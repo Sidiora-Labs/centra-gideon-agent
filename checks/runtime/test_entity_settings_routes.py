@@ -49,7 +49,7 @@ def test_load_entity_settings_warns_when_contents_are_discarded(
     path.write_text(contents)
 
     with caplog.at_level(logging.WARNING, logger=er.__name__):
-        assert er._load_entity_settings("inbox") == {}
+        assert er._load_entity_settings("inbox") is None
 
     assert len(caplog.records) == 1
     assert message in caplog.text
@@ -65,7 +65,7 @@ def test_load_entity_settings_warns_on_oserror(monkeypatch, caplog):
     )
 
     with caplog.at_level(logging.WARNING, logger=er.__name__):
-        assert er._load_entity_settings("notifications") == {}
+        assert er._load_entity_settings("notifications") is None
 
     assert len(caplog.records) == 1
     assert "notifications" in caplog.text

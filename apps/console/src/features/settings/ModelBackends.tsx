@@ -195,11 +195,14 @@ export function SchemaField({ field, name, value, onChange }: {
     )
   }
   const sensitive = !!meta.sensitive
+  const numeric = field.type === 'number' || field.type === 'integer'
   return (
     <label className="flex flex-col gap-1">
       <span data-type="caption" className="text-on-surface-low">{label}</span>
       <div className="relative">
-        <input aria-label={label} type={sensitive && !show ? 'password' : 'text'} value={value}
+        <input aria-label={label} type={numeric ? 'number' : sensitive && !show ? 'password' : 'text'} value={value}
+          min={numeric ? field.minimum : undefined} max={numeric ? field.maximum : undefined}
+          step={numeric ? field.type === 'integer' ? 1 : 'any' : undefined}
           onChange={(e) => onChange(e.target.value)} placeholder={meta.help || label}
           data-type="body-s" className={inputCls + (sensitive ? ' pr-10' : '')} />
         {sensitive && (

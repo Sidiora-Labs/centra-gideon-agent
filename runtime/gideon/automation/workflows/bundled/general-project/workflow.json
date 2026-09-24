@@ -92,6 +92,13 @@
     "id": "project",
     "config": {
       "mode": "until_dry",
+      "supervisor": {
+        "convergence": {
+          "signal": "verify_command",
+          "command_key": "verify_command",
+          "done_check_optional": true
+        }
+      },
       "streak": 2,
       "progress_field": "meaningful_progress",
       "max_iterations": 6,

@@ -96,6 +96,14 @@ class StateEntry:
 
 INVENTORY: tuple[StateEntry, ...] = (
     StateEntry(
+        id="rooms",
+        kind=KIND_TREE,
+        path="rooms",
+        domain=DOMAIN_WORK,
+        merge=MERGE_REPLACE_ONLY,
+        help="agent room records and conversation transcripts",
+    ),
+    StateEntry(
         id="memory_db",
         kind=KIND_SQLITE,
         path="memory.db",

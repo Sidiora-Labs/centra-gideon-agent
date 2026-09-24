@@ -1,5 +1,6 @@
 """CLI doctor subcommand — verify Gideon setup and diagnose issues."""
 
+import importlib.util
 import json
 import os
 import shutil
@@ -304,6 +305,30 @@ def _doctor_maintenance() -> None:
             f"  last run:     {row.get('timestamp', row.get('ts', '?'))} "
             f"({row.get('outcome', row.get('stopped_reason', 'unknown'))})"
         )
+
+
+def _doctor_stt_dependency() -> list[str]:
+    if importlib.util.find_spec("faster_whisper") is not None:
+        print("  faster_whisper: ✅ installed (runtime not loaded)")
+        return []
+    print("  faster_whisper: ❌ missing")
+    print("               Fix: pip install faster-whisper")
+    return ["faster_whisper missing"]
+
+
+def _doctor_external_vector_store() -> list[str]:
+    import asyncio
+
+    from gideon.operations.resilience.doctor import (
+        DoctorContext,
+        _mask,
+        _probe_external_vector_store,
+    )
+
+    result = asyncio.run(_probe_external_vector_store(DoctorContext(home=config_dir())))
+    print("\nExternal vector store")
+    print(f"  status:      {'✅' if result.ok else '❌'} {_mask(result.detail)}")
+    return [] if result.ok else ["external vector store"]
 
 
 def _doctor() -> None:
@@ -622,18 +647,12 @@ def _doctor() -> None:
         print("  ffmpeg:      ⏭  not installed (not needed)")
 
     if stt_active and stt_resolved is not None:
-        try:
-            import faster_whisper  # noqa: F401
-
-            print("  faster_whisper: ✅ importable")
-        except ImportError:
-            print("  faster_whisper: ❌ missing")
-            print("               Fix: pip install faster-whisper")
-            issues.append("faster_whisper missing")
+        issues.extend(_doctor_stt_dependency())
 
     from gideon.extensions.app_cli import run_app_doctor_probes
 
     issues.extend(run_app_doctor_probes())
+    issues.extend(_doctor_external_vector_store())
 
     print("\nProvider Health")
     _provider_issues = _doctor_providers()

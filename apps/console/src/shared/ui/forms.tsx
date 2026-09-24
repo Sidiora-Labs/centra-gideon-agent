@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import { cx } from './cx'
 import { Eyebrow } from './Eyebrow'
 import { addChip, commitNumber, createDraft, draftReducer, fieldNaming } from './formState'
@@ -112,7 +112,7 @@ export function Select({ value, onChange, options, disabled, id, name, ariaLabel
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
-  return <select id={id || name || identity} name={name} value={value} disabled={disabled}
+  return <div className="relative w-full"><select id={id || name || identity} name={name} value={value} disabled={disabled}
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     title={disabled ? disabledReason || undefined : undefined} data-type={sizeTokens[size].role}
     onChange={(event) => {
@@ -120,7 +120,7 @@ export function Select({ value, onChange, options, disabled, id, name, ariaLabel
       if (!disabled && !options.find((option) => option.value === next)?.disabled) onChange(next)
     }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface])}>
     {options.map(({ value: key, label: text, disabled: unavailable, title }) => <option key={key} value={key} disabled={unavailable} title={title}>{text}</option>)}
-  </select>
+  </select><ChevronDown size={16} aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-low ${disabled ? 'opacity-50' : ''}`} /></div>
 }
 
 export { Segmented, type SegOption } from './Segmented'

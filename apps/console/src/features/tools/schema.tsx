@@ -127,7 +127,7 @@ export function SchemaField({ name, schema, required, value, onChange, widgets }
   } else if (t === 'boolean') {
     control = <Toggle on={!!value} onChange={onChange} size="sm" label={label} />
   } else if (t === 'number' || t === 'integer') {
-    control = <input id={id} data-type="body-s" type="number" value={value === '' || value == null ? '' : Number(value)} onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} className={base} />
+    control = <input id={id} data-type="body-s" type="number" min={schema.minimum} max={schema.maximum} step={t === 'integer' ? 1 : 'any'} value={value === '' || value == null ? '' : Number(value)} onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} className={base} />
   } else if (t === 'object' || t === 'array') {
     control = <textarea id={id} data-type="caption" value={typeof value === 'string' ? value : JSON.stringify(value ?? (t === 'array' ? [] : {}), null, 2)} onChange={(e) => onChange(e.target.value)} rows={3} placeholder={t === 'array' ? '[ … ]' : '{ … }'} className={`${base} font-mono resize-y`} />
   } else {

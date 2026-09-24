@@ -4,7 +4,7 @@ This file records what shipped, newest first. Releases before 0.1.3 are listed f
 
 ## [Unreleased]
 
-Nothing unreleased yet.
+- MCP elicitation now expires within the tool-call approval window, cancels unanswered requests, and withdraws stale approval cards.
 
 ## [0.1.3] - 2026-09-16
 

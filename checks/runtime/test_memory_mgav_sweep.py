@@ -58,6 +58,7 @@ def home(tmp_path, monkeypatch):
     from THIS directory rather than the developer's own settings.
     """
     monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    monkeypatch.setattr("gideon.cognition.context_engine._PUSH_TIMEOUT_MS", 20_000)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "ws"))
     (tmp_path / "ws").mkdir(exist_ok=True)

@@ -97,12 +97,15 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
             {"type": "sessions", "data": sessions_data, "yolo": state.is_yolo_active()}
         )
         app = request.get("app", "")
-        for session in state._sessions.values():
-            if session._routing_suggestion is not None and (
+        for chat_session in state._sessions.values():
+            if chat_session._routing_suggestion is not None and (
                 not app or state._app_may_see_event(app, "routing_suggestion")
             ):
                 await ws.send_json(
-                    {"type": "routing_suggestion", "data": session._routing_suggestion}
+                    {
+                        "type": "routing_suggestion",
+                        "data": chat_session._routing_suggestion,
+                    }
                 )
     except Exception:
         pass

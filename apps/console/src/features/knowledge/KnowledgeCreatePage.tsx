@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { ArrowLeft, Check, Loader2, Upload, X, Link2, FileText, Mic } from 'lucide-react'
@@ -52,7 +53,7 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
   const [url, setUrl] = useState('')
   const [language, setLanguage] = useState('typescript')
   const [tags, setTags] = useState<string[]>([])
-  const { data: knownTags } = useQuery('knowledge:tags', () => api.knowledgeTags().catch(() => [] as string[]), { persist: true })
+  const { data: knownTags, error: tagsErr, refresh: refreshTags } = useQuery('knowledge:tags', () => api.knowledgeTags(), { persist: true })
   const [file, setFile] = useState<File | null>(null)
   const [fileTooBig, setFileTooBig] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
@@ -148,6 +149,7 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
           )}
 
           { }
+          {tagsErr && <LoadError what="tag suggestions" error={tagsErr} onRetry={refreshTags} />}
           <div className="shrink-0"><ChipInput values={tags} onChange={setTags} placeholder="Add a tag, Enter" suggestions={knownTags ?? []} /></div>
 
           { }

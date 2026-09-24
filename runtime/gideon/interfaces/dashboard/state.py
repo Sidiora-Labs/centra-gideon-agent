@@ -718,6 +718,7 @@ class ConsoleState(WebSocketState):
         self._pending_approvals: dict[str, dict] = {}
         self._approval_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
         self._mcp_elicitation_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
+        self._mcp_elicitation_deadlines: dict[str, float] = {}
         self._flush_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._upload_sweep_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._durability_svc: object | None = None
@@ -1033,9 +1034,15 @@ class ConsoleState(WebSocketState):
     async def request_mcp_elicitation(self, server: str, params: Any) -> Any:
         from mcp.types import ElicitResult
 
+        from gideon.integrations.mcp_client import approval_window_secs
+
         request_id = __import__("uuid").uuid4().hex
         fut = asyncio.get_running_loop().create_future()
         self._mcp_elicitation_futures[request_id] = fut
+        timeout = approval_window_secs()
+        self._mcp_elicitation_deadlines[request_id] = (
+            asyncio.get_running_loop().time() + timeout
+        )
         payload = (
             params.model_dump(by_alias=True) if hasattr(params, "model_dump") else {}
         )
@@ -1043,17 +1050,22 @@ class ConsoleState(WebSocketState):
             "mcp_elicitation", {"id": request_id, "server": server, **payload}
         )
         try:
-            response = await fut
+            response = await asyncio.wait_for(fut, timeout=timeout)
             return ElicitResult(
                 action=response.get("action", "cancel"),
                 content=response.get("content"),
             )
+        except asyncio.TimeoutError:
+            return ElicitResult(action="cancel")
         finally:
             self._mcp_elicitation_futures.pop(request_id, None)
+            self._mcp_elicitation_deadlines.pop(request_id, None)
+            self.broadcast_ws("mcp_elicitation_withdrawn", {"id": request_id})
 
     def resolve_mcp_elicitation(self, request_id: str, response: dict) -> bool:
         fut = self._mcp_elicitation_futures.get(request_id)
-        if fut is None or fut.done():
+        deadline = self._mcp_elicitation_deadlines.get(request_id, 0.0)
+        if fut is None or fut.done() or asyncio.get_running_loop().time() >= deadline:
             return False
         fut.set_result(response)
         return True

@@ -4,3 +4,5 @@ recursive-include apps/console/dist *
 
 prune tmp
 global-exclude .DS_Store *.py[cod]
+
+recursive-include runtime/gideon/extensions/apps/native *.py LICENSE README.md

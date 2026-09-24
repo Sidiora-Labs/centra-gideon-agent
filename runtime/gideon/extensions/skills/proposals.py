@@ -464,7 +464,7 @@ def get(pid: str) -> SkillProposal | None:
     return _load(pid)
 
 
-def reject(pid: str) -> bool:
+def reject(pid: str, *, accepted: bool = False) -> bool:
     """Drop a proposal (never installed). Returns True if it existed.
 
     ``accept()`` also calls this to clear the queue entry, so the inbox resolution here is
@@ -472,10 +472,24 @@ def reject(pid: str) -> bool:
     distinction matters because "I said no" and "I installed it" are different answers, and
     the item's terminal status is the only record of which one the user gave.
     """
+    prop = _load(pid)
     try:
         _path(pid).unlink()
         logger.info("Rejected skill proposal %s", pid)
         _resolve_inbox_item(pid, "dismissed")
+        if prop is not None:
+            from gideon.cognition.feedback import record_feedback
+
+            record_feedback(
+                target_kind="proposal_content",
+                target_id=pid,
+                verdict="up" if accepted else "down",
+                producer_kind="skill_synthesis",
+                producer_id=accept_target(
+                    slug=prop.slug, kind=prop.kind, refine_target=prop.refine_target
+                ),
+                session_key=prop.session_key,
+            )
         return True
     except OSError:
         return False
@@ -560,7 +574,7 @@ def accept(
             )
         except (OSError, ValueError) as exc:
             raise AcceptError(f"could not overlay skill {target!r}: {exc}") from exc
-        reject(pid)
+        reject(pid, accepted=True)
         _resolve_inbox_item(pid, "handled")
         logger.info("Accepted proposal %s → overlaid %s v%d", pid, target, version)
         return AcceptResult(target, version)
@@ -577,7 +591,7 @@ def accept(
         raise AcceptError(
             f"could not write skill {prop.slug!r} (invalid, oversized, or exists)"
         )
-    reject(pid)
+    reject(pid, accepted=True)
     _resolve_inbox_item(pid, "handled")
     logger.info("Accepted skill proposal %s → %s", pid, created)
     return AcceptResult(created)

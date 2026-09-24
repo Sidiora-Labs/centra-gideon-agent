@@ -7,6 +7,20 @@ conversations. Paths are relative to `Gideon/src/gideon/`.
 
 ## Knowledge
 
+### Retrieval configuration
+
+`knowledge.fetch_top_n` defaults to **3** results and
+`knowledge.fetch_max_tokens` defaults to **4096** estimated content tokens for
+`GET /api/knowledge/search-for-context`. These settings survive config save/load;
+request `limit` and `max_tokens` values override them for a single fetch.
+
+`skills.progressive_disclosure_threshold` defaults to **2**. More matching skills
+than this threshold produce a compact index; the agent uses `skill_invoke` to
+retrieve full bodies. Zero disables progressive disclosure. The threshold is
+clamped to `skills.max_triggered - 1` with a warning when too high, so the index
+can activate within the match limit. With `max_triggered = 1`, the clamp yields
+zero and the single skill is inlined.
+
 ### Store
 
 `knowledge/store.py`: `knowledge.db` (SQLite) holds items, an FTS index, and

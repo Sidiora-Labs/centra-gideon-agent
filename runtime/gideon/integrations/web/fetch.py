@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from urllib.parse import urldefrag, urlparse
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 from gideon.integrations.web.extract import extract_main_content
 from gideon.security.net import STRICT, EgressBlocked, egress_policy_for
 from gideon.security.net import fetch as net_fetch
@@ -26,7 +27,6 @@ from gideon.security.net.policy import EgressPolicy
 
 logger = logging.getLogger(__name__)
 
-_CHARS_PER_TOKEN = 4
 _DEFAULT_MAX_TOKENS = 5000
 
 _seen_by_session: dict[str, set[str]] = {}
@@ -212,7 +212,7 @@ async def web_fetch(
     record_seen_urls(session_key, [final_url])
 
     total = len(full_text)
-    budget = max(1, max_tokens) * _CHARS_PER_TOKEN
+    budget = max(1, max_tokens) * NOMINAL_CHARS_PER_TOKEN
     start = max(0, start_index)
     window = full_text[start : start + budget]
     end = start + len(window)
@@ -275,7 +275,7 @@ async def web_extract(
     fetched = await web_fetch(
         url,
         session_key=session_key,
-        max_tokens=_EXTRACT_CONTENT_CHARS // _CHARS_PER_TOKEN,
+        max_tokens=_EXTRACT_CONTENT_CHARS // NOMINAL_CHARS_PER_TOKEN,
         require_provenance=require_provenance,
         policy=policy,
     )

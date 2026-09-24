@@ -6,6 +6,7 @@ import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { ListControls } from '../../shared/ui/ListControls'
 import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { Markdown } from '../../shared/ui/Markdown'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { Modal } from '../../shared/ui/Modal'
 import { Button } from '../../shared/ui/Button'
@@ -283,7 +284,7 @@ export function providerBadge(g: Pick<Group, 'providerLocked' | 'tier'>): { labe
   return { label: trustTierLabel(g.tier), title: trustTierHint(g.tier) }
 }
 
-function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggleTool, onToggleProvider, onReconnect, reconnecting }: { g: Group; onOpen: (name: string) => void; onToggleServer: (s: McpServer) => void; onRemoveServer: (s: McpServer) => void; onToggleTool: (g: Group, t: ToolItem) => void; onToggleProvider: (g: Group) => void; onReconnect: (s: McpServer) => void; reconnecting: string | null }) {
+export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggleTool, onToggleProvider, onReconnect, reconnecting }: { g: Group; onOpen: (name: string) => void; onToggleServer: (s: McpServer) => void; onRemoveServer: (s: McpServer) => void; onToggleTool: (g: Group, t: ToolItem) => void; onToggleProvider: (g: Group) => void; onReconnect: (s: McpServer) => void; reconnecting: string | null }) {
   const health = g.server ? serverHealth(g.server) : null
   const nativeToggleable = g.kind === 'native' && !g.providerLocked
   const badge = g.kind === 'native' ? providerBadge(g) : null
@@ -355,10 +356,10 @@ function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggleTool, o
             return (
               <div key={t.name}
                 className={`group flex items-start gap-s rounded-lg bg-surface-container px-m py-m transition-colors hover:bg-surface-high ${off ? 'opacity-55' : ''}`}>
-                <button onClick={() => onOpen(t.name)} className="flex min-w-0 flex-1 items-start gap-s text-left">
+                <div className="flex min-w-0 flex-1 items-start gap-s text-left">
                   <Wrench size={16} className="text-primary shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => onOpen(t.name)} className="flex max-w-full items-center gap-1.5 text-left">
                       {
 }
                       <span className="truncate font-mono text-on-surface text-[0.8125rem]" title={t.name}>{t.name}</span>
@@ -367,11 +368,11 @@ function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggleTool, o
                       {t.requires_approval && <ShieldAlert size={12} className="text-warn shrink-0" role="img" aria-label="Asks for approval before it runs" />}
                       <RiskBadge risk={t.risk_level} />
                       {off && <span data-type="caption" className="rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low">Disabled</span>}
-                    </div>
-                    <p data-type="caption" className="mt-0.5 line-clamp-2 text-on-surface-low leading-snug">{t.description}</p>
+                    </button>
+                    <div data-type="caption" className="mt-0.5 line-clamp-2 text-on-surface-low leading-snug"><Markdown inline>{t.description}</Markdown></div>
                     {props.length > 0 && <div data-type="caption" className="mt-1 text-on-surface-low">{props.length} param{props.length === 1 ? '' : 's'}</div>}
                   </div>
-                </button>
+                </div>
                 {
 }
                 <button

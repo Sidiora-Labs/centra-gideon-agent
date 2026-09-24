@@ -15,7 +15,8 @@ vi.mock('../../shared/data/api', () => ({
     gideonConfig: () => new Promise(() => {}),
   },
 }))
-vi.mock('../../app/shell/identity', () => ({
+vi.mock('../../app/shell/identity', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../app/shell/identity')>(),
   useIdentity: () => ({ setName }),
   firstNameOf: (n: string) => n.split(' ')[0],
   DEFAULT_USER_NAME: 'Operator',
@@ -83,7 +84,7 @@ describe('the done screen points at the Inbox with a link that can leave the flo
     await reachDoneScreen()
     fireEvent.click(screen.getByRole('button', { name: 'Open the Inbox instead' }))
     expect(peekOnboardingExit()).toBe('inbox')
-    await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace'))
+    await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace'))
     expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' })
   })
 })

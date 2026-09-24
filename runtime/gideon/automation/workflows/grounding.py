@@ -369,6 +369,8 @@ def _source_fields(provider: Any) -> list[tuple[str, str, bool]]:
     """
     try:
         module = inspect.getmodule(provider.__class__)
+        if module is None:
+            return []
         source = inspect.getsource(module)
         tree = ast.parse(source)
         definitions = {

@@ -317,13 +317,21 @@ async def api_loop_grill_tree(request: web.Request) -> web.Response:
 
 
 async def api_loop_create(request: web.Request) -> web.Response:
-    """POST /api/loops {kind, task|goal, …} — create a READY loop of any kind."""
+    """Start a workflow for ported kinds; create a READY loop for other kinds."""
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
     kind = str(body.get("kind", "goal")).strip().lower() or "goal"
     if kind not in KINDS:
         return web.json_response({"error": f"Unknown loop kind: {kind!r}"}, status=400)
+    from gideon.automation.workflows import handlers as workflow_http
+    from gideon.automation.workflows import service as workflow_service
+
+    ported = kind in workflow_service.PORTED_LOOP_KINDS
+    if ported:
+        denied = workflow_http._guard(request, "workflow_run_start")
+        if denied is not None:
+            return denied
     task = str(body.get("task") or body.get("goal") or "").strip()
     if len(task) < 12:
         return web.json_response(
@@ -333,6 +341,48 @@ async def api_loop_create(request: web.Request) -> web.Response:
     if not v.can_start:
         return web.json_response(
             {"error": "Validation failed", **v.to_dict()}, status=400
+        )
+    if ported:
+        from gideon.security.safety_flags import strict_bool
+
+        inputs = (
+            dict(body["kind_config"])
+            if isinstance(body.get("kind_config"), dict)
+            else {}
+        )
+        if isinstance(body.get("inputs"), dict):
+            inputs.update(body["inputs"])
+        inputs["task"] = task
+        if body.get("success_criteria"):
+            inputs["exit_condition"] = str(body["success_criteria"])
+        result = await workflow_service.start_kind_run(
+            kind=kind,
+            inputs=inputs,
+            supervisor=workflow_http._supervisor(request),
+            origin_kind=workflow_http._api_origin(),
+            session_key=request.headers.get("X-Session-Key", ""),
+            project_id=str(body.get("project_id", "") or ""),
+            idempotency_key=str(body.get("idempotency_key", "") or ""),
+            skip_preflight=strict_bool(
+                body.get("skip_preflight"), field="skip_preflight"
+            ),
+        )
+        workflow_http._audit(
+            request,
+            "workflow_run_start",
+            "success" if result.get("ok") else "failure",
+            str(result.get("run_id") or kind),
+        )
+        if not result.get("ok"):
+            return workflow_http._fail(result)
+        return web.json_response(
+            {
+                "run_id": result["run_id"],
+                "status": result["status"],
+                "blocking": bool(result.get("blocking", False)),
+                "kind": kind,
+            },
+            status=202,
         )
     loop = _build_loop_from_body(body)
     created = store.create(loop)

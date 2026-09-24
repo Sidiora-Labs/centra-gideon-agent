@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useInboxDetailActions, useInboxOperation } from './inboxQueueState'
 import { useEffect, useState } from 'react'
 import { toneChipSkin } from '../../shared/theme/accent'
@@ -8,7 +9,7 @@ import { FeedbackThumbs } from '../../shared/ui/FeedbackThumbs'
 import { InvestigateButton } from '../../shared/ui/InvestigateButton'
 import { Markdown } from '../../shared/ui/Markdown'
 import { TextArea, Segmented, FieldError } from '../../shared/ui/forms'
-import { api, type InboxItem, type InboxClassification, type SkillProposalDetail } from '../../shared/data/api'
+import { api, ApiError, type InboxItem, type InboxClassification, type SkillProposalDetail } from '../../shared/data/api'
 import { classMeta, confMeta, statusMeta, kindMeta, channelLabel, sourceLabel, relPast, CLASSIFICATIONS, NON_CHANNEL_ITEM_KINDS, refTarget, refLabel } from './inboxMeta'
 import { WorkflowGateActions } from './WorkflowGateActions'
 import { invalidateKeys } from '../../shared/data/data'
@@ -176,7 +177,9 @@ function Section({ label, right, children }: { label: string; right?: React.Reac
   </section>
 }
 
-function ProposalActions({ pid, onChanged, navigate }: { pid: string; onChanged: () => void; navigate: (path: string) => void }) {
+export function ProposalActions({ pid, onChanged, navigate }: { pid: string; onChanged: () => void; navigate: (path: string) => void }) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [review, setReview] = useState<{ state: 'loading' | 'gone' | 'ready'; detail: SkillProposalDetail | null }>({ state: 'loading', detail: null })
   const operation = useInboxOperation(pid)
   const { busy, err } = operation
@@ -184,24 +187,28 @@ function ProposalActions({ pid, onChanged, navigate }: { pid: string; onChanged:
   const gone = review.state === 'gone'
   useEffect(() => {
     let cancelled = false
+    setLoadErr(null)
     setReview({ state: 'loading', detail: null })
     const resolve = async () => {
       try {
         const proposal = await api.skillProposalDetail(pid)
         if (!cancelled) setReview({ state: 'ready', detail: proposal })
-      } catch {
-        if (!cancelled) setReview({ state: 'gone', detail: null })
+      } catch (error) {
+        if (cancelled) return
+        if (error instanceof ApiError && (error.status === 404 || error.status === 410)) setReview({ state: 'gone', detail: null })
+        else setLoadErr(error)
       }
     }
     void resolve()
     return () => { cancelled = true }
-  }, [pid])
+  }, [pid, loadAttempt])
 
   const act = (kind: 'accept' | 'reject') => operation.run(kind, async () => {
     if (kind === 'accept') await api.acceptSkillProposal(pid)
     else await api.rejectSkillProposal(pid)
   }, () => { invalidateKeys('skill-proposals', true); onChanged() }, `${kind} failed`)
 
+  if (loadErr) return <LoadError what="skill proposal" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} />
   if (gone) {
     return (
       <Section label="Proposal">

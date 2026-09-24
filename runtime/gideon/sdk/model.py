@@ -10,8 +10,7 @@ client that any OpenAI-COMPATIBLE endpoint app — vllm, together, groq, … —
 An app imports these, not core internals, so core can evolve underneath it. This is
 generic infra: openai/anthropic/bedrock/vllm are all implementations built on it (they
 ship pre-installed for a working out-of-box system, but are architecturally identical
-to any installed model app). Ollama is the one model provider that stays core-native
-(it owns model download/management), so it is not built on this surface.
+to any installed model app), including bundled local model providers.
 """
 
 from gideon.extensions.providers.media_scanners import register_scanner  # noqa: F401
@@ -27,7 +26,7 @@ from gideon.integrations.llm.base import (
 )
 from gideon.integrations.llm.branded_specs import BrandedProviderSpec  # noqa: F401
 from gideon.integrations.llm.capabilities import ProviderCapability  # noqa: F401
-from gideon.integrations.llm.capabilities import Capability
+from gideon.integrations.llm.capabilities import Capability, StructuredOutput
 from gideon.integrations.llm.catalog import (
     ConnectionResult,
     ModelCatalog,
@@ -54,7 +53,11 @@ from gideon.integrations.media_catalogs import (
     MediaModel,
     register_media_catalog,
 )
-from gideon.integrations.model_windows import model_context_window  # noqa: F401
+from gideon.integrations.model_windows import (
+    LOCAL_SERVED_CONTEXT_WINDOW,
+    declared_context_window,
+    model_context_window,
+)
 from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
 
 __all__ = [
@@ -66,6 +69,7 @@ __all__ = [
     "EVENT_THINKING_CHUNK",
     "EVENT_TOOL_CALL",
     "Capability",
+    "StructuredOutput",
     "ProviderCapability",
     "PromptCache",
     "CACHE_HINT_KEY",
@@ -77,6 +81,8 @@ __all__ = [
     "KIND_OUTSIDE",
     "make_think_splitter",
     "model_context_window",
+    "declared_context_window",
+    "LOCAL_SERVED_CONTEXT_WINDOW",
     "OpenAIProvider",
     "AnthropicProvider",
     "ModelCatalog",

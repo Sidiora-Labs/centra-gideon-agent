@@ -3,6 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { LoadError, EmptyState } from './ListScaffold'
+import ts from 'typescript'
+import { swallowedReads } from '../testing/swallowCensus'
+import swallowBudget from '../testing/swallowBudget.json'
 
 
 describe('LoadError announces and offers recovery', () => {
@@ -188,5 +191,84 @@ describe('direct fetches keep their rejection too — the 2026-09-05 false-empty
       expect(catchPin.test(src), `${rel}: the catch must record the error, not fold it into an empty value (${catchPin})`).toBe(true)
       expect(src.includes(`<LoadError what="${what}"`), `${rel}: must render <LoadError what="${what}">`).toBe(true)
     }
+  })
+})
+
+
+describe('full-file swallow census', () => {
+  const surfaces = [
+    'features/skills/LearningSummaryBlock.tsx',
+    'features/skills/SkillInspector.tsx',
+    'features/chat/PromptPalette.tsx',
+    'features/chat/SessionSkillsReview.tsx',
+    'features/dashboard/widgets/Suggestions.tsx',
+    'features/knowledge/TagManager.tsx',
+    'features/knowledge/ConflictPanel.tsx',
+    'features/knowledge/RestructureControl.tsx',
+    'features/knowledge/KnowledgeCreatePage.tsx',
+    'features/settings/PromptsPanel.tsx',
+    'features/settings/NotificationsPanel.tsx',
+    'features/settings/ProviderConfigForm.tsx',
+    'features/settings/DiagnosticsPanel.tsx',
+    'features/settings/AlwaysOnConventions.tsx',
+    'features/tasks/TaskCreatePage.tsx',
+    'features/triggers/TriggersListPage.tsx',
+  ]
+
+  it('finds direct reads throughout a file, including cast and parenthesized fallbacks', () => {
+    const source = `
+      const cached = useQuery('safe', () => api.safe())
+      function direct() { return api.read().catch(() => [] as Row[]) }
+      function later() { return api.read().catch(() => ({} as Record<string, unknown>)) }
+      const nullable = api.read().catch(() => null as Value | null)
+      const block = api.read().catch(() => { return ([] as Row[]) })
+      const discarded = api.read().catch(() => {})
+      const state = api.read().catch(() => setRows([]))
+    `
+    expect(swallowedReads(source)).toHaveLength(6)
+    expect(swallowedReads(source).every((site) => site.line > 2)).toBe(true)
+  })
+
+  it('does not count strings, comments, propagated failures or explicit error state', () => {
+    expect(swallowedReads(`
+      // api.read().catch(() => [])
+      const text = "api.read().catch(() => [])"
+      api.read().catch((error) => { throw error })
+      api.read().catch(setLoadError)
+      api.read().catch((error) => { setLoadError(error); setRows(null) })
+    `)).toEqual([])
+  })
+
+  it('ratchets the measured remaining whole-file budget without hiding its population', () => {
+    const files = walk(SRC)
+    expect(files.length).toBeGreaterThanOrEqual(350)
+    expect(Object.keys(swallowBudget)).toHaveLength(61)
+    expect(Object.values(swallowBudget).reduce((sum, count) => sum + count, 0)).toBe(173)
+    const growth: string[] = []
+    for (const abs of files) {
+      const rel = abs.slice(SRC.length + 1)
+      const sites = swallowedReads(readFileSync(abs, 'utf8'))
+      const allowed = (swallowBudget as Record<string, number>)[rel] ?? 0
+      if (sites.length > allowed) growth.push(`${rel}: ${sites.length} > ${allowed}: ${sites.map((s) => s.line).join(', ')}`)
+    }
+    expect(growth).toEqual([])
+  })
+
+  for (const rel of surfaces) {
+    it(`${rel} keeps read failures visible and has no silent fallback`, () => {
+      const source = readFileSync(join(SRC, rel), 'utf8')
+      expect(swallowedReads(source)).toEqual([])
+      expect(source).toMatch(/<LoadError[^>]*error=\{/)
+      expect(source).toMatch(/error:\s*\w+Err|catch\(set\w*Err\)|catch\(\(error\)/)
+      const parsed = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      expect((parsed as typeof parsed & { parseDiagnostics: unknown[] }).parseDiagnostics).toEqual([])
+    })
+  }
+
+  it('does not let the shared prompt tile poison the repaired panel cache', () => {
+    const source = readFileSync(join(SRC, 'features/settings/settingsWidgets.tsx'), 'utf8')
+    expect(source).toMatch(/'settings:prompt-bindings', \(\) => api\.promptBindings\(\),/)
+    expect(source).toContain('error: bErr')
+    expect(source).toContain('Couldn’t load prompt bindings.')
   })
 })

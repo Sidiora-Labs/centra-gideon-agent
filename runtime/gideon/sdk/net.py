@@ -7,7 +7,7 @@ extraction pipeline: ``web_fetch``/``web_extract`` + ``record_seen_urls`` proven
 Generic, provider-agnostic infrastructure a web-capable app/tool builds on.
 """
 
-from gideon.integrations.inbound.a2a import outbound_policy as a2a_outbound_policy  # noqa: F401
+from gideon.integrations.inbound.a2a import outbound_policy as a2a_outbound_policy  # noqa: F401  # fmt: skip
 from gideon.integrations.web.fetch import record_seen_urls, web_extract, web_fetch
 from gideon.security.net import (
     CONNECTOR,

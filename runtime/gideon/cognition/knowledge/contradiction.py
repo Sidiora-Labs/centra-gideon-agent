@@ -5,16 +5,10 @@ surfaces during retrieval, something has already built on one side of it. A clai
 the store unflagged has been retrieved, cited, and folded into a synthesis, and unwinding that
 means finding everything downstream. Flagging at ingest costs one deterministic pass per write.
 
-Two tiers, cheapest first:
-
-**Deterministic (zero cost).** Two claims sharing a SUBJECT and PREDICATE with different
+Deterministic detection (zero cost). Two claims sharing a SUBJECT and PREDICATE with different
 OBJECTS, or a subject and object with opposite predicates, conflict — no model needed. This is
 what §2.1's structured claims exist to make possible: the same test over free text needs an LLM,
 over `{subject, predicate, object}` it is a comparison.
-
-**Fast-model (metered).** For claims the deterministic tier cannot separate, a shortlist of
-semantically-near items goes to one background-tier call. Memoized per content hash so only
-CHANGED items re-hit the model, and capped, so marginal cost does not grow with the store.
 
 **Both claims are kept, always.** A conflict record carries a source-precedence ladder
 (`user > compiled > timeline > external`) so a reader knows which to prefer — but the losing
@@ -126,9 +120,8 @@ class Conflict:
     """A recorded disagreement. First-class, not a log line.
 
     `prefer` names which side the precedence ladder favours — advice for a reader, never an
-    instruction to delete the other. `basis` says which TIER found it, because a deterministic
-    finding and a model's opinion warrant different confidence and a reader cannot tell them
-    apart from the text alone.
+    instruction to delete the other. Conflicts record deterministic findings; model review
+    proposals are represented separately as inferred edges.
     """
 
     left_claim: str = ""
@@ -136,7 +129,6 @@ class Conflict:
     left_item: str = ""
     right_item: str = ""
     kind: str = "value"
-    basis: str = "deterministic"
     prefer: str = ""
     detail: str = ""
     confidence: float = 1.0
@@ -148,7 +140,6 @@ class Conflict:
             "left_item": self.left_item,
             "right_item": self.right_item,
             "kind": self.kind,
-            "basis": self.basis,
             "prefer": self.prefer,
             "detail": self.detail,
             "confidence": round(self.confidence, 4),
@@ -280,7 +271,6 @@ def _make(left: Claim, right: Claim, *, kind: str, detail: str) -> Conflict:
         left_item=left.source_ref,
         right_item=right.source_ref,
         kind=kind,
-        basis="deterministic",
         prefer=prefer_side(left, right),
         detail=detail,
         confidence=1.0,
@@ -356,99 +346,6 @@ def unsettled_candidates(
     return out
 
 
-def conflict_prompt(incoming: Claim, candidates: list[Claim]) -> str:
-    """The single fast-model call. Content fenced, output shape stated.
-
-    Fenced because claims partly derive from web and inbox content: a stored item quoting an
-    instruction is not an instruction, and this pass runs with nobody watching.
-    """
-    from gideon.security.security import fence_untrusted
-
-    lines = [
-        "Decide whether the NEW claim contradicts any of the STORED claims.",
-        "A contradiction means they cannot both be true of the same subject at the same time.",
-        "Different aspects of one subject, or a refinement, are NOT contradictions.",
-        'Return one JSON object: {"conflicts": [{"index": 0, "kind": '
-        '"value", "reason": "one line", "confidence": 0.5}]}.',
-        "The index is the bracketed STORED index. If none conflict, return "
-        '{"conflicts": []}. Do not invent a conflict to be helpful.',
-        "",
-        fence_untrusted(
-            f"NEW: {incoming.statement}",
-            source="knowledge",
-            source_type="claim",
-            source_id=incoming.source_ref,
-            transformation_path="contradiction-review",
-        ),
-        "",
-        "STORED:",
-    ]
-    for index, candidate in enumerate(candidates):
-        lines.append(
-            fence_untrusted(
-                f"[{index}] item={candidate.source_ref}\n{candidate.statement}",
-                source="knowledge",
-                source_type="claim",
-                source_id=candidate.source_ref,
-                transformation_path="contradiction-review",
-            )
-        )
-    return "\n".join(lines)
-
-
-def memo_key(incoming: Claim, candidates: list[Claim]) -> str:
-    """Cache key for one conflict question.
-
-    Over the CONTENT of both sides, so only a changed item re-hits the model. Keyed on item ids
-    instead, an edited claim would return the previous verdict forever — the memo would make the
-    pass permanently wrong rather than merely stale.
-    """
-    import hashlib
-
-    parts = [_norm(incoming.statement)] + sorted(_norm(c.statement) for c in candidates)
-    return hashlib.sha256("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()[
-        :16
-    ]
-
-
-def parse_model_verdict(
-    raw: Any, incoming: Claim, candidates: list[Claim]
-) -> list[Conflict]:
-    """Turn the model's answer into Conflict records.
-
-    An unparseable answer yields NO conflicts rather than a guess: this tier exists to catch what
-    the deterministic one cannot prove, so a garbled response means "we do not know", and
-    inventing a conflict from noise is the one outcome worse than missing one.
-    """
-    if not isinstance(raw, dict):
-        return []
-    rows = raw.get("conflicts")
-    if not isinstance(rows, list):
-        return []
-    out: list[Conflict] = []
-    for row in rows[:MAX_CONFLICTS_PER_PASS]:
-        if not isinstance(row, dict):
-            continue
-        index = _int(row.get("index"), -1)
-        if not (0 <= index < len(candidates)):
-            continue
-        other = candidates[index]
-        out.append(
-            Conflict(
-                left_claim=incoming.statement,
-                right_claim=other.statement,
-                left_item=incoming.source_ref,
-                right_item=other.source_ref,
-                kind=str(row.get("kind", "value") or "value"),
-                basis="model",
-                prefer=prefer_side(incoming, other),
-                detail=str(row.get("reason", "") or "")[:200],
-                confidence=min(0.9, max(0.1, _float(row.get("confidence"), 0.5))),
-            )
-        )
-    return out
-
-
 RELATION_VERBS = ("supersedes", "contradicts", "derived_from", "depends_on", "part_of")
 
 MAX_EDGES_PER_PASS = 10
@@ -487,13 +384,7 @@ class Edge:
 
 
 def edges_from_conflicts(conflicts: list[Conflict]) -> list[Edge]:
-    """`contradicts` edges for what the DETERMINISTIC tier proved.
-
-    Deterministic findings get `provenance: extracted` at confidence 1.0; the model tier's get
-    `inferred` at its own confidence. Collapsing them would make a proof and an opinion
-    indistinguishable in the graph, and a later pass reading confidence alone could not tell
-    which edges it is safe to act on.
-    """
+    """Extracted `contradicts` edges for deterministic findings."""
     out: list[Edge] = []
     for conflict in conflicts:
         if not (conflict.left_item and conflict.right_item):
@@ -503,7 +394,7 @@ def edges_from_conflicts(conflicts: list[Conflict]) -> list[Edge]:
             target=conflict.right_item,
             relation="contradicts",
             confidence=conflict.confidence,
-            provenance="extracted" if conflict.basis == "deterministic" else "inferred",
+            provenance="extracted",
             justification=conflict.detail,
         )
         if edge.valid:
@@ -615,12 +506,3 @@ def _float(raw: Any, fallback: float) -> float:
         except (TypeError, ValueError):
             return fallback
     return float(raw)
-
-
-def _int(raw: Any, fallback: int) -> int:
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        try:
-            return int(str(raw).strip())
-        except (TypeError, ValueError):
-            return fallback
-    return int(raw)

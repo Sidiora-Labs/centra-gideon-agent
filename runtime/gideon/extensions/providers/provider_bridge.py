@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from gideon.core.errors import AgentError
+from gideon.extensions.providers.failure_copy import provider_load_error
 from gideon.integrations.llm.base import ModelProvider
 
 logger = logging.getLogger(__name__)
@@ -599,12 +600,14 @@ def resolve_provider_for_use_case(
             **kwargs,
         )
 
+    failures: list[AgentError] = []
     capability = parent_capability(use_case)
     if use_case in ("reasoning", "background", "loops", "orchestration"):
         kwargs["_guard_use_case"] = use_case
     if model_override and "/" in model_override and ":" not in model_override:
         direct = _resolve_from_config_registry(
             capability,
+            _failures=failures,
             session_key=session_key,
             agent=agent,
             model_override=model_override,
@@ -616,6 +619,7 @@ def resolve_provider_for_use_case(
     if model_override and (":" in model_override or "/" in model_override):
         direct = _resolve_from_config_registry(
             capability,
+            _failures=failures,
             session_key=session_key,
             agent=agent,
             model_override=model_override,
@@ -669,6 +673,7 @@ def resolve_provider_for_use_case(
                 _rk["_guard_routed_fallback"] = True
         pinned = _resolve_from_config_registry(
             capability,
+            _failures=failures,
             session_key=session_key,
             agent=agent,
             model_override=model_id,
@@ -691,32 +696,19 @@ def resolve_provider_for_use_case(
     if _last_dead is not None:
         ref, provider_name = _last_dead
         raise ProviderResolutionError(
-            f"The model selected for {use_case!r} ({ref!r}) isn't available — its "
-            f"provider {provider_name!r} isn't installed or configured. Install it "
-            f"in the App Store, or pick a different model in Settings → Models.",
-            AgentError(
-                code="ERR_MODEL_UNRESOLVED",
-                what=(
-                    f"the model pinned for use case {use_case!r} ({ref!r}) cannot be built"
-                ),
-                why=(
-                    f"the active ref names provider {provider_name!r}, which is absent "
-                    f"from config.json (its app isn't installed or configured)"
-                    + (
-                        " — every other chain entry was skipped too"
-                        if len(_refs) > 1
-                        else ""
-                    )
-                ),
-                fix=(
-                    f"install {provider_name!r} in the App Store, or rebind {use_case!r} "
-                    f"to an available model in Settings → Models"
-                ),
+            f"The model selected for {use_case!r} ({ref!r}) could not be loaded.",
+            (
+                failures[-1]
+                if failures
+                else provider_load_error(
+                    "unknown", use_case=use_case, provider=provider_name
+                )
             ),
         )
 
     fallback = _resolve_from_config_registry(
         capability,
+        _failures=failures,
         session_key=session_key,
         agent=agent,
         model_override=model_override,
@@ -727,14 +719,8 @@ def resolve_provider_for_use_case(
         return fallback
 
     raise ProviderResolutionError(
-        f"No provider configured for use case {use_case!r}. "
-        f"Add a model provider in Settings → Providers.",
-        AgentError(
-            code="ERR_MODEL_UNRESOLVED",
-            what=f"no model provider resolves for use case {use_case!r}",
-            why="no provider in config.json declares the capability this use case needs",
-            fix=f"add a model provider in Settings → Providers, then bind {use_case!r} to it",
-        ),
+        f"No provider could be loaded for use case {use_case!r}.",
+        failures[-1] if failures else provider_load_error("unknown", use_case=use_case),
     )
 
 
@@ -808,6 +794,7 @@ def _resolve_from_config_registry(
     model_override: str | None = None,
     cwd: str | None = None,
     provider_hint: str | None = None,
+    _failures: list[AgentError] | None = None,
     **kwargs: Any,
 ) -> ModelProvider | None:
     """Fallback: resolve via the ProviderEntry registry.
@@ -818,14 +805,28 @@ def _resolve_from_config_registry(
     or app's ``register_type`` factory). Returns ``None`` when no compatible provider
     is configured.
     """
+
+    def failed(cause: str, provider_type: str = "") -> None:
+        if _failures is not None:
+            _failures.append(
+                provider_load_error(
+                    cause,
+                    use_case=use_case,
+                    provider=provider_hint or "",
+                    provider_type=provider_type,
+                )
+            )
+
     try:
         import gideon.integrations.llm.acp_agent  # noqa: F401
         from gideon.integrations.llm.registry import get_default_registry
     except Exception:
+        failed("registry_unavailable")
         return None
 
     target_cap = _capability_enum(use_case)
     if target_cap is None:
+        failed("unsupported_capability")
         return None
 
     model_axis_only = bool(kwargs.pop("_model_axis_only", False))
@@ -833,9 +834,14 @@ def _resolve_from_config_registry(
     guard_routed = bool(kwargs.pop("_guard_routed", False))
     guard_routed_fallback = bool(kwargs.pop("_guard_routed_fallback", False))
 
-    registry = get_default_registry()
-    entries = list(registry.list_entries())
+    try:
+        registry = get_default_registry()
+        entries = list(registry.list_entries())
+    except Exception:
+        failed("registry_unavailable")
+        return None
     if not entries:
+        failed("no_entries")
         return None
 
     if (
@@ -853,6 +859,15 @@ def _resolve_from_config_registry(
         if any(e.name == _maybe_provider for e in entries):
             _hint, model_override = model_override.split(":", 1)
             provider_hint = provider_hint or _hint
+
+    if provider_hint and not any(entry.name == provider_hint for entry in entries):
+        failed("entry_missing")
+        return None
+    if provider_hint:
+        selected = next(entry for entry in entries if entry.name == provider_hint)
+        if selected.type not in registry._factories:
+            failed("factory_missing", selected.type)
+            return None
 
     candidate = None
     for entry in entries:
@@ -872,6 +887,10 @@ def _resolve_from_config_registry(
         break
 
     if candidate is None:
+        failed("capability_missing")
+        return None
+    if candidate.type not in registry._factories:
+        failed("factory_missing", candidate.type)
         return None
 
     config: dict[str, Any] = {
@@ -917,7 +936,19 @@ def _resolve_from_config_registry(
             agent=agent,
             **build_kwargs,
         )
-    except Exception:
+    except Exception as exc:
+        from gideon.integrations.llm.registry import CredentialMissing
+
+        cause = (
+            "credential_missing"
+            if isinstance(exc, CredentialMissing)
+            else (
+                "dependency_missing"
+                if isinstance(exc, ImportError)
+                else "construction_failed"
+            )
+        )
+        failed(cause, candidate.type)
         logger.exception(
             "Config-registry fallback failed to build provider %r for %s",
             candidate.name,

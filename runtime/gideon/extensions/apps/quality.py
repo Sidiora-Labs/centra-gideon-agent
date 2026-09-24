@@ -108,30 +108,83 @@ def frontend_sources(app_dir: Path) -> list[Path]:
     return out
 
 
-def token_lint_file(path: Path, rules: dict[str, str] | None = None) -> list[str]:
-    """Token-lint one file. Returns ``"<line>: <kind> — <text>"`` strings (empty = clean).
-    Same line semantics as the host lint: comment-only lines are skipped because design
-    rationale legitimately cites hex/px in prose."""
+@dataclass
+class TokenLintState:
+    block_comment: bool = False
+
+
+def strip_token_comments(line: str, state: TokenLintState) -> str:
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        next_ch = line[i + 1] if i + 1 < len(line) else ""
+        if state.block_comment:
+            out.append(" ")
+            if ch == "*" and next_ch == "/":
+                state.block_comment = False
+                out.append(" ")
+                i += 1
+        elif quote:
+            out.append(ch)
+            if ch == "\\" and next_ch:
+                out.append(next_ch)
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif (
+            ch == "/"
+            and next_ch == "*"
+            and (i == 0 or not re.match(r"[A-Za-z0-9\[]", line[i - 1]))
+        ):
+            state.block_comment = True
+            out.append("  ")
+            i += 1
+        elif ch == "/" and next_ch == "/" and (i == 0 or line[i - 1] != ":"):
+            break
+        else:
+            out.append(ch)
+            if ch in ("'", '"', "`"):
+                quote = ch
+        i += 1
+    return "".join(out)
+
+
+@dataclass(frozen=True)
+class TokenLintResult:
+    violations: list[str]
+    end_state: str
+
+
+def token_lint_source(
+    text: str, rules: dict[str, str] | None = None
+) -> TokenLintResult:
     r = rules or load_token_lint_rules()
     hex_re = re.compile(r["hex"])
     px_re = re.compile(r["raw_px"])
     ok_re = re.compile(r["px_ok_context"])
     calc_re = re.compile(r["calc_with_token"])
     hits: list[str] = []
-    text = path.read_text(encoding="utf-8", errors="replace")
+    state = TokenLintState()
     for i, line in enumerate(text.split("\n"), start=1):
         trimmed = line.strip()
-        if (
-            trimmed.startswith("//")
-            or trimmed.startswith("*")
-            or trimmed.startswith("/*")
-        ):
-            continue
+        line = strip_token_comments(line, state)
         if hex_re.search(line):
             hits.append(f"{i}: hex — {trimmed[:80]}")
         if px_re.search(line) and not calc_re.search(line) and not ok_re.search(line):
             hits.append(f"{i}: px — {trimmed[:80]}")
-    return hits
+    end_state = "block_comment" if state.block_comment else "code"
+    if end_state != "code":
+        hits.append(
+            f"{len(text.split(chr(10)))}: lexical — unreadable EOF: {end_state}"
+        )
+    return TokenLintResult(hits, end_state)
+
+
+def token_lint_file(path: Path, rules: dict[str, str] | None = None) -> list[str]:
+    """Token-lint a file, including lexical failures that prevent reading to EOF."""
+    return token_lint_source(path.read_text(encoding="utf-8"), rules).violations
 
 
 def token_lint_bundle(app_dir: Path) -> dict[str, list[str]]:

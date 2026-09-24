@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -103,6 +104,8 @@ def git_root(proj: str) -> str:
 
 
 def detect_install_kind() -> InstallKind:
+    if getattr(sys, "frozen", False):
+        return "desktop"
     selected = (os.environ.get("GIDEON_INSTALL_KIND") or "").strip().lower()
     if selected in _ENV_KINDS:
         return cast(InstallKind, selected)
@@ -533,6 +536,10 @@ def resolve_default_branch(proj: str) -> str:
 
 
 def git_fetch(proj: str, branch: str) -> subprocess.CompletedProcess[str]:
+    if detect_install_kind() == "desktop" or any(
+        part.endswith(".app") for part in Path(proj).parts
+    ):
+        raise RuntimeError("Git fetch is unavailable in a desktop bundle")
     return GitCheckout(proj).run("fetch", "origin", branch, timeout=60)
 
 
@@ -581,6 +588,10 @@ async def _git_output(project, arguments, timeout, capture):
 
 
 async def commits_behind_upstream(proj: str) -> int | None:
+    if detect_install_kind() == "desktop" or any(
+        part.endswith(".app") for part in Path(proj).parts
+    ):
+        return None
     try:
         await _git_output(proj, ["fetch", "--quiet"], 15, False)
     except Exception:

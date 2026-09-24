@@ -89,9 +89,9 @@ class TestAliasIndex:
     def test_matches_name_and_aliases(self):
         index = AliasIndex()
         index.add_entity(
-            Entity("e1", "Gideon", "project", aliases=("gideon", "p-gideon"))
+            Entity("e1", "Gideon", "project", aliases=("gideon", "gideon-project"))
         )
-        for text in ("I use Gideon daily", "gideon is fast", "the p-gideon repo"):
+        for text in ("I use Gideon daily", "gideon is fast", "the gideon-project repo"):
             assert [m.entity_id for m in index.find(text)] == ["e1"], text
 
     def test_match_is_case_insensitive(self):
@@ -119,7 +119,7 @@ class TestAliasIndex:
         index = AliasIndex()
         assert index.add("e1", "AI") is False
         assert index.add("e1", "ML") is False
-        assert index.add("e1", "Gideon") is True
+        assert index.add("e1", "Nova") is True
         assert index.add("e2", "AI Safety") is True
 
     def test_empty_and_unmatched_text(self):
@@ -181,8 +181,8 @@ class TestEntities:
 
     def test_upsert_merges_aliases(self, graph):
         graph.upsert_entity("Gideon", "project", aliases=["gideon"])
-        graph.upsert_entity("Gideon", "project", aliases=["gideon"])
-        assert graph.entities()[0].aliases == ("gideon", "gideon")
+        graph.upsert_entity("Gideon", "project", aliases=["assistant"])
+        assert graph.entities()[0].aliases == ("assistant", "gideon")
 
     def test_unknown_entity_type_is_refused(self, graph):
         with pytest.raises(ValueError):

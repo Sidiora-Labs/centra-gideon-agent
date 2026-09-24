@@ -1,7 +1,11 @@
 "use strict";
 
 const { contextBridge, ipcRenderer } = require("electron");
-const { CAPABILITIES, IPC_CHANNELS } = require("../native/capabilities");
+const CAPABILITIES = ["audio_capture", "global_hotkey", "native_notifications", "tray", "screen_capture", "login_item", "system_audio"];
+const IPC_CHANNELS = Object.fromEntries(Object.entries({ probe: "probe", request: "request", snapshot: "snapshot", state: "state",
+  hotkeyBind: "hotkey-bind", capturing: "capturing", pushToTalk: "push-to-talk", loginItemGet: "login-item-get",
+  loginItemSet: "login-item-set", notify: "notify", notificationActivate: "notification-activate" })
+  .map(([key, name]) => [key, "gideon-desktop:" + name]));
 
 function subscribe(channel, callback, select = (payload) => payload) {
   if (typeof callback !== "function") return () => {};

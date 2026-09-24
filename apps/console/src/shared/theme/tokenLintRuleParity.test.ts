@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { HEX, RAW_PX, PX_OK_CONTEXT, CALC_WITH_TOKEN, lineViolations } from './tokenLintRule'
+import { HEX, RAW_PX, PX_OK_CONTEXT, CALC_WITH_TOKEN, lineViolations, sourceViolations, scanTokenSource } from './tokenLintRule'
 
 // vitest runs from web/, so the packaged JSON is two levels up.
 const RULES_PATH = join(process.cwd(), "../../runtime/gideon/extensions/apps/token_lint_rules.json")
@@ -61,4 +61,50 @@ describe('token-lint rule parity (TS ↔ packaged JSON)', () => {
     }
     expect(corpus.filter(([, e]) => e.length).length).toBeGreaterThanOrEqual(3)
   })
+})
+
+interface LexicalCase {
+  name: string
+  source: string
+  expected: [number, 'hex' | 'px' | 'lexical'][]
+  end_state?: 'code' | 'block_comment'
+  intended?: [number, 'hex' | 'px' | 'lexical'][]
+}
+
+const lexicalCases = JSON.parse(readFileSync(join(process.cwd(), '../../checks/fixtures/token_lint_cases.json'), 'utf8')) as LexicalCase[]
+
+describe('shared token-lint lexical corpus', () => {
+  it.each(lexicalCases)('$name', ({ name, source, expected, intended, end_state = 'code' }) => {
+    expect(scanTokenSource(source).end_state).toBe(end_state)
+    const actual = sourceViolations(source).map((hit) => {
+      const [line, detail] = hit.split(': ')
+      return [Number(line), detail.split(' — ')[0]]
+    })
+    expect(actual).toEqual(expected)
+    if (name.startsWith('gap_')) {
+      expect(intended).toBeDefined()
+      expect(actual).not.toEqual(intended)
+    }
+  })
+
+  it('keeps block-comment state local to each file', () => {
+    sourceViolations('/* unfinished')
+    expect(sourceViolations("const color = '#fff'")).toHaveLength(1)
+  })
+
+  it('counts real clean and rejected sources without known gaps', () => {
+    const normalCases = lexicalCases.filter(({ name }) => !name.startsWith('gap_'))
+    expect(lexicalCases.length - normalCases.length).toBeGreaterThanOrEqual(2)
+    let clean = 0
+    let rejected = 0
+    for (const { source, expected } of normalCases) {
+      const hits = sourceViolations(source)
+      expect(hits.length > 0).toBe(expected.length > 0)
+      if (hits.length) rejected++
+      else clean++
+    }
+    expect(clean).toBeGreaterThanOrEqual(10)
+    expect(rejected).toBeGreaterThanOrEqual(15)
+  })
+
 })

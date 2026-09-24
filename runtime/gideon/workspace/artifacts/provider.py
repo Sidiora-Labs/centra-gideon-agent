@@ -52,9 +52,19 @@ class ArtifactProvider(ABC):
         """
         ...
 
-    def find_similar(self, name: str, *, kind: str | None = None) -> Artifact | None:
+    def find_similar(
+        self,
+        name: str,
+        *,
+        kind: str | None = None,
+        project_id: str | None = None,
+    ) -> Artifact | None:
         """The existing artifact whose name matches *name* by slug, or None — the
-        list-before-save dedup hint. Default returns None (a backend opts in)."""
+        list-before-save dedup hint. Default returns None (a backend opts in).
+
+        ``project_id=None`` searches all projects, ``""`` only unscoped artifacts,
+        and a project id only that project.
+        """
         return None
 
     def set_folder(self, slug: str, folder_id: str) -> Artifact | None:

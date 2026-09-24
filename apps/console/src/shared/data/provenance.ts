@@ -1,3 +1,4 @@
+import type { RegistryProvenance } from './api'
 
 export type SourceKind = 'native' | 'bundled' | 'first-party' | 'local' | 'git'
 
@@ -23,4 +24,22 @@ export function provenance(input: { sourceKind?: string | null; locked?: boolean
   if (input.locked) return PLATFORM
   const kind = (input.sourceKind ?? '').trim()
   return PROVENANCE[kind] ?? null
+}
+
+
+const SCAN_VERDICTS: Record<string, string> = {
+  clean: 'clean',
+  warning: 'warning',
+  dangerous: 'dangerous',
+}
+
+export function registryProvenance(registry?: RegistryProvenance | null): Provenance | null {
+  if (!registry) return null
+  const maintainer = registry.maintainer?.trim() || 'not provided'
+  const validated = registry.lastValidated?.trim() || 'not provided'
+  const verdict = SCAN_VERDICTS[registry.scanVerdict?.trim() ?? ''] ?? 'not available'
+  return {
+    label: `Maintainer: ${maintainer} · Last validated: ${validated} · Scan: ${verdict}`,
+    title: 'Reported by the registry. This listing does not replace the security scan at installation.',
+  }
 }

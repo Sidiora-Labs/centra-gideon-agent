@@ -79,6 +79,7 @@ lint:
 	$(PYTHON) -m isort --check-only $(PYTHON_SOURCES)
 	$(PYTHON) -m flake8 $(PYTHON_SOURCES)
 	$(PYTHON) -m mypy $(PKG) $(HARNESS)
+	$(PYTHON) tooling/scripts/lint_bundled_apps.py
 
 test:
 	$(PYTHON) -m pytest
@@ -115,6 +116,8 @@ desktop: pyinstaller
 	mkdir -p "$(DESKTOP_DIR)/backend-dist"
 	cp -R "$(PYI_BUNDLE_DIR)" "$(DESKTOP_DIR)/backend-dist/"
 
+# Release CI builds an unsigned arm64 DMG from an unpacked app.
+# Signing and notarization remain publisher configuration, not this target.
 desktop-dist: desktop
 	npm --prefix "$(DESKTOP_DIR)" run dist
 

@@ -41,6 +41,7 @@ class ReadyNode:
     item: Any = None
     has_item: bool = False
     iter_index: int | None = None
+    item_total: int = 0
 
     @property
     def node_id(self) -> str:
@@ -427,6 +428,7 @@ class _Cursor:
     item: Any = None
     has_item: bool = False
     iteration: int | None = None
+    item_total: int = 0
 
     def child(self, node: Node, suffix: str) -> _Cursor:
         return _Cursor(
@@ -437,10 +439,16 @@ class _Cursor:
             self.item,
             self.has_item,
             self.iteration,
+            self.item_total,
         )
 
     def body(
-        self, marker: str, index: int, value: Any = None, has_value: bool = False
+        self,
+        marker: str,
+        index: int,
+        value: Any = None,
+        has_value: bool = False,
+        item_total: int = 0,
     ) -> _Cursor:
         spec = self.spec + ".body"
         path = f"{self.path}.body{marker}{index}"
@@ -454,6 +462,7 @@ class _Cursor:
             value,
             has_value,
             index,
+            item_total,
         )
 
 
@@ -481,6 +490,7 @@ class _FrontierWalk:
                 item=cursor.item,
                 has_item=cursor.has_item,
                 iter_index=cursor.iteration,
+                item_total=cursor.item_total,
             )
         )
 
@@ -594,7 +604,7 @@ class _FrontierWalk:
                         self.result.wip_held.append(path)
                     continue
                 occupied += 1
-            self.visit(cursor.body("#", index, value, True))
+            self.visit(cursor.body("#", index, value, True, len(values)))
 
     def loop(self, cursor: _Cursor) -> None:
         if cursor.node.body is None:

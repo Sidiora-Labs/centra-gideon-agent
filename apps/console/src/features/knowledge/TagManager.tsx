@@ -4,22 +4,25 @@ import { api, ApiError, type KnowledgeTag } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { confirmDelete, confirmDestructive, promptInput } from '../../shared/ui/dialog'
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
-import { EmptyState, ListSkeleton } from '../../shared/ui/ListScaffold'
+import { LoadError, EmptyState, ListSkeleton } from '../../shared/ui/ListScaffold'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { fvs } from '../../shared/theme/fontWeight'
 
 export function TagManager({ onChanged }: { onChanged?: () => void }) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [tags, setTags] = useState<KnowledgeTag[] | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [note, setNote] = useState('')
 
   useEffect(() => {
     let alive = true
+    setLoadErr(null)
     api.knowledgeTagTree()
       .then((t) => { if (alive) setTags(t) })
-      .catch(() => { if (alive) setTags([]) })
+      .catch((error) => { if (alive) setLoadErr(error) })
     return () => { alive = false }
-  }, [])
+  }, [loadAttempt])
 
   const run = async (
     id: number,
@@ -53,6 +56,7 @@ export function TagManager({ onChanged }: { onChanged?: () => void }) {
     return out
   }, [tags])
 
+  if (loadErr) return <LoadError what="tags" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} />
   if (tags === null) return <ListSkeleton what="tags" />
   if (!tags.length) {
     return (

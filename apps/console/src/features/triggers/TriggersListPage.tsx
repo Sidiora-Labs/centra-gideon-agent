@@ -18,7 +18,7 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { useQueryParam, useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { api, partitionRunHistory, type ActionProvider } from '../../shared/data/api'
+import { api, partitionRunHistory } from '../../shared/data/api'
 import { ScheduleDetail } from '../schedule/ScheduleDetail'
 import { LifecycleDetail } from './LifecycleDetail'
 import { StoreTriggerDetail } from './StoreTriggerDetail'
@@ -55,7 +55,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   const catalog = useTriggerVariables()
   const { data: stores, error: storesErr, refresh: refreshStores } = useQuery('triggers:store', () => api.storeTriggers(), { persist: false })
   const { data: events, error: eventsErr, refresh: refreshEvents } = useQuery('triggers:events', () => api.eventTriggers(), { persist: false })
-  const { data: providers = [] } = useQuery('triggers:action-providers', () => api.actionProviders().catch(() => [] as ActionProvider[]), { persist: true })
+  const { data: providers = [], error: providersErr, refresh: refreshProviders } = useQuery('triggers:action-providers', () => api.actionProviders(), { persist: true })
   const { ladder } = useAutonomyLadder()
   const rungByProvider = useMemo(() => providerRungIndex(ladder), [ladder])
 
@@ -142,7 +142,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
               : open.kind === 'event' && open.event
               ? <EventTriggerSummary t={open} onDeleted={() => { setOpenId(""); loadEvents() }} />
               : open.hook
-              ? <LifecycleDetail hook={open.hook} providers={providers} editing={editing} onEditingChange={setEditing} onSaved={loadHooks} onDeleted={() => { setOpenId(""); loadHooks() }} />
+              ? providersErr ? <LoadError what="action providers" error={providersErr} onRetry={refreshProviders} /> : <LifecycleDetail hook={open.hook} providers={providers} editing={editing} onEditingChange={setEditing} onSaved={loadHooks} onDeleted={() => { setOpenId(""); loadHooks() }} />
               : null}
           </SidePanel>
         )

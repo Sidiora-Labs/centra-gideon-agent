@@ -208,6 +208,7 @@ class AcpProcess:
         self._child_pids: dict[int, int | None] = {}
         self._sandbox_handle: SandboxHandle | None = None
         self._stderr_lines: deque[str] = deque(maxlen=20)
+        self.first_stderr_tail = ""
         self._stderr_task: asyncio.Task | None = None
         self._last_activity = time.monotonic()
 
@@ -416,6 +417,8 @@ class AcpProcess:
         self._process = None
         self._pid = self._pgid = self._start_time = None
         self._child_pids = {}
+        if not self.first_stderr_tail:
+            self.first_stderr_tail = self.stderr_tail()
         self._stderr_lines.clear()
         for operation, value in identifiers:
             if value is not None and value != {}:

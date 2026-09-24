@@ -494,7 +494,13 @@ class BindingPath:
                 )
             if next_value is _MISSING:
                 raise BindingError(
-                    f"unresolved reference at {segment!r}", self.expression
+                    f"unresolved reference at {segment!r}; "
+                    + (
+                        f"available keys: {', '.join(sorted(map(str, value))) or '(none)'}"
+                        if isinstance(value, dict)
+                        else f"list contains {len(value)} items"
+                    ),
+                    self.expression,
                 )
             value = next_value
         return value
@@ -508,7 +514,10 @@ class BindingPlan:
         parts = list(map(str.strip, self.expression.split("|")))
         head, pipes = parts[0], parts[1:]
         names = {match.group(1) for pipe in pipes if (match := _PIPE_RE.match(pipe))}
-        if _is_previous_ref(head) and not self.context.has_previous:
+        missing_loop_output = (
+            _root_name(head) == "last" and not self.context.has_last
+        ) or (_is_previous_ref(head) and not self.context.has_previous)
+        if self.context.iter_index == 0 and missing_loop_output:
             return _run_pipes(None, pipes, self.expression, self.context)
         if head.startswith("secret:"):
             value = self.secret(head[len("secret:") :].strip())

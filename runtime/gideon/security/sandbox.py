@@ -277,6 +277,24 @@ def _probe_unshare() -> bool:
         return False
 
 
+def _seatbelt_binaries() -> tuple[str, str]:
+    try:
+        system_path = os.confstr("CS_PATH")
+    except (AttributeError, OSError, ValueError) as exc:
+        raise RuntimeError("Seatbelt requires a trusted CS_PATH") from exc
+    if not system_path or any(
+        not os.path.isabs(directory) for directory in system_path.split(os.pathsep)
+    ):
+        raise RuntimeError("Seatbelt requires an absolute, nonempty CS_PATH")
+    binaries = []
+    for name in ("env", "sandbox-exec"):
+        resolved = shutil.which(name, path=system_path)
+        if resolved is None:
+            raise FileNotFoundError(f"Seatbelt binary {name!r} not found in CS_PATH")
+        binaries.append(resolved)
+    return binaries[0], binaries[1]
+
+
 _SANDBOX_EXEC_PROBE_CACHE: dict[tuple[object, ...], bool] = {}
 
 
@@ -296,22 +314,24 @@ def _probe_sandbox_exec() -> bool:
             (platform_name, None, subprocess.run), False
         )
         return False
-    sandbox_exec = shutil.which("sandbox-exec")
-    cache_key = (platform_name, sandbox_exec, subprocess.run)
+    try:
+        env, sandbox_exec = _seatbelt_binaries()
+    except (RuntimeError, OSError) as exc:
+        logger.debug("sandbox-exec probe unavailable: %s", exc)
+        return False
+    cache_key = (platform_name, env, sandbox_exec, subprocess.run)
     if cache_key in _SANDBOX_EXEC_PROBE_CACHE:
         return _SANDBOX_EXEC_PROBE_CACHE[cache_key]
     available = False
-    if sandbox_exec is None:
-        _SANDBOX_EXEC_PROBE_CACHE[cache_key] = False
-        return False
     target = "/usr/bin/true"
     target_arg: list[str] = []
-    fd, profile_path = tempfile.mkstemp(suffix=".sb", prefix="gideon_probe_")
+    profile_path = None
     try:
-        os.write(fd, b"(version 1)(allow default)")
-        os.close(fd)
+        fd, profile_path = tempfile.mkstemp(suffix=".sb", prefix="gideon_probe_")
+        with os.fdopen(fd, "wb") as profile_file:
+            profile_file.write(b"(version 1)(allow default)")
         result = subprocess.run(
-            [sandbox_exec, "-f", profile_path, target, *target_arg],
+            [env, sandbox_exec, "-f", profile_path, target, *target_arg],
             capture_output=True,
             timeout=5,
         )
@@ -326,7 +346,8 @@ def _probe_sandbox_exec() -> bool:
         logger.debug("sandbox-exec probe failed: %s", exc)
     finally:
         try:
-            os.unlink(profile_path)
+            if profile_path is not None:
+                os.unlink(profile_path)
         except OSError:
             pass
     _SANDBOX_EXEC_PROBE_CACHE[cache_key] = available
@@ -684,6 +705,7 @@ def sandbox_exec_argv(
     Returns (new_argv, tmp_profile_path).  Caller should delete the
     profile file after the child exits.
     """
+    env, sandbox_exec = _seatbelt_binaries()
     profile = _build_seatbelt_profile(sandbox_level)
     fd, path = tempfile.mkstemp(suffix=".sb", prefix="gideon_sandbox_")
     os.write(fd, profile.encode())
@@ -697,7 +719,7 @@ def sandbox_exec_argv(
             if key.startswith(prefix):
                 unset_args.extend(["-u", key])
                 break
-    return ["env", *unset_args, "sandbox-exec", "-f", path, *argv], path
+    return [env, *unset_args, sandbox_exec, "-f", path, *argv], path
 
 
 _backend: str | None = None

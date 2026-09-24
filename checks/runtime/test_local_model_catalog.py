@@ -432,8 +432,25 @@ def test_every_local_model_field_has_a_writer(tmp_path):
     assert len(card_writes) >= 14, sorted(card_writes)
     assert disk_writes == {"downloaded", "integrity"}, sorted(disk_writes)
 
+    from gideon.integrations.local_models.multi_instance import (
+        MultiInstanceLocalProvider,
+    )
+    from gideon.integrations.local_models.registry import to_local_model
+
+    identified = to_local_model(
+        default, provider=MultiInstanceLocalProvider("catalog-app", [])
+    )
+    identity_writes = {
+        f.name
+        for f in dataclasses.fields(LocalModel)
+        if getattr(identified, f.name) != getattr(default, f.name)
+    }
+    assert identity_writes == {"instance_id", "instance_label"}
     residue = (
-        {f.name for f in dataclasses.fields(LocalModel)} - card_writes - disk_writes
+        {f.name for f in dataclasses.fields(LocalModel)}
+        - card_writes
+        - disk_writes
+        - identity_writes
     )
     assert not residue, (
         f"LocalModel.{sorted(residue)} is read on the wire (to_dict) but no catalog card and "

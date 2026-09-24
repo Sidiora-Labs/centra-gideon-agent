@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { api, type PromptBinding, type PromptItem, type PromptBindings } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { PanelHeader, Section } from './settingsUI'
-import { ListSkeleton } from '../../shared/ui/ListScaffold'
+import { LoadError, ListSkeleton } from '../../shared/ui/ListScaffold'
 
 export function PromptsPanel() {
-  const { data, refresh } = useQuery<PromptBindings | null>(
-    'settings:prompt-bindings', () => api.promptBindings().catch(() => null), { persist: true },
+  const { data, error: loadErr, refresh } = useQuery<PromptBindings | null>(
+    'settings:prompt-bindings', () => api.promptBindings(), { persist: true },
   )
   const [saving, setSaving] = useState('')
 
@@ -23,7 +23,7 @@ export function PromptsPanel() {
   return (
     <div>
       <PanelHeader title="Prompts" hint="Bind which prompt serves each runtime context. Edit the prompts themselves on the Prompts page; unset uses each context's bundled default." />
-      {!data ? (
+      {loadErr ? <LoadError what="prompt bindings" error={loadErr} onRetry={refresh} /> : !data ? (
         <ListSkeleton rows={4} />
       ) : (
         data.categories.map((c) => {

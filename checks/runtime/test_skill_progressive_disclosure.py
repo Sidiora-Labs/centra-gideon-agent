@@ -130,8 +130,8 @@ def test_above_threshold_injects_index_only(tmp_path, monkeypatch):
 
 
 def test_at_threshold_inlines_bodies(tmp_path, monkeypatch):
-    _patch_cfg(monkeypatch, max_triggered=10, threshold=8)
-    builder = _builder_with_skills(tmp_path, 3)
+    _patch_cfg(monkeypatch, max_triggered=3, threshold=2)
+    builder = _builder_with_skills(tmp_path, 2)
     msg, _ = builder.build_message("deploy widget now", is_new_session=False)
     assert "BODY-0" in msg
     assert "INDEX only" not in msg

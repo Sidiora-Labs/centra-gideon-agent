@@ -12,6 +12,7 @@ import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 type GuardrailsCfg = {
   budgets?: { max_tokens_per_run?: number; max_tokens_per_day?: number; max_dollars_per_day?: number }
   breaker?: { failure_threshold?: number; recovery_secs?: number }
+  loop_breaker?: { circuit_threshold?: number }
   scan_mode?: string
 }
 
@@ -28,13 +29,14 @@ export function GuardrailsPanel() {
   if (!data || !cfg) return <FormSkeleton sections={3} what="settings" />
 
   const patchNum = (path: string, value: number, label?: string) =>
-    api.patchConfig(`guardrails.${path}`, value).catch((e) => {
+    api.patchConfig(`guardrails.${path}`, value).then(() => true).catch((e) => {
       notify(`Couldn't save ${label ?? path}: ${String((e as Error)?.message || e)}`, 'error')
+      return false
     })
 
   return (
     <div>
-      <PanelHeader title="Guardrails" hint="The personal safety floor for unattended work — a daily spend ceiling, an outbound secret scan, provider circuit breakers, and a kill switch. Interactive chat is never affected by these." />
+      <PanelHeader title="Guardrails" hint="The personal safety floor for unattended work — a daily spend ceiling, an outbound secret scan, provider circuit breakers, and a kill switch. The tool-loop ceiling also applies to interactive turns." />
 
       <IncidentSection />
 
@@ -62,7 +64,7 @@ export function GuardrailsPanel() {
         </RowGroup>
       </Section>
 
-      <Section title="Circuit breaker" hint="Per-provider fail-fast: after N consecutive failures a provider's breaker opens, so unattended runs fail in microseconds during an outage instead of stacking timeouts.">
+      <Section title="Provider circuit breaker" hint="Per-provider fail-fast: after N consecutive failures a provider's breaker opens, so unattended runs fail in microseconds during an outage instead of stacking timeouts.">
         <RowGroup>
           <NumberRow label="Failure threshold" hint="Consecutive failures before the breaker opens."
             value={cfg.breaker?.failure_threshold ?? 5} min={1} step={1}
@@ -70,6 +72,18 @@ export function GuardrailsPanel() {
           <NumberRow label="Recovery seconds" hint="How long an open breaker waits before a half-open probe."
             value={cfg.breaker?.recovery_secs ?? 30} min={0} step={5}
             onSave={(v) => { setCfg((c) => ({ ...c, breaker: { ...c?.breaker, recovery_secs: v } })); return patchNum('breaker.recovery_secs', v, 'Recovery seconds') }} />
+        </RowGroup>
+      </Section>
+
+      <Section title="Tool-loop breaker" hint="Abort a turn when its total tool failures exceed this ceiling. Applies to native and ACP turns; changes take effect on the next run.">
+        <RowGroup>
+          <NumberRow label="Tool failure ceiling" hint="Minimum 1. Successful calls do not erase the run-wide failure count."
+            value={cfg.loop_breaker?.circuit_threshold ?? 30} min={1} step={1}
+            onSave={async (v) => {
+              const saved = await patchNum('loop_breaker.circuit_threshold', v, 'Tool failure ceiling')
+              if (saved) setCfg((c) => ({ ...c, loop_breaker: { ...c?.loop_breaker, circuit_threshold: v } }))
+              return saved
+            }} />
         </RowGroup>
       </Section>
 
@@ -334,7 +348,12 @@ function NumberRow({ label, hint, value, min, step, dollars, onSave }: {
   const [saved, setSaved] = useState(false)
   const commit = (n: number) => {
     if (n === value) return
-    onSave(n).then(() => { setSaved(true); window.setTimeout(() => setSaved(false), 1500) })
+    setSaved(false)
+    onSave(n).then((result) => {
+      if (result === false) return
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1500)
+    }).catch(() => setSaved(false))
   }
   return (
     <Row label={label} hint={hint}>

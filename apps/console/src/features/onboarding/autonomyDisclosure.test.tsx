@@ -18,7 +18,8 @@ vi.mock('../../shared/data/api', () => ({
     theme: () => new Promise(() => {}),
   },
 }))
-vi.mock('../../app/shell/identity', () => ({
+vi.mock('../../app/shell/identity', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../app/shell/identity')>(),
   useIdentity: () => ({ setName }),
   firstNameOf: (n: string) => n.split(' ')[0],
   DEFAULT_USER_NAME: 'Operator',

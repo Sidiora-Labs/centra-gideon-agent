@@ -3,7 +3,7 @@ import { Check, Globe, Newspaper, LineChart, FileText, Zap, type LucideIcon } fr
 import { api, type SearchProviderInfo } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { PanelHeader, Section } from './settingsUI'
-import { ListSkeleton } from '../../shared/ui/ListScaffold'
+import { ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { DisclosureCard } from '../../shared/ui/DisclosureCard'
 import { TextLink } from '../../shared/ui/TextLink'
 
@@ -16,11 +16,11 @@ const USE_CASE_META: Record<string, { label: string; description: string; icon: 
 const USE_CASE_ORDER = ['search-general', 'search-news', 'search-financial', 'fetch-article']
 
 export function SearchPanel() {
-  const { data, refresh } = useQuery('settings:search', async () => {
+  const { data, error: loadErr, refresh } = useQuery('settings:search', async () => {
     const [providers, active, tools] = await Promise.all([
-      api.searchProviders().catch(() => [] as SearchProviderInfo[]),
-      api.searchActive().catch(() => ({} as Record<string, string[]>)),
-      api.tools().catch(() => null),
+      api.searchProviders(),
+      api.searchActive(),
+      api.tools(),
     ])
     return { providers, active, tools }
   }, { persist: true })
@@ -31,6 +31,7 @@ export function SearchPanel() {
 
   const reloadActive = () => { invalidateKeys('settings:search'); refresh() }
 
+  if (loadErr) return <LoadError what="search settings" error={loadErr} onRetry={refresh} />
   if (!providers) return <ListSkeleton rows={4} />
 
   return (

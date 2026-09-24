@@ -312,7 +312,8 @@ async def execute_tick(
     from gideon.security.guardrails.autonomy import rung_rank
 
     ts = time.time() if now is None else now
-    if unattended and rung_rank(granted_rung) < rung_rank(plan.floor()):
+    required_rank = rung_rank(plan.floor()) + (1 if plan.submits else 0)
+    if unattended and rung_rank(granted_rung) < required_rank:
         return TickResult(
             plan_id=plan.id,
             ok=False,

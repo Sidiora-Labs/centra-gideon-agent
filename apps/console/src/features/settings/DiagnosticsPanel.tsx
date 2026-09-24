@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { Pause, Play, Trash2, ArrowDownToLine } from 'lucide-react'
@@ -27,6 +28,7 @@ const LEVEL_TONE: Record<string, string> = {
 const MAX_ENTRIES = 2000
 
 export function DiagnosticsPanel() {
+  const [levelErr, setLevelErr] = useState<unknown>(null)
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [paused, setPaused] = useState(false)
   const [filter, setFilter] = useState('')
@@ -41,7 +43,8 @@ export function DiagnosticsPanel() {
   const keyRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { api.logLevel().then(setLevel).catch(() => {}) }, [])
+  const loadLevel = () => { setLevelErr(null); api.logLevel().then(setLevel).catch(setLevelErr) }
+  useEffect(loadLevel, [])
 
   useEffect(() => {
     let es: EventSource | null = null
@@ -97,6 +100,7 @@ export function DiagnosticsPanel() {
       {
 }
       <Section title="Backend log level" hint="Change how verbose the gateway logs are, live. Persists across restarts.">
+        {levelErr && <LoadError what="backend log level" error={levelErr} onRetry={loadLevel} />}
         <Surface tone="container" radius="lg" className="px-l py-m">
           <div className="flex items-center gap-s">
             <div className="inline-flex rounded-pill bg-surface-container p-1">
@@ -106,7 +110,7 @@ export function DiagnosticsPanel() {
                 const on = level === l
                 return (
                   <button key={l} aria-label={`Backend log level: ${l}`} aria-pressed={on}
-                    onClick={() => changeLevel(l)} disabled={levelBusy}
+                    onClick={() => changeLevel(l)} disabled={levelBusy || !!levelErr || !level}
                     data-type="body-s" className="rounded-pill px-m h-8 transition-colors disabled:opacity-60"
                     style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
                     {l}

@@ -48,7 +48,7 @@ function ParamRow({ name, schema, required, depth = 0 }: { name: string; schema:
         {required && <span data-type="caption" className="text-danger">required</span>}
         {schema.enum && <span data-type="caption" className="text-on-surface-low">· {schema.enum.map(String).join(' | ').slice(0, 60)}</span>}
       </div>
-      {schema.description && <p data-type="body-s" className="mt-0.5 text-on-surface-var leading-snug">{schema.description}</p>}
+      {schema.description && <div data-type="body-s" className="mt-0.5 text-on-surface-var leading-snug"><Markdown inline>{schema.description}</Markdown></div>}
       {nested.length > 0 && <div className="mt-1.5 flex flex-col gap-1.5">{nested.map(([n, s]) => <ParamRow key={n} name={n} schema={s} required={(schema.required ?? []).includes(n)} depth={depth + 1} />)}</div>}
     </div>
   )
@@ -146,20 +146,24 @@ function RunPanel({ tool }: { tool: ToolItem }) {
             </Modal>
           )}
 
-          {result && (
-            <div className="rounded-md bg-surface-container p-m">
-              <div data-type="body-s" className="flex items-center gap-1.5 mb-1.5" style={{ color: result.ok ? 'var(--color-ok)' : 'var(--color-danger)' }}>
-                {result.ok ? <Check size={14} /> : <AlertTriangle size={14} />} {result.ok ? 'Success' : 'Error'}
-              </div>
-              <div className="max-h-96 overflow-y-auto">
-                {result.ok
-                  ? <ToolOutput text={result.output ?? ''} />
-                  : <pre data-type="body-s" className="text-danger font-mono whitespace-pre-wrap break-words">{result.error}</pre>}
-              </div>
-            </div>
-          )}
+          {result && <ToolRunResult result={result} />}
         </div>
       )}
+    </div>
+  )
+}
+
+export function ToolRunResult({ result }: { result: ToolInvokeResult }) {
+  return (
+    <div className="rounded-md bg-surface-container p-m">
+      <div data-type="body-s" className="flex items-center gap-1.5 mb-1.5" style={{ color: result.ok ? 'var(--color-ok)' : 'var(--color-danger)' }}>
+        {result.ok ? <Check size={14} /> : <AlertTriangle size={14} />} {result.ok ? 'Success' : 'Error'}
+      </div>
+      <div role="region" aria-label="Tool result" tabIndex={0} className="max-h-96 overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+        {result.ok
+          ? <ToolOutput text={result.output ?? ''} />
+          : <pre data-type="body-s" className="text-danger font-mono whitespace-pre-wrap break-words">{result.error}</pre>}
+      </div>
     </div>
   )
 }

@@ -16,6 +16,21 @@ from gideon.core.sqlite_compat import FTS5_REMEDY, probe, sqlite3
 
 logger = logging.getLogger(__name__)
 
+_EXTERNAL_ROW_COLUMNS = (
+    "id",
+    "item_id",
+    "chunk_index",
+    "text",
+    "embedding",
+    "embedding_provider",
+    "embedding_model",
+    "section",
+    "line_start",
+    "line_end",
+    "section_key",
+    "section_digest",
+)
+
 _TRACKING_PARAMS = frozenset(
     {
         "utm_source",
@@ -788,6 +803,8 @@ class KnowledgeStore:
     )
 
     _NEW_CHUNK_COLUMNS = (
+        ("section_key", "TEXT NOT NULL DEFAULT ''"),
+        ("section_digest", "TEXT NOT NULL DEFAULT ''"),
         ("embedding_provider", "TEXT NOT NULL DEFAULT ''"),
         ("embedding_model", "TEXT NOT NULL DEFAULT ''"),
     )
@@ -2412,6 +2429,8 @@ class KnowledgeStore:
                 c.section,
                 c.line_start,
                 c.line_end,
+                c.section_key,
+                c.section_digest,
             )
             for c in chunks
         ]
@@ -2419,8 +2438,8 @@ class KnowledgeStore:
             self.db.executemany(
                 "INSERT INTO chunks "
                 "(id, item_id, chunk_index, text, embedding, embedding_provider, "
-                "embedding_model, section, line_start, line_end) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "embedding_model, section, line_start, line_end, section_key, section_digest) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         self.vec_index.sync_item(item_id, [(r[0], r[4]) for r in rows])
@@ -2435,6 +2454,7 @@ class KnowledgeStore:
         otherwise a lightweight ``has_embedding`` flag is returned instead."""
         cols = (
             "id, item_id, chunk_index, text, section, line_start, line_end, "
+            "section_key, section_digest, "
             "embedding_provider, embedding_model, embedding"
         )
         rows = self.db.execute(
@@ -2468,10 +2488,14 @@ class KnowledgeStore:
 
         return get_provider()
 
-    def _sync_external_vectors(self, item_id: str, rows: list[tuple]) -> None:
+    def _sync_external_vectors(self, item_id: str, rows: list[tuple]) -> bool:
+        if any(len(row) != len(_EXTERNAL_ROW_COLUMNS) for row in rows):
+            raise ValueError(
+                f"External vector row must have {len(_EXTERNAL_ROW_COLUMNS)} columns"
+            )
         provider = self._external_vector_store()
         if provider is None:
-            return
+            return False
         try:
             provider.replace_item(
                 item_id,
@@ -2488,10 +2512,67 @@ class KnowledgeStore:
                     if row[4]
                 ],
             )
+            return True
         except Exception:
             logger.warning(
                 "External vector-store write failed for item %s", item_id, exc_info=True
             )
+            return False
+
+    def reindex_external_vector_store(self) -> dict[str, Any]:
+        provider = self._external_vector_store()
+        if provider is None:
+            return {"ok": True, "skipped": True, "reason": "unbound", "reindexed": 0}
+        local_count = self.db.execute(
+            "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0"
+        ).fetchone()[0]
+        report = provider.describe()
+        if report.get("reachable") is False:
+            raise ConnectionError(
+                f"External vector store {provider.name} is unreachable"
+            )
+        external_count = report.get("count")
+        if (
+            not isinstance(external_count, int)
+            or isinstance(external_count, bool)
+            or external_count < 0
+        ):
+            raise ValueError(
+                "External vector store describe() must report a nonnegative integer count"
+            )
+        if local_count == external_count:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reindexed": 0,
+                "local_count": local_count,
+                "external_count": external_count,
+            }
+        reindexed = failed = 0
+        columns = ", ".join(_EXTERNAL_ROW_COLUMNS)
+        item_ids = [
+            row[0] for row in self.db.execute("SELECT DISTINCT item_id FROM chunks")
+        ]
+        for item_id in item_ids:
+            rows = self.db.execute(
+                f"SELECT {columns} FROM chunks WHERE item_id = ? ORDER BY chunk_index",
+                (item_id,),
+            ).fetchall()
+            if self._sync_external_vectors(item_id, rows):
+                reindexed += sum(bool(row[4]) for row in rows)
+            else:
+                failed += 1
+        final_report = provider.describe()
+        return {
+            "ok": not failed
+            and final_report.get("reachable") is not False
+            and final_report.get("count") == local_count,
+            "skipped": False,
+            "reindexed": reindexed,
+            "failed_items": failed,
+            "local_count": local_count,
+            "external_count": final_report.get("count"),
+        }
 
     def _delete_external_vectors(self, item_id: str) -> None:
         provider = self._external_vector_store()
@@ -2998,6 +3079,66 @@ class KnowledgeStore:
         )
         self.db.commit()
         return cur.rowcount
+
+    def reembed_stale_chunks(self, embedder, *, limit: int = 100) -> dict[str, int]:
+        from gideon.cognition.knowledge.embed_batch import embed_texts
+        from gideon.cognition.knowledge.embedder import floats_to_bytes
+        from gideon.cognition.knowledge.pipeline.runner import (
+            active_batch_embed_fn,
+            embedding_space_fingerprint,
+        )
+
+        provider, model = embedding_space_fingerprint(embedder)
+        dimension = getattr(embedder, "dim", None)
+        dimension = dimension() if callable(dimension) else dimension
+        columns = ", ".join(f"c.{column}" for column in _EXTERNAL_ROW_COLUMNS)
+        rows = self.db.execute(
+            f"SELECT {columns} FROM chunks c JOIN items i ON i.id = c.item_id "
+            "WHERE i.status = 'active' AND COALESCE(i.is_archived, 0) = 0 AND "
+            "(c.embedding IS NULL OR LENGTH(c.embedding) = 0 OR c.embedding_provider != ? "
+            "OR c.embedding_model != ? OR (? > 0 AND LENGTH(c.embedding) != ?)) "
+            "ORDER BY c.item_id, c.chunk_index LIMIT ?",
+            (provider, model, dimension or 0, (dimension or 0) * 4, max(1, int(limit))),
+        ).fetchall()
+        vectors = (
+            embed_texts(
+                [row[3] for row in rows],
+                embed_many=active_batch_embed_fn(embedder),
+                embed_one=self._item_embed_one(embedder),
+            )
+            if rows
+            else []
+        )
+        changed: set[str] = set()
+        reembedded = 0
+        for row, vector in zip(rows, vectors):
+            if not vector:
+                continue
+            self.db.execute(
+                "UPDATE chunks SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
+                (floats_to_bytes(vector), provider, model, row[0]),
+            )
+            changed.add(row[1])
+            reembedded += 1
+        for item_id in changed:
+            item_rows = self.db.execute(
+                f"SELECT {', '.join(_EXTERNAL_ROW_COLUMNS)} FROM chunks WHERE item_id = ? ORDER BY chunk_index",
+                (item_id,),
+            ).fetchall()
+            self.vec_index.sync_item(item_id, [(row[0], row[4]) for row in item_rows])
+            self.clear_similarity_sweep(item_id)
+        self.db.commit()
+        for item_id in changed:
+            item_rows = self.db.execute(
+                f"SELECT {', '.join(_EXTERNAL_ROW_COLUMNS)} FROM chunks WHERE item_id = ? ORDER BY chunk_index",
+                (item_id,),
+            ).fetchall()
+            self._sync_external_vectors(item_id, item_rows)
+        return {
+            "reembedded": reembedded,
+            "failed": len(rows) - reembedded,
+            "total": len(rows),
+        }
 
     def count_items_to_reembed(self) -> int:
         """How many active items carry embeddable text (title or content)."""

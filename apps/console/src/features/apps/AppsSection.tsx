@@ -19,6 +19,8 @@ import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { ListControls } from '../../shared/ui/ListControls'
 import { FilterMenu, type FilterSectionDef, type FilterOption } from '../../shared/ui/FilterMenu'
 import { Modal } from '../../shared/ui/Modal'
+import { Markdown } from '../../shared/ui/Markdown'
+import { MoreRow } from '../../shared/ui/MoreRow'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { RowHitTarget } from '../../shared/ui/RowHitTarget'
@@ -37,6 +39,7 @@ import {
 } from '../../shared/data/useGuardedInstall'
 import { catalogApps } from '../../shared/data/appCatalog'
 import { provenance } from '../../shared/data/provenance'
+import { RegistryProvenanceLine } from './RegistryProvenanceLine'
 import { AppIcon } from './appIcon'
 import { QualityBadges } from './qualityBadges'
 import { StoreSideRail, type RailOption } from './StoreSideRail'
@@ -124,11 +127,11 @@ function SourceDivider({ label, count }: { label: string; count: number }) {
 }
 
 type AppActionKind = 'open' | 'toggle' | 'configure' | 'update' | 'uninstall' | 'force-uninstall'
-type DispatchAppAction = (app: { name: string; enabled: boolean; hasUI: boolean }, action: AppActionKind) => void
+type DispatchAppAction = (app: { name: string; displayName: string; enabled: boolean; hasUI: boolean }, action: AppActionKind) => void
 
 function useAppActions(nav: (p: string) => void, reload: () => void) {
   const [busyName, setBusyName] = useState<string | null>(null)
-  const [configFor, setConfigFor] = useState<string | null>(null)
+  const [configFor, setConfigFor] = useState<{ name: string; displayName: string } | null>(null)
   const [updateFor, setUpdateFor] = useState<string | null>(null)
   const [uninstallFor, setUninstallFor] = useState<string | null>(null)
   const [removeFor, setRemoveFor] = useState<string | null>(null)
@@ -136,7 +139,7 @@ function useAppActions(nav: (p: string) => void, reload: () => void) {
   const dispatch: DispatchAppAction = (app, action) => {
     switch (action) {
       case 'open': nav(`app/${encodeURIComponent(app.name)}`); return
-      case 'configure': setConfigFor(app.name); return
+      case 'configure': setConfigFor(app); return
       case 'update': setUpdateFor(app.name); return
       case 'uninstall': setRemoveFor(app.name); return
       case 'force-uninstall': setUninstallFor(app.name); return
@@ -153,7 +156,7 @@ function useAppActions(nav: (p: string) => void, reload: () => void) {
     <>
       {updateFor && <UpdateModal name={updateFor} onClose={() => setUpdateFor(null)}
         onUpdated={() => { setUpdateFor(null); reload() }} />}
-      {configFor && <ConfigModal name={configFor} onClose={() => setConfigFor(null)} />}
+      {configFor && <ConfigModal name={configFor.name} displayName={configFor.displayName} onClose={() => setConfigFor(null)} />}
       {removeFor && <RemoveAppModal name={removeFor} onClose={() => setRemoveFor(null)}
         onDone={() => { setRemoveFor(null); reload() }} />}
       {uninstallFor && <UninstallModal name={uninstallFor} onClose={() => setUninstallFor(null)}
@@ -164,7 +167,7 @@ function useAppActions(nav: (p: string) => void, reload: () => void) {
 }
 
 function AppActionMenu({ item, onAction }: { item: StoreItem; onAction: DispatchAppAction }) {
-  const app = { name: item.name, enabled: item.enabled, hasUI: item.hasUI }
+  const app = { name: item.name, displayName: item.displayName, enabled: item.enabled, hasUI: item.hasUI }
   return (
     <Popover align="right" placement="bottom" width={200}
       portal
@@ -440,6 +443,9 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
   const showLibControls = !isStore && (apps === undefined || apps.length > 0)
   const showStoreControls = isStore && (catalog === undefined || storeUniverse.length > 0)
 
+  const viewSelector = <Segmented ariaLabel="Native, Library, or Store" collapse="menu" value={view} onChange={setView}
+    options={[{ key: 'native', label: 'Native' }, { key: 'library', label: 'Library' }, { key: 'store', label: 'Store' }]} />
+
   return (
     <>
       <WorkbenchLayout
@@ -450,8 +456,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
               <PageTitle>Apps</PageTitle>
               {
 }
-              <Segmented ariaLabel="Native, Library, or Store" collapse="menu" value={view} onChange={setView}
-                options={[{ key: 'native', label: 'Native' }, { key: 'library', label: 'Library' }, { key: 'store', label: 'Store' }]} />
+              <div className="hidden sm:block">{viewSelector}</div>
             </div>
           }
           right={<HeaderActions>
@@ -459,7 +464,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
             <HeaderControl icon={Plus} label="Install from URL" variant="primary" priority="primary" onClick={() => setInstalling(true)} />
           </HeaderActions>}
         />}
-        controls={showLibControls ? (
+        controls={<><div className="px-l py-s sm:hidden" data-apps-mobile-view>{viewSelector}</div>{showLibControls ? (
           <ListControls search={{ value: search, onChange: setSearch, placeholder: 'Search installed apps', label: 'Search apps' }}
             results={{ count: (libResult ?? []).length, noun: 'apps', active: apps !== undefined && libNarrowed }}>
             <FilterMenu sections={libSections} label="Filter & sort" />
@@ -469,7 +474,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
             results={{ count: storeResult.length, noun: 'apps', active: catalog !== undefined && storeNarrowed }}>
             <FilterMenu sections={storeSections} label="Filter & sort" />
           </ListControls>
-        ) : undefined}
+        ) : undefined}</>}
         panel={(open || openStore) ? (
           <SidePanel key={(open ?? openStore)!.name} fillHeight storeKey="app-panel-w"
             title={(open ?? openStore)!.displayName} icon={<AppIcon name={(open ?? openStore)!.icon} size={18} />}
@@ -501,7 +506,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
                   onAddSource={() => setSourcesOpen(true)} />
               )}
               <div className="min-w-0 flex-1">
-                <StoreView catalog={catalog} catalogError={catalogErr} result={storeResult} totalKnown={storeUniverse.length}
+                <StoreView catalog={catalog} indexing={catalogRevalidating} catalogError={catalogErr} result={storeResult} totalKnown={storeUniverse.length}
                   installedCount={(apps ?? []).filter((a) => !a.native).length}
                   onInstalled={reload} reloadCatalog={reloadCatalog} onClearFilters={clearStoreFilters(setSearch, setStoreType, setStoreEntity, setStoreTag, setStoreSrc)}
                   filtersActive={storeNarrowed}
@@ -536,7 +541,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
                   {groupBySource((libResult ?? []).map(installedToStoreItem), catalog?.localSources ?? []).map((g) => (
                     <div key={g.key}>
                       <SourceDivider label={g.label} count={g.items.length} />
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))' }}>
                         {g.items.map((it, i) => (
                           <AppCard key={it.name} item={it} index={i} busy={false}
                             onInstall={() => {}} onOpen={() => setOpenName(it.name)} onAction={appActions.dispatch} />
@@ -573,9 +578,14 @@ function ResultCount({ n, total, noun }: { n: number; total: number; noun: strin
   )
 }
 
-export function StoreView({ catalog, catalogError, result, totalKnown, installedCount, onInstalled, reloadCatalog, onClearFilters, filtersActive, onOpen, onAction, onOpenSources }: {
+function StoreIndexingNotice() {
+  return <p role="status" data-type="body-s" className="text-on-surface-low">Indexing the Store… Available apps will appear as the catalog loads.</p>
+}
+
+export function StoreView({ catalog, indexing = false, catalogError, result, totalKnown, installedCount, onInstalled, reloadCatalog, onClearFilters, filtersActive, onOpen, onAction, onOpenSources }: {
   catalog: AppCatalog | null | undefined
   catalogError?: unknown
+  indexing?: boolean
   result: StoreItem[]
   totalKnown: number
   installedCount: number
@@ -610,10 +620,11 @@ export function StoreView({ catalog, catalogError, result, totalKnown, installed
   if (catalog === undefined && catalogError) {
     return <LoadError what="Store catalog" error={catalogError} onRetry={reloadCatalog} />
   }
-  if (catalog === undefined) return <ListSkeleton rows={3} what="Store catalog" />
+  if (catalog === undefined) return <><StoreIndexingNotice /><ListSkeleton rows={3} what="Store catalog" /></>
 
   return (
     <div className="flex flex-col gap-2xl">
+      {indexing && <StoreIndexingNotice />}
       <GuardedFailure guarded={guarded} />
       {pending && guarded.blocked && (
         <ConsentModal
@@ -628,7 +639,7 @@ export function StoreView({ catalog, catalogError, result, totalKnown, installed
         />
       )}
 
-      {totalKnown === 0 ? (
+      {totalKnown === 0 && indexing ? null : totalKnown === 0 ? (
         <div className="rounded-lg bg-surface-container px-l py-l text-on-surface-low text-[0.8125rem]">
           {installedCount > 0
             ? <>All available apps are installed — find them in the <strong className="text-on-surface">Library</strong> tab. <TextLink onClick={onOpenSources}>Manage Sources</TextLink> to discover more.</>
@@ -645,7 +656,7 @@ export function StoreView({ catalog, catalogError, result, totalKnown, installed
           {groupBySource(result, catalog?.localSources ?? []).map((g) => (
             <div key={g.key}>
               <SourceDivider label={g.label} count={g.items.length} />
-              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))' }}>
                 {g.items.map((e, i) => (
                   <AppCard key={e.name} item={e} index={i} busy={busy === e.name}
                     onInstall={() => installFrom(e.pointer || e.source, e.name, e)}
@@ -844,12 +855,12 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
   )
 }
 
-function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
+export function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
   item: StoreItem; index: number; busy: boolean; onInstall: () => void; onOpen: () => void; onAction: DispatchAppAction
 }) {
   const providerLabel = item.isProvider
     ? `${PROVIDER_ENTITY_LABEL[item.providerType] ?? item.providerType} provider` : ''
-  const app = { name: item.name, enabled: item.enabled, hasUI: item.hasUI }
+  const app = { name: item.name, displayName: item.displayName, enabled: item.enabled, hasUI: item.hasUI }
   const menuItems: ContextMenuItem[] = item.installed
     ? [
         { icon: <Blocks size={15} />, label: 'Details', onSelect: onOpen },
@@ -940,11 +951,12 @@ function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
 
         { }
         <p className="line-clamp-2 flex-1 text-on-surface-low" data-type="body-s">
-          {item.description || item.name}{item.author ? ` · by ${item.author}` : ''}
+          <Markdown inline>{item.description || item.name}</Markdown>{item.author ? ` · by ${item.author}` : ''}
         </p>
 
         {
 }
+        <RegistryProvenanceLine registry={item.registry} />
         <QualityBadges quality={item.quality} />
 
         { }
@@ -953,6 +965,7 @@ function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
             {(item.tags ?? []).slice(0, 3).map((t) => (
               <span key={t} className="inline-flex h-6 items-center rounded-pill bg-surface-high px-2 text-on-surface-var text-[0.75rem]">{t}</span>
             ))}
+            <MoreRow total={(item.tags ?? []).length} shown={3} noun="tags" />
           </div>
           {item.installed ? (
             item.hasUI && item.enabled ? (
@@ -1083,7 +1096,7 @@ function GuardedFailure({ guarded }: { guarded: Pick<GuardedInstall, 'error' | '
 }
 
 
-function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; onClose: () => void; onChanged: () => void; onOpen: () => void }) {
+export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; onClose: () => void; onChanged: () => void; onOpen: () => void }) {
   const [busy, setBusy] = useState(false)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -1106,7 +1119,7 @@ function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; 
     <>
       <div className="flex flex-col gap-l p-l">
         <div>
-          <div data-type="body-s" className="text-on-surface-low">{app.description || app.name}</div>
+          <div data-type="body-s" className="text-on-surface-low"><Markdown>{app.description || app.name}</Markdown></div>
           {
 }
           <div data-type="label-s" className="mt-1 text-on-surface-low">
@@ -1216,7 +1229,7 @@ function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; 
 
       {updateOpen && <UpdateModal name={app.name} onClose={() => setUpdateOpen(false)}
         onUpdated={() => { setUpdateOpen(false); onChanged() }} />}
-      {configOpen && <ConfigModal name={app.name} onClose={() => setConfigOpen(false)} />}
+      {configOpen && <ConfigModal name={app.name} displayName={app.displayName} onClose={() => setConfigOpen(false)} />}
       {confirmRemove && <RemoveAppModal name={app.name}
         onClose={() => setConfirmRemove(false)}
         onDone={() => { setConfirmRemove(false); onClose(); onChanged() }} />}
@@ -1227,7 +1240,7 @@ function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSummary; 
   )
 }
 
-function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled: () => void }) {
+export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled: () => void }) {
   const providerLabel = item.isProvider
     ? `${PROVIDER_ENTITY_LABEL[item.providerType] ?? item.providerType} provider` : ''
   const [consent, setConsent] = useState<GuardedResult | null>(null)
@@ -1250,7 +1263,7 @@ function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled:
         <div className="absolute inset-0 bg-gradient-to-t from-surface/60 to-transparent" />
       </div>
       <div>
-        <div data-type="body-s" className="text-on-surface-low">{item.description || item.name}</div>
+        <div data-type="body-s" className="text-on-surface-low"><Markdown>{item.description || item.name}</Markdown></div>
         <div data-type="label-s" className="mt-1 text-on-surface-low">
           v{item.version || '—'}{item.author ? ` · by ${item.author}` : ''}
         </div>
@@ -1307,12 +1320,16 @@ function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onInstalled:
 
 
 
-function ConfigModal({ name, onClose }: { name: string; onClose: () => void }) {
+export function AppConfigDialog({ displayName, onClose, children }: { displayName: string; onClose: () => void; children: React.ReactNode }) {
+  return <Modal title={`Configure ${displayName}`} icon={<Settings2 size={18} />} onClose={onClose}>{children}</Modal>
+}
+
+export function ConfigModal({ name, displayName, onClose }: { name: string; displayName: string; onClose: () => void }) {
   const cfg = useAppConfig(name)
 
   return (
-    <Modal title={`Configure ${name}`} icon={<Settings2 size={18} />} onClose={onClose}>
-      <div className="flex flex-col gap-m p-l" style={{ minWidth: 440 }}>
+    <AppConfigDialog displayName={displayName} onClose={onClose}>
+      <div className="flex flex-col gap-m p-l" style={{ width: 440, maxWidth: '100%' }}>
         {cfg.error ? (
           <LoadError what="app configuration" error={cfg.error} onRetry={cfg.reload} />
         ) : cfg.loading ? <div data-type="body-s" className="text-on-surface-low">Loading…</div>
@@ -1335,7 +1352,7 @@ function ConfigModal({ name, onClose }: { name: string; onClose: () => void }) {
             onClick={() => cfg.save(onClose)}>Save</Button>
         </div>
       </div>
-    </Modal>
+    </AppConfigDialog>
   )
 }
 

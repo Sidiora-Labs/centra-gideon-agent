@@ -27,11 +27,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOKENS = 800
 
-CHARS_PER_TOKEN = 4
 
 PRIORITY_KINDS = ("decision", "overview", "insight")
 
@@ -142,7 +143,7 @@ def compose(
     Items are dropped WHOLE. A truncated decision is worse than an absent one: half a rationale
     reads as a complete one, and a run would act on the half it saw.
     """
-    budget_chars = max(0, int(max_tokens)) * CHARS_PER_TOKEN
+    budget_chars = max(0, int(max_tokens)) * NOMINAL_CHARS_PER_TOKEN
     ranked = sorted(items, key=_rank)
     chosen: list[BriefItem] = []
     used = 0

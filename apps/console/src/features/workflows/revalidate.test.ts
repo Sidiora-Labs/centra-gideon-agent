@@ -34,4 +34,11 @@ describe('revalidateSummary', () => {
     expect(cascadeConfirmation({ rerun: ['send'], stale: [], skipped: [], committed_effects: ['send'], needs_confirmation: true }))
       .toMatch(/Committed external effects: send/)
   })
+
+  it('discloses every committed stage before the cascade consent request', () => {
+    const text = cascadeConfirmation({ rerun: ['work', 'publish'], stale: [], skipped: [], committed_effects: ['work', 'publish'], needs_confirmation: true })
+    expect(text).toContain('Committed external effects: work, publish.')
+    expect(text.indexOf('work, publish')).toBeLessThan(text.indexOf('Confirm this cascade'))
+    expect(text).toContain('may repeat an external action')
+  })
 })

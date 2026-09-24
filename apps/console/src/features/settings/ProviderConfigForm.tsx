@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useId, useState } from 'react'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { api, type ProviderSchema, type ProviderSchemaProp } from '../../shared/data/api'
@@ -17,6 +18,8 @@ export function schemaDefaults(schema: ProviderSchema | null | undefined): Recor
 }
 
 export function ProviderConfigForm({ name }: { name: string }) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [schema, setSchema] = useState<ProviderSchema | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [secretSet, setSecretSet] = useState<string[]>([])
@@ -27,6 +30,8 @@ export function ProviderConfigForm({ name }: { name: string }) {
 
   useEffect(() => {
     let live = true
+    setLoadErr(null)
+    setSchema(null)
     Promise.all([api.providerSchema(name), api.providerConfig(name)])
       .then(([s, c]) => {
         if (!live) return
@@ -37,10 +42,11 @@ export function ProviderConfigForm({ name }: { name: string }) {
         setSecretSet(set)
         setValues(next)
       })
-      .catch(() => { if (live) setSchema({ properties: {} }) })
+      .catch((error) => { if (live) setLoadErr(error) })
     return () => { live = false }
-  }, [name])
+  }, [name, loadAttempt])
 
+  if (loadErr) return <LoadError what="provider configuration" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} />
   if (!schema) return <div data-type="caption" className="py-2 text-on-surface-low"><Loader2 size={12} className="inline animate-spin" /> Loading config…</div>
   const props = Object.entries(schema.properties ?? {})
   if (props.length === 0) return null

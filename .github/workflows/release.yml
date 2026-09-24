@@ -206,6 +206,7 @@ jobs:
         BACKEND=squashfs-root/resources/backend-dist/gideon-backend/gideon-backend
         test -x "$BACKEND"
         "$BACKEND" --version
+        python3 ../../../tooling/scripts/smoke_packaged_desktop.py "$BACKEND"
         # deb: correct package name + the same two load-bearing paths present.
         dpkg-deb --info gideon-desktop_*.deb | grep -q "Package: gideon-desktop"
         dpkg-deb --contents gideon-desktop_*.deb | grep -q "resources/app.asar"
@@ -216,6 +217,53 @@ jobs:
         path: |
           apps/desktop/dist/*.AppImage
           apps/desktop/dist/*.deb
+  desktop-mac:
+    runs-on: macos-14
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.ref }}
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+        cache: pnpm
+        cache-dependency-path: |
+          pnpm-lock.yaml
+          apps/console/pnpm-lock.yaml
+          apps/desktop/pnpm-lock.yaml
+    - name: Install locked frontend and desktop dependencies
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm --dir apps/console install --frozen-lockfile
+        pnpm --dir apps/desktop install --frozen-lockfile
+    - uses: astral-sh/setup-uv@v7
+    - name: Prepare native arm64 backend environment
+      run: |
+        test "$(uname -m)" = arm64
+        uv python install 3.12
+        uv venv .venv --python 3.12
+        uv pip install --python .venv/bin/python '.[anthropic,openai,slack]' pyinstaller
+    - name: Stage native backend and unpacked desktop
+      run: |
+        pnpm --dir apps/console run build
+        .venv/bin/pyinstaller tooling/packaging/runtime-bundle.spec --noconfirm
+        mkdir -p apps/desktop/backend-dist
+        cp -R dist/gideon-backend apps/desktop/backend-dist/
+        pnpm --dir apps/desktop run dist --arm64 --dir --config.asar=false --config.mac.identity=null --publish never
+    - name: Package unsigned arm64 DMG from unpacked application
+      run: pnpm --dir apps/desktop run dist --arm64 --prepackaged dist/mac-arm64/Gideon.app --config.mac.identity=null --publish never
+    - name: Smoke mounted arm64 DMG
+      run: bash tooling/scripts/smoke_desktop_mac.sh apps/desktop/dist/*.dmg
+    - uses: actions/upload-artifact@v7
+      with:
+        name: desktop-mac
+        path: apps/desktop/dist/*.dmg
+        if-no-files-found: error
   notes:
     needs:
     - build
@@ -223,6 +271,7 @@ jobs:
     - pypi-client
     - images
     - desktop-linux
+    - desktop-mac
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -236,7 +285,8 @@ jobs:
         path: dist/
     - uses: actions/download-artifact@v8
       with:
-        name: desktop-linux
+        pattern: desktop-*
+        merge-multiple: true
         path: desktop-dist/
     - name: Extract this version's CHANGELOG section
       run: |
@@ -261,7 +311,7 @@ jobs:
           --notes-file release-notes.md \
           $([ "${RELEASE_REF}" != "${RELEASE_REF%rc*}" ] && echo --prerelease)
     if: ${{ always() && inputs.create_release && needs.build.result == 'success' && needs.desktop-linux.result ==
-      'success' && (!inputs.publish_python || (needs.pypi.result == 'success' && needs.pypi-client.result == 'success'))
+      'success' && needs.desktop-mac.result == 'success' && (!inputs.publish_python || (needs.pypi.result == 'success' && needs.pypi-client.result == 'success'))
       && (!inputs.publish_images || needs.images.result == 'success') }}
     environment: release
   website-follow:

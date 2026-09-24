@@ -1,24 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
-import { useIdentity, DEFAULT_USER_NAME } from '../../app/shell/identity'
+import { useIdentity, DEFAULT_USER_NAME, suggestHandle, USERNAME_MAX_LEN } from '../../app/shell/identity'
 import { confirm } from '../../shared/ui/dialog'
 import { notify } from '../../app/shell/appSdk'
 import { api } from '../../shared/data/api'
 import { PanelHeader, Section, Field, Row, Toggle } from './settingsUI'
 import { TextInput } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
-
-function suggestHandle(displayName: string): string {
-  return displayName
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, 32)
-    .replace(/[-_]+$/, '')
-}
 
 export function AccountPanel() {
   const { name, setName, clearName } = useIdentity()
@@ -94,7 +82,7 @@ export function AccountPanel() {
         <Field label="Username" hint="A short handle stamped onto things you create (tasks, comments) so contributions stay attributable later. Lowercase letters, digits, - and _ — anything else is normalized. It's a label, not a login. Leave it empty to keep records unattributed.">
           <div className="flex items-center gap-s">
             <div className="flex-1" style={{ maxWidth: 280 }}>
-              <TextInput value={handleDraft} onChange={setHandleDraft}
+              <TextInput value={handleDraft} onChange={setHandleDraft} maxLength={USERNAME_MAX_LEN}
                 placeholder={suggestHandle(name) || 'your-handle'} />
             </div>
             {

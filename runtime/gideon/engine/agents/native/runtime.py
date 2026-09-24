@@ -37,6 +37,7 @@ from gideon.core.cancellation import (
     REQUEST_REPEAT,
     CancelScope,
 )
+from gideon.core.token_estimate import CONSERVATIVE_CHARS_PER_TOKEN
 from gideon.engine.agents.native import dispatch_plan
 from gideon.engine.agents.native.approval import REJECT, ApprovalGate
 from gideon.engine.agents.native.tools import (
@@ -299,6 +300,7 @@ class _TurnTotals:
     events: int = 0
     calls: int = 0
     recoveries: int = 0
+    context_recovered: bool = False
 
     def account(self, response: "_ModelExchange") -> None:
         self.calls += len(response.calls)
@@ -351,12 +353,44 @@ class _ModelExchange:
     def retry_allowed(self, failure: FailureMode) -> bool:
         return not (
             self.retried
+            or self.totals.context_recovered
             or self.totals.recoveries >= _MAX_INFERENCE_RECOVERIES_PER_TURN
             or self.visible
             or self.calls
             or self.runtime._cancelled
             or not is_retryable(failure)
         )
+
+    async def _retry_messages(
+        self, error: Exception, messages: list[dict], cache_mode: PromptCache
+    ) -> list[dict]:
+        from gideon.automation.workflows.compaction import is_context_overflow
+
+        failure = _inference_failure_mode(error)
+        if not self.retry_allowed(failure):
+            raise error
+        if is_context_overflow(error):
+            if self.totals.recoveries:
+                raise error
+            await self.runtime.compact()
+            if self.runtime._compaction_result["type"] != "completed":
+                raise error
+            self.totals.context_recovered = True
+            messages = mark_cacheable_prefix(
+                self.runtime._messages,
+                cache_mode,
+                generation=self.runtime._cache_generation,
+            )
+        else:
+            instruction = correction_note(failure)
+            if instruction:
+                messages = [
+                    *messages,
+                    {"role": "user", "content": instruction, "_volatile": True},
+                ]
+        self.retried = True
+        self.totals.recoveries += 1
+        return messages
 
     async def events(self, tools: list[dict] | None) -> AsyncIterator[AgentEvent]:
         runtime = self.runtime
@@ -393,10 +427,7 @@ class _ModelExchange:
                     started_ms=started,
                     passed=False,
                 )
-                if not self.retry_allowed(failure):
-                    raise
-                self.retried = True
-                self.totals.recoveries += 1
+                messages = await self._retry_messages(error, messages, cache_mode)
                 logger.warning(
                     "native inference failed (%s); retrying exchange %d "
                     "(turn recovery %d/%d): %s",
@@ -406,12 +437,6 @@ class _ModelExchange:
                     _MAX_INFERENCE_RECOVERIES_PER_TURN,
                     error,
                 )
-                instruction = correction_note(failure)
-                if instruction:
-                    messages = [
-                        *messages,
-                        {"role": "user", "content": instruction, "_volatile": True},
-                    ]
                 await asyncio.sleep(_INFERENCE_RETRY_BACKOFF_SECS)
                 self.fragments.clear()
                 self.usage = None
@@ -1173,6 +1198,19 @@ class NativeAgentRuntime(AgentProvider):
         return metadata
 
     async def _invoke(self, tool_name: str, args: dict, *, meta_sink: dict) -> str:
+        if self._session_key.removeprefix("dashboard_").startswith("room:"):
+            from gideon.security.guardrails.policy import (
+                profile_for_session,
+                tool_grant_denial,
+            )
+
+            posture = profile_for_session(self._session_key)
+            denial = tool_grant_denial(
+                tool_name, posture.tool_grants, posture.tool_allowlist
+            )
+            if denial:
+                meta_sink["ok"] = False
+                return f"Error: {denial}"
         handlers = {
             "tool_schema": self._describe_tool,
             "reset_tools": self._reset_tools,
@@ -1225,7 +1263,6 @@ class NativeAgentRuntime(AgentProvider):
         )
 
     _COMPACT_THRESHOLD_PCT = 70.0
-    _EST_CHARS_PER_TOKEN = 3.0
 
     def _estimated_context_pct(self) -> float | None:
         from gideon.cognition.context_compaction import total_chars
@@ -1234,9 +1271,13 @@ class NativeAgentRuntime(AgentProvider):
         characters = total_chars(self._messages)
         if characters <= 0:
             return None
-        capacity = model_context_window(self.agent_model or None)
+        capacity = model_context_window(
+            self.agent_model or None,
+            override=getattr(self._model, "context_window", None),
+            local=bool(getattr(self._model, "is_local", False)),
+        )
         return (
-            100.0 * (characters / self._EST_CHARS_PER_TOKEN) / capacity
+            100.0 * (characters / CONSERVATIVE_CHARS_PER_TOKEN) / capacity
             if capacity > 0
             else None
         )

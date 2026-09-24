@@ -7,8 +7,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
 ENTRYPOINT_IMPORTS = (
+    "gideon.integrations.mcp_core",
+    "gideon.operations.desktop_smoke",
     "gideon.integrations.llm.acp_agent",
     "gideon.integrations.llm.anthropic",
     "gideon.integrations.llm.openai",
@@ -80,18 +81,9 @@ class RuntimeBundlePlan:
         return self.import_root / "gideon" / "__main__.py"
 
     def runtime_resources(self) -> list[tuple[str, str]]:
-        console = self.repository / "apps" / "console" / "dist"
-        if not (console / "index.html").is_file():
-            raise SystemExit("Build the console before freezing the backend: make web-build")
-        resources = [
-            (str(item), item.parent.relative_to(self.import_root).as_posix())
-            for item in sorted((self.import_root / "gideon").rglob("*"))
-            if item.is_file()
-            and "__pycache__" not in item.parts
-            and item.suffix not in {".pyc", ".pyo"}
-        ]
-        resources.append((str(console), "gideon/static/dist"))
-        return resources
+        from tooling.packaging.backend_bundle_manifest import data_files
+
+        return data_files(self.repository)
 
     def provider_imports(self) -> list[str]:
         providers = self.import_root / "gideon" / "extensions" / "apps" / "native"
@@ -115,10 +107,21 @@ class RuntimeBundlePlan:
         )
 
         imports = [*ENTRYPOINT_IMPORTS, *self.provider_imports()]
+        from gideon.integrations.mcp_core import _AGGREGATED_CATEGORY_MODULES
+
+        imports.extend(_AGGREGATED_CATEGORY_MODULES)
         for package in MODULE_COLLECTIONS:
             imports.extend(collect_submodules(package))
 
+        from PyInstaller.config import CONF
+
+        from tooling.packaging.backend_bundle_manifest import write_manifest
+
         resources = self.runtime_resources()
+        inventory = write_manifest(
+            self.repository, Path(CONF["workpath"]) / "runtime-bundle-manifest.json"
+        )
+        resources.append((str(inventory), "gideon"))
         resources.extend(copy_metadata("gideon-agent-harness"))
         for package in RESOURCE_COLLECTIONS:
             resources.extend(collect_data_files(package))

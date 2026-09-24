@@ -7,6 +7,10 @@ import asyncio
 import pytest
 
 from gideon.integrations.browse import plans as bp
+from gideon.integrations.browse.plan_runner import (
+    make_content_tick_runner,
+    make_gateway_opener,
+)
 from gideon.integrations.browse.target import TARGET_USER_BROWSER
 from gideon.security.guardrails.autonomy import (
     RUNG_AUTONOMOUS,
@@ -180,3 +184,66 @@ def test_cursor_write_does_not_recreate_a_deleted_plan(plan_home):
     runner = StubRunner(lambda plan, n: bp.TickOutcome(content="v", ok=True))
     asyncio.run(bp.execute_tick(_watch(), run=runner, granted_rung=RUNG_ONE_TAP))
     assert bp.load_plan("w1") is None
+
+
+@pytest.mark.parametrize("submits", [False, True])
+@pytest.mark.parametrize(
+    "granted_rung, unattended, refused",
+    [
+        ("", True, True),
+        (RUNG_DRAFT_ONLY, True, True),
+        (RUNG_ONE_TAP, True, False),
+        (RUNG_DRAFT_ONLY, False, False),
+    ],
+)
+def test_unattended_floor_boundary_with_production_content_runner(
+    plan_home, submits, granted_rung, unattended, refused
+):
+    plan = _watch(submits=submits, cursor={"last_tick": 1})
+    bp.save_plan(plan)
+    runner = make_content_tick_runner(
+        open_session=make_gateway_opener(), resolve_url=str
+    )
+
+    result = asyncio.run(
+        bp.execute_tick(
+            plan,
+            run=runner,
+            unattended=unattended,
+            granted_rung=granted_rung,
+            now=2,
+        )
+    )
+
+    assert result.refused is refused
+    persisted = bp.load_plan(plan.id)
+    if refused:
+        assert result.ok is False
+        assert result.cursor == plan.cursor
+        assert persisted == plan
+    else:
+        assert result.note == "no gateway browser is configured (cdp_url is empty)"
+        assert persisted.cursor["last_tick"] == 2
+
+
+@pytest.mark.parametrize(
+    "granted_rung, refused",
+    [(RUNG_DRAFT_ONLY, True), (RUNG_ONE_TAP, False)],
+)
+def test_submit_flow_requires_promotion_before_dispatch(
+    plan_home, granted_rung, refused
+):
+    plan = _walk(cursor={"step": 0})
+    bp.save_plan(plan)
+    runner = make_content_tick_runner(
+        open_session=make_gateway_opener(), resolve_url=str
+    )
+    tick = bp.execute_tick(plan, run=runner, granted_rung=granted_rung)
+    if refused:
+        result = asyncio.run(tick)
+        assert result.refused is True
+        assert result.ok is False
+    else:
+        with pytest.raises(bp.PlanError, match="needs an agentic decider"):
+            asyncio.run(tick)
+    assert bp.load_plan(plan.id) == plan

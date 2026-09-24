@@ -17,6 +17,10 @@ from gideon.integrations.llm.base import CancelOutcome
 logger = logging.getLogger(__name__)
 
 
+def options_sandbox_mode(options: dict) -> str:
+    return str(options.get("sandbox_mode") or "auto")
+
+
 def capability_names(payload: Any) -> frozenset[str]:
     if not isinstance(payload, dict):
         return frozenset()
@@ -115,7 +119,7 @@ class ProbePlan:
                     )
         return ReadinessStatus(False, "not_found", problem) if problem else None
 
-    def failure(self, error: Exception):
+    def failure(self, error: Exception, stderr_tail: str = ""):
         from gideon.engine.agents.provider import ReadinessStatus
 
         configured = self.options.get("login_command")
@@ -124,7 +128,8 @@ class ProbePlan:
             if isinstance(configured, list) and configured
             else self.command[:1]
         )
-        text = str(error).lower()
+        evidence = f"; stderr: {stderr_tail!r}" if stderr_tail else ""
+        text = (str(error) + " " + stderr_tail).lower()
         if any(
             word in text
             for word in (
@@ -137,16 +142,19 @@ class ProbePlan:
             )
         ):
             return ReadinessStatus(
-                False, "needs_login", f"agent requires sign-in: {error}", login
+                False,
+                "needs_login",
+                f"agent requires sign-in: {error}{evidence}",
+                login,
             )
         if isinstance(error, TimeoutError):
             return ReadinessStatus(
                 False,
                 "timeout",
-                f"handshake timed out after {self.timeout:.0f}s (cold start may be slow — retry; sign in only if the agent needs auth)",
+                f"handshake timed out after {self.timeout:.0f}s (cold start may be slow — retry; sign in only if the agent needs auth){evidence}",
                 login,
             )
-        return ReadinessStatus(False, "error", f"handshake failed: {error}")
+        return ReadinessStatus(False, "error", f"handshake failed: {error}{evidence}")
 
     async def readiness(self, provider_type):
         from gideon.engine.agents.provider import ReadinessStatus
@@ -159,6 +167,7 @@ class ProbePlan:
             cwd=self.options.get("cwd"),
             env=self.options.get("env") or {},
             dialect=self.options.get("dialect"),
+            sandbox_mode=options_sandbox_mode(self.options),
         )
         timeout = self.timeout
         closed = False
@@ -171,7 +180,7 @@ class ProbePlan:
                 True, "ready", f"initialize OK (caps: {', '.join(names) or 'none'})"
             )
         except Exception as error:
-            return self.failure(error)
+            return self.failure(error, provider.client.stderr_tail())
         finally:
             if not closed:
                 await close_quietly(provider.shutdown)
@@ -190,6 +199,7 @@ class ProbePlan:
                 work_dir=workspace,
                 dialect=dialect,
                 extra_env=self.options.get("env") or {},
+                sandbox_mode=options_sandbox_mode(self.options),
             ),
             timeout=self.timeout,
         )
@@ -251,7 +261,7 @@ def launch_arguments(entry, session_key: str | None, overrides: dict) -> dict:
         "capability_flags": mapping("capability_flags", bool),
         "session_key": session_key,
         "channel_id": str(channel) if channel else None,
-        "sandbox_mode": str(options.get("sandbox_mode") or "auto"),
+        "sandbox_mode": options_sandbox_mode(options),
         "sandbox": choice("sandbox", "sandbox", "none"),
         "session_files_dir": path(options.get("session_files_dir")),
         "dialect": str(dialect) if dialect else None,

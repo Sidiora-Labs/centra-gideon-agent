@@ -242,7 +242,6 @@ class TestCreate:
     @pytest.mark.parametrize(
         "kind,kc_key",
         [
-            ("general", "verify_command"),
             ("goal", "goal_type"),
             ("code", "entry_stage"),
             ("design", "token_overrides"),

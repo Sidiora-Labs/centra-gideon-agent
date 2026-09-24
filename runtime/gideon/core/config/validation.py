@@ -1,6 +1,10 @@
 """Normalize a stored configuration and report rejected values without writing it."""
 
+import hashlib
+import json
 import logging
+from copy import deepcopy
+from threading import RLock
 
 import jsonschema
 
@@ -72,17 +76,25 @@ def _present(data: dict, path: str) -> bool:
     return True
 
 
+def consume_retired_keys(values: dict) -> None:
+    for section, retired in _RETIRED_FIELDS.items():
+        owner = values.get(section) if section else values
+        if isinstance(owner, dict):
+            for field in retired:
+                owner.pop(field, None)
+
+
+_VALIDATED_CONTENT: dict[str, dict] = {}
+_VALIDATION_LOCK = RLock()
+
+
 class ConfigurationSanitizer:
     def __init__(self, schema: dict, entries: list):
         self.schema = schema
         self.entries = entries
 
     def prepare(self, values: dict) -> None:
-        for section, retired in _RETIRED_FIELDS.items():
-            owner = values.get(section) if section else values
-            if isinstance(owner, dict):
-                for field in retired:
-                    owner.pop(field, None)
+        consume_retired_keys(values)
         known = _DIRECT_READ_TOP_KEYS | {
             entry.path
             for entry in self.entries
@@ -140,4 +152,14 @@ class ConfigurationSanitizer:
 def _validate_config_data(data: dict) -> dict:
     from gideon.core.config.schema import JSON_SCHEMA, SCHEMA_REGISTRY
 
-    return ConfigurationSanitizer(JSON_SCHEMA, SCHEMA_REGISTRY).clean(data)
+    content = json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    key = hashlib.sha256(content).hexdigest()
+    with _VALIDATION_LOCK:
+        if key not in _VALIDATED_CONTENT:
+            cleaned = ConfigurationSanitizer(JSON_SCHEMA, SCHEMA_REGISTRY).clean(
+                deepcopy(data)
+            )
+            _VALIDATED_CONTENT[key] = cleaned
+        data.clear()
+        data.update(deepcopy(_VALIDATED_CONTENT[key]))
+    return data

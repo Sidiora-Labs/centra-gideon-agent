@@ -90,6 +90,6 @@ describe('the stepper is a set, so aria-current has something to be current with
   it('🪤 the live region no longer justifies itself with a claim that is now false', () => {
     const src = onboarding()
     expect(src, 'the false clause is gone').not.toMatch(/rows are not focusable and the step\s*\n?\s*\/?\/?\s*title is not in any focused control/)
-    expect(src, 'and the real reason is stated').toMatch(/a step change is not a focus change/i)
+    expect(src, 'progress numbers supplement the focused heading').toMatch(/progress numbers to the focused step heading/i)
   })
 })

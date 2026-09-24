@@ -241,7 +241,9 @@ def _built_in(
     label: str,
     default_mode: Mode = "immediate",
     default_severity: int = SEV_INFO,
-    **kwargs: object,
+    *,
+    attention: bool = False,
+    verifiable: bool = False,
 ) -> NotificationKind:
     """Build a registry entry only after declaring its production owner."""
     identity = (source, kind)
@@ -258,7 +260,8 @@ def _built_in(
         default_severity,
         production_owner=owner or "",
         configurable=owner is not None,
-        **kwargs,
+        attention=attention,
+        verifiable=verifiable,
     )
 
 

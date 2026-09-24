@@ -36,6 +36,7 @@ from gideon.cognition.context_headroom import (
     HeadroomState,
     check_for_model,
 )
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 
 if TYPE_CHECKING:
     from gideon.cognition.context import PromptAssembler
@@ -484,7 +485,7 @@ async def check_headroom(
         from gideon.cognition.context_headroom import Headroom as _H
         from gideon.cognition.context_headroom import Window as _W
 
-        raw = len(assembled.message) // 4
+        raw = len(assembled.message) // NOMINAL_CHARS_PER_TOKEN
         return _H(
             state=HeadroomState.FITS,
             window=_W(

@@ -44,11 +44,6 @@ def is_valid_username(value: str) -> bool:
     return value == slugify_username(value)
 
 
-def suggest_username(display_name: str) -> str:
-    """Pre-fill username from the operator's display name."""
-    return slugify_username(display_name)
-
-
 def current_username() -> str:
     """The owner's username, or ``""`` when unset. Never raises."""
     try:

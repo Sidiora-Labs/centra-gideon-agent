@@ -447,6 +447,10 @@ def scan_upward_edges() -> Scan:
     per_file: dict[str, dict[str, Any]] = {}
     inspected: set[str] = set()
     for path in _src_py_files():
+        if path.is_relative_to(
+            _REPO_ROOT / "runtime" / "gideon" / "extensions" / "apps" / "native"
+        ):
+            continue
         tree = _parse(path)
         if tree is None:
             continue

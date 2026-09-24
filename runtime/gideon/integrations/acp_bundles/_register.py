@@ -41,6 +41,7 @@ def register_acp_cli_entry(
     dialect: str,
     command: list[str] | None,
     model: str = "",
+    self_sandboxing: bool = False,
     env: dict[str, str] | None = None,
     session_files_dir: str | None = None,
     extension: str | None = None,
@@ -122,6 +123,8 @@ def register_acp_cli_entry(
 
     name = f"acp:{cli}"
     options: dict[str, object] = {"command": list(command), "dialect": dialect}
+    if self_sandboxing:
+        options["sandbox_mode"] = "off"
     if env:
         options["env"] = dict(env)
     if session_files_dir:

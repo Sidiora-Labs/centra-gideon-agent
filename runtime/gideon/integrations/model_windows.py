@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 DEFAULT_CONTEXT_WINDOW = 200_000
+# Conservative fallback when a local endpoint has not reported its served capacity.
+# Actual server defaults vary with its configuration and available hardware.
+LOCAL_SERVED_CONTEXT_WINDOW = 4096
 _TOKENS_FILE = Path(__file__).resolve().parent / "model_tokens.json"
 _WINDOWS: dict[str, int] | None = None
 
@@ -60,9 +66,44 @@ def _resolve_window(identifier: str, windows: dict[str, int], default: int) -> i
     return default if chosen is None else chosen[1]
 
 
+def declared_context_window(value: object) -> int | None:
+    if isinstance(value, Mapping):
+        value = value.get("context_window")
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        numeric = float(value)
+        parsed = int(numeric)
+    except (ValueError, OverflowError):
+        return None
+    return parsed if parsed > 0 and parsed == numeric else None
+
+
+def is_local_endpoint(endpoint: str | None) -> bool:
+    hostname = urlparse(endpoint or "").hostname
+    if not hostname:
+        return False
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+        return True
+    try:
+        address = ipaddress.ip_address(hostname)
+        return address.is_loopback or address.is_private
+    except ValueError:
+        return False
+
+
 def model_context_window(
-    model_id: str | None, default: int = DEFAULT_CONTEXT_WINDOW
+    model_id: str | None,
+    default: int = DEFAULT_CONTEXT_WINDOW,
+    *,
+    override: object = None,
+    local: bool = False,
 ) -> int:
+    declared = declared_context_window(override)
+    if declared is not None:
+        return declared
+    if local:
+        return LOCAL_SERVED_CONTEXT_WINDOW
     return _resolve_window(model_id.strip(), _load(), default) if model_id else default
 
 

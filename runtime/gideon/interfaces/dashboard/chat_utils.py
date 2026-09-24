@@ -358,6 +358,25 @@ def tool_input_to_str(value: object) -> str:
     return str(value)
 
 
+def _append_tool_row(
+    session: _ChatSession,
+    title: str,
+    *,
+    tool_call_id: str,
+    kind: str,
+    purpose: str,
+    input_preview: str,
+) -> None:
+    meta = (
+        {"tool_call_id": tool_call_id, "purpose": purpose, "input": input_preview}
+        if tool_call_id
+        else {}
+    )
+    if kind:
+        meta["kind"] = kind
+    session.append("tool", title, "msg msg-tool", meta=meta or None)
+
+
 def _broadcast_auto_tool(
     state: ConsoleState, session: _ChatSession, event: "LLMEvent"
 ) -> str:

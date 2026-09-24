@@ -1,4 +1,4 @@
-import { forwardRef } from 'react'
+import { forwardRef, useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, type LucideIcon } from 'lucide-react'
 import { withWeight } from '../../shared/theme/fontWeight'
@@ -17,6 +17,10 @@ const SURFACES = {
 export const StepRow = forwardRef<HTMLLIElement, StepRowProps>(function StepRow(props, ref) {
   const { index, icon: Icon, title, subtitle, state, doneSummary, onActivate, children } = props
   const active = state === 'active'
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (active) heading.current?.focus()
+  }, [active])
   const done = state === 'done'
   const revisitable = !active && done && !!onActivate
   const Header = revisitable ? motion.button : motion.div
@@ -40,7 +44,7 @@ export const StepRow = forwardRef<HTMLLIElement, StepRowProps>(function StepRow(
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline justify-between gap-s">
-          <span className="text-on-surface" style={withWeight({ fontSize: active ? '1.0625rem' : '0.9375rem' }, 600)}>{title}</span>
+          <h2 ref={heading} tabIndex={-1} className="text-on-surface" style={withWeight({ fontSize: active ? '1.0625rem' : '0.9375rem' }, 600)}>{title}</h2>
           <span className="text-on-surface-low text-[0.75rem]">Step {index + 1}</span>
         </div>
         <AnimatePresence initial={false} mode="wait">

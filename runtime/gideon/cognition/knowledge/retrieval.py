@@ -30,6 +30,7 @@ _ANN_MAX_ATTEMPTS = 4
 _ID_BATCH = 400
 
 _DEFAULT_RERANKER_MAX_CANDIDATES = 32
+_RERANK_TIMEOUT_SECS = 10.0
 
 ARM_KEYWORD = "keyword"
 ARM_GRAPH = "graph"
@@ -159,14 +160,9 @@ class RelevanceReranker:
         try:
             from gideon.integrations.llm_helpers import one_shot_completion
 
-            call = one_shot_completion(prompt, use_case="reasoning")
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                response = asyncio.run(call)
-            else:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    response = pool.submit(asyncio.run, call).result()
+            response = _run_rerank_completion(
+                one_shot_completion(prompt, use_case="reasoning")
+            )
             requested = json.loads(response)
             if not isinstance(requested, list):
                 raise ValueError("response is not an ID array")
@@ -182,6 +178,24 @@ class RelevanceReranker:
         except Exception:  # noqa: BLE001 — assistant reasoning has a fail-open floor
             logger.debug("knowledge rerank unavailable", exc_info=True)
             return RerankResult(True, False, reason="unusable_response")
+
+
+def _run_rerank_completion(call):
+    async def bounded():
+        return await asyncio.wait_for(call, timeout=_RERANK_TIMEOUT_SECS)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(bounded())
+
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="knowledge-rerank"
+    )
+    try:
+        return pool.submit(asyncio.run, bounded()).result(timeout=_RERANK_TIMEOUT_SECS)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def relevance_cliff_cut(

@@ -87,3 +87,47 @@ def test_resolution_tiers_and_equal_specificity_preserve_catalog_order():
     assert _resolve_window("Provider:version/model-v2-date", catalog, 99) == 20
     assert _resolve_window("MODEL-V2-date", catalog, 99) == 20
     assert _resolve_window("unknown", catalog, 99) == 99
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        None,
+        "",
+        "llama3.1",
+        "ollama:llama3.1",
+        "llama3.1:8b",
+        "vendor/llama3.1",
+        "LLAMA3-1-custom",
+        "unknown",
+    ],
+)
+def test_local_served_floor_precedes_every_catalog_exit(model):
+    from gideon.integrations.model_windows import LOCAL_SERVED_CONTEXT_WINDOW
+
+    assert (
+        model_context_window(model, local=True) == LOCAL_SERVED_CONTEXT_WINDOW == 4096
+    )
+    assert model_context_window(model, local=True, override="8192") == 8192
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("16384", 16384),
+        (" 8192 ", 8192),
+        (4096, 4096),
+        (4096.0, 4096),
+        ("0", None),
+        (-1, None),
+        (True, None),
+        ("nan", None),
+        ("inf", None),
+        ("12.5", None),
+        ({"context_window": "65536"}, 65536),
+    ],
+)
+def test_declared_context_window_numeric_values(value, expected):
+    from gideon.integrations.model_windows import declared_context_window
+
+    assert declared_context_window(value) == expected

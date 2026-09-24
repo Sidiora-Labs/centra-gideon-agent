@@ -40,6 +40,7 @@ where = ["runtime"]
 include = ["gideon*"]
 
 [tool.setuptools.package-data]
+"gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
 "*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.svg", "**/*.png", "**/*.woff2"]
 
 [tool.black]
@@ -59,6 +60,7 @@ addopts = "-ra"
 asyncio_mode = "auto"
 
 [tool.mypy]
+exclude = '^runtime/gideon/extensions/apps/native/'
 mypy_path = "runtime"
 explicit_package_bases = true
 check_untyped_defs = true

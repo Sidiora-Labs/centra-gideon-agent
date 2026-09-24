@@ -42,6 +42,10 @@ _BREAKER_THRESHOLD = 3
 _BREAKER_COOLDOWN_SECS = 60.0
 
 
+def approval_window_secs() -> float:
+    return max(0.0, _CALL_TIMEOUT_SECS * 0.9)
+
+
 def mcp_sdk_available() -> bool:
     """True when the optional ``mcp`` SDK is importable."""
     try:
@@ -248,21 +252,39 @@ class McpServerConn:
             from contextlib import AsyncExitStack
 
             from mcp import ClientSession
+            from mcp.client.session import ElicitationFnT
+            from mcp.shared.context import RequestContext
+            from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
 
             async with AsyncExitStack() as stack:
                 read, write = await self._open_transport(stack)
-                session_kwargs = {}
+                elicitation_callback: ElicitationFnT | None = None
                 if (
                     self.spec.get("allowElicitation") is True
                     and self._elicitation_handler
                 ):
 
-                    async def _elicit(_context: Any, params: Any) -> Any:
-                        return await self._elicitation_handler(self.name, params)
+                    async def _elicit(
+                        context: RequestContext[ClientSession, Any],
+                        params: ElicitRequestParams,
+                    ) -> ElicitResult | ErrorData:
+                        handler = self._elicitation_handler
+                        if handler is None:
+                            return ElicitResult(action="cancel")
 
-                    session_kwargs["elicitation_callback"] = _elicit
+                        try:
+                            return await asyncio.wait_for(
+                                handler(self.name, params),
+                                timeout=approval_window_secs(),
+                            )
+                        except asyncio.TimeoutError:
+                            return ElicitResult(action="cancel")
+
+                    elicitation_callback = _elicit
                 session = await stack.enter_async_context(
-                    ClientSession(read, write, **session_kwargs)
+                    ClientSession(
+                        read, write, elicitation_callback=elicitation_callback
+                    )
                 )
                 await session.initialize()
                 await self._refresh_tools(session)

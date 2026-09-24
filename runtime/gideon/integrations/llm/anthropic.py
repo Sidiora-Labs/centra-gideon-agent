@@ -22,6 +22,7 @@ from gideon.integrations.llm.protocol_turn import (
     wire_value,
 )
 from gideon.integrations.llm.registry import CredentialMissing
+from gideon.integrations.model_windows import declared_context_window, is_local_endpoint
 from gideon.integrations.model_windows import model_context_window as _model_window
 
 logger = logging.getLogger(__name__)
@@ -300,6 +301,10 @@ class AnthropicProvider(ConversationProtocol):
         self._anthropic_module = sdk
         self._model, self._base_url, self._max_tokens = model, base_url, max_tokens
         self._extra_options = dict(extra_options or {})
+        self.context_window = declared_context_window(
+            self._extra_options.pop("context_window", None)
+        )
+        self.is_local = is_local_endpoint(base_url)
         connection = {"api_key": credential.secret}
         if base_url:
             connection["base_url"] = base_url
@@ -361,7 +366,12 @@ class AnthropicProvider(ConversationProtocol):
         if decoder.usage.input_tokens > 0:
             context = (
                 decoder.usage.input_tokens
-                / _model_window(model, _DEFAULT_CONTEXT_WINDOW)
+                / _model_window(
+                    model,
+                    _DEFAULT_CONTEXT_WINDOW,
+                    override=self.context_window,
+                    local=self.is_local,
+                )
             ) * 100
         context = self._record_completion(decoder.answer, context, remember=remember)
         yield decoder.usage.terminal(context)

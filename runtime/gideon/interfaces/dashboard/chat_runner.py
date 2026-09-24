@@ -62,6 +62,7 @@ from gideon.interfaces.dashboard.chat_utils import (
     _BLOCKED_SLASH_COMMANDS,
     _SLASH_COMMANDS,
     SLASH_FALLBACK_ACTIVITY_KIND,
+    _append_tool_row,
     _apply_incognito_prefix,
     _broadcast_auto_tool,
     _broadcast_compaction_result,
@@ -1597,6 +1598,18 @@ def _report_ungated_tool_call(
     return abort
 
 
+async def _abort_acp_turn(provider: object, reason: str) -> str | None:
+    cancel = getattr(provider, "cancel", None)
+    if not callable(cancel):
+        logger.warning("ACP abort after %s: provider.cancel is unavailable", reason)
+        return None
+    try:
+        return await cancel()
+    except Exception:
+        logger.warning("ACP cancel after %s failed", reason, exc_info=True)
+        return None
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,
@@ -1619,6 +1632,7 @@ async def run_chat(
     """
     session._last_turn_errored = False
     if _prompt_depth == 0:
+        session._acp_breaker.reset()
         try:
             from gideon.engine import turn_checkpoints
 
@@ -2594,19 +2608,13 @@ async def run_chat(
                         "input": _input_obj,
                     },
                 )
-                session.append(
-                    "tool",
+                _append_tool_row(
+                    session,
                     _title,
-                    "msg msg-tool",
-                    meta=(
-                        {
-                            "tool_call_id": event.tool_call_id,
-                            "purpose": _purpose,
-                            "input": _input_preview,
-                        }
-                        if event.tool_call_id
-                        else None
-                    ),
+                    tool_call_id=event.tool_call_id,
+                    kind=_kind,
+                    purpose=_purpose,
+                    input_preview=_input_preview,
                 )
                 _capture_file_change(session, event.title, event.tool_input)
                 _capture_declared_file_change(session, event.file_change)
@@ -2786,15 +2794,7 @@ async def run_chat(
                         request_id=event.tool_call_id,
                     )
                     if _abort:
-                        try:
-                            _cancel = getattr(client, "cancel_session", None)
-                            if _cancel is not None:
-                                await _cancel()
-                        except Exception:
-                            logger.warning(
-                                "ACP cancel after ungated tool call failed",
-                                exc_info=True,
-                            )
+                        await _abort_acp_turn(client, "ungated tool call")
                 if _acp_cli:
                     _bkey = _acp_tool_keys.pop(event.tool_call_id, "") or params_key(
                         _tool_name or event.title, ""
@@ -2857,15 +2857,7 @@ async def run_chat(
                                     "SEL audit failed for ACP breaker trip",
                                     exc_info=True,
                                 )
-                            try:
-                                _cancel = getattr(client, "cancel_session", None)
-                                if _cancel is not None:
-                                    await _cancel()
-                            except Exception:
-                                logger.warning(
-                                    "ACP cancel after breaker trip failed",
-                                    exc_info=True,
-                                )
+                            await _abort_acp_turn(client, "breaker trip")
                     else:
                         _loop_reason = _acp_breaker.record_structural(
                             f"{_bkey}\x1f{result_digest(_out)}"
@@ -3031,7 +3023,9 @@ async def run_chat(
                         continue
                     try:
                         _parsed_input = (
-                            json.loads(event.tool_input) if event.tool_input else None
+                            json.loads(tool_input_to_str(event.tool_input))
+                            if event.tool_input
+                            else None
                         )
                     except Exception:
                         _parsed_input = None
@@ -3162,7 +3156,7 @@ async def run_chat(
                     if not _pre_tool_hooks_fired:
                         try:
                             _parsed_input = (
-                                json.loads(event.tool_input)
+                                json.loads(tool_input_to_str(event.tool_input))
                                 if event.tool_input
                                 else None
                             )
@@ -3370,7 +3364,9 @@ async def run_chat(
                         break
                     try:
                         _parsed_input = (
-                            json.loads(event.tool_input) if event.tool_input else None
+                            json.loads(tool_input_to_str(event.tool_input))
+                            if event.tool_input
+                            else None
                         )
                     except Exception:
                         _parsed_input = None

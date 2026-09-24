@@ -314,6 +314,9 @@ def _list_tools() -> list[dict[str, Any]]:
                 "or 'document' when they just want to read it in the app. Re-running with "
                 "the same `slug` updates that document and bumps its version instead of "
                 "creating a near-duplicate. Returns the slug and a download URL."
+                " Without a slug, a matching name in the same format updates the "
+                "existing artifact and returns Updated. An explicit slug takes "
+                "precedence over name matching."
             ),
             "inputSchema": {
                 "type": "object",
@@ -364,6 +367,9 @@ def _list_tools() -> list[dict[str, Any]]:
                 "AS NUMBERS (not strings) so the result can be summed and charted — that "
                 "is the main reason to produce a spreadsheet rather than a table. Returns "
                 "the slug and a download URL."
+                " Without a slug, a matching name in the same format updates the "
+                "existing artifact and returns Updated. An explicit slug takes "
+                "precedence over name matching."
             ),
             "inputSchema": {
                 "type": "object",
@@ -407,6 +413,9 @@ def _list_tools() -> list[dict[str, Any]]:
                 "speaker notes. A leading `#` titles the deck. Write an outline, not "
                 "prose — paragraphs on a slide are what makes generated decks unreadable. "
                 "Returns the slug and a download URL."
+                " Without a slug, a matching name in the same format updates the "
+                "existing artifact and returns Updated. An explicit slug takes "
+                "precedence over name matching."
             ),
             "inputSchema": {
                 "type": "object",
@@ -606,7 +615,9 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 return "Error: provide content or content_file"
             if not args.get("slug") and not args.get("force"):
                 similar = prov.find_similar(
-                    args["name"], kind=args.get("kind", "widget")
+                    args["name"],
+                    kind=args.get("kind", "widget"),
+                    project_id=_current_project_id(),
                 )
                 if similar is not None:
                     _audit("deduped", similar.slug)
@@ -1172,7 +1183,7 @@ def _document_create(
             import csv
             import io
 
-            parsed: list[list[object]] = list(csv.reader(io.StringIO(csv_text)))
+            parsed: list[list[str]] = list(csv.reader(io.StringIO(csv_text)))
             model = SheetModel.from_rows({"Sheet1": parsed})
         else:
             _audit("denied", error="no sheet input")
@@ -1225,7 +1236,13 @@ def _document_create(
 
     display_name = str(args.get("name") or "").strip() or f"Untitled {fmt}"
     slug = str(args.get("slug") or "").strip()
-    existing = prov.get(slug) if slug else None
+    existing = (
+        prov.get(slug)
+        if slug
+        else prov.find_similar(display_name, kind=fmt, project_id=_current_project_id())
+    )
+    if existing is not None:
+        slug = existing.slug
     if existing is not None and existing.kind != fmt:
         _audit("denied", slug, f"format mismatch: {existing.kind} != {fmt}")
         return (

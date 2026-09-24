@@ -1,6 +1,7 @@
 """Additional tests for gideon.security.sandbox — wrap_argv, profiles, env scrubbing."""
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -157,6 +158,10 @@ class TestBuildLauncherScript:
             assert prefix in script
 
 
+@pytest.mark.skipif(
+    shutil.which("sandbox-exec", path=os.confstr("CS_PATH")) is None,
+    reason="requires the system Seatbelt binary",
+)
 class TestSandboxExecArgv:
     @patch.dict(
         os.environ, {"AWS_SECRET_ACCESS_KEY": "fake", "SSH_AUTH_SOCK": "/tmp/ssh"}
@@ -164,11 +169,11 @@ class TestSandboxExecArgv:
     def test_includes_env_unset_flags(self):
         argv, profile_path = sandbox_exec_argv(["gideon", "acp"], "strict")
         try:
-            assert "env" == argv[0]
+            assert shutil.which("env", path=os.confstr("CS_PATH")) == argv[0]
             assert "-u" in argv
             assert "AWS_SECRET_ACCESS_KEY" in argv
             assert "SSH_AUTH_SOCK" in argv
-            assert "sandbox-exec" in argv
+            assert shutil.which("sandbox-exec", path=os.confstr("CS_PATH")) in argv
             assert "-f" in argv
             assert profile_path is not None
             assert os.path.exists(profile_path)

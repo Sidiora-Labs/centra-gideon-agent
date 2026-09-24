@@ -21,8 +21,8 @@ export function NotificationsPanel() {
   )
   useEffect(() => { if (settingsData) setS(settingsData) }, [settingsData])
 
-  const { data: rules, refresh: refreshRules } = useQuery<NotificationRulesDoc | null>(
-    'settings:notification-rules', () => api.notificationRules().catch(() => null), { persist: false },
+  const { data: rules, error: rulesErr, refresh: refreshRules } = useQuery<NotificationRulesDoc | null>(
+    'settings:notification-rules', () => api.notificationRules(), { persist: false },
   )
   const reloadRules = () => { invalidateKeys('settings:notification-rules'); refreshRules() }
 
@@ -68,8 +68,9 @@ export function NotificationsPanel() {
 
       {
 }
-      {rules && <NotificationRulesMatrix doc={rules} onSaved={reloadRules} />}
-      {rules && <DigestSchedule schedule={rules.digest.schedule} onSaved={reloadRules} />}
+      {rulesErr && <LoadError what="notification rules" error={rulesErr} onRetry={reloadRules} />}
+      {!rulesErr && rules && <NotificationRulesMatrix doc={rules} onSaved={reloadRules} />}
+      {!rulesErr && rules && <DigestSchedule schedule={rules.digest.schedule} onSaved={reloadRules} />}
     </div>
   )
 }

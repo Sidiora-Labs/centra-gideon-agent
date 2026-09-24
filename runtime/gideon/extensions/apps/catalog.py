@@ -134,6 +134,7 @@ class CatalogEntry:
     uiComponents: str = ""  # noqa: N815
     quality: dict[str, Any] = field(default_factory=dict)
     coreCompatibility: dict[str, Any] = field(default_factory=dict)  # noqa: N815
+    registry: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -218,6 +219,9 @@ def resolve_catalog_entries(entries: list[CatalogEntry]) -> list[CatalogEntry]:
 _REGISTRY_FILENAME = "app-registry.json"
 _REGISTRY_TTL_SECS = 3600.0
 _registry_cache: dict[str, tuple[float, list["RegistryPointer"]]] = {}
+_REGISTRY_RETRY_INITIAL_SECS = 30.0
+_REGISTRY_RETRY_MAX_SECS = 300.0
+_registry_retry: dict[str, tuple[float, float]] = {}
 
 _GIT_SCAN_TTL_SECS = 300.0
 _git_scan_cache: dict[str, tuple[float, list["CatalogEntry"]]] = {}
@@ -241,6 +245,9 @@ class RegistryPointer:
     icon: str = ""
     author: str = ""
     tags: list[str] = field(default_factory=list)
+    maintainer: str = ""
+    lastValidated: str = ""  # noqa: N815
+    scanVerdict: str = ""  # noqa: N815
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RegistryPointer | None":
@@ -258,6 +265,10 @@ class RegistryPointer:
             icon=str(d.get("icon", "")).strip(),
             author=str(d.get("author", "")).strip(),
             tags=[str(t) for t in (d.get("tags") or []) if str(t).strip()],
+            **{
+                key: d[key].strip() if isinstance(d.get(key), str) else ""
+                for key in ("maintainer", "lastValidated", "scanVerdict")
+            },
         )
 
 
@@ -347,9 +358,28 @@ def _fetch_registry_index(
         return cached[1] or None
     text: str | None
     if is_git:
+        key = _git_source_key(source)
+        default_source = configured_registry_source()
+        is_default = bool(default_source) and key == _git_source_key(default_source)
+        retry = _registry_retry.get(key) if is_default else None
+        if retry is not None and now < retry[0]:
+            return None
         text = _read_git_registry(source)
         if text is None:
+            if is_default:
+                delay = min(
+                    retry[1] * 2 if retry else _REGISTRY_RETRY_INITIAL_SECS,
+                    _REGISTRY_RETRY_MAX_SECS,
+                )
+                _registry_retry[key] = (now + delay, delay)
+                if retry is None:
+                    logger.warning(
+                        "Default app registry fetch failed for %s; retrying with backoff",
+                        source,
+                    )
             return None
+        if is_default:
+            _registry_retry.pop(key, None)
     else:
         p = Path(source).expanduser() / _REGISTRY_FILENAME
         try:
@@ -379,6 +409,11 @@ def _pointer_to_entry(source: str, p: RegistryPointer, *, is_git: bool) -> Catal
         sourceKind="git" if is_git else "local",
         tags=list(p.tags),
         pointer=pointer,
+        registry={
+            "maintainer": p.maintainer,
+            "lastValidated": p.lastValidated,
+            "scanVerdict": p.scanVerdict,
+        },
     )
 
 

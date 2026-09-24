@@ -106,9 +106,9 @@ class WindowWorkspace {
     const { WebContentsView } = this.electron;
     const content = new WebContentsView({ webPreferences: {
       ...(attachBridge ? { preload: path.join(__dirname, "../bridge/dashboard-preload.js") } : {}),
-      contextIsolation: true, nodeIntegration: false,
+      contextIsolation: true, nodeIntegration: false, sandbox: true,
     } });
-    const drag = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false } });
+    const drag = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
     current.bridge = attachBridge;
     current.content = content;
     current.drag = drag;

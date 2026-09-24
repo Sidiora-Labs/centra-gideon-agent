@@ -17,6 +17,7 @@ type QueryChannel = {
 
 const channels = new Map<string, QueryChannel>()
 const storagePrefix = 'cache:'
+export const READER_WAIT_MS = 8_000
 
 function channelFor(key: string): QueryChannel {
   let channel = channels.get(key)
@@ -109,10 +110,15 @@ export function fetchKey<T>(key: string, fetcher: () => Promise<T>, persist = fa
   const revision = channel.revision
   let source: Promise<T>
   try { source = Promise.resolve(fetcher()) } catch (error) { source = Promise.reject(error) }
-  const request = source.then((value) => {
+  let timer: ReturnType<typeof setTimeout>
+  const ceiling = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Data request timed out after 8 seconds. Try again.')), READER_WAIT_MS)
+  })
+  const request = Promise.race([source, ceiling]).then((value) => {
     if (channels.get(key) === channel && channel.revision === revision) commit(key, channel, value)
     return value
   }).finally(() => {
+    clearTimeout(timer)
     if (channel.request === request) channel.request = undefined
   })
   channel.request = request

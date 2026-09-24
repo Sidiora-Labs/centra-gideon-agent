@@ -275,6 +275,7 @@ class _BrowseExecution:
             on_step=self.provider._mirror_sink(self.ctx),
             kill_check=_kill_check,
             close_check=self.close_check,
+            vision_enabled=self.request.config.get("vision_enabled") is True,
         )
         return self.owned.result
 
@@ -361,8 +362,14 @@ class BrowseActionProvider(ActionProvider):
         transport = await WebSocketCdpTransport.connect(cdp_url)
         try:
             directory = str(action_config.get("screenshot_dir") or "").strip()
+            if not directory and action_config.get("vision_enabled") is True:
+                from gideon.core.config import config_dir
+
+                directory = str(Path(config_dir()) / "browse" / "screenshots")
             driver = CdpPageDriver(
-                transport, screenshot_dir=Path(directory) if directory else None
+                transport,
+                screenshot_dir=Path(directory) if directory else None,
+                vision_enabled=action_config.get("vision_enabled") is True,
             )
             session = GatedCdpSession(
                 transport,

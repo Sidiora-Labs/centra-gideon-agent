@@ -203,3 +203,59 @@ class TestDependencyExtraction:
 class TestResolveExprDirect:
     def test_expression_bodies_resolve_without_braces(self, ctx) -> None:
         assert resolve_expr("inputs.topic", ctx) == "checkout latency"
+
+
+class TestLoopRelativeReferences:
+    @pytest.mark.parametrize("root", ["last", "previous"])
+    def test_first_cycle_absent_output_resolves_and_runs_pipes(self, root):
+        ctx = BindingContext(iter_index=0)
+        assert resolve("{{" + root + ".output.summary}}", ctx) is None
+        assert resolve("prior={{" + root + ".output.summary}}", ctx) == "prior="
+        assert (
+            resolve("{{" + root + ".output.summary | default('start')}}", ctx)
+            == "start"
+        )
+        assert resolve("{{" + root + ".output.items | count}}", ctx) == 0
+        with pytest.raises(BindingError, match="unknown pipe"):
+            resolve("{{" + root + ".output | typo}}", ctx)
+
+    @pytest.mark.parametrize("root", ["last", "previous"])
+    @pytest.mark.parametrize("iteration", [0, 1, 8])
+    def test_present_output_preserves_values_and_missing_field_errors(
+        self, root, iteration
+    ):
+        ctx = BindingContext(
+            iter_index=iteration,
+            **{
+                root + "_output": {"summary": "prior", "items": [1, 2]},
+                "has_" + root: True,
+            },
+        )
+        assert resolve("{{" + root + ".output.summary}}", ctx) == "prior"
+        assert resolve("{{" + root + ".output.items | count}}", ctx) == 2
+        with pytest.raises(BindingError, match="available keys: items, summary"):
+            resolve("{{" + root + ".output.missing}}", ctx)
+
+    @pytest.mark.parametrize("root", ["last", "previous"])
+    @pytest.mark.parametrize("iteration", [None, 1, 8])
+    def test_missing_output_outside_first_cycle_names_available_roots(
+        self, root, iteration
+    ):
+        ctx = BindingContext(iter_index=iteration)
+        expression = root + ".output.summary | default('start')"
+        available = "inputs, nodes" if iteration is None else "inputs, iter, nodes"
+        with pytest.raises(BindingError) as caught:
+            resolve("{{" + expression + "}}", ctx)
+        assert str(caught.value) == (
+            f"unresolved reference at {root!r}; available keys: {available} "
+            + "(in {{"
+            + expression
+            + "}})"
+        )
+
+    def test_missing_root_diagnostic_exposes_names_without_values(self):
+        ctx = BindingContext(inputs={"token": "private-token"})
+        with pytest.raises(BindingError) as caught:
+            resolve("{{inputs.unknown}}", ctx)
+        assert "available keys: token" in str(caught.value)
+        assert "private-token" not in str(caught.value)

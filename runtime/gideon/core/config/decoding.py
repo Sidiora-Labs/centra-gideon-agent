@@ -117,6 +117,9 @@ RECORDS = {
             ),
             "timezone": Value(("timezone",), ""),
             "snapshot_dir": Value(("snapshot_dir",), ""),
+            "rooms": Derived(
+                lambda document: _decode("config.rooms.RoomsConfig", document)
+            ),
             "durability": Derived(
                 lambda document: _decode("config.durability.DurabilityConfig", document)
             ),
@@ -599,6 +602,18 @@ RECORDS = {
             ),
         },
     ),
+    "config.rooms.RoomsConfig": Record(
+        "RoomsConfig",
+        {
+            "enabled": Value(("rooms", "enabled"), False, definitions._guard_flag),
+            "round_budget": Value(
+                ("rooms", "round_budget"), 8, lambda value: max(1, min(100, int(value)))
+            ),
+            "max_members": Value(
+                ("rooms", "max_members"), 8, lambda value: max(1, min(100, int(value)))
+            ),
+        },
+    ),
     "config.durability.DurabilityConfig": Record(
         "DurabilityConfig",
         {
@@ -864,7 +879,7 @@ RECORDS = {
                 ("skills", "auto_similarity_threshold"), 0.85, float
             ),
             "progressive_disclosure_threshold": Value(
-                ("skills", "progressive_disclosure_threshold"), 8, int
+                ("skills", "progressive_disclosure_threshold"), 2, int
             ),
         },
     ),
@@ -1001,6 +1016,16 @@ RECORDS = {
     "config.knowledge.KnowledgeConfig": Record(
         "KnowledgeConfig",
         {
+            "fetch_max_tokens": Value(
+                ("knowledge", "fetch_max_tokens"),
+                4096,
+                lambda value: max(1, definitions._safe_int(value, 4096)),
+            ),
+            "fetch_top_n": Value(
+                ("knowledge", "fetch_top_n"),
+                3,
+                lambda value: max(1, definitions._safe_int(value, 3)),
+            ),
             "ocr_max_bytes": Value(
                 ("knowledge", "ocr_max_bytes"),
                 10 * 1024 * 1024,
@@ -1191,6 +1216,12 @@ RECORDS = {
             "breaker": Derived(
                 lambda document: _decode(
                     "config.guardrails.GuardrailsConfig.breaker.BreakerConfig", document
+                )
+            ),
+            "loop_breaker": Derived(
+                lambda document: _decode(
+                    "config.guardrails.GuardrailsConfig.loop_breaker.LoopBreakerConfig",
+                    document,
                 )
             ),
             "autonomy": Derived(
@@ -1539,6 +1570,16 @@ RECORDS = {
                 ("guardrails", "breaker", "recovery_secs"),
                 30.0,
                 lambda value: max(0.0, float(value)),
+            ),
+        },
+    ),
+    "config.guardrails.GuardrailsConfig.loop_breaker.LoopBreakerConfig": Record(
+        "LoopBreakerConfig",
+        {
+            "circuit_threshold": Value(
+                ("guardrails", "loop_breaker", "circuit_threshold"),
+                30,
+                lambda value: max(1, definitions._safe_int(value, 30)),
             ),
         },
     ),

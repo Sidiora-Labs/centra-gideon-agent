@@ -415,7 +415,13 @@ class NativeArtifactProvider(ArtifactProvider):
         out.sort(key=lambda a: a.updated_at or a.created_at, reverse=True)
         return out
 
-    def find_similar(self, name: str, *, kind: str | None = None) -> Artifact | None:
+    def find_similar(
+        self,
+        name: str,
+        *,
+        kind: str | None = None,
+        project_id: str | None = None,
+    ) -> Artifact | None:
         """The most-recent existing artifact whose name matches *name* by slug — the
         list-before-save dedup hint (ARTIFACTS S1). Same slug derivation as save, so a
         re-save of "Sales Dashboard" finds the prior one instead of minting a ``-2``.
@@ -425,6 +431,8 @@ class NativeArtifactProvider(ArtifactProvider):
             return None
         try:
             for art in self.list(kind=kind):
+                if project_id is not None and art.project_id != project_id:
+                    continue
                 if slugify(art.name) == target or art.slug == target:
                     return art
         except Exception:

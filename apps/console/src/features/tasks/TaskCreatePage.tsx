@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useState, useEffect, useRef } from 'react'
 import { ArrowLeft, Check } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -12,7 +13,7 @@ import { useTaskOperation } from './taskEditorState'
 export function TaskCreatePage({ onBack, onCreated }: { onBack: () => void; onCreated: (t: TaskItem) => void }) {
   const [draft, setDraft] = useState<TaskDraft>(emptyDraft)
   const { busy: saving, error: err, setError, run } = useTaskOperation('create-task')
-  const { data: allTasks = [] } = useQuery<TaskItem[]>('tasks-all', () => api.allTasks().then(result => result.tasks).catch(() => []), { persist: true })
+  const { data: allTasks = [], error: tasksErr, refresh: refreshTasks } = useQuery<TaskItem[]>('tasks-all', () => api.allTasks().then(result => result.tasks), { persist: true })
   const errRef = useRef<HTMLParagraphElement>(null)
   useEffect(() => { if (err) errRef.current?.scrollIntoView({ block: 'nearest' }) }, [err])
   const create = () => {
@@ -23,6 +24,7 @@ export function TaskCreatePage({ onBack, onCreated }: { onBack: () => void; onCr
     <TopBar left={<div className="flex items-center gap-s"><IconButton icon={ArrowLeft} label="Back" size={40} onClick={onBack} /><PageTitle>New task</PageTitle></div>} />
     <div role="region" aria-label="Task editor" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
       <div className="mx-auto px-l py-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+        {tasksErr && <LoadError what="task dependencies" error={tasksErr} onRetry={refreshTasks} />}
         <TaskForm draft={draft} onChange={setDraft} allTasks={allTasks} />
         {err && <p ref={errRef} role="alert" data-type="body-s" className="mt-l rounded-md border-l-2 border-danger bg-danger/10 p-m text-danger">{err}</p>}
       </div>

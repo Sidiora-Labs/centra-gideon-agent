@@ -415,6 +415,20 @@ class MemoryService:
             return []
         return EntityInspection(archive).outbound(ref)
 
+    def pin_facet(self, key: str, pinned: bool = True) -> bool:
+        from gideon.cognition.preference_facets import pin_facet
+
+        if not key.startswith("pref.facet.") or self._vs is None:
+            return False
+        return pin_facet(self._vs, key, pinned)
+
+    def forget_facet(self, key: str) -> bool:
+        from gideon.cognition.preference_facets import forget_facet
+
+        if not key.startswith("pref.facet.") or self._vs is None:
+            return False
+        return forget_facet(self._vs, key)
+
     def slots(self) -> list[dict]:
         from gideon.cognition import memory_slots
 

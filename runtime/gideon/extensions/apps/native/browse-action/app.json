@@ -60,6 +60,14 @@
             "label": "Screenshot folder",
             "help": "Optional. Where per-step screenshots are written. They are referenced by path and never pasted into the model's context."
           }
+        },
+        "vision_enabled": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Vision click fallback",
+            "help": "Opt in to image_modality grounding for pages without element refs. Click only; CAPTCHAs require a human. Recommended model: Qwen/Qwen2.5-VL-7B-Instruct (Apache-2.0)."
+          }
         }
       }
     }

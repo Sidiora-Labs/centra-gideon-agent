@@ -1264,8 +1264,9 @@ Examples:
         epilog="""
 Examples:
   gideon config get                   # Show all config
-  gideon config get dashboard.port    # Get specific value
-  gideon config set dashboard.port 8888
+  gideon config get dashboard.url    # Get specific value
+  gideon config set dashboard.url http://localhost:8888
+  gideon config unset dashboard.url   # Restore the default value
   gideon config edit                  # Open in $EDITOR
 """,
         formatter_class=_fmt,
@@ -1273,17 +1274,19 @@ Examples:
     cfg_sub = cfg_parser.add_subparsers(dest="config_action")
     cfg_get = cfg_sub.add_parser("get", help="Get a config value (or all if no key)")
     cfg_get.add_argument(
-        "key", nargs="?", help="Dot-separated key (e.g. dashboard.port)"
+        "key", nargs="?", help="Dot-separated key (e.g. dashboard.url)"
     )
     cfg_set = cfg_sub.add_parser("set", help="Set a config value")
     cfg_set.add_argument(
-        "key", nargs="?", help="Dot-separated key (e.g. dashboard.port)"
+        "key", nargs="?", help="Dot-separated key (e.g. dashboard.url)"
     )
     cfg_set.add_argument("value", nargs="?", help="Value to set")
     cfg_set.add_argument(
         "--file", "-f", dest="file", help="Load full config from a JSON file"
     )
     cfg_sub.add_parser("edit", help="Open config in $EDITOR")
+    cfg_unset = cfg_sub.add_parser("unset", help="Remove a stored config value")
+    cfg_unset.add_argument("key", help="Dot-separated key (e.g. dashboard.url)")
 
     _add_app_parser(sub)
 
@@ -1540,7 +1543,7 @@ Examples:
 
 
 from gideon.integrations.inbound.auth import inbound_cmd as _inbound_cmd  # noqa: E402
-from gideon.integrations.inbound.capture_import import capture_cmd as _capture_cmd  # noqa: E402
+from gideon.integrations.inbound.capture_import import capture_cmd as _capture_cmd  # noqa: E402  # fmt: skip
 from gideon.interfaces.cli.app_new import add_parser as _add_app_parser  # noqa: E402
 from gideon.interfaces.cli.app_new import app_cmd as _app_cmd  # noqa: E402
 from gideon.interfaces.cli.chat import _chat  # noqa: E402

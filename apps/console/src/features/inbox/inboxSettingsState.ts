@@ -28,6 +28,9 @@ export function useInboxSettingsState() {
   const flags = useOptimisticRecord<{ engagement: boolean; sources: boolean }>()
   const [loadErr, recordLoadError] = useState<unknown>(null)
   const [saved, setSaved] = useState(false)
+  const [cfgErr, setCfgErr] = useState('')
+  const [cfgLoading, setCfgLoading] = useState(true)
+  const [cfgRevision, setCfgRevision] = useState(0)
   const [revision, setRevision] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -38,12 +41,19 @@ export function useInboxSettingsState() {
   }, [revision])
   useEffect(() => {
     let current = true
-    api.gideonConfig().then(config => { if (current) flags.reset({ engagement: Boolean(config?.inbox?.engagement_ranking_enabled), sources: Boolean(config?.inbox?.enabled) }) }).catch(() => { if (current) flags.reset({ engagement: false, sources: false }) })
+    api.gideonConfig().then(config => {
+      if (current) {
+        flags.reset({ engagement: Boolean(config?.inbox?.engagement_ranking_enabled), sources: Boolean(config?.inbox?.enabled) })
+        setCfgErr('')
+      }
+    }).catch(error => { if (current) setCfgErr(String((error as Error)?.message || error)) })
+      .finally(() => { if (current) setCfgLoading(false) })
     return () => { current = false; if (timer.current) clearTimeout(timer.current) }
-  }, [])
+  }, [cfgRevision])
+  const retryConfig = () => { setCfgErr(''); setCfgLoading(true); setCfgRevision(value => value + 1) }
   const acknowledge = () => { setSaved(true); if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => setSaved(false), 1600) }
   const patch = (change: Partial<InboxSettings>) => settings.write(change, () => api.saveInboxSettings(change), acknowledge, error => notify(`Couldn't save your inbox settings: ${String((error as Error)?.message || error)}`, 'error'))
   const setEngagement = (value: boolean) => flags.write({ engagement: value }, () => api.patchConfig('inbox.engagement_ranking_enabled', value), acknowledge, () => {})
   const setSources = (value: boolean) => flags.write({ sources: value }, async () => { await api.patchConfig('inbox.enabled', value); await api.restartInbox() }, acknowledge, () => {})
-  return { s: settings.value, saved, loadErr, load: () => setRevision(value => value + 1), engagementOn: flags.value?.engagement ?? null, sourcesOn: flags.value?.sources ?? null, patch, setEngagement, setSources }
+  return { s: settings.value, saved, cfgErr, cfgLoading, retryConfig, loadErr, load: () => setRevision(value => value + 1), engagementOn: flags.value?.engagement ?? null, sourcesOn: flags.value?.sources ?? null, patch, setEngagement, setSources }
 }

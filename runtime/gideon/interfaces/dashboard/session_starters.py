@@ -19,6 +19,7 @@ from aiohttp import web
 
 from gideon.core.http_request import read_json_body
 from gideon.engine import session_search
+from gideon.http_download import download_headers
 from gideon.interfaces.dashboard import session_export, session_share, session_templates
 from gideon.interfaces.dashboard.chat_utils import _history_key_for, resolve_history_key
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -186,7 +187,7 @@ async def api_session_export(request: web.Request) -> web.Response:
         content_type=content_type,
         charset="utf-8",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            **download_headers(filename),
             "Content-Length": str(len(body)),
             "X-Content-Type-Options": "nosniff",
         },

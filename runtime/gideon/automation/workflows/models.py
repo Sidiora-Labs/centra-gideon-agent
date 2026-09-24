@@ -33,6 +33,23 @@ from gideon.automation.workflows.workflow_codec import (
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
+_INSTANCE_MARKER_RE = re.compile(r"(?:[@#]\d+)+$")
+
+
+def spec_path(path: str) -> str:
+    """Map an instance path to its spec path, preserving every structural segment."""
+    return ".".join(_INSTANCE_MARKER_RE.sub("", part) for part in path.split("."))
+
+
+def sibling_group(path: str) -> str:
+    """Group immediate iterations while retaining enclosing instance identities."""
+    matches = list(re.finditer(r"[@#]\d+(?=\.|$)", path))
+    if not matches:
+        return path
+    marker = matches[-1]
+    return path[: marker.start()] + path[marker.end() :]
+
+
 SPEC_SEMVER = "1.0"
 
 
@@ -679,6 +696,7 @@ class NodeInstance:
     tokens: int = 0
     wake_at: float = 0.0
     item_label: str = ""
+    item_total: int = 0
     #: liveness stays owned by `DelegationSupervisor.get` -- and it is per-INSTANCE because a
     subagent_id: str = ""
 

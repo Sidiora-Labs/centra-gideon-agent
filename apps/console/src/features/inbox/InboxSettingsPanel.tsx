@@ -1,3 +1,4 @@
+import { InboxConfigBoundary } from './InboxConfigBoundary'
 import { useInboxSettingsState } from './inboxSettingsState'
 import { Loading, LoadError } from '../../shared/ui/ListScaffold'
 import { Row, Field, Toggle, SavedToast } from '../settings/settingsUI'
@@ -5,7 +6,7 @@ import { NumberField } from '../../shared/ui/forms'
 import { TextLink } from '../../shared/ui/TextLink'
 
 export function InboxSettingsPanel() {
-  const { s, saved, loadErr, load, engagementOn, sourcesOn, patch, setEngagement, setSources } = useInboxSettingsState()
+  const { s, saved, cfgErr, cfgLoading, retryConfig, loadErr, load, engagementOn, sourcesOn, patch, setEngagement, setSources } = useInboxSettingsState()
 
   if (!s && loadErr) return <LoadError what="inbox settings" error={loadErr} onRetry={load} />
   if (!s) return <Loading what="inbox settings" />
@@ -15,9 +16,11 @@ export function InboxSettingsPanel() {
   ]
   return <div className="grid gap-l rounded-xl border border-outline/20 p-m">
     <div className="flex justify-end"><SavedToast show={saved} /></div>
+    <InboxConfigBoundary cfgErr={cfgErr} loading={cfgLoading} onRetry={retryConfig}>
     {switches.map(control => <Row key={control.label} label={control.label} hint={control.hint}>
       <Toggle on={Boolean(control.value)} onChange={control.change} label={control.aria} disabled={control.value === null} />
     </Row>)}
+    </InboxConfigBoundary>
     <Row label="Alerts" hint="Keyword and name-mention alerts are now per-notification-kind, so the same rules cover loops, proposals and messages alike.">
       <TextLink href="#/settings/notifications" ink="emphasis" size="sm">Open notification rules</TextLink>
     </Row>

@@ -1,21 +1,25 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Scale, Sparkles } from 'lucide-react'
+import { AlertTriangle, Scale } from 'lucide-react'
 import { api, type KnowledgeConflict } from '../../shared/data/api'
-import { EmptyState, ListSkeleton } from '../../shared/ui/ListScaffold'
+import { LoadError, EmptyState, ListSkeleton } from '../../shared/ui/ListScaffold'
 import { fvs } from '../../shared/theme/fontWeight'
 import { accentChip } from '../../shared/theme/accent'
 
 export function ConflictPanel() {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [conflicts, setConflicts] = useState<KnowledgeConflict[] | null>(null)
 
   useEffect(() => {
     let alive = true
+    setLoadErr(null)
     api.knowledgeConflicts()
       .then((d) => { if (alive) setConflicts(d.conflicts) })
-      .catch(() => { if (alive) setConflicts([]) })
+      .catch((error) => { if (alive) setLoadErr(error) })
     return () => { alive = false }
-  }, [])
+  }, [loadAttempt])
 
+  if (loadErr) return <LoadError what="contradictions" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} />
   if (conflicts === null) return <ListSkeleton rows={3} what="contradictions" />
   if (conflicts.length === 0) {
     return (
@@ -36,25 +40,14 @@ export function ConflictPanel() {
   )
 }
 
-function ConflictRow({ conflict }: { conflict: KnowledgeConflict }) {
-  const proven = conflict.basis === 'deterministic'
+export function ConflictRow({ conflict }: { conflict: KnowledgeConflict }) {
   return (
     <div data-type="body-s" className="rounded-lg border border-outline-variant bg-surface p-3">
       <div data-type="caption" className="mb-2 flex items-center gap-2 text-on-surface-low">
-        {proven
-          ? <AlertTriangle size={13} className="text-warning" aria-hidden />
-          : <Sparkles size={13} aria-hidden />}
-        <span style={fvs(600)}>{proven ? 'Provable conflict' : 'Possible conflict'}</span>
+        <AlertTriangle size={13} className="text-warning" aria-hidden />
+        <span style={fvs(600)}>Provable conflict</span>
         <span aria-hidden>·</span>
         <span>{conflict.kind}</span>
-        {!proven && (
-          <>
-            <span aria-hidden>·</span>
-            {
-}
-            <span>{Math.round(conflict.confidence * 100)}% confident</span>
-          </>
-        )}
       </div>
 
       <ClaimSide

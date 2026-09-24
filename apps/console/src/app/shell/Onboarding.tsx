@@ -12,7 +12,7 @@ import { TOKENS, type ScalarToken } from '../../shared/theme/tokenRegistry'
 import { spring } from '../../shared/theme/motion'
 import { withWeight } from '../../shared/theme/fontWeight'
 import { unavailableWhen } from '../../shared/ui/unavailable'
-import { useIdentity, firstNameOf, DEFAULT_USER_NAME } from './identity'
+import { useIdentity, firstNameOf, DEFAULT_USER_NAME, suggestHandle, USERNAME_MAX_LEN } from './identity'
 import { setNavMode } from './navDisclosure'
 import { APP_NAME } from './config'
 import { reportActionFailure } from './reportingWrite'
@@ -36,6 +36,8 @@ const steps: Record<StepId, { icon: LucideIcon; subtitle: string }> = {
 export function Onboarding() {
   const { setName } = useIdentity()
   const [state, dispatch] = useReducer(setupReducer, initialSetup)
+  const [handleDraft, setHandleDraft] = useState<string | null>(null)
+  const handle = handleDraft ?? suggestHandle(state.draft)
   const rows = useMemo(() => Object.fromEntries(ORDER.map((id) => [id, createRef<HTMLLIElement>()])) as Record<StepId, React.RefObject<HTMLLIElement | null>>, [])
   const progress = useCallback((patch: OnboardingStatePatch) => { void api.saveOnboardingState(patch).catch(() => {}) }, [])
   useEffect(() => {
@@ -63,7 +65,8 @@ export function Onboarding() {
   function finish() {
     progress({ step: 'done' })
     setNavMode(state.showEverything ? 'expert' : 'starter')
-    void setName(state.name || DEFAULT_USER_NAME)
+    if (state.name) void setName(state.name, handleDraft ?? suggestHandle(state.name))
+    else void setName(DEFAULT_USER_NAME)
   }
   function exitTo(path: string) {
     setOnboardingExit(path)
@@ -72,7 +75,7 @@ export function Onboarding() {
   const tour = () => { requestProductTour(); finish() }
   const summaries: Partial<Record<StepId, string>> = { name: state.name, import: state.imported, essentials: state.model, try: state.tried }
   const content: Record<StepId, ReactNode> = {
-    name: <NameStep value={state.draft} change={(value) => dispatch({ type: 'draft', value })} submit={commitName} />,
+    name: <NameStep handle={handle} changeHandle={setHandleDraft} value={state.draft} change={(value) => dispatch({ type: 'draft', value })} submit={commitName} />,
     import: <ImportStep onDone={(summary) => advance('import', summary)} onSkip={() => advance('import', 'Skipped')} />,
     essentials: state.readiness ? <EssentialsStep readiness={state.readiness} onProgress={progress} onDone={(summary) => advance('essentials', summary)} onSkip={() => advance('essentials', 'Set up later')} />
       : <div role="status" aria-busy="true" className="flex items-center gap-s py-s"><LoadingStatus what="what's already set up" /><Loader2 size={18} className="animate-spin text-on-surface-low" aria-hidden="true" /></div>,
@@ -80,15 +83,15 @@ export function Onboarding() {
     ready: <ReadyScreen name={state.name} model={state.model} tried={state.tried} showEverything={state.showEverything}
       setDisclosure={(value) => dispatch({ type: 'disclosure', value })} finish={finish} tour={tour} exitTo={exitTo} />,
   }
-  return <div className="fixed inset-0 z-[var(--z-modal)] overflow-y-auto bg-canvas">
+  return <div data-onboarding-scroll className="fixed inset-0 z-[var(--z-modal)] h-dvh min-h-0 overflow-y-auto overscroll-contain bg-canvas">
     <DotGlow intensity={1.15} composerRef={rows[state.step]} />
-    <main className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-2xl px-l py-3xl">
+    <main className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col justify-start gap-2xl px-l py-3xl">
       <header className="flex items-center gap-l rounded-2xl border border-outline-variant/40 bg-surface/80 p-l">
         <GideonMark size={56} animated blob />
         <div className="min-w-0"><h1 data-type="headline-m" className="text-on-surface">Welcome to {APP_NAME}</h1>
           <p className="mt-s text-on-surface-low">Your self-hosted personal agent. A few moments to get set up.</p></div>
       </header>
-      {/* A step change is not a focus change, so progress has its own announcement. */}
+      {/* The live region adds progress numbers to the focused step heading. */}
       <p role="status" aria-live="polite" className="sr-only">{`Step ${ORDER.indexOf(state.step) + 1} of ${ORDER.length}: ${TITLES[state.step]}`}</p>
       <ol className="flex w-full list-none flex-col gap-2 p-0">
         {ORDER.map((id, index) => {
@@ -106,12 +109,23 @@ export function Onboarding() {
     </main>
   </div>
 }
-function NameStep({ value, change, submit }: { value: string; change: (value: string) => void; submit: () => void }) {
-  return <form className="flex items-center gap-s rounded-xl border border-outline-variant bg-surface-high p-s focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary" onSubmit={(event) => { event.preventDefault(); submit() }}>
-    <input autoFocus aria-label="Your name" placeholder="Your name" value={value} onChange={(event) => change(event.target.value)}
-      className="min-w-0 flex-1 bg-transparent px-m py-s text-on-surface outline-none placeholder:text-on-surface-low" />
-    <motion.button type="submit" aria-label="Continue" {...unavailableWhen(!value.trim(), 'Enter your name first')} whileTap={{ scale: 0.96 }} transition={spring.spatialFast}
-      className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg aria-disabled:cursor-not-allowed aria-disabled:opacity-40" style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}><ArrowRight size={18} /></motion.button>
+export function NameStep({ value, change, handle, changeHandle, submit }: {
+  value: string; change: (value: string) => void; handle: string; changeHandle: (value: string) => void; submit: () => void
+}) {
+  return <form className="flex flex-col gap-m" onSubmit={(event) => { event.preventDefault(); submit() }}>
+    <div className="flex items-center gap-s rounded-xl border border-outline-variant bg-surface-high p-s focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
+      <input autoFocus aria-label="Your name" placeholder="Your name" value={value} onChange={(event) => change(event.target.value)}
+        className="min-w-0 flex-1 bg-transparent px-m py-s text-on-surface outline-none placeholder:text-on-surface-low" />
+      <motion.button type="submit" aria-label="Continue" {...unavailableWhen(!value.trim(), 'Enter your name first')} whileTap={{ scale: 0.96 }} transition={spring.spatialFast}
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg aria-disabled:cursor-not-allowed aria-disabled:opacity-40" style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}><ArrowRight size={18} /></motion.button>
+    </div>
+    <label className="flex flex-col gap-s">
+      <span>Attribution handle (optional)</span>
+      <input aria-label="Attribution handle (optional)" aria-describedby="attribution-hint" placeholder="your-handle" value={handle} maxLength={USERNAME_MAX_LEN}
+        onChange={(event) => changeHandle(event.target.value.slice(0, USERNAME_MAX_LEN))}
+        className="rounded-lg border border-outline-variant bg-surface-high px-m py-s text-on-surface" />
+    </label>
+    <p id="attribution-hint" className="text-on-surface-low">Labels tasks and comments you create. Leave empty for no attribution; you can change it in Settings.</p>
   </form>
 }
 function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish, tour, exitTo }: {

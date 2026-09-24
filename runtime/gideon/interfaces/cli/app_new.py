@@ -912,7 +912,7 @@ over-broad declaration costs you installs.
 
 ## License
 
-MIT — see `LICENSE`.
+Apache License 2.0 — see `LICENSE`.
 """
 
 
@@ -994,7 +994,9 @@ def scaffold(
         "README.md": _render_readme(
             contract, app_name=name, display_name=display, description=desc
         ),
-        "LICENSE": _license_text(author or display, year or _dt.date.today().year),
+        "LICENSE": _license_text(
+            author.strip() or "<your name>", year or _dt.date.today().year
+        ),
     }
     target.mkdir(parents=True, exist_ok=True)
     for rel, content in files.items():
@@ -1399,6 +1401,10 @@ def app_cmd(args: argparse.Namespace) -> int:
         print(f"  {rel}")
     print("")
     print(f"Contract: {result.contract.label}")
+    if not args.author.strip():
+        print(
+            f"Replace <your name> in {result.path / 'LICENSE'} with the copyright holder’s name."
+        )
     print("Next:")
     print(f"  pytest {result.path}")
     print(f"  install it from this local path (see {result.path / 'README.md'})")

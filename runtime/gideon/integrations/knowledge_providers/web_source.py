@@ -1092,6 +1092,7 @@ class WebSourceProvider(KnowledgeSourceProvider):
 
         async def _browse(url: str, *, policy: Any = None) -> Any:
             from gideon.integrations.browse.plan_runner import (
+                make_browse_settle,
                 make_content_tick_runner,
                 make_gateway_opener,
             )
@@ -1103,7 +1104,9 @@ class WebSourceProvider(KnowledgeSourceProvider):
             from gideon.security.guardrails.autonomy import RUNG_ONE_TAP
 
             runner = make_content_tick_runner(
-                open_session=make_gateway_opener(), resolve_url=lambda: cdp_url
+                open_session=make_gateway_opener(),
+                resolve_url=lambda: cdp_url,
+                settle=make_browse_settle(),
             )
             plan = BrowsePlan(
                 id=f"web-source:{source_id}" if source_id else "web-source-preview",

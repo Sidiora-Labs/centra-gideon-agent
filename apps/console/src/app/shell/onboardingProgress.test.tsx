@@ -15,7 +15,8 @@ vi.mock('../../shared/data/api', () => ({
     theme: () => new Promise(() => {}),
   },
 }))
-vi.mock('./identity', () => ({
+vi.mock('./identity', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./identity')>(),
   useIdentity: () => ({ setName }),
   firstNameOf: (n: string) => n.split(' ')[0],
   DEFAULT_USER_NAME: 'Operator',
@@ -120,7 +121,7 @@ describe('every step transition persists its resume point', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'stub-tried' }))
     fireEvent.click(await screen.findByRole('button', { name: /Start using/ }))
     await waitFor(() => expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' }))
-    expect(setName).toHaveBeenCalledWith('Ada Lovelace')
+    expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace')
     const steps = saveOnboardingState.mock.calls.map(([p]) => p.step)
     expect(steps).toEqual(['essentials', 'first_success', 'done'])
   })
@@ -245,7 +246,7 @@ describe('skip at any step lands in a working dashboard', () => {
     await enterNameAndImport()
     expect(await screen.findByRole('button', { name: 'stub-continue' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Skip setup and go to the dashboard' }))
-    await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace'))
+    await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace'))
     expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' })
   })
 
@@ -278,5 +279,5 @@ it('records the tour request before the completed flow releases the identity gat
   fireEvent.click(await screen.findByRole('button', { name: /Take the quick tour/ }))
   expect(consumeProductTourRequest()).toBe(true)
   expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' })
-  expect(setName).toHaveBeenCalledWith('Ada Lovelace')
+  expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace')
 })

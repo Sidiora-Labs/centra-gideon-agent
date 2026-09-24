@@ -171,7 +171,11 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
             return web.json_response({"error": "slug already exists"}, status=409)
     force = request.query.get("force") in ("1", "true")
     if not requested_slug and not source_path and not force:
-        similar = prov.find_similar(name, kind=str(body.get("kind", "widget")))
+        similar = prov.find_similar(
+            name,
+            kind=str(body.get("kind", "widget")),
+            project_id=str(body.get("project_id", "")).strip(),
+        )
         if similar is not None:
             _audit(request, "artifact.create", "deduped", f"similar={similar.slug}")
             return web.json_response(

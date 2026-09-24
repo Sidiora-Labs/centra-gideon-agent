@@ -63,7 +63,6 @@ async def execute_with_fallback_chain(
     )
     from gideon.extensions.providers.use_cases import resolution_chain
 
-    factory = provider_factory or resolve_provider_for_use_case
     key = session_key if session_key is not None else None
     try:
         chain = resolution_chain(use_case)
@@ -73,8 +72,8 @@ async def execute_with_fallback_chain(
     def resolve(ref: str | None = None) -> ModelProvider:
         kwargs = {} if ref is None else {"model_override": ref}
         if provider_factory is None:
-            return factory(use_case, **kwargs)
-        return factory(key, **kwargs)
+            return resolve_provider_for_use_case(use_case, **kwargs)
+        return provider_factory(key, **kwargs)
 
     if provider_factory is not None and len(chain) > 1:
         try:

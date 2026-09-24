@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { Children, isValidElement, memo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { physics } from '../theme/motion'
 import { fvs } from '../theme/fontWeight'
@@ -182,11 +182,10 @@ function looksLikeFile(s: string): boolean {
   return t.length <= 200 && !t.includes(' ') && FILE_PATH_RE.test(t)
 }
 
-function renderCode({ className, children }: any) {
+function renderCode({ className, children, block = false }: any) {
   const m = /language-(\w+)/.exec(className || '')
   const str = String(children).replace(/\n$/, '')
-  const isBlock = !!className || str.includes('\n')
-  if (!isBlock) return <code className="rounded-sm bg-surface-high px-1.5 py-0.5 text-[0.85em] font-mono text-primary-emphasis">{children}</code>
+  if (!block) return <code className="rounded-sm bg-surface-high px-1.5 py-0.5 text-[0.85em] font-mono text-primary-emphasis">{children}</code>
   const lang = m?.[1]
   if (lang === 'mermaid') return <MermaidBlock code={str} />
   if (isDiff(str, lang)) return <DiffBlock code={str} />
@@ -195,7 +194,14 @@ function renderCode({ className, children }: any) {
 
 const COMPONENTS: Record<string, React.ComponentType<any>> = {
   code: renderCode,
-  pre({ children }: any) { return <>{children}</> },
+  pre({ children }: any) {
+    const parts = Children.toArray(children)
+    const code = parts[0]
+    if (parts.length === 1 && isValidElement<{ className?: string; children?: React.ReactNode }>(code)) {
+      return renderCode({ ...code.props, block: true })
+    }
+    return <pre>{children}</pre>
+  },
   table({ children }: any) { return <div className="my-3 overflow-x-auto"><table data-type="body-s" className="w-full border-collapse">{children}</table></div> },
   th({ children }: any) { return <th className="border-b border-outline-variant/50 bg-surface-high px-m py-2 text-left text-on-surface-var" style={fvs(500)}>{children}</th> },
   td({ children }: any) { return <td className="border-b border-outline-variant/30 px-m py-2">{children}</td> },
@@ -335,14 +341,18 @@ function stringifyChildren(v: unknown): string {
   return String(v)
 }
 
-function MarkdownText({ children, onFileClick, chatSessionKey, citations }: {
-  children: string; onFileClick?: (path: string) => void; chatSessionKey?: string; citations?: MemoryCitation[]
+function MarkdownText({ children, onFileClick, chatSessionKey, citations, inline = false }: {
+  children: string; inline?: boolean; onFileClick?: (path: string) => void; chatSessionKey?: string; citations?: MemoryCitation[]
 }) {
-  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={componentsWith(onFileClick, chatSessionKey, citations)}>{children}</ReactMarkdown>
+  const components = componentsWith(onFileClick, chatSessionKey, citations)
+  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={inline ? [] : REHYPE}
+    skipHtml={inline} disallowedElements={inline ? undefined : ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button']}
+    allowedElements={inline ? ['p', 'strong', 'em', 'del', 'a', 'code', 'br'] : undefined} unwrapDisallowed={inline}
+    components={inline ? { ...components, p: ({ children }) => <span>{children}{' '}</span>, code: ({ children }) => <code className="font-mono">{children}</code> } : components}>{children}</ReactMarkdown>
 }
 
-export const Markdown = memo(function Markdown({ children, className, onFileClick, chatSessionKey, messageTs, streaming, citations }: {
-  children: unknown; className?: string; onFileClick?: (path: string) => void
+export const Markdown = memo(function Markdown({ children, className, onFileClick, chatSessionKey, messageTs, streaming, citations, inline = false }: {
+  children: unknown; inline?: boolean; className?: string; onFileClick?: (path: string) => void
   chatSessionKey?: string
   messageTs?: string
   streaming?: boolean
@@ -350,6 +360,7 @@ export const Markdown = memo(function Markdown({ children, className, onFileClic
 }) {
   const text = typeof children === 'string' ? children : stringifyChildren(children)
   if (!text.trim()) return null
+  if (inline) return <span className={className}><MarkdownText inline onFileClick={onFileClick} chatSessionKey={chatSessionKey} citations={citations}>{text}</MarkdownText></span>
   const segments = parseWidgetBlocks(text, streaming)
   if (segments.length === 1 && segments[0].type === 'md') {
     return <div className={`text-on-surface ${className ?? ''}`}><MarkdownText onFileClick={onFileClick} chatSessionKey={chatSessionKey} citations={citations}>{text}</MarkdownText></div>

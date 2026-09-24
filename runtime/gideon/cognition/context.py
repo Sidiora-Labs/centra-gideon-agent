@@ -1116,7 +1116,7 @@ class PromptAssembler:
             try:
                 threshold = AppConfig.load().skills.progressive_disclosure_threshold
             except Exception:
-                threshold = 8
+                threshold = 2
             if threshold and len(matches) > threshold:
                 descriptions = {row["key"]: row for row in self.skills.list_skills()}
                 lines = [

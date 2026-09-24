@@ -47,6 +47,7 @@ from gideon.core.config.safety import (
     BudgetConfig,
     EgressConfig,
     GuardrailsConfig,
+    LoopBreakerConfig,
     SandboxConfig,
     SecurityConfig,
 )
@@ -1556,13 +1557,14 @@ class SkillsConfig:
         ),
     )
     progressive_disclosure_threshold: int = field(
-        default=8,
+        default=2,
         metadata=_meta(
             "Progressive Disclosure Threshold",
             "When more than this many skills match a turn, inject only their compact "
             "INDEX (name + description) and let the agent pull full bodies on demand "
             "via skill_invoke — instead of inlining every matched body. Token "
-            "efficiency at scale; 0 disables (always inline). Default 8.",
+            "efficiency at scale; 0 disables (always inline). Default 2, capped at "
+            "max_triggered - 1.",
         ),
     )
 
@@ -1583,11 +1585,17 @@ class SkillsConfig:
                 "auto_refine_on_deviation requires auto_create_from_sessions; disabling auto_refine_on_deviation"
             )
             object.__setattr__(self, "auto_refine_on_deviation", False)
-        object.__setattr__(
-            self,
-            "progressive_disclosure_threshold",
-            max(0, self.progressive_disclosure_threshold),
-        )
+        threshold = max(0, self.progressive_disclosure_threshold)
+        ceiling = self.max_triggered - 1
+        if threshold > ceiling:
+            logger.warning(
+                "progressive_disclosure_threshold %d exceeds max_triggered - 1 (%d), using %d",
+                threshold,
+                ceiling,
+                ceiling,
+            )
+            threshold = ceiling
+        object.__setattr__(self, "progressive_disclosure_threshold", threshold)
 
 
 @dataclass
@@ -1600,6 +1608,20 @@ class KnowledgeConfig:
     reports, and someone tracking fast-moving facts wants shorter default expiry.
     """
 
+    fetch_max_tokens: int = field(
+        default=4096,
+        metadata=_meta(
+            "Knowledge Fetch Token Budget",
+            "Maximum estimated content tokens returned by knowledge context retrieval.",
+        ),
+    )
+    fetch_top_n: int = field(
+        default=3,
+        metadata=_meta(
+            "Knowledge Fetch Results",
+            "Maximum knowledge items returned for context retrieval by default.",
+        ),
+    )
     ocr_max_bytes: int = field(
         default=10 * 1024 * 1024,
         metadata=_meta(
@@ -2376,6 +2398,21 @@ class ProjectionRuleConfig:
 
 
 @dataclass
+class RoomsConfig:
+    enabled: bool = field(
+        default=False,
+        metadata=_meta("Enable rooms", "Enable Agent Rooms APIs and turns."),
+    )
+    round_budget: int = field(
+        default=8,
+        metadata=_meta("Round budget", "Maximum member turns per room message."),
+    )
+    max_members: int = field(
+        default=8, metadata=_meta("Maximum members", "Maximum agents in a room.")
+    )
+
+
+@dataclass
 class DurabilityConfig:
     """Scheduled backup + retention + drills (DURABILITY-AND-SYNC §3)."""
 
@@ -3007,6 +3044,9 @@ class AppConfig:
             "Directory for gideon snapshot output. "
             "Defaults to ~/.gideon/snapshots if empty.",
         ),
+    )
+    rooms: RoomsConfig = field(
+        default_factory=RoomsConfig, metadata=_meta("Rooms", "Agent room settings.")
     )
     durability: "DurabilityConfig" = field(
         default_factory=lambda: DurabilityConfig(),

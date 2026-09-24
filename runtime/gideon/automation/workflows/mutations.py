@@ -310,6 +310,7 @@ def cascade_preview(
             records = (effects or {}).get(path) or []
             if _has_committed(records):
                 preview.committed_effects.append(node_id)
+                preview.needs_confirmation = True
                 break
     return preview
 

@@ -291,3 +291,17 @@ or write rather than a degraded local call.
 
 See also: [API overview](API_OVERVIEW.md) · [CLI reference](CLI.md) ·
 [Getting started](../guides/GETTING_STARTED.md)
+
+### Tool-loop breaker
+
+`guardrails.loop_breaker.circuit_threshold` defaults to `30`, with a minimum of `1`.
+Native and ACP turns abort after total tool failures exceed this ceiling. Successful
+calls clear their matching failure bucket but do not clear the run-wide count.
+The ceiling is loaded lazily once per run and reset for the next run, so an active
+run keeps its current limit when settings change. Settings → Guardrails exposes
+this as **Tool failure ceiling**. Structural repetition detection remains warn-only;
+the ACP host can abort between protocol events but cannot prevent a tool call that
+its provider already executed.
+
+The separate **Provider circuit breaker** settings govern consecutive model-provider
+failures and recovery probes, not the tool-loop failure ceiling.

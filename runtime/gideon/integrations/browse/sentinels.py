@@ -46,6 +46,14 @@ class ClickAction:
 
 
 @dataclass(frozen=True)
+class ClickVisionAction:
+    what: str
+
+    def render(self) -> str:
+        return f"CLICK_VISION {self.what}"
+
+
+@dataclass(frozen=True)
 class TypeAction:
     """``TYPE <ref>(value)`` — fill the field named by a stable ElementRef."""
 
@@ -113,6 +121,7 @@ class NotesAction:
 Action = (
     NavigateAction
     | ClickAction
+    | ClickVisionAction
     | TypeAction
     | SubmitAction
     | ScrollAction
@@ -149,6 +158,9 @@ def parse_sentinel(line: str) -> Action | None:
         return GoBackAction()
     if upper == "DONE":
         return DoneAction()
+
+    if upper.startswith("CLICK_VISION ") and s[13:].strip():
+        return ClickVisionAction(what=s[13:].strip())
 
     m = _TYPE_RE.match(s)
     if m:

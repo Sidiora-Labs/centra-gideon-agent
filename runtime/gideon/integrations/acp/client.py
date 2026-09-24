@@ -283,6 +283,9 @@ class AcpClient:
             )
             self._reasoning_effort = effort
 
+    def stderr_tail(self) -> str:
+        return self._transport.first_stderr_tail or self._transport.stderr_tail()
+
     async def ensure_ready(self) -> None:
         self._work_dir.mkdir(parents=True, exist_ok=True)
         async with self._ready_lock:
@@ -292,6 +295,7 @@ class AcpClient:
                 and self._session_id
             ):
                 return
+            self._transport.first_stderr_tail = ""
             for attempt in range(2):
                 try:
                     if (

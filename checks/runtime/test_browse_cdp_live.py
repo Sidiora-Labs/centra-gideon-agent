@@ -557,3 +557,51 @@ def test_a_measured_run_and_a_real_guard_failure_both_pass_the_rail() -> None:
             }
         }
     )
+
+
+@pytest.mark.parametrize("close_after_ms", [0, 650, None])
+def test_browse_settle_waits_for_real_dom_readiness_with_a_ceiling(close_after_ms):
+    from gideon.integrations.browse.page import CdpPageDriver
+    from gideon.integrations.browse.plan_runner import make_browse_settle
+    from gideon.integrations.browse.transport import WebSocketCdpTransport
+
+    async def exercise(page_ws):
+        inner = await WebSocketCdpTransport.connect(page_ws)
+        recorder = _RecordingTransport(inner)
+        page = CdpPageDriver(recorder)
+        try:
+            await page._eval(
+                "document.open(); document.write('<html><body>Watched content</body>');"
+            )
+            assert await page._eval("document.readyState") == "loading"
+            if close_after_ms == 0:
+                await page._eval("document.close()")
+            elif close_after_ms is not None:
+                await page._eval(
+                    f"setTimeout(() => document.close(), {close_after_ms})"
+                )
+            recorder.methods.clear()
+            started = time.monotonic()
+            await make_browse_settle()(page)
+            elapsed = time.monotonic() - started
+            polls = recorder.count("Runtime.evaluate")
+            state = await page._eval("document.readyState")
+            if close_after_ms is None:
+                assert 9.8 <= elapsed < 11.0
+                assert 30 <= polls <= 40
+                assert state == "loading"
+            elif close_after_ms:
+                assert 0.5 <= elapsed < 2.0
+                assert 3 <= polls <= 8
+                assert state == "complete"
+            else:
+                assert elapsed < 1.0
+                assert polls == 1
+                assert state == "complete"
+        finally:
+            await inner.close()
+
+    chrome = browse_chrome.chrome_or_skip(PROOF)
+    browse_chrome.websockets_or_skip(PROOF)
+    with _browser(chrome) as page_ws:
+        asyncio.run(exercise(page_ws))

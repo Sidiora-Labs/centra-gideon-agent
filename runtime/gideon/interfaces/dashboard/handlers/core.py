@@ -612,6 +612,7 @@ _EDITABLE_CONFIG: dict[str, dict] = {
         "min": 0.0,
         "max": 100_000.0,
     },
+    "guardrails.loop_breaker.circuit_threshold": {"type": "int", "min": 1},
     "guardrails.breaker.failure_threshold": {"type": "int", "min": 1, "max": 100},
     "guardrails.breaker.recovery_secs": {"type": "float", "min": 0.0, "max": 3600.0},
     "guardrails.scan_mode": {"type": "enum", "values": ["warn", "redact", "block"]},
@@ -1056,7 +1057,7 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
 
     if path_key in ("companion.discovery_enabled", "companion.instance_name"):
         try:
-            from gideon.integrations.companion import discovery as _discovery  # noqa: F811
+            from gideon.integrations.companion import discovery as _discovery  # noqa: F811  # fmt: skip
 
             _discovery.reconcile()
         except Exception:

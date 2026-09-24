@@ -24,6 +24,7 @@ without a live browser.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from gideon.integrations.browse.extraction import extract_page
@@ -38,6 +39,18 @@ from gideon.integrations.browse.plans import (
 CdpSessionOpener = Callable[
     [str], Awaitable[tuple[Any, Any, Callable[[], Awaitable[None]]]]
 ]
+
+
+def make_browse_settle() -> Callable[[Any], Awaitable[None]]:
+    async def _settle(page: Any) -> None:
+        try:
+            async with asyncio.timeout(10.0):
+                while not await page._eval("document.readyState === 'complete'"):
+                    await asyncio.sleep(0.25)
+        except TimeoutError:
+            return
+
+    return _settle
 
 
 def make_content_tick_runner(

@@ -123,11 +123,10 @@ def test_native_manifest_resyncs_from_source_on_restart(tmp_path):
     )
 
 
-def test_native_manifest_resync_keeps_metadata_and_provider_registry_equal(
+def test_native_manifest_resync_preserves_metadata_and_refreshes_registry(
     tmp_path, monkeypatch
 ):
-    """Every observable projection moves with packaged app.json: the installed-card
-    metadata and an already-registered provider cannot retain the previous manifest."""
+    """Provider declarations refresh while installed user state remains untouched."""
     _native_manifest(tmp_path, "brave-search", native=True)
     app_manager.seed_builtin_apps()
 
@@ -153,8 +152,9 @@ def test_native_manifest_resync_keeps_metadata_and_provider_registry_equal(
     assert installed is not None and registered is not None and meta is not None
     assert installed.to_dict() == registered.manifest.to_dict()
     assert registered.provider_config.to_dict() == installed.provider.to_dict()
-    assert meta.version == installed.version == "1.1.0"
-    assert meta.displayName == installed.displayName == "Brave Search Updated"
+    assert installed.version == "1.1.0"
+    assert meta.version == "1.0.0"
+    assert meta.displayName == "Brave-Search"
 
 
 def test_native_manifest_resync_preserves_user_config_data(tmp_path):
@@ -190,46 +190,43 @@ def test_native_app_skipped_by_bundled_discovery(tmp_path):
     assert "stray-nonnative" in discovered
 
 
-def test_ollama_migration_demotes_builtin_to_local(tmp_path):
-    """ollama-models was de-cored from native to first-party but its installed.json
-    still says origin=builtin, locking it. The migration in seed_builtin_apps() must
-    downgrade origin to local and remove it from the seed marker so the user can
-    disable/uninstall like any first-party app."""
-    ollama_dir = tmp_path / "apps" / "ollama-models"
-    ollama_dir.mkdir(parents=True)
-    mani = {
-        "name": "ollama-models",
-        "version": "1.0.0",
-        "displayName": "Ollama",
-        "description": "local model runtime",
-        "provider": {"type": "model", "implementation": "provider:create_provider"},
-    }
-    (ollama_dir / "app.json").write_text(json.dumps(mani), encoding="utf-8")
-    meta = {
-        "name": "ollama-models",
-        "version": "1.0.0",
-        "displayName": "Ollama",
-        "enabled": True,
-        "installedAt": "2026-01-01T00:00:00Z",
-        "updatedAt": "2026-01-01T00:00:00Z",
-        "source": "builtin",
-        "origin": "builtin",
-        "resources": "gateway",
-        "lifecycle": "gateway",
-        "schemaVersion": 2,
-    }
-    (ollama_dir / "installed.json").write_text(json.dumps(meta), encoding="utf-8")
-
-    marker_path = tmp_path / "apps" / ".seeded-builtins.json"
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
-    marker_path.write_text(json.dumps({"seeded": ["ollama-models"]}), encoding="utf-8")
-
+def test_full_bundle_resync_preserves_owned_files(tmp_path):
+    _native_manifest(tmp_path, "local-models", native=True)
+    source = tmp_path / "native" / "local-models"
+    (source / "provider.py").write_text("VERSION = 1")
     app_manager.seed_builtin_apps()
+    installed = manager.app_dir("local-models")
+    metadata = (installed / "installed.json").read_bytes()
+    (installed / "data" / "config.json").write_text("user config")
+    (installed / "retained.py").write_text("user file")
+    (source / "provider.py").write_text("VERSION = 2")
+    (source / "nested").mkdir()
+    (source / "nested" / "helper.py").write_text("VALUE = 3")
+    (source / "data").mkdir()
+    (source / "data" / "config.json").write_text("must not copy")
+    (source / "installed.json").write_text("must not copy")
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "provider.pyc").write_bytes(b"must not copy")
+    assert app_manager.seed_builtin_apps() == []
+    assert (installed / "provider.py").read_text() == "VERSION = 2"
+    assert (installed / "nested" / "helper.py").read_text() == "VALUE = 3"
+    assert (installed / "data" / "config.json").read_text() == "user config"
+    assert (installed / "installed.json").read_bytes() == metadata
+    assert (installed / "retained.py").read_text() == "user file"
+    assert not (installed / "__pycache__").exists()
+    modified = (installed / "provider.py").stat().st_mtime_ns
+    app_manager.seed_builtin_apps()
+    assert (installed / "provider.py").stat().st_mtime_ns == modified
 
-    updated_meta = manager._read_installed("ollama-models")
-    assert updated_meta is not None
-    assert updated_meta.origin == "local"
-    marker = json.loads(marker_path.read_text(encoding="utf-8"))
-    assert "ollama-models" not in marker["seeded"]
 
-    assert not app_manager._is_native("ollama-models")
+def test_first_seed_ignores_runtime_state(tmp_path):
+    _native_manifest(tmp_path, "local-models", native=True)
+    source = tmp_path / "native" / "local-models"
+    (source / "data").mkdir()
+    (source / "data" / "private.txt").write_text("not package data")
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "provider.pyc").write_bytes(b"cache")
+    app_manager.seed_builtin_apps()
+    installed = manager.app_dir("local-models")
+    assert not (installed / "data" / "private.txt").exists()
+    assert not (installed / "__pycache__").exists()

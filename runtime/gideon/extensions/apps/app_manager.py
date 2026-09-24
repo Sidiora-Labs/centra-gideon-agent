@@ -40,6 +40,7 @@ import json
 import logging
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -978,6 +979,79 @@ def _data_fact(key: str, path: Path | None) -> str:
     return f"{key}=empty" if n == 0 else f"{key}={n}"
 
 
+def _live_tree_state(source: Path) -> tuple:
+    entries = []
+    for path in [source, *sorted(source.rglob("*"))]:
+        info = path.lstat()
+        entries.append(
+            (
+                str(path.relative_to(source)),
+                info.st_dev,
+                info.st_ino,
+                info.st_mode,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+            )
+        )
+    return tuple(entries)
+
+
+class _LiveTreeChanged(OSError):
+    pass
+
+
+def _copy_live_tree(
+    source: Path, destination: Path, *, retries: int = 3, settle_seconds: float = 0.05
+) -> None:
+    if retries < 1 or settle_seconds < 0:
+        raise ValueError(
+            "live-tree copy requires positive retries and nonnegative settling"
+        )
+    destination.mkdir(parents=True, exist_ok=False)
+    last_error: OSError | None = None
+    try:
+        for attempt in range(retries):
+            try:
+                before = _live_tree_state(source)
+                time.sleep(min(settle_seconds * 2 ** min(attempt, 10), 1.0))
+                if _live_tree_state(source) != before:
+                    raise _LiveTreeChanged("app data/ changed while settling")
+                try:
+                    shutil.copytree(
+                        source, destination, symlinks=True, dirs_exist_ok=True
+                    )
+                except shutil.Error as exc:
+                    failures = exc.args[0] if exc.args else []
+                    vanished = bool(failures) and all(
+                        isinstance(failure, (tuple, list))
+                        and len(failure) == 3
+                        and not Path(failure[0]).exists()
+                        and not Path(failure[0]).is_symlink()
+                        for failure in failures
+                    )
+                    if not vanished:
+                        raise
+                    raise _LiveTreeChanged(
+                        "app data/ entries vanished during copy"
+                    ) from exc
+                if _live_tree_state(source) != before:
+                    raise _LiveTreeChanged("app data/ changed during copy")
+                return
+            except _LiveTreeChanged as exc:
+                last_error = exc
+                shutil.rmtree(destination)
+                if attempt + 1 < retries:
+                    destination.mkdir()
+        raise OSError(
+            f"app data/ did not settle after {retries} attempts"
+        ) from last_error
+    except BaseException:
+        if destination.exists():
+            shutil.rmtree(destination)
+        raise
+
+
 def _discard_preserved_data(name: str) -> None:
     """Drop any parked ``data/`` held for *name*. Never raises."""
     try:
@@ -1136,7 +1210,7 @@ def update(
             new_data = staged / _APP_DATA_DIRNAME
             if new_data.exists():
                 shutil.rmtree(new_data, ignore_errors=True)
-            shutil.copytree(old_data, new_data)
+            _copy_live_tree(old_data, new_data)
         old_meta_file = live / INSTALLED_META_FILENAME
         if old_meta_file.is_file():
             shutil.copy2(old_meta_file, staged / INSTALLED_META_FILENAME)
@@ -1240,34 +1314,36 @@ def _write_seed_marker(seeded: set[str]) -> None:
     atomic_write(p, json.dumps({"seeded": sorted(seeded)}, indent=2) + "\n")
 
 
-def _resync_native_manifest(
-    name: str, src_manifest: "Path", manifest: AppManifest
-) -> None:
-    """Refresh an already-seeded native app's ``app.json`` from packaged source when
-    it differs. Never touches ``data/`` (user config) or the installed enabled state.
-    No-op if the app dir is missing or the manifest already matches (byte-compare
-    avoids needless writes).
-
-    The installed metadata and a provider registration built earlier in this process
-    are projections of that manifest, so refresh them in the same change. Otherwise
-    the Library card can keep showing the old version and the live provider registry
-    can keep serving the old declaration even though the installed ``app.json`` is new.
-    """
-    dest_manifest = app_dir(name) / APP_MANIFEST_FILENAME
-    if not dest_manifest.parent.is_dir():
+def _resync_native_bundle(name: str, source: Path, manifest: AppManifest) -> None:
+    """Overwrite packaged files while preserving all installed user-owned state."""
+    destination = app_dir(name)
+    if not destination.is_dir():
         return
+    changed = False
     try:
-        src_bytes = src_manifest.read_bytes()
-        if dest_manifest.is_file() and dest_manifest.read_bytes() == src_bytes:
+        for src in sorted(source.rglob("*")):
+            relative = src.relative_to(source)
+            if any(
+                part in {"data", "installed.json", "__pycache__"}
+                for part in relative.parts
+            ):
+                continue
+            if not src.is_file() or src.is_symlink():
+                continue
+            dest = destination / relative
+            if dest.is_file() and dest.read_bytes() == src.read_bytes():
+                continue
+            if any(
+                parent.is_symlink()
+                for parent in [dest, *dest.parents]
+                if parent != destination.parent
+            ):
+                raise OSError(f"Refusing native bundle symlink: {relative}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+            changed = True
+        if not changed:
             return
-        dest_manifest.write_bytes(src_bytes)
-        meta = _read_installed(name)
-        if meta is not None:
-            meta.version = manifest.version
-            meta.displayName = manifest.displayName or name
-            meta.updatedAt = _now_iso()
-            _write_installed(name, meta)
-
         registry = _provider_registry()
         registered = registry.get(name)
         if registered is not None:
@@ -1275,9 +1351,9 @@ def _resync_native_manifest(
             registry.deregister(name)
             if manifest.all_providers():
                 registry.register(manifest, enabled=enabled)
-        logger.info("Re-synced native app manifest %r from packaged source", name)
+        logger.info("Re-synced native app bundle %r from packaged source", name)
     except (OSError, ValueError):
-        logger.debug("Could not re-sync native manifest %s", name, exc_info=True)
+        logger.warning("Could not re-sync native bundle %s", name, exc_info=True)
 
 
 def seed_builtin_apps() -> list[str]:
@@ -1318,16 +1394,21 @@ def seed_builtin_apps() -> list[str]:
             continue
         name = manifest.name
         if name in seeded:
-            _resync_native_manifest(name, manifest_file, manifest)
+            _resync_native_bundle(name, entry, manifest)
             continue
         seeded.add(name)
         changed = True
         dest = app_dir(name)
         if dest.exists():
+            _resync_native_bundle(name, entry, manifest)
             newly.append(name)
             continue
         try:
-            shutil.copytree(entry, dest)
+            shutil.copytree(
+                entry,
+                dest,
+                ignore=shutil.ignore_patterns("data", "installed.json", "__pycache__"),
+            )
             (dest / _APP_DATA_DIRNAME).mkdir(parents=True, exist_ok=True)
             meta = InstalledApp(
                 name=name,
@@ -1348,21 +1429,6 @@ def seed_builtin_apps() -> list[str]:
             shutil.rmtree(dest, ignore_errors=True)
     if changed:
         _write_seed_marker(seeded)
-    _OLLAMA_MIGRATION_NAME = "ollama-models"
-    if _OLLAMA_MIGRATION_NAME in seeded:
-        ollama_meta = _read_installed(_OLLAMA_MIGRATION_NAME)
-        if ollama_meta is not None and ollama_meta.origin == "builtin":
-            manifest_check = _manifest_of(_OLLAMA_MIGRATION_NAME)
-            if manifest_check is None or not manifest_check.native:
-                ollama_meta.origin = "local"
-                ollama_meta.updatedAt = _now_iso()
-                _write_installed(_OLLAMA_MIGRATION_NAME, ollama_meta)
-                logger.info(
-                    "migrated %s from builtin→local (de-cored)", _OLLAMA_MIGRATION_NAME
-                )
-        seeded.discard(_OLLAMA_MIGRATION_NAME)
-        _write_seed_marker(seeded)
-
     return newly
 
 
@@ -1692,7 +1758,7 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
     staged = _data_stage_dir(name)
     try:
         if had_data:
-            shutil.copytree(live_data, staged)
+            _copy_live_tree(live_data, staged)
     except OSError as exc:
         shutil.rmtree(staged, ignore_errors=True)
         _audit(

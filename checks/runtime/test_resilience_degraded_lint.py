@@ -14,8 +14,8 @@ key — the owning file is.
 
 from __future__ import annotations
 
+import ast
 import pathlib
-import re
 
 from gideon.operations.resilience import degraded
 
@@ -51,7 +51,19 @@ _CALL_SITE_SURFACES = {
     "packs/prompt_cards.py": "assistant_reasoning",
 }
 
-_CALL_RE = re.compile(r"\bone_shot_completion\s*\(")
+
+def _calls_one_shot(text: str) -> bool:
+    return any(
+        isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "one_shot_completion")
+            or (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "one_shot_completion"
+            )
+        )
+        for node in ast.walk(ast.parse(text))
+    )
 
 
 def _files_calling_one_shot() -> set[str]:
@@ -62,7 +74,7 @@ def _files_calling_one_shot() -> set[str]:
         if path.name == "llm_helpers.py":
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if _CALL_RE.search(text):
+        if _calls_one_shot(text):
             hits.add(path.relative_to(_SRC).as_posix())
     return hits
 
@@ -95,3 +107,9 @@ def test_map_has_no_stale_entries():
     assert (
         not stale
     ), f"Stale _CALL_SITE_SURFACES entries (file no longer calls one_shot): {sorted(stale)}"
+
+
+def test_call_census_ignores_prose():
+    assert not _calls_one_shot('# one_shot_completion()\n"one_shot_completion()"')
+    assert _calls_one_shot("await helper.one_shot_completion([])")
+    assert len(_files_calling_one_shot()) >= 20

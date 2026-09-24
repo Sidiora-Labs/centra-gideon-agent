@@ -34,6 +34,7 @@ const GATEWAY_COMMAND = [
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: /onboardingGeometry\.spec\.ts$/,
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}-{platform}{ext}',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

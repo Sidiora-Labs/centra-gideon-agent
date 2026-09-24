@@ -12,6 +12,7 @@ from aiohttp import web
 from gideon.cognition.vector_memory import SemanticRejectCode
 from gideon.core.atomic_write import atomic_write
 from gideon.core.http_request import RequestBodyTypeError, read_json_body, string_field
+from gideon.http_download import download_headers
 from gideon.interfaces.dashboard.handlers._shared import (
     _blocks_reads_session,
     _get_memory,
@@ -1415,7 +1416,7 @@ async def api_memory_graph_export(request: web.Request) -> web.Response:
         text=document,
         content_type="text/html",
         charset="utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={**download_headers(filename)},
     )
 
 
@@ -1548,3 +1549,30 @@ async def api_memory_volunteer_stats(request: web.Request) -> web.Response:
             "min_confidence": float(getattr(cfg, "push_min_confidence", 0.7)),
         }
     )
+
+
+async def api_memory_facet(request: web.Request) -> web.Response:
+    try:
+        body = await read_json_body(request)
+    except (ValueError, TypeError):
+        return web.json_response({"error": "body must be JSON"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "body must be an object"}, status=400)
+    key = body.get("key")
+    action = body.get("action")
+    if not isinstance(key, str) or not key.startswith("pref.facet."):
+        return web.json_response({"error": "facet key is required"}, status=400)
+    if action not in ("pin", "forget") or (
+        action == "pin" and not isinstance(body.get("pinned", True), bool)
+    ):
+        return web.json_response({"error": "invalid facet action"}, status=400)
+    svc = _get_service(request.app["state"])
+    operation = (
+        (lambda: svc.pin_facet(key, body.get("pinned", True)))
+        if action == "pin"
+        else lambda: svc.forget_facet(key)
+    )
+    ok = await asyncio.to_thread(operation)
+    if not ok:
+        return web.json_response({"error": "facet not found"}, status=404)
+    return web.json_response({"ok": True})

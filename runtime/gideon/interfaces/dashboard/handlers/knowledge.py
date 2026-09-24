@@ -15,6 +15,7 @@ from uuid import uuid4
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gideon.cognition.knowledge.restructure import RestructureError
@@ -151,8 +152,8 @@ async def list_items(request: web.Request) -> web.Response:
         embed_fn = embedder.embed if embedder and embedder.is_available() else None
         retriever = HybridRetriever(store, embedder=embed_fn)
         include_archived = request.query.get("include_archived") in ("1", "true", "yes")
-        all_results = retriever.search(
-            q, limit=limit * 3, include_archived=include_archived
+        all_results = await asyncio.to_thread(
+            retriever.search, q, limit=limit * 3, include_archived=include_archived
         )
         result_ids = [r["id"] for r in all_results]
         if result_ids:
@@ -1588,7 +1589,7 @@ _CONTEXT_MAX_TOKENS_CEILING = 32000
 
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
-    return len(text) // 4
+    return len(text) // NOMINAL_CHARS_PER_TOKEN
 
 
 async def search_for_context(request: web.Request) -> web.Response:
@@ -1604,17 +1605,11 @@ async def search_for_context(request: web.Request) -> web.Response:
     if not q:
         return web.json_response({"error": "q parameter required"}, status=400)
 
-    from gideon.core.config.loader import config_path
+    from gideon.core.config.loader import AppConfig
 
-    cfg_path = config_path()
-    try:
-        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
-    except Exception:
-        cfg = {}
-    top_n = cfg.get("knowledge", {}).get("fetch_top_n", KNOWLEDGE_FETCH_TOP_N)
-    max_tokens = cfg.get("knowledge", {}).get(
-        "fetch_max_tokens", KNOWLEDGE_FETCH_MAX_TOKENS
-    )
+    config = AppConfig.load().knowledge
+    top_n = config.fetch_top_n
+    max_tokens = config.fetch_max_tokens
 
     try:
         limit = int(request.query.get("limit", top_n))
@@ -1634,7 +1629,7 @@ async def search_for_context(request: web.Request) -> web.Response:
     embedder = _get_embedder(request)
     embed_fn = embedder.embed if embedder and embedder.is_available() else None
     retriever = HybridRetriever(store, embedder=embed_fn)
-    results = retriever.search(q, limit=limit)
+    results = await asyncio.to_thread(retriever.search, q, limit=limit)
 
     cards = []
     total_tokens = 0
@@ -2505,8 +2500,7 @@ async def list_conflicts(request: web.Request) -> web.Response:
     about which source to trust, which is the owner's call — so there is deliberately no
     "resolve" endpoint that would let the system pick a winner on its own.
 
-    `basis` rides along on every row because a deterministic finding and a model's opinion warrant
-    different confidence, and a reader cannot tell them apart from the claim text alone.
+    Deterministic findings and unsettled candidate pairs are returned in separate lists.
     """
     store = _store(request)
     limit = _int_param(request, "limit", 100, low=1, high=500)
@@ -3171,7 +3165,8 @@ async def create_watched_source(request: web.Request) -> web.Response:
             },
             status=400,
         )
-    spec = body.get("spec") if isinstance(body.get("spec"), dict) else {}
+    raw_spec = body.get("spec")
+    spec = raw_spec if isinstance(raw_spec, dict) else {}
     err = _validated_spec(provider, spec)
     if err:
         return web.json_response({"error": err}, status=400)
@@ -3184,7 +3179,7 @@ async def create_watched_source(request: web.Request) -> web.Response:
         spec=spec,
         enrichment=enrichment,
         poll_interval_secs=int(
-            body.get("poll_interval_secs")
+            body.get("poll_interval_secs", 0)
             or getattr(provider, "poll_interval_seconds", 3600)
         ),
         budget=body.get("budget") if isinstance(body.get("budget"), dict) else {},

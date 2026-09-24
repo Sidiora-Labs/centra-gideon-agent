@@ -578,7 +578,13 @@ export interface AppCronSummary {
   name: string; every?: number; cron_expr?: string; agent?: string; message?: string
   cadence?: string
 }
+export interface RegistryProvenance {
+  maintainer?: string
+  lastValidated?: string
+  scanVerdict?: string
+}
 export interface AppCatalogEntry {
+  registry?: RegistryProvenance | null
   name: string; displayName: string; description: string; version: string
   icon: string; heroUrl?: string; author: string
   source: string; sourceKind: 'bundled' | 'native' | 'first-party' | 'local' | 'git'
@@ -665,7 +671,6 @@ export type KnowledgeConflict = {
   left_item: string
   right_item: string
   kind: 'value' | 'polarity' | 'number'
-  basis: 'deterministic' | 'model'
   prefer: 'left' | 'right' | ''
   detail: string
   confidence: number
@@ -3133,6 +3138,13 @@ export interface VoiceResolution {
 }
 
 export type LoopKind = 'general' | 'goal' | 'code' | 'design' | 'research'
+
+export interface CreatedLoopRun {
+  run_id: string
+  status: string
+  blocking: boolean
+  kind: LoopKind
+}
 export type UnifiedLoopStatus =
   | 'intake' | 'planning' | 'review' | 'ready' | 'running' | 'paused'
   | 'stagnant' | 'blocked' | 'needs_input' | 'complete' | 'failed' | 'stopped'
@@ -3790,6 +3802,8 @@ export const api = {
       if (!r.ok) throw await apiError(r)
       return r.text()
     }),
+  memoryPinFacet: (key: string, pinned: boolean) => post<{ ok: boolean }>('/api/memory/facets', { key, action: 'pin', pinned }),
+  memoryForgetFacet: (key: string) => post<{ ok: boolean }>('/api/memory/facets', { key, action: 'forget' }),
   memorySlots: () => get<MemorySlotsResponse>('/api/memory/slots'),
   memorySlotAppend: async (name: string, text: string): Promise<MemorySlotAppendResult> => {
     const r = await fetch(`/api/memory/slots/${encodeURIComponent(name)}/lines`, {
@@ -4191,7 +4205,7 @@ export const api = {
     post<UnifiedLoopClassification>('/api/loops/classify', { kind, task }),
   grillTree: (id: string) => post<GrillTreeResult>(`/api/loops/${encodeURIComponent(id)}/grill-tree`, {}),
   validateULoop: (body: Record<string, unknown>) => post<LoopValidation>('/api/loops/validate', body),
-  createULoop: (body: Record<string, unknown>) => post<Loop>('/api/loops', body),
+  createULoop: (body: Record<string, unknown>) => post<Loop | CreatedLoopRun>('/api/loops', body),
   updateULoop: (id: string, body: Record<string, unknown>) => put<Loop>(`/api/loops/${encodeURIComponent(id)}`, body),
   uLoopAction: (id: string, action: 'start' | 'pause' | 'resume' | 'stop') =>
     fetch(`/api/loops/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...SK }, body: JSON.stringify({ action }) }).then(j<Loop>),

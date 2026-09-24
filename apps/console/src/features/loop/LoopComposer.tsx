@@ -16,6 +16,8 @@ import { api, type Granularity, type LoopKind } from '../../shared/data/api'
 import type { ComposerControls } from '../../shared/ui/composer/types'
 import { notify } from '../../app/shell/appSdk'
 import { isNoModelSetupError } from '../chat/NoModelSetupState'
+import type { CreatedLoopRun, Loop } from '../../shared/data/api'
+import { isCreatedLoopRun } from './creation'
 
 
 const KINDS: { id: LoopKind; label: string; blurb: string }[] = [
@@ -58,7 +60,7 @@ function designInputType(name: string): string {
 const DESIGN_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.svg,.avif,.bmp,.mp4,.mov,.webm,.m4v,.html,.htm,.jsx,.tsx,.js,.ts,.md'
 
 export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKind, initialWorkspace }: {
-  onCreated: (loopId: string, kind: LoopKind, planning: boolean) => void
+  onCreated: (created: Loop | CreatedLoopRun, planning: boolean) => void
   onHistory: () => void
   initialProjectId?: string
   initialKind?: LoopKind
@@ -154,12 +156,13 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
       const v = await api.validateULoop(body).catch(() => null)
       if (v && !v.can_start) { setError((v.errors ?? ['Validation failed']).join(' · ')); setBusy(false); return }
       const loop = await api.createULoop(body)
+      if (isCreatedLoopRun(loop)) { onCreated(loop, false); return }
       const filesDir = loop.files_dir
       if (kind === 'design' && designFiles.length && filesDir) {
         await reportingWrite(`upload ${designFiles.length === 1 ? 'that file' : `those ${designFiles.length} files`}`,
           () => api.fileUpload(filesDir, designFiles))
       }
-      onCreated(loop.id, kind, (cls.intake_rigor ?? 'grill') !== 'minimal')
+      onCreated(loop, (cls.intake_rigor ?? 'grill') !== 'minimal')
     } catch (e) {
       setError((e as Error).message || 'Could not create the loop'); setBusy(false)
     }

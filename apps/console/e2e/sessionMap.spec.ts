@@ -1,19 +1,49 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { gotoRoute } from './helpers'
 import { SCRIPTED } from '../playwright.config'
 
 const PROMPT = 'Open the desktop Session Map.'
 
+async function assertMapPosition(rail: Locator, count: number) {
+  const current = rail.locator('[data-session-marker][data-current="true"]')
+  await expect(current).toHaveCount(1)
+  await expect(current).toHaveAttribute('aria-current', 'location')
+  await expect.poll(async () => rail.evaluate((element) => {
+    const marks = Array.from(element.querySelectorAll('[data-session-marker]'))
+    const index = marks.findIndex((mark) => mark.getAttribute('data-current') === 'true')
+    return {
+      count: marks.length,
+      consistent: index >= 0 && element.querySelector('[role="status"]')?.textContent
+        === `Message ${index + 1} of ${marks.length}`,
+    }
+  })).toEqual({ count, consistent: true })
+}
+
+async function sendTurn(page: Page, rail: Locator, previousCount: number) {
+  const expectedCount = previousCount + 2
+  const composer = page.getByRole('textbox', { name: 'Message input' })
+  const prompt = `${PROMPT} Turn ${expectedCount / 2}.`
+  await expect(rail.locator('[data-session-marker]')).toHaveCount(previousCount)
+  await composer.fill(prompt)
+  const send = page.getByRole('button', { name: 'Send message', exact: true })
+  await expect(send).not.toHaveAttribute('aria-disabled', 'true')
+  await send.click()
+  const markers = rail.locator('[data-session-marker]')
+  await expect(markers).toHaveCount(expectedCount, { timeout: 60_000 })
+  await expect(markers.nth(previousCount)).toContainText(prompt)
+  await expect(markers.nth(expectedCount - 1)).toContainText(SCRIPTED.reply, { timeout: 60_000 })
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0, { timeout: 60_000 })
+  await expect(page.getByRole('button', { name: 'Regenerate', exact: true })).toBeVisible()
+  await expect(rail).toHaveAttribute('data-session-map-state', 'open')
+  await assertMapPosition(rail, expectedCount)
+  return expectedCount
+}
+
 async function openPopulatedSessionMap(page: Page) {
   await gotoRoute(page, 'chat')
-  const composer = page.getByRole('textbox', { name: 'Message input' })
-  await composer.click()
-  await composer.pressSequentially(PROMPT)
-  await page.getByRole('button', { name: 'Send message', exact: true }).click()
-  await expect(page.getByText(SCRIPTED.reply, { exact: false }).first()).toBeVisible({ timeout: 60_000 })
   const rail = page.getByRole('region', { name: 'Session map messages' })
-  await expect(rail).toHaveAttribute('data-session-map-state', 'open')
+  await sendTurn(page, rail, 0)
   return rail
 }
 
@@ -55,6 +85,16 @@ test.describe('desktop Session Map', () => {
     }
   })
 
+  test('waits for each new turn even when assistant replies repeat', async ({ page }) => {
+    const rail = await openPopulatedSessionMap(page)
+    let completedMarkers = 2
+    for (let turn = 0; turn < 2; turn++) {
+      completedMarkers = await sendTurn(page, rail, completedMarkers)
+    }
+    await expect(rail.locator('[data-session-marker]')).toHaveCount(6)
+    await expect(rail.getByRole('status', { name: 'Session map position' })).toHaveText(/Message \d+ of 6/)
+  })
+
   test('walks the rail with Arrow keys, Home, and End', async ({ page }) => {
     const rail = await openPopulatedSessionMap(page)
     const markers = rail.locator('[data-session-marker]')
@@ -69,5 +109,6 @@ test.describe('desktop Session Map', () => {
     await expect(markers.last()).toBeFocused()
     await page.keyboard.press('ArrowUp')
     await expect(markers.first()).toBeFocused()
+    await assertMapPosition(rail, 2)
   })
 })

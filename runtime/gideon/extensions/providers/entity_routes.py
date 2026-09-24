@@ -40,22 +40,22 @@ def _entity_settings_path(entity: str) -> Path:
     return config_dir() / "entity_settings" / f"{entity}.json"
 
 
-def _load_entity_settings(entity: str) -> dict[str, Any]:
+def _load_entity_settings(entity: str) -> dict[str, Any] | None:
     path = _entity_settings_path(entity)
     try:
-        if not path.is_file():
-            return {}
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
         logger.warning(
             "discarding non-object entity settings for %s at %s", entity, path
         )
-    except (json.JSONDecodeError, OSError):
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, UnicodeError, OSError):
         logger.warning(
             "failed to load entity settings for %s at %s", entity, path, exc_info=True
         )
-    return {}
+    return None
 
 
 def _save_entity_settings(entity: str, settings: dict[str, Any]) -> None:
@@ -79,7 +79,7 @@ def legacy_inbox_alert_fields() -> dict[str, Any]:
     now drops these keys — which is the point of retiring them. Returns ``{}`` when the file
     is absent or the keys are already gone.
     """
-    raw = _load_entity_settings("inbox")
+    raw = _load_entity_settings("inbox") or {}
     return {k: raw[k] for k in _LEGACY_ALERT_KEYS if k in raw}
 
 
@@ -92,6 +92,8 @@ def load_inbox_settings() -> dict[str, Any]:
     (taking the tighter DM window) and drops unknown keys; the store itself
     self-heals on the next PUT."""
     raw = _load_entity_settings("inbox")
+    if raw is None:
+        return {**INBOX_DEFAULTS, "auto_cleanup_enabled": False}
     if "retention_days" not in raw and "dm_retention_days" in raw:
         try:
             raw["retention_days"] = int(raw["dm_retention_days"])
@@ -158,7 +160,7 @@ def load_notifications_settings() -> dict[str, Any]:
     notification-delivery providers, but no provider declares
     ``type=notification`` and no delivery consumer exists — see the
     EntitySeamHandler registration in providers/registry.py)."""
-    raw = _load_entity_settings("notifications")
+    raw = _load_entity_settings("notifications") or {}
     if "mute_all" not in raw and "master_mute" in raw:
         raw["mute_all"] = bool(raw["master_mute"])
     known = {k: v for k, v in raw.items() if k in NOTIFICATIONS_DEFAULTS}

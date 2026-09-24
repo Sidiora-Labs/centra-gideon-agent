@@ -26,3 +26,8 @@ class VectorStoreProvider(ABC):
 
     @abstractmethod
     def delete_item(self, item_id: str) -> None: ...
+
+    @abstractmethod
+    def describe(self) -> dict[str, Any]:
+        """Read-only health report with reachable (bool) and stored vector count (int)."""
+        ...

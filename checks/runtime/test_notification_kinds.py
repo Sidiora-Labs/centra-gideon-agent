@@ -640,7 +640,6 @@ def test_frontend_display_map_kinds_all_resolve():
         "status",
         "progress",
         "complete",
-        "stalled",
         "retire",
         "route_drift",
         "update",
@@ -665,3 +664,16 @@ def test_the_tolerated_list_does_not_outlive_its_reason():
         assert (
             key in bare or key == "schedule"
         ), f"{key!r} is not a registered kind at all"
+
+
+def test_retired_stalled_display_key_is_not_tolerated():
+    keys = _frontend_kind_keys()
+    assert keys, "notification display map must be present for this parity check"
+    assert "stalled" not in keys
+    assert "stalled" not in _wire_vocabulary()
+    assert nk.kind_for_legacy_pair("loop", "stalled") == "loop_stalled"
+    assert "loop_stalled" in keys
+    assert (
+        _frontend_kind_labels()["loop_stalled"]
+        == nk.resolve_kind("loop", "stalled").label
+    )

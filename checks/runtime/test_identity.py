@@ -15,7 +15,6 @@ from gideon.cognition.identity import (
     current_username,
     is_valid_username,
     slugify_username,
-    suggest_username,
 )
 
 
@@ -67,8 +66,10 @@ class TestSlugify:
         assert not is_valid_username("Keyur Golani")
         assert is_valid_username("")
 
-    def test_suggest_from_display_name(self):
-        assert suggest_username("Keyur Golani") == "keyur-golani"
+    def test_backend_suggestion_is_retired(self):
+        from gideon.cognition import identity
+
+        assert not hasattr(identity, "suggest_username")
 
 
 class TestConfigRoundTrip:
@@ -241,3 +242,24 @@ class TestDashboardConfigEndpoint:
 
         src = Path(files_mod.__file__).read_text(encoding="utf-8")
         assert '"username": cfg.dashboard.username' in src
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handle", ["Ada Lovelace", "", "x" * 100])
+async def test_saved_onboarding_identity_attributes_real_task_writes(
+    tmp_path, monkeypatch, handle
+):
+    import gideon.core.config.loader as loader
+    from gideon.engine.tasks.native import NativeTaskProvider
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
+    cfg = loader.AppConfig()
+    cfg.dashboard.user_name = "Ada Lovelace"
+    cfg.dashboard.username = handle
+    cfg.save()
+    restored = loader.AppConfig.load()
+    assert restored.dashboard.user_name == "Ada Lovelace"
+    assert restored.dashboard.username == slugify_username(handle)
+    task = await NativeTaskProvider().create_task(title="First attributed task")
+    assert task.author == slugify_username(handle)

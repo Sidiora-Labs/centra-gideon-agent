@@ -181,7 +181,7 @@ class RepeatableListReset:
                     for key, value in fields.items()
                     if key not in ENGINE_OWNED_FIELDS
                 }
-            await registry.update_task(task.id, **fields)
+            await registry.update_task(task.id, None, **fields)
             reset_ids.append(task.id)
         return web.json_response({"ok": True, "reset_task_ids": reset_ids})
 

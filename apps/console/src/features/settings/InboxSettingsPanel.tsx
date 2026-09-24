@@ -5,7 +5,7 @@ import { PanelHeader, Section, Row, Toggle, SavedToast } from './settingsUI'
 import { TriageRulesCard } from './TriageRulesCard'
 import { NumberField } from '../../shared/ui/forms'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
-import { InlineError } from '../../shared/ui/InlineError'
+import { InboxConfigBoundary } from '../inbox/InboxConfigBoundary'
 import { notify } from '../../app/shell/appSdk'
 import { TextLink } from '../../shared/ui/TextLink'
 
@@ -19,20 +19,22 @@ export function InboxSettingsPanel() {
   const [cfgErr, setCfgErr] = useState('')
 
   const { data, error: loadErr, refresh } = useQuery('settings:inbox', () => api.inboxSettings(), { persist: true })
-  const { data: config, error: configError, refresh: refreshConfig } = useQuery('settings:inbox-config', () => api.gideonConfig())
+  const { data: config, error: configError, revalidating: cfgLoading, refresh: refreshConfig } = useQuery('settings:inbox-config', () => api.gideonConfig())
   useEffect(() => { if (data) setS(data) }, [data])
 
   useEffect(() => {
-    if (config) {
+    if (cfgLoading) {
+      setCfgErr('')
+    } else if (configError) {
+      setCfgErr(String((configError as Error)?.message || configError))
+    } else if (config) {
       setEngagementOn(Boolean(config?.inbox?.engagement_ranking_enabled))
       setSourcesOn(Boolean(config?.inbox?.enabled))
       setTriageOn(Boolean(config?.proactive?.triage_enabled))
       setAutoExecOn(Boolean(config?.proactive?.auto_execute_enabled))
       setCfgErr('')
-    } else if (configError) {
-      setCfgErr(String((configError as Error)?.message || configError))
     }
-  }, [config, configError])
+  }, [config, configError, cfgLoading])
 
   const patch = (p: Partial<InboxSettings>) => {
     const prev = s
@@ -95,6 +97,7 @@ export function InboxSettingsPanel() {
       {
 }
       <Section title="Collection" hint="What the inbox gathers, and how it is ordered.">
+        <InboxConfigBoundary cfgErr={cfgErr} loading={cfgLoading || sourcesOn === null || engagementOn === null} onRetry={refreshConfig}>
         <Row label="Poll message sources"
           hint="Collect messages from connected poll sources (filesystem drops; channel apps). Agents can always post here directly.">
           <Toggle on={!!sourcesOn} onChange={setSources} label="Poll message sources" disabled={sourcesOn === null} />
@@ -103,16 +106,13 @@ export function InboxSettingsPanel() {
           hint="Rank the inbox by how much you engage with each channel/sender (favorites, opens, replies boost; dismisses lower) on top of recency. Off = pure newest-first.">
           <Toggle on={!!engagementOn} onChange={setEngagement} label="Engagement ranking" disabled={engagementOn === null} />
         </Row>
+        </InboxConfigBoundary>
       </Section>
 
       {
 }
       <Section title="Proactive triage" hint="One scheduled digest of what accumulated, with proposals you answer. Off by default; nothing is collected or spent while it is off.">
-        {cfgErr && (
-          <div className="mb-m">
-            <InlineError icon>Couldn't read your triage settings: {cfgErr}</InlineError>
-          </div>
-        )}
+        <InboxConfigBoundary cfgErr={cfgErr} loading={cfgLoading || triageOn === null || autoExecOn === null} onRetry={refreshConfig}>
         <Row label="Morning triage digest" hint="Collect, filter and propose on a schedule. Turning this off retires the schedule and keeps every rule you taught — turning it back on is lossless.">
           <Toggle on={!!triageOn} onChange={setTriage} label="Morning triage digest"
             disabled={triageOn === null}
@@ -125,6 +125,7 @@ export function InboxSettingsPanel() {
               ? 'Still reading your configuration — this switch appears once it loads.'
               : 'Turn the Morning triage digest on first — there is nothing to auto-execute without it.'} />
         </Row>
+        </InboxConfigBoundary>
       </Section>
 
       <TriageRulesCard />

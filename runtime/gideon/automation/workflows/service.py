@@ -57,6 +57,8 @@ from gideon.automation.workflows.models import (
     RunStatus,
     WorkflowDef,
     WorkflowRun,
+    sibling_group,
+    spec_path,
     valid_name,
     walk,
 )
@@ -67,6 +69,7 @@ logger = logging.getLogger(__name__)
 MIN_OBSERVE_MS = 100
 MAX_OBSERVE_MS = 30_000
 DEFAULT_OBSERVE_MS = 5_000
+PORTED_LOOP_KINDS = frozenset({"general"})
 
 
 def _service_failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -661,6 +664,25 @@ async def start_run(
     return _ok(run_id=run.id, status=RunStatus.RUNNING.value, blocking=False)
 
 
+async def start_kind_run(
+    *,
+    kind: str,
+    inputs: dict[str, Any] | None = None,
+    **options: Any,
+) -> dict[str, Any]:
+    from gideon.automation.workflows.bundled_defs import register_bundled_provider
+    from gideon.automation.workflows.loop_aliases import resolve_kind
+
+    normalized = str(kind or "").strip().lower()
+    if normalized not in PORTED_LOOP_KINDS:
+        return _service_failure(
+            "WF_KIND_NOT_SUPPORTED",
+            f"loop kind {kind!r} has no bundled convergence launch",
+        )
+    register_bundled_provider()
+    return await start_run(name=resolve_kind(normalized), inputs=inputs, **options)
+
+
 async def start_draft(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
     """Launch an existing prelaunch run after its draft controls have been reviewed."""
     run = store.get(run_id)
@@ -783,11 +805,7 @@ def output(run_id: str, node_id: str) -> dict[str, Any]:
             "WF_NODE_NOT_FOUND", f"no node {node_id!r} in this run's spec"
         )
     instances = store.read_state(run_id)
-    matched = [
-        p
-        for p in instances
-        if any(p == b or p.startswith(f"{b}#") or p.startswith(f"{b}@") for b in paths)
-    ]
+    matched = [p for p in instances if spec_path(p) in paths]
     if not matched:
         return _service_failure(
             "WF_NODE_NOT_RUN", f"node {node_id!r} has not produced an output yet"
@@ -848,13 +866,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
         )
 
     instances = store.read_state(run_id)
-    matched = [
-        p
-        for p in instances
-        if any(
-            p == b or p.startswith(f"{b}#") or p.startswith(f"{b}@") for b in id_paths
-        )
-    ]
+    matched = [p for p in instances if spec_path(p) in id_paths]
     if not matched:
         return _service_failure(
             "WF_NODE_NOT_RUN", f"node {node_id!r} has not produced an output yet"
@@ -867,7 +879,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
             f"node {node_id!r} is {inst.state.value}, not terminal — nothing to reconstruct yet",
         )
 
-    base = target.split("#")[0].split("@")[0]
+    base = spec_path(target)
     node = node_by_path.get(base)
 
     node_events = [
@@ -899,15 +911,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
     for dep in sorted(node_deps(node.config or {}) if node else set()):
         dep_base = id_to_base.get(dep)
         dep_matches = (
-            [
-                ip
-                for ip in instances
-                if ip == dep_base
-                or ip.startswith(f"{dep_base}#")
-                or ip.startswith(f"{dep_base}@")
-            ]
-            if dep_base
-            else []
+            [ip for ip in instances if spec_path(ip) == dep_base] if dep_base else []
         )
         resolved_inputs[dep] = (
             store.read_output(run_id, sorted(dep_matches)[-1]) if dep_matches else None
@@ -2187,14 +2191,13 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
             pass
     totals: dict[str, int] = {}
     for path in instances:
-        totals[path.split("#")[0].split("@")[0]] = (
-            totals.get(path.split("#")[0].split("@")[0], 0) + 1
-        )
+        group = sibling_group(path)
+        totals[group] = totals.get(group, 0) + 1
 
     out: list[dict[str, Any]] = []
     for path in sorted(instances):
         inst = instances[path]
-        base = path.split("#")[0].split("@")[0]
+        base = spec_path(path)
         row: dict[str, Any] = {
             "instance_path": path,
             "node_id": ids.get(base, ""),
@@ -2203,10 +2206,11 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
             "degraded_reason": inst.degraded_reason,
             "failure": inst.failure.to_dict() if inst.failure else None,
         }
-        suffix = re.search(r"[#@](\d+)$", path)
-        if suffix and totals.get(base, 0) > 1:
-            row["item_index"] = int(suffix.group(1))
-            row["item_total"] = totals[base]
+        markers = list(re.finditer(r"[#@](\d+)(?=\.|$)", path))
+        total = inst.item_total or totals.get(sibling_group(path), 0)
+        if markers and (inst.item_total > 0 or total > 1):
+            row["item_index"] = int(markers[-1].group(1))
+            row["item_total"] = total
             if inst.item_label:
                 row["item_label"] = inst.item_label
         out.append(row)

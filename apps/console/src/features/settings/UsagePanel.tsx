@@ -1,3 +1,4 @@
+import { LoadError, FormSkeleton } from '../../shared/ui/ListScaffold'
 import { useMemo } from 'react'
 import { Coins } from 'lucide-react'
 import { api, type UsageAgg, type UsageFold } from '../../shared/data/api'
@@ -56,41 +57,49 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
   const days = (PERIODS.find((p) => p.id === period) ?? PERIODS[0]).days
   const since = useMemo(() => _sinceIso(days), [days])
 
-  const { data: totals } = useQuery(
+  const { data: totals, error: totalsErr, refresh: refreshTotals } = useQuery(
     `settings:usage-totals:${period}`,
-    () => api.usageTotals({ since }).then((d) => d.totals).catch(() => null),
+    () => api.usageTotals({ since }).then((d) => d.totals),
     { persist: false },
   )
-  const { data: byModel } = useQuery(
+  const { data: byModel, error: byModelErr, refresh: refreshByModel } = useQuery(
     `settings:usage-rollup:model:${period}`,
-    () => api.usageRollup({ group_by: 'model', since }).then((d) => d.rows).catch(() => []),
+    () => api.usageRollup({ group_by: 'model', since }).then((d) => d.rows),
     { persist: false },
   )
-  const { data: bySource } = useQuery(
+  const { data: bySource, error: bySourceErr, refresh: refreshBySource } = useQuery(
     `settings:usage-rollup:source:${period}`,
-    () => api.usageRollup({ group_by: 'source', since }).then((d) => d.rows).catch(() => []),
+    () => api.usageRollup({ group_by: 'source', since }).then((d) => d.rows),
     { persist: false },
   )
-  const { data: cfg } = useQuery(
+  const { data: cfg, error: cfgErr, refresh: refreshCfg } = useQuery(
     'settings:guardrails-config',
-    () => api.gideonConfig().then((c) => c?.guardrails?.budgets ?? null).catch(() => null),
+    () => api.gideonConfig().then((c) => c?.guardrails?.budgets ?? null),
     { persist: false },
   )
-  const { data: todayTotals } = useQuery(
+  const { data: todayTotals, error: todayTotalsErr, refresh: refreshTodayTotals } = useQuery(
     'settings:usage-totals:today',
-    () => api.usageTotals({ since: _sinceIso(1) }).then((d) => d.totals).catch(() => null),
+    () => api.usageTotals({ since: _sinceIso(1) }).then((d) => d.totals),
     { persist: false },
   )
-  const { data: sys } = useQuery(
+  const { data: sys, error: sysErr, refresh: refreshSys } = useQuery(
     'settings:usage-system-stats',
-    () => api.system().then((s) => s.stats ?? null).catch(() => null),
+    () => api.system().then((s) => s.stats ?? null),
     { persist: false },
   )
-  const { data: fold } = useQuery(
+  const { data: fold, error: foldErr, refresh: refreshFold } = useQuery(
     `settings:usage-fold:${period}`,
-    () => api.usageFold({ window: FOLD_WINDOW[period] ?? 'day', group: 'purpose' }).catch(() => null),
+    () => api.usageFold({ window: FOLD_WINDOW[period] ?? 'day', group: 'purpose' }),
     { persist: false },
   )
+
+  const loadErr = totalsErr || byModelErr || bySourceErr || cfgErr || todayTotalsErr || sysErr || foldErr
+  const refresh = () => {
+    refreshTotals(); refreshByModel(); refreshBySource(); refreshCfg()
+    refreshTodayTotals(); refreshSys(); refreshFold()
+  }
+  if (loadErr) return <LoadError what="usage" error={loadErr} onRetry={refresh} />
+  if ([totals, byModel, bySource, cfg, todayTotals, sys, fold].some((value) => value === undefined)) return <FormSkeleton sections={3} what="usage" />
 
   const t: UsageAgg | null = totals ?? null
   const cacheTokens = (t?.cache_read_tokens ?? 0) + (t?.cache_creation_tokens ?? 0)

@@ -71,14 +71,12 @@ def _rebuild_agent_config_safe() -> None:
         )
 
 
-def _refresh_tool_provider_safe(name: str) -> None:
-    """Re-register a generic multiInstance TOOL provider after its instance set
-    changed, so newly-added/edited/removed instances become live tool providers
-    without a restart. mcp-tools has its own path (live mcp.json registry); this
-    covers the OTHER tool apps (e.g. openai-tools) whose ToolTypeHandler.create
-    rebuilds one provider per enabled instance. disable→enable re-runs create()
-    against the current on-disk instance set (disk = source of truth), then the
-    agent config is rebuilt. Best-effort; never raises."""
+def _refresh_instance_provider_safe(name: str) -> None:
+    """Re-register multiInstance model and tool providers from their saved instances.
+
+    mcp-tools retains its separate live-registry refresh path. Best-effort;
+    never raises.
+    """
     try:
         from gideon.extensions.providers.registry import get_provider_registry
 
@@ -86,7 +84,7 @@ def _refresh_tool_provider_safe(name: str) -> None:
         ext = registry.get(name)
         if (
             not ext
-            or ext.provider_config.type != "tool"
+            or ext.provider_config.type not in ("tool", "model")
             or not ext.provider_config.multiInstance
         ):
             return
@@ -96,7 +94,7 @@ def _refresh_tool_provider_safe(name: str) -> None:
         _rebuild_agent_config_safe()
     except Exception:
         logger.warning(
-            "tool-provider refresh failed after instance change for %s",
+            "provider refresh failed after instance change for %s",
             name,
             exc_info=True,
         )
@@ -216,7 +214,7 @@ async def handle_create_instance(request: web.Request) -> web.Response:
         return web.json_response({"instance": mask_instance(inst, schema)}, status=201)
 
     inst = create_instance(name, display_name=display_name, config=config)
-    _refresh_tool_provider_safe(name)
+    _refresh_instance_provider_safe(name)
     return web.json_response({"instance": mask_instance(inst, schema)}, status=201)
 
 
@@ -326,7 +324,7 @@ async def handle_update_instance(request: web.Request) -> web.Response:
         return json_error(
             "not_found", message="No instance exists with that id.", status=404
         )
-    _refresh_tool_provider_safe(name)
+    _refresh_instance_provider_safe(name)
     return web.json_response({"instance": mask_instance(inst, schema)})
 
 
@@ -348,7 +346,7 @@ async def handle_delete_instance(request: web.Request) -> web.Response:
         return json_error(
             "not_found", message="No instance exists with that id.", status=404
         )
-    _refresh_tool_provider_safe(name)
+    _refresh_instance_provider_safe(name)
     return web.json_response({"ok": True})
 
 

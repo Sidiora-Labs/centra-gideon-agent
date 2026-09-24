@@ -808,7 +808,7 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
     go through ``store.replace_chunks``, which is what keeps the ANN index (KL-11) in step
     — a bulk writer taking any other route would leave that index stale.
 
-    All of an item's chunks are embedded in ONE pass through ``embed_batch.embed_texts``
+    Changed or missing chunks are embedded in ONE pass through ``embed_batch.embed_texts``
     (KL-15) rather than one provider call per chunk. Two things change beyond the round
     trips: a transient failure is now retried with backoff instead of being swallowed by an
     inline ``except Exception: vec = None``, and a group that fails in a batch-shaped way is
@@ -821,7 +821,7 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
     vector-less (still FTS/keyword reachable) rather than dropped. Re-index embedders that
     expose only ``embed_for_item`` are adapted to the same single-text contract so repairing
     item vectors cannot leave the chunk layer stale."""
-    from gideon.cognition.knowledge.chunking import chunk_text
+    from gideon.cognition.knowledge.chunking import chunk_text, content_digest
     from gideon.cognition.knowledge.embed_batch import embed_texts
     from gideon.cognition.knowledge.embedder import floats_to_bytes
 
@@ -838,13 +838,35 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
     try:
         provider, model = embedding_space_fingerprint(embedder)
         chunks = chunk_text(content)
-        if chunks:
+        carried = {}
+        if provider and model:
+            for row in store.db.execute(
+                "SELECT section_key, section_digest, text, embedding FROM chunks "
+                "WHERE item_id = ? AND embedding_provider = ? AND embedding_model = ? "
+                "AND embedding IS NOT NULL AND section_digest <> ''",
+                (item_id, provider, model),
+            ):
+                key = (
+                    row["section_key"],
+                    row["section_digest"],
+                    content_digest(row["text"]),
+                )
+                carried[key] = row["embedding"]
+        pending = []
+        for c in chunks:
+            key = (c.section_key, c.section_digest, content_digest(c.text))
+            c.embedding = carried.get(key)
+            if c.embedding:
+                c.embedding_provider, c.embedding_model = provider, model
+            else:
+                pending.append(c)
+        if pending:
             vectors = embed_texts(
-                [c.text for c in chunks],
+                [c.text for c in pending],
                 embed_many=active_batch_embed_fn(embedder),
                 embed_one=embed_one,
             )
-            for c, vec in zip(chunks, vectors):
+            for c, vec in zip(pending, vectors):
                 c.embedding = floats_to_bytes(vec) if vec else None
                 c.embedding_provider = provider if vec else ""
                 c.embedding_model = model if vec else ""

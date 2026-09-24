@@ -116,7 +116,14 @@ class CdpPageDriver:
     so there is exactly one socket per page and exactly one gate in front of navigation.
     """
 
-    def __init__(self, transport: Any, *, screenshot_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        transport: Any,
+        *,
+        screenshot_dir: Path | None = None,
+        vision_enabled: bool = False,
+    ) -> None:
+        self._vision_enabled = vision_enabled is True
         self._transport = transport
         self._screenshot_dir = screenshot_dir
 
@@ -151,6 +158,39 @@ class CdpPageDriver:
 
     async def click(self, ref: ElementRef) -> None:
         await self._act(_js("hit.click(); return 'ok';", ref=ref), f"CLICK {ref.ref}")
+
+    async def click_vision(self, click, *, expected_html: str) -> None:
+        from gideon.integrations.browse.vision import (
+            VisionRefusal,
+            audit_vision,
+            parse_vision_click,
+            require_unreferenced_page,
+        )
+
+        if self._vision_enabled is not True:
+            raise VisionRefusal("vision_refused", "driver vision clicking is disabled")
+        point = parse_vision_click(
+            json.dumps({"action": "CLICK", "x": click.x, "y": click.y})
+        )
+        html = await self.html()
+        require_unreferenced_page(html)
+        if html != expected_html:
+            raise VisionRefusal(
+                "vision_refused", "page changed during vision grounding"
+            )
+        audit_vision("attempt")
+        result = await self._eval(
+            "(() => {"
+            f"if (document.documentElement.outerHTML !== {json.dumps(html)}) return 'changed';"
+            f"const el = document.elementFromPoint({point.x} * innerWidth, {point.y} * innerHeight);"
+            "if (!el || el.closest('iframe,input,textarea,select,form')) return 'refused';"
+            "el.click(); return 'ok'; })()"
+        )
+        audit_vision("clicked" if result == "ok" else "refused")
+        if result != "ok":
+            raise VisionRefusal(
+                "vision_refused", "vision click target changed or is unsafe"
+            )
 
     async def fill(self, ref: ElementRef, value: str) -> None:
         body = (

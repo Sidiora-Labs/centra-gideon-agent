@@ -46,6 +46,19 @@ print([w for w in re.findall(r'([\w.\-]+\.whl)', blk) if "aarch64" in w or "arm6
 PY
 ```
 
+### macOS OpenMP (`libomp`) and dependency checks
+
+Local speech and embedding libraries can load different OpenMP runtimes into the
+same process. On macOS, importing `faster_whisper` and its transitive dependencies
+alongside PyTorch can expose a duplicate `libomp` initialization hazard, potentially
+aborting the process before Python can report an exception.
+
+The doctor's `faster_whisper` dependency check uses `importlib.util.find_spec` to
+locate the package without importing it or loading `torch`. Its “installed” result
+confirms package discovery only; it does not certify that transcription, native
+libraries, or model loading work. Exercise the selected speech model separately to
+qualify its runtime on the target host.
+
 ### RAM floor on Pi-class boards
 
 The embedding stack, not the gateway, is what strains small boards. The gateway

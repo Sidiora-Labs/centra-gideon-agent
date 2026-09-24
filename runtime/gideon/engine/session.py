@@ -483,6 +483,9 @@ class ConversationDirectory:
 
         try:
             from gideon.integrations.acp.connection_pool import get_acp_pool
+            from gideon.integrations.llm.acp_provider_runtime import (
+                options_sandbox_mode,
+            )
             from gideon.integrations.llm.acp_session_provider import (
                 concurrent_sessions_enabled,
             )
@@ -504,7 +507,7 @@ class ConversationDirectory:
                 command=list(map(str, command)),
                 dialect=dialect,
                 session_files_dir=Path(str(files)) if files else None,
-                sandbox_mode=str(options.get("sandbox_mode") or "auto"),
+                sandbox_mode=options_sandbox_mode(options),
                 extra_env=environment if isinstance(environment, dict) else None,
                 session_key=key,
                 channel_id=channel_id,

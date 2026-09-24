@@ -249,22 +249,12 @@ def test_collect_ignores_unparseable_packets():
 @pytest.fixture()
 def live_advertiser():
     """A real Advertiser on a high port. Unicast-driven, so no multicast setup is needed."""
-    port = _free_udp_port()
-    adv = disc.Advertiser(_service(), listen_port=port)
+    adv = disc.Advertiser(_service(), listen_port=0)
     assert adv.start() is True, "the advertiser could not open its socket"
     try:
-        yield adv, port
+        yield adv, adv.listen_port
     finally:
         adv.stop()
-
-
-def _free_udp_port() -> int:
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-    finally:
-        s.close()
 
 
 def test_advertiser_answers_a_real_query_over_a_socket(live_advertiser):
@@ -292,7 +282,9 @@ def test_malformed_traffic_does_not_stop_the_responder(live_advertiser):
 
 def test_resolver_returns_empty_when_nothing_answers():
     """Finding nothing is a normal answer — every caller keeps the type-the-URL path."""
-    assert disc.resolve(timeout=0.5, unicast_to=("127.0.0.1", _free_udp_port())) == []
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as silent:
+        silent.bind(("127.0.0.1", 0))
+        assert disc.resolve(timeout=0.5, unicast_to=silent.getsockname()) == []
 
 
 def test_stopped_advertiser_stops_answering(live_advertiser):
@@ -554,3 +546,24 @@ def test_the_route_returns_the_status_payload(stub_advertiser):
     assert body["advertising"] is True
     assert body["reason"] == "advertising"
     assert set(body["txt"]) == {"name", "port", "requires_pairing", "schema"}
+
+
+def test_ephemeral_advertisers_own_distinct_ports_until_stopped():
+    advertisers = [
+        disc.Advertiser(_service(name=f"instance-{index}"), listen_port=0)
+        for index in range(4)
+    ]
+    try:
+        for advertiser in advertisers:
+            assert advertiser.start()
+            assert advertiser.listen_port > 0
+        ports = {advertiser.listen_port for advertiser in advertisers}
+        assert len(ports) == len(advertisers)
+        for advertiser in advertisers:
+            found = disc.resolve(
+                timeout=0.2, unicast_to=("127.0.0.1", advertiser.listen_port)
+            )
+            assert [item.name for item in found] == [advertiser.service.instance_name]
+    finally:
+        for advertiser in advertisers:
+            advertiser.stop()

@@ -1411,3 +1411,18 @@ def should_record_observe_history(
 def redact_and_truncate(text: str, max_chars: int = 4000) -> str:
     """Truncate, then redact credentials and exfiltration URLs."""
     return redact_credentials(redact_exfiltration_urls((text or "")[:max_chars])[0])[0]
+
+
+def redact_field(text: str) -> str:
+    """Both redaction passes over one field. Applied to EVERY role — see the module
+    docstring for why the write path's role exemption can't be inherited here.
+
+    Public because ``session_share`` needs the SAME redaction for the artifact name it
+    derives (SM-9). One implementation with two callers, never a second pass that redacts
+    slightly less.
+    """
+    if not text:
+        return ""
+    safe, _ = redact_exfiltration_urls(str(text))
+    safe, _ = redact_credentials(safe)
+    return safe

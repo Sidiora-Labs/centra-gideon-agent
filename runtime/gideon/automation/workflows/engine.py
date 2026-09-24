@@ -81,6 +81,7 @@ from gideon.automation.workflows.verify import (
     requires_fresh_judge,
     run_ladder,
 )
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 from gideon.security.safety_flags import strict_bool
 
 logger = logging.getLogger(__name__)
@@ -1815,7 +1816,7 @@ def _estimate_tokens(prompt: str, response: str) -> int:
     unreported call still costs something against the cap, rather than being free and
     letting an unmetered provider run away.
     """
-    return max(1, (len(prompt) + len(response)) // 4)
+    return max(1, (len(prompt) + len(response)) // NOMINAL_CHARS_PER_TOKEN)
 
 
 async def dispatch(
@@ -1897,7 +1898,7 @@ def selected_dispatcher(node: Node) -> Any | None:
 
 def dispatcher_commits_effects(node: Node) -> bool:
     """Whether the dispatcher selected for ``node`` may commit an external effect."""
-    return selected_dispatcher(node) is dispatch_action
+    return selected_dispatcher(node) in (dispatch_action, dispatch_stage)
 
 
 async def _dispatch_inner(
@@ -1915,7 +1916,7 @@ async def _dispatch_inner(
     completion: Any = None,
     get_provider: Any = None,
     verify: Any = None,
-    timeout: int = 60,
+    timeout: float = 60,
     mode: str = "background",
     supervisor: Any = None,
     on_progress: Any = None,

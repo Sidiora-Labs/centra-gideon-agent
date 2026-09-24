@@ -56,6 +56,12 @@ class _QuerySpec:
                 f"detail {detail!r} must be one of: {', '.join(DETAIL_CAPS)}"
             )
         filters = config.get("filters")
+        if isinstance(filters, dict) and "tags" in filters:
+            tags = filters["tags"]
+            if not isinstance(tags, (str, list)) or (
+                isinstance(tags, list) and any(not isinstance(tag, str) for tag in tags)
+            ):
+                raise ValueError("filters.tags must be a string or list of strings")
         return cls(
             query,
             detail,
@@ -72,7 +78,14 @@ class _QuerySpec:
             for rank, hit in enumerate(admitted[: self.limit])
         ]
         overview = _overview_for(store, self.query, detail=self.detail)
-        if overview is not None:
+        if overview is not None and (
+            not self.filters.get("tags")
+            or _apply_filters(
+                [{**overview, "tags": store._tags_for_item(overview["item_id"])}],
+                {"tags": self.filters["tags"]},
+                strategy="hybrid",
+            )
+        ):
             selected = [overview] + [
                 item for item in selected if item["item_id"] != overview["item_id"]
             ]
@@ -201,6 +214,9 @@ def _bounded_top_k(raw: Any) -> int:
 
 def _enrich(store, hits: list[dict]) -> list[dict]:
     records = _ItemRows(store)
+    if hasattr(store, "_tags_for_items"):
+        tags = store._tags_for_items([str(hit.get("id") or "") for hit in hits])
+        hits = [{**hit, "tags": tags.get(str(hit.get("id") or ""), [])} for hit in hits]
     metadata: dict[str, dict] = {}
     enriched = []
     for hit in hits:
@@ -221,8 +237,12 @@ def _apply_filters(
     hits: list[dict], filters: dict[str, Any], *, strategy: str
 ) -> list[dict]:
     kind = str(filters.get("kind") or "").strip().lower()
+    raw_tags = filters.get("tags") or []
+    required_tags = {raw_tags} if isinstance(raw_tags, str) else set(raw_tags)
 
     def accepted(hit: dict) -> bool:
+        if not required_tags.issubset(set(hit.get("tags") or [])):
+            return False
         if kind and str(hit.get("kind") or "").lower() != kind:
             return False
         return strategy == "hybrid" or float(hit.get("score", 0.0)) >= RELEVANCE_CLIFF

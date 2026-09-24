@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { GraduationCap, Check, X, Pencil } from 'lucide-react'
@@ -11,15 +12,18 @@ export function SessionSkillsReview({ sessionKey, agent, refreshKey }: {
   agent?: string
   refreshKey: number
 }) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
   const [drafts, setDrafts] = useState<EphemeralDraft[]>([])
   const [open, setOpen] = useState(false)
 
   const load = () => {
     if (!sessionKey) return
-    api.ephemeralSkills(sessionKey).then(setDrafts).catch(() => setDrafts([]))
+    setLoadErr(null)
+    api.ephemeralSkills(sessionKey).then(setDrafts).catch(setLoadErr)
   }
   useEffect(load, [sessionKey, refreshKey])
 
+  if (loadErr) return <LoadError what="session skills" error={loadErr} onRetry={load} />
   if (drafts.length === 0) return null
 
   return (

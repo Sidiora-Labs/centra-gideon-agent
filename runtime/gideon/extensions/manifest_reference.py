@@ -131,10 +131,13 @@ def _route_table_calls(tree: ast.AST) -> list[ast.Call]:
             parts = [
                 v.value if isinstance(v, ast.FormattedValue) else v for v in node.values
             ]
-            if all(
-                isinstance(v, ast.Constant) and isinstance(v.value, str) for v in parts
-            ):
-                return ast.Constant("".join(v.value for v in parts))
+            strings = [
+                v.value
+                for v in parts
+                if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            ]
+            if len(strings) == len(parts):
+                return ast.Constant("".join(strings))
             return node
 
         def visit_BinOp(self, node):
@@ -173,7 +176,7 @@ def _route_table_calls(tree: ast.AST) -> list[ast.Call]:
 
     import copy
 
-    calls = []
+    calls: list[ast.Call] = []
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -192,8 +195,10 @@ def _route_table_calls(tree: ast.AST) -> list[ast.Call]:
                 and statement.iter.id in tables
             ):
                 continue
-            names = statement.target.elts
-            if not all(isinstance(name, ast.Name) for name in names):
+            names = [
+                name for name in statement.target.elts if isinstance(name, ast.Name)
+            ]
+            if len(names) != len(statement.target.elts):
                 continue
             for row in tables[statement.iter.id]:
                 if not isinstance(row, (ast.Tuple, ast.List)) or len(row.elts) != len(

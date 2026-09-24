@@ -1,20 +1,14 @@
-"""Version single-sourcing consistency (plan 34 T1.2, contract C3).
+"""Keep seven release surfaces aligned with the core package version.
 
-pyproject.toml is the single source of truth for the package version. This test
-asserts the three surfaces a release exposes agree:
-
-  1. pyproject.toml  ``[project].version``
-  2. ``gideon.__version__``  (importlib.metadata when installed, literal
-     fallback on a source tree)
-  3. the latest release heading in ``CHANGELOG.md``  (``## [X.Y.Z] — DATE``,
-     skipping the ``[Unreleased]`` section)
-
-If any of the three drift, this test goes red — that is the guardrail that keeps
-`pip show`, `gideon --version`, and the in-app "what's new" panel honest.
+The surfaces are pyproject.toml, the runtime module (including its source
+fallback), CHANGELOG.md, the Python client, the ACP handshake, the README
+release banner, and desktop package metadata. Desktop's pnpm lockfile records
+its dependencies rather than the workspace package's own release version.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -149,4 +143,15 @@ def test_readme_banner_version_tracks_core() -> None:
     assert _readme_declared_version() == _pyproject_version(), (
         f"README pre-1.0 banner says v{_readme_declared_version()} but core is "
         f"v{_pyproject_version()} — update the banner in the release-prep commit"
+    )
+
+
+def test_desktop_package_version_tracks_core() -> None:
+    package = json.loads(
+        (_REPO_ROOT / "apps" / "desktop" / "package.json").read_text(encoding="utf-8")
+    )
+    assert package["version"] == _pyproject_version(), (
+        f"desktop package version={package['version']!r} disagrees with core "
+        f"version={_pyproject_version()!r} — bump apps/desktop/package.json "
+        "before packaging the desktop release"
     )

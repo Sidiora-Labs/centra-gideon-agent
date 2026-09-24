@@ -9,6 +9,7 @@ import os
 import sys
 import traceback
 import types
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -55,8 +56,21 @@ class GatewayChannel:
             data=json.dumps(body).encode("utf-8"),
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=30) as reply:
-            return json.loads(reply.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=30) as reply:
+                return json.loads(reply.read().decode("utf-8"))
+        except urllib.error.HTTPError as failure:
+            with failure:
+                raw = failure.read().decode("utf-8", errors="replace")
+            try:
+                result = json.loads(raw)
+            except ValueError:
+                result = None
+            if not isinstance(result, dict):
+                result = {"error": raw or str(failure)}
+            result.setdefault("ok", False)
+            result.setdefault("status", failure.code)
+            return result
 
 
 class ScriptContext:

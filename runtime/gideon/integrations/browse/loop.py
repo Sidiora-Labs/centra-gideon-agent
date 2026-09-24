@@ -61,6 +61,7 @@ from gideon.integrations.browse.handoff import PARK_LOGIN_REQUIRED
 from gideon.integrations.browse.sentinels import (
     Action,
     ClickAction,
+    ClickVisionAction,
     DoneAction,
     GoBackAction,
     NavigateAction,
@@ -355,6 +356,10 @@ async def verify_submission(
             "submission probably never reached the server",
         )
 
+    from gideon.integrations.browse.vision import has_captcha
+
+    if has_captcha(html_after):
+        return VERDICT_FORM_FAILED, "CAPTCHA requires a human"
     extraction = extract_page(html_after, url=url_after)
     fenced = _fence_page(_outline_text(extraction, ""), url_after)
     raw = ""
@@ -390,6 +395,7 @@ async def run_browse_loop(
     on_step: StepSink | None = None,
     kill_check: KillCheck | None = None,
     close_check: CloseCheck | None = None,
+    vision_enabled: bool = False,
 ) -> BrowseLoopResult:
     """Drive ``page`` toward ``goal``, navigating only through ``session``'s gate.
 
@@ -500,6 +506,16 @@ async def run_browse_loop(
                 blocked_urls=tuple(st.blocked),
             )
 
+        from gideon.integrations.browse.vision import has_captcha
+
+        if has_captcha(html):
+            return _park(
+                st,
+                goal=goal,
+                url=url,
+                reason="captcha_required",
+                detail="CAPTCHA requires a human",
+            )
         extraction = extract_page(html, url=url)
         try:
             screenshot = await page.screenshot()
@@ -515,6 +531,10 @@ async def run_browse_loop(
             step=step,
             max_steps=max_steps,
         )
+        if vision_enabled is True and not _element_index(extraction):
+            prompt += (
+                "\nCLICK_VISION <what> may locate a click target without a DOM ref."
+            )
         st.warnings.clear()
 
         try:
@@ -605,6 +625,32 @@ async def run_browse_loop(
                 if url not in st.visited:
                     st.visited.append(url)
                 outcome_note = "navigated"
+        elif isinstance(action, ClickVisionAction):
+            from gideon.integrations.browse.vision import VisionRefusal, audit_vision
+
+            try:
+                await _click_vision(
+                    action,
+                    page=page,
+                    html=html,
+                    enabled=vision_enabled,
+                    budget_check=budget_check,
+                    kill_check=kill_check,
+                    close_check=close_check,
+                )
+                outcome_note = "clicked using vision"
+            except VisionRefusal as exc:
+                audit_vision(exc.reason)
+                return _park(st, goal=goal, url=url, reason=exc.reason, detail=str(exc))
+            except Exception:
+                audit_vision("vision_unavailable")
+                return _park(
+                    st,
+                    goal=goal,
+                    url=url,
+                    reason="vision_unavailable",
+                    detail="vision grounding or click failed",
+                )
         elif isinstance(action, SubmitAction):
             url_before, html_before = url, html
             try:
@@ -666,6 +712,54 @@ async def run_browse_loop(
         reason=PARK_STEP_EXHAUSTED,
         detail=f"max_steps={max_steps}",
     )
+
+
+async def _click_vision(
+    action,
+    *,
+    page,
+    html,
+    enabled=False,
+    budget_check=None,
+    kill_check=None,
+    close_check=None,
+):
+    from gideon.integrations.browse.vision import (
+        VisionRefusal,
+        ground_click,
+        require_unreferenced_page,
+    )
+
+    if enabled is not True:
+        raise VisionRefusal(
+            "vision_refused", "vision clicking requires explicit opt-in"
+        )
+    if not isinstance(action, ClickVisionAction):
+        raise VisionRefusal("vision_refused", "only CLICK_VISION is permitted")
+    require_unreferenced_page(html)
+    for check, reason in ((kill_check, PARK_KILLED), (close_check, PARK_TAB_CLOSED)):
+        if check is not None:
+            stopped, detail = check()
+            if stopped:
+                raise VisionRefusal(reason, detail)
+    if budget_check is not None:
+        verdict, detail = budget_check()
+        if str(getattr(verdict, "value", verdict)) == "exceeded":
+            raise VisionRefusal(PARK_BUDGET_EXHAUSTED, detail)
+    current = await page.html()
+    require_unreferenced_page(current)
+    click = await ground_click(
+        what=action.what,
+        html=current,
+        screenshot=await page.screenshot(),
+        enabled=enabled,
+    )
+    for check, reason in ((kill_check, PARK_KILLED), (close_check, PARK_TAB_CLOSED)):
+        if check is not None:
+            stopped, detail = check()
+            if stopped:
+                raise VisionRefusal(reason, detail)
+    await page.click_vision(click, expected_html=current)
 
 
 async def _actuate(

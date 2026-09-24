@@ -27,6 +27,8 @@ import ssl
 
 import aiohttp
 
+from gideon.core.errors import AgentError
+
 __all__ = ["connectivity_guidance", "relayed_failure_copy", "UNEXPECTED_FAILURE_COPY"]
 
 UNEXPECTED_FAILURE_COPY = (
@@ -77,3 +79,59 @@ def connectivity_guidance(exc: BaseException) -> str | None:
     if isinstance(exc, aiohttp.ClientError):
         return "Could not reach that endpoint. Check the URL and that the service is running."
     return None
+
+
+def provider_load_error(
+    cause: str, *, use_case: str, provider: str = "", provider_type: str = ""
+) -> AgentError:
+    guidance = {
+        "registry_unavailable": (
+            "the provider registry could not be loaded",
+            "check the gateway logs and repair the provider installation, then restart Gideon",
+        ),
+        "unsupported_capability": (
+            f"{use_case!r} is not a supported model capability",
+            "select a supported model use case in Settings → Models",
+        ),
+        "no_entries": (
+            "the provider registry contains no configured entries",
+            "add a model provider in Settings → Providers",
+        ),
+        "entry_missing": (
+            f"provider entry {provider!r} is absent from the registry",
+            "configure that provider in Settings → Providers, or select an available model",
+        ),
+        "capability_missing": (
+            f"no eligible provider declares the {use_case!r} capability",
+            "bind this use case to a provider that supports it in Settings → Models",
+        ),
+        "factory_missing": (
+            f"no factory is registered for provider TYPE {provider_type!r}",
+            f"enable or repair the app that registers TYPE {provider_type!r}, then restart Gideon",
+        ),
+        "credential_missing": (
+            "the provider reported a missing credential",
+            "configure its credential in Settings → Providers, then retry",
+        ),
+        "dependency_missing": (
+            "a required module could not be imported while constructing the provider",
+            "check the gateway logs for the missing module and repair the provider installation",
+        ),
+        "construction_failed": (
+            "the provider constructor failed; Gideon is not sure of the underlying cause",
+            "check the gateway logs for this provider's construction error, then retry",
+        ),
+    }
+    why, fix = guidance.get(
+        cause,
+        (
+            "Gideon is not sure why the provider could not be loaded",
+            "check the gateway logs and the provider configuration, then retry",
+        ),
+    )
+    return AgentError(
+        code="ERR_MODEL_UNRESOLVED",
+        what=f"the model provider {provider!r} could not be loaded for {use_case!r}",
+        why=why,
+        fix=fix,
+    )

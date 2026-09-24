@@ -10,9 +10,8 @@ import { notify } from '../../app/shell/appSdk'
 import {
   api, requireWriteAccepted, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
   type SettingsProvider, type NotificationSettings, type UpdateCheck,
-  type PromptBindings, type SelVerify, type SavedAgent,
-  type SearchProviderInfo,
-  type ToolsSavings, type DeviceRec, type InstalledPackRec, type ChannelTrust,
+  type SelVerify, type SavedAgent,
+  type ToolsSavings, type DeviceRec, type ChannelTrust,
 } from '../../shared/data/api'
 import { fmtInterval } from '../knowledge/sourceMeta'
 import { useQuery, invalidateSpecs, type CacheKeySpec } from '../../shared/data/data'
@@ -49,11 +48,12 @@ const useModelsActive = () => useQuery('settings:models-active', () => api.model
 const useRoutingTelemetry = () => useQuery('settings:routing-telemetry:reasoning:long_reasoning',
   () => api.modelsTelemetry({ use_case: 'reasoning', query_class: 'long_reasoning' }).then((d) => d.rows).catch(() => null), { persist: false })
 const useSearchEntity = () => useQuery('settings:search', async () => {
-  const [providers, active] = await Promise.all([
-    api.searchProviders().catch(() => [] as SearchProviderInfo[]),
-    api.searchActive().catch(() => ({} as Record<string, string[]>)),
+  const [providers, active, tools] = await Promise.all([
+    api.searchProviders(),
+    api.searchActive(),
+    api.tools(),
   ])
-  return { providers, active }
+  return { providers, active, tools }
 }, { persist: true })
 const useRuntimes = () => useQuery('settings:agent-runtimes', () => api.agentRuntimes().catch(() => null as AgentRuntime[] | null), { persist: true })
 const useProviders = () => useQuery('settings:providers', () => api.settingsProviders().catch(() => [] as SettingsProvider[]), { persist: true })
@@ -62,7 +62,7 @@ const useInbox = () => useQuery('settings:inbox', () => api.inboxSettings(), { p
 const useApps = () => useQuery('apps', () => api.apps(), { persist: true })
 const useNotif = () => useQuery('settings:notification-settings', () => api.notificationSettings().catch(() => null as NotificationSettings | null), { persist: true })
 const useUpdates = () => useQuery('settings:update-check', () => api.updateCheck().catch(() => null as UpdateCheck | null), { persist: true })
-const usePromptBindings = () => useQuery('settings:prompt-bindings', () => api.promptBindings().catch(() => null as PromptBindings | null), { persist: true })
+const usePromptBindings = () => useQuery('settings:prompt-bindings', () => api.promptBindings(), { persist: true })
 const useDurability = () => useQuery('settings:durability-card', async () => {
   const [status, snaps] = await Promise.all([
     api.durabilityStatus().catch(() => null),
@@ -95,7 +95,7 @@ const useSenderTrust = () => useQuery('settings:sender-trust-card',
   () => api.channelTrust().catch(() => null as ChannelTrust | null), { persist: true })
 const useProjectionRules = () => useQuery('settings:projection-rules', () => api.projectionRules(), { persist: true })
 const useToolsSavings = () => useQuery('settings:tools-savings', () => api.toolsSavings().catch(() => null as ToolsSavings | null), { persist: true })
-const useFeedbackProducers = () => useQuery('settings:feedback-producers', () => api.feedbackProducers().catch(() => null), { persist: false })
+const useFeedbackProducers = () => useQuery('settings:feedback-producers', () => api.feedbackProducers(), { persist: false })
 const useAgentDefaults = () => useQuery('settings:agent-defaults', async () => {
   const [cfg, agents] = await Promise.all([
     api.gideonConfig().then((c) => (c.agent ?? {}) as Record<string, unknown>),
@@ -110,7 +110,7 @@ const useSourcesCfg = () => useQuery('settings:sources-card', () =>
 const usePacksCfg = () => useQuery('settings:packs', () =>
   api.gideonConfig().then((c) => (c.packs ?? {}) as Record<string, unknown>), { persist: true })
 const usePacksInstalled = () => useQuery('settings:packs:installed', () =>
-  api.packsInstalled().catch(() => [] as InstalledPackRec[]), { persist: true })
+  api.packsInstalled(), { persist: true })
 const useCompanionDiscovery = () => useQuery('settings:companion:discovery', () => api.companionDiscovery())
 const useWorkflows = () => useQuery('settings:workflows-card', () => api.workflowDefs().then((d) => d.defs), { persist: true })
 const useAutonomousLoops = () => useQuery('settings:autonomous-loops-card', () => api.uLoops().then((loops) => loops.filter((loop) => loop.kind !== 'code')), { persist: false })
@@ -313,12 +313,13 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
       return `search web provider use case duckduckgo tavily searxng exa perplexity brave ${provs} ${binds}`
     },
     render(query, go) {
-      const { data, stale: isStalePaint } = useSearchEntity()
+      const { data, error: searchErr, stale: isStalePaint } = useSearchEntity()
       const USE_CASES = [['search-general', 'General'], ['search-news', 'News'], ['fetch-article', 'Fetch']] as const
       const active = data?.active
       return (
-        <BentoCard icon={Search} title="Search" query={query} onClick={() => go('search')} loading={data === undefined} stale={isStalePaint}>
-          {data && (data.providers.length === 0
+        <BentoCard icon={Search} title="Search" query={query} onClick={() => go('search')} loading={data === undefined && !searchErr} stale={isStalePaint}>
+          {Boolean(searchErr) && <div role="alert" data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load search settings.</div>}
+          {!searchErr && data && (data.providers.length === 0
             ? <div data-type="body-s" className="text-on-surface-low">DuckDuckGo (keyless) is the default; add a provider in Providers to upgrade.</div>
             : <KVList query={query} rows={USE_CASES.map(([uc, label]) => {
                 const bound = (active?.[uc] ?? [])[0]
@@ -339,14 +340,15 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
       return `prompts system prompt context binding ${names}`
     },
     render(query, go) {
-      const { data: b, stale: bStale } = usePromptBindings()
+      const { data: b, error: bErr, stale: bStale } = usePromptBindings()
       const rows = (b?.bindings ?? []).slice(0, 4).map((x) => {
         const name = (x.ref || x.effective_ref || 'Default').replace(/\.md$/, '')
         return { k: x.use_case.replace(/_/g, ' '), v: name, vText: name, mono: false }
       })
       return (
-        <BentoCard icon={FileText} title="Prompts" query={query} onClick={() => go('prompts')} loading={b === undefined} stale={bStale}>
-          {b && (rows.length ? <KVList query={query} rows={rows} /> : <div data-type="body-s" className="text-on-surface-low">All contexts use the default prompt.</div>)}
+        <BentoCard icon={FileText} title="Prompts" query={query} onClick={() => go('prompts')} loading={b === undefined && !bErr} stale={bStale}>
+          {Boolean(bErr) && <div role="alert" data-type="body-s" className="text-on-surface-low">Couldn’t load prompt bindings. Open Prompts to retry.</div>}
+          {!bErr && b && (rows.length ? <KVList query={query} rows={rows} /> : <div data-type="body-s" className="text-on-surface-low">All contexts use the default prompt.</div>)}
         </BentoCard>
       )
     },
@@ -536,13 +538,14 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     },
     render(query, go) {
       const { data: p, error: packsErr, stale: pStale } = usePacksCfg()
-      const { data: installed } = usePacksInstalled()
+      const { data: installed, error: installedErr } = usePacksInstalled()
       const n = installed?.length ?? 0
       return (
         <BentoCard icon={Package} title="Packs" query={query} onClick={() => go('packs')}
-          loading={(p === undefined || installed === undefined) && !packsErr} stale={pStale}>
+          loading={(p === undefined || installed === undefined) && !packsErr && !installedErr} stale={pStale}>
           {!p && Boolean(packsErr) && <div data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load your pack settings.</div>}
-          {p && installed && <>
+          {Boolean(installedErr) && <div role="alert" data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load installed packs.</div>}
+          {!packsErr && !installedErr && p && installed && <>
             <BigStat value={n} caption={n === 1 ? 'installed pack' : 'installed packs'} />
             <div data-type="caption" className="mt-1.5 text-on-surface-low">
               {p.fingerprint_enabled
@@ -910,13 +913,13 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
       return `feedback thumbs accuracy judgment verdict up down retire suppress ${rows.map((r) => r.producer_id).join(' ')}`
     },
     render(query, go) {
-      const { data, stale: isStalePaint } = useFeedbackProducers()
+      const { data, error: feedbackErr, stale: isStalePaint } = useFeedbackProducers()
       const rows = data?.producers ?? []
       const rated = rows.filter((r) => !r.collecting)
       const suppressed = rows.filter((r) => r.producer_kind === 'skill_synthesis' && r.suppressed).length
       return (
-        <BentoCard icon={ThumbsUp} title="AI feedback" query={query} onClick={() => go('feedback')} loading={data === undefined} stale={isStalePaint}>
-          {rows.length === 0
+        <BentoCard icon={ThumbsUp} title="AI feedback" query={query} onClick={() => go('feedback')} loading={data === undefined && !feedbackErr} stale={isStalePaint}>
+          {feedbackErr ? <div role="alert" data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load feedback sources.</div> : rows.length === 0
             ? <div data-type="body-s" className="text-on-surface-low">👍/👎 on inbox triage, drafts, digests, and loop findings collect here per judgment source. Weak skills stop surfacing; other sources get a retire proposal.</div>
             : <><BigStat value={rows.length} caption={rows.length === 1 ? 'judgment source' : 'judgment sources'} />
                 <div data-type="body-s" className="mt-1 text-on-surface-low">

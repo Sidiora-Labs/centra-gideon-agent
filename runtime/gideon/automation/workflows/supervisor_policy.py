@@ -84,6 +84,7 @@ POLICY_FIELDS: frozenset[str] = frozenset(
         "write_scope",
         "budget",
         "hitl_posture",
+        "convergence",
     }
 )
 
@@ -154,6 +155,43 @@ class ConvergenceSpec:
     budget_stop_is_genuine: bool = False
     stagnation_enabled: bool = True
     done_check_optional: bool = False
+
+
+CONVERGENCE_TEXT_FIELDS = frozenset(
+    {"command_key", "criteria_key", "ground_truth_deliverable"}
+)
+CONVERGENCE_BOOL_FIELDS = frozenset(
+    {"budget_stop_is_genuine", "stagnation_enabled", "done_check_optional"}
+)
+CONVERGENCE_FIELDS = CONVERGENCE_TEXT_FIELDS | CONVERGENCE_BOOL_FIELDS | {"signal"}
+
+
+def _parse_convergence(raw: Any) -> ConvergenceSpec:
+    if not isinstance(raw, dict):
+        return ConvergenceSpec()
+
+    def text(key: str) -> str:
+        value = raw.get(key)
+        return value if isinstance(value, str) else ""
+
+    def flag(key: str, default: bool = False) -> bool:
+        value = raw.get(key)
+        return value if isinstance(value, bool) else default
+
+    signal = raw.get("signal")
+    return ConvergenceSpec(
+        signal=(
+            signal
+            if isinstance(signal, str) and signal in DONE_SIGNALS
+            else DONE_ORCHESTRATED
+        ),
+        command_key=text("command_key"),
+        criteria_key=text("criteria_key"),
+        ground_truth_deliverable=text("ground_truth_deliverable"),
+        budget_stop_is_genuine=flag("budget_stop_is_genuine"),
+        stagnation_enabled=flag("stagnation_enabled", True),
+        done_check_optional=flag("done_check_optional"),
+    )
 
 
 @dataclass(frozen=True)
@@ -305,6 +343,7 @@ def parse_supervisor_policy(raw: Any) -> SupervisorPolicy:
         write_scope=_parse_write_scope(raw.get("write_scope")),
         budget_max_cycles=_parse_budget(raw.get("budget")),
         hitl_posture=hitl,
+        convergence=_parse_convergence(raw.get("convergence")),
     )
 
 

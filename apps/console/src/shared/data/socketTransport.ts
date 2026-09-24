@@ -33,6 +33,11 @@ export class GatewaySocket {
     }
   }
 
+  send(message: Record<string, unknown>): boolean {
+    if (!this.connected || !this.socket) return false
+    try { this.socket.send(JSON.stringify(message)); return true } catch { return false }
+  }
+
   private deliver(callback: (() => void) | undefined): void {
     try { callback?.() } catch (error) { console.error('Gateway event subscriber failed', error) }
   }

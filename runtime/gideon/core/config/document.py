@@ -115,8 +115,10 @@ def write_configuration(
 ) -> None:
     from gideon import __version__
     from gideon.core.atomic_write import atomic_write
+    from gideon.core.config.validation import consume_retired_keys
 
     document = merge_configuration(path, values, error_type)
+    consume_retired_keys(document)
     document.setdefault(
         "meta",
         {

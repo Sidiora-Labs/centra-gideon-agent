@@ -3,7 +3,7 @@
 Compares a scenario's freshly-computed :class:`~harness.replay.Metrics` against checked-in
 baselines with two kinds of threshold:
 
-- **hard thresholds** (absolute ceilings, the Gideon-proven defaults): duplicate_event_rate
+- **hard thresholds** (absolute ceilings with fixed defaults): duplicate_event_rate
   ≤ 0.005, order_violations = 0, reconnect_loss = 0, fanout ≤ 1.2 for single-key streams.
   A stream that legitimately fans out to many keys overrides its fanout ceiling in the
   baseline file.

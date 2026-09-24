@@ -150,6 +150,9 @@ _CATEGORY_OF: dict[str, str] = {
 }
 
 PLATFORM_CATEGORIES: frozenset[str] = frozenset({"filesystem", "shell", "core"})
+PLATFORM_TOOL_NAMES: frozenset[str] = frozenset(
+    name for name, category in _CATEGORY_OF.items() if category in PLATFORM_CATEGORIES
+)
 APP_CATEGORY_PROVIDERS: dict[str, tuple[str, str]] = {
     "knowledge": ("gideon-knowledge-tools", "Knowledge Tools"),
     "tasks": ("gideon-tasks-tools", "Tasks Tools"),
@@ -1456,8 +1459,11 @@ class NativeBuiltinToolProvider(ToolProvider):
 
 def create_platform_tools_provider(
     config: dict | None = None,
+    *,
+    cwd: Path | str | None = None,
 ) -> "NativeBuiltinToolProvider":
     settings: dict = {
+        "cwd": Path(cwd) if cwd is not None else None,
         "categories": PLATFORM_CATEGORIES,
         "provider_name": "gideon-filesystem",
         "display": "Filesystem & Shell Tools",

@@ -1,0 +1,387 @@
+[
+  {
+    "name": "multiline prose",
+    "source": "/* rationale\n#fff style={{ padding: 4px }}\n*/\nconst ok = true",
+    "expected": []
+  },
+  {
+    "name": "code after closing",
+    "source": "/* rationale\n#fff\n*/ const color = \"#abc\"",
+    "expected": [
+      [
+        3,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "code before opening",
+    "source": "const color = \"#abc\"; /*\n#fff\n*/",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "inline blocks",
+    "source": "/* #fff */ const el = <div style={{ padding: 4px }} /> /* #abc */",
+    "expected": [
+      [
+        1,
+        "px"
+      ]
+    ]
+  },
+  {
+    "name": "multiple blocks",
+    "source": "/* #aaa */ /* #bbb\n#ccc */ const color = \"#def\"; /* #aaa */",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "quoted markers",
+    "source": "const marker = \"/*\";\nconst color = \"#fff\";\nconst marker2 = \"//\"; const el = <div style={{ padding: 4px }} />",
+    "expected": [
+      [
+        2,
+        "hex"
+      ],
+      [
+        3,
+        "px"
+      ]
+    ]
+  },
+  {
+    "name": "line comments",
+    "source": "// /* #fff\nconst color = \"#abc\"; // #bbb",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "quoted escape",
+    "source": "const marker = 'don\\'t /*'; const color = '#abc'",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "comment boundary preserves token separation",
+    "source": "const color = #a/* gap */bc",
+    "expected": []
+  },
+  {
+    "name": "blank comment lines",
+    "source": "/*\n\n#fff\n\n*/\nconst color = \"#abc\"",
+    "expected": [
+      [
+        6,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "clean source after another file",
+    "source": "const color = \"#fff\"",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ]
+  },
+  {
+    "name": "unreadable block EOF",
+    "source": "/* rationale\n#fff",
+    "expected": [
+      [
+        2,
+        "lexical"
+      ]
+    ],
+    "end_state": "block_comment"
+  },
+  {
+    "name": "closed block EOF",
+    "source": "/* rationale\n#fff */",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "scheme remains source",
+    "source": "const url = https://example.test; const color = \"#abc\"",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "backticks protect comment markers on their line",
+    "source": "const text = `/* #abc */`",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "backticks reset on next line",
+    "source": "const text = `start\nconst color = \"#abc\"; /* open",
+    "expected": [
+      [
+        2,
+        "hex"
+      ],
+      [
+        2,
+        "lexical"
+      ]
+    ],
+    "end_state": "block_comment"
+  },
+  {
+    "name": "line local backtick reaches EOF",
+    "source": "const text = `start\nconst color = \"#abc\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "url_before_hex",
+    "source": "const url = \"https://example.test/path\"; const color = \"#abc\"",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "url_after_hex",
+    "source": "const color = \"#abc\"; const url = \"https://example.test/path\"",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "url_clean_token",
+    "source": "const url = \"https://example.test/path\"; const color = \"var(--color-text)\"",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "url_comment_only_hex",
+    "source": "const url = \"https://example.test/path\"; // color was #abc",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "url_block_comment_hex",
+    "source": "const url = \"https://example.test/path\"; /* color was #abc */",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "url_and_hex_before_comment",
+    "source": "const url = \"https://example.test/path\"; const color = \"#abc\"; // explanation",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "url_scheme_control",
+    "source": "const url = https://example.test/path; const color = \"var(--color-text)\"",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "url_protocol_relative_with_hex",
+    "source": "const url = \"//example.test/path\"; const color = \"#abc\"",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "regex_character_class_preserves_hex",
+    "source": "const delimiters = /[/*]/;\nconst foreground = \"#cab\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "unreadable_jsx_wildcard_text",
+    "source": "return <p>Match /* for nested route entries</p>;\nconst foreground = \"#cab\";",
+    "expected": [
+      [
+        2,
+        "lexical"
+      ]
+    ],
+    "end_state": "block_comment"
+  },
+  {
+    "name": "opener_after_a",
+    "source": "a/* marker\nconst color = \"#abc\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_Z",
+    "source": "Z/* marker\nconst color = \"#abc\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_7",
+    "source": "7/* marker\nconst color = \"#abc\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_bracket",
+    "source": "[/* marker\nconst color = \"#abc\";",
+    "expected": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_start_of_line",
+    "source": "/* marker\n#abc */",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_space",
+    "source": "value /* marker\n#abc */",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_punctuation",
+    "source": "const value = (/* marker\n#abc */ 1)",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_after_newline",
+    "source": "value\n/* marker\n#abc */",
+    "expected": [],
+    "end_state": "code"
+  },
+  {
+    "name": "opener_unclosed_after_space",
+    "source": "value /* marker\n#abc",
+    "expected": [
+      [
+        2,
+        "lexical"
+      ]
+    ],
+    "end_state": "block_comment"
+  },
+  {
+    "name": "opener_after_token_closed_text",
+    "source": "route/*segment*/; const color = \"#abc\";",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "gap_jsx_comment_text_hides_hex",
+    "source": "return <section>Match /* for nested routes\n<div style={{ color: \"#cab\" }} />\nUse */ to finish the example</section>;",
+    "expected": [],
+    "intended": [
+      [
+        2,
+        "hex"
+      ]
+    ],
+    "end_state": "code"
+  },
+  {
+    "name": "gap_lookbehind_identifier_comment",
+    "source": "const count = total/* use #cab in the explanation */;",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "intended": [],
+    "end_state": "code"
+  },
+  {
+    "name": "gap_lookbehind_digit_comment",
+    "source": "const count = 3/* use #cab in the explanation */;",
+    "expected": [
+      [
+        1,
+        "hex"
+      ]
+    ],
+    "intended": [],
+    "end_state": "code"
+  }
+]

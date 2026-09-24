@@ -33,7 +33,12 @@ describe('kindMeta covers every kind the backend emits', () => {
   })
 
   it('retired stalled display key uses the unknown-kind fallback', () => {
-    expect(kindMeta('stalled').label).toBe('stalled')
+    const retired = kindMeta('stalled')
+    const fallback = kindMeta('unknown-kind')
+    expect(retired).toEqual({ ...fallback, label: 'stalled' })
+    expect(kindMeta('loop_stalled').label).toBe('Loop stalled or blocked')
+    expect(kindMeta('loop_stalled').tone).toBe('var(--color-warn)')
+    expect(kindMeta('loop_stalled').icon).not.toBe(retired.icon)
   })
 
   it('every backend kind yields a usable label / icon / token-routed tone', () => {

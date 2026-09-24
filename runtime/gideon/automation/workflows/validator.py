@@ -475,6 +475,8 @@ def _validate_supervisor(res: ValidationResult, path: str, raw: Any) -> None:
     if not isinstance(raw, dict):
         _add(res, "WF_SUPERVISOR_NOT_OBJECT", "supervisor must be an object", path)
         return
+    if "convergence" in raw:
+        _validate_convergence(res, path, raw["convergence"])
     for name in raw:
         if name not in POLICY_FIELDS:
             _add(
@@ -523,6 +525,58 @@ def _validate_supervisor(res: ValidationResult, path: str, raw: Any) -> None:
         for entry in values:
             if str(entry) not in vocabulary:
                 _add(res, code, message.format(entry), path)
+
+
+def _validate_convergence(res: ValidationResult, path: str, raw: Any) -> None:
+    from gideon.automation.workflows.supervisor_policy import (
+        CONVERGENCE_BOOL_FIELDS,
+        CONVERGENCE_FIELDS,
+        CONVERGENCE_TEXT_FIELDS,
+        DONE_SIGNALS,
+    )
+
+    if not isinstance(raw, dict):
+        _add(res, "WF_CONVERGENCE_NOT_OBJECT", "convergence must be an object", path)
+        return
+    for key, value in raw.items():
+        if key not in CONVERGENCE_FIELDS:
+            _add(
+                res,
+                "WF_CONVERGENCE_UNKNOWN_FIELD",
+                f"unknown convergence field {key!r}",
+                path,
+            )
+        elif key == "signal":
+            if not isinstance(value, str) or value not in DONE_SIGNALS:
+                _add(
+                    res,
+                    "WF_CONVERGENCE_BAD_SIGNAL",
+                    f"unknown convergence signal {value!r}",
+                    path,
+                )
+        elif key in CONVERGENCE_TEXT_FIELDS and not isinstance(value, str):
+            _add(
+                res,
+                "WF_CONVERGENCE_BAD_TYPE",
+                f"convergence {key} must be a string",
+                path,
+            )
+        elif key in CONVERGENCE_BOOL_FIELDS and not isinstance(value, bool):
+            _add(
+                res,
+                "WF_CONVERGENCE_BAD_TYPE",
+                f"convergence {key} must be a boolean",
+                path,
+            )
+    if raw.get("signal") == "verify_command" and not (
+        isinstance(raw.get("command_key"), str) and raw["command_key"].strip()
+    ):
+        _add(
+            res,
+            "WF_CONVERGENCE_MISSING_COMMAND_KEY",
+            "verify_command convergence requires command_key",
+            path,
+        )
 
 
 def _validate_bindings(

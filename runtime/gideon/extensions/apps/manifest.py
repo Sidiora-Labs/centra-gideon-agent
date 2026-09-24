@@ -990,6 +990,7 @@ class PackSourceEntry:
 
 PROVIDER_TYPES = frozenset(
     {
+        "context_engine",
         "model",
         "agent",
         "task",

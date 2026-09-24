@@ -234,7 +234,10 @@ def test_a_first_cycle_previous_is_not_an_error():
     `{{previous.output.summary | default('None yet')}}`; raising would make each one fail on its
     own first cycle unless it grew a branch node for the case."""
     assert (
-        resolve("{{previous.output.report | default('None yet')}}", BindingContext())
+        resolve(
+            "{{previous.output.report | default('None yet')}}",
+            BindingContext(iter_index=0),
+        )
         == "None yet"
     )
 
@@ -757,15 +760,15 @@ def test_a_node_below_an_iteration_marker_keeps_its_spec_path():
     SEQUENCE. Live effect: a `wait` nested in a loop body was read as a gate by
     `_wake_due_nodes`, and every cycle failed with "gate timed out with no answer" — for a
     template containing no gate at all."""
-    from gideon.automation.workflows.controller import _base_path
+    from gideon.automation.workflows.models import spec_path
 
     assert (
-        _base_path("root.children[0].body@0.children[0]")
+        spec_path("root.children[0].body@0.children[0]")
         == "root.children[0].body.children[0]"
     )
-    assert _base_path("root.body#3.children[1]") == "root.body.children[1]"
-    assert _base_path("root.body@2") == "root.body"
-    assert _base_path("root") == "root"
+    assert spec_path("root.body#3.children[1]") == "root.body.children[1]"
+    assert spec_path("root.body@2") == "root.body"
+    assert spec_path("root") == "root"
 
 
 def test_a_container_bodied_loop_finds_its_parent():

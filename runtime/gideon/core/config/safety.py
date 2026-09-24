@@ -129,6 +129,18 @@ class BreakerConfig:
 
 
 @dataclass
+class LoopBreakerConfig:
+    circuit_threshold: int = field(
+        default=30,
+        metadata=_meta(
+            "Tool-loop Failure Ceiling",
+            "Abort a turn after total tool failures exceed this ceiling. Minimum 1. "
+            "Read once per run; changes apply to the next run.",
+        ),
+    )
+
+
+@dataclass
 class AutonomyConfig:
     """Earned-autonomy rung ladder thresholds (AUTONOMY-GUARDRAILS §5).
 
@@ -202,6 +214,10 @@ class GuardrailsConfig:
     breaker: BreakerConfig = field(
         default_factory=BreakerConfig,
         metadata=_meta("Circuit Breaker", "Per-provider model-call breaker tuning."),
+    )
+    loop_breaker: LoopBreakerConfig = field(
+        default_factory=LoopBreakerConfig,
+        metadata=_meta("Tool-loop Breaker", "Run-wide tool failure ceiling."),
     )
     autonomy: AutonomyConfig = field(
         default_factory=AutonomyConfig,

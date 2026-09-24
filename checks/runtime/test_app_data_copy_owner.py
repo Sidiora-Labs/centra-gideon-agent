@@ -67,6 +67,8 @@ DESTRUCTIVE_CALLS = {
     "os.remove": {0},
     "os.unlink": {0},
 }
+PATH_TAKING_HELPERS = {"_copy_live_tree": {1}}
+
 DESTRUCTIVE_METHODS = frozenset({"rename", "replace", "unlink", "rmdir"})
 
 OWNERS = frozenset({"_discard_preserved_data", "install", "uninstall_keep_data"})
@@ -75,7 +77,7 @@ EXPECTED = Counter(
     {
         ("_discard_preserved_data", "shutil.rmtree", ("arg0",)): 1,
         ("install", "shutil.rmtree", ("arg0",)): 1,
-        ("uninstall_keep_data", "shutil.copytree", ("arg1",)): 1,
+        ("uninstall_keep_data", "_copy_live_tree", ("arg1",)): 1,
         ("uninstall_keep_data", "shutil.rmtree", ("arg0",)): 2,
         ("uninstall_keep_data", ".rename", ("recv",)): 1,
     }
@@ -118,8 +120,9 @@ def census(source: str) -> list[tuple[tuple[str, str, tuple[str, ...]], str, int
             spelling = ast.unparse(node.func)
             roles: list[str] = []
             how = ""
-            if spelling in DESTRUCTIVE_CALLS:
-                for pos in sorted(DESTRUCTIVE_CALLS[spelling]):
+            path_positions = {**DESTRUCTIVE_CALLS, **PATH_TAKING_HELPERS}
+            if spelling in path_positions:
+                for pos in sorted(path_positions[spelling]):
                     if pos >= len(node.args):
                         continue
                     names = _idents(node.args[pos])
@@ -263,3 +266,17 @@ def test_no_other_module_reaches_the_data_copy_paths():
         f"{offenders}. Route the decision through app_manager._unconsumed_data_copies "
         "instead of deciding about the copy from another module."
     )
+
+
+@pytest.mark.parametrize(
+    "statement,label",
+    [
+        ("_copy_live_tree(source, _data_stage_dir(name))", "literal"),
+        ("target = _data_stage_dir(name); _copy_live_tree(source, target)", "alias"),
+    ],
+)
+def test_census_tracks_path_taking_helper_destinations(statement, label):
+    found = census(_plant(SRC.read_text(encoding="utf-8"), statement))
+    new = Counter(key for key, _how, _line in found) - EXPECTED
+    assert new == Counter({("enable", "_copy_live_tree", ("arg1",)): 1})
+    assert {how for key, how, _line in found if key[0] == "enable"} == {label}

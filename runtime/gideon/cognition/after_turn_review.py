@@ -230,6 +230,7 @@ def capture_preference_facet(service, user_message: str) -> str | None:
     (upsert_facet returns None for veto; the caller writes the lesson)."""
     if service is None or not getattr(service, "has_vector", False):
         return None
+    capture_glossary(service, user_message)
     try:
         from gideon.cognition.preference_facets import (
             detect_facet_candidate,
@@ -255,6 +256,19 @@ def capture_preference_facet(service, user_message: str) -> str | None:
     except Exception:
         logger.debug("preference-facet capture failed", exc_info=True)
         return None
+
+
+def capture_glossary(service, user_message: str) -> int:
+    import re
+
+    definitions = []
+    for line in (user_message or "").splitlines():
+        match = re.fullmatch(
+            r"\s*([A-Z][A-Z0-9_-]{1,31})\s+(?:means|stands for|=)\s+(.{2,240})\s*", line
+        )
+        if match:
+            definitions.append(f"{match[1]} = {match[2].strip()}")
+    return capture_slot_lines(service, "glossary", definitions)
 
 
 def capture_slot_lines(

@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useState } from 'react'
 import { Plug, Plus, Wifi, Pencil, Trash2, X, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { api, type SettingsProvider, type ProviderInstance, type ProviderSchema, type ProviderTestResult } from '../../shared/data/api'
@@ -16,14 +17,14 @@ export function MultiInstanceCard({ ext, onChanged }: { ext: SettingsProvider; o
   const [adding, setAdding] = useState(false)
   const [busyToggle, setBusyToggle] = useState(false)
 
-  const { data: schema } = useQuery(
+  const { data: schema, error: schemaErr, refresh: refreshSchema } = useQuery(
     `settings:provider-schema:${ext.name}`,
-    () => api.providerSchema(ext.name).catch(() => ({ properties: {} } as ProviderSchema)),
+    () => api.providerSchema(ext.name),
     { persist: true },
   )
-  const { data: instances, refresh: refreshInstances } = useQuery(
+  const { data: instances, error: instancesErr, refresh: refreshInstances } = useQuery(
     `settings:provider-instances:${ext.name}:${ext.enabled ? 'on' : 'off'}`,
-    () => ext.enabled ? api.providerInstances(ext.name).catch(() => [] as ProviderInstance[]) : Promise.resolve([] as ProviderInstance[]),
+    () => ext.enabled ? api.providerInstances(ext.name) : Promise.resolve([] as ProviderInstance[]),
     { persist: true },
   )
   const reloadInstances = () => { invalidateKeys(`settings:provider-instances:${ext.name}`, true); refreshInstances() }
@@ -34,6 +35,9 @@ export function MultiInstanceCard({ ext, onChanged }: { ext: SettingsProvider; o
     finally { setBusyToggle(false) }
   }
 
+  const loadErr = schemaErr || instancesErr
+  const ready = !loadErr && schema !== undefined && instances !== undefined
+  const retry = () => { refreshSchema(); refreshInstances() }
   const count = instances?.length ?? 0
   return (
     <div className="rounded-lg bg-surface-container px-4 py-3" style={{ opacity: busyToggle ? 0.6 : 1 }}>
@@ -44,7 +48,7 @@ export function MultiInstanceCard({ ext, onChanged }: { ext: SettingsProvider; o
             <span data-type="title-m" className="truncate text-on-surface" style={fvs(500)}>{ext.displayName || ext.name}</span>
             {ext.version && <span data-type="caption" className="text-on-surface-low">v{ext.version}</span>}
             <span data-type="caption" className="rounded-pill px-1.5 py-0.5" style={accentChip}>multi-instance</span>
-            {ext.enabled && <span data-type="caption" className="text-on-surface-low">{count} {count === 1 ? 'instance' : 'instances'}</span>}
+            {ext.enabled && ready && <span data-type="caption" className="text-on-surface-low">{count} {count === 1 ? 'instance' : 'instances'}</span>}
           </div>
           {ext.description && <p data-type="body-s" className="mt-0.5 truncate text-on-surface-low">{ext.description}</p>}
         </div>
@@ -54,7 +58,7 @@ export function MultiInstanceCard({ ext, onChanged }: { ext: SettingsProvider; o
 
       {ext.enabled && (
         <div className="mt-3 flex flex-col gap-2 border-t border-outline-variant/30 pt-3">
-          {instances === undefined ? (
+          {loadErr ? <LoadError what="provider instances" error={loadErr} onRetry={retry} /> : instances === undefined || schema === undefined ? (
             <div data-type="caption" className="py-1 text-on-surface-low"><Loader2 size={12} className="inline animate-spin" /> Loading instances…</div>
           ) : instances.length === 0 && !adding ? (
             <p data-type="body-s" className="text-on-surface-low">No instances yet. Add one to start using this provider.</p>
@@ -62,9 +66,9 @@ export function MultiInstanceCard({ ext, onChanged }: { ext: SettingsProvider; o
             instances.map((inst) => <InstanceRow key={inst.id} ext={ext} inst={inst} schema={schema} onChanged={reloadInstances} />)
           )}
 
-          {adding
+          {ready && (adding
             ? <AddInstanceForm ext={ext} schema={schema} onDone={(created) => { setAdding(false); if (created) reloadInstances() }} />
-            : <Button variant="secondary" size="sm" className="self-start" onClick={() => setAdding(true)}><Plus size={15} /> Add instance</Button>}
+            : <Button variant="secondary" size="sm" className="self-start" onClick={() => setAdding(true)}><Plus size={15} /> Add instance</Button>)}
         </div>
       )}
     </div>

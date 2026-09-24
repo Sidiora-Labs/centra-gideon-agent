@@ -8,11 +8,11 @@ from collections.abc import Callable
 from typing import Any
 
 from gideon.cognition.context_compaction import compact, should_compact, total_chars
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 from gideon.integrations.model_windows import model_context_window
 
 logger = logging.getLogger(__name__)
 
-CHARS_PER_TOKEN = 4
 
 COMPACT_AT_FRACTION = 0.80
 
@@ -28,7 +28,7 @@ def prompt_char_budget(
     model_ref: str,
     *,
     fraction: float = COMPACT_AT_FRACTION,
-    chars_per_token: int = CHARS_PER_TOKEN,
+    chars_per_token: int = NOMINAL_CHARS_PER_TOKEN,
 ) -> int:
     """The prompt size, IN CHARS, at which the proactive layer should compact.
 

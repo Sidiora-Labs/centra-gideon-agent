@@ -309,7 +309,7 @@ def load_dismissed() -> set[str]:
     """
     from gideon.extensions.providers.entity_routes import _load_entity_settings
 
-    raw = _load_entity_settings(_ENTITY)
+    raw = _load_entity_settings(_ENTITY) or {}
     ids = raw.get(_DISMISSED_FIELD, [])
     if not isinstance(ids, list):
         return set()
@@ -337,7 +337,7 @@ def dismiss(tip_id: str) -> set[str]:
     if tip_id not in TIP_IDS:
         raise UnknownTipError(tip_id)
 
-    current = _load_entity_settings(_ENTITY)
+    current = _load_entity_settings(_ENTITY) or {}
     existing = current.get(_DISMISSED_FIELD, [])
     stored = {str(x) for x in existing} if isinstance(existing, list) else set()
     ids = (stored | {tip_id}) & TIP_IDS
@@ -358,7 +358,7 @@ def clear_dismissed() -> set[str]:
         _save_entity_settings,
     )
 
-    current = _load_entity_settings(_ENTITY)
+    current = _load_entity_settings(_ENTITY) or {}
     current[_DISMISSED_FIELD] = []
     _save_entity_settings(_ENTITY, current)
     return set()

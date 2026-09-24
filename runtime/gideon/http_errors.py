@@ -303,6 +303,7 @@ HTTP_ERROR_CODES: dict[str, str] = {
         "still in the compose box — try saving again."
     ),
     "invalid_field_type": "A request field carries a value of the wrong type for that field.",
+    "workspace_unresolved": "The platform tool workspace could not be resolved.",
     "workspace_dir_unsafe": (
         "The project's bound workspace directory is not a safe place to write generated agent "
         "files (a relative path, the home directory itself, a credential directory, or an "

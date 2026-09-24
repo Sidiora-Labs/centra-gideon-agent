@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from gideon.integrations.local_models.provider import (
@@ -39,7 +40,9 @@ _DEFAULT_SELF_TEST_TIMEOUT_SECONDS = 30.0
 _MAX_SELF_TEST_TIMEOUT_SECONDS = 300.0
 
 
-def to_local_model(m: Any, *, capabilities: list[str] | None = None) -> LocalModel:
+def to_local_model(
+    m: Any, *, capabilities: list[str] | None = None, provider: Any = None
+) -> LocalModel:
     """Adapt any provider's catalog entry to the uniform :class:`LocalModel`.
 
     The management surface speaks one shape. A provider's ``list_models`` may return a
@@ -51,18 +54,26 @@ def to_local_model(m: Any, *, capabilities: list[str] | None = None) -> LocalMod
     inference; management never needs them.
     """
     if isinstance(m, LocalModel):
-        if capabilities and not m.capabilities:
-            m.capabilities = list(capabilities)
-        return m
-    return LocalModel(
-        name=getattr(m, "name", ""),
-        size_mb=float(getattr(m, "size_mb", 0) or 0),
-        description=getattr(m, "description", ""),
-        downloaded=bool(getattr(m, "downloaded", False)),
-        capabilities=list(getattr(m, "capabilities", None) or capabilities or []),
-        gated=bool(getattr(m, "gated", False)),
-        source=getattr(m, "source", ""),
-    )
+        model = replace(m, capabilities=list(m.capabilities or capabilities or []))
+    else:
+        model = LocalModel(
+            name=getattr(m, "name", ""),
+            size_mb=float(getattr(m, "size_mb", 0) or 0),
+            description=getattr(m, "description", ""),
+            downloaded=bool(getattr(m, "downloaded", False)),
+            capabilities=list(getattr(m, "capabilities", None) or capabilities or []),
+            gated=bool(getattr(m, "gated", False)),
+            source=getattr(m, "source", ""),
+            instance_id=getattr(m, "instance_id", ""),
+            instance_label=getattr(m, "instance_label", ""),
+        )
+    if provider is not None:
+        from gideon.integrations.local_models.multi_instance import instance_identity
+
+        identity = instance_identity(provider)
+        model.instance_id = model.instance_id or identity["instance_id"]
+        model.instance_label = model.instance_label or identity["instance_label"]
+    return model
 
 
 def register_provider(
@@ -129,7 +140,7 @@ async def catalog_for(provider: LocalModelProvider) -> list[LocalModel]:
         )
         return []
     caps = capabilities_for(_key_for(provider))
-    return [to_local_model(m, capabilities=caps) for m in raw]
+    return [to_local_model(m, capabilities=caps, provider=provider) for m in raw]
 
 
 def _failure(

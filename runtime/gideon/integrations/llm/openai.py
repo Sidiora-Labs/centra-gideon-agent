@@ -22,6 +22,7 @@ from gideon.integrations.llm.protocol_turn import (
 )
 from gideon.integrations.llm.registry import CredentialMissing
 from gideon.integrations.llm.stream_tags import KIND_OUTSIDE, make_think_splitter
+from gideon.integrations.model_windows import declared_context_window, is_local_endpoint
 from gideon.integrations.model_windows import model_context_window as _model_window
 
 logger = logging.getLogger(__name__)
@@ -93,14 +94,35 @@ class _ChatDecoder:
             if reason in {"tool_calls", "stop", "length"}:
                 events.extend(self._flush_calls(str(reason)))
         usage = wire_value(chunk, "usage")
-        for source, target in (
-            ("prompt_tokens", "input_tokens"),
-            ("completion_tokens", "output_tokens"),
-        ):
-            measured = wire_value(usage, source)
-            if measured:
-                setattr(self.usage, target, measured)
+        prompt = wire_value(usage, "prompt_tokens")
+        if type(prompt) is int and prompt >= 0:
+            details = wire_value(usage, "prompt_tokens_details")
+            cached = wire_value(details, "cached_tokens", 0)
+            cached = min(prompt, max(0, cached)) if type(cached) is int else 0
+            self.usage.input_tokens = prompt - cached
+            self.usage.cache_read_tokens = cached
+        output = wire_value(usage, "completion_tokens")
+        if type(output) is int and output >= 0:
+            self.usage.output_tokens = output
         return events
+
+    def context_usage_pct(
+        self, model: str, *, override: object = None, local: bool = False
+    ) -> float | None:
+        prompt = (
+            self.usage.input_tokens
+            + self.usage.cache_creation_tokens
+            + self.usage.cache_read_tokens
+        )
+        if prompt > 0:
+            return (
+                prompt
+                / _model_window(
+                    model, _DEFAULT_CONTEXT_WINDOW, override=override, local=local
+                )
+                * 100
+            )
+        return None
 
     def finish(self) -> list[LLMEvent]:
         return self._segments(self._splitter.flush()) + self._flush_calls()
@@ -129,6 +151,10 @@ class OpenAIProvider(ConversationProtocol):
         self._openai_module = sdk
         self._model, self._base_url, self._max_tokens = model, base_url, max_tokens
         self._extra_options = dict(extra_options or {})
+        self.context_window = declared_context_window(
+            self._extra_options.pop("context_window", None)
+        )
+        self.is_local = is_local_endpoint(base_url)
         self._embedding_model = str(self._extra_options.pop("embedding_model", ""))
         self._client = sdk.AsyncOpenAI(api_key=credential.secret, base_url=base_url)
         self._initialize_conversation()
@@ -217,12 +243,9 @@ class OpenAIProvider(ConversationProtocol):
                     logger.debug("Could not close model response stream", exc_info=True)
         for event in decoder.finish():
             yield event
-        context = None
-        if decoder.usage.input_tokens > 0:
-            context = (
-                decoder.usage.input_tokens
-                / _model_window(model, _DEFAULT_CONTEXT_WINDOW)
-            ) * 100
+        context = decoder.context_usage_pct(
+            model, override=self.context_window, local=self.is_local
+        )
         context = self._record_completion(decoder.answer, context, remember=remember)
         yield decoder.usage.terminal(context)
 

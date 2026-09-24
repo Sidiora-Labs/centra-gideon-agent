@@ -17,6 +17,13 @@ NOTE_TYPE_NOTIFICATION = "notification"
 
 
 class WebSocketState:
+    _ws_clients: list[web.WebSocketResponse]
+    _ws_app: dict[web.WebSocketResponse, str]
+    _ws_log_subscribers: set[web.WebSocketResponse]
+    _ws_subagent_subscribers: set[web.WebSocketResponse]
+    _ws_loop: asyncio.AbstractEventLoop | None
+    _flush_task: asyncio.Task[None] | None
+
     def _broadcast(self, note: dict[str, Any]) -> None:
         """Fan a dashboard state note out to the WebSocket clients.
 

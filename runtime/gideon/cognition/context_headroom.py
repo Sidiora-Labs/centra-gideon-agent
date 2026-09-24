@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass, replace
 from enum import Enum
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,6 @@ class HeadroomState(str, Enum):
 WINDOW_UNKNOWN = "unknown"
 PRESSURE_WARN_FRACTION = 0.75
 PRESSURE_CRITICAL_FRACTION = 0.9
-_CHARS_PER_TOKEN = 4
 _COMPRESSION_PASSES = 3
 _PASS_TIGHTENING = 0.75
 MIN_PROJECTION_CHARS = 400
@@ -258,7 +259,9 @@ class _ProjectionBudget:
     def project(self, index, tightening):
         component, previous = self.working[index]
         desired = max(1, previous - (self.total - self.limit))
-        cap = max(MIN_PROJECTION_CHARS, int(desired * _CHARS_PER_TOKEN * tightening))
+        cap = max(
+            MIN_PROJECTION_CHARS, int(desired * NOMINAL_CHARS_PER_TOKEN * tightening)
+        )
         if cap >= len(component.text):
             return False
         try:

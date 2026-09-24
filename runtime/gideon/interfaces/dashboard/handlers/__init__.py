@@ -233,6 +233,7 @@ from gideon.interfaces.dashboard.handlers.memory import (
     api_memory_episodic_search,
     api_memory_event_undo,
     api_memory_events,
+    api_memory_facet,
     api_memory_graph,
     api_memory_graph_export,
     api_memory_graph_rebuild,

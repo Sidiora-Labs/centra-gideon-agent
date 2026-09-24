@@ -263,6 +263,7 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
     drops it at schema assembly. Core-locked tools and the locked platform provider are
     exempt (``tool_prefs.is_disabled`` handles that), so the primitives stay reachable.
     """
+    from gideon.integrations.tool_providers.base import ToolProvider
     from gideon.integrations.tool_providers.registry import get_provider, list_providers
 
     try:
@@ -319,8 +320,32 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
         )
     provider_name = provider_raw or ""
 
-    provider = None
-    if provider_name:
+    from gideon.engine.agents.native.builtin_tools import (
+        PLATFORM_TOOL_NAMES,
+        create_platform_tools_provider,
+    )
+
+    provider: ToolProvider | None = None
+    if provider_name == "gideon-filesystem" or (
+        not provider_name and tool_name in PLATFORM_TOOL_NAMES
+    ):
+        if tool_name not in PLATFORM_TOOL_NAMES:
+            return web.json_response(
+                {"ok": False, "error": f"tool not found: {tool_name}"}, status=404
+            )
+        from gideon.core.config.loader import workspace_root
+
+        try:
+            cwd = workspace_root().resolve(strict=True)
+            if not cwd.is_dir():
+                raise NotADirectoryError(str(cwd))
+        except Exception:
+            logger.warning(
+                "Platform tool workspace could not be resolved", exc_info=True
+            )
+            return json_error("workspace_unresolved", status=503, ok=False)
+        provider = create_platform_tools_provider(cwd=cwd)
+    elif provider_name:
         provider = get_provider(provider_name)
         if provider is None:
             return web.json_response(

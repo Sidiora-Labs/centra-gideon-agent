@@ -31,6 +31,7 @@ from gideon.core.http_request import (
     read_json_body,
 )
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
+from gideon.http_download import download_headers
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import (
@@ -282,7 +283,6 @@ async def api_outbox_notify(request: web.Request) -> web.Response:
 async def api_outbox_download(request: web.Request) -> web.StreamResponse:
     """GET /api/outbox/{filename} — download a file from the outbox."""
     import mimetypes  # noqa: PLC0415
-    import urllib.parse  # noqa: F811
 
     from gideon.core.config.loader import outbox_dir  # noqa: F811
     from gideon.engine.hooks import safe_read_file_bytes  # noqa: F811
@@ -315,7 +315,13 @@ async def api_outbox_download(request: web.Request) -> web.StreamResponse:
             outcome="completed",
             resources=f"filename={filename} ct={content_type}",
         )
-        return web.FileResponse(path, headers={"Content-Type": content_type})
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": content_type,
+                **download_headers(path.name, inline=True),
+            },
+        )
     try:
         raw = safe_read_file_bytes(str(path))
     except FileTooLargeError as e:
@@ -365,7 +371,6 @@ async def api_outbox_download(request: web.Request) -> web.StreamResponse:
         return web.json_response(
             {"error": "file content was redacted; download aborted"}, status=400
         )
-    safe_name = urllib.parse.quote(path.name, safe="")
     _sel().log_tool_invocation(
         session_key="api",
         source="api",
@@ -376,7 +381,7 @@ async def api_outbox_download(request: web.Request) -> web.StreamResponse:
     )
     return web.Response(
         body=redacted.encode("utf-8"),
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}"},
+        headers=download_headers(path.name),
     )
 
 
@@ -1974,7 +1979,7 @@ _RG_AVAILABLE: bool | None = None
 
 
 class _ContentSearchTimedOut(Exception):
-    """Stop the Python fallback when its content-search deadline expires."""
+    """Report an expired content-search deadline from either engine."""
 
 
 def _has_rg() -> bool:
@@ -2006,7 +2011,9 @@ async def _content_search_rg(
         return [], False
     try:
         out, _ = await run_with_timeout(proc, _CONTENT_SEARCH_TIMEOUT)
-    except (asyncio.TimeoutError, OSError, ValueError):
+    except asyncio.TimeoutError as exc:
+        raise _ContentSearchTimedOut() from exc
+    except (OSError, ValueError):
         return [], False
     results: list[dict] = []
     for line in out.decode("utf-8", "replace").splitlines():
@@ -2041,16 +2048,25 @@ def _content_search_python(
     """Pure-Python content search fallback (no ripgrep). Returns (results, truncated)."""
     import fnmatch
 
+    deadline = time.monotonic() + _CONTENT_SEARCH_TIMEOUT
+
+    def check_deadline() -> None:
+        if time.monotonic() >= deadline:
+            raise _ContentSearchTimedOut()
+
     globs = [g.strip() for g in include.split(",") if g.strip()]
     needle = query.lower()
     results: list[dict] = []
+    check_deadline()
     for dirpath, dirnames, filenames in os.walk(root):
+        check_deadline()
         dirnames[:] = [
             d
             for d in dirnames
             if d not in _CONTENT_SEARCH_IGNORE_DIRS and not d.startswith(".")
         ]
         for fn in filenames:
+            check_deadline()
             fpath = os.path.join(dirpath, fn)
             if globs and not any(fnmatch.fnmatch(fpath, g) for g in globs):
                 continue
@@ -2059,6 +2075,7 @@ def _content_search_python(
             try:
                 with open(fpath, encoding="utf-8", errors="ignore") as fh:
                     for n, line in enumerate(fh, 1):
+                        check_deadline()
                         col = line.lower().find(needle)
                         if col >= 0:
                             results.append(
@@ -2105,12 +2122,23 @@ async def api_file_content_search(request: web.Request) -> web.Response:
     if not q:
         return web.json_response({"results": [], "engine": engine, "truncated": False})
     include = request.query.get("include", "")
-    if _has_rg():
-        results, truncated = await _content_search_rg(path, q, include)
-    else:
-        results, truncated = await asyncio.to_thread(
-            _content_search_python, path, q, include
+    try:
+        if engine == "rg":
+            results, truncated = await _content_search_rg(path, q, include)
+        else:
+            results, truncated = await asyncio.to_thread(
+                _content_search_python, path, q, include
+            )
+    except _ContentSearchTimedOut:
+        error = "Content search timed out. Narrow the directory or include glob and try again."
+        _sel().log_tool_invocation(
+            session_key="dashboard",
+            tool_name="file_content_search",
+            outcome="error",
+            resources=f"{path} q={q[:80]}",
+            error=error,
         )
+        return web.json_response({"error": error, "engine": engine}, status=504)
     _sel().log_tool_invocation(
         session_key="dashboard",
         tool_name="file_content_search",

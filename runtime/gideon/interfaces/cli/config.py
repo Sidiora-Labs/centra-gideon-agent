@@ -1,9 +1,10 @@
-"""CLI config subcommand — get, set, edit configuration values."""
+"""CLI config subcommand — get, set, unset, edit configuration values."""
 
 import argparse
 import json
 import os
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 from gideon.core.config import AppConfig
@@ -77,9 +78,10 @@ def _config_cmd(args: argparse.Namespace) -> None:
             try:
                 existing = _read_config_for_update(config_path())
                 data = preserve_configuration_credentials(data, existing)
+                _validate_file_update(data, existing)
                 write_configuration(config_path(), data, ValueError)
             except (OSError, ValueError) as e:
-                print(f"❌ Could not read config: {e}", file=sys.stderr)
+                print(f"❌ Could not apply config: {e}", file=sys.stderr)
                 sys.exit(1)
             sel().log_api_access(
                 caller="cli",
@@ -136,6 +138,39 @@ def _config_cmd(args: argparse.Namespace) -> None:
                 resources=f"{key}={json.dumps(parsed)}",
             )
             print(f"✅ {key} = {json.dumps(parsed)}")
+    elif action == "unset":
+        from gideon.core.atomic_write import atomic_write
+
+        key = getattr(args, "key", "")
+        if not key or any(not part or part.strip() != part for part in key.split(".")):
+            print("❌ Invalid key: use a nonempty dot-separated key", file=sys.stderr)
+            sys.exit(1)
+        p = config_path()
+        try:
+            raw = _read_config_for_update(p)
+            if _dict_get(raw, key) is _MISSING:
+                if _dict_get(AppConfig().to_dict(), key) is _MISSING:
+                    print(f"❌ Unknown key: {key}", file=sys.stderr)
+                    sys.exit(1)
+                print(f"✅ {key} is not set")
+                return
+            owner = raw
+            parts = key.split(".")
+            for part in parts[:-1]:
+                owner = owner[part]
+            del owner[parts[-1]]
+            atomic_write(p, json.dumps(raw, indent=2) + "\n")
+        except (OSError, ValueError) as exc:
+            print(f"❌ Could not unset config: {exc}", file=sys.stderr)
+            sys.exit(1)
+        sel().log_api_access(
+            caller="cli",
+            operation="config_unset",
+            outcome="allowed",
+            source="cli",
+            resources=key,
+        )
+        print(f"✅ Unset {key}")
     elif action == "edit":
 
         p = config_path()
@@ -153,8 +188,45 @@ def _config_cmd(args: argparse.Namespace) -> None:
         editor = os.environ.get("EDITOR", "vi")
         os.execvp(editor, [editor, str(p)])
     else:
-        print("Usage: gideon config {get,set,edit}", file=sys.stderr)
+        print("Usage: gideon config {get,set,unset,edit}", file=sys.stderr)
         sys.exit(1)
+
+
+def _validate_file_update(data: dict, existing: dict) -> None:
+    import jsonschema
+
+    from gideon.core.config.schema import JSON_SCHEMA
+    from gideon.core.config.validation import _DIRECT_READ_TOP_KEYS
+
+    schema = deepcopy(JSON_SCHEMA)
+
+    def close_records(node):
+        if "properties" in node:
+            node["additionalProperties"] = False
+            for child in node["properties"].values():
+                close_records(child)
+        for name in ("items", "additionalProperties"):
+            if isinstance(node.get(name), dict):
+                close_records(node[name])
+
+    close_records(schema)
+    for key in _DIRECT_READ_TOP_KEYS | {"use_cases"}:
+        schema["properties"][key] = {"type": "object"}
+    candidate = dict(data)
+    unsupported = []
+    for key in data.keys() - schema["properties"].keys():
+        if key in existing and data[key] == existing[key]:
+            candidate.pop(key)
+        else:
+            unsupported.append(key)
+    issues = jsonschema.Draft7Validator(schema).iter_errors(candidate)
+    unsupported.extend(
+        ".".join(map(str, issue.absolute_path)) or "<root>" for issue in issues
+    )
+    if unsupported:
+        raise ValueError(
+            "cannot apply config fields: " + ", ".join(sorted(set(unsupported)))
+        )
 
 
 def _editable_spec(key: str) -> dict | None:

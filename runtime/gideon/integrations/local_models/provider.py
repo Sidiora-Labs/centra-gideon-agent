@@ -120,6 +120,8 @@ class LocalModel:
     status: str = "active"
     integrity: str = ""
     config_only: bool = False
+    instance_id: str = ""
+    instance_label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +145,8 @@ class LocalModel:
             "status": self.status,
             "integrity": self.integrity,
             "config_only": self.config_only,
+            "instance_id": self.instance_id,
+            "instance_label": self.instance_label,
         }
 
 

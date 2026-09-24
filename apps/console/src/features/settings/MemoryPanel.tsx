@@ -489,6 +489,29 @@ const ADD_MODE_TITLE: Record<'fact' | 'lesson' | 'entity' | 'proposals', string>
   fact: 'New fact', lesson: 'New lesson', entity: 'New entity', proposals: 'Names to decide on',
 }
 
+export function FacetControls({ fact, onSaved }: { fact: SemanticEntry; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  let flags: { pinned?: boolean; forgotten?: boolean } = {}
+  try { flags = JSON.parse(fact.value_json || '{}') } catch { /* invalid stored value */ }
+  const update = async (action: 'pin' | 'forget') => {
+    setBusy(true); setError('')
+    try {
+      if (action === 'pin') await api.memoryPinFacet(fact.key, !flags.pinned)
+      else await api.memoryForgetFacet(fact.key)
+      onSaved()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return <div className="flex flex-col gap-2">
+    <div className="flex gap-2">
+      <Button size="sm" disabled={busy || flags.forgotten} onClick={() => void update('pin')}>{flags.pinned ? 'Unpin preference' : 'Pin preference'}</Button>
+      <Button size="sm" disabled={busy || flags.forgotten} onClick={() => void update('forget')}>{flags.forgotten ? 'Preference forgotten' : 'Forget preference'}</Button>
+    </div>
+    {error && <p role="alert">{error}</p>}
+  </div>
+}
+
 function StudioInspector({ item, onDelete, onSaved, onSlotChanged }: {
   item: StudioItem; onDelete: () => void; onSaved: () => void; onSlotChanged: () => void
 }) {
@@ -518,6 +541,7 @@ function StudioInspector({ item, onDelete, onSaved, onSlotChanged }: {
               <Eyebrow className="mb-1">Value</Eyebrow>
               <pre data-type="caption" className="whitespace-pre-wrap rounded-lg bg-surface-high px-3 py-2 text-on-surface">{readValue(item.fact.value_json)}</pre>
             </div>
+            {item.fact.key.startsWith('pref.facet.') && <FacetControls fact={item.fact} onSaved={onSaved} />}
             <StudioMeta pairs={[
               ['Scope', (item.fact.scope || 'global') + (item.fact.scope_ref ? ` · ${item.fact.scope_ref}` : '')],
               ['Source', item.fact.source || '—'], ['Tier', item.fact.tier || 'semantic'],
@@ -1569,12 +1593,14 @@ function SettingsTab({ stats, onConsolidated }: { stats: MemoryStats | null | un
   )
 }
 
-function DailyDigestSection() {
+export function DailyDigestSection() {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
   const [digests, setDigests] = useState<DailyDigest[] | null>(null)
   const [busy, setBusy] = useState(false)
   const load = (rebuild = false) => {
     setBusy(true)
-    api.dailyDigests(rebuild).then(setDigests).catch(() => setDigests([])).finally(() => setBusy(false))
+    setLoadErr(null)
+    api.dailyDigests(rebuild).then(setDigests).catch(setLoadErr).finally(() => setBusy(false))
   }
   useEffect(() => load(false), [])
 
@@ -1585,7 +1611,7 @@ function DailyDigestSection() {
         </Button>
         {digests && <span data-type="body-s" className="text-on-surface-low">{digests.length} digest{digests.length === 1 ? '' : 's'}</span>}
       </div>
-      {!digests ? <ListSkeleton rows={3} what="daily digests" /> : digests.length === 0 ? (
+      {loadErr ? <LoadError what="daily digests" error={loadErr} onRetry={() => load(false)} /> : !digests ? <ListSkeleton rows={3} what="daily digests" /> : digests.length === 0 ? (
         <EmptyState icon={CalendarDays} title="No daily digests yet"
           hint="A digest is one day's memory activity rolled up — 'what happened on day D'. They build on the maintenance cadence, or press Build / refresh above." />
       ) : (

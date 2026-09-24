@@ -274,9 +274,24 @@ as part of native qualification.
 
 ### macOS
 
-The desktop workspace's `dist` command targets a DMG. Distribution signing and
-notarization are deployment requirements to configure for the actual publisher, and this
-checkout makes no claim about available signing credentials or a published installer.
+The release workflow's `desktop-mac` job builds an **unsigned arm64 DMG** on
+macOS for Apple Silicon. It checks source and repository destinations, stages the
+native backend and an unpacked Electron application, then checks that application
+before packaging the same tree into the DMG. The smoke test mounts the DMG
+read-only, checks the application and backend architecture, and executes their
+version/architecture probes with an isolated Gideon home. A failed smoke test
+blocks artifact upload and release creation.
+
+Release notes wait for both desktop jobs and collect `desktop-*` artifacts. The
+DMG appears in the configured release channel only after that workflow succeeds;
+source-level validation does not establish that an installer was built or tested.
+This artifact has no Developer ID signing or notarization. macOS Gatekeeper may
+block it; obtain it only through your operator's verified release channel. Intel
+Macs are not a target of this artifact. Native UI, permissions, and visual branding
+still require release qualification on the intended system.
+
+`make desktop-dist` remains the local macOS packaging target. Publisher signing
+and notarization require separate credentials and configuration.
 
 ### Windows
 

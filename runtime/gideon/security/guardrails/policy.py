@@ -201,9 +201,19 @@ def profile_for_session(session_key: str) -> SafetyProfile:
     A corrupt ceiling raises out of here, which fails the dispatch CLOSED."""
     base = HEADLESS if is_unattended_session(session_key) else INTERACTIVE
     layered = safety_profile_for(base)
+    if (session_key or "").removeprefix(_DASHBOARD_WRAPPER).startswith(
+        "room:"
+    ) and layered.approval == "auto":
+        layered = replace(layered, approval="ask")
     from gideon.security.guardrails.ceiling import active_ceiling, resolve
 
-    return resolve(active_ceiling(), layered)
+    effective = resolve(active_ceiling(), layered)
+    room_key = (session_key or "").removeprefix(_DASHBOARD_WRAPPER)
+    if room_key.startswith("room:"):
+        from gideon.engine.rooms.safety import profile_for_room_key
+
+        return profile_for_room_key(room_key, effective)
+    return effective
 
 
 def ceiling_permits_approval(value: str) -> bool:

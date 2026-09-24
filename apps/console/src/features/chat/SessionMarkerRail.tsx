@@ -201,6 +201,9 @@ function MapMarks({ id, turns, viewport, current, compact, jumpTo, moveWithKeybo
           data-session-map-state="open"
           aria-describedby={`${id}-session-map-keyboard-help`}
           className="relative flex flex-col items-center rounded-xl border border-outline-variant/50 bg-rail py-1 shadow-md">
+          <span role="status" aria-label="Session map position" aria-live="polite" aria-atomic="true" className="sr-only">
+            {`Message ${current + 1} of ${turns.length}`}
+          </span>
           <span id={`${id}-session-map-keyboard-help`} className="sr-only">
             Use the Up and Down arrow keys to jump between messages. Home jumps to the first message and End jumps to the newest.
           </span>
@@ -217,6 +220,7 @@ function MapMarks({ id, turns, viewport, current, compact, jumpTo, moveWithKeybo
               : '')
             return (
               <button key={index} type="button" data-session-marker
+                data-current={current === index}
                 data-marker-tone={current === index ? 'current' : 'history'}
                 aria-label={`Jump to message ${index + 1}, ${speaker}: ${marks.join(', ')}`}
                 aria-describedby={previewId}

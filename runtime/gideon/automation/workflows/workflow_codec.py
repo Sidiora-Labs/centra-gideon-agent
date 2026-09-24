@@ -271,6 +271,7 @@ class RecordCodecs:
             "tokens",
             "wake_at",
             "item_label",
+            "item_total",
             "subagent_id",
         ),
     }
@@ -486,6 +487,7 @@ class RecordCodecs:
             tokens=row.scalar("tokens", int, 0),
             wake_at=row.scalar("wake_at", float, 0.0),
             item_label=row.scalar("item_label"),
+            item_total=row.scalar("item_total", int, 0),
             subagent_id=row.scalar("subagent_id"),
         )
         return factory(**values)

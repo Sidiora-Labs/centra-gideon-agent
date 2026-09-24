@@ -1,4 +1,4 @@
-import { useId, useReducer, type ReactNode } from 'react'
+import { useCallback, useId, useReducer, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { X, Maximize2, Minimize2 } from 'lucide-react'
@@ -19,6 +19,10 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
   onExpand?: () => void
   children: ReactNode
 }) {
+  const [bodyHost] = useState(() => document.createElement('div'))
+  const attachBody = useCallback((node: HTMLDivElement | null) => {
+    if (node && bodyHost.parentNode !== node) node.appendChild(bodyHost)
+  }, [bodyHost])
   const titleId = useId()
   const reduced = useReducedMotion()
   const focusReturnRef = useFocusReturn<HTMLDivElement>()
@@ -50,10 +54,10 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
       </div>
     </header>
   )
-  const body = <div className="min-h-0 flex-1 overflow-y-auto px-l py-l">{children}</div>
+  const body = <div ref={attachBody} className="min-h-0 flex-1 overflow-y-auto px-l py-l" />
   if (expanded) {
     const edge = `inset(0px 0px 0px calc(100dvw - ${dockW}px))`
-    return createPortal(
+    return <>{createPortal(
       <motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
         className="fixed inset-0 z-[var(--z-content)] flex flex-col bg-surface"
         initial={reduced ? { opacity: 0 } : { clipPath: edge }}
@@ -62,12 +66,12 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
         {header}
         <div className="mx-auto flex min-h-0 w-full flex-1 flex-col" style={{ maxWidth: 'var(--side-panel-width)' }}>{body}</div>
       </motion.div>, document.body,
-    )
+    )}{createPortal(children, bodyHost)}</>
   }
   const top = fillHeight ? '0px' : 'var(--shell-corner-rh, 56px)'
   const bottom = 'var(--spacing-m, 12px)'
   return (
-    <motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
+    <><motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
       className="relative shrink-0 overflow-hidden rounded-l-2xl border-l border-outline-variant/50 bg-surface shadow-sm"
       style={{ marginTop: top, marginBottom: bottom, height: `calc(100% - ${top} - ${bottom})` }}
       initial={{ width: reduced ? dockW : 0, opacity: 0 }} animate={{ width: dockW, opacity: 1 }}
@@ -80,6 +84,6 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
           initial={false} animate={{ width: 1 }} whileHover={{ width: reduced ? 1 : 1 + expr(2.5, 0.3) }} transition={physics.snappy} />
       </div>
       <div className="flex h-full flex-col" style={{ width: dockW }}>{header}{body}</div>
-    </motion.div>
+    </motion.div>{createPortal(children, bodyHost)}</>
   )
 }

@@ -1,4 +1,5 @@
 import { api } from '../../shared/data/api'
+import { createdLoopRoute, isCreatedLoopRun } from '../loop/creation'
 
 export type TryOneId = 'knowledge' | 'trigger' | 'loop'
 
@@ -111,6 +112,11 @@ export async function runReminderFlow(): Promise<TryOneOutcome> {
 }
 export async function runLoopFlow(): Promise<TryOneOutcome> {
   const created = await api.createULoop({ ...LOOP_SEED, max_cycles: 1 })
+  if (isCreatedLoopRun(created)) {
+    return outcome('Your first loop is running.', createdLoopRoute(created), 'Watch it work', [
+      ['Working on', LOOP_SEED.task], ['Status', created.status],
+    ])
+  }
   const running = await api.uLoopAction(created.id, 'start')
   if (running.status !== 'running') throw new Error(`The loop was created but did not start — it is "${running.status}".`)
   return outcome('Your first loop is running.', `loops/${running.id}`, 'Watch it work', [

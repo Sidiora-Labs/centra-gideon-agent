@@ -88,7 +88,7 @@ class TestBudget:
         windows get different budgets. A hardcoded cap would make these equal."""
         small = C.prompt_char_budget(SMALL_MODEL)
         big = C.prompt_char_budget(BIG_MODEL)
-        assert small == int(8192 * C.CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION)
+        assert small == int(8192 * C.NOMINAL_CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION)
         assert big > small * 100
 
     def test_an_unresolvable_model_falls_back_to_a_real_budget_not_to_unbounded(
@@ -99,7 +99,9 @@ class TestBudget:
         """
         budget = C.prompt_char_budget("no-such-model-anywhere")
         assert budget > 0
-        assert budget == int(200_000 * C.CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION)
+        assert budget == int(
+            200_000 * C.NOMINAL_CHARS_PER_TOKEN * C.COMPACT_AT_FRACTION
+        )
 
 
 class TestSegmentation:

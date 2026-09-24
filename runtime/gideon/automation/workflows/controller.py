@@ -117,6 +117,7 @@ from gideon.automation.workflows.models import (
     NodeKind,
     RunStatus,
     WorkflowRun,
+    spec_path,
 )
 from gideon.automation.workflows.resilience import (
     Attempt,
@@ -152,7 +153,6 @@ from gideon.cognition.knowledge import session_brief
 
 logger = logging.getLogger(__name__)
 
-_INSTANCE_MARKER_RE = re.compile(r"[@#]\d+")
 
 _LOOP_MARKER_RE = re.compile(r"@(\d+)")
 
@@ -299,7 +299,7 @@ class RunController:
         for path, inst in self.instances.items():
             if inst.state not in SUCCESS_STATES:
                 continue
-            node = by_path.get(_base_path(path))
+            node = by_path.get(spec_path(path))
             if node is None or not node.id:
                 continue
             self._outputs[node.id] = store.read_output(self.run.id, path)
@@ -785,7 +785,7 @@ class RunController:
         A `wait` is parked on the CLOCK and resolves itself, so surfacing it as needs_input
         would ask a human to answer something nobody asked them.
         """
-        node = dict(_walk(self.root)).get(_base_path(path))
+        node = dict(_walk(self.root)).get(spec_path(path))
         if node is None or node.kind != NodeKind.GATE:
             return False
         raw = str((node.config or {}).get("kind", "") or "")
@@ -808,7 +808,7 @@ class RunController:
         for existing in list_continuations(self.run.id):
             if existing.instance_path == path and existing.epoch == inst.epoch:
                 return
-        node = dict(_walk(self.root)).get(_base_path(path))
+        node = dict(_walk(self.root)).get(spec_path(path))
         ask = dict(self.run.attention or {}) if self.run.attention else {}
         outstanding = [
             p
@@ -868,7 +868,7 @@ class RunController:
     def _resolved_for_path(self, path: str) -> dict[str, Any]:
         """What this node had already resolved — the field that makes a resume re-enter
         the STEP rather than re-run the enclosing subgraph."""
-        node = dict(_walk(self.root)).get(_base_path(path))
+        node = dict(_walk(self.root)).get(spec_path(path))
         if node is None:
             return {}
         deps = node_deps(node.config or {})
@@ -942,7 +942,7 @@ class RunController:
         filled = ask.apply_defaults(answer)
         approved = _is_approved(ask, filled)
         if approved and always_allow:
-            node = dict(_walk(self.root)).get(_base_path(cont.instance_path))
+            node = dict(_walk(self.root)).get(spec_path(cont.instance_path))
             self._allow_memory.remember(node.config if node else {}, cont.node_id)
         inst.wake_at = 0.0
         if approved:
@@ -1333,7 +1333,7 @@ class RunController:
             inst.completed_at = None
             inst.wake_at = 0.0
             inst.attempt = 0
-            node = dict(_walk(self.root)).get(_base_path(path))
+            node = dict(_walk(self.root)).get(spec_path(path))
             if node is not None and node.id:
                 self._outputs.pop(node.id, None)
             self.journal.invalidate_prefix(path)
@@ -1407,7 +1407,7 @@ class RunController:
         """Mark a whole subtree skipped. The subtree matters: skipping only the case root
         would leave its children pending, and a derived container state would then read
         the branch as unfinished forever."""
-        node = dict(_walk(self.root)).get(_base_path(path))
+        node = dict(_walk(self.root)).get(spec_path(path))
         paths = [path]
         if node is not None:
             from gideon.automation.workflows.models import walk
@@ -1476,7 +1476,7 @@ class RunController:
                 continue
             if info is None or not getattr(info, "done", False):
                 continue
-            node = dict(_walk(self.root)).get(_base_path(path))
+            node = dict(_walk(self.root)).get(spec_path(path))
             node_id = node.id if node else ""
             error = str(getattr(info, "error", "") or "")
             reaped = bool(getattr(info, "reaped", False))
@@ -1562,7 +1562,7 @@ class RunController:
                 continue
             inst.state = InstanceState.CANCELLED
             inst.completed_at = _now()
-            node = dict(_walk(self.root)).get(_base_path(path))
+            node = dict(_walk(self.root)).get(spec_path(path))
             node_id = node.id if node else ""
             self.journal.write(
                 journal_mod.WATCHER_REAPED,
@@ -1828,7 +1828,7 @@ class RunController:
         segments = path.split(".")
         for i in range(len(segments)):
             prefix = ".".join(segments[: i + 1])
-            node = nodes.get(_base_path(prefix))
+            node = nodes.get(spec_path(prefix))
             if node is None:
                 continue
             config = node.config or {}
@@ -1859,7 +1859,7 @@ class RunController:
         if index == 0:
             return "", ""
         prior = f"{match.group('parent')}.children[{index - 1}]"
-        node = dict(_walk(self.root)).get(_base_path(prior))
+        node = dict(_walk(self.root)).get(spec_path(prior))
         return prior, (node.id if node is not None else "")
 
     def _resolve_metric(self, raw: Any) -> float | None:
@@ -2082,7 +2082,7 @@ class RunController:
             index = path[len(prefix) :].split(".", 1)[0]
             if not index.isdigit():
                 continue
-            node = by_path.get(_base_path(path))
+            node = by_path.get(spec_path(path))
             out.append(
                 {
                     "item_index": int(index),
@@ -2109,6 +2109,7 @@ class RunController:
         ctx = self._context_for(item)
         resolved_view = self._resolved_inputs(item, ctx)
         inst = self._instance(item.path)
+        inst.item_total = item.item_total
         key = CacheKey(
             path=item.path,
             epoch=inst.epoch,
@@ -2636,7 +2637,7 @@ class RunController:
         let a bundled spec tighten an operator's policy. Zero/invalid falls back to the default
         rather than disabling the check — a malformed knob must not switch a safety timeout off.
         """
-        node = dict(_walk(self.root)).get(_base_path(path))
+        node = dict(_walk(self.root)).get(spec_path(path))
         default = int(self.services.node_timeout_stall or 0)
         raw = (
             (node.config or {}).get("timeout_stall_secs") if node is not None else None
@@ -3310,7 +3311,7 @@ class RunController:
         parent_path, iteration = _loop_parent(item.path)
         if parent_path is None:
             return
-        node = dict(_walk(self.root)).get(_base_path(parent_path))
+        node = dict(_walk(self.root)).get(spec_path(parent_path))
         if node is None or node.kind != NodeKind.LOOP:
             return
         if not self._iteration_complete(node, parent_path, iteration):
@@ -3746,7 +3747,7 @@ class RunController:
         parent_path, iteration = _loop_parent(path)
         if parent_path is None:
             return None, False
-        loop = dict(_walk(self.root)).get(_base_path(parent_path))
+        loop = dict(_walk(self.root)).get(spec_path(parent_path))
         if loop is None or loop.kind != NodeKind.LOOP:
             return None, False
 
@@ -3785,7 +3786,7 @@ class RunController:
                 continue
             if inst.output_ref.startswith("outputs/"):
                 continue
-            node = by_path.get(_base_path(path))
+            node = by_path.get(spec_path(path))
             if node is None or not node.id:
                 continue
             artifacts[node.id] = inst.output_ref
@@ -3807,7 +3808,7 @@ class RunController:
         container = _enclosing_parallel(path, tree)
         if container is None:
             return None
-        node = tree.get(_base_path(container))
+        node = tree.get(spec_path(container))
         if node is None or not node.children:
             return None
         out: dict[str, list[Any]] = {}
@@ -3916,7 +3917,7 @@ class RunController:
                 continue
             crossed = inst.wake_at
             inst.wake_at = 0.0
-            node = dict(_walk(self.root)).get(_base_path(path))
+            node = dict(_walk(self.root)).get(spec_path(path))
             kind = node.kind if node else None
             self.journal.clock_read(
                 path,
@@ -4196,10 +4197,8 @@ class RunController:
         out: dict[str, Any] = {}
         if item.iter_index is not None:
             out["item_index"] = item.iter_index
-            base = _base_path(item.path)
-            total = sum(1 for p in self.instances if _base_path(p) == base)
-            if total > 1:
-                out["item_total"] = total
+            if item.item_total > 0:
+                out["item_total"] = item.item_total
         label = _item_label(item.item)
         if label:
             out["item_label"] = label
@@ -4760,23 +4759,6 @@ def _walk(root: Node) -> list[tuple[str, Node]]:
     return walk(root)
 
 
-def _base_path(path: str) -> str:
-    """Strip foreach/loop instance MARKERS, yielding the SPEC path.
-
-    `root.body#3` and `root.body@2` are instances of the same spec node; the state map is
-    keyed by instance, but the spec lookup needs the shared path.
-
-    Removes each `@N`/`#N` marker in place rather than truncating at the last one. Truncating
-    was wrong for any node BELOW an iteration marker:
-    `root.children[0].body@0.children[0]` became `root.children[0].body`, so the spec lookup
-    returned the body SEQUENCE instead of the wait inside it. Measured live: a `wait` nested in
-    a loop body was read as a gate by `_wake_due_nodes` and every cycle failed with "gate timed
-    out with no answer" — for a template containing no gate at all. Every container-bodied
-    loop and foreach was affected, which is the shape the watcher templates use.
-    """
-    return _INSTANCE_MARKER_RE.sub("", path)
-
-
 def _enclosing_parallel(path: str, tree: dict[str, Node]) -> str | None:
     """The path of the nearest enclosing `parallel`, walking OUTWARD.
 
@@ -4794,7 +4776,7 @@ def _enclosing_parallel(path: str, tree: dict[str, Node]) -> str | None:
         candidate = path[: match.start()]
         if not candidate:
             continue
-        node = tree.get(_base_path(candidate))
+        node = tree.get(spec_path(candidate))
         if node is not None and node.kind == NodeKind.PARALLEL:
             return candidate
     return None

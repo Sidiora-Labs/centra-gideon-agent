@@ -505,22 +505,26 @@ async def test_destructive_invoke_requires_and_accepts_explicit_ack(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_a_core_locked_tool_is_never_refused(monkeypatch):
+async def test_a_core_locked_tool_is_never_refused(monkeypatch, tmp_path):
     """`bash` and the other primitives must stay reachable even with a stray disable row.
 
     Not a special case here: the exemption is `tool_prefs.is_disabled`'s own, which is why
     the gate calls that instead of testing the disabled set itself. A cron script locked
     out of `bash` by a bad row would be a worse outage than the bug being fixed.
     """
-    prov = _RecordingProvider("bash", provider_tag="gideon-filesystem")
-    _install_provider(monkeypatch, prov)
-    _disable(monkeypatch, "gideon-filesystem:bash")
+    from gideon.core.config.loader import config_dir
 
+    monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path))
+    (config_dir() / "tool_prefs.json").write_text(
+        json.dumps({"disabled": ["gideon-filesystem:bash"]})
+    )
     resp = await tools_mod.api_tool_invoke(
-        _invoke_request({"tool": "bash", "confirm_risk": "destructive"})
+        _invoke_request({"tool": "bash", "arguments": {"command": "pwd"}})
     )
     assert resp.status == 200
-    assert prov.invoked == [("bash", {})]
+    payload = json.loads(resp.body)
+    assert payload["ok"] is True
+    assert payload["output"].strip() == str(tmp_path)
 
 
 @pytest.mark.asyncio

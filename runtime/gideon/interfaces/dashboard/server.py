@@ -458,6 +458,9 @@ async def start_dashboard(
 
     _precompute_telemetry(state)
 
+    from gideon.interfaces.dashboard.handlers.rooms import setup_room_routes
+
+    setup_room_routes(app)
     _register_mcp_routes(app)
 
     ring_handler = handlers.install_log_ring_handler()
@@ -803,6 +806,7 @@ async def start_dashboard(
     app.router.add_get("/api/memory/graph/entities", handlers.api_memory_entity_graph)
     app.router.add_get("/api/memory/record-links", handlers.api_memory_record_links)
     app.router.add_get("/api/memory/graph/export", handlers.api_memory_graph_export)
+    app.router.add_post("/api/memory/facets", handlers.api_memory_facet)
     app.router.add_get("/api/memory/slots", handlers.api_memory_slots)
     app.router.add_post(
         "/api/memory/slots/{name}/lines", handlers.api_memory_slot_append

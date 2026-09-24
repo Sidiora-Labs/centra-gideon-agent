@@ -1,3 +1,4 @@
+import { LoadError, ListSkeleton } from '../../shared/ui/ListScaffold'
 import { useState } from 'react'
 import { ThumbsUp, ThumbsDown, BellOff, RotateCcw } from 'lucide-react'
 import { api, type FeedbackProducerRow } from '../../shared/data/api'
@@ -6,9 +7,9 @@ import { Button } from '../../shared/ui/Button'
 import { PanelHeader, Section } from './settingsUI'
 
 export function FeedbackPanel() {
-  const { data, refresh } = useQuery(
+  const { data, error: loadErr, refresh } = useQuery(
     'settings:feedback-producers',
-    () => api.feedbackProducers().catch(() => null),
+    () => api.feedbackProducers(),
     { persist: false },
   )
   const [busy, setBusy] = useState('')
@@ -29,7 +30,7 @@ export function FeedbackPanel() {
 
       <Section title="Judgment sources"
         hint={data ? `Rolling ${data.window_days}-day window · accuracy shown after ${data.min_n} verdicts. History restarts when you rebind a prompt (a new prompt is a new source).` : undefined}>
-        {rows.length === 0 ? (
+        {loadErr ? <LoadError what="feedback sources" error={loadErr} onRetry={refresh} /> : !data ? <ListSkeleton rows={3} what="feedback sources" /> : rows.length === 0 ? (
           <div data-type="body-s" className="rounded-lg bg-surface-container px-3 py-3 text-on-surface-low">
             No feedback yet — 👍/👎 appear on inbox classifications, drafted replies, digests, and loop findings. Verdicts collect here per judgment source.
           </div>

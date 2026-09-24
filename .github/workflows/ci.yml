@@ -97,6 +97,7 @@ jobs:
           run_tool "isort --check-only" uv run isort --check-only runtime/gideon checks/runtime checks/harness
           run_tool "flake8" uv run flake8 runtime/gideon checks/runtime checks/harness
           run_tool "mypy" uv run mypy runtime/gideon checks/harness
+          run_tool "mypy native bundles" uv run python tooling/scripts/lint_bundled_apps.py
           if [ "$status" -ne 0 ]; then
             {
               echo "violations<<LINTEOF"

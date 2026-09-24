@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
+
 logger = logging.getLogger(__name__)
 
 THRESHOLD_PROFILES: dict[str, float] = {
@@ -277,7 +279,9 @@ def count_tokens(text: str) -> int:
             encoded = tiktoken.get_encoding("cl100k_base").encode(text)
             return len(encoded)
         except Exception:
-            return max(1, (len(text) + 3) // 4)
+            return max(
+                1, (len(text) + NOMINAL_CHARS_PER_TOKEN - 1) // NOMINAL_CHARS_PER_TOKEN
+            )
     return 0
 
 

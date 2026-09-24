@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { Sparkles, RefreshCw, Lightbulb, Brain } from 'lucide-react'
 import { Surface } from '../../shared/ui/Surface'
 import { useQuery } from '../../shared/data/data'
@@ -19,7 +20,8 @@ function SummaryRow({ icon, label, group }: { icon: React.ReactNode; label: stri
   </div>
 }
 export function LearningSummaryBlock() {
-  const { data } = useQuery<LearningSummary | null>('learning:summary', () => api.learningSummary().catch(() => null))
+  const { data, error: loadErr, refresh } = useQuery<LearningSummary | null>('learning:summary', () => api.learningSummary())
+  if (loadErr) return <LoadError what="learning summary" error={loadErr} onRetry={refresh} />
   if (!data || data.total <= 0) return null
   const visible = sections.filter(section => data[section.key].count > 0)
   return <Surface tone="low" radius="lg" className="mb-l border border-outline-variant/25 px-m py-m">

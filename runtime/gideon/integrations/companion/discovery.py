@@ -465,6 +465,7 @@ class Advertiser:
         """
         if self._thread is not None:
             return True
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -472,6 +473,7 @@ class Advertiser:
             if reuse_port is not None:
                 sock.setsockopt(socket.SOL_SOCKET, reuse_port, 1)
             sock.bind(("", self._listen_port))
+            self._listen_port = int(sock.getsockname()[1])
             mreq = struct.pack(
                 "4s4s", socket.inet_aton(self._group), socket.inet_aton("0.0.0.0")
             )
@@ -480,6 +482,8 @@ class Advertiser:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
             sock.settimeout(1.0)
         except OSError:
+            if sock is not None:
+                sock.close()
             logger.warning(
                 "LAN discovery could not open the mDNS socket on port %d — companion apps "
                 "will need the URL typed in. Everything else is unaffected.",
@@ -510,6 +514,10 @@ class Advertiser:
             sock.close()
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
+
+    @property
+    def listen_port(self) -> int:
+        return self._listen_port
 
     @property
     def running(self) -> bool:

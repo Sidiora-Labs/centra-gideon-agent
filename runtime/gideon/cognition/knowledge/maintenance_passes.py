@@ -67,7 +67,8 @@ def _derived_refresh_pass(*, batch_size: int = 0) -> int:
     chunks = chunk_backfill.backfill_item_chunks(store, embedder, max_items=limit)
     progressed = int(chunks.get("chunked") or 0)
     vectors = store.reembed_all(embedder, only_missing=True, limit=limit)
-    return progressed + int(vectors.get("reembedded") or 0)
+    stale = store.reembed_stale_chunks(embedder, limit=limit)
+    return progressed + int(vectors.get("reembedded") or 0) + stale["reembedded"]
 
 
 def _vault_projection_pass(*, batch_size: int = 0) -> int:

@@ -16,8 +16,8 @@ so the thresholds and the *wording* of every notice are defined once:
 
 * **failure path** — :meth:`LoopBreaker.record` counts consecutive failures per
   ``(tool, params)`` key. :data:`WARN_THRESHOLD` warns, :data:`BLOCK_THRESHOLD`
-  refuses further identical calls, and :data:`CIRCUIT_THRESHOLD` total failures
-  in one run abort it.
+  refuses further identical calls, and failures above the configured run-wide
+  ceiling abort the run (default :data:`CIRCUIT_THRESHOLD`).
 * **structural path** — :meth:`LoopBreaker.record_structural` catches
   stuck-but-*successful* repetition (the same ``(tool, params, result_digest)``
   triple N× in a row, or an A↔B ping-pong) that the failure path cannot see
@@ -280,11 +280,13 @@ class LoopBreaker:
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}
         self.total_failures = 0
+        self._circuit_threshold: int | None = None
         self._recent: deque[str] = deque(maxlen=STRUCT_WINDOW)
         self._struct_reported: set[str] = set()
 
     def reset(self) -> None:
         self._counts.clear()
+        self._circuit_threshold = None
         self.total_failures = 0
         self._recent.clear()
         self._struct_reported.clear()
@@ -308,8 +310,14 @@ class LoopBreaker:
         return self._counts.get(key, 0)
 
     def circuit_tripped(self) -> bool:
-        """True once this run's total failures exceed :data:`CIRCUIT_THRESHOLD`."""
-        return self.total_failures > CIRCUIT_THRESHOLD
+        """Cache the configured ceiling lazily until the next run's reset."""
+        if self._circuit_threshold is None:
+            from gideon.core.config.loader import AppConfig
+
+            self._circuit_threshold = max(
+                1, AppConfig.load().guardrails.loop_breaker.circuit_threshold
+            )
+        return self.total_failures > self._circuit_threshold
 
     def record_structural(self, sig: str) -> str:
         """Record a ``(tool, params, result_digest)`` signature; return a reason

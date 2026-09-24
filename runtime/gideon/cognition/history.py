@@ -351,6 +351,7 @@ class ConversationLog:
         source_user: str | None = None,
         agent: str | None = None,
         tab_id: str | None = None,
+        speaker: str | None = None,
     ) -> None:
         path = self._path(key)
         if not path.exists():
@@ -375,9 +376,16 @@ class ConversationLog:
                 ("tools", tools),
                 ("source_thread", source_thread),
                 ("source_user", source_user),
+                ("speaker", speaker),
             )
             if value
         )
+        with path.open("rb+") as stream:
+            stream.seek(0, 2)
+            if stream.tell():
+                stream.seek(-1, 2)
+                if stream.read(1) != b"\n":
+                    stream.write(b"\n")
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(entry) + "\n")
         self._invalidate_cache(key)
@@ -391,7 +399,11 @@ class ConversationLog:
             [row for row in messages if row["role"] in roles] if roles else messages
         )
         return [
-            dict(role=row["role"], content=row["content"])
+            dict(
+                role=row["role"],
+                content=row["content"],
+                **({"speaker": row["speaker"]} if row.get("speaker") else {}),
+            )
             for row in selected[-max_messages:]
         ]
 
@@ -429,7 +441,7 @@ class ConversationLog:
 
     def load_transcript(self, key: str) -> str:
         return "\n\n".join(
-            f"{row['role'].title()}: {row['content']}"
+            f"{row.get('speaker') or row['role'].title()}: {row['content']}"
             for row in self._read_messages(key)
         )
 

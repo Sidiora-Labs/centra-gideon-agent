@@ -1,6 +1,9 @@
 """Section-aware text windows with source line provenance."""
 
+import hashlib
+import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 
 MAX_CHARS = 1500
@@ -18,6 +21,8 @@ class Chunk:
     embedding: bytes | None = None
     embedding_provider: str = ""
     embedding_model: str = ""
+    section_key: str = ""
+    section_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -72,17 +77,30 @@ class _LineWindow:
         self.pending.append(entry)
 
 
+def canonical_text(content: str) -> str:
+    return content.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def content_digest(content: str) -> str:
+    return hashlib.sha256(canonical_text(content).encode("utf-8")).hexdigest()
+
+
 def chunk_text(
     content: str, *, max_chars: int = MAX_CHARS, overlap: int = OVERLAP
 ) -> list[Chunk]:
     if not content or not content.strip():
         return []
-    chunks = [
-        part
-        for label, lines in _split_into_sections(content.split("\n"))
-        for part in _size_split(lines, label, max_chars, overlap)
-        if part.text.strip()
-    ]
+    chunks = []
+    occurrences: dict[str | None, int] = defaultdict(int)
+    for label, lines in _split_into_sections(canonical_text(content).split("\n")):
+        key = json.dumps([label, occurrences[label]], ensure_ascii=False)
+        occurrences[label] += 1
+        digest = content_digest("\n".join(text for _, text in lines).strip("\n"))
+        for part in _size_split(lines, label, max_chars, overlap):
+            if part.text.strip():
+                part.section_key = key
+                part.section_digest = digest
+                chunks.append(part)
     for index, part in enumerate(chunks):
         part.chunk_index = index
     return chunks

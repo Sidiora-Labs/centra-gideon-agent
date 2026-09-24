@@ -47,7 +47,6 @@ class _CitationWiring:
 class _ConflictReview:
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     candidates: list[dict[str, Any]] = field(default_factory=list)
-    prompts: list[str] = field(default_factory=list)
 
 
 def _resolve_citations(
@@ -62,24 +61,25 @@ def _resolve_citations(
 
     references = _coerce_source_refs(raw)
     resolved = citations.resolve(body, references)
+    records = list(resolved.citations)
     result = _CitationWiring(
         resolved.text,
         summary,
-        records=list(resolved.citations),
+        records=records,
         warnings=list(resolved.warnings),
     )
     if summary and citations.parse_markers(summary):
         caption = citations.resolve(summary, references)
         result.summary = caption.text
         result.warnings.extend(caption.warnings)
-        present = {int(getattr(record, "marker", 0)) for record in result.records}
-        result.records.extend(
+        present = {int(getattr(record, "marker", 0)) for record in records}
+        records.extend(
             record
             for record in caption.citations
             if int(getattr(record, "marker", 0)) not in present
         )
-        result.records.sort(key=lambda record: int(getattr(record, "marker", 0)))
-    result.stored = list(citations.persist_form(result.records))
+        records.sort(key=lambda record: int(getattr(record, "marker", 0)))
+    result.stored = list(citations.persist_form(records))
     return result
 
 
@@ -185,7 +185,6 @@ class _PreparedWrite:
             reason=decision.reason,
             conflicts=[],
             conflict_candidates=[],
-            conflict_prompts=[],
         )
 
         def finish() -> ActionResult:
@@ -232,9 +231,6 @@ class _PreparedWrite:
                 metadata["conflict_candidates"] = review.candidates
         receipt["conflicts"] = review.conflicts
         receipt["conflict_candidates"] = review.candidates
-        receipt["conflict_prompts"] = review.prompts
-        if len(review.prompts) == 1:
-            receipt["conflict_prompt"] = review.prompts[0]
         if decision.action == "reinforce":
             _write_metadata(store, decision.item_id, metadata, source_ref=source)
             _write_tags(store, decision.item_id, scope_tags)
@@ -592,24 +588,6 @@ def _detect_conflicts(
             return _ConflictReview()
         conflicts = contradiction.find_conflicts(arriving, candidates)
         unsettled = contradiction.unsettled_candidates(arriving, candidates)
-        pending = {
-            (
-                candidate.left_claim,
-                candidate.right_claim,
-                candidate.right_item,
-            )
-            for candidate in unsettled
-        }
-        prompts = []
-        for claim in arriving:
-            neighbours = [
-                candidate
-                for candidate in contradiction.shortlist(claim, candidates)
-                if (claim.statement, candidate.statement, candidate.source_ref)
-                in pending
-            ]
-            if neighbours:
-                prompts.append(contradiction.conflict_prompt(claim, neighbours))
         if edge_source and conflicts:
             _write_edges(
                 store,
@@ -619,7 +597,6 @@ def _detect_conflicts(
         return _ConflictReview(
             conflicts=[conflict.to_dict() for conflict in conflicts],
             candidates=[candidate.to_dict() for candidate in unsettled],
-            prompts=prompts,
         )
     except Exception:
         logger.warning("conflict detection failed — the write proceeds", exc_info=True)
@@ -724,9 +701,7 @@ def _write_conflict_edges(store, conflicts: list[dict], *, source_item: str) -> 
             target=str(record.get("right_item") or ""),
             relation=_relation_for(record),
             confidence=float(record.get("confidence") or 1.0),
-            provenance=(
-                "extracted" if record.get("basis") == "deterministic" else "inferred"
-            ),
+            provenance="extracted",
             justification=str(record.get("detail") or ""),
         )
         if edge.valid:

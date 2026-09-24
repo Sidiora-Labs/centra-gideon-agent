@@ -54,6 +54,15 @@ class MemoryVectorStore(VectorStoreProvider):
             raise ConnectionError("unreachable")
         self.rows.pop(item_id, None)
 
+    def describe(self) -> dict:
+        if self.fail:
+            raise ConnectionError("unreachable")
+        return {
+            "name": self.name,
+            "reachable": True,
+            "count": sum(len(rows) for rows in self.rows.values()),
+        }
+
 
 @pytest.fixture(autouse=True)
 def _unbind_vector_store():
@@ -63,8 +72,14 @@ def _unbind_vector_store():
 
 
 @pytest.fixture()
-def store(tmp_path):
-    store = KnowledgeStore(str(tmp_path / "knowledge.db"))
+def store(tmp_path, monkeypatch):
+    from gideon.cognition.knowledge.store import knowledge_db_path
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    store = KnowledgeStore(str(knowledge_db_path(tmp_path)))
+    from gideon.cognition import knowledge
+
+    monkeypatch.setattr(knowledge, "_store", store)
     yield store
     store.close()
 
@@ -118,7 +133,7 @@ def test_external_store_is_byte_identical_over_seven_queries_and_archive_modes(s
             )
 
     provider = MemoryVectorStore()
-    register_provider(provider)
+    register_provider(provider, store=store)
     for row in store.db.execute("SELECT id FROM items"):
         item_id = row["id"]
         chunks = store.get_chunks(item_id, with_embedding=True)
@@ -140,7 +155,7 @@ def test_external_store_is_byte_identical_over_seven_queries_and_archive_modes(s
 def test_unreachable_store_has_no_vec_fallback_and_writes_fail_open(store, caplog):
     item_id = _item_with_chunk(store, "keyword", [1.0, 0.0, 0.0, 0.0])
     provider = MemoryVectorStore(fail=True)
-    register_provider(provider)
+    register_provider(provider, store=store)
     store.replace_chunks(item_id, [])
     store.clear_chunks(item_id)
     results = HybridRetriever(
@@ -156,3 +171,112 @@ def test_unreachable_store_has_no_vec_fallback_and_writes_fail_open(store, caplo
 def test_provider_type_and_handler_are_public_contracts():
     assert "vector_store" in PROVIDER_TYPES
     assert VectorStoreTypeHandler
+
+
+def test_registration_reindexes_existing_vectors_and_matching_counts_skip(store):
+    item_id = _item_with_chunk(store, "before registration", [0.1, 0.2, 0.3])
+    provider = MemoryVectorStore()
+    register_provider(provider)
+    rows = provider.rows[item_id]
+    assert len(rows) == 1
+    assert rows[0]["embedding"] == pytest.approx([0.1, 0.2, 0.3])
+    report = store.reindex_external_vector_store()
+    assert report == {
+        "ok": True,
+        "skipped": True,
+        "reindexed": 0,
+        "local_count": 1,
+        "external_count": 1,
+    }
+    assert provider.rows[item_id] is rows
+    provider.rows.clear()
+    report = store.reindex_external_vector_store()
+    assert report["ok"] and not report["skipped"]
+    assert report["reindexed"] == 1
+    assert provider.rows[item_id][0]["chunk_id"] == rows[0]["chunk_id"]
+
+
+@pytest.mark.parametrize("width", [0, 4, 11, 13])
+def test_external_row_width_is_not_swallowed(store, width, caplog):
+    from gideon.cognition.knowledge.store import _EXTERNAL_ROW_COLUMNS
+
+    assert len(_EXTERNAL_ROW_COLUMNS) == 12
+    provider = MemoryVectorStore()
+    register_provider(provider, store=store)
+    with pytest.raises(ValueError, match="12 columns"):
+        store._sync_external_vectors("invalid", [tuple(range(width))])
+    assert provider.rows == {}
+    assert "External vector-store write failed" not in caplog.text
+
+
+def test_stale_chunk_refresh_preserves_ids_and_mirrors_full_item(store):
+    from test_knowledge_chunking import _CharEmbedder
+
+    provider = MemoryVectorStore()
+    register_provider(provider, store=store)
+    item_id = _item_with_chunk(store, "stale chunk", [1.0, 0.0, 0.0])
+    original = store.get_chunks(item_id, with_embedding=True)[0]
+    store.db.execute(
+        "UPDATE chunks SET embedding_provider = 'retired', embedding_model = 'old' WHERE item_id = ?",
+        (item_id,),
+    )
+    store.db.commit()
+    embedder = _CharEmbedder()
+    report = store.reembed_stale_chunks(embedder, limit=1)
+    assert report == {"reembedded": 1, "failed": 0, "total": 1}
+    updated = store.get_chunks(item_id, with_embedding=True)[0]
+    assert updated["id"] == original["id"]
+    assert updated["embedding"] == embedder.embed(original["text"])
+    assert provider.rows[item_id][0]["chunk_id"] == original["id"]
+    assert provider.rows[item_id][0]["embedding"] == updated["embedding"]
+    assert store.reembed_stale_chunks(embedder)["total"] == 0
+
+
+def test_reindex_failure_cannot_report_success(store):
+    _item_with_chunk(store, "content", [1.0, 0.0])
+    provider = MemoryVectorStore()
+    register_provider(provider, store=store)
+    provider.rows["unowned"] = [{"embedding": [1.0, 0.0]}]
+    report = store.reindex_external_vector_store()
+    assert not report["ok"]
+    assert report["external_count"] == 2
+    assert report["local_count"] == 1
+    provider.fail = True
+    with pytest.raises(ConnectionError):
+        store.reindex_external_vector_store()
+
+
+@pytest.mark.parametrize("state", ["healthy", "unreachable", "empty", "both_empty"])
+def test_doctor_reports_bound_store_and_fails_unhealthy_states(
+    store, tmp_path, capsys, state
+):
+    import asyncio
+
+    from gideon.interfaces.cli.doctor import _doctor_external_vector_store
+    from gideon.operations.resilience.doctor import (
+        DoctorContext,
+        _probe_external_vector_store,
+    )
+
+    if state != "both_empty":
+        _item_with_chunk(store, "local", [1.0, 0.0])
+    provider = MemoryVectorStore()
+    register_provider(provider, store=store)
+    if state == "unreachable":
+        provider.fail = True
+    if state == "empty":
+        provider.rows.clear()
+    result = asyncio.run(_probe_external_vector_store(DoctorContext(home=tmp_path)))
+    assert result.ok == (state in {"healthy", "both_empty"})
+    issues = _doctor_external_vector_store()
+    output = capsys.readouterr().out
+    assert bool(issues) == (not result.ok)
+    if state == "unreachable":
+        assert "unreachable" in output
+    else:
+        assert json.dumps(provider.describe(), sort_keys=True) in output
+    if state == "empty":
+        assert "empty while 1 local chunk vectors exist" in output
+    assert (
+        provider.rows == {} if state in {"empty", "both_empty"} else bool(provider.rows)
+    )

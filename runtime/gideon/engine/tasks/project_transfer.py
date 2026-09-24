@@ -8,6 +8,8 @@ from pathlib import Path
 from aiohttp import web
 from aiohttp.multipart import BodyPartReader
 
+from gideon.http_download import download_headers
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,7 +108,7 @@ class ProjectExport:
             body=data,
             content_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="{name}"',
+                **download_headers(name),
                 "Content-Length": str(len(data)),
                 "X-Gideon-Entities": str(len(plan.entries)),
                 "X-Gideon-Skipped": str(len(plan.skipped)),

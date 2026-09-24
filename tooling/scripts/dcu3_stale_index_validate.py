@@ -66,6 +66,7 @@ import platform
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,9 @@ DETAIL_UNKNOWN_ID = "no such snapshot is live in this gateway"
 
 MARKER_CONTROL = "DCU-3 stale-index run wrote this on the fresh path"
 MARKER_TTL_RECOVERY = "DCU-3 stale-index run wrote this after the past-TTL re-snapshot"
-MARKER_FP_RECOVERY = "DCU-3 stale-index run wrote this after the fingerprint re-snapshot"
+MARKER_FP_RECOVERY = (
+    "DCU-3 stale-index run wrote this after the fingerprint re-snapshot"
+)
 MARKER_NEVER = "DCU-3 expects this string never to reach a window"
 
 APP = "TextEdit"
@@ -97,7 +100,8 @@ _STALE_OBSERVED: list[str] = []
 _DRIVER_OPS: list[str] = []
 
 
-def _install_driver_counter() -> None:
+@contextmanager
+def _install_driver_counter():
     """Count driver spawns, observationally. Wraps ``_run_driver``; never replaces it.
 
     The wrapper awaits the real function and returns its result unchanged, so every refusal,
@@ -109,11 +113,18 @@ def _install_driver_counter() -> None:
 
     real = service._run_driver
 
-    async def counting(op: str, payload: dict[str, Any], *, tool: str) -> dict[str, Any]:
+    async def counting(
+        op: str, payload: dict[str, Any], *, tool: str
+    ) -> dict[str, Any]:
         _DRIVER_OPS.append(op)
         return await real(op, payload, tool=tool)
 
     service._run_driver = counting  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        service._run_driver = real
+        _DRIVER_OPS.clear()
 
 
 def _driver_ops_since() -> list[str]:
@@ -151,13 +162,16 @@ def _rendered(error: Any) -> str:
 
 
 def _write_enable(home: Path, apps: list[str]) -> None:
-    from gideon.integrations.computer_use.enable_state import ENABLE_FILENAME
-    from gideon.integrations.computer_use.enable_state import GOVERNANCE_DIRNAME
+    from gideon.integrations.computer_use.enable_state import (
+        ENABLE_FILENAME,
+        GOVERNANCE_DIRNAME,
+    )
 
     governance = home / GOVERNANCE_DIRNAME
     governance.mkdir(parents=True, exist_ok=True)
     (governance / ENABLE_FILENAME).write_text(
-        json.dumps({"version": 1, "enabled": True, "apps": sorted(apps)}), encoding="utf-8"
+        json.dumps({"version": 1, "enabled": True, "apps": sorted(apps)}),
+        encoding="utf-8",
     )
 
 
@@ -181,7 +195,9 @@ def _snapshot(clause: str) -> dict[str, Any]:
     """One ``computer_snapshot`` through the dispatch, or a :class:`Failure` naming the clause."""
     outcome, payload = _dispatch("computer_snapshot", {"app": APP})
     if outcome != "ok":
-        raise Failure(clause, f"computer_snapshot refused: {getattr(payload, 'code', payload)!r}")
+        raise Failure(
+            clause, f"computer_snapshot refused: {getattr(payload, 'code', payload)!r}"
+        )
     return payload
 
 
@@ -189,7 +205,10 @@ def _element_index(snapshot: dict[str, Any], role: str, clause: str) -> int:
     for element in list(snapshot.get("elements") or []):
         if isinstance(element, dict) and str(element.get("role", "")) == role:
             return int(element["index"])
-    raise Failure(clause, f"no {role} in the {len(snapshot.get('elements') or [])} walked elements")
+    raise Failure(
+        clause,
+        f"no {role} in the {len(snapshot.get('elements') or [])} walked elements",
+    )
 
 
 def _element_value(snapshot: dict[str, Any], role: str) -> str:
@@ -202,10 +221,16 @@ def _element_value(snapshot: dict[str, Any], role: str) -> str:
 def _window_title(snapshot: dict[str, Any]) -> str:
     """The walked window's own title. ``walk_window`` is window-first, so it is element 0."""
     elements = list(snapshot.get("elements") or [])
-    return str(elements[0].get("title", "")) if elements and isinstance(elements[0], dict) else ""
+    return (
+        str(elements[0].get("title", ""))
+        if elements and isinstance(elements[0], dict)
+        else ""
+    )
 
 
-def _write_by_index(snapshot: dict[str, Any], marker: str, clause: str) -> dict[str, Any]:
+def _write_by_index(
+    snapshot: dict[str, Any], marker: str, clause: str
+) -> dict[str, Any]:
     """Set the text area's value BY ELEMENT INDEX, then read it back through the dispatch.
 
     The read-back is a second ``computer_snapshot`` rather than a direct FFI walk, so the value
@@ -213,12 +238,19 @@ def _write_by_index(snapshot: dict[str, Any], marker: str, clause: str) -> dict[
     model would have been handed.
     """
     index = _element_index(snapshot, "AXTextArea", clause)
+    _driver_ops_since()
     outcome, payload = _dispatch(
         "computer_set_value",
-        {"snapshot_id": str(snapshot.get("snapshot_id")), "element_index": index, "value": marker},
+        {
+            "snapshot_id": str(snapshot.get("snapshot_id")),
+            "element_index": index,
+            "value": marker,
+        },
     )
     if outcome != "ok":
-        raise Failure(clause, f"set_value by index refused: {getattr(payload, 'code', payload)!r}")
+        raise Failure(
+            clause, f"set_value by index refused: {getattr(payload, 'code', payload)!r}"
+        )
     ops = _driver_ops_since()
     if ops != ["snapshot", "set_value"]:
         raise Failure(
@@ -228,7 +260,9 @@ def _write_by_index(snapshot: dict[str, Any], marker: str, clause: str) -> dict[
     readback = _snapshot(clause)
     observed = _element_value(readback, "AXTextArea").strip()
     if observed != marker:
-        raise Failure(clause, f"the text area holds {observed!r}, not the marker this run wrote")
+        raise Failure(
+            clause, f"the text area holds {observed!r}, not the marker this run wrote"
+        )
     return {
         "element_index": index,
         "window": _window_title(snapshot),
@@ -251,7 +285,11 @@ def _expect_stale(
     _driver_ops_since()
     outcome, payload = _dispatch(
         "computer_set_value",
-        {"snapshot_id": str(snapshot.get("snapshot_id")), "element_index": index, "value": marker},
+        {
+            "snapshot_id": str(snapshot.get("snapshot_id")),
+            "element_index": index,
+            "value": marker,
+        },
     )
     ops = _driver_ops_since()
     if outcome != "refused":
@@ -261,7 +299,9 @@ def _expect_stale(
         raise Failure(clause, f"refused with {code!r}, not the stale-index code")
     rendered = _rendered(payload)
     if expect_detail not in rendered:
-        raise Failure(clause, f"the refusal does not name the expected cause: {rendered!r}")
+        raise Failure(
+            clause, f"the refusal does not name the expected cause: {rendered!r}"
+        )
     for forbidden in forbid_details:
         if forbidden in rendered:
             raise Failure(
@@ -282,35 +322,62 @@ def _expect_stale(
     }
 
 
-def _front_window_walks() -> bool:
-    """Can the dispatch walk a front window for ``APP`` yet? Used only to wait out a launch."""
-    outcome, _payload = _dispatch("computer_snapshot", {"app": APP})
-    return outcome == "ok"
+def _document_title_matches(title: str, document: Path) -> bool:
+    for name in (document.name, document.stem):
+        if title == name or title.startswith((name + " — ", name + " - ")):
+            return True
+    return False
 
 
-def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transcript, read top down
-    """Both stale-index triggers, separately, plus the fresh-path positive control."""
+def _wait_document(document: Path, clause: str) -> dict[str, Any]:
+    for _ in range(30):
+        outcome, snapshot = _dispatch("computer_snapshot", {"app": APP})
+        if outcome == "ok" and _document_title_matches(
+            _window_title(snapshot), document
+        ):
+            return snapshot
+        time.sleep(0.5)
+    raise Failure(clause, f"{APP} did not expose the opened document {document.name!r}")
+
+
+def phase_stale(home: Path) -> dict[str, Any]:
     from gideon.integrations.computer_use import macos_ffi
+
+    _ATTEMPTS.clear()
+    _STALE_OBSERVED.clear()
+    _DRIVER_OPS.clear()
+    _write_enable(home, [APP])
+    scratch = Path(tempfile.mkdtemp(prefix="gideon-stale-index-"))
+    doc_a, doc_b = scratch / "document-A.txt", scratch / "document-B.txt"
+    doc_a.write_text("stale-index scratch document A\n", encoding="utf-8")
+    doc_b.write_text("stale-index scratch document B\n", encoding="utf-8")
+    launched = {APP} - set(macos_ffi.list_gui_apps())
+    cleanup: dict[str, Any] = {
+        "scratch_documents": str(scratch),
+        "autosave": "retained; TextEdit may save edits to these scratch files automatically",
+    }
+    with _install_driver_counter():
+        try:
+            report = _phase_stale_interaction(home, doc_a, doc_b, launched)
+            report["cleanup"] = cleanup
+            return report
+        finally:
+            for app in sorted(launched):
+                result = subprocess.run(["pkill", "-x", app], check=False)
+                cleanup[app] = (
+                    f"quit requested (exit {result.returncode}; this run launched it)"
+                )
+            if not launched:
+                cleanup[APP] = "left running; scratch documents may remain open"
+
+
+def _phase_stale_interaction(
+    home: Path, doc_a: Path, doc_b: Path, launched: set[str]
+) -> dict[str, Any]:
     from gideon.integrations.computer_use import service
 
-    _install_driver_counter()
-    _write_enable(home, [APP])
-
-    doc_a = Path(tempfile.gettempdir()) / "dcu3-stale-index-A.txt"
-    doc_b = Path(tempfile.gettempdir()) / "dcu3-stale-index-B.txt"
-    doc_a.write_text("dcu3 stale-index scratch document A\n", encoding="utf-8")
-    doc_b.write_text("dcu3 stale-index scratch document B\n", encoding="utf-8")
-
-    already = set(macos_ffi.list_gui_apps())
-    launched = {APP} - already
-
     subprocess.run(["open", "-F", "-a", APP, str(doc_a)], check=True)
-    for _ in range(30):
-        if _front_window_walks():
-            break
-        time.sleep(0.5)
-    else:
-        raise Failure("live-target", f"{APP} never exposed a walkable front window for document A")
+    _wait_document(doc_a, "live-target")
 
     report: dict[str, Any] = {
         "launched_by_this_run": sorted(launched),
@@ -321,15 +388,12 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
     report["fresh_path_positive_control"] = _write_by_index(
         control_snap, MARKER_CONTROL, "fresh-path-positive-control"
     )
-    report["fresh_path_positive_control"]["fingerprint"] = str(control_snap.get("fingerprint", ""))
+    report["fresh_path_positive_control"]["fingerprint"] = str(
+        control_snap.get("fingerprint", "")
+    )
 
     subprocess.run(["open", "-F", "-a", APP, str(doc_b)], check=True)
-    for _ in range(30):
-        if _front_window_walks():
-            break
-        time.sleep(0.5)
-    else:
-        raise Failure("past-ttl", f"{APP} never exposed a walkable front window for document B")
+    _wait_document(doc_b, "past-ttl")
 
     ttl_snap = _snapshot("past-ttl")
     ttl_fingerprint = str(ttl_snap.get("fingerprint", ""))
@@ -371,12 +435,16 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
     fp_window = _window_title(fp_snap)
     taken_at = time.monotonic()
     subprocess.run(["open", "-a", APP, str(doc_a)], check=True)
+    _wait_document(doc_a, "changed-fingerprint")
 
     changed: dict[str, Any] | None = None
     for _ in range(20):
         time.sleep(0.4)
         candidate = _snapshot("changed-fingerprint")
-        if str(candidate.get("fingerprint", "")) != fp_fingerprint:
+        if (
+            _document_title_matches(_window_title(candidate), doc_a)
+            and str(candidate.get("fingerprint", "")) != fp_fingerprint
+        ):
             changed = candidate
             break
     if changed is None:
@@ -449,18 +517,12 @@ def phase_stale(home: Path) -> dict[str, Any]:  # noqa: C901 - one linear transc
         "approved": len([r for r in rows if r.get("outcome") == "approved"]),
         "denied": len([r for r in rows if r.get("outcome") == "denied"]),
         "stale_rows": [
-            {"operation": r.get("operation"), "resources": r.get("resources")} for r in stale_rows
+            {"operation": r.get("operation"), "resources": r.get("resources")}
+            for r in stale_rows
         ],
         "stale_refusals_observed": list(_STALE_OBSERVED),
     }
 
-    cleanup: dict[str, Any] = {"scratch_documents": "left unsaved; discarded when the app quits"}
-    for app in sorted(launched):
-        subprocess.run(["pkill", "-x", app], check=False)
-        cleanup[app] = "quit (this run launched it)"
-    if not launched:
-        cleanup[APP] = "left running (the operator already had it open); its windows are untouched"
-    report["cleanup"] = cleanup
     return report
 
 
@@ -472,12 +534,15 @@ def _preflight() -> dict[str, Any]:
     identity answered — and on this host that identity is the difference between True and False.
     """
     if platform.system() != "Darwin":
-        raise Failure("preflight", f"this is a macOS validation; this host is {platform.system()}")
-    from gideon.integrations.computer_use import macos_ffi
-    from gideon.integrations.computer_use import macos_tcc
+        raise Failure(
+            "preflight", f"this is a macOS validation; this host is {platform.system()}"
+        )
+    from gideon.integrations.computer_use import macos_ffi, macos_tcc
 
     trusted = macos_ffi.is_process_trusted()
-    responsible = macos_tcc.responsible_process(timeout=macos_tcc.PATIENT_PROBE_TIMEOUT_SECS)
+    responsible = macos_tcc.responsible_process(
+        timeout=macos_tcc.PATIENT_PROBE_TIMEOUT_SECS
+    )
     if not trusted:
         raise Failure(
             "preflight",
@@ -511,7 +576,11 @@ def main(argv: list[str] | None = None) -> int:
     home.mkdir(parents=True, exist_ok=True)
     os.environ["GIDEON_HOME"] = str(home)
 
-    result: dict[str, Any] = {"atom": "DCU-3", "clause": "stale index", "home": str(home)}
+    result: dict[str, Any] = {
+        "atom": "DCU-3",
+        "clause": "stale index",
+        "home": str(home),
+    }
     try:
         result["preflight"] = _preflight()
         result["detail"] = phase_stale(home)

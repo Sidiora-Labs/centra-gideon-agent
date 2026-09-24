@@ -416,7 +416,12 @@ async def api_local_model_search(request: web.Request) -> web.Response:
 
     caps = capabilities_for(provider_name)
     return web.json_response(
-        {"models": [to_local_model(m, capabilities=caps).to_dict() for m in raw]}
+        {
+            "models": [
+                to_local_model(m, capabilities=caps, provider=provider).to_dict()
+                for m in raw
+            ]
+        }
     )
 
 

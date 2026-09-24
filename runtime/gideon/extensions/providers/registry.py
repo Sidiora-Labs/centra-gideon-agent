@@ -800,6 +800,33 @@ class MemoryTypeHandler(_TypeHandler):
         unregister_provider(provider_name)
 
 
+class ContextEngineTypeHandler(MemoryTypeHandler):
+    def create(self, ext: RegisteredProvider) -> Any:
+        instance = super().create(ext)
+        if instance is None:
+            raise ValueError("context engine factory returned no engine")
+        return instance
+
+    def register(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.cognition.context_engine import _DEFAULT, get_engine, set_engine
+
+        if not isinstance(getattr(instance, "name", None), str) or not all(
+            callable(getattr(instance, hook, None))
+            for hook in ("assemble", "ingest", "after_turn")
+        ):
+            raise ValueError("invalid context engine contract")
+        current = get_engine()
+        if current is not _DEFAULT and current is not instance:
+            raise ValueError("a context engine is already active")
+        set_engine(instance)
+
+    def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
+        from gideon.cognition.context_engine import get_engine, set_engine
+
+        if get_engine() is instance:
+            set_engine(None)
+
+
 class KnowledgeTypeHandler(_TypeHandler):
     """Handler for ``provider.type == 'knowledge'`` extensions (WATCHED-SOURCES §1.3).
 
@@ -1013,8 +1040,8 @@ class ModelTypeHandler(_TypeHandler):
                     provider = factory(inst.config)
                     if not hasattr(provider, "name"):
                         provider.name = f"{ext.name}:{inst.id}"
-                    if not hasattr(provider, "instance_id"):
-                        provider.instance_id = inst.id
+                    provider.instance_id = inst.id
+                    provider.instance_label = inst.display_name or inst.id
                     if not hasattr(provider, "display_name"):
                         provider.display_name = inst.display_name or inst.id
                     providers.append(provider)
@@ -1034,16 +1061,31 @@ class ModelTypeHandler(_TypeHandler):
     def register(self, ext: RegisteredProvider, instance: Any) -> None:
         caps = ext.provider_config.capabilities
         providers = instance if isinstance(instance, list) else [instance]
-        for provider in providers:
-            from gideon.integrations.local_models.registry import (
-                is_local_model_provider,
-            )
-            from gideon.integrations.local_models.registry import (
-                register_provider as reg_local,
-            )
+        from gideon.integrations.local_models.multi_instance import (
+            MultiInstanceLocalProvider,
+        )
+        from gideon.integrations.local_models.registry import get_provider as get_local
+        from gideon.integrations.local_models.registry import is_local_model_provider
+        from gideon.integrations.local_models.registry import (
+            register_provider as reg_local,
+        )
 
-            if is_local_model_provider(provider, capabilities=list(caps)):
-                reg_local(provider, capabilities=list(caps), name=ext.name)
+        local = [
+            provider
+            for provider in providers
+            if is_local_model_provider(provider, capabilities=list(caps))
+        ]
+        if local:
+            if ext.provider_config.multiInstance:
+                aggregate = get_local(ext.name)
+                if isinstance(aggregate, MultiInstanceLocalProvider):
+                    aggregate.add(local)
+                else:
+                    aggregate = MultiInstanceLocalProvider(ext.name, local)
+                reg_local(aggregate, capabilities=list(caps), name=ext.name)
+            else:
+                reg_local(local[0], capabilities=list(caps), name=ext.name)
+        for provider in providers:
             if "embedding" in caps:
                 from gideon.integrations.embedding_providers.base import (
                     EmbeddingProvider as _EMB,
@@ -1110,13 +1152,25 @@ class ModelTypeHandler(_TypeHandler):
     def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
         caps = ext.provider_config.capabilities
         providers = instance if isinstance(instance, list) else [instance]
+        from gideon.integrations.local_models.multi_instance import (
+            MultiInstanceLocalProvider,
+        )
+        from gideon.integrations.local_models.registry import get_provider as get_local
+        from gideon.integrations.local_models.registry import (
+            unregister_provider as unreg_local,
+        )
+
+        aggregate = get_local(ext.name)
+        if ext.provider_config.multiInstance and isinstance(
+            aggregate, MultiInstanceLocalProvider
+        ):
+            aggregate.remove(providers)
+            if not aggregate.providers:
+                unreg_local(ext.name)
+        elif any(aggregate is provider for provider in providers):
+            unreg_local(ext.name)
         for provider in providers:
             provider_name = getattr(provider, "name", ext.name)
-            from gideon.integrations.local_models.registry import (
-                unregister_provider as unreg_local,
-            )
-
-            unreg_local(ext.name)
             if "embedding" in caps:
                 from gideon.integrations.embedding_providers.registry import (
                     unregister_provider as unreg_emb,
@@ -1163,6 +1217,7 @@ def get_provider_registry() -> ProviderRegistry:
         _registry.register_type_handler("task", TaskTypeHandler())
         _registry.register_type_handler("workflow", WorkflowTypeHandler())
         _registry.register_type_handler("memory", MemoryTypeHandler())
+        _registry.register_type_handler("context_engine", ContextEngineTypeHandler())
         _registry.register_type_handler("tool", ToolTypeHandler())
         _registry.register_type_handler("search", SearchTypeHandler())
         _registry.register_type_handler("action", ActionTypeHandler())

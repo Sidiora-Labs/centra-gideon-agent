@@ -8,6 +8,7 @@ import { ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 
 export function AlwaysOnConventions() {
   const [projectId, setProjectId] = useState('')
+  const [projectsErr, setProjectsErr] = useState<unknown>(null)
   const [projects, setProjects] = useState<ProjectItem[]>([])
   const [data, setData] = useState<AlwaysOnResponse | null>(null)
   const [error, setError] = useState<Error | null>(null)
@@ -22,7 +23,8 @@ export function AlwaysOnConventions() {
   }, [])
 
   useEffect(() => { load(projectId) }, [load, projectId])
-  useEffect(() => { api.projects().then(setProjects).catch(() => setProjects([])) }, [])
+  const loadProjects = () => { setProjectsErr(null); api.projects().then(setProjects).catch(setProjectsErr) }
+  useEffect(loadProjects, [])
 
   useEffect(() => { setOpenId(''); setDraft('') }, [projectId])
 
@@ -104,7 +106,7 @@ export function AlwaysOnConventions() {
           </select>
         }
       >
-        {instructions.length === 0 ? (
+        {projectsErr ? <LoadError what="projects" error={projectsErr} onRetry={loadProjects} /> : instructions.length === 0 ? (
           <Empty>
             {projectId
               ? 'This project has no instruction documents yet. Its overview and ledgers appear here once they have content.'

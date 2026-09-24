@@ -696,6 +696,16 @@
         "sensitive": false,
         "type": "int"
       },
+      "knowledge.fetch_max_tokens": {
+        "default": 4096,
+        "sensitive": false,
+        "type": "int"
+      },
+      "knowledge.fetch_top_n": {
+        "default": 3,
+        "sensitive": false,
+        "type": "int"
+      },
       "knowledge.idempotent_persist": {
         "default": true,
         "sensitive": false,
@@ -1342,7 +1352,7 @@
         "type": "int"
       },
       "skills.progressive_disclosure_threshold": {
-        "default": 8,
+        "default": 2,
         "sensitive": false,
         "type": "int"
       },

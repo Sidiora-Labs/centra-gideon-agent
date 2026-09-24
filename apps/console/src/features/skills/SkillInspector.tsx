@@ -19,7 +19,7 @@ export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem
   const tone = SOURCE_TONE[skill.source] ?? 'var(--color-on-surface-low)'
   const editable = skill.source !== 'bundled'
 
-  const { data: files } = useQuery<SkillFile[]>(`skill:files:${skill.name}`, () => api.skillFiles(skill.name).then((d) => d.files ?? []).catch(() => []), { persist: true })
+  const { data: files, error: filesErr, refresh: refreshFiles } = useQuery<SkillFile[]>(`skill:files:${skill.name}`, () => api.skillFiles(skill.name).then((d) => d.files ?? []), { persist: true })
   useEffect(() => { show({ kind: 'overview' }) }, [skill.name])
 
   const del = () => deletion.run(async () => {
@@ -51,7 +51,7 @@ export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem
       )}
 
       <Section label="Files">
-        {files === undefined ? <div className="flex flex-col gap-1.5"><Skeleton className="h-9 w-full rounded-md" /><Skeleton className="h-9 w-full rounded-md" /></div>
+        {filesErr ? <LoadError what="skill files" error={filesErr} onRetry={refreshFiles} /> : files === undefined ? <div className="flex flex-col gap-1.5"><Skeleton className="h-9 w-full rounded-md" /><Skeleton className="h-9 w-full rounded-md" /></div>
           : files.length === 0 ? <p className="text-on-surface-low text-[0.8125rem]">No files.</p>
           : (
             <div className="flex flex-col gap-1">

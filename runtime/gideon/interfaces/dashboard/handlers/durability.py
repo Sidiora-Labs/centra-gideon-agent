@@ -33,6 +33,7 @@ from aiohttp import web
 from aiohttp.multipart import BodyPartReader
 
 from gideon.core.http_request import read_json_body
+from gideon.http_download import download_headers
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -252,7 +253,7 @@ async def api_durability_export(request: web.Request) -> web.Response:
         body=zip_bytes,
         content_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="gideon-export{tag}-{stamp}.zip"',
+            **download_headers(f"gideon-export{tag}-{stamp}.zip"),
             "Content-Length": str(len(zip_bytes)),
         },
     )

@@ -1,7 +1,10 @@
 """Tests for sandbox 'cc' mode — routing, dir lists, and profile generation."""
 
 import os
+import shutil
 from unittest.mock import patch
+
+import pytest
 
 from gideon.security.sandbox import (
     _AGENT_DENIED_ENV_KEYS,
@@ -136,6 +139,10 @@ class TestBuildSeatbeltProfileCcMode:
         assert ".ssh" not in profile
 
 
+@pytest.mark.skipif(
+    shutil.which("sandbox-exec", path=os.confstr("CS_PATH")) is None,
+    reason="requires the system Seatbelt binary",
+)
 class TestWrapArgvCcMode:
     @patch("gideon.security.sandbox.detect_backend", return_value="sandbox-exec")
     def test_cc_mode_routes_to_sandbox(self, _mock_backend):
@@ -205,6 +212,10 @@ class TestAgentDeniedEnvKeys:
         for key in _AGENT_DENIED_ENV_KEYS:
             assert key not in line, f"{key} should NOT be in standard ENV_PREFIXES"
 
+    @pytest.mark.skipif(
+        shutil.which("sandbox-exec", path=os.confstr("CS_PATH")) is None,
+        reason="requires the system Seatbelt binary",
+    )
     def test_cc_sandbox_exec_scrubs_agent_creds(self, monkeypatch):
         """sandbox-exec (macOS) cc path emits env -u for cred keys present in env."""
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-secret")
@@ -217,6 +228,10 @@ class TestAgentDeniedEnvKeys:
             if cleanup:
                 os.unlink(cleanup)
 
+    @pytest.mark.skipif(
+        shutil.which("sandbox-exec", path=os.confstr("CS_PATH")) is None,
+        reason="requires the system Seatbelt binary",
+    )
     def test_standard_sandbox_exec_does_not_scrub_agent_creds(self, monkeypatch):
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-secret")
         argv, cleanup = sandbox_exec_argv(["echo", "hi"], sandbox_level="standard")

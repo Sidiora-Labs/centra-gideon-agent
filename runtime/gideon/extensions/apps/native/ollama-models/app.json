@@ -1,0 +1,54 @@
+{
+  "name": "ollama-models",
+  "version": "1.0.0",
+  "displayName": "Ollama",
+  "description": "Local chat and embeddings through your Ollama server.",
+  "author": "Gideon",
+  "license": "Apache-2.0",
+  "native": true,
+  "provider": {
+    "type": "model",
+    "providerType": "ollama",
+    "implementation": "provider:create_provider",
+    "capabilities": [
+      "chat",
+      "embedding"
+    ],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "default": "http://localhost:11434"
+        },
+        "model": {
+          "type": "string",
+          "default": ""
+        },
+        "embedding_model": {
+          "type": "string",
+          "default": ""
+        },
+        "context_window": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "x-meta": {
+            "label": "Context window",
+            "help": "Optional served token capacity override; otherwise use the server measurement."
+          }
+        },
+        "timeout_secs": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 120,
+          "x-meta": {
+            "label": "Request timeout",
+            "help": "Maximum request wait in seconds."
+          }
+        }
+      }
+    }
+  }
+}

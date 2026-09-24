@@ -15,6 +15,11 @@ from gideon.core._ssl_compat import _ensure_ssl_certs
 _ensure_ssl_certs()
 
 if __name__ == "__main__":
-    from gideon.interfaces.cli.main import main  # noqa: E402
+    import sys
+
+    if sys.argv[1:] == ["--desktop-smoke"]:
+        from gideon.operations.desktop_smoke import main
+    else:
+        from gideon.interfaces.cli.main import main
 
     main()

@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useCallback, useEffect, useState } from 'react'
 import { Scissors, AlertTriangle, Undo2, Link2 } from 'lucide-react'
 import {
@@ -54,6 +55,7 @@ function RestructureForm({ item, selection, onDone }: {
 }) {
   const [verb, setVerb] = useState<Verb>('split')
   const [sections, setSections] = useState<KnowledgeSection[] | null>(null)
+  const [duplicatesErr, setDuplicatesErr] = useState<unknown>(null)
   const [duplicates, setDuplicates] = useState<KnowledgeDuplicate[] | null>(null)
   const [chosen, setChosen] = useState<number[]>([])
   const [title, setTitle] = useState('')
@@ -68,12 +70,13 @@ function RestructureForm({ item, selection, onDone }: {
 
   useEffect(() => {
     let live = true
+    setDuplicatesErr(null)
     api.knowledgeItemSections(item.id)
       .then((d) => { if (live) setSections(d.sections) })
       .catch((e) => { if (live) { setSections([]); setErr(msg(e)) } })
     api.knowledgeDuplicates(item.id)
       .then((d) => { if (live) setDuplicates(d) })
-      .catch(() => { if (live) setDuplicates([]) })
+      .catch((error) => { if (live) setDuplicatesErr(error) })
     return () => { live = false }
   }, [item.id])
 
@@ -182,7 +185,7 @@ function RestructureForm({ item, selection, onDone }: {
         </Field>
       )}
 
-      {verb === 'merge' && (duplicates?.length ? (
+      {verb === 'merge' && (duplicatesErr ? <LoadError what="near-duplicates" error={duplicatesErr} /> : duplicates === null ? <p>Loading near-duplicates…</p> : duplicates.length ? (
         <Field label="Near-duplicate to fold in"
           hint="This item survives; the one you pick is deleted after its tags, shelves, highlights and relations move across">
           {

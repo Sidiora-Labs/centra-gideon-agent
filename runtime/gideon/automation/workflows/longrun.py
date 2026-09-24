@@ -31,6 +31,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
+
 DEFAULT_SYNTHESIS_WINDOW = 20
 
 DEFAULT_SIGNIFICANCE_THRESHOLD = 0.7
@@ -255,7 +257,7 @@ class BufferState:
 
     def approx_tokens(self) -> int:
         text = json.dumps(self.items, ensure_ascii=False, default=str)
-        return len(text) // 4
+        return len(text) // NOMINAL_CHARS_PER_TOKEN
 
     def should_seal(self, *, now: float) -> tuple[bool, str]:
         reason = next(_BufferPolicy(self).reasons(now), "")

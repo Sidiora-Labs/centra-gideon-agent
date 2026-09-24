@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { lineViolations } from './tokenLintRule'
+import { sourceViolations } from './tokenLintRule'
 
 
 // vitest runs from the web/ package dir; source lives in web/src.
@@ -46,14 +46,7 @@ function walk(dir: string): string[] {
 }
 
 function violations(file: string): string[] {
-  const text = readFileSync(file, 'utf8')
-  const hits: string[] = []
-  text.split('\n').forEach((line, i) => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return
-    for (const kind of lineViolations(line)) hits.push(`${i + 1}: ${kind} — ${trimmed.slice(0, 80)}`)
-  })
-  return hits
+  return sourceViolations(readFileSync(file, 'utf8'))
 }
 
 describe('token-lint: design-system adherence', () => {

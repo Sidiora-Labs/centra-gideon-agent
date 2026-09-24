@@ -1,3 +1,4 @@
+import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { FieldError } from '../../shared/ui/forms'
@@ -15,6 +16,8 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
   onSend?: (text: string) => void
   onClose: () => void
 }) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [items, setItems] = useState<PromptItem[] | null>(null)
   const [q, setQ] = useState('')
   const [picked, setPicked] = useState<PromptItem | null>(null)
@@ -22,8 +25,11 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    api.prompts('user').then(setItems).catch(() => setItems([]))
-  }, [])
+    let live = true
+    setLoadErr(null)
+    api.prompts('user').then((items) => { if (live) setItems(items) }).catch((error) => { if (live) setLoadErr(error) })
+    return () => { live = false }
+  }, [loadAttempt])
 
   const filtered = useMemo(() => {
     if (!items) return null
@@ -79,7 +85,7 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
           )}
           {err && <FieldError>{err}</FieldError>}
           <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-outline-variant/40">
-            {filtered === null ? (
+            {loadErr ? <LoadError what="prompts" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} /> : filtered === null ? (
               <div className="flex h-40 items-center justify-center"><Loader2 size={18} className="animate-spin text-on-surface-low" /></div>
             ) : filtered.length === 0 ? (
               <div data-type="body-s" className="flex h-40 flex-col items-center justify-center gap-1 px-4 text-center text-on-surface-low">

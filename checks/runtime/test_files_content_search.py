@@ -133,3 +133,59 @@ def test_handler_redacts_secrets_in_preview(tmp_path, monkeypatch):
         "AKIAIOSFODNN7EXAMPLEKEY1234567890abcd" not in r["preview"]
         for r in body["results"]
     )
+
+
+@pytest.mark.parametrize("engine", ["python", "rg"])
+@pytest.mark.parametrize("timeout", [0.0, 15.0])
+def test_real_search_deadline_http_and_audit(tmp_path, monkeypatch, engine, timeout):
+    import shutil
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from gideon.security.sel import SecurityEventLog
+
+    if engine == "rg" and shutil.which("rg") is None:
+        pytest.skip("ripgrep is not installed")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "match.txt").write_text("needle\n")
+    audit_home = tmp_path / "audit"
+    monkeypatch.setenv("GIDEON_HOME", str(audit_home))
+    monkeypatch.setattr(SecurityEventLog, "_instance", None)
+    monkeypatch.setattr(F, "_dashboard_roots", lambda: [("Workspace", str(root))])
+    monkeypatch.setattr(F, "_RG_AVAILABLE", engine == "rg")
+    monkeypatch.setattr(F, "_CONTENT_SEARCH_TIMEOUT", timeout)
+
+    async def request():
+        app = web.Application()
+        app.router.add_get("/api/file-content-search", F.api_file_content_search)
+        async with TestClient(TestServer(app)) as client:
+            async with client.get(
+                "/api/file-content-search",
+                params={"path": str(root), "q": "needle", "include": "*.txt"},
+            ) as response:
+                return response.status, await response.json()
+
+    status, body = asyncio.run(request())
+    rows = [
+        json.loads(line)
+        for line in (audit_home / "security_events.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["operation"] == "file_content_search"
+    assert row["caller_identity"] == "dashboard"
+    assert str(root) in row["resources"]
+    assert body["engine"] == engine
+    if timeout == 0:
+        assert status == 504
+        assert "Narrow the directory or include glob and try again." in body["error"]
+        assert row["outcome"] == "error"
+        assert row["error"] == body["error"]
+        assert "results" not in body
+    else:
+        assert status == 200
+        assert [r["file"] for r in body["results"]] == [str(root / "match.txt")]
+        assert row["outcome"] == "success"
+        assert not row["error"]

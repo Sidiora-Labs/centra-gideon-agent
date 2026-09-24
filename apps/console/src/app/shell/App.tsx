@@ -27,6 +27,7 @@ import { CommandPalette, type Command } from './CommandPalette'
 import { TerminalDrawer } from '../../features/terminal/TerminalDrawer'
 import { Toaster } from '../../shared/ui/Toaster'
 import { useApprovalToasts } from './useApprovalToasts'
+import { McpElicitationCards } from './McpElicitation'
 import { useNativeNotifications } from '../../shared/data/nativeNotifications'
 import { DialogHost } from '../../shared/ui/dialog/DialogHost'
 import { PersonalityShellElement } from './personality'
@@ -246,6 +247,7 @@ function AppInner() {
         </ErrorBoundary>
         {
 }
+        <McpElicitationCards />
         <Toaster />
       </>
     )
@@ -273,6 +275,7 @@ function AppInner() {
         </ErrorBoundary>
         {
 }
+        <McpElicitationCards />
         <Toaster />
         <DialogHost />
       </div>
@@ -354,6 +357,7 @@ function AppInner() {
       {
 }
       <PersonalityShellElement />
+      <McpElicitationCards />
       <Toaster />
       <DialogHost />
       {

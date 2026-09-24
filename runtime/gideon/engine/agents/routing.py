@@ -198,7 +198,7 @@ def _load_store() -> dict:
     from gideon.extensions.providers.entity_routes import _load_entity_settings
 
     try:
-        document = _load_entity_settings(_STORE)
+        document = _load_entity_settings(_STORE) or {}
     except Exception:
         logger.warning("agent-routing store load failed", exc_info=True)
         return {}

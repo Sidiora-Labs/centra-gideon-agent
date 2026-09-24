@@ -321,6 +321,8 @@ def _make_state(tmp_path, context_builder=None):
     sessions = MagicMock(count=0)
     sessions.get_pid = MagicMock(return_value=None)
     client = AsyncMock()
+    client.cancel.return_value = "acked"
+    del client.cancel_session
     client.provider_id = "acp:kiro-cli"
     sessions.get_or_create = AsyncMock(return_value=(client, True, False))
     sessions.record_failure = AsyncMock()
@@ -629,7 +631,7 @@ class TestUngatedResidue:
             if c.args and c.args[0] == "activity_event"
         ]
         assert any("Not gated by host" in t for t in texts), texts
-        client.cancel_session.assert_not_awaited()
+        client.cancel.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_undeclared_ungated_mutation_under_ask_aborts_the_turn(
@@ -645,7 +647,7 @@ class TestUngatedResidue:
             + [LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")],
         )
         await _drive(state, session)
-        client.cancel_session.assert_awaited_once()
+        client.cancel.assert_awaited_once_with()
         assert any("ungated" in t for t in _tool_texts(session)), _tool_texts(session)
         assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(
             session
@@ -679,7 +681,7 @@ class TestUngatedResidue:
         )
         await _drive(state, session)
         client.approve_tool.assert_awaited_once()
-        client.cancel_session.assert_not_awaited()
+        client.cancel.assert_not_awaited()
         assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(
             session
         )
@@ -699,7 +701,7 @@ class TestUngatedResidue:
             + [LLMEvent(kind=EVENT_COMPLETE, stop_reason="end_turn")],
         )
         await _drive(state, session)
-        client.cancel_session.assert_not_awaited()
+        client.cancel.assert_not_awaited()
         assert not any("ungated" in t for t in _tool_texts(session)), _tool_texts(
             session
         )
@@ -799,7 +801,7 @@ class TestUnacceptedResidualStaysLoud:
         assert any("turn stopped" in t for t in _tool_texts(session)), _tool_texts(
             session
         )
-        client.cancel_session.assert_awaited_once()
+        client.cancel.assert_awaited_once_with()
         assert any(m.get("ungated_declared") is False for m in self._tool_meta(session))
         rows = _ungated_audit_rows(sel_mock)
         assert [r["outcome"] for r in rows] == ["ungated"], rows
@@ -833,7 +835,7 @@ class TestUnacceptedResidualStaysLoud:
         assert not any("(ungated:" in t for t in _tool_texts(session)), _tool_texts(
             session
         )
-        client.cancel_session.assert_not_awaited()
+        client.cancel.assert_not_awaited()
         assert any(m.get("ungated_declared") is True for m in self._tool_meta(session))
         rows = _ungated_audit_rows(sel_mock)
         assert [r["outcome"] for r in rows] == ["ungated_declared"], rows

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type BundledPackRec, type InstalledPackRec, type PackProposalRec, type PackUpdateRec } from '../../shared/data/api'
+import { api, type InstalledPackRec, type PackProposalRec, type PackUpdateRec } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { invalidateKeys, useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup, Row, Field, SavedToast, ToggleRow } from './settingsUI'
@@ -17,8 +17,8 @@ export function PacksPanel() {
     api.gideonConfig().then((c) => (c.packs ?? {}) as PacksCfg),
     { persist: true },
   )
-  const { data: installed, refresh: refreshInstalled } = useQuery('settings:packs:installed', () =>
-    api.packsInstalled().catch(() => [] as InstalledPackRec[]),
+  const { data: installed, error: installedErr, refresh: refreshInstalled } = useQuery('settings:packs:installed', () =>
+    api.packsInstalled(),
     { persist: true },
   )
 
@@ -62,10 +62,10 @@ export function PacksPanel() {
 
       <ProposalsSection onInstalled={onInstalled} />
 
-      <PackStoreSection installed={installed ?? []} onInstalled={onInstalled} />
+      {installedErr ? <LoadError what="installed packs" error={installedErr} onRetry={onInstalled} /> : installed === undefined ? <FormSkeleton sections={1} what="installed packs" /> : <PackStoreSection installed={installed} onInstalled={onInstalled} />}
 
       <Section title="Installed packs" hint="Each imported pack, its skipped-connector markers, a re-runnable setup interview when it ships one, and an update that never overwrites a component you have edited.">
-        <InstalledPacks packs={installed ?? []} />
+        {!installedErr && installed !== undefined && <InstalledPacks packs={installed} />}
       </Section>
     </div>
   )
@@ -203,7 +203,7 @@ export function PackStoreSection({ installed, onInstalled }: {
 }) {
   const [busy, setBusy] = useState('')
   const { data: bundled, error, refresh } = useQuery('settings:packs:bundled', () =>
-    api.packsBundled().catch(() => [] as BundledPackRec[]),
+    api.packsBundled(),
     { persist: true },
   )
   const have = new Set(installed.map((p) => p.name))
@@ -220,9 +220,8 @@ export function PackStoreSection({ installed, onInstalled }: {
   return (
     <div id="pack-store">
       <Section title="Pack store" hint="The packs shipped in this build. Installing one scans every component, lands its triggers disabled, and stages its roster until you deploy it.">
-        {error ? <LoadError what="pack catalog" error={error} onRetry={refresh} /> : null}
-        <div className="flex flex-col gap-2">
-          {(bundled ?? []).map((p) => (
+        {error ? <LoadError what="pack catalog" error={error} onRetry={refresh} /> : bundled === undefined ? <FormSkeleton sections={1} what="pack catalog" /> : <div className="flex flex-col gap-2">
+          {bundled.map((p) => (
             <RowGroup key={p.name}>
               <Row label={`${p.displayName} ${p.version}`.trim()} hint={p.description}>
                 {have.has(p.name)
@@ -231,7 +230,7 @@ export function PackStoreSection({ installed, onInstalled }: {
               </Row>
             </RowGroup>
           ))}
-        </div>
+        </div>}
       </Section>
     </div>
   )

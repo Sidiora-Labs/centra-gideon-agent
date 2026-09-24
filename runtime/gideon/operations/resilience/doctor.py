@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
+import json
 import socket
 import sqlite3
 import sys
@@ -50,7 +51,7 @@ def config_dir() -> Path:
 
 
 class Tier(enum.IntEnum):
-    """Probe tiers (Gideon three-tier readiness, extended per-capability).
+    """Process, socket, RPC, and per-capability readiness tiers.
 
     Ordered so a lower tier gates the higher ones: if tier 2 (cheap RPC) fails,
     tier-3 capability packs are not run — the gateway itself is the problem.
@@ -983,6 +984,55 @@ async def _probe_remote_reachability(ctx: DoctorContext) -> ProbeResult:
     )
 
 
+async def _probe_external_vector_store(ctx: DoctorContext) -> ProbeResult:
+    from gideon.cognition.knowledge.store import knowledge_db_path
+    from gideon.integrations.vector_store_providers.registry import provider_for_health
+
+    def read_report():
+        provider = provider_for_health()
+        if provider is None:
+            return None, 0
+        report = provider.describe()
+        if not isinstance(report, dict):
+            raise ValueError("Vector store describe() must return a dictionary")
+        path = knowledge_db_path(ctx.home, create=False)
+        local_count = 0
+        if path.exists():
+            with contextlib.closing(
+                sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+            ) as db:
+                local_count = db.execute(
+                    "SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0"
+                ).fetchone()[0]
+        return report, local_count
+
+    try:
+        report, local_count = await asyncio.wait_for(
+            asyncio.to_thread(read_report), timeout=5
+        )
+        if report is None:
+            return ProbeResult(ok=True, detail="No external vector store bound")
+        count = report.get("count")
+        valid_count = (
+            isinstance(count, int) and not isinstance(count, bool) and count >= 0
+        )
+        ok = (
+            report.get("reachable") is not False
+            and valid_count
+            and not (local_count and count == 0)
+        )
+        detail = json.dumps(report, sort_keys=True, default=str)
+        if local_count and count == 0:
+            detail += f"; external store is empty while {local_count} local chunk vectors exist"
+        return ProbeResult(
+            ok=bool(ok),
+            detail=detail,
+            evidence={"store": report, "local_count": local_count},
+        )
+    except Exception as exc:
+        return ProbeResult(ok=False, detail=f"External vector store unreachable: {exc}")
+
+
 async def _probe_knowledge_vector_index(ctx: DoctorContext) -> ProbeResult:
     """knowledge — is the chunk ANN index (sqlite-vec) live, and does it cover the chunks? (KL-11)
 
@@ -1587,6 +1637,15 @@ def _register_builtin_probes() -> None:
             Tier.CAPABILITY,
             _probe_remote_reachability,
             "Remote reachability (tailnet / exposure)",
+        )
+    )
+    register_probe(
+        Probe(
+            "knowledge.external-vector-store",
+            "knowledge",
+            Tier.CAPABILITY,
+            _probe_external_vector_store,
+            "External knowledge vector store",
         )
     )
     register_probe(

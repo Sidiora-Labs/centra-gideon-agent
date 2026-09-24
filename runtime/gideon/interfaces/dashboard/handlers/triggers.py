@@ -1075,7 +1075,8 @@ def _update_event(raw: str, body: dict) -> web.Response:
     if trigger is None:
         return web.json_response({"error": "not found"}, status=404)
 
-    action = body.get("action") if isinstance(body.get("action"), dict) else {}
+    raw_action = body.get("action")
+    action = raw_action if isinstance(raw_action, dict) else {}
     refusal = _provider_refusal(
         {"provider": action.get("provider") or trigger.action_provider}
     )

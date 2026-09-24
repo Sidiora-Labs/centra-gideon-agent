@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.security import redact_field
 
 logger = logging.getLogger(__name__)
 
@@ -39,21 +39,6 @@ _ROLE_LABELS = {
 }
 
 
-def redact_field(text: str) -> str:
-    """Both redaction passes over one field. Applied to EVERY role — see the module
-    docstring for why the write path's role exemption can't be inherited here.
-
-    Public because ``session_share`` needs the SAME redaction for the artifact name it
-    derives (SM-9). One implementation with two callers, never a second pass that redacts
-    slightly less.
-    """
-    if not text:
-        return ""
-    safe, _ = redact_exfiltration_urls(str(text))
-    safe, _ = redact_credentials(safe)
-    return safe
-
-
 def _content_messages(messages: list[dict]) -> list[dict]:
     """Conversation-bearing messages only, each with its content redacted."""
     out: list[dict] = []
@@ -67,6 +52,8 @@ def _content_messages(messages: list[dict]) -> list[dict]:
         if not content.strip():
             continue
         entry: dict[str, Any] = {"role": role, "content": content}
+        if msg.get("speaker"):
+            entry["speaker"] = redact_field(msg["speaker"])
         ts = msg.get("ts")
         if ts:
             entry["ts"] = str(ts)
@@ -103,7 +90,7 @@ def render_markdown(*, title: str, key: str, meta: dict, messages: list[dict]) -
     lines.append("")
 
     for msg in exported:
-        who = _ROLE_LABELS.get(msg["role"], msg["role"].title())
+        who = msg.get("speaker") or _ROLE_LABELS.get(msg["role"], msg["role"].title())
         stamp = f" · {msg['ts']}" if msg.get("ts") else ""
         lines.append(f"## {who}{stamp}")
         lines.append("")

@@ -51,6 +51,7 @@ the manifests. What lives here is the detector plus its planted floors.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -58,24 +59,19 @@ import pytest
 
 from checks.runtime.test_apps_import_boundary import _app_roots
 
-_CRED_HINTS = (
-    "api_key",
-    "apikey",
-    "token",
-    "secret",
-    "password",
-    "credential",
-    "access_key",
+CRED_CLASS = re.compile(
+    r"(?:[a-z0-9]+_)*(?:api_key|apikey|token|secret|password|credentials?|access_key|private_key|ssh_key)",
+    re.IGNORECASE,
 )
+_CREDENTIAL_EXEMPTIONS = frozenset({"rsync-sync.ssh_key"})
 
 
 def _is_credential_shaped(key: str) -> bool:
-    low = key.lower()
-    return any(hint in low for hint in _CRED_HINTS)
+    return CRED_CLASS.fullmatch(key) is not None
 
 
 def _credential_fields(
-    props: dict[str, Any] | None, trail: str = ""
+    props: dict[str, Any] | None, trail: str = "", *, app_name: str = ""
 ) -> list[tuple[str, bool]]:
     """Every credential-shaped field under *props*, as ``(dotted_name, is_marked_sensitive)``.
 
@@ -87,12 +83,19 @@ def _credential_fields(
     for key, spec in (props or {}).items():
         if not isinstance(spec, dict):
             continue
-        if _is_credential_shaped(key):
+        if (
+            _is_credential_shaped(key)
+            and f"{app_name}.{trail}{key}" not in _CREDENTIAL_EXEMPTIONS
+        ):
             meta = spec.get("x-meta")
             marked = bool(isinstance(meta, dict) and meta.get("sensitive"))
             out.append((trail + key, marked))
         if spec.get("type") == "object" and isinstance(spec.get("properties"), dict):
-            out.extend(_credential_fields(spec["properties"], trail + key + "."))
+            out.extend(
+                _credential_fields(
+                    spec["properties"], trail + key + ".", app_name=app_name
+                )
+            )
     return out
 
 
@@ -179,7 +182,7 @@ def test_no_credential_field_ships_unmarked() -> None:
         if not isinstance(manifest, dict):
             continue
         for props in _schema_property_blocks(manifest):
-            for name, marked in _credential_fields(props):
+            for name, marked in _credential_fields(props, app_name=path.parent.name):
                 credential_fields_seen += 1
                 if not marked:
                     unmarked.append(f"{path.parent.name}: {name}")
@@ -230,3 +233,91 @@ def test_a_non_credential_field_is_ignored() -> None:
     """Vacuity in the other direction: the matcher must not flag every setting there is."""
     planted = {"default_model": {"type": "string"}, "timeout_s": {"type": "integer"}}
     assert _credential_fields(planted) == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "api_key",
+        "apikey",
+        "token",
+        "secret",
+        "password",
+        "credential",
+        "credentials",
+        "access_key",
+        "private_key",
+        "ssh_key",
+        "refresh_token",
+        "client_secret",
+        "aws_access_key",
+        "BOT_TOKEN",
+    ],
+)
+def test_credential_classification_floor(name: str) -> None:
+    assert _is_credential_shaped(name)
+    assert _credential_fields({name: {"type": "string"}}) == [(name, False)]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "max_tokens",
+        "max_token_count",
+        "token_limit",
+        "tokenizer",
+        "secretary",
+        "password_length",
+        "credential_file_path",
+        "api_key_enabled",
+        "monkey",
+        "default_model",
+        "token\n",
+    ],
+)
+def test_noncredential_classification_floor(name: str) -> None:
+    assert not _is_credential_shaped(name)
+    assert _credential_fields({name: {"type": "string"}}) == []
+
+
+def test_rsync_key_path_exemption_is_exact() -> None:
+    props = {"ssh_key": {"type": "string"}, "api_key": {"type": "string"}}
+    assert _credential_fields(props, app_name="rsync-sync") == [("api_key", False)]
+    assert _credential_fields(props, app_name="other-sync") == [
+        ("ssh_key", False),
+        ("api_key", False),
+    ]
+    nested = {"auth": {"type": "object", "properties": props}}
+    assert _credential_fields(nested, app_name="rsync-sync") == [
+        ("auth.ssh_key", False),
+        ("auth.api_key", False),
+    ]
+
+
+def test_census_preserves_classifications_across_schema_locations() -> None:
+    manifest = {
+        "settingsSchema": {
+            "properties": {
+                "max_tokens": {"type": "integer"},
+                "api_key": {"type": "string", "x-meta": {"sensitive": True}},
+            }
+        },
+        "provider": {
+            "settingsSchema": {
+                "properties": {
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "refresh_token": {"type": "string"},
+                        },
+                    },
+                }
+            }
+        },
+    }
+    classified = [
+        field
+        for props in _schema_property_blocks(manifest)
+        for field in _credential_fields(props, app_name="census-floor")
+    ]
+    assert classified == [("api_key", True), ("auth.refresh_token", False)]

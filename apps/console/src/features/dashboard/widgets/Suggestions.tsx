@@ -1,3 +1,4 @@
+import { LoadError } from '../../../shared/ui/ListScaffold'
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Sparkles, RefreshCw, ArrowUpRight } from 'lucide-react'
@@ -7,19 +8,22 @@ import { spring } from '../../../shared/theme/motion'
 import type { RouteProps } from '../../../app/shell/useQueryState'
 
 export function Suggestions({ navigate }: RouteProps) {
+  const [loadErr, setLoadErr] = useState<unknown>(null)
   const [items, setItems] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback((force = false) => {
+    setLoadErr(null)
     setLoading(true)
     api.suggestions(force)
       .then((d) => setItems(d.suggestions ?? []))
-      .catch(() => setItems([]))
+      .catch(setLoadErr)
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => { load(false) }, [load])
 
+  if (loadErr) return <LoadError what="suggestions" error={loadErr} onRetry={() => load()} />
   if (loading && items.length === 0) {
     return (
       <div className="flex flex-col gap-s pt-xs">
