@@ -1,0 +1,15 @@
+{
+  "name": "gideon-wellbeing",
+  "version": "1.0.0",
+  "displayName": "Wellbeing Records",
+  "description": "Record personal body weight and blood pressure with immutable provenance and correction history.",
+  "icon": "Heart",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.wellbeing.provider:create_provider",
+    "capabilities": ["wellbeing_records"]
+  },
+  "native": true
+}
