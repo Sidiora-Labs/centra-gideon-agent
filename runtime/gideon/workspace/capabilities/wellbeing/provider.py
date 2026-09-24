@@ -21,12 +21,15 @@ class WellbeingProvider(ToolProvider):
             name="wellbeing_records", provider=self.name,
             description="List, read, export, enter or correct personal weight and blood pressure records. Corrections preserve provenance and history. Writes require a stable request_id; correct also requires revision.",
             parameters={"type": "object", "required": ["operation"], "additionalProperties": False,
-                "properties": {"operation": {"type": "string", "enum": ["list", "get", "history", "export", "create", "correct"]},
-                    "id": {"type": "string"}, "payload": {"type": "object", "description": "Create: request_id, kind (body_weight/blood_pressure), observed_at with UTC offset, unit (kg/lb/mmHg), values (weight or systolic/diastolic), source, notes. Correct: request_id, revision, optional observed_at/unit/values/notes. List: optional from_date/to_date/kind/limit/offset."}}},
+                "properties": {"operation": {"type": "string", "enum": ["list", "get", "history", "export", "create", "correct", "labs_preview", "labs_commit", "labs_get", "labs_list", "labs_history", "labs_correct", "labs_trends"]},
+                    "id": {"type": "string"}, "payload": {"type": "object", "description": "Create: request_id, kind (body_weight/blood_pressure), observed_at with UTC offset, unit (kg/lb/mmHg), values (weight or systolic/diastolic), source, notes. Correct: request_id, revision, optional observed_at/unit/values/notes. List: optional from_date/to_date/kind/limit/offset. Labs preview: filename, format csv/json, content, source; rows analyte, observed_at with offset, value, unit, optional reference_low/reference_high/notes/external_id. Labs commit also requires preview_id and request_id. Labs correct: revision, request_id, value/reference bounds/notes. Labs trends: analyte and unit."}}},
             requires_approval=True, risk_level=RiskLevel.CAUTION)]
 
     async def invoke(self, tool_name, arguments):
         try:
+            if tool_name == "wellbeing_records" and str(arguments.get("operation", "")).startswith("labs_"):
+                from .labs_provider import invoke_labs
+                return ToolResult(success=True, output=await invoke_labs(self.home, arguments))
             if tool_name != "wellbeing_records" or arguments.get("operation") not in ("list", "get", "history", "export", "create", "correct"):
                 raise MeasurementError("Unknown wellbeing operation")
             store = MeasurementStore(self.home)
