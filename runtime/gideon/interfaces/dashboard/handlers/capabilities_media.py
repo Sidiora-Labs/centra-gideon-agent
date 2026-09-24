@@ -44,3 +44,5 @@ def register(app):
     app.router.add_put(prefix + "/{id}", dispatch)
     app.router.add_get(prefix + "/{id}/source", dispatch)
     app.router.add_post(prefix + "/{id}/export", dispatch)
+    from gideon.workspace.capabilities.media.library_http import register_library
+    register_library(app, app[STORE_KEY].artifacts)
