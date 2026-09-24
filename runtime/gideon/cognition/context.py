@@ -754,6 +754,11 @@ class PromptAssembler:
 
         service = service_for(memory)
         sections = _MemorySections()
+        from gideon.workspace.capabilities.identity.twin_context import standing_human_context
+
+        human = _guarded_recall("human_identity", lambda: standing_human_context(session_key))
+        if human:
+            sections.direct.append(human)
         caps = _memory_caps(active_chat_model_window())
         recall = _guarded_recall(
             "recall",
