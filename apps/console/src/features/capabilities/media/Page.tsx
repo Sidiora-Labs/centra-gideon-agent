@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
+import LibraryPage from './LibraryPage'
 
 type Stroke = { tool: 'draw' | 'erase'; color: string; width: number; points: number[][] }
 type Sketch = { id: string; width: number; height: number; strokes: Stroke[]; revision: number; source_artifact_id: string | null }
@@ -11,7 +12,7 @@ async function request(path: string, method = 'GET', body?: unknown) {
   return value
 }
 
-export default function Page() {
+function SketchPage() {
   const [items, setItems] = useState<Sketch[]>([])
   const [sketch, setSketch] = useState<Sketch | null>(null)
   const [strokes, setStrokes] = useState<Stroke[]>([])
@@ -62,6 +63,7 @@ export default function Page() {
   const dirty = sketch && JSON.stringify(strokes) !== JSON.stringify(sketch.strokes)
   return <section className="p-4 space-y-4 overflow-auto" aria-label="Image sketches">
     <h1>Image sketches</h1>
+    <a href="#/capabilities/media?view=library">Media library</a>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-3">
       <label>Source artifact ID (optional)<input aria-label="Source artifact ID" value={source} onChange={e => setSource(e.target.value)} /></label>
@@ -97,4 +99,10 @@ export default function Page() {
       </div>
     </>}
   </section>
+}
+
+export default function Page() {
+  const [library, setLibrary] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view') === 'library')
+  useEffect(() => { const update = () => setLibrary(new URLSearchParams(location.hash.split('?')[1] || '').get('view') === 'library'); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
+  return library ? <LibraryPage /> : <SketchPage />
 }
