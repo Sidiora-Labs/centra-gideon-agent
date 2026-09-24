@@ -4,11 +4,18 @@ from aiohttp import web
 
 from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
+from gideon.workspace.capabilities.communications.imports import commit, preview
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/import/' in request.path:
+            data = await request.json()
+            if request.path.endswith('/preview'):
+                return web.json_response(preview(store, data))
+            receipt, created = commit(store, data)
+            return web.json_response({'receipt': receipt, 'created': created}, status=201 if created else 200)
         zone = request.query.get('timezone') or AppConfig.load().timezone or 'UTC'
         try:
             ZoneInfo(zone)
@@ -35,6 +42,8 @@ async def handle(request):
 
 
 def register(app):
+    app.router.add_post('/api/capabilities/communications/import/preview', handle)
+    app.router.add_post('/api/capabilities/communications/import/commit', handle)
     base = '/api/capabilities/communications/people'
     app.router.add_get(base, handle)
     app.router.add_post(base, handle)
