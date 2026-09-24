@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import CatalogPage from './CatalogPage'
 import { Button } from '../../../shared/ui/Button'
 
 type Attachment = { slug: string; version: number }
@@ -7,7 +8,7 @@ type Item = { id: string; title: string; instrument: string; body: string; attac
 const selected = () => window.location.hash.split('/music/')[1]?.split('?')[0] || ''
 const fieldClass = 'w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
 
-export default function Page({ apiBase = '/api/capabilities/music' }: { apiBase?: string }) {
+function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: string }) {
   const [items, setItems] = useState<Item[]>([])
   const [id, setId] = useState(selected)
   const [item, setItem] = useState<Item | null>(null)
@@ -95,4 +96,10 @@ export default function Page({ apiBase = '/api/capabilities/music' }: { apiBase?
       </article>}
     </>}
   </section>
+}
+
+export default function Page(props: { apiBase?: string }) {
+  const [hash, setHash] = useState(window.location.hash)
+  useEffect(() => { const changed = () => setHash(window.location.hash); window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed) }, [])
+  return hash.includes('/music/catalog') ? <CatalogPage /> : <><a className="p-4 text-primary" href="#/capabilities/music/catalog/tracks">Music catalog</a><RepertoirePage {...props} /></>
 }

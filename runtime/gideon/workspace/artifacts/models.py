@@ -47,11 +47,12 @@ ALLOWED_KINDS = {
     "pdf",
     "csv",
     "video",
+    "audio",
 }
 ALLOWED_SOURCES = {"chat", "cron", "subagent", "manual", "import"}
 ALLOWED_EVENT_TYPES = {"created", "edited", "iterated", "referenced", "reverted"}
 
-BINARY_KINDS = {"image", "video", "docx", "xlsx", "pptx", "pdf"}
+BINARY_KINDS = {"image", "video", "audio", "docx", "xlsx", "pptx", "pdf"}
 
 _MIME_TO_EXT = {
     "image/png": "png",
@@ -68,6 +69,11 @@ _MIME_TO_EXT = {
     "video/mp4": "mp4",
     "video/webm": "webm",
     "video/quicktime": "mov",
+    "audio/wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/mp4": "m4a",
 }
 
 
