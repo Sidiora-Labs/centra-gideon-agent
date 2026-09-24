@@ -20,13 +20,14 @@ function fillDefaults(content: string, vars: PromptVariable[]): string {
   return vars.reduce((text, variable) => variable.default == null || variable.default === '' ? text : text.replaceAll(`{{${variable.name}}}`, () => String(variable.default)), content)
 }
 
-export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp, onEditingChange, onNavigate }: {
+export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp, onEditingChange, onNavigate, deletionBlockedReason }: {
   prompt: PromptItem
   onSaved: (name: string) => void
   onDeleted: () => void
   editing: boolean
   onEditingChange: (v: boolean) => void
   onNavigate: (path: string) => void
+  deletionBlockedReason?: string
 }) {
   const readOnly = isReadOnly(prompt.source)
   const editing = editingProp && !readOnly
@@ -44,7 +45,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
     void request.run(() => api.savePrompt(prompt.name, draftToPayload(draft)), result => { invalidateKeys(`prompt:${prompt.name}`); refetch(); onSaved(result.prompt?.name ?? prompt.name); setEditing(false) }, 'Save failed')
   }
   const del = async () => {
-    if (readOnly || !await confirmDelete('prompt', prompt.name)) return
+    if (readOnly || deletionBlockedReason || !await confirmDelete('prompt', prompt.name)) return
     await request.run(() => api.deletePrompt(prompt.name), onDeleted, 'Delete failed')
   }
 
@@ -88,7 +89,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
         ) : (
           <>
             <Button size="sm" variant="secondary" onClick={() => setEditing(true)}><Pencil size={14} /> Edit</Button>
-            <Button size="sm" variant="ghost" onClick={del}><Trash2 size={14} /> Delete</Button>
+            <Button size="sm" variant="ghost" onClick={del} disabled={!!deletionBlockedReason} disabledReason={deletionBlockedReason}><Trash2 size={14} /> Delete</Button>
           </>
         )}
         {full.kind && <span data-type="caption" className="inline-flex items-center rounded-md px-m h-6" style={{ background: 'var(--color-surface-high)', color: 'var(--color-on-surface-var)' }}>{full.kind} prompt</span>}

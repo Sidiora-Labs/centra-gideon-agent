@@ -8,6 +8,7 @@ import { sourceTone } from './promptMeta'
 import { PromptDetail } from './PromptDetail'
 import { SnippetDetail } from './SnippetDetail'
 import { useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
+import { PromptUsage, deletionBlockedReason, type PromptUsageRecord } from '../capabilities/platform/PromptUsage'
 
 export function PromptViewPage({ kind, name, onBack, navigate, query, setQuery }: {
   kind: 'system' | 'user' | 'snippets'
@@ -18,6 +19,7 @@ export function PromptViewPage({ kind, name, onBack, navigate, query, setQuery }
   const isSnippet = kind === 'snippets'
   const { record: loaded, refresh } = usePromptRecord(isSnippet, name)
   const tone = sourceTone(typeof loaded === 'object' && loaded ? loaded.source : undefined)
+  const usage = loaded && typeof loaded === 'object' ? (loaded as PromptItem & { usage?: PromptUsageRecord }).usage : undefined
 
   return (
     <div className="flex h-full flex-col">
@@ -39,7 +41,10 @@ export function PromptViewPage({ kind, name, onBack, navigate, query, setQuery }
           ) : isSnippet ? (
             <SnippetDetail snippet={loaded as PromptSnippet} editing={editing} onEditingChange={setEditing} onSaved={refresh} onDeleted={onBack} />
           ) : (
-            <PromptDetail prompt={loaded as PromptItem} editing={editing} onEditingChange={setEditing} onSaved={refresh} onDeleted={onBack} onNavigate={navigate} />
+            <>
+              <PromptUsage usage={usage} />
+              <PromptDetail prompt={loaded as PromptItem} deletionBlockedReason={deletionBlockedReason(usage)} editing={editing} onEditingChange={setEditing} onSaved={refresh} onDeleted={onBack} onNavigate={navigate} />
+            </>
           )}
         </div>
       </div>

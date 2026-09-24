@@ -1,0 +1,104 @@
+{
+  "task": "platform.02",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "bbdb4dbb",
+  "contract": "Prompt detail includes usage {version,provider,name,consumers:[{kind,id,label}],total,complete,deletable}; deletion refuses active bindings and declared native/app consumers with 409 prompt_in_use; unreadable binding truth refuses deletion with 503 prompt_usage_unavailable. No inferred workflow fields.",
+  "acceptance": [
+    "Create native user prompt through real HTTP, bind chat, inspect structured dependency and refuse deletion",
+    "Clear actual binding then delete through same HTTP and confirm persisted removal",
+    "Protect bundled declaration and registered app-owned prompt even when active override changes",
+    "Corrupt active_prompts fails closed without losing prompt; repair restores usability",
+    "Preserve snippet include deletion protection and provider identity separation",
+    "Console presents actual dependency payload and blocks protected delete; no fake services"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/prompt_usage.py",
+    "runtime/gideon/interfaces/dashboard/handlers/prompts.py",
+    "apps/console/src/features/capabilities/platform/PromptUsage.tsx",
+    "apps/console/src/features/prompts/PromptViewPage.tsx",
+    "apps/console/src/features/prompts/PromptDetail.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_prompt_usage.py",
+    "apps/console/src/features/capabilities/platform/PromptUsage.test.tsx",
+    "checks/runtime/capabilities/platform/prompt_ui_server.py"
+  ],
+  "compile_base": "bbdb4dbb",
+  "dependencies": [
+    "platform.01",
+    "Existing active_prompts.json truth, BUNDLED_PROMPTS, app prompt registry"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify platform.02",
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_prompt_usage.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/PromptUsage.test.tsx"
+  ],
+  "evidence": {
+    "task": "platform.02",
+    "root": "/tmp/gideon-expansion-worktrees/platform",
+    "started_at": 1790293980.0034716,
+    "production_lines": 93,
+    "test_lines": 262,
+    "ratio": 2.817204301075269,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/prompts.py",
+          "runtime/gideon/workspace/capabilities/platform/prompt_usage.py",
+          "checks/runtime/capabilities/platform/prompt_ui_server.py",
+          "checks/runtime/capabilities/platform/test_prompt_usage.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-platform.02-checks-mgxibw6c/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/platform/checks/runtime/capabilities/platform/test_prompt_usage.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-platform.02-checks-mgxibw6c/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/platform/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/platform/apps/console/src/features/capabilities/platform/PromptUsage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-platform.02-checks-mgxibw6c/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-platform.02-checks-mgxibw6c",
+    "completed_at": 1790294001.0462008,
+    "files": {
+      "apps/console/src/features/capabilities/platform/PromptUsage.tsx": "6623a86f065c5b9a4a06cb69184229e7c7ea4392361e879cdd1e39b1c44ec81b",
+      "apps/console/src/features/prompts/PromptDetail.tsx": "12634e44c00e7ff90198a1e2e9c5b461f21a9c4445ac2728628cd65b4878ba8e",
+      "apps/console/src/features/prompts/PromptViewPage.tsx": "4ff90086204fc573e31378aa711d9501dba3db850fe12d6dbffd5e2f8e75308b",
+      "runtime/gideon/interfaces/dashboard/handlers/prompts.py": "912bd172bdb2d4c91b32d9b9761c0a9e1058f8a44cefa498b7200039b15b80e3",
+      "runtime/gideon/workspace/capabilities/platform/prompt_usage.py": "d26bef639fd7eaebd74122c0498585e9a611674ef1781bb0f29343e6d32d6d4c",
+      "apps/console/src/features/capabilities/platform/PromptUsage.test.tsx": "0493aad4c2daa72f91ce64663c103d8f3ca1d2f8b2ae14c833dfaa441d318bbf",
+      "checks/runtime/capabilities/platform/prompt_ui_server.py": "733b0732af7a04c39e75dc539462218b08f4ebc4e17600c59f1061e3e6f5bcc1",
+      "checks/runtime/capabilities/platform/test_prompt_usage.py": "9627ef8f3eb8bc9f0061c34c8d551479c91651c65f63ddfa18686a735701513f"
+    }
+  },
+  "remaining_limits": [
+    "Assembled browser qualification remains with root integration",
+    "PromptView receives usage from existing detail endpoint; core API tests and rendered PromptDetail over real HTTP passed",
+    "No inferred workflow references: workflow templates are inline, declared workflow-related use cases covered by native catalog"
+  ]
+}
