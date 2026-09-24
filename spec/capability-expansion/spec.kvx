@@ -1,0 +1,1102 @@
+[meta]
+feature = "capability-expansion"
+status = "in_progress"
+source = "spec/capability-expansion/SPEC.md"
+backlog = "spec/capability-expansion/backlog.json"
+
+[task.workspace.01]
+title = "Workspace context snapshots and reconciliation"
+wave = 1
+owner_lane = "workspace"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.01"
+
+[task.workspace.02]
+title = "Managed external application processes"
+wave = 2
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.02"
+
+[task.workspace.03]
+title = "Host port reservations and conflict inventory"
+wave = 3
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.03"
+
+[task.workspace.04]
+title = "Existing project discovery and scaffolding"
+wave = 4
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.04"
+
+[task.workspace.05]
+title = "Operator Git and submodule operations"
+wave = 5
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.05"
+
+[task.workspace.06]
+title = "Human remote desktop sessions"
+wave = 6
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.06"
+
+[task.workspace.07]
+title = "External terminal mirroring"
+wave = 7
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.07"
+
+[task.workspace.08]
+title = "Provider terminal launch and image attachments"
+wave = 8
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.08"
+
+[task.workspace.09]
+title = "Managed process logs"
+wave = 9
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.09"
+
+[task.workspace.10]
+title = "Attributed storage diagnosis"
+wave = 10
+owner_lane = "workspace"
+status = "pending"
+requires = ["workspace.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify workspace.10"
+
+[task.knowledge.01]
+title = "Anniversary resurfacing"
+wave = 1
+owner_lane = "knowledge"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.01"
+
+[task.knowledge.02]
+title = "Capture classification and correction"
+wave = 2
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.02"
+
+[task.knowledge.03]
+title = "Personal record type mappings"
+wave = 3
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.03"
+
+[task.knowledge.04]
+title = "Conversation archive import"
+wave = 4
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.04"
+
+[task.knowledge.05]
+title = "Tracked cross-domain topics"
+wave = 5
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.05"
+
+[task.knowledge.06]
+title = "Obligation digests and weekly review"
+wave = 6
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.06"
+
+[task.knowledge.07]
+title = "Date-keyed journals with activity drafts"
+wave = 7
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.07"
+
+[task.knowledge.08]
+title = "Idea-list vault exchange"
+wave = 8
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.08"
+
+[task.knowledge.09]
+title = "Video transcript and source ingestion"
+wave = 9
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.09"
+
+[task.knowledge.10]
+title = "Link collections and repository study"
+wave = 10
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.10"
+
+[task.knowledge.11]
+title = "External vault registration and editing"
+wave = 11
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.11"
+
+[task.knowledge.12]
+title = "RSVP reader"
+wave = 12
+owner_lane = "knowledge"
+status = "pending"
+requires = ["knowledge.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.12"
+
+[task.identity.01]
+title = "Autobiography stories and follow-up chains"
+wave = 1
+owner_lane = "identity"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.01"
+
+[task.identity.02]
+title = "Human digital twin and enrichment"
+wave = 2
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.02"
+
+[task.identity.03]
+title = "Twin fidelity evaluations"
+wave = 3
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.03"
+
+[task.identity.04]
+title = "Human life goals and calendar sessions"
+wave = 4
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.04"
+
+[task.identity.05]
+title = "Human progress sheet"
+wave = 5
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.05"
+
+[task.identity.06]
+title = "Protected agent continuity and lifecycle"
+wave = 6
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.06"
+
+[task.identity.07]
+title = "Encrypted selective identity bundles"
+wave = 7
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.07"
+
+[task.identity.08]
+title = "Versioned bounded tool recipes"
+wave = 8
+owner_lane = "identity"
+status = "pending"
+requires = ["identity.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify identity.08"
+
+[task.wellbeing.01]
+title = "Body measurements and blood pressure records"
+wave = 1
+owner_lane = "wellbeing"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.01"
+
+[task.wellbeing.02]
+title = "Blood results and clinical record history"
+wave = 2
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.02"
+
+[task.wellbeing.03]
+title = "Apple Health XML ZIP JSON and FHIR ingestion"
+wave = 3
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.03"
+
+[task.wellbeing.04]
+title = "Alcohol and nicotine tracking"
+wave = 4
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.04"
+
+[task.wellbeing.05]
+title = "Genome source index and annotations"
+wave = 5
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.05"
+
+[task.wellbeing.06]
+title = "Intervention records and adherence"
+wave = 6
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.06"
+
+[task.wellbeing.07]
+title = "Timed cognitive exercises and scoring"
+wave = 7
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.07"
+
+[task.wellbeing.08]
+title = "Spaced memory and cognitive practice"
+wave = 8
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.08"
+
+[task.wellbeing.09]
+title = "Life calendar and completion reminders"
+wave = 9
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.09"
+
+[task.wellbeing.10]
+title = "Versioned health export"
+wave = 10
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.10"
+
+[task.wellbeing.11]
+title = "Native health shared-store integration"
+wave = 11
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.11"
+
+[task.wellbeing.12]
+title = "Privacy subjects consent and encrypted facts"
+wave = 12
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.12"
+
+[task.wellbeing.13]
+title = "Organization holdings and change propagation"
+wave = 13
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.13"
+
+[task.wellbeing.14]
+title = "Broker case lifecycle and verification"
+wave = 14
+owner_lane = "wellbeing"
+status = "pending"
+requires = ["wellbeing.13"]
+verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.14"
+
+[task.communications.01]
+title = "People and relationship touchpoints"
+wave = 1
+owner_lane = "communications"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.01"
+
+[task.communications.02]
+title = "Contact import and identity resolution"
+wave = 2
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.02"
+
+[task.communications.03]
+title = "Care cadence and unanswered-thread evidence"
+wave = 3
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.03"
+
+[task.communications.04]
+title = "Account-bound email and message mirrors"
+wave = 4
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.04"
+
+[task.communications.05]
+title = "iMessage and Signal Desktop imports"
+wave = 5
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.05"
+
+[task.communications.06]
+title = "Beeper conversations attachments and durable outbox"
+wave = 6
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.06"
+
+[task.communications.07]
+title = "Telegram operational commands and notifications"
+wave = 7
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.07"
+
+[task.communications.08]
+title = "External calendar mirroring and daily review"
+wave = 8
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.08"
+
+[task.communications.09]
+title = "Social account registry"
+wave = 9
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.09"
+
+[task.communications.10]
+title = "X reading and reviewed compose handoff"
+wave = 10
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.10"
+
+[task.communications.11]
+title = "Stacker News territory and action workflow"
+wave = 11
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.11"
+
+[task.communications.12]
+title = "Agent platform account lifecycle"
+wave = 12
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.12"
+
+[task.communications.13]
+title = "Human activity timeline"
+wave = 13
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.13"
+
+[task.media.01]
+title = "Editable sketches and original-preserving image overlays"
+wave = 1
+owner_lane = "media"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify media.01"
+
+[task.media.02]
+title = "Media library facets and collection membership"
+wave = 2
+owner_lane = "media"
+status = "pending"
+requires = ["media.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.02"
+
+[task.media.03]
+title = "Media annotations and attribution"
+wave = 3
+owner_lane = "media"
+status = "pending"
+requires = ["media.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.03"
+
+[task.media.04]
+title = "Durable media job lifecycle"
+wave = 4
+owner_lane = "media"
+status = "pending"
+requires = ["media.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.04"
+
+[task.media.05]
+title = "Image and video readiness contracts"
+wave = 5
+owner_lane = "media"
+status = "pending"
+requires = ["media.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.05"
+
+[task.media.06]
+title = "Advanced image controls and conditioning"
+wave = 6
+owner_lane = "media"
+status = "pending"
+requires = ["media.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.06"
+
+[task.media.07]
+title = "LoRA discovery and compatibility"
+wave = 7
+owner_lane = "media"
+status = "pending"
+requires = ["media.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.07"
+
+[task.media.08]
+title = "LoRA datasets and checkpoint training"
+wave = 8
+owner_lane = "media"
+status = "pending"
+requires = ["media.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.08"
+
+[task.media.09]
+title = "Image cleanup transforms"
+wave = 9
+owner_lane = "media"
+status = "pending"
+requires = ["media.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.09"
+
+[task.media.10]
+title = "Advanced video generation and continuation"
+wave = 10
+owner_lane = "media"
+status = "pending"
+requires = ["media.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.10"
+
+[task.media.11]
+title = "Video timeline and FFmpeg rendering"
+wave = 11
+owner_lane = "media"
+status = "pending"
+requires = ["media.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.11"
+
+[task.media.12]
+title = "Continuous scene episodes"
+wave = 12
+owner_lane = "media"
+status = "pending"
+requires = ["media.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.12"
+
+[task.media.13]
+title = "Sprite generation and atlas compilation"
+wave = 13
+owner_lane = "media"
+status = "pending"
+requires = ["media.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.13"
+
+[task.media.14]
+title = "Code animation workspace"
+wave = 14
+owner_lane = "media"
+status = "pending"
+requires = ["media.13"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.14"
+
+[task.media.15]
+title = "Media source downloader"
+wave = 15
+owner_lane = "media"
+status = "pending"
+requires = ["media.14"]
+verify_cmd = "python3 tooling/capability_workflow.py verify media.15"
+
+[task.creative.01]
+title = "Creative ingredient catalog and revisions"
+wave = 1
+owner_lane = "creative"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.01"
+
+[task.creative.02]
+title = "Moodboards and source references"
+wave = 2
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.02"
+
+[task.creative.03]
+title = "Universe canon and visual identity"
+wave = 3
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.03"
+
+[task.creative.04]
+title = "Universe relationship graph and merge"
+wave = 4
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.04"
+
+[task.creative.05]
+title = "Literary authors and voice configuration"
+wave = 5
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.05"
+
+[task.creative.06]
+title = "Writing works exercises and versioned drafts"
+wave = 6
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.06"
+
+[task.creative.07]
+title = "Bounded manuscript polishing and promotion"
+wave = 7
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.07"
+
+[task.creative.08]
+title = "Guided story development"
+wave = 8
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.08"
+
+[task.creative.09]
+title = "Series volumes arcs and staged drafting"
+wave = 9
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.09"
+
+[task.creative.10]
+title = "Reverse outline and continuity ledger"
+wave = 10
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.10"
+
+[task.creative.11]
+title = "Voice fingerprint diagnostics"
+wave = 11
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.11"
+
+[task.creative.12]
+title = "Editorial checks and anchored reversible repairs"
+wave = 12
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.12"
+
+[task.creative.13]
+title = "Bounded series production workflow"
+wave = 13
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.13"
+
+[task.creative.14]
+title = "EPUB and print manuscript export"
+wave = 14
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.13"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.14"
+
+[task.creative.15]
+title = "Creative direction and production plans"
+wave = 15
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.14"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.15"
+
+[task.creative.16]
+title = "Recurring commissions and feedback"
+wave = 16
+owner_lane = "creative"
+status = "pending"
+requires = ["creative.15"]
+verify_cmd = "python3 tooling/capability_workflow.py verify creative.16"
+
+[task.music.01]
+title = "Repertoire and spaced practice"
+wave = 1
+owner_lane = "music"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify music.01"
+
+[task.music.02]
+title = "Artists albums tracks and selected renders"
+wave = 2
+owner_lane = "music"
+status = "pending"
+requires = ["music.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.02"
+
+[task.music.03]
+title = "Music generation and engine capabilities"
+wave = 3
+owner_lane = "music"
+status = "pending"
+requires = ["music.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.03"
+
+[task.music.04]
+title = "Musical canons and multi-part practice"
+wave = 4
+owner_lane = "music"
+status = "pending"
+requires = ["music.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.04"
+
+[task.music.05]
+title = "Audio transcription to MIDI and piano roll"
+wave = 5
+owner_lane = "music"
+status = "pending"
+requires = ["music.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.05"
+
+[task.music.06]
+title = "Beat-aware music video composition"
+wave = 6
+owner_lane = "music"
+status = "pending"
+requires = ["music.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.06"
+
+[task.music.07]
+title = "Image-to-3D assets and export"
+wave = 7
+owner_lane = "music"
+status = "pending"
+requires = ["music.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.07"
+
+[task.music.08]
+title = "Procedural model schemas refinement and diagnostics"
+wave = 8
+owner_lane = "music"
+status = "pending"
+requires = ["music.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.08"
+
+[task.music.09]
+title = "Listening history and playlist ingestion"
+wave = 9
+owner_lane = "music"
+status = "pending"
+requires = ["music.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.09"
+
+[task.music.10]
+title = "Playing-card and tarot design"
+wave = 10
+owner_lane = "music"
+status = "pending"
+requires = ["music.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify music.10"
+
+[task.experience.01]
+title = "Interactive story graphs and durable player state"
+wave = 1
+owner_lane = "experience"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.01"
+
+[task.experience.02]
+title = "Hosted story participation and voice"
+wave = 2
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.02"
+
+[task.experience.03]
+title = "Spoken interface navigation and action receipts"
+wave = 3
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.03"
+
+[task.experience.04]
+title = "Proactive speech output ownership"
+wave = 4
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.04"
+
+[task.experience.05]
+title = "Fullscreen ambient display"
+wave = 5
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.05"
+
+[task.experience.06]
+title = "Animated avatar driven by actual state"
+wave = 6
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.06"
+
+[task.experience.07]
+title = "Native audio call adapter and session handoff"
+wave = 7
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.07"
+
+[task.experience.08]
+title = "World engine application integration"
+wave = 8
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.08"
+
+[task.experience.09]
+title = "World projection presence and editing"
+wave = 9
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.09"
+
+[task.experience.10]
+title = "Scoped world guests and travel"
+wave = 10
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.10"
+
+[task.experience.11]
+title = "World foundations and controller lifecycle"
+wave = 11
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.11"
+
+[task.experience.12]
+title = "Game asset binding and compilation"
+wave = 12
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.12"
+
+[task.experience.13]
+title = "Moltworld adapter"
+wave = 13
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.13"
+
+[task.experience.14]
+title = "Moltbook adapter"
+wave = 14
+owner_lane = "experience"
+status = "pending"
+requires = ["experience.13"]
+verify_cmd = "python3 tooling/capability_workflow.py verify experience.14"
+
+[task.platform.01]
+title = "HTTP and event API explorer"
+wave = 1
+owner_lane = "platform"
+status = "pending"
+requires = []
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.01"
+
+[task.platform.02]
+title = "Prompt consumer dependency protection"
+wave = 2
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.01"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.02"
+
+[task.platform.03]
+title = "Provider connection bindings and entitlements"
+wave = 3
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.02"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.03"
+
+[task.platform.04]
+title = "CLI harness coverage and lifecycle"
+wave = 4
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.03"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.04"
+
+[task.platform.05]
+title = "Model comparison and benchmark records"
+wave = 5
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.05"
+
+[task.platform.06]
+title = "Private inference host adapter"
+wave = 6
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.06"
+
+[task.platform.07]
+title = "Reference repository review cursors"
+wave = 7
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.06"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.07"
+
+[task.platform.08]
+title = "Remote agent session bridge"
+wave = 8
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.07"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.08"
+
+[task.platform.09]
+title = "Subscription quota plans and reservations"
+wave = 9
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.09"
+
+[task.platform.10]
+title = "Persistent feature ownership"
+wave = 10
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.09"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.10"
+
+[task.platform.11]
+title = "GSD project interoperability"
+wave = 11
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.10"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.11"
+
+[task.platform.12]
+title = "Managed project maintenance catalog"
+wave = 12
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.11"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.12"
+
+[task.platform.13]
+title = "External PR screening and disposition workflow"
+wave = 13
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.12"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.13"
+
+[task.platform.14]
+title = "Task-class learning and cadence"
+wave = 14
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.13"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.14"
+
+[task.platform.15]
+title = "Cross-schedule forecasting"
+wave = 15
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.14"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.15"
+
+[task.platform.16]
+title = "Core dashboard compositions"
+wave = 16
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.15"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.16"
+
+[task.platform.17]
+title = "Subscription and instance usage accounting"
+wave = 17
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.16"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.17"
+
+[task.platform.18]
+title = "Personal insight and scorecard projections"
+wave = 18
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.17"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.18"
+
+[task.platform.19]
+title = "Domain alerts and readiness inventory"
+wave = 19
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.18"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.19"
+
+[task.platform.20]
+title = "Jira Datadog and repository management apps"
+wave = 20
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.19"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.20"
+
+[task.platform.21]
+title = "Direct peer identity and category policy"
+wave = 21
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.20"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.21"
+
+[task.platform.22]
+title = "Domain replication and conflict extensions"
+wave = 22
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.21"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.22"
+
+[task.platform.23]
+title = "Remote media execution"
+wave = 23
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.22"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.23"
+
+[task.platform.24]
+title = "Selective media sharing"
+wave = 24
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.23"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.24"
+
+[task.platform.25]
+title = "New-domain durability and migration"
+wave = 25
+owner_lane = "platform"
+status = "pending"
+requires = ["platform.24"]
+verify_cmd = "python3 tooling/capability_workflow.py verify platform.25"
+
