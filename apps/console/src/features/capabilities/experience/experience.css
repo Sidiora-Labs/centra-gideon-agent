@@ -1,0 +1,8 @@
+.experience-page { overflow-y: auto; max-height: 100%; color: var(--color-on-surface); }
+.experience-page label { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.experience-page input, .experience-page textarea, .experience-page select { background: var(--color-surface-high); color: var(--color-on-surface); border: 1px solid var(--color-outline-variant); border-radius: .5rem; padding: .65rem; max-width: 100%; width: 100%; }
+.experience-page textarea { min-height: 6rem; resize: vertical; }
+.experience-page h1 { font-size: 1.6rem; }
+.experience-page h2 { font-size: 1.2rem; }
+.experience-page button { margin: .2rem; }
+.experience-page :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
