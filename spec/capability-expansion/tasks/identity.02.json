@@ -1,0 +1,108 @@
+{
+  "id": "identity.02",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "acceptance": [
+    "Persist weighted identity documents, traits and selected persona with optimistic conflicts",
+    "Disabled and private documents do not reach automatic context",
+    "Bound composition including framing with source attribution and explicit omissions",
+    "Actual ContextBuilder consumes human data separately from agent persona",
+    "HTTP and console authoring reaches the durable core",
+    "Enrichment invokes existing configured provider explicitly or reports unavailable without invented text"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/twin.py",
+    "runtime/gideon/workspace/capabilities/identity/twin_context.py",
+    "runtime/gideon/workspace/capabilities/identity/twin_enrichment.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_twin.py",
+    "apps/console/src/features/capabilities/identity/TwinPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_twin.py",
+    "checks/runtime/capabilities/identity/twin_ui_server.py",
+    "apps/console/src/features/capabilities/identity/TwinPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_twin.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/TwinPage.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/cognition/context.py"
+  ],
+  "baseline_dir": "/tmp/gideon-identity02-baseline",
+  "source_revision": "4895fa53ca73d679213db4d54c08ca2f1b27a5fb",
+  "evidence": {
+    "task": "identity.02",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790294126.1211069,
+    "production_lines": 272,
+    "test_lines": 335,
+    "ratio": 1.2316176470588236,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/cognition/context.py",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_twin.py",
+          "runtime/gideon/workspace/capabilities/identity/twin.py",
+          "runtime/gideon/workspace/capabilities/identity/twin_context.py",
+          "runtime/gideon/workspace/capabilities/identity/twin_enrichment.py",
+          "checks/runtime/capabilities/identity/test_twin.py",
+          "checks/runtime/capabilities/identity/twin_ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.02-checks-pglqa7tv/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_twin.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.02-checks-pglqa7tv/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/TwinPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.02-checks-pglqa7tv/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.02-checks-pglqa7tv",
+    "completed_at": 1790294164.7436333,
+    "files": {
+      "apps/console/src/features/capabilities/identity/TwinPage.tsx": "96a8c01f12c54f21324abc80d2e8b7b2a6de2e10f299cdbcde0063abd970c1b5",
+      "runtime/gideon/cognition/context.py": "a3fde0fba400474b451f235009a5985451442108bd302173dc6067cf1a02f564",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_twin.py": "cae852cf0bded53dc2ebb49f74749d148f398e4efc13c053a682a7c67aa32053",
+      "runtime/gideon/workspace/capabilities/identity/twin.py": "4011b03b5f10e5eedb56ea2e82b8d1cef8dc81559228267a02d1c6ae39c9944e",
+      "runtime/gideon/workspace/capabilities/identity/twin_context.py": "02dfdd895eac1558cb28135188f7fcf52ddbffac486e433bfb8d8d3d0046a726",
+      "runtime/gideon/workspace/capabilities/identity/twin_enrichment.py": "dae6cc25f4268fd1ebf1fae231aa18509808ccc26403809769b4eec657b4c863",
+      "apps/console/src/features/capabilities/identity/TwinPage.test.tsx": "aa77dfff66555c8613ad09066ffae7d049548fa7aa5ba87b279c4c9ec8bcb373",
+      "checks/runtime/capabilities/identity/test_twin.py": "27c44ee8f287d5f6729dafe016c548d07a9f048244863527345d7fcea09372ac",
+      "checks/runtime/capabilities/identity/twin_ui_server.py": "8a26118769ca1c71ddc4555186fb9c0d8c93b00562d4ee0860d7249d48e86c94"
+    }
+  },
+  "exit_code": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.02",
+  "repair_cycles": 1,
+  "remaining_limits": [
+    "External enrichment provider generation not exercised; only actual adapter binding and private-source refusal locally established",
+    "Root-owned navigation/API/durability registration needs integrated qualification",
+    "Native tool integration is the next authorized child task"
+  ]
+}
