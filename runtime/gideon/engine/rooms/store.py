@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import builtins
 import fcntl
+import hashlib
 import json
 import os
 import re
+import shutil
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -34,6 +37,20 @@ def _text(value: object, name: str) -> str:
     return value.strip()
 
 
+def timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def message_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 16000:
+        raise ValueError("text must be a nonempty string of at most 16000 characters")
+    return value.strip()
+
+
+class RoomBusyError(RuntimeError):
+    pass
+
+
 @dataclass
 class RoomMember:
     id: str
@@ -46,6 +63,8 @@ class RoomMember:
     def __post_init__(self):
         _identifier(self.id)
         self.agent = _text(self.agent, "agent")
+        if not isinstance(self.name, str):
+            raise ValueError("member name must be a string")
         self.name = _text(self.name or self.agent, "member name")
         if not isinstance(self.role, str) or len(self.role) > 4000:
             raise ValueError("role must be a string of at most 4000 characters")
@@ -176,7 +195,7 @@ class RoomStore:
         members: builtins.list[dict] | None = None,
         max_members: int = 8,
     ) -> Room:
-        with self._locked():
+        with self.acquire_turn(room_id), self._locked():
             rooms = self._read()
             room = rooms[_identifier(room_id)]
             if name is not None:
@@ -188,27 +207,171 @@ class RoomStore:
             return room
 
     def delete(self, room_id: str) -> None:
-        with self._locked():
+        with self.acquire_turn(room_id), self._locked():
             rooms = self._read()
             del rooms[_identifier(room_id)]
             self._save(rooms)
             self.transcript.delete_session(room_id)
+            shutil.rmtree(self.directory / "turns" / room_id, ignore_errors=True)
 
-    def append(self, room_id: str, role: str, content: str, *, speaker: str) -> None:
+    def append(
+        self, room_id: str, role: str, content: str, *, speaker: str,
+        turn_id: str | None = None, interrupted: bool = False,
+    ) -> dict:
         if role not in {"user", "assistant", "system"}:
             raise ValueError("invalid room message role")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("content must be a nonempty string")
+        if not isinstance(content, str) or not content.strip() or len(content) > 100000:
+            raise ValueError("content must be a nonempty string of at most 100000 characters")
         with self._locked():
             room = self.get(room_id)
             if role == "assistant" and speaker not in {m.id for m in room.members}:
                 raise ValueError("speaker must be a room member")
-            self.transcript.append(
-                room_id, role, content, speaker=_text(speaker, "speaker")
-            )
-            with self.transcript._path(room_id).open("rb") as stream:
-                os.fsync(stream.fileno())
+            return self._append(room, role, content, speaker=speaker,
+                                turn_id=turn_id, interrupted=interrupted)
 
-    def messages(self, room_id: str) -> builtins.list[dict]:
+    def _append(self, room: Room, role: str, content: str, *, speaker: str,
+                turn_id: str | None = None, interrupted: bool = False) -> dict:
+        now = timestamp()
+        record = {
+            "id": uuid4().hex, "role": role, "content": content,
+            "speaker": _text(speaker, "speaker"),
+            "speaker_name": next((m.name for m in room.members if m.id == speaker), speaker),
+            "ts": now, "created_at": now,
+        }
+        if turn_id:
+            record["turn_id"] = turn_id
+        if interrupted:
+            record["interrupted"] = True
+        path = self.transcript._path(room.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("ab+") as stream:
+            os.chmod(path, 0o600)
+            stream.seek(0, 2)
+            if stream.tell():
+                stream.seek(-1, 2)
+                if stream.read(1) != b"\n":
+                    stream.write(b"\n")
+            else:
+                stream.write((json.dumps({"_type": "metadata", "created_at": now}) + "\n").encode())
+            stream.write((json.dumps(record, ensure_ascii=False) + "\n").encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+        self.transcript._invalidate_cache(room.id)
+        return record
+
+    def messages(self, room_id: str, *, limit: int | None = None,
+                 before: str | None = None) -> builtins.list[dict]:
         self.get(room_id)
-        return self.transcript.read_messages(room_id)
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 501):
+            raise ValueError("limit must be between 1 and 500")
+        if before is not None:
+            _identifier(before)
+        rows: deque[dict] = deque(maxlen=limit)
+        path = self.transcript._path(room_id)
+        found = before is None
+        if path.exists():
+            with path.open(encoding="utf-8") as stream:
+                for index, line in enumerate(stream):
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict) or row.get("role") not in {"user", "assistant", "system"}:
+                        continue
+                    row.setdefault("id", hashlib.sha256(f"{room_id}:{index}:{line}".encode()).hexdigest()[:32])
+                    row.setdefault("created_at", row.get("ts", ""))
+                    row.setdefault("speaker_name", row.get("speaker", row["role"]))
+                    if row["id"] == before:
+                        found = True
+                        break
+                    rows.append(row)
+        if not found:
+            raise ValueError("transcript cursor was not found")
+        return list(rows)
+
+    def _turn_path(self, room_id: str, turn_id: str) -> Path:
+        return self.directory / "turns" / _identifier(room_id) / (_identifier(turn_id) + ".json")
+
+    def turn(self, room_id: str, turn_id: str | None = None) -> dict | None:
+        self.get(room_id)
+        path = self._turn_path(room_id, turn_id) if turn_id else self.directory / "turns" / room_id / "current.json"
+        if not path.exists():
+            return None
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not turn_id:
+            return self.turn(room_id, record["id"])
+        return record
+
+    def _save_turn(self, record: dict) -> None:
+        path = self._turn_path(record["room_id"], record["id"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps(record, ensure_ascii=False), fsync=True, mode=0o600)
+
+    def begin_turn(self, room_id: str, content: str, request_id: str) -> tuple[dict, bool]:
+        content = message_text(content)
+        _identifier(request_id)
+        if request_id == "current":
+            raise ValueError("reserved request id")
+        with self._locked():
+            room = self.get(room_id)
+            existing = self.turn(room_id, request_id)
+            digest = hashlib.sha256(content.encode()).hexdigest()
+            if existing:
+                if existing.get("content_hash") != digest:
+                    raise RoomBusyError("request id was already used for different text")
+                return existing, False
+            current = self.turn(room_id)
+            if current and current["status"] in {"queued", "running"}:
+                raise RoomBusyError("room already has an active turn")
+            now = timestamp()
+            record = dict(id=request_id, room_id=room_id, status="queued", member_id=None,
+                          text="", error=None, created_at=now, updated_at=now,
+                          content_hash=digest)
+            self._save_turn(record)
+            atomic_write(self._turn_path(room_id, "current"), json.dumps({"id": request_id}),
+                         fsync=True, mode=0o600)
+            try:
+                self._append(room, "user", content, speaker="user", turn_id=request_id)
+            except Exception:
+                record.update(status="failed", error="Message could not be stored", updated_at=timestamp())
+                self._save_turn(record)
+                raise
+            return record, True
+
+    def update_turn(self, room_id: str, turn_id: str, **changes) -> dict:
+        with self._locked():
+            record = self.turn(room_id, turn_id)
+            if record is None:
+                raise KeyError(turn_id)
+            record.update(changes, updated_at=timestamp())
+            self._save_turn(record)
+            return record
+
+    def acquire_turn(self, room_id: str):
+        self.get(room_id)
+        directory = self.directory / "turns" / _identifier(room_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        lock = (directory / "run.lock").open("a")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock.close()
+            raise RoomBusyError("room already has an active turn") from None
+        return lock
+
+    def recover_interrupted(self) -> None:
+        for room in self.list():
+            current = self.turn(room.id)
+            if not current or current["status"] not in {"queued", "running"}:
+                continue
+            try:
+                lock = self.acquire_turn(room.id)
+            except RoomBusyError:
+                continue
+            try:
+                current = self.turn(room.id)
+                if current and current["status"] in {"queued", "running"}:
+                    self.update_turn(room.id, current["id"], status="failed",
+                                     error="Room turn interrupted by a runtime restart. Send a new message to continue.")
+            finally:
+                lock.close()

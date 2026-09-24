@@ -122,7 +122,7 @@ async def test_eight_routes_and_live_kill_switch(room_home):
     app = web.Application()
     store = RoomStore(room_home)
     setup_room_routes(app, store)
-    assert len(list(app.router.routes())) == 8
+    assert len(list(app.router.routes())) == 12
     async with TestClient(TestServer(app)) as client:
         response = await client.post("/api/rooms", json={"name": "Room"})
         assert response.status == 201
@@ -160,7 +160,7 @@ async def test_eight_routes_and_live_kill_switch(room_home):
         ]:
             assert (
                 await client.request(method, path, json={"name": "blocked"})
-            ).status == 404
+            ).status == (200 if method == "GET" and path == "/api/rooms" else 404)
         assert store.path.read_bytes() == before
         (room_home / "config.json").write_text('{"rooms":{"enabled":true}}')
         assert (await client.delete(base)).status == 200

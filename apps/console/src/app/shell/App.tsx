@@ -46,6 +46,7 @@ const LoopsSection = lazyRoute('loops', () => import('../../features/loops/Loops
 const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
 const SettingsPage = lazyRoute('settings', () => import('../../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AgentsSection = lazyRoute('agents', () => import('../../features/agents/AgentsSection').then((m) => ({ default: m.AgentsSection })))
+const RoomsSection = lazyRoute('rooms', () => import('../../features/rooms/RoomsSection').then((m) => ({ default: m.RoomsSection })))
 const NotificationsPage = lazyRoute('notifications', () => import('../../features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })))
 const TriggersSection = lazyRoute('triggers', () => import('../../features/triggers/TriggersSection').then((m) => ({ default: m.TriggersSection })))
 const LearningPage = lazyRoute('learning', () => import('../../features/learning/LearningPage').then((m) => ({ default: m.LearningPage })))
@@ -74,6 +75,7 @@ installRoutePreload()
 const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'rooms', label: 'Rooms', icon: Users },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'tasks', label: 'Tasks', icon: ListChecks, section: 'Platform' },
@@ -106,6 +108,7 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   dashboard: DashboardPage,
   'mission-control': MissionControl,
   chat: ChatPage,
+  rooms: RoomsSection,
   loop: LoopSection,
   loops: LoopsSection,
   code: CodeSection,
