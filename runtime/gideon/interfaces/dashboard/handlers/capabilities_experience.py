@@ -11,7 +11,7 @@ PREFIX = "/api/capabilities/experience"
 
 async def handle(request):
     store = request.app[STORE]
-    resource = request.match_info["resource"]
+    resource = request.path.split("/")[4]
     key = request.match_info.get("id")
     try:
         if request.method == "GET":
@@ -45,8 +45,10 @@ async def handle(request):
 def register(app):
     if STORE not in app:
         app[STORE] = ExperienceStore()
+    from gideon.workspace.capabilities.experience.narration_http import register_narration
+    register_narration(app, app[STORE])
     for resource in ("stories", "sessions"):
-        path = PREFIX + "/{resource:" + resource + "}"
+        path = PREFIX + "/" + resource
         app.router.add_get(path, handle)
         app.router.add_post(path, handle)
         app.router.add_get(path + "/{id}", handle)
