@@ -1,0 +1,92 @@
+{
+  "id": "knowledge.02",
+  "status": "locally_qualified",
+  "base_revision": "a975274d",
+  "schema_version": 1,
+  "contract": "Chronological text and voice captures with immutable original provenance in the existing knowledge database; idempotent creation, explicit human review/correction, optimistic routing to canonical note/journal/fleeting records, durable route recovery and preserved original audio with real transcription adapter availability/failure states.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/capture.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_capture.py",
+    "apps/console/src/features/capabilities/knowledge/CapturePage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_capture.py",
+    "checks/runtime/capabilities/knowledge/capture_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/CapturePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_capture.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/CapturePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Successful ASR requires an actual configured speech provider; no successful ASR result is fabricated or certified by unavailable-provider checks.",
+    "Human review routing is implemented; model classification proposals require their own configured model acceptance journey.",
+    "Root owns runtime and console registration, agent metadata, durability inventory and integrated browser qualification."
+  ],
+  "verification": {
+    "task": "knowledge.02",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790294239.109135,
+    "production_lines": 312,
+    "test_lines": 400,
+    "ratio": 1.2820512820512822,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_capture.py",
+          "runtime/gideon/workspace/capabilities/knowledge/capture.py",
+          "checks/runtime/capabilities/knowledge/capture_ui_server.py",
+          "checks/runtime/capabilities/knowledge/test_capture.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.02-checks-st277o8k/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_capture.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.02-checks-st277o8k/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/knowledge/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/knowledge/apps/console/src/features/capabilities/knowledge/CapturePage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.02-checks-st277o8k/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.02-checks-st277o8k",
+    "completed_at": 1790294273.9055073,
+    "files": {
+      "apps/console/src/features/capabilities/knowledge/CapturePage.tsx": "f06431dc01df77b77593c3fa32fbeacf03ddc7e29258d2455399beb97a8e3407",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_capture.py": "a0f915e68c9b57b6a1627e9336ebdb9933e9e069c490a1fe3e672820517a3741",
+      "runtime/gideon/workspace/capabilities/knowledge/capture.py": "13dcf953d4305f935773030be22214e3993ce53cededf017e8acfe56e8f8b79b",
+      "apps/console/src/features/capabilities/knowledge/CapturePage.test.tsx": "02baa49b9945035e28cebc5bd7ff9ffa9a2d4eaf333f217b8937dfe2b5c43e66",
+      "checks/runtime/capabilities/knowledge/capture_ui_server.py": "a44c3dc7241dbaf36b0d46a90dec317214b0901669f7c37dfc3804c460feb99e",
+      "checks/runtime/capabilities/knowledge/test_capture.py": "557b2ee05c400b2b572020fe3056f1b959acffff7ddf08803b2e3a362eb53a99"
+    }
+  },
+  "integration_hooks": {
+    "handler": "gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture:register",
+    "console": "features/capabilities/knowledge/CapturePage.tsx default",
+    "route": "#/capabilities/knowledge/capture",
+    "durability": "Existing knowledge.db gains capability_knowledge_captures and capability_knowledge_capture_events; audio in existing adjacent files directory."
+  }
+}
