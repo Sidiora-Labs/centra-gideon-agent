@@ -6,6 +6,7 @@ from jsonschema import Draft202012Validator, ValidationError
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 
 from .library import MediaLibrary
+from .annotations import AnnotationStore
 from .sketches import SketchError, SketchStore
 
 STRING = {"type": "string", "maxLength": 200}
@@ -26,6 +27,14 @@ CATALOG = {
     "media_sketch_update": ("Save draw/erase strokes using the current revision; omit the last stroke to undo.", ("sketch_id", "revision", "strokes"), {"sketch_id": STRING, "revision": INTEGER, "strokes": STROKES}, True),
     "media_sketch_export": ("Flatten a saved sketch revision into a canonical PNG derivative without modifying its original.", ("sketch_id", "revision"), {"sketch_id": STRING, "revision": INTEGER}, True),
 }
+ATTRIBUTION = {"type": "object", "additionalProperties": False, "required": ["creator", "license", "source_url"], "properties": {key: {"type": "string"} for key in ("creator", "license", "source_url")}}
+ANNOTATIONS = {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": False, "required": ["id", "text"], "properties": {
+    "id": STRING, "text": {"type": "string", "maxLength": 4000}, "region": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}, "time_seconds": {"type": "number", "minimum": 0, "maximum": 604800}}}}
+CATALOG.update({
+    "media_annotations_get": ("Read media annotations at a pinned artifact version, optionally a historical annotation revision.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "annotation_revision": INTEGER}, False),
+    "media_annotations_save": ("Save versioned notes, image regions or video timestamps plus attribution without rewriting original provenance.", ("artifact_id", "version", "revision", "request_id", "annotations", "attribution"), {"artifact_id": STRING, "version": INTEGER, "revision": {"type": "integer", "minimum": 0}, "request_id": STRING, "annotations": ANNOTATIONS, "attribution": ATTRIBUTION}, True),
+    "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
+})
 
 
 def schema(name):
@@ -34,8 +43,9 @@ def schema(name):
 
 
 class MediaToolProvider(ToolProvider):
-    def __init__(self, sketches, library):
+    def __init__(self, sketches, library, annotations=None):
         self.sketches, self.library = sketches, library
+        self.annotations = annotations or AnnotationStore(sketches.path.parent / 'annotations.sqlite3', sketches.artifacts)
 
     @property
     def name(self):
@@ -62,6 +72,13 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name.startswith('media_annotations_'):
+            artifact_id, version = args.pop('artifact_id'), args.pop('version')
+            if name == 'media_annotations_get':
+                return self.annotations.get(artifact_id, version, args.get('annotation_revision'))
+            if name == 'media_annotations_history':
+                return self.annotations.history(artifact_id, version, **args)
+            return self.annotations.save(artifact_id, version, args)
         if name == "media_library_list":
             return self.library.list(args)
         if name == "media_library_get":
