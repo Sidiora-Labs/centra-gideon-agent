@@ -1,3 +1,4 @@
+import Git from './Git'
 import { useEffect, useState } from 'react'
 import Processes from './Processes'
 import Ports from './Ports'
@@ -69,6 +70,6 @@ export default function Page() {
     </article>}
     <Processes />
     <Ports />
-    <Projects />
+    <Projects /><Git />
   </section>
 }

@@ -171,7 +171,35 @@ async def project_endpoint(request):
         return web.json_response({"error": "Project operation unavailable"}, status=503)
 
 
+async def git_endpoint(request):
+    if not request.get('user') or request.get('app'):
+        return web.json_response({'error':'Owner authentication required'},status=403)
+    from gideon.workspace.capabilities.workspace.git_ops import GitService
+    from .files import _dashboard_roots
+    try:
+        service = GitService(config_dir() / 'capabilities' / 'workspace',allowed_roots=[p for _,p in _dashboard_roots()])
+        project_id = request.match_info.get('project_id')
+        if request.method == 'POST':
+            result = await service.mutate(await read_json_body(request))
+        elif request.match_info.get('history'):
+            result = service.list(project_id)
+        else:
+            result = await service.inspect(project_id)
+        return web.json_response(result)
+    except ConflictError as error:
+        return web.json_response({'error':str(error)},status=409)
+    except FileNotFoundError:
+        return web.json_response({'error':'Project or repository not found'},status=404)
+    except (ValueError,TypeError) as error:
+        return web.json_response({'error':str(error)},status=400)
+    except (OSError,TimeoutError):
+        return web.json_response({'error':'Git operation unavailable'},status=503)
+
+
 def register(app):
+    app.router.add_post('/api/capabilities/workspace/git/operations',git_endpoint)
+    app.router.add_get('/api/capabilities/workspace/git/{project_id}/{history:operations}',git_endpoint)
+    app.router.add_get('/api/capabilities/workspace/git/{project_id}',git_endpoint)
     prefix = "/api/capabilities/workspace"
     app.router.add_get(prefix, endpoint)
     app.router.add_post(prefix, endpoint)

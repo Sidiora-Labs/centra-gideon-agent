@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, beforeAll, expect, test } from 'vitest'
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,7 +12,6 @@ let backend: ChildProcess
 let server: ViteDevServer
 let browser: Browser
 let page: Page
-let repo = ''
 let token = ''
 let origin = ''
 const root = resolve(process.cwd(), '../..')
@@ -30,7 +29,7 @@ beforeAll(async () => {
       if (line) accept(JSON.parse(line))
     })
   })
-  repo = ready.repo; token = ready.token
+  token = ready.token
   server = await createServer({
     configFile: false, cacheDir: cache, root: process.cwd(),
     optimizeDeps: { entries: [resolve(root, 'checks/runtime/capabilities/workspace/entry.tsx')] },
