@@ -14,6 +14,9 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_git_inspect', 'Inspect a canonical project repository and initialized submodules.', {'project_id':{'type':'string'}}, ['project_id'], False),
+            ('workspace_git_history', 'Read bounded durable project Git operation receipts.', {'project_id':{'type':'string'}}, ['project_id'], False),
+            ('workspace_git_mutate', 'Create or switch a clean local branch, or reset an initialized submodule to its cached pinned revision.', {key:{'type':'string'} for key in ('project_id','operation','target','expected_head','request_id')}, ['project_id','operation','target','expected_head','request_id'], True),
             ('workspace_projects', 'List canonical projects in allowed workspace roots.', {}, [], False),
             ('workspace_project_detect', 'Read bounded project metadata without executing scripts.', {'workspace':{'type':'string'}}, ['workspace'], False),
             ('workspace_project_templates', 'List local runnable templates and interpreter availability.', {}, [], False),
@@ -53,7 +56,16 @@ class WorkspaceToolProvider(ToolProvider):
                 expected = str if schema['properties'][key]['type'] == 'string' else int
                 if type(value) is not expected:
                     raise ValueError('Invalid argument type')
-            if tool_name.startswith('workspace_project'):
+            if tool_name.startswith('workspace_git'):
+                from .git_ops import GitService
+                git = GitService(root, allowed_roots=roots)
+                if tool_name == 'workspace_git_inspect':
+                    result = await git.inspect(arguments['project_id'])
+                elif tool_name == 'workspace_git_history':
+                    result = git.list(arguments['project_id'])
+                else:
+                    result = await git.mutate(arguments)
+            elif tool_name.startswith('workspace_project'):
                 from .projects import ProjectService
                 projects = ProjectService(root, allowed_roots=roots)
                 if tool_name == 'workspace_projects':

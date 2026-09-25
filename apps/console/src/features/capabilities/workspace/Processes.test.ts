@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, beforeAll, expect, test } from 'vitest'
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

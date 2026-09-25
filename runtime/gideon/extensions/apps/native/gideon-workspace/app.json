@@ -16,7 +16,8 @@
       "workspace_contexts",
       "managed_processes",
       "port_reservations",
-      "project_discovery"
+      "project_discovery",
+      "project_git"
     ]
   },
   "native": true
