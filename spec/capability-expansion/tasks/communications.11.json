@@ -1,6 +1,6 @@
 {
   "id": "communications.11",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "b4100053",
   "requires": [
@@ -50,8 +50,9 @@
     "https://github.com/stackernews/stacker.news/blob/master/api/resolvers/item.js"
   ],
   "qualification": {
-    "runtime": "52 passed",
+    "runtime": "53 passed; includes loopback GraphQL territory, identity, documented discussion PayIn submission and reconciliation protocol",
     "console_http": "4 passed",
+    "evidence": "/tmp/gideon-communications.11-checks-j9je8bz2/evidence.json",
     "external_execution": "not attempted; authorized credential qualification pending",
     "residuals": [
       "Direct zap prohibited by API-key provider policy",
