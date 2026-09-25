@@ -47,6 +47,17 @@
       "exit_code": 0,
       "passed": 5,
       "log": "/tmp/gideon-expansion-20260925/oss-platform-wal.log"
+    },
+    "moltbook_wal_inventory": {
+      "command": "env PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/test_capability_state_enrollment.py -q -k moltbook",
+      "exit_code": 0,
+      "result": "1 passed; live committed SQLite WAL retained in backup"
+    },
+    "post_domain_merge_runtime": {
+      "command": "env PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/test_capability_integration.py -q",
+      "exit_code": 0,
+      "result": "7 passed",
+      "log": "/tmp/gideon-expansion-20260925/oss-post-merge-runtime.log"
     }
   },
   "remaining_limits": [

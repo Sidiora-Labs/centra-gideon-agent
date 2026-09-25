@@ -123,3 +123,12 @@ test('pressure controls reject invalid correction without losing persisted prove
   expect(location.hash).not.toContain('?id=')
   expect(screen.queryByText('Correction history')).not.toBeInTheDocument()
 })
+
+test('opens the shared privacy surface that contains broker provider workflows', async () => {
+  window.history.replaceState(null, '', '#/capabilities/wellbeing')
+  render(<Page />)
+  await screen.findByRole('button', { name: 'Privacy' })
+  fireEvent.click(screen.getByRole('button', { name: 'Privacy' }))
+  expect(await screen.findByRole('heading', { name: 'Private identity facts' })).toBeInTheDocument()
+  expect(location.hash).toContain('view=privacy')
+})

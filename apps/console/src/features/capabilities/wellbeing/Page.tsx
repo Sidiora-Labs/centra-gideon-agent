@@ -3,6 +3,7 @@ import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
 import { records, type Measurement } from './api'
+import Privacy from './Privacy'
 
 const display = (row: Measurement) => row.kind === 'body_weight' ? `${row.values.weight} kg` : `${row.values.systolic}/${row.values.diastolic} mmHg`
 
@@ -69,8 +70,9 @@ export default function Page() {
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'wellbeing-records.json'; anchor.click(); URL.revokeObjectURL(url)
     } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
   }
+  if (params.view === 'privacy') return <Privacy />
   return <main className="h-full overflow-auto p-4 sm:p-6 text-on-surface">
-    <div className="flex flex-wrap items-center justify-between gap-3 mb-6"><h1 data-type="headline-s">Wellbeing records</h1><div className="flex gap-2"><Button onClick={() => setParams({})}>New measurement</Button><Button variant="secondary" onClick={download}>Export records</Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-6"><h1 data-type="headline-s">Wellbeing records</h1><div className="flex gap-2"><Button variant="secondary" onClick={() => setRouteQuery({ view: 'privacy' })}>Privacy</Button><Button onClick={() => setParams({})}>New measurement</Button><Button variant="secondary" onClick={download}>Export records</Button></div></div>
     <form className="grid gap-3 sm:grid-cols-3 mb-6" onSubmit={e => { e.preventDefault(); const next = new URLSearchParams(); if (from) next.set('from', from); if (to) next.set('to', to); setQuery(next.toString()) }}>
       <Field label="From (timestamp with offset)"><TextInput value={from} onChange={setFrom} /></Field><Field label="To (timestamp with offset)"><TextInput value={to} onChange={setTo} /></Field><Button type="submit">Filter dates</Button>
     </form>
