@@ -18,6 +18,7 @@ from gideon.workspace.capabilities.platform.accounting import view
 from gideon.workspace.capabilities.platform.tools import create_provider
 
 PREFIX = '/api/capabilities/platform/accounting'
+FIXTURES = Path(__file__).with_name('fixtures')
 
 
 @pytest.fixture
@@ -186,6 +187,66 @@ def test_window_invalid_rows_unknown_prices_and_source_preservation(home):
             view(days=invalid)
 
 
+def test_import_real_claude_code_jsonl_is_deduplicated_unpriced_and_redacted(home):
+    source = FIXTURES / 'claude_code_usage.jsonl'
+    first = ledger.import_cli_usage_file('claude_code_jsonl', source)
+    assert first['candidate_records'] == 2
+    assert first['imported_records'] == 2
+    assert first['duplicate_records'] == 0
+    assert first['invalid_lines'] == 1
+    assert first['priced'] is False
+    assert first['recorded_cost_usd'] == 0
+    repeated = ledger.import_cli_usage_file('claude_code_jsonl', source)
+    assert repeated['imported_records'] == 0
+    assert repeated['duplicate_records'] == 2
+    rows = ledger._iter_rows()
+    assert [(row['input_tokens'], row['output_tokens']) for row in rows] == [(120, 30), (50, 20)]
+    assert [row['cache_read_tokens'] for row in rows] == [40, 5]
+    assert all(row['priced'] is False and row['cost_usd'] == 0 for row in rows)
+    assert all(row['instance_id'] == machine_id(home) for row in rows)
+    assert all(row['attribution'] == 'historical_cli_import' for row in rows)
+    persisted = ledger._path().read_text()
+    assert '/private/project' not in persisted
+    assert 'secret prompt' not in persisted
+    result = view()
+    assert result['imported_turns'] == 2
+    assert result['rows'][0]['import_formats'] == ['claude_code_jsonl']
+    assert result['rows'][0]['recorded_cost_usd'] == 0
+    assert result['rows'][0]['unpriced_turns'] == 2
+
+
+def test_import_real_codex_rollout_uses_cumulative_deltas_and_growing_file_dedup(home):
+    source = FIXTURES / 'codex_rollout_usage.jsonl'
+    content = source.read_text()
+    first = ledger.import_cli_usage('codex_rollout_jsonl', content, source.name)
+    assert first['candidate_records'] == 2
+    assert first['imported_records'] == 2
+    rows = ledger._iter_rows()
+    assert [(row['input_tokens'], row['cache_read_tokens'], row['output_tokens']) for row in rows] == [(75, 25, 20), (60, 20, 30)]
+    assert all(row['model'] == 'gpt-5.3-codex' for row in rows)
+    extended = content + json.dumps({'timestamp': '2026-09-24T11:02:00Z', 'type': 'event_msg', 'payload': {'type': 'token_count', 'info': {'total_token_usage': {'input_tokens': 220, 'cached_input_tokens': 55, 'output_tokens': 65}}}}) + '\n'
+    receipt = ledger.import_cli_usage('codex_rollout_jsonl', extended, source.name)
+    assert receipt['candidate_records'] == 3
+    assert receipt['imported_records'] == 1
+    assert receipt['duplicate_records'] == 2
+    assert ledger._iter_rows()[-1]['input_tokens'] == 30
+    assert ledger._iter_rows()[-1]['cache_read_tokens'] == 10
+    assert ledger._iter_rows()[-1]['output_tokens'] == 15
+    assert view()['imported_turns'] == 3
+
+
+@pytest.mark.parametrize('format_name,content,name', [
+    ('unknown', '{}', 'usage.jsonl'),
+    ('claude_code_jsonl', '{}\n', 'usage.jsonl'),
+    ('codex_rollout_jsonl', '{"type":"session_meta","payload":{}}\n', 'usage.jsonl'),
+    ('claude_code_jsonl', '{}', '../secret.jsonl'),
+])
+def test_cli_import_rejects_unsupported_empty_or_unsafe_sources(home, format_name, content, name):
+    with pytest.raises(ValueError):
+        ledger.import_cli_usage(format_name, content, name)
+    assert ledger._iter_rows() == []
+
+
 @pytest.mark.asyncio
 async def test_signed_http_and_native_read_canonical_accounting(home):
     entry()
@@ -193,21 +254,34 @@ async def test_signed_http_and_native_read_canonical_accounting(home):
     app = web.Application(middlewares=[token_auth_middleware()])
     register(app)
     before = ledger._path().read_bytes()
+    token = generate_token('owner')
     async with TestClient(TestServer(app)) as client:
         assert (await client.get(PREFIX)).status in {401, 403}
-        response = await client.get(PREFIX, params={'token': generate_token('owner')})
+        response = await client.get(PREFIX, params={'token': token})
         assert response.status == 200
         result = await response.json()
         assert result['rows'][0]['credential_ref'] == 'billing-a'
         assert result['rows'][0]['input_tokens'] == 100
         assert (await client.get(PREFIX, params={'days': 'bad'})).status == 400
         assert (await client.post(PREFIX, json={})).status == 405
+        fixture = (FIXTURES / 'claude_code_usage.jsonl').read_text()
+        imported = await client.post(PREFIX + '/import', params={'token': token}, json={'format': 'claude_code_jsonl', 'content': fixture, 'source_name': 'claude_code_usage.jsonl'})
+        assert imported.status == 201
+        receipt = await imported.json()
+        assert receipt['imported_records'] == 2
+        assert receipt['priced'] is False
+        duplicate = await client.post(PREFIX + '/import', params={'token': token}, json={'format': 'claude_code_jsonl', 'content': fixture, 'source_name': 'claude_code_usage.jsonl'})
+        assert (await duplicate.json())['duplicate_records'] == 2
+        assert (await client.post(PREFIX + '/import', params={'token': token}, json={'format': 'unknown', 'content': fixture, 'source_name': 'usage.jsonl'})).status == 400
+        projected = await (await client.get(PREFIX, params={'token': token})).json()
+        assert projected['imported_turns'] == 2
         provider = create_provider()
         native = await provider.invoke('platform_usage_accounting', {'days': 1})
         assert native.success
-        assert json.loads(native.output)['turns'] == 1
+        assert json.loads(native.output)['turns'] == 3
         tool = next(item for item in await provider.list_tools() if item.name == 'platform_usage_accounting')
         assert not tool.requires_approval
         manifest = json.loads(Path('runtime/gideon/extensions/apps/native/gideon-platform/app.json').read_text())
         assert tool.name in manifest['provider']['capabilities']
-    assert ledger._path().read_bytes() == before
+    assert ledger._path().read_bytes().startswith(before)
+    assert len(ledger._iter_rows()) == 3
