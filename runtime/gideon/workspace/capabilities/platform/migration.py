@@ -13,13 +13,13 @@ from contextlib import closing
 from datetime import datetime, timezone
 
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
-from gideon.engine.tasks.models import Project
+from gideon.engine.tasks.models import Project, Task, TaskPriority, TaskStatus
 from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
 from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
-from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy
+from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.communications.store import PeopleStore, person_values
 
-FORMAT = "portos_snapshot_v1"
+FORMAT = "legacy_snapshot_v1"
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 MAX_EXPANDED_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2000
@@ -128,16 +128,16 @@ def _inspect(data):
     for name, expected in normalized.items():
         if hashlib.sha256(data_files[name]).hexdigest() != expected:
             raise MigrationError(f"Checksum mismatch for {name}", 409)
-    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links|buckets|inbox)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
+    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links|buckets|inbox|admin|threads)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
     unsupported = sorted(name for name in data_files if not allowed.fullmatch(name))
     if unsupported:
         domains = sorted({name.split("/", 1)[0] for name in unsupported})
         raise MigrationError(f"Archive contains unsupported domains: {', '.join(domains)}")
-    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox") if f"brain/{domain}/index.json" in data_files]
+    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    if ("people" in domains or "projects" in domains) and len(domains) > 1:
-        raise MigrationError("People, projects and knowledge domains require separate atomic imports")
+    if any(domain in domains for domain in ("people", "projects", "admin", "threads")) and len(domains) > 1:
+        raise MigrationError("People, projects, tasks and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
         if index.get("schemaVersion") != 1 or index.get("type") != domain:
@@ -189,6 +189,62 @@ def _inspect(data):
             records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "name": record["name"].strip(),
                             "status": "archived" if record["status"] == "done" else "active", "brief": "\n".join(filter(None, details)),
                             "created_at": record.get("createdAt"), "updated_at": record.get("updatedAt")}})
+            continue
+        if domain in ("admin", "threads"):
+            common = {"id", "title", "status", "notes", "createdAt", "updatedAt", "originInstanceId"}
+            fields = common | ({"dueDate", "nextAction"} if domain == "admin" else
+                               {"priority", "nextAction", "waitingOn", "dueAt", "tags", "pinned", "refs", "source", "externalState", "closedAt"})
+            if (domain == "admin" and not UUID.fullmatch(record_id) or domain == "threads" and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", record_id)
+                    or set(record) - fields):
+                raise MigrationError(f"{domain.title()} record identity or fields are unsupported")
+            title, notes, next_action = record.get("title"), record.get("notes", ""), record.get("nextAction", "")
+            statuses = ("open", "waiting", "done") if domain == "admin" else ("open", "waiting", "someday", "done", "archived")
+            if (not isinstance(title, str) or not title.strip() or len(title) > 200 or record.get("status") not in statuses
+                    or not isinstance(notes, str) or len(notes) > (5000 if domain == "admin" else 20000)
+                    or not isinstance(next_action, str) or len(next_action) > 500):
+                raise MigrationError(f"{domain.title()} record fields are invalid")
+            created, updated = record.get("createdAt"), record.get("updatedAt")
+            for value in (created, updated, record.get("dueDate") or record.get("dueAt"), record.get("closedAt")):
+                if value is None:
+                    continue
+                try:
+                    if not isinstance(value, str) or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                        raise ValueError()
+                except (ValueError, OverflowError):
+                    raise MigrationError(f"{domain.title()} record timestamps are invalid") from None
+            tags = record.get("tags", []) if domain == "threads" else []
+            refs = record.get("refs", []) if domain == "threads" else []
+            if (not isinstance(tags, list) or len(tags) > 50 or any(not isinstance(value, str) or not 0 < len(value) <= 50 for value in tags)
+                    or not isinstance(refs, list) or len(refs) > 100):
+                raise MigrationError("Threads tags or references are invalid")
+            accepted_refs = {"brain.idea", "brain.project", "brain.person", "brain.admin", "brain.memory", "brain.link", "brain.journal",
+                             "cos.task", "github.issue", "gitlab.issue", "jira.issue", "url"}
+            for ref in refs:
+                if (not isinstance(ref, dict) or set(ref) - {"kind", "id", "label"} or ref.get("kind") not in accepted_refs
+                        or not isinstance(ref.get("id"), str) or not 0 < len(ref["id"]) <= 2000
+                        or not isinstance(ref.get("label", ""), str) or len(ref.get("label", "")) > 300):
+                    raise MigrationError("Threads reference is unsupported or invalid")
+                if ref["kind"] in ("github.issue", "gitlab.issue", "jira.issue", "url") and not re.fullmatch(r"https?://[^\s]+", ref["id"]):
+                    raise MigrationError("Threads external reference URL is invalid")
+            mapped_status = TaskStatus.BLOCKED if record["status"] == "waiting" else TaskStatus.DONE if record["status"] == "done" else TaskStatus.CANCELLED if record["status"] == "archived" else TaskStatus.OPEN
+            priority = {"low": TaskPriority.LOW, "normal": TaskPriority.MEDIUM, "high": TaskPriority.HIGH, "urgent": TaskPriority.CRITICAL}.get(record.get("priority", "normal"))
+            if priority is None or "pinned" in record and type(record["pinned"]) is not bool:
+                raise MigrationError("Threads priority or pinned state is invalid")
+            source_state = record.get("source")
+            if source_state is not None and (not isinstance(source_state, dict) or set(source_state) != {"kind", "key"}
+                                             or source_state.get("kind") != "github.issue" or not isinstance(source_state.get("key"), str)
+                                             or not 0 < len(source_state["key"]) <= 2000):
+                raise MigrationError("Threads source provenance is invalid")
+            if record.get("externalState", "unknown") not in ("unknown", "open", "closed"):
+                raise MigrationError("Threads external state is invalid")
+            labels = tags + (["someday"] if record["status"] == "someday" else []) + (["pinned"] if record.get("pinned") else [])
+            records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "title": title.strip(),
+                            "status": mapped_status.value, "description": notes, "priority": priority.value, "labels": list(dict.fromkeys(labels)),
+                            "due": record.get("dueDate") or record.get("dueAt") or "", "action_plan": [{"content": next_action, "completed": mapped_status in (TaskStatus.DONE, TaskStatus.CANCELLED)}] if next_action else [],
+                            "notes": [{"content": "Waiting on: " + record["waitingOn"], "timestamp": updated}] if record.get("waitingOn") else [],
+                            "blocked_reason_kind": "external" if mapped_status == TaskStatus.BLOCKED else "",
+                            "created_at": created, "updated_at": updated, "refs": refs,
+                            "source_state": {key: record[key] for key in ("source", "externalState", "closedAt") if key in record}}})
             continue
         if domain == "buckets":
             fields = {"id", "name", "color", "icon", "order", "createdAt", "updatedAt", "originInstanceId"}
@@ -337,7 +393,8 @@ def preview(data):
                          "name": row["values"].get("name") or row["values"]["title"]} for row in records]}
 
 
-def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None):
+def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
+           tasks: BoundTasks | None = None):
     if not isinstance(data, dict) or set(data) != {"format", "content", "archive_digest", "review_token"}:
         raise MigrationError("Commit requires the reviewed archive, digest and review token")
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
@@ -347,6 +404,10 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
         if projects is None:
             raise MigrationError("Canonical project store is unavailable", 503)
         return _commit_project(projects, digest, token, records, generated)
+    if domains in (["admin"], ["threads"]):
+        if tasks is None:
+            raise MigrationError("Canonical task store is unavailable", 503)
+        return _commit_task(tasks, store, knowledge, projects, digest, token, records, generated)
     if domains != ["people"]:
         if knowledge is None:
             raise MigrationError("Canonical knowledge store is unavailable", 503)
@@ -476,7 +537,83 @@ def _commit_project(store: BoundHierarchy, digest, token, records, generated):
     return receipt, True
 
 
-def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None):
+def _resolve_task_refs(refs, people, knowledge, projects, tasks):
+    resolved = []
+    for ref in refs:
+        kind, source_id = ref["kind"], ref["id"]
+        target_id = source_id
+        if kind in ("github.issue", "gitlab.issue", "jira.issue", "url"):
+            resolved.append({**ref, "canonical_id": source_id})
+            continue
+        if kind in ("brain.idea", "brain.memory", "brain.link", "brain.journal"):
+            if knowledge is None or knowledge.get_item(source_id) is None:
+                raise MigrationError("Thread references a missing canonical knowledge record", 409)
+        elif kind == "brain.project":
+            if projects is None or projects.get_project(source_id) is None:
+                raise MigrationError("Thread references a missing canonical project", 409)
+        elif kind == "brain.person":
+            matches = [row["id"] for row in people.people() if ("Legacy record: " + source_id) in row.get("notes", "").splitlines()]
+            if len(matches) != 1:
+                raise MigrationError("Thread person reference does not resolve uniquely", 409)
+            target_id = matches[0]
+        elif kind in ("brain.admin", "cos.task"):
+            path = tasks._task_path(source_id)
+            if not path.is_file():
+                raise MigrationError("Thread references a missing canonical task", 409)
+        resolved.append({**ref, "canonical_id": target_id})
+    return resolved
+
+
+def _commit_task(tasks, people, knowledge, projects, digest, token, records, generated):
+    if len(records) != 1:
+        raise MigrationError("Task archives must contain exactly one record for atomic publication")
+    row, values = records[0], records[0]["values"]
+    target = tasks._task_path(values["id"])
+    if target.exists():
+        try:
+            body = json.loads(target.read_text())
+            marker = next(item for item in body.get("evidence", []) if item.get("type") == "platform_migration")
+        except (OSError, json.JSONDecodeError, StopIteration, AttributeError):
+            raise MigrationError("Migration target identity already exists", 409) from None
+        if marker.get("archive_digest") != digest or marker.get("review_token") != token:
+            raise MigrationError("Migration target identity already exists", 409)
+        return marker["receipt"], False
+    resolved_refs = _resolve_task_refs(values["refs"], people, knowledge, projects, tasks)
+    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
+               "committed_at": datetime.now(timezone.utc).isoformat(), "domains": {row["domain"]: 1},
+               "records": [{"source_id": row["source_id"], "task_id": values["id"], "domain": row["domain"]}]}
+    evidence = {"type": "platform_migration", "archive_digest": digest, "review_token": token, "receipt": receipt,
+                "source_collection": row["domain"], "source_record_id": row["source_id"], "references": resolved_refs,
+                "source_state": values["source_state"]}
+    task = Task(id=values["id"], title=values["title"], status=TaskStatus(values["status"]), description=values["description"],
+                provider="native", priority=TaskPriority(values["priority"]), labels=values["labels"], due=values["due"],
+                action_plan=values["action_plan"], notes=values["notes"], blocked_reason_kind=values["blocked_reason_kind"],
+                evidence=[evidence], created_at=values["created_at"], updated_at=values["updated_at"])
+    root = tasks._ensure_dir()
+    descriptor, staging = tempfile.mkstemp(prefix=".migration-", suffix=".json", dir=root)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(task.to_dict(), stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(staging, target)
+        directory = os.open(root, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except FileExistsError:
+        raise MigrationError("Migration target identity already exists", 409) from None
+    finally:
+        try:
+            os.unlink(staging)
+        except FileNotFoundError:
+            pass
+    return receipt, True
+
+
+def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
+             tasks: BoundTasks | None = None):
     with closing(store.connect()) as db:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_migrations'").fetchone()
         result = [] if not exists else [json.loads(row[0]) for row in db.execute("SELECT receipt FROM platform_migrations ORDER BY rowid DESC LIMIT 20")]
@@ -488,4 +625,8 @@ def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projec
                 result.append(json.loads(path.read_text())["receipt"])
             except (OSError, KeyError, json.JSONDecodeError):
                 continue
+    if tasks is not None:
+        for task in tasks._all_tasks():
+            result += [item["receipt"] for item in task.evidence
+                       if item.get("type") == "platform_migration" and isinstance(item.get("receipt"), dict)]
     return sorted(result, key=lambda row: row["committed_at"], reverse=True)[:20]

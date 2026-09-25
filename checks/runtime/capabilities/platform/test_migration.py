@@ -10,7 +10,7 @@ import pytest
 
 from gideon.workspace.capabilities.communications import PeopleStore
 from gideon.cognition.knowledge.store import KnowledgeStore
-from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy
+from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.platform.migration import FORMAT, MigrationError, commit, preview, receipts
 
 
@@ -170,7 +170,7 @@ def test_more_than_one_snapshot_root_is_rejected():
 
 
 @pytest.mark.parametrize("extra,domain", [
-    ({"brain/admin/admin/index.json": b"{}"}, "brain"),
+    ({"brain/future/admin/index.json": b"{}"}, "brain"),
     ({"media/item.bin": b"media"}, "media"),
     ({"../legacy-db.sql": b"select 1"}, "unsafe path"),
 ])
@@ -438,3 +438,131 @@ def test_inbox_rejects_unverifiable_route_and_collision_rolls_back(tmp_path):
         commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
     assert knowledge.db.execute("SELECT count(*) FROM capability_knowledge_capture_events").fetchone()[0] == 0
     assert receipts(people, knowledge) == []
+
+
+def test_admin_import_is_one_crash_safe_canonical_task_with_embedded_receipt(tmp_path):
+    identity = "22222222-2222-4222-8222-222222222222"
+    source = domains_archive({"admin": [{"id": identity, "title": "Renew insurance", "status": "waiting",
+        "dueDate": "2026-10-01T09:00:00Z", "nextAction": "Ask broker for revised terms", "notes": "Policy expires soon",
+        "createdAt": "2026-08-01T10:00:00Z", "updatedAt": "2026-09-01T10:00:00Z"}]})
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["admin"]
+    assert checked["records"] == [{"source_id": identity, "domain": "admin", "name": "Renew insurance"}]
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert created and receipt["domains"] == {"admin": 1}
+    task = tasks._all_tasks()[0]
+    assert task.id == identity and task.title == "Renew insurance" and task.status.value == "blocked"
+    assert task.description == "Policy expires soon" and task.due == "2026-10-01T09:00:00Z"
+    assert task.action_plan[0]["content"] == "Ask broker for revised terms" and not task.action_plan[0]["completed"]
+    marker = task.evidence[0]
+    assert marker["type"] == "platform_migration" and marker["archive_digest"] == checked["archive_digest"]
+    assert marker["receipt"] == receipt and marker["source_record_id"] == identity
+    assert not list((tmp_path / "home/tasks").glob(".migration-*"))
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert not created and again == receipt
+    assert receipts(people, knowledge, projects, tasks) == [receipt]
+
+
+def test_thread_import_preserves_work_state_and_resolves_real_references(tmp_path):
+    idea_id = "23232323-2323-4323-8323-232323232323"
+    thread_id = "24242424-2424-4424-8424-242424242424"
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    idea_source = domains_archive({"ideas": [{"id": idea_id, "title": "Solar kiln", "status": "active", "oneLiner": "Dry lumber",
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"}]})
+    idea_preview = preview(idea_source)
+    commit(people, {**idea_source, "archive_digest": idea_preview["archive_digest"], "review_token": idea_preview["review_token"]}, knowledge, projects, tasks)
+    source = domains_archive({"threads": [{"id": thread_id, "title": "Finish workshop plan", "status": "someday", "priority": "urgent",
+        "nextAction": "Price firebrick", "notes": "Resume after the roof repair", "waitingOn": "Dry weather",
+        "dueAt": "2026-12-01T00:00:00Z", "tags": ["workshop", "planning"], "pinned": True,
+        "refs": [{"kind": "brain.idea", "id": idea_id, "label": "Solar kiln"},
+                 {"kind": "url", "id": "https://example.com/firebrick", "label": "Supplier"}],
+        "source": {"kind": "github.issue", "key": "example/workshop#1"}, "externalState": "open",
+        "createdAt": "2026-02-01T00:00:00Z", "updatedAt": "2026-03-01T00:00:00Z"}]})
+    checked = preview(source)
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert created and receipt["domains"] == {"threads": 1}
+    task = tasks._read_task(tasks._task_path(thread_id))
+    assert task.status.value == "open" and task.priority.value == "critical"
+    assert task.labels == ["workshop", "planning", "someday", "pinned"]
+    assert task.notes == [{"content": "Waiting on: Dry weather", "timestamp": "2026-03-01T00:00:00Z"}]
+    assert task.action_plan[0]["content"] == "Price firebrick" and task.due == "2026-12-01T00:00:00Z"
+    refs = task.evidence[0]["references"]
+    assert refs == [{"kind": "brain.idea", "id": idea_id, "label": "Solar kiln", "canonical_id": idea_id},
+                    {"kind": "url", "id": "https://example.com/firebrick", "label": "Supplier", "canonical_id": "https://example.com/firebrick"}]
+    assert task.evidence[0]["source_state"] == {"source": {"kind": "github.issue", "key": "example/workshop#1"}, "externalState": "open"}
+
+
+def test_thread_person_reference_resolves_prior_migration_identity(tmp_path):
+    source_person = "25252525-2525-4525-8525-252525252525"
+    thread_id = "26262626-2626-4626-8626-262626262626"
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    person_source = archive([{"id": source_person, "name": "Ada", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}])
+    person_preview = preview(person_source)
+    person_receipt, _ = commit(people, {**person_source, "archive_digest": person_preview["archive_digest"], "review_token": person_preview["review_token"]}, knowledge, projects, tasks)
+    canonical_person = person_receipt["records"][0]["person_id"]
+    source = domains_archive({"threads": [{"id": thread_id, "title": "Ask Ada", "status": "open", "priority": "normal",
+        "nextAction": "Send questions", "notes": "", "tags": [], "pinned": False,
+        "refs": [{"kind": "brain.person", "id": source_person, "label": "Ada"}],
+        "createdAt": "2026-02-01T00:00:00Z", "updatedAt": "2026-02-01T00:00:00Z"}]})
+    checked = preview(source)
+    commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    task = tasks._read_task(tasks._task_path(thread_id))
+    assert task.evidence[0]["references"][0]["canonical_id"] == canonical_person
+
+
+def test_missing_thread_reference_fails_before_task_publication(tmp_path):
+    identity = "27272727-2727-4727-8727-272727272727"
+    source = domains_archive({"threads": [{"id": identity, "title": "Broken relation", "status": "open", "priority": "high",
+        "nextAction": "Inspect", "notes": "", "tags": [], "pinned": False,
+        "refs": [{"kind": "brain.project", "id": "28282828-2828-4828-8828-282828282828", "label": "Missing"}],
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    checked = preview(source)
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    with pytest.raises(MigrationError, match="missing canonical project"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert not tasks._task_path(identity).exists()
+    assert receipts(people, knowledge, projects, tasks) == []
+
+
+def test_task_archives_reject_multiple_records_and_cross_store_mixes(tmp_path):
+    def admin(identity, title):
+        return {"id": identity, "title": title, "status": "open", "nextAction": "Continue", "notes": "",
+                "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    source = domains_archive({"admin": [admin("29292929-2929-4929-8929-292929292929", "One"), admin("30303030-3030-4030-8030-303030303030", "Two")]})
+    checked = preview(source)
+    with pytest.raises(MigrationError, match="exactly one record"):
+        commit(PeopleStore(tmp_path / "people"), {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               KnowledgeStore(str(tmp_path / "knowledge.db")), BoundHierarchy(tmp_path / "home"), BoundTasks(tmp_path / "home"))
+    mixed = domains_archive({"admin": [admin("31313131-3131-4131-8131-313131313131", "Mixed")],
+        "ideas": [{"id": "32323232-3232-4232-8232-323232323232", "title": "Idea", "status": "active", "oneLiner": "Idea",
+                   "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(mixed)
+
+
+def test_threads_fail_closed_for_unknown_refs_invalid_urls_and_future_fields():
+    base = {"id": "33333333-3333-4333-8333-333333333333", "title": "Validate", "status": "open", "priority": "normal",
+            "nextAction": "Check", "notes": "", "tags": [], "pinned": False,
+            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    for ref in ({"kind": "brain.song", "id": "song", "label": "Unsupported"},
+                {"kind": "url", "id": "javascript:alert(1)", "label": "Unsafe"}):
+        with pytest.raises(MigrationError, match="reference"):
+            preview(domains_archive({"threads": [{**base, "refs": [ref]}]}))
+    with pytest.raises(MigrationError, match="unsupported"):
+        preview(domains_archive({"threads": [{**base, "refs": [], "future": True}]}))
+
+
+def test_song_records_and_unmanifested_binary_paths_remain_explicitly_unsupported():
+    song_id = "34343434-3434-4434-8434-343434343434"
+    song = {"id": song_id, "title": "A song", "artist": "Artist", "instrument": "guitar", "stage": "new",
+            "tags": [], "content": {"format": "tab", "text": "Am C"}, "attachments": [],
+            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    with pytest.raises(MigrationError, match="unsupported domains"):
+        preview(domains_archive({"songs": [song]}))
+    with pytest.raises(MigrationError, match="unsupported domains"):
+        preview(archive(extra={f"brain/songs/{song_id}/attachments/score.pdf": b"%PDF"}))

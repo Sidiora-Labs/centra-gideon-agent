@@ -67,6 +67,16 @@ function expandedKnowledgeFixture() {
   return tarFile({ 'snapshot-expanded/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-expanded/data/${name}`, value])) })
 }
 
+function adminFixture() {
+  const id = '35353535-3535-4535-8535-353535353535'
+  const data: Record<string, Buffer> = {
+    'brain/admin/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'admin', updatedAt: '2026-09-24T00:00:00Z', config: {} })),
+    [`brain/admin/${id}/index.json`]: Buffer.from(JSON.stringify({ id, title: 'UI imported action', status: 'open', nextAction: 'Complete the form', notes: 'Canonical task notes', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-09-24T00:00:00Z' })),
+  }
+  const manifest = { generatedAt: '2026-09-24T00:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
+  return tarFile({ 'snapshot-admin/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-admin/data/${name}`, value])) })
+}
+
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
@@ -126,7 +136,7 @@ it('imports a checksummed memory into canonical knowledge and reports its durabl
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 memories ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
-  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links', 'buckets', 'inbox'])
+  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links', 'buckets', 'inbox', 'admin', 'threads'])
   expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.memories === 1)).toBe(true)
 })
 
@@ -141,4 +151,18 @@ it('reviews and atomically imports mixed ideas and journals through the actual A
   expect(screen.getByText('journals: Journal for 2026-09-23')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 ideas, 1 journals ·/)).toBeVisible()
+})
+
+it('imports one admin action through the API into the canonical task surface', async () => {
+  render(<Migration baseUrl={baseUrl} />)
+  const file = new File([adminFixture()], 'admin.tar.gz', { type: 'application/gzip' })
+  fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
+  expect(await screen.findByText('Domains: admin')).toBeVisible()
+  expect(screen.getByText('admin: UI imported action')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
+  expect(await screen.findByText(/1 admin ·/)).toBeVisible()
+  const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
+  expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.admin === 1)).toBe(true)
 })
