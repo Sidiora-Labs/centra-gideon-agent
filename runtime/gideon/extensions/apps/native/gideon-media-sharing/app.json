@@ -1,0 +1,15 @@
+{
+  "name": "gideon-media-sharing",
+  "version": "1.0.0",
+  "displayName": "Selective Media Sharing",
+  "description": "Share explicit canonical media versions with opt-in signed peers.",
+  "icon": "Share2",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.media_share_tools:create_provider",
+    "capabilities": ["platform_media_shares_list", "platform_media_share", "platform_media_share_revoke"]
+  },
+  "native": true
+}
