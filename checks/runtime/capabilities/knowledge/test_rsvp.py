@@ -8,6 +8,7 @@ from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_rsvp import register
+from gideon.interfaces.dashboard.handlers.capabilities_knowledge import register as register_knowledge
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.rsvp import RsvpStates, delay_multiplier, words
@@ -211,6 +212,52 @@ async def test_http_round_trip_guards_shape_and_persists_bookmark(tmp_path):
         assert invalid_response.status == 400
         missing_response = await client.get("/api/capabilities/knowledge/rsvp/missing")
         assert missing_response.status == 404
+    finally:
+        await client.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_knowledge_umbrella_mounts_one_rsvp_owner_and_restores_canonical_item(tmp_path):
+    store = KnowledgeStore(str(tmp_path / "umbrella.db"))
+    item_id = store.create_typed_item(
+        item_type="article", title="Umbrella RSVP", content="zero one two three four five six"
+    )
+    state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
+    state._knowledge_store = store
+    app = web.Application()
+    app["state"] = state
+    register_knowledge(app)
+    routes = [route for route in app.router.routes() if route.resource.canonical.startswith("/api/capabilities/knowledge/rsvp/")]
+    assert sum(route.method == "GET" for route in routes) == 1
+    assert sum(route.method == "PUT" for route in routes) == 1
+    assert sum(route.method == "POST" for route in routes) == 1
+    owner = app["capability_knowledge_rsvp"]
+    assert isinstance(owner, RsvpStates)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        opened = await (await client.get(f"/api/capabilities/knowledge/rsvp/{item_id}")).json()
+        saved = await (await client.put(f"/api/capabilities/knowledge/rsvp/{item_id}", json={
+            "word_index": 2, "wpm": 425, "chunk_size": 2,
+            "content_revision": opened["content_revision"],
+        })).json()
+        assert saved["word_index"] == 2
+        bookmarked = await (await client.post(f"/api/capabilities/knowledge/rsvp/{item_id}/bookmark", json={
+            "word_index": 2, "content_revision": opened["content_revision"],
+        })).json()
+        assert bookmarked["bookmark_index"] == 2
+        moved = await (await client.put(f"/api/capabilities/knowledge/rsvp/{item_id}", json={
+            "word_index": 6, "wpm": 425, "chunk_size": 1,
+            "content_revision": opened["content_revision"],
+        })).json()
+        assert moved["word_index"] == 6
+        restored = await (await client.post(f"/api/capabilities/knowledge/rsvp/{item_id}/restore", json={})).json()
+        assert restored["word_index"] == restored["bookmark_index"] == 2
+        persisted = owner.get(item_id)
+        assert persisted["word_index"] == 2
+        assert persisted["wpm"] == 425
+        assert store.get_item(item_id)["content"] == "zero one two three four five six"
     finally:
         await client.close()
         store.close()

@@ -6,6 +6,7 @@ from gideon.cognition.memory_service import MemoryService
 from gideon.interfaces.dashboard.handlers._shared import _blocks_reads_session
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.workspace.capabilities.knowledge.anniversaries import anniversaries, source_record
+from gideon.interfaces.dashboard.handlers import capabilities_knowledge_rsvp
 
 
 def _stores(request):
@@ -56,3 +57,4 @@ async def get_source(request):
 def register(app):
     app.router.add_get("/api/capabilities/knowledge/anniversaries", get_anniversaries)
     app.router.add_get("/api/capabilities/knowledge/sources/{source_type}/{source_id}", get_source)
+    capabilities_knowledge_rsvp.register(app)

@@ -38,7 +38,7 @@
     "Playback timers run only while the reader is mounted; durable state records position and settings, not a claim that playback continued while the console was closed.",
     "Content-change reconciliation safely clamps offsets but does not semantically relocate edited passages; the content_changed disclosure tells the reader to confirm the new position.",
     "One explicit bookmark per canonical item is in scope; annotation/highlight collections remain the existing mechanism for multiple anchored passages.",
-    "Central dashboard handler registration is integrated by the root lane; RSVP is embedded in the existing Knowledge reading surface and needs no duplicate navigation destination."
+    "RSVP is embedded in the existing Knowledge reading surface and needs no duplicate navigation destination."
   ],
   "verification": {
     "task": "knowledge.12",
@@ -49,6 +49,8 @@
     "test_lines": 410,
     "runtime_tests": 54,
     "ui_tests": 8,
-    "note": "One serialized promise queue orders position writes; click-time snapshots and state generations prevent delayed saves or responses from replacing newer pause, bookmark or restore state."
+    "note": "One serialized promise queue orders position writes; click-time snapshots and state generations prevent delayed saves or responses from replacing newer pause, bookmark or restore state.",
+    "integration_command": "PYTHONPATH=runtime GIDEON_HOME=<isolated> /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/knowledge/test_rsvp.py::test_knowledge_umbrella_mounts_one_rsvp_owner_and_restores_canonical_item -q",
+    "integration_status": "1 passed"
   }
 }
