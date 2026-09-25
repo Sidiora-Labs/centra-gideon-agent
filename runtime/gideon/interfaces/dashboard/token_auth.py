@@ -38,6 +38,10 @@ from gideon.security.sel import sel as _sel_fn
 
 logger = logging.getLogger(__name__)
 
+_HANDLER_AUTH_ROUTES = frozenset({
+    ("POST", "/api/capabilities/creative/commission-feedback/receive"),
+})
+
 _SECRET: bytes | None = None
 _EPHEMERAL_SECRET: bytes | None = None
 
@@ -876,6 +880,9 @@ def token_auth_middleware(
                 return await handler(request)  # type: ignore[operator]
 
         path = request.path
+
+        if (request.method, path) in _HANDLER_AUTH_ROUTES:
+            return await handler(request)  # handler verifies the signed peer envelope
 
         _matches_strict = internal_paths and (
             path in internal_paths

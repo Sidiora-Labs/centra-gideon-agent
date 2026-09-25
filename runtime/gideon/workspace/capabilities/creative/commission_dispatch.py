@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 
 from .store import CatalogError, identifier, integer, keys, text
@@ -25,16 +26,46 @@ def normalize_dispatch(ability, value, sources):
         raise CatalogError('Commission dispatch must be provider-neutral')
     if ability in ('image', 'video'):
         keys(value, {'input'})
-        if not isinstance(value.get('input'), dict):
+        media_input = value.get('input')
+        if not isinstance(media_input, dict):
             raise CatalogError('Media dispatch input must be an object')
-        return {'input': value['input']}
+        if ability == 'image':
+            keys(media_input, {'prompt', 'size', 'source_artifact_id', 'source_version', 'mask_artifact_id',
+                               'mask_version', 'controls', 'loras'})
+            prompt = text(media_input.get('prompt'), 4000, True)
+            size = media_input.get('size', '')
+            controls = media_input.get('controls', {})
+            loras = media_input.get('loras', [])
+            if not isinstance(size, str) or len(size) > 40:
+                raise CatalogError('Invalid image size')
+            if not isinstance(controls, dict) or not isinstance(loras, list):
+                raise CatalogError('Image controls and adapters must be typed collections')
+            return {'input': {**media_input, 'prompt': prompt, 'size': size, 'controls': controls, 'loras': loras}}
+        keys(media_input, {'prompt', 'duration_seconds', 'aspect_ratio', 'controls', 'first_frame_artifact_id',
+                           'first_frame_version', 'last_frame_artifact_id', 'last_frame_version',
+                           'continuation_artifact_id', 'continuation_version'})
+        prompt = text(media_input.get('prompt'), 4000, True)
+        duration = media_input.get('duration_seconds')
+        aspect = media_input.get('aspect_ratio', '')
+        controls = media_input.get('controls', {})
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or not 1 <= duration <= 60:
+            raise CatalogError('Video duration must be between 1 and 60 seconds')
+        if not isinstance(aspect, str) or len(aspect) > 20 or not isinstance(controls, dict):
+            raise CatalogError('Video aspect ratio and controls are invalid')
+        return {'input': {**media_input, 'prompt': prompt, 'duration_seconds': duration,
+                          'aspect_ratio': aspect, 'controls': controls}}
     if ability == 'music':
         allowed = {'track_id', 'track_revision', 'prompt', 'music_length_ms', 'force_instrumental', 'license'}
         keys(value, allowed)
         if set(value) != allowed:
             raise CatalogError('Music dispatch requires a pinned track, prompt, duration, mode and license')
+        duration = value['music_length_ms']
+        if duration is not None:
+            duration = integer(duration, 3000, 600000)
+        if type(value['force_instrumental']) is not bool:
+            raise CatalogError('Instrumental mode must be boolean')
         return {'track_id': identifier(value['track_id']), 'track_revision': integer(value['track_revision']),
-                'prompt': text(value['prompt'], 4100, True), 'music_length_ms': value['music_length_ms'],
+                'prompt': text(value['prompt'], 4100, True), 'music_length_ms': duration,
                 'force_instrumental': value['force_instrumental'], 'license': text(value['license'], 500, True)}
     if ability == 'music-video':
         keys(value, {'project_id', 'revision'})

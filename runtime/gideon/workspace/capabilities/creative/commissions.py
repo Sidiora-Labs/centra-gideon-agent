@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -37,6 +38,15 @@ def now_iso():
 def digest(value):
     raw = value if isinstance(value, str) else json.dumps(value, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def process_identity(pid):
+    try:
+        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        started = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+        return boot + ':' + started
+    except (OSError, IndexError, TypeError, ValueError):
+        return None
 
 
 def _recurrence_rule(value, anchor):
@@ -233,6 +243,11 @@ class CommissionStore:
         db.execute('INSERT OR REPLACE INTO creative_commissions VALUES(?,?)', (record['id'], json.dumps(record, sort_keys=True)))
         return record
 
+    @staticmethod
+    def _present(record):
+        return {**record, 'mode': record.get('mode', 'planning'),
+                'mode_source': 'explicit' if 'mode' in record else 'legacy'}
+
     def _direction(self):
         if self.direction is None:
             try:
@@ -243,7 +258,7 @@ class CommissionStore:
         return self.direction
 
     def create(self, payload):
-        keys(payload, {'request_id', 'name', 'target_ability', 'brief', 'cadence', 'sources', 'steps', 'enabled', 'max_attempts', 'dispatch'})
+        keys(payload, {'request_id', 'name', 'target_ability', 'brief', 'cadence', 'sources', 'steps', 'enabled', 'max_attempts', 'mode', 'dispatch'})
         request = identifier(payload.get('request_id'))
         ability = payload.get('target_ability')
         if ability not in ABILITIES:
@@ -259,12 +274,20 @@ class CommissionStore:
         direction = self._direction()
         for source in sources:
             direction.pin(source)
+        mode = payload.get('mode', 'planning')
+        if mode not in ('planning', 'generate'):
+            raise CatalogError('Commission mode must be planning or generate')
+        dispatch = normalize_dispatch(ability, payload.get('dispatch'), sources) if 'dispatch' in payload else None
+        if mode == 'generate' and dispatch is None:
+            raise CatalogError('Generate mode requires typed ability configuration')
+        if mode == 'planning' and dispatch is not None:
+            raise CatalogError('Planning mode does not accept ability dispatch configuration')
         normalized = {'name': text(payload.get('name'), 200, True), 'target_ability': ability,
                       'brief': _brief(payload.get('brief')), 'cadence': _cadence(payload.get('cadence')),
                       'sources': sources, 'steps': _plan(payload.get('steps')), 'enabled': payload.get('enabled', True),
                       'max_attempts': integer(payload.get('max_attempts', 2), 1, 3)}
-        if 'dispatch' in payload:
-            normalized['dispatch'] = normalize_dispatch(ability, payload.get('dispatch'), sources)
+        if 'mode' in payload: normalized['mode'] = mode
+        if dispatch is not None: normalized['dispatch'] = dispatch
         if type(normalized['enabled']) is not bool:
             raise CatalogError('Commission enabled must be boolean')
         fingerprint = digest(normalized)
@@ -273,32 +296,43 @@ class CommissionStore:
             if prior:
                 if prior[0] != fingerprint:
                     raise CatalogError('Commission request already used with different values', 409)
-                return self._load(db, prior[1])
+                return self._present(self._load(db, prior[1]))
             stamp = now_iso()
-            record = {**normalized, 'id': str(uuid4()), 'revision': 1, 'schedule_revision': 1,
+            record = {**normalized, 'mode': mode, 'id': str(uuid4()), 'revision': 1, 'schedule_revision': 1,
                       'schedule_error': '', 'created_at': stamp, 'updated_at': stamp}
             self._save(db, record)
             db.execute('INSERT INTO creative_commission_requests VALUES(?,?,?)', (request, fingerprint, record['id']))
-        return self._sync(record)
+        return self._present(self._sync(record))
 
     def get(self, identity):
         with self.db() as db:
-            return self._load(db, identity)
+            return self._present(self._load(db, identity))
 
     def list(self):
         with self.db() as db:
-            return {'items': [json.loads(row[0]) for row in db.execute('SELECT record FROM creative_commissions ORDER BY rowid DESC')]}
+            return {'items': [self._present(json.loads(row[0])) for row in db.execute('SELECT record FROM creative_commissions ORDER BY rowid DESC')]}
 
     def update(self, identity, payload):
-        keys(payload, {'revision', 'name', 'brief', 'cadence', 'enabled', 'max_attempts', 'dispatch'})
+        keys(payload, {'revision', 'name', 'brief', 'cadence', 'enabled', 'max_attempts', 'mode', 'dispatch'})
         with self.db() as db:
             record = self._load(db, identity)
             if integer(payload.get('revision')) != record['revision']:
                 raise CatalogError('Commission changed; reload', 409)
             changed_schedule = 'cadence' in payload or 'enabled' in payload
+            mode = payload.get('mode', record.get('mode', 'planning'))
+            if mode not in ('planning', 'generate'):
+                raise CatalogError('Commission mode must be planning or generate')
+            existing_dispatch = record.get('dispatch') if 'mode' in record or payload.get('mode') == 'generate' else None
+            dispatch = normalize_dispatch(record['target_ability'], payload['dispatch'], record['sources']) if 'dispatch' in payload else existing_dispatch
+            if mode == 'generate' and dispatch is None:
+                raise CatalogError('Generate mode requires typed ability configuration')
+            if mode == 'planning' and dispatch is not None:
+                raise CatalogError('Planning mode does not accept ability dispatch configuration')
             if 'name' in payload: record['name'] = text(payload['name'], 200, True)
             if 'brief' in payload: record['brief'] = _brief(payload['brief'])
-            if 'dispatch' in payload: record['dispatch'] = normalize_dispatch(record['target_ability'], payload['dispatch'], record['sources'])
+            record['mode'] = mode
+            if dispatch is None: record.pop('dispatch', None)
+            else: record['dispatch'] = dispatch
             if 'cadence' in payload: record['cadence'] = _cadence(payload['cadence'])
             if 'enabled' in payload:
                 if type(payload['enabled']) is not bool: raise CatalogError('Commission enabled must be boolean')
@@ -307,7 +341,7 @@ class CommissionStore:
             record.update(revision=record['revision'] + 1, updated_at=now_iso())
             if changed_schedule: record['schedule_revision'] += 1
             self._save(db, record)
-        return self._sync(record)
+        return self._present(self._sync(record))
 
     def _trigger(self, record, at=0.0):
         if not record['enabled']:
@@ -378,7 +412,7 @@ class CommissionStore:
         return [{'id': row['id'], 'revision': row['revision'], 'rating': row['rating'], 'note': row['note'],
                  'tags': row['tags'], 'author': row['author'], 'output': row['output']} for row in reversed(live)]
 
-    async def execute(self, commission_id, occurrence, schedule_revision=None, cadence_hash=None, trigger='schedule'):
+    async def execute(self, commission_id, occurrence, schedule_revision=None, cadence_hash=None, trigger='schedule', retrying=False):
         occurrence = text(str(occurrence), 200, True)
         with self.db() as db:
             commission = self._load(db, commission_id)
@@ -391,7 +425,26 @@ class CommissionStore:
             row = db.execute('SELECT record FROM creative_commission_runs WHERE commission_id=? AND occurrence=?',
                              (commission_id, occurrence)).fetchone()
             run = json.loads(row[0]) if row else None
-            if run and run['status'] in ('completed', 'submitted'): return run
+            if run and run['status'] in ('planned', 'completed', 'submitted'): return run
+            if run and run['status'] == 'dispatch_unknown': return run
+            if run and run['status'] == 'running':
+                live = run.get('claim_identity') and process_identity(run.get('claim_pid')) == run['claim_identity']
+                if live:
+                    return {**run, 'status': 'in_progress'}
+                reserved = run['attempts'][-1] if run.get('attempts') else None
+                uncertain = run.get('phase') == 'dispatching'
+                status = 'dispatch_unknown' if uncertain else 'failed'
+                error = 'upstream-admission-unknown' if uncertain else 'execution-interrupted'
+                if reserved and reserved.get('status') == 'running':
+                    reserved.update(status=status, finished_at=now_iso(), error=error)
+                run.update(status=status, updated_at=now_iso(), phase='unknown' if uncertain else 'interrupted')
+                for key in ('claim_id', 'claim_pid', 'claim_identity', 'claimed_at'):
+                    run.pop(key, None)
+                db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?',
+                           (json.dumps(run, sort_keys=True), run['id']))
+                return run
+            if run and run['status'] == 'failed' and not retrying:
+                return run
             attempts = run['attempts'] if run else []
             if len(attempts) >= commission['max_attempts']:
                 return {**run, 'status': 'exhausted'}
@@ -399,16 +452,27 @@ class CommissionStore:
             run_id = run['id'] if run else digest(commission_id + ':' + occurrence)
             if run is None:
                 run = {'id': run_id, 'commission_id': commission_id, 'occurrence': occurrence, 'trigger': trigger,
-                       'status': 'running', 'project_id': None, 'outputs': [], 'dispatch_receipts': [],
-                       'feedback_refs': [], 'attempts': [],
+                       'status': 'pending', 'project_id': None, 'outputs': [], 'dispatch_receipts': [],
+                       'feedback_refs': [], 'attempts': [], 'mode': commission.get('mode', 'planning'),
+                       'dispatch': commission.get('dispatch'),
                        'created_at': now_iso(), 'updated_at': now_iso()}
                 db.execute('INSERT INTO creative_commission_runs VALUES(?,?,?,?)',
                            (run_id, commission_id, occurrence, json.dumps(run, sort_keys=True)))
             attempt = len(attempts) + 1
+            started = now_iso()
+            claim_id = str(uuid4())
+            run.update(status='running', claim_id=claim_id, claim_pid=os.getpid(),
+                       claim_identity=process_identity(os.getpid()), claimed_at=started, phase='direction', updated_at=started)
+            run['attempts'].append({'number': attempt, 'status': 'running', 'started_at': started,
+                                    'finished_at': '', 'error': ''})
+            db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?',
+                       (json.dumps(run, sort_keys=True), run_id))
         project_id = run.get('project_id')
-        started = now_iso()
         receipt = None
         try:
+            mode = run.get('mode', 'planning')
+            if mode == 'generate' and not run.get('dispatch'):
+                raise CatalogError('Generate commission has no typed ability configuration', 409)
             direction = self._direction()
             treatment = json.dumps({'ability': commission['target_ability'], 'brief': commission['brief'],
                                     'feedback': feedback}, ensure_ascii=False, sort_keys=True)
@@ -420,6 +484,8 @@ class CommissionStore:
                 project_id = project['id']
                 with self.db() as db:
                     current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
+                    if current.get('claim_id') != claim_id:
+                        raise CatalogError('Commission run claim changed', 409)
                     current['project_id'] = project_id; current['updated_at'] = now_iso()
                     db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current, sort_keys=True), run['id']))
             if project['status'] == 'draft':
@@ -429,13 +495,22 @@ class CommissionStore:
                 project = direction.advance(project_id, {'revision': project['revision']})
             if project['status'] != 'completed': raise CatalogError('Direction project did not complete its bounded plan', 409)
             outputs = [step['result'] for step in project['steps'] if step.get('result', {}).get('artifact_id')]
-            receipt = None
-            if commission.get('dispatch'):
-                receipt = await self.dispatcher.submit(commission['target_ability'], commission['dispatch'], run['id'], attempt)
+            if mode == 'generate':
+                with self.db() as db:
+                    current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
+                    if current.get('claim_id') != claim_id:
+                        raise CatalogError('Commission run claim changed', 409)
+                    current.update(phase='dispatching', dispatch_request_id='commission-' + run['id'][:48] + '-' + str(attempt),
+                                   updated_at=now_iso())
+                    db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?',
+                               (json.dumps(current, sort_keys=True), run['id']))
+                receipt = await self.dispatcher.submit(commission['target_ability'], run['dispatch'], run['id'], attempt)
                 if receipt['status'] in ('failed', 'external_unavailable'):
                     raise CatalogError('Ability dispatch ' + receipt['status'], 503 if receipt['status'] == 'external_unavailable' else 409)
                 outputs.extend(row for row in receipt['artifact_refs'] if row.get('content_hash'))
-            status = receipt['status'] if receipt else 'completed'
+                if receipt['status'] not in ('submitted', 'completed'):
+                    raise CatalogError('Ability dispatch did not return a terminal admission state', 409)
+            status = receipt['status'] if receipt else 'planned'
             entry = {'number': attempt, 'status': status, 'started_at': started, 'finished_at': now_iso(), 'error': ''}
             error = ''
         except Exception as exc:
@@ -445,11 +520,16 @@ class CommissionStore:
             entry = {'number': attempt, 'status': status, 'started_at': started, 'finished_at': now_iso(), 'error': error}
         with self.db() as db:
             current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
+            if current.get('claim_id') != claim_id:
+                raise CatalogError('Commission run claim changed', 409)
             current.update(status=status, project_id=project_id, outputs=outputs,
-                           feedback_refs=[{'id': item['id'], 'revision': item['revision']} for item in feedback], updated_at=now_iso())
+                           feedback_refs=[{'id': item['id'], 'revision': item['revision']} for item in feedback],
+                           phase='complete', updated_at=now_iso())
             if receipt and not any(row['request_id'] == receipt['request_id'] for row in current.get('dispatch_receipts', [])):
                 current.setdefault('dispatch_receipts', []).append(receipt)
-            current['attempts'].append(entry)
+            current['attempts'][-1] = entry
+            for key in ('claim_id', 'claim_pid', 'claim_identity', 'claimed_at'):
+                current.pop(key, None)
             db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current, sort_keys=True), run['id']))
             return current
 
@@ -460,7 +540,7 @@ class CommissionStore:
             if not row: raise CatalogError('Commission run not found', 404)
             run = json.loads(row[0])
             if run['status'] != 'failed': raise CatalogError('Only a retryable failed run can retry', 409)
-        return await self.execute(commission_id, run['occurrence'], trigger=run['trigger'])
+        return await self.execute(commission_id, run['occurrence'], trigger=run['trigger'], retrying=True)
 
     def feedback(self, commission_id):
         self.get(commission_id)
@@ -533,12 +613,12 @@ class CommissionActionProvider(ActionProvider):
             result = await self.store.execute(identifier(action_config.get('commission_id')), occurrence,
                 schedule_revision=integer(action_config.get('schedule_revision')),
                 cadence_hash=text(action_config.get('cadence_hash'), 64, True), trigger='schedule')
-            if result.get('reason') not in ('disabled', 'stale_schedule'):
+            if result.get('reason') not in ('disabled', 'stale_schedule') and result.get('status') != 'in_progress':
                 self.store.rearm_recurrence(action_config['commission_id'], occurrence,
                     action_config['schedule_revision'], action_config['cadence_hash'])
-            success = result.get('status') in ('completed', 'submitted', 'skipped')
+            success = result.get('status') in ('planned', 'completed', 'submitted', 'skipped', 'in_progress')
             return ActionResult(success=success, stdout=json.dumps(result), error='' if success else result['attempts'][-1]['error'],
-                                outcome='ran' if result.get('status') == 'completed' else 'skipped_noop' if success else 'failed')
+                                outcome='ran' if result.get('status') in ('planned', 'completed', 'submitted') else 'skipped_noop' if success else 'failed')
         except CatalogError as exc:
             return ActionResult(False, error=str(exc), outcome='failed')
 

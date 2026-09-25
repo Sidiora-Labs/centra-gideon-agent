@@ -4,7 +4,7 @@ type Output = { artifact_id: string; artifact_version: number; content_hash: str
 type Receipt = { backend: string; operation: string; request_id: string; resource_id: string; status: string; upstream_status: string; error_code: string }
 type Run = { id: string; status: string; project_id?: string; outputs: Output[]; dispatch_receipts?: Receipt[]; attempts: Array<{ number: number; status: string; error: string }> }
 type Reaction = { id: string; revision: number; author: string; rating: string; deleted: boolean }
-type Commission = { id: string; revision: number; name: string; target_ability: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
+type Commission = { id: string; revision: number; name: string; target_ability: string; mode: string; mode_source?: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
 
 const api = '/api/capabilities/creative/commissions'
 
@@ -14,12 +14,24 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   const [name, setName] = useState('Weekly treatment')
   const [intent, setIntent] = useState('Create a focused treatment from the selected manuscript.')
   const [ability, setAbility] = useState('series')
+  const [mode, setMode] = useState('planning')
+  const [sourceKind, setSourceKind] = useState('work')
   const [sourceId, setSourceId] = useState('')
   const [sourceRevision, setSourceRevision] = useState(1)
   const [cadenceKind, setCadenceKind] = useState('interval')
   const [recurrenceStart, setRecurrenceStart] = useState('2026-10-01T09:00:00')
   const [recurrenceRule, setRecurrenceRule] = useState('FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1')
-  const [dispatchText, setDispatchText] = useState('')
+  const [mediaPrompt, setMediaPrompt] = useState('A focused visual interpretation of the approved direction.')
+  const [imageSize, setImageSize] = useState('')
+  const [videoDuration, setVideoDuration] = useState(5)
+  const [videoAspect, setVideoAspect] = useState('')
+  const [trackId, setTrackId] = useState('')
+  const [trackRevision, setTrackRevision] = useState(1)
+  const [musicLength, setMusicLength] = useState(30000)
+  const [musicLicense, setMusicLicense] = useState('Use is subject to the configured provider terms.')
+  const [projectId, setProjectId] = useState('')
+  const [projectRevision, setProjectRevision] = useState(1)
+  const [seriesMode, setSeriesMode] = useState('model')
   const [error, setError] = useState('')
 
   async function list() {
@@ -32,17 +44,20 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   }
   async function create() {
     setError('')
-    let dispatch: Record<string, unknown> | undefined
-    try { dispatch = dispatchText.trim() ? JSON.parse(dispatchText) : undefined }
-    catch { return setError('Ability dispatch must be valid JSON') }
+    const dispatch = mode === 'planning' ? undefined : ability === 'image'
+      ? { input: { prompt: mediaPrompt, size: imageSize, controls: {}, loras: [] } }
+      : ability === 'video' ? { input: { prompt: mediaPrompt, duration_seconds: videoDuration, aspect_ratio: videoAspect, controls: {} } }
+      : ability === 'music' ? { track_id: trackId, track_revision: trackRevision, prompt: mediaPrompt, music_length_ms: musicLength, force_instrumental: true, license: musicLicense }
+      : ability === 'music-video' ? { project_id: projectId, revision: projectRevision }
+      : { series_id: sourceId, series_revision: sourceRevision, mode: seriesMode, max_attempts: 2 }
     const response = await fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      request_id: `commission-${Date.now()}`, name, target_ability: ability,
+      request_id: `commission-${Date.now()}`, name, target_ability: ability, mode,
       brief: { intent, genre: '', category: '', style: '', constraints: {}, seed_refs: [] },
       cadence: cadenceKind === 'recurrence'
         ? { kind: 'recurrence', dtstart: recurrenceStart, rrule: recurrenceRule, timezone: 'UTC', exdates: [] }
         : { kind: 'interval', seconds: 900, timezone: 'UTC' },
       ...(dispatch ? { dispatch } : {}),
-      sources: [{ kind: 'work', id: sourceId, revision: sourceRevision }], enabled: true, max_attempts: 2,
+      sources: [{ kind: sourceKind, id: sourceId, revision: sourceRevision }], enabled: true, max_attempts: 2,
       steps: [
         { id: 'verify', title: 'Verify canonical source', operation: 'source.verify', depends_on: [] },
         { id: 'snapshot', title: 'Snapshot treatment', operation: 'treatment.snapshot', depends_on: ['verify'] },
@@ -88,7 +103,9 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
       <label>Ability<select aria-label="Target ability" value={ability} onChange={event => setAbility(event.target.value)}>
         {['video', 'image', 'music', 'music-video', 'series'].map(value => <option key={value}>{value}</option>)}
       </select></label>
-      <label>Source work ID<input aria-label="Source work ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
+      <label>Execution mode<select aria-label="Execution mode" value={mode} onChange={event => setMode(event.target.value)}><option value="planning">Planning only</option><option value="generate">Generate through configured service</option></select></label>
+      <label>Source kind<select aria-label="Source kind" value={sourceKind} onChange={event => setSourceKind(event.target.value)}><option value="work">Work</option><option value="series">Series</option></select></label>
+      <label>Source ID<input aria-label="Source work ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
       <label>Source revision<input aria-label="Source revision" type="number" value={sourceRevision} onChange={event => setSourceRevision(Number(event.target.value))} /></label>
       <label>Cadence<select aria-label="Cadence kind" value={cadenceKind} onChange={event => setCadenceKind(event.target.value)}>
         <option value="interval">Every 15 minutes</option><option value="recurrence">Calendar recurrence</option>
@@ -97,7 +114,12 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
         <label>First local occurrence<input aria-label="Recurrence start" value={recurrenceStart} onChange={event => setRecurrenceStart(event.target.value)} /></label>
         <label>Recurrence rule<input aria-label="Recurrence rule" value={recurrenceRule} onChange={event => setRecurrenceRule(event.target.value)} /></label>
       </>}
-      <label>Ability dispatch JSON<textarea aria-label="Ability dispatch JSON" value={dispatchText} onChange={event => setDispatchText(event.target.value)} placeholder="Optional canonical job input" /></label>
+      {mode === 'generate' && (ability === 'image' || ability === 'video' || ability === 'music') && <label>Generation prompt<textarea aria-label="Generation prompt" value={mediaPrompt} onChange={event => setMediaPrompt(event.target.value)} /></label>}
+      {mode === 'generate' && ability === 'image' && <label>Image size<input aria-label="Image size" value={imageSize} onChange={event => setImageSize(event.target.value)} /></label>}
+      {mode === 'generate' && ability === 'video' && <><label>Duration seconds<input aria-label="Duration seconds" type="number" value={videoDuration} onChange={event => setVideoDuration(Number(event.target.value))} /></label><label>Aspect ratio<input aria-label="Aspect ratio" value={videoAspect} onChange={event => setVideoAspect(event.target.value)} /></label></>}
+      {mode === 'generate' && ability === 'music' && <><label>Track ID<input aria-label="Track ID" value={trackId} onChange={event => setTrackId(event.target.value)} /></label><label>Track revision<input aria-label="Track revision" type="number" value={trackRevision} onChange={event => setTrackRevision(Number(event.target.value))} /></label><label>Length milliseconds<input aria-label="Length milliseconds" type="number" value={musicLength} onChange={event => setMusicLength(Number(event.target.value))} /></label><label>License statement<input aria-label="License statement" value={musicLicense} onChange={event => setMusicLicense(event.target.value)} /></label></>}
+      {mode === 'generate' && ability === 'music-video' && <><label>Music video project ID<input aria-label="Music video project ID" value={projectId} onChange={event => setProjectId(event.target.value)} /></label><label>Project revision<input aria-label="Project revision" type="number" value={projectRevision} onChange={event => setProjectRevision(Number(event.target.value))} /></label></>}
+      {mode === 'generate' && ability === 'series' && <label>Series production mode<select aria-label="Series production mode" value={seriesMode} onChange={event => setSeriesMode(event.target.value)}><option value="model">Configured model</option><option value="authored">Authored approval</option></select></label>}
       <button onClick={() => void create()}>Create commission</button>
     </section>
     {error && <p role="alert">{error}</p>}
@@ -106,7 +128,7 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
     </li>)}</ul>
     {selected && <section aria-label="Commission detail">
       <h2>{selected.name}</h2>
-      <p>{selected.target_ability} · {selected.schedule_state || (selected.enabled ? 'scheduled' : 'disabled')} {selected.next_fire_at && `· next ${selected.next_fire_at}`} {selected.schedule_error && `· ${selected.schedule_error}`}</p>
+      <p>{selected.target_ability} · {selected.mode === 'planning' ? 'planning only' : 'generation'}{selected.mode_source === 'legacy' ? ' (legacy)' : ''} · {selected.schedule_state || (selected.enabled ? 'scheduled' : 'disabled')} {selected.next_fire_at && `· next ${selected.next_fire_at}`} {selected.schedule_error && `· ${selected.schedule_error}`}</p>
       <button onClick={() => void update(!selected.enabled)}>{selected.enabled ? 'Disable' : 'Enable'}</button>
       <button onClick={() => void runNow()}>Run now</button>
       <h3>Run history</h3>

@@ -350,6 +350,7 @@ def register(app):
     from gideon.interfaces.dashboard.handlers.capabilities_creative_production import register as register_production
     from gideon.interfaces.dashboard.handlers.capabilities_creative_direction import register as register_direction
     from gideon.interfaces.dashboard.handlers.capabilities_creative_commissions import register as register_commissions
+    from gideon.interfaces.dashboard.handlers.capabilities_creative_peer_feedback import register as register_peer_feedback
     from gideon.workspace.capabilities.creative.direction import DirectionStore
     from gideon.workspace.capabilities.creative.exports import ManuscriptExports
     app['creative_exports_factory'] = lambda: ManuscriptExports(app[STORE].home)
@@ -358,6 +359,7 @@ def register(app):
     register_production(app, app[STORE].home)
     register_direction(app)
     register_commissions(app, app[STORE].home)
+    register_peer_feedback(app, app[STORE].home)
     app[SERIES] = SeriesStore(app[STORE].home)
     app[VOICE] = VoiceStore(app[SERIES])
     app.router.add_get("/api/capabilities/creative/series/{id}/voice", voice)
