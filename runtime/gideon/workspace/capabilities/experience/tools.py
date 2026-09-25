@@ -4,6 +4,7 @@ import json
 
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from .narration import get_narration_jobs
+from .navigation import NavigationReceipts
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
@@ -22,6 +23,8 @@ OPERATIONS = {
     "narration_start": ({"id": STRING, "revision": REVISION, "request_id": STRING}, True, "Request source-bound speech using configured voice settings; unavailable is not generated speech."),
     "narration_get": ({"id": STRING}, False, "Read narration status and canonical audio reference, if ready."),
     "narration_cancel": ({"id": STRING}, True, "Cancel queued or active speech generation."),
+    "navigation_list": ({}, False, "Read navigation receipts; requested is not browser acknowledgement."),
+    "navigation_get": ({"id": STRING}, False, "Read whether the browser acknowledged a navigation action."),
 }
 
 
@@ -73,6 +76,8 @@ class ExperienceTools(ToolProvider):
             elif operation == "session_choose": result = self.store.choose(key, args)
             elif operation == "narration_start": result = {"narration": self.jobs.start(key, args)}
             elif operation == "narration_get": result = {"narration": self.jobs.get(key)}
+            elif operation == "navigation_list": result = {"receipts": NavigationReceipts(self.store).list()}
+            elif operation == "navigation_get": result = {"receipt": NavigationReceipts(self.store).get(key)}
             else: result = {"narration": await self.jobs.cancel(key)}
             return ToolResult(True, output=json.dumps(result))
         except (Conflict, NotFound, ValueError) as exc:
