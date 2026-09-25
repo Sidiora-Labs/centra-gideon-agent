@@ -7,6 +7,7 @@ from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
+from gideon.workspace.capabilities.identity.recipes import RecipeStore
 from gideon.workspace.capabilities.identity.bundles import BundleService
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
@@ -48,7 +49,10 @@ class IdentityToolProvider(ToolProvider):
             return ToolResult(success=False, error="Invalid identity arguments: " + problem.message,
                               recovery_hints=["Use the tool's declared fields and current revision."])
         try:
-            if tool_name == "identity_fidelity_run":
+            if tool_name == "identity_recipe_advance":
+                store = RecipeStore(self.home / "capabilities/identity/recipes.sqlite3")
+                result = await store.advance(**arguments, provider=self)
+            elif tool_name == "identity_fidelity_run":
                 store = FidelityStore(self.home / "capabilities/identity/fidelity.sqlite3")
                 result = await run_evaluation(store, **arguments)
                 store._sources(result["case_snapshot"]["source_ids"])
@@ -80,6 +84,8 @@ class IdentityToolProvider(ToolProvider):
 
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
+        if name.startswith("identity_recipe_"):
+            return getattr(RecipeStore(directory / "recipes.sqlite3"), name.removeprefix("identity_recipe_"))(**arguments)
         if name == "identity_bundle_inventory":
             return BundleService(self.home).inventory()
         if name.startswith("identity_continuity_"):
