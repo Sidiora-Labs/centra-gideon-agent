@@ -7,6 +7,7 @@ from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
+from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.identity.fidelity import FidelityStore
 from gideon.workspace.capabilities.identity.fidelity_generation import run_evaluation
@@ -77,6 +78,9 @@ class IdentityToolProvider(ToolProvider):
 
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
+        if name.startswith("identity_progress_"):
+            store = ProgressStore(directory / "progress.sqlite3")
+            return getattr(store, name.removeprefix("identity_progress_"))(**arguments)
         if name.startswith("identity_goals_"):
             store = GoalStore(directory / "goals.sqlite3")
             operation = name.removeprefix("identity_goals_")
