@@ -1,0 +1,46 @@
+{
+  "id": "experience.07",
+  "status": "locally_checked_native_pending",
+  "base_revision": "f4b3ec7a",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/native_calls.py",
+    "runtime/gideon/workspace/capabilities/experience/native_calls_http.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/NativeCalls.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_native_calls.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/NativeCalls.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/workspace/capabilities/experience/assets/facetime.applescript"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_native_calls.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/NativeCalls.test.tsx"
+  ],
+  "contract": "Actual bundled macOS AppleScript controls FaceTime through URL and Accessibility with configured caller identity. Durable bounded requests distinguish requested/unknown/unavailable from connection. User-supplied transcript handoff persists into an existing idle persistent conversation with idempotent provenance and no automatic agent reply. Native read-only tool shares service.",
+  "remaining_limits": [
+    "Native AppleScript compilation/execution, caller accessibility UI, device routing and real phone journey require macOS qualification",
+    "Automatic duplex audio/STT/TTS and paired remote desktop execution transport remain unimplemented continuation; this task does not meet complete native call parity",
+    "Supplied transcript is explicitly user-provided and is not automatically captured audio; agent continuation not started"
+  ],
+  "evidence": [
+    "/tmp/gideon-experience.07-checks-r1wzl9_k/evidence.json",
+    "/tmp/gideon-experience.07-checks-qjees_on/evidence.json"
+  ],
+  "qualification": {
+    "runtime_passed": 32,
+    "ui_passed": 3,
+    "production_lines": 247,
+    "test_lines": 249,
+    "continuation": "Parent-authorized bounded home-guard continuation; runtime then UI only. UI repaired requestJson calling convention; unchanged runtime not repeated."
+  },
+  "remaining_task": "experience.15 owns actual duplex audio/STT/TTS and paired native executor; no complete native call parity claim"
+}
