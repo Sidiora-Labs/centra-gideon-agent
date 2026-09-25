@@ -66,8 +66,8 @@ async def test_native_manifest_loads_registers_invokes_and_disables_real_provide
 @pytest.mark.asyncio
 async def test_static_tool_schemas_preserve_approval_and_do_not_create_storage(provider, tmp_path):
     definitions = await provider.list_tools()
-    assert len(definitions) == 26
-    assert len({tool.name for tool in definitions}) == 26
+    assert len(definitions) == 29
+    assert len({tool.name for tool in definitions}) == 29
     assert all(tool.provider == "gideon-experience" for tool in definitions)
     assert not (tmp_path / "capabilities/experience.sqlite3").exists()
     for tool in definitions:

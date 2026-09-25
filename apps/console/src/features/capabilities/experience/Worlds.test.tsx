@@ -1,0 +1,92 @@
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { afterAll, beforeAll, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import Worlds from './Worlds'
+let child: ChildProcess, home: string, base: string
+const root = resolve(process.cwd(), '../..')
+beforeAll(async () => {
+  home = await mkdtemp(resolve(tmpdir(), 'gideon-worlds-ui-'))
+  child = spawn('/tmp/gideon-runtime-venv/bin/python', ['checks/runtime/capabilities/experience/serve_worlds_ui.py', home], { cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime'), PATH: '/tmp/gideon-world-engine-deps/bun-linux-x64:' + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] })
+  base = await new Promise<string>((accept, reject) => {
+    let output = '', errors = ''
+    child.stdout!.on('data', data => { output += String(data); const match = output.match(/UI_URL=(http:\/\/[^\s]+)/); if (match) accept(match[1] + '/api/capabilities/experience') })
+    child.stderr!.on('data', data => { errors += String(data) })
+    child.on('exit', code => reject(new Error(`HTTP process exited ${code}: ${errors}`)))
+    child.on('error', reject)
+  })
+}, 30000)
+afterAll(async () => { const stopped = new Promise<void>(resolve => child?.once('exit', () => resolve())); child?.kill(); await stopped; await rm(home, { recursive: true, force: true }) })
+it('joins actual world and projects a chosen canonical source, preserving route selection', async () => {
+  location.hash = '/capabilities/experience?story=authored&session=saved&world=ui_garden'
+  render(<Worlds baseUrl={base} />)
+  expect(screen.getByLabelText('World name')).toHaveValue('ui_garden')
+  expect(screen.queryByTitle('Selected persistent world')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Join or create world' }))
+  await screen.findByText('Present: gideon')
+  expect(location.hash).toContain('story=authored')
+  expect(location.hash).toContain('session=saved')
+  expect(location.hash).toContain('world=ui_garden')
+  expect(screen.getByLabelText('health')).not.toBeChecked()
+  expect(screen.getByRole('button', { name: 'Project selected sources' })).toBeDisabled()
+  fireEvent.click(screen.getByLabelText('goals'))
+  await screen.findByRole('link', { name: 'Actual authored goal' })
+  fireEvent.click(screen.getByRole('button', { name: 'Project selected sources' }))
+  await screen.findByText('2 world changes recorded')
+  const objects = screen.getByRole('list', { name: 'World objects' })
+  expect(await within(objects).findByRole('button', { name: 'Actual authored goal' })).toBeVisible()
+  expect(within(objects).getByRole('link', { name: 'Open source' })).toHaveAttribute('href', '#/capabilities/identity')
+  expect(screen.getByTitle('Selected persistent world')).toHaveAttribute('src', base + '/world-engine/host/?world=ui_garden')
+  const state = await (await fetch(base + '/worlds/ui_garden')).json()
+  const entities = Object.values(state.state.entities) as { comp: { gideon_source: { kind: string } } }[]
+  expect(entities).toHaveLength(1)
+  expect(entities[0].comp.gideon_source.kind).toBe('goals')
+  expect(state.present.map((row: { id: string }) => row.id)).toContain('gideon')
+})
+it('edits actual objects and reports stale snapshots until explicitly refreshed', async () => {
+  location.hash = '/capabilities/experience?world=ui_edit'
+  render(<Worlds baseUrl={base} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Join or create world' }))
+  await screen.findByText('Present: gideon')
+  fireEvent.change(screen.getByLabelText('Object identifier'), { target: { value: 'desk' } })
+  fireEvent.change(screen.getByLabelText('X'), { target: { value: '3' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'spawn object' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'spawn object' }))
+  await screen.findByText('1 world changes recorded')
+  await waitFor(() => expect(within(screen.getByRole('list', { name: 'World objects' })).getByRole('button', { name: 'desk' })).toBeVisible())
+  let state = await (await fetch(base + '/worlds/ui_edit')).json()
+  expect(state.state.entities.desk.pos).toEqual([3, 0, 0])
+  const changed = await fetch(base + '/worlds/ui_edit/objects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'place', id: 'desk', position: [8, 0, 8], expected_seq: state.seq, request_id: 'other_editor' }) })
+  expect(changed.status).toBe(200)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'remove object' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'remove object' }))
+  await screen.findByRole('alert')
+  expect(screen.getByRole('alert')).toHaveTextContent('World changed')
+  state = await (await fetch(base + '/worlds/ui_edit')).json()
+  expect(state.state.entities.desk.pos).toEqual([8, 0, 8])
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh world' }))
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/8, 0, 8/)).toBeVisible())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'remove object' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'remove object' }))
+  await waitFor(() => expect(within(screen.getByRole('list', { name: 'World objects' })).queryByRole('button', { name: 'desk' })).not.toBeInTheDocument())
+  state = await (await fetch(base + '/worlds/ui_edit')).json()
+  expect(state.state.entities.desk).toBeUndefined()
+})
+it('does not silently create a missing world on read or accept invalid names', async () => {
+  location.hash = '/capabilities/experience?world=not_opened'
+  render(<Worlds baseUrl={base} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh world' }))
+  await screen.findByRole('alert')
+  expect(screen.getByRole('alert')).toHaveTextContent('World has not been opened')
+  expect(screen.queryByTitle('Selected persistent world')).not.toBeInTheDocument()
+  const absent = await fetch(base + '/worlds/not_opened')
+  expect(absent.status).toBe(404)
+  fireEvent.change(screen.getByLabelText('World name'), { target: { value: '../escape' } })
+  expect(screen.getByRole('button', { name: 'Join or create world' })).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('World name'), { target: { value: '' } })
+  expect(screen.getByRole('button', { name: 'Join or create world' })).toBeDisabled()
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+})

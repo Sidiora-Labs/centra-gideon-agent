@@ -10,12 +10,16 @@ from .ambient import AmbientDisplay
 from .avatar import AvatarStore
 from .native_calls import get_native_calls
 from .world_engine import WorldEngine
+from .worlds import get_worlds
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "world_get": ({"world": STRING}, False, "Read canonical world objects and live presence; never create a world."),
+    "world_project": ({"world": STRING, "body": {"type":"object","description":"Explicit kinds, expected_seq and request_id"}}, True, "Project selected real source metadata into an existing world with revision checking."),
+    "world_objects": ({"world": STRING, "body": {"type":"object","description":"operation spawn/place/remove, id, optional position, expected_seq, request_id"}}, True, "Edit actual existing world objects through native engine permissions."),
     "world_engine_get": ({}, False, "Read actual managed world engine readiness and version."),
     "world_engine_start": ({}, True, "Enable the operator-installed world engine through the existing app supervisor."),
     "world_engine_stop": ({}, True, "Disable the managed world engine through the existing app lifecycle."),
@@ -53,6 +57,7 @@ class ExperienceTools(ToolProvider):
         self._store = store
         self._jobs = None
         self._native_calls = None
+        self._worlds = None
 
     @property
     def store(self):
@@ -81,6 +86,14 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
+            if operation in ("world_get", "world_project", "world_objects"):
+                if self._worlds is None:
+                    self._worlds = get_worlds(self.store)
+                result = await self._worlds.call(args["world"])
+                if operation != "world_get":
+                    await self._worlds.open(args["world"], {})
+                    result = await self._worlds.mutate(args["world"], operation.removeprefix("world_"), args["body"])
+                return ToolResult(success=True, output=json.dumps(result))
             if operation.startswith("world_engine_"):
                 engine = WorldEngine(self.store)
                 result = await engine.status() if operation == "world_engine_get" else await engine.control(operation.removeprefix("world_engine_"), {})

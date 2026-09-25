@@ -1,6 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { worldAPI } from './world_api.js'
 const data = process.env.GIDEON_APP_DATA_DIR
 const secret = process.env.GIDEON_APP_SECRET
 if (!data || !secret) throw new Error('World engine requires app storage and proxy credentials')
@@ -14,7 +15,8 @@ for (const kind of ['worlds', 'video']) {
   if (result.exitCode !== 0 || result.stdout.toString().trim() !== pins[kind]) throw new Error('Installed engine dependency revision mismatch')
 }
 for (const directory of ['worlds', 'assets', 'relay']) mkdirSync(join(data, directory), { recursive: true })
-Object.assign(process.env, { WORLDS_DIR: join(data, 'worlds'), OPT_DIR: join(data, 'assets'), RELAY_STATE_DIR: join(data, 'relay'), EIDOVERSE_DIR: config.video, SKIP_OPT_SWEEP: '1', JOIN_TOKEN: '' })
+Object.assign(process.env, { WORLDS_DIR: join(data, 'worlds'), OPT_DIR: join(data, 'assets'), RELAY_STATE_DIR: join(data, 'relay'), EIDOVERSE_DIR: config.video, SKIP_OPT_SWEEP: '1', JOIN_TOKEN: '', WORLD_ADMIN: 'gideon' })
+const worldHandler = await worldAPI(config.worlds, data)
 const originalServe = Bun.serve.bind(Bun)
 Bun.serve = options => originalServe({ ...options, hostname: '127.0.0.1', async fetch(request, server) {
   const url = new URL(request.url)
@@ -26,6 +28,7 @@ Bun.serve = options => originalServe({ ...options, hostname: '127.0.0.1', async 
   const hash = createHash('sha256').update(bytes).digest('hex')
   const expected = createHmac('sha256', secret).update(`${timestamp}:${request.method}:${url.pathname}${url.search}:${hash}`).digest()
   if (!timingSafeEqual(expected, Buffer.from(mac, 'hex'))) return new Response('Proxy admission rejected', { status: 403 })
+  if (url.pathname.startsWith('/gideon/worlds/')) return worldHandler(request)
   return options.fetch(request, server)
 } })
 await import(join(config.worlds, 'server', 'server.ts'))

@@ -59,6 +59,8 @@ def register(app):
     register_native_calls(app, app[STORE])
     from gideon.workspace.capabilities.experience.world_engine_http import register_world_engine
     register_world_engine(app, app[STORE])
+    from gideon.workspace.capabilities.experience.worlds_http import register_worlds
+    register_worlds(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource
         app.router.add_get(path, handle)

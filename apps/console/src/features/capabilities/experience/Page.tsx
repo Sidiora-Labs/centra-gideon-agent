@@ -6,6 +6,7 @@ import AmbientDisplay from './AmbientDisplay'
 import AvatarPanel from './AvatarPanel'
 import NativeCalls from './NativeCalls'
 import WorldEngine from './WorldEngine'
+import Worlds from './Worlds'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 
 type Choice = { id: string; label: string; target: string }
@@ -48,7 +49,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     }).catch(cause => { if (active) setError(String(cause)) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [baseUrl, route])
-  const navigate = (kind: string, id: string) => { location.hash = `/capabilities/experience?${kind}=${encodeURIComponent(id)}` }
+  const navigate = (kind: string, id: string) => { const query = selected(); query.delete('story'); query.delete('session'); query.set(kind, id); location.hash = '/capabilities/experience?' + query }
   const run = async (action: () => Promise<void>) => {
     if (busy) return
     setBusy(true); setError('')
@@ -73,7 +74,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
   return <main className="experience-page p-4 max-w-4xl mx-auto space-y-4" aria-label="Interactive stories">
     <h1>Interactive stories</h1>
     <Button onClick={() => { location.hash = '/capabilities/experience?ambient=1' }}>Open ambient display</Button>
-    <WorldEngine baseUrl={baseUrl} /><NativeCalls baseUrl={baseUrl} /><AvatarPanel baseUrl={baseUrl} />
+    <WorldEngine baseUrl={baseUrl} /><Worlds baseUrl={baseUrl} /><NativeCalls baseUrl={baseUrl} /><AvatarPanel baseUrl={baseUrl} />
     <p>Author connected scenes and play choices into different endings.</p>
     {loading && <p role="status">Loading stories…</p>}
     {error && <p role="alert">{error}</p>}
