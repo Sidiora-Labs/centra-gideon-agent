@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from gideon.extensions.apps.background import BackgroundWorker
 
+from .cleanup import CleanupService
 from .datasets import DatasetStore
 from .training import DiffusersTrainer
 from .images import ImageService
@@ -35,6 +36,7 @@ class MediaJobs:
     def __init__(self, path, sketches, images=None, training_allowed=True):
         self.path, self.sketches = Path(path), sketches
         self.images = images or ImageService(sketches.artifacts)
+        self.cleanup = CleanupService(self.images)
         self.datasets = DatasetStore(self.path.parent / 'datasets.sqlite3', self.images)
         self.trainer = DiffusersTrainer(sketches.artifacts.root.parent, self.datasets, allowed=training_allowed)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +74,10 @@ class MediaJobs:
         if not isinstance(body, dict):
             raise SketchError('Expected an object')
         image_request = None
-        if body.get('operation') == 'lora_train':
+        if body.get('operation') == 'image_cleanup':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.cleanup.prepare(body['input'])
+        elif body.get('operation') == 'lora_train':
             fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
             image_request = self.trainer.prepare(body['input'])
         elif body.get('operation') == 'image_generate':
@@ -197,7 +202,9 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            if job['operation'] == 'lora_train':
+            if job['operation'] == 'image_cleanup':
+                result = self.jobs.cleanup.execute(job['input'], job['id'])
+            elif job['operation'] == 'lora_train':
                 result = self.jobs.trainer.execute(job['input'], job['id'], lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested', lambda pid: self.jobs.attach_child(job['id'], pid))
             else:
                 result = asyncio.run(self.jobs.images.execute(job['input'], job['id'])) if job['operation'] == 'image_generate' else self.jobs.sketches.export(job['sketch_id'], {'revision': job['revision']})

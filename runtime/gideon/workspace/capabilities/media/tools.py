@@ -38,6 +38,9 @@ CATALOG.update({
     "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
 })
 
+CLEANUP_INPUT = {"type": "object", "additionalProperties": False, "required": ["source_artifact_id", "source_version", "operations"], "properties": {"source_artifact_id": STRING, "source_version": INTEGER, "operations": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object", "required": ["op"], "properties": {"op": {"enum": ["crop", "resize", "rotate", "flip", "brightness", "contrast", "sharpen", "solid_background"]}}}}}}
+CATALOG["media_cleanup_submit"] = ("Queue ordered local image transforms preserving the pinned original; solid-background cleanup is deterministic edge color removal, not semantic segmentation.", ("request_id", "input"), {"request_id": STRING, "input": CLEANUP_INPUT}, True)
+
 DATASET_FIELDS = {"title": STRING, "base_model": STRING, "request_id": STRING, "revision": {"type": "integer", "minimum": 0}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object", "additionalProperties": False, "required": ["artifact_id", "version", "caption"], "properties": {"artifact_id": STRING, "version": INTEGER, "caption": {"type": "string", "maxLength": 2000}}}}}
 TRAIN_INPUT = {"type": "object", "additionalProperties": False, "required": ["dataset_id", "dataset_revision", "steps", "rank", "learning_rate", "seed"], "properties": {"dataset_id": STRING, "dataset_revision": INTEGER, "steps": INTEGER, "rank": INTEGER, "learning_rate": {"type": "number"}, "seed": {"type": "integer", "minimum": 0}}}
 CATALOG.update({
@@ -113,6 +116,8 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_cleanup_submit':
+            return self.jobs.submit(dict(operation='image_cleanup', **args))
         if name == 'media_datasets_list':
             return self.jobs.datasets.list()
         if name == 'media_datasets_get':

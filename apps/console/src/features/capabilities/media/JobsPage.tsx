@@ -8,7 +8,7 @@ async function api(path: string, body?: object) {
 }
 export function JobCard({ job, act, busy }: { job: MediaJob; act: (job: MediaJob, action: string) => void; busy: boolean }) {
   return <article className="rounded border p-3 space-y-2">
-    <h2>{job.operation === 'lora_train' ? 'LoRA training' : job.operation === 'image_generate' ? 'Image generation: ' + job.input?.prompt : <>Sketch {job.sketch_id} · revision {job.revision}</>}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
+    <h2>{job.operation === 'image_cleanup' ? 'Image cleanup' : job.operation === 'lora_train' ? 'LoRA training' : job.operation === 'image_generate' ? 'Image generation: ' + job.input?.prompt : <>Sketch {job.sketch_id} · revision {job.revision}</>}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
     {job.error && <p role="alert">{job.error}</p>}
     {job.result?.artifact_id && <a href={'/api/artifacts/' + job.result.artifact_id + '/raw?version=' + job.result.version}>Open rendered PNG</a>}
     {job.result?.adapter_id && <p>Trained adapter: {job.result.adapter_id}</p>}

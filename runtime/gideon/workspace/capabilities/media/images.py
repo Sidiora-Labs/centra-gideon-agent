@@ -178,6 +178,8 @@ class ImageService:
             raise SketchError('Generated image cannot be decoded') from exc
         slug = f'image-job-{job_id}'
         metadata = dict(media_job_id=job_id, generation_request_sha256=hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(), model_selection=request['selection'])
+        if request.get('engine') == 'pillow':
+            metadata = dict(media_job_id=job_id, cleanup_request_sha256=metadata['generation_request_sha256'], engine='Pillow')
         metadata.update({key: request[key] for key in ('source_artifact_id', 'source_version', 'mask_artifact_id', 'mask_version') if key in request})
         existing = self.artifacts.get(slug)
         if existing:
