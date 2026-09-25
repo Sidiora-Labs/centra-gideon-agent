@@ -4,7 +4,7 @@
   "mode": "QUALIFY",
   "owner_lane": "platform",
   "status": "locally_qualified_partial",
-  "scope": "Checksummed bounded legacy snapshot preview and transactional canonical people migration",
+  "scope": "Checksummed bounded legacy snapshot preview with transactional canonical people, memory and link migration",
   "requires": [
     "platform.24"
   ],
@@ -29,21 +29,24 @@
     "A bounded gzip tar snapshot is inspected without filesystem extraction and requires one safe root, regular files only and a complete SHA-256 manifest",
     "Preview and commit fail closed for changed bytes, unsafe paths, links, unknown manifest shapes, unsupported collection versions, fields, tombstones and domains",
     "Reviewed people records map into the canonical PeopleStore in one SQLite transaction with a durable replay-safe receipt",
-    "Authenticated HTTP and console file selection expose verified preview, explicit supported-domain coverage, reviewed commit and persisted receipts"
+      "Authenticated HTTP and console file selection expose verified preview, explicit supported-domain coverage, reviewed commit and persisted receipts",
+      "Version-1 memory and link records retain stable conflict IDs, source identity, timestamps, tags, URLs and structured provenance in canonical KnowledgeStore items"
   ],
   "limits": [
-    "This sub-slice supports only version-1 people collection records; every other archive domain, relational dump and future schema is rejected.",
+    "This sub-slice supports only version-1 people, memories and links collection records; every other archive domain, relational dump and future schema is rejected.",
+    "People and knowledge archive families require separate imports so each authoritative database and its receipt commit atomically.",
     "Shared durability inventory and final fresh-home restore integration remain owned by the root integration slice.",
-    "Complete original domain breadth, media/reference restoration and full archive restore proof remain pending."
+    "Complete original domain breadth, binary media restoration and full archive restore proof remain pending."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
   "verification": {
-    "evidence": "/tmp/gideon-platform.25-checks-pdj11ix3/evidence.json",
+    "previous_evidence": "/tmp/gideon-platform.25-checks-pdj11ix3/evidence.json",
+    "evidence": "/tmp/gideon-platform.25-checks-4gqtfrl3/evidence.json",
     "compile_exit": 0,
-    "runtime_passed": 24,
-    "ui_passed": 2,
-    "production_lines": 222,
-    "test_lines": 257,
-    "repair_cycles": 2
+    "runtime_passed": 29,
+    "ui_passed": 3,
+    "production_lines": 306,
+    "test_lines": 356,
+    "repair_cycles": 0
   }
 }

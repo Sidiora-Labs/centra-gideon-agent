@@ -44,6 +44,16 @@ function fixture(extra: Record<string, Buffer> = {}) {
   return tarFile({ 'snapshot-ui/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-ui/data/${name}`, value])) })
 }
 
+function knowledgeFixture() {
+  const id = '88888888-8888-4888-8888-888888888888'
+  const data: Record<string, Buffer> = {
+    'brain/memories/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'memories', updatedAt: '2026-09-12T00:00:00Z', config: {} })),
+    [`brain/memories/${id}/index.json`]: Buffer.from(JSON.stringify({ id, title: 'UI migrated memory', content: 'Canonical knowledge content', tags: ['migration'], source: 'archive', sourceRef: 'memory.json', createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-02-01T00:00:00Z' })),
+  }
+  const manifest = { generatedAt: '2026-09-12T00:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
+  return tarFile({ 'snapshot-memory/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-memory/data/${name}`, value])) })
+}
+
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
@@ -70,8 +80,8 @@ it('previews checksummed people then commits through the actual API and reloads 
   fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
   await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
-  expect(await screen.findByText(/1 people records verified/)).toBeVisible()
-  expect(screen.getByText('UI Archive Person')).toBeVisible()
+  expect(await screen.findByText(/1 records verified/)).toBeVisible()
+  expect(screen.getByText('people: UI Archive Person')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 people ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
@@ -90,4 +100,19 @@ it('refuses an archive containing an unsupported domain without showing an impor
   fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('unsupported domains: media')
   expect(screen.queryByRole('button', { name: 'Import reviewed records' })).not.toBeInTheDocument()
+})
+
+it('imports a checksummed memory into canonical knowledge and reports its durable receipt', async () => {
+  render(<Migration baseUrl={baseUrl} />)
+  const file = new File([knowledgeFixture()], 'memory.tar.gz', { type: 'application/gzip' })
+  fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
+  expect(await screen.findByText('Domains: memories')).toBeVisible()
+  expect(screen.getByText('memories: UI migrated memory')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
+  expect(await screen.findByText(/1 memories ·/)).toBeVisible()
+  const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
+  expect(state.supported_domains).toEqual(['people', 'memories', 'links'])
+  expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.memories === 1)).toBe(true)
 })
