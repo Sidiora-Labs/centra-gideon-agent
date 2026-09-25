@@ -39,6 +39,8 @@ class ImageGenModel:
     active: bool = False
     supported_controls: dict[str, ImageControl] = field(default_factory=dict)
     supports_mask: bool = False
+    supports_lora: bool = False
+    lora_base_model: str = ""
 
 
 @dataclass

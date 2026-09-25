@@ -1,0 +1,46 @@
+{
+  "id": "media.07",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "64afe37c",
+  "contract": "Installed adapters remain in canonical home/models/loras. Read-only catalog validates bounded safetensors header/descriptors/payload layout and named LoRA tensor presence, hashes exact bytes, exposes explicit declared base-model/trigger metadata. Metadata match/mismatch/unknown never implies loader or inference effect. API/tools/UI reject caller roots and missing support; image jobs pin adapter ID/digest/scale and stage exact hash-verified copies in owned execution temp directories only when selected model advertises LoRA support and explicit base metadata matches.",
+  "acceptance": "Genuine numeric tensor containers exercise SHA256/header/offset/layout validation, symlink and traversal rejection, metadata states, exact staged-byte identity with original unchanged, changed-file conflict, malformed selection rejection, opt-in SDK compatibility, actual HTTP/tool discovery and picker support states. No trained-weight efficacy or actual provider application claimed.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/loras.py",
+    "runtime/gideon/workspace/capabilities/media/images.py",
+    "runtime/gideon/workspace/capabilities/media/images_http.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/integrations/image_gen/provider.py",
+    "apps/console/src/features/capabilities/media/LoraPicker.tsx",
+    "apps/console/src/features/capabilities/media/ImagePage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_loras.py",
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/LoraPicker.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_loras.py",
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/LoraPicker.test.tsx"
+  ],
+  "remaining_limits": [
+    "Tensor fixture tests prove structural containers and byte identity, not trained LoRA quality, loader compatibility or image effect",
+    "No installed provider advertises LoRA application locally; real inference remains externally unavailable",
+    "Discovery reads at most32files with512MiB per-file bound and cumulative stop; truncated state explicit",
+    "Linux O_NOFOLLOW descriptor protection qualified; other platforms not qualified",
+    "Remote adapter download/install is not implemented by this discovery task"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.07",
+  "external_status": "unavailable",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.07-checks-ipc_v5vo/evidence.json",
+  "production_lines": 197,
+  "test_lines": 248,
+  "ratio": 1.2588832487309645,
+  "repair_cycles": 1
+}
