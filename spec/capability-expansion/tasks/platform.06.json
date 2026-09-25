@@ -1,0 +1,55 @@
+{
+  "task": "platform.06",
+  "status": "locally_qualified_external_pending",
+  "schema_version": 1,
+  "contract": "An explicitly armed private inference listener invokes an existing direct ModelProvider with tools disabled. It re-resolves CredentialStore peer references on every request, enforces bounded non-streaming admission, cancels active requests during stop, records canonical successful usage and bounded local failure outcomes. Lifecycle controls own the listener, not GPU installation or upstream service startup.",
+  "source_evidence": [
+    "runtime/gideon/integrations/local_models/provider.py:1 management and inference are explicitly separate axes",
+    "runtime/gideon/workspace/capabilities/platform/connections.py existing connection endpoint/credential references from platform.03",
+    "runtime/gideon/interfaces/dashboard/handlers/providers.py existing model catalog operations"
+  ],
+  "qualification": {
+    "runtime_tests": 16,
+    "ui_tests": 2,
+    "production_lines": 213,
+    "test_lines": 312,
+    "repair_cycles": 0,
+    "limitations": [
+      "Successful inference and concurrency/cancellation against actual model service not exercised; unavailable provider failure is not success proof.",
+      "Two distinct physical hosts and admitted GPU startup/install recipe remain unavailable; upstream process lifecycle is not implemented."
+    ]
+  },
+  "acceptance": [
+    "Two actual local listeners isolate peer keys and stop independently; configured model metadata explicitly not-probed.",
+    "Credential rotation/revocation takes immediate effect; listener arm survives service cleanup while explicit disarm persists.",
+    "Stale/invalid configuration, bind collision, model switch, tools and streaming requests fail honestly without claimed inference.",
+    "Actual missing provider failure records unknown usage and no prompt/secret; authenticated dashboard and console start/stop real listener; native reads same state."
+  ],
+  "base_revision": "dea8fc90",
+  "external_acceptance_pending": [
+    "Successful inference and concurrency/cancellation against actual model service not exercised; unavailable provider failure is not success proof.",
+    "Two distinct physical hosts and admitted GPU startup/install recipe remain unavailable; upstream process lifecycle is not implemented."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/inference_host.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_inference_host.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/InferenceHost.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_inference_host.py",
+    "checks/runtime/capabilities/platform/inference_host_ui_server.py",
+    "apps/console/src/features/capabilities/platform/InferenceHost.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_inference_host.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/InferenceHost.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.06-checks-tryot0xk/evidence.json"
+}

@@ -15,6 +15,7 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect, request_phase
 
 _SCHEMAS = {
+    "platform_inference_host": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_personal_scorecard": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_usage_accounting": {"type": "object", "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 365}}, "additionalProperties": False},
     "platform_dashboard_compositions": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -38,6 +39,7 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_inference_host": "Inspect actual private inference listener admission and retained request outcomes.",
     "platform_personal_scorecard": "Read descriptive source-linked goal and wellbeing scorecards; no causal or clinical inference.",
     "platform_usage_accounting": "Read canonical per-turn usage grouped by recorded instance and credential bindings.",
     "platform_dashboard_compositions": "Read canonical dashboard core compositions and selected view.",
@@ -74,7 +76,10 @@ class PlatformTools(ToolProvider):
             return ToolResult(success=False, error="Unknown platform tool")
         try:
             validate(arguments, _SCHEMAS[tool_name])
-            if tool_name == "platform_personal_scorecard":
+            if tool_name == "platform_inference_host":
+                from gideon.workspace.capabilities.platform.inference_host import current
+                result = current().view()
+            elif tool_name == "platform_personal_scorecard":
                 from gideon.workspace.capabilities.platform.insights import view
                 result = view()
             elif tool_name == "platform_usage_accounting":
