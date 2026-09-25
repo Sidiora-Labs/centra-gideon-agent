@@ -1,0 +1,15 @@
+{
+  "name": "gideon-creative",
+  "version": "1.0.0",
+  "displayName": "Creative Tools",
+  "description": "Revisioned ingredient catalog and artifact reference moodboards.",
+  "icon": "Palette",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "creative"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.creative.tools:create_provider",
+    "capabilities": ["creative"]
+  },
+  "native": true
+}
