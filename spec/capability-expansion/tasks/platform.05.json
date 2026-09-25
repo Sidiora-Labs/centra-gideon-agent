@@ -1,0 +1,49 @@
+{
+  "task": "platform.05",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "6b15f6ab",
+  "contract": "Source-attributed imported observations with model/corpus/metric/date/methodology and durable CRUD; separate actual judge benchmark history/table projection. Unknown served identity and usage in legacy tables remain unknown. No routing changes.",
+  "acceptance": [
+    "Persist two attributed model observations through authenticated HTTP, compare only matching corpus and metric identities, reload and remove without changing existing eval artifacts.",
+    "Read actual judge_bench.write_bench_artifacts output with historical run selection and failure/unknown metrics intact.",
+    "Reject invalid provenance and untrusted source URLs; corrupt import store fails closed.",
+    "Console adds compares and removes attributed observations over real HTTP; native platform_model_comparisons returns exact persisted records."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/comparisons.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_comparisons.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Comparisons.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_comparisons.py",
+    "checks/runtime/capabilities/platform/comparisons_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Comparisons.test.tsx",
+    "checks/runtime/capabilities/platform/ui_server.py",
+    "apps/console/src/features/capabilities/platform/Page.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_comparisons.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Comparisons.test.tsx",
+    "apps/console/src/features/capabilities/platform/Page.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "external_pending": [
+    "Same-corpus live two-model generation/served IDs/timing/usage/cancel proof requires actual provider execution credentials. Existing evaluator remains authoritative; imported observations are never represented as locally measured runs."
+  ],
+  "evidence": {
+    "path": "/tmp/gideon-platform.05-checks-jnzcy_ew/evidence.json",
+    "runtime_tests": 15,
+    "ui_tests": 7,
+    "production_lines": 135,
+    "test_lines": 241,
+    "gate_runs": 2,
+    "repairs": 1
+  }
+}
