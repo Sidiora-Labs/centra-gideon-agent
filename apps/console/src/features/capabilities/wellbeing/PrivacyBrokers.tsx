@@ -7,6 +7,7 @@ import { Field, TextInput } from '../../../shared/ui/forms'
 type Broker = { id: string; name: string; website: string; optout_url: string; source: string; enabled: boolean }
 type Case = { id: string; revision: number; subject_id: string; broker_id: string; state: string; evidence_basis: string; evidence: string; reason: string; next_recheck_at: string; allowed_transitions: string[]; broker?: Broker }
 type Event = { revision: number; operation: string; state: string; at: string; evidence_basis?: string }
+type SpokeoPlan = { method: string; form_url: string; disclosed_fields: string[]; approval_phrase: string; submission_mode: 'disabled' | 'contract' | 'live'; live_submission_enabled: boolean }
 const base = '/api/capabilities/wellbeing/privacy'
 
 export default function PrivacyBrokers({ subject }: { subject: string }) {
@@ -15,6 +16,9 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
   const [history, setHistory] = useState<Case[]>([]), [events, setEvents] = useState<Event[]>([])
   const [name, setName] = useState(''), [website, setWebsite] = useState(''), [optoutUrl, setOptoutUrl] = useState(''), [source, setSource] = useState('owner supplied')
   const [brokerId, setBrokerId] = useState(''), [outcome, setOutcome] = useState('found'), [evidence, setEvidence] = useState(''), [reason, setReason] = useState('')
+  const [firstName, setFirstName] = useState(''), [lastName, setLastName] = useState(''), [city, setCity] = useState(''), [region, setRegion] = useState('')
+  const [profileUrl, setProfileUrl] = useState(''), [email, setEmail] = useState(''), [spokeoPlan, setSpokeoPlan] = useState<SpokeoPlan | null>(null)
+  const [approved, setApproved] = useState(false), [providerStatus, setProviderStatus] = useState('')
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [error, setError] = useState(''), [generation, setGeneration] = useState(0)
   const selected = cases.find(row => row.id === query.broker_case)
 
@@ -83,6 +87,31 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
     void mutate(() => requestJson(`${base}/broker-cases/${selected.id}/recheck`, 'POST', { request_id: crypto.randomUUID(), revision: selected.revision }))
   }
 
+  function spokeo(action: 'scan' | 'prepare' | 'submit' | 'verify') {
+    if (!selected) return
+    void mutate(async () => {
+      const identity = { first_name: firstName, last_name: lastName, city, state: region }
+      const optout = { profile_url: profileUrl, email }
+      const payload = action === 'scan' || action === 'verify' ? identity : optout
+      const response = await requestJson<Case | { case: Case; plan: SpokeoPlan }>(
+        `${base}/broker-cases/${selected.id}/providers/spokeo/${action}`, 'POST',
+        { request_id: crypto.randomUUID(), revision: selected.revision, ...payload,
+          ...(action === 'submit' ? { approval: spokeoPlan?.approval_phrase } : {}) })
+      if (action === 'prepare' && 'plan' in response) {
+        setSpokeoPlan(response.plan)
+        setApproved(false)
+        setProviderStatus(response.plan.submission_mode === 'contract'
+          ? 'Contract server is ready for an owner-approved submission. This is not live-broker readiness; preparation sent no opt-out request.'
+          : response.plan.submission_mode === 'live'
+            ? 'Live provider submission is enabled and ready for separate owner approval. Preparation sent no opt-out request.'
+            : 'Prepared without submitting. Live submission is disabled on this runtime.')
+      } else {
+        if (action === 'submit') { setSpokeoPlan(null); setApproved(false) }
+        setProviderStatus(action === 'scan' ? 'Provider scan recorded.' : action === 'submit' ? 'Provider acknowledged the approved submission.' : 'Provider verification recorded.')
+      }
+    })
+  }
+
   return <section aria-label="Privacy broker cases" className="space-y-5">
     <h2 data-type="title-m">Privacy broker cases</h2>
     <p>Track owner-observed exposure and opt-out work without sending requests. Owner reports stay labelled user-attested. Confirmed removal is reserved for an integrated verifier re-scan.</p>
@@ -107,6 +136,32 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
       <p>State: {selected.state} · evidence: {selected.evidence_basis} · revision {selected.revision}</p>
       {selected.evidence && <p>Recorded evidence: {selected.evidence}</p>}
       <p>Next re-check: {selected.next_recheck_at}</p>
+      {selected.broker?.name.trim().toLowerCase() === 'spokeo' && <section aria-label="Spokeo provider controls" className="space-y-3">
+        <h4>Spokeo provider</h4>
+        <p>Each action uses the current provider protocol and writes its durable outcome to this case. No action runs automatically.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Spokeo first name"><TextInput value={firstName} onChange={setFirstName} required /></Field>
+          <Field label="Spokeo last name"><TextInput value={lastName} onChange={setLastName} required /></Field>
+          <Field label="Spokeo city"><TextInput value={city} onChange={setCity} /></Field>
+          <Field label="Spokeo state"><TextInput value={region} onChange={setRegion} required /></Field>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={busy || !firstName || !lastName || !region} onClick={() => spokeo('scan')}>Scan Spokeo</Button>
+          <Button variant="secondary" disabled={busy || !firstName || !lastName || !region || !['submitted', 'verification_pending', 'awaiting_processing'].includes(selected.state)} onClick={() => spokeo('verify')}>Verify removal</Button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Spokeo profile URL"><TextInput value={profileUrl} onChange={setProfileUrl} required /></Field>
+          <Field label="Spokeo contact email"><TextInput value={email} onChange={setEmail} required /></Field>
+        </div>
+        <Button variant="secondary" disabled={busy || !profileUrl || !email || !['found', 'indirect_exposure'].includes(selected.state)} onClick={() => spokeo('prepare')}>Prepare opt-out</Button>
+        {spokeoPlan && <div role="status" className="space-y-2">
+          <p>{providerStatus}</p>
+          <p>Submission discloses: {spokeoPlan.disclosed_fields.join(', ')}.</p>
+          <label><input type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I approve this Spokeo opt-out submission</label>
+          <Button disabled={busy || !approved || !spokeoPlan.live_submission_enabled} onClick={() => spokeo('submit')}>Submit approved opt-out</Button>
+        </div>}
+        {!spokeoPlan && providerStatus && <p role="status">{providerStatus}</p>}
+      </section>}
       <form onSubmit={observe} className="space-y-3"><label>Owner observation<select aria-label="Owner observation" value={outcome} onChange={event => setOutcome(event.target.value)}>{['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => <option key={value}>{value}</option>)}</select></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy}>Record user-attested observation</Button></form>
       <Field label="Transition reason"><TextInput value={reason} onChange={setReason} /></Field>
       <div className="flex flex-wrap gap-2">{selected.allowed_transitions.map(state => <Button key={state} variant="secondary" disabled={busy} onClick={() => transition(state)}>Move to {state}</Button>)}<Button variant="secondary" disabled={busy} onClick={recheck}>Request re-check</Button></div>
