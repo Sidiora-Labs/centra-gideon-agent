@@ -22,7 +22,7 @@
   "limits": [
     "Root owns navigation, agent-tool registration, durability enrollment and authenticated integrated browser qualification",
     "Index currently shows the first 100 records; API supports offset/limit pagination. Integrated browser/auth/tool/durability qualification belongs to root.",
-    "PortOS URL fetching, tablature parsing, autoscroll and playback are not claimed; source_url and typed related-record links are provenance metadata, scroll duration is retained, and notation remains preserved text.",
+    "URL fetching, tablature parsing, autoscroll and playback are not claimed; source_url and typed related-record links are provenance metadata, scroll duration is retained, and notation remains preserved text.",
     "Legacy archive parsing, binary hash/size/path/MIME validation and attachment-byte materialization belong to platform.25; this task supplies the canonical repertoire target, exact-version availability projection and transactional import/rollback seam."
   ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.01",

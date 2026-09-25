@@ -23,7 +23,7 @@
     "primary": "https://moltworld.app/skill.md",
     "retrieved_at": "2026-09-25",
     "observed": "HTTP 200 text/markdown, 14544 bytes; declares https://moltworld.fly.dev, Bearer API key, /api/v1/agent, /api/v1/observe, /api/v1/action, 202 queued tick receipts, one action per tick and 500ms request rate",
-    "legacy_donor": "/root/private-neo-v1/tmp/PortOS/server/integrations/moltworld/api.js uses incompatible moltworld.io agentId/body endpoints and was not copied"
+    "compatibility": "Legacy moltworld.io agentId/body endpoints are incompatible with the current supported API"
   },
   "dependencies": {
     "experience.12": "Ordering dependency only; the current Moltworld protocol has no game compiler dependency",

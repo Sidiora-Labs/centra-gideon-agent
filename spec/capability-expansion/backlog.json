@@ -486,7 +486,7 @@
       "id": "knowledge.12",
       "title": "RSVP reader",
       "owner_lane": "knowledge",
-      "status": "pending",
+      "status": "done",
       "wave": 12,
       "requires": [
         "knowledge.11"
@@ -502,8 +502,8 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify knowledge.12",
       "acceptance": "Complete the rsvp reader workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "locally_qualified",
+      "evidence_record": "spec/capability-expansion/tasks/knowledge.12.json"
     },
     {
       "id": "identity.01",
@@ -1078,7 +1078,7 @@
       "id": "communications.04",
       "title": "Account-bound email and message mirrors",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 4,
       "requires": [
         "communications.03"
@@ -1094,14 +1094,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.04",
       "acceptance": "Complete the account-bound email and message mirrors workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.04.json"
     },
     {
       "id": "communications.05",
       "title": "iMessage and Signal Desktop imports",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 5,
       "requires": [
         "communications.04"
@@ -1117,14 +1117,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.05",
       "acceptance": "Complete the imessage and signal desktop imports workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.05.json"
     },
     {
       "id": "communications.06",
       "title": "Beeper conversations attachments and durable outbox",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 6,
       "requires": [
         "communications.05"
@@ -1140,14 +1140,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.06",
       "acceptance": "Complete the beeper conversations attachments and durable outbox workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.06.json"
     },
     {
       "id": "communications.07",
       "title": "Telegram operational commands and notifications",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 7,
       "requires": [
         "communications.06"
@@ -1163,14 +1163,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.07",
       "acceptance": "Complete the telegram operational commands and notifications workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.07.json"
     },
     {
       "id": "communications.08",
       "title": "External calendar mirroring and daily review",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 8,
       "requires": [
         "communications.07"
@@ -1186,14 +1186,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.08",
       "acceptance": "Complete the external calendar mirroring and daily review workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.08.json"
     },
     {
       "id": "communications.09",
       "title": "Social account registry",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 9,
       "requires": [
         "communications.08"
@@ -1209,14 +1209,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.09",
       "acceptance": "Complete the social account registry workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.09.json"
     },
     {
       "id": "communications.10",
       "title": "X reading and reviewed compose handoff",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 10,
       "requires": [
         "communications.09"
@@ -1232,7 +1232,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.10",
       "acceptance": "Complete the x reading and reviewed compose handoff workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.10.json"
     },
     {
@@ -1262,7 +1262,7 @@
       "id": "communications.12",
       "title": "Agent platform account lifecycle",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 12,
       "requires": [
         "communications.11"
@@ -1278,14 +1278,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.12",
       "acceptance": "Complete the agent platform account lifecycle workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.12.json"
     },
     {
       "id": "communications.13",
       "title": "Human activity timeline",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 13,
       "requires": [
         "communications.12"
@@ -1301,7 +1301,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.13",
       "acceptance": "Complete the human activity timeline workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.13.json"
     },
     {
@@ -1695,7 +1695,7 @@
       "id": "creative.03",
       "title": "Universe canon and visual identity",
       "owner_lane": "creative",
-      "status": "in_progress",
+      "status": "done",
       "wave": 3,
       "requires": [
         "creative.02"
@@ -1711,14 +1711,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.03",
       "acceptance": "Complete the universe canon and visual identity workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/creative.03.json"
     },
     {
       "id": "creative.04",
       "title": "Universe relationship graph and merge",
       "owner_lane": "creative",
-      "status": "in_progress",
+      "status": "done",
       "wave": 4,
       "requires": [
         "creative.03"
@@ -1734,14 +1734,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.04",
       "acceptance": "Complete the universe relationship graph and merge workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/creative.04.json"
     },
     {
       "id": "creative.05",
       "title": "Literary authors and voice configuration",
       "owner_lane": "creative",
-      "status": "in_progress",
+      "status": "done",
       "wave": 5,
       "requires": [
         "creative.04"
@@ -1757,14 +1757,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.05",
       "acceptance": "Complete the literary authors and voice configuration workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/creative.05.json"
     },
     {
       "id": "creative.06",
       "title": "Writing works exercises and versioned drafts",
       "owner_lane": "creative",
-      "status": "in_progress",
+      "status": "done",
       "wave": 6,
       "requires": [
         "creative.05"
@@ -1780,7 +1780,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.06",
       "acceptance": "Complete the writing works exercises and versioned drafts workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/creative.06.json"
     },
     {
@@ -1902,7 +1902,7 @@
       "id": "creative.12",
       "title": "Editorial checks and anchored reversible repairs",
       "owner_lane": "creative",
-      "status": "pending",
+      "status": "in_progress",
       "wave": 13,
       "requires": [
         "creative.19"
@@ -1918,8 +1918,8 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.12",
       "acceptance": "Complete the editorial checks and anchored reversible repairs workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "in_progress",
+      "evidence_record": "spec/capability-expansion/tasks/creative.12.json"
     },
     {
       "id": "creative.13",
@@ -1994,7 +1994,7 @@
       "id": "creative.16",
       "title": "Recurring commissions and feedback",
       "owner_lane": "creative",
-      "status": "pending",
+      "status": "in_progress",
       "wave": 16,
       "requires": [
         "creative.15"
@@ -2010,8 +2010,8 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify creative.16",
       "acceptance": "Complete the recurring commissions and feedback workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "in_progress",
+      "evidence_record": "spec/capability-expansion/tasks/creative.16.json"
     },
     {
       "id": "music.01",
@@ -2358,7 +2358,7 @@
       "id": "experience.06",
       "title": "Animated avatar driven by actual state",
       "owner_lane": "experience",
-      "status": "in_progress",
+      "status": "done",
       "wave": 6,
       "requires": [
         "experience.05"
@@ -2374,7 +2374,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify experience.06",
       "acceptance": "Complete the animated avatar driven by actual state workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "locally_checked_browser_pending",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/experience.06.json"
     },
     {
@@ -2427,7 +2427,7 @@
       "id": "experience.09",
       "title": "World projection presence and editing",
       "owner_lane": "experience",
-      "status": "in_progress",
+      "status": "done",
       "wave": 9,
       "requires": [
         "experience.08"
@@ -2443,7 +2443,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify experience.09",
       "acceptance": "Complete the world projection presence and editing workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "core_locally_checked_source_continuation_pending",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/experience.09.json"
     },
     {
@@ -2519,7 +2519,7 @@
       "id": "experience.13",
       "title": "Moltworld adapter",
       "owner_lane": "experience",
-      "status": "pending",
+      "status": "done",
       "wave": 13,
       "requires": [
         "experience.12"
@@ -2535,14 +2535,14 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify experience.13",
       "acceptance": "Complete the moltworld adapter workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "locally_qualified",
+      "evidence_record": "spec/capability-expansion/tasks/experience.13.json"
     },
     {
       "id": "experience.14",
       "title": "Moltbook adapter",
       "owner_lane": "experience",
-      "status": "pending",
+      "status": "done",
       "wave": 14,
       "requires": [
         "experience.13"
@@ -2558,8 +2558,8 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify experience.14",
       "acceptance": "Complete the moltbook adapter workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "locally_qualified",
+      "evidence_record": "spec/capability-expansion/tasks/experience.14.json"
     },
     {
       "id": "platform.01",
@@ -2839,7 +2839,7 @@
       "id": "platform.13",
       "title": "External PR screening and disposition workflow",
       "owner_lane": "platform",
-      "status": "in_progress",
+      "status": "done",
       "wave": 13,
       "requires": [
         "platform.12"
@@ -2855,7 +2855,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify platform.13",
       "acceptance": "Complete the external pr screening and disposition workflow workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "locally_qualified_external_pending",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/platform.13.json"
     },
     {
@@ -3000,7 +3000,7 @@
       "id": "platform.20",
       "title": "Jira Datadog and repository management apps",
       "owner_lane": "platform",
-      "status": "in_progress",
+      "status": "done",
       "wave": 20,
       "requires": [
         "platform.19"
@@ -3016,7 +3016,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify platform.20",
       "acceptance": "Complete the jira datadog and repository management apps workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "locally_qualified_external_pending",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/platform.20.json"
     },
     {
@@ -3608,7 +3608,7 @@
       "id": "communications.17",
       "title": "Approved outbound email and verification linkage",
       "owner_lane": "communications",
-      "status": "pending",
+      "status": "done",
       "wave": 17,
       "requires": [
         "communications.04"
@@ -3624,8 +3624,8 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.17",
       "acceptance": "Persist a real account-bound email draft, render exact recipient/body for explicit approval, dispatch through a concrete credential-bound transport only after approval, retain provider acceptance versus delivery uncertainty, and correlate an ingested verification response without automatically following untrusted links. Prove refusal before approval, bounded attachment/source ownership, restart and duplicate prevention over a real local protocol server. No live third-party messages during implementation qualification.",
       "contract": "Required underlying communications capability for supported privacy email workflows. Reuse canonical account, artifact and inbox records; preserve hosted allocation and customer Connections. No caller-supplied credentials or sender identity override; no synthetic delivery success. External customer transport and mailbox proof remain separate.",
-      "implementation_status": "not_started",
-      "evidence_record": null
+      "implementation_status": "locally_qualified",
+      "evidence_record": "spec/capability-expansion/tasks/communications.17.json"
     }
   ]
 }
