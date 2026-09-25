@@ -50,7 +50,18 @@ class IdentityToolProvider(ToolProvider):
             return ToolResult(success=False, error="Invalid identity arguments: " + problem.message,
                               recovery_hints=["Use the tool's declared fields and current revision."])
         try:
-            if tool_name.startswith("identity_lifecycle_"):
+            if tool_name.startswith("identity_guarded_"):
+                from gideon.workspace.capabilities.identity.guarded_recipes import GuardedRecipes
+                from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+                service = GuardedRecipes(self.home, get_dashboard_state())
+                operation = tool_name.removeprefix("identity_guarded_")
+                fields = dict(arguments)
+                if operation in ("catalog", "save", "begin", "restore"):
+                    fields["session_key"] = session
+                elif service.get_run(fields.get("run_id", fields.get("id")))["session_key"] != session:
+                    raise ValueError("Guarded run belongs to another session")
+                result = service.get_run(**fields) if operation == "get_run" else await getattr(service, operation)(**fields)
+            elif tool_name.startswith("identity_lifecycle_"):
                 from gideon.workspace.capabilities.identity.lifecycle import LifecycleStore
                 from gideon.integrations.inbox_providers.native_source import get_dashboard_state
                 from gideon.automation.triggers.nudge import get_instance
