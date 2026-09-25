@@ -1,25 +1,23 @@
 {
   "id": "communications.05",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "0cc60078",
   "requires": [
     "communications.04"
   ],
-  "contract": "Preview and commit bounded plain SQLite snapshots using actual iMessage message/handle/chat joins and Signal Desktop messages/conversations schema. Retain original bytes and immutable messages atomically with linked relationship evidence. Source coverage always incomplete; encrypted Desktop unlocking and attributed text/attachment decoding not implemented.",
+  "contract": "Preview and commit bounded plain SQLite snapshots using actual iMessage message/handle/chat joins and Signal Desktop messages/conversations schema. Retain original bytes and immutable messages atomically with linked relationship evidence. Durable message tombstones and identity blocks remove stored evidence and prevent replay. Source coverage always incomplete; encrypted Desktop unlocking and attributed text/attachment decoding not implemented.",
   "acceptance": [
     "Real SQLite file preview/commit/restart/replay, source and allocation isolation",
     "Stale review and conflicting source identities rollback atomically",
     "Bounded deserialization and schema probes reject encrypted/damaged/nonordinary sources",
     "Real native ToolProvider and HTTP-backed file upload UI workflows",
-    "Source provenance persisted; imported snapshots remain unknown coverage"
+    "Source provenance persisted; imported snapshots remain unknown coverage",
+    "Deleted messages and blocked identities stay excluded across restart and snapshot replay"
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/desktop.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/DesktopPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/DesktopPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_desktop.py",
@@ -36,7 +34,24 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-people/app.json"
   ],
+  "integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.05",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.05-checks-sh_b7ol7",
+  "production_lines": 277,
+  "test_lines": 510,
+  "ratio": 1.8411552346570397,
+  "files": {
+    "apps/console/src/features/capabilities/communications/DesktopPanel.tsx": "962a21cd398f310de551a168f01b9af21f3335b65bc2a2ef1baff9d6c38435e2",
+    "runtime/gideon/workspace/capabilities/communications/desktop.py": "a4819f6f42f2e551a9f9b9f9d2f5951c90d1837e4dfbd6e34109658170273515",
+    "apps/console/src/features/capabilities/communications/DesktopPanel.test.tsx": "a8be19da53c9d854bc4a4b13b34c8c633790eb0d39ecb62fccf7a096f5d9a7bb",
+    "checks/runtime/capabilities/communications/test_desktop.py": "8cd8194ae9c69607d78118a758a8df6d29527ce2afc60c0b8a32b81396763b60",
+    "checks/runtime/capabilities/communications/test_tools.py": "be397f28cbf58cfcfddf11c47f5df27bdb328f2331766996daa7810e3d520773"
+  },
   "sources": [
     "https://github.com/signalapp/Signal-Desktop/blob/main/DATABASE_SCHEMA.md"
   ],
@@ -47,8 +62,11 @@
     "Signal groups and unsupported system events retained as history without inferred person linkage."
   ],
   "qualification": {
-    "runtime": "42 passed",
+    "compile": "passed",
+    "runtime": "45 passed including durable message tombstones, identity blocks, source isolation and replay exclusion",
     "console_http": "3 passed with real uploaded SQLite files",
+    "native_http_ui": "approval-required exclude plus read-only exclusions qualified",
+    "external_sends": "none performed",
     "live_desktop": "not qualified; supplied plain snapshots only",
     "integrated_browser": "pending root integration"
   }

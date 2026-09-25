@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 
-type Row = { external_id: string; body: string; direction: string | null; person_id: string | null; eligible: boolean; limitations: string[] }
+type Row = { external_id: string; body: string; direction: string | null; identity: { kind: string; value: string } | null; person_id: string | null; eligible: boolean; limitations: string[] }
 type Preview = { source_digest: string; review_token: string; rows: Row[]; limits: string[] }
 const base = '/api/capabilities/communications/desktop'
 export function DesktopPanel() {
@@ -19,6 +19,8 @@ export function DesktopPanel() {
   const data = { source, source_account_id: account, content_base64: content }
   const reset = () => { setPreview(null); setReceipt(''); setHistory([]) }
   const run = async (operation: () => Promise<void>) => { setBusy(true); setError(''); try { await operation() } catch (e) { setError(String(e)) } finally { setBusy(false) } }
+  const readHistory = async () => setHistory((await requestJson<{ messages: Row[] }>(`${base}/history?source=${encodeURIComponent(source)}&source_account_id=${encodeURIComponent(account)}`)).messages)
+  const exclude = async (row: Row, scope: 'message' | 'identity') => { const result = await requestJson<{ removed: number; created: boolean }>(base + '/exclusions', 'POST', { source, source_account_id: account, external_id: row.external_id, scope }); await readHistory(); setReceipt(`${result.created ? 'Excluded' : 'Already excluded'}: ${result.removed} stored message${result.removed === 1 ? '' : 's'} removed. Future snapshot replays remain excluded.`) }
   return <section aria-label="Desktop message imports" className="space-y-3 rounded border p-4">
     <h2>Desktop message imports</h2>
     <p>Upload a plain SQLite snapshot from iMessage or Signal Desktop. Encrypted Signal databases require a local export or decryption first. Imported snapshots do not prove complete conversation coverage.</p>
@@ -29,7 +31,7 @@ export function DesktopPanel() {
     <label>SQLite snapshot file<input disabled={busy} type="file" accept=".db,.sqlite,.sqlite3" onChange={e => { const file = e.target.files?.[0]; reset(); setContent(''); if (!file) return; if (file.size > 8388608) { setError('Snapshot exceeds 8 MiB'); return } void run(async () => { const encoded = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read snapshot')); reader.onload = () => resolve(String(reader.result).split(',')[1] || ''); reader.readAsDataURL(file) }); setContent(encoded) }) }} /></label>
     <button disabled={busy || !content || !account} onClick={() => void run(async () => { setPreview(await requestJson<Preview>(base + '/preview', 'POST', data)); setReceipt('') })}>Preview desktop snapshot</button>
     {preview && <div><p>{preview.rows.length} source messages; {preview.rows.filter(row => row.eligible).length} match people.</p>{preview.limits.map(limit => <p key={limit}>{limit}</p>)}{preview.rows.map(row => <article key={row.external_id}><p>{row.external_id}: {row.direction || 'unsupported event'}; {row.eligible ? 'linked to person' : 'history only'}</p><pre className="whitespace-pre-wrap">{row.body || '(Text unavailable)'}</pre>{row.limitations.map(limit => <p key={limit}>{limit}</p>)}</article>)}<button disabled={busy} onClick={() => void run(async () => { const result = await requestJson<{ receipt: { inserted: number; linked: number }; created: boolean }>(base + '/commit', 'POST', { ...data, source_digest: preview.source_digest, review_token: preview.review_token }); setReceipt(`${result.created ? 'Imported' : 'Already imported'}: ${result.receipt.inserted} messages; ${result.receipt.linked} relationship observations. Coverage remains unknown.`) })}>Commit desktop import</button></div>}
-    <button disabled={busy || !account} onClick={() => void run(async () => { setHistory((await requestJson<{ messages: Row[] }>(`${base}/history?source=${encodeURIComponent(source)}&source_account_id=${encodeURIComponent(account)}`)).messages) })}>Read desktop history</button>
-    {history.map(row => <article key={row.external_id}><p>Stored: {row.external_id}</p><pre className="whitespace-pre-wrap">{row.body || '(Text unavailable)'}</pre></article>)}
+    <button disabled={busy || !account} onClick={() => void run(readHistory)}>Read desktop history</button>
+    {history.map(row => <article key={row.external_id}><p>Stored: {row.external_id}</p><pre className="whitespace-pre-wrap">{row.body || '(Text unavailable)'}</pre><button disabled={busy} onClick={() => void run(() => exclude(row, 'message'))}>Exclude this message</button>{row.identity && <button disabled={busy} onClick={() => void run(() => exclude(row, 'identity'))}>Block this identity</button>}</article>)}
   </section>
 }

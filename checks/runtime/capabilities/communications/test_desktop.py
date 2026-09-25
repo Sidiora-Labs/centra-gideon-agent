@@ -176,6 +176,64 @@ def test_incremental_snapshot_has_stable_message_ids(tmp_path):
     assert report(store)['threads'][0]['latest']['direction'] == 'outbound'
 
 
+def test_message_tombstone_removes_evidence_and_survives_restart_replay(tmp_path):
+    store = PeopleStore(tmp_path)
+    person(store)
+    desktop.commit(store, reviewed(store, payload('signal')))
+    exclusion, removed, created = desktop.exclude(store, {'source': 'signal', 'source_account_id': 'desktop-account',
+                                                           'external_id': 'message-1', 'scope': 'message'})
+    assert created is True
+    assert removed == 1
+    assert exclusion['scope'] == 'message'
+    assert desktop.history(store, 'signal', 'desktop-account') == []
+    assert report(store)['threads'] == []
+    assert desktop.exclude(PeopleStore(tmp_path), {'source': 'signal', 'source_account_id': 'desktop-account',
+                                                   'external_id': 'message-1', 'scope': 'message'}) == (exclusion, 0, False)
+    replay = snapshot('signal', [('message-1', 'Imported desktop hello', 'incoming', 1700000000000),
+                                 ('message-2', 'Allowed reply', 'outgoing', 1700000001000)])
+    receipt, _ = desktop.commit(PeopleStore(tmp_path), reviewed(store, payload('signal', replay)))
+    assert receipt['excluded'] == 1
+    assert receipt['inserted'] == 1
+    assert [row['external_id'] for row in desktop.history(store, 'signal', 'desktop-account')] == ['message-2']
+    assert desktop.exclusions(PeopleStore(tmp_path), 'signal', 'desktop-account') == [exclusion]
+
+
+def test_identity_block_removes_all_matching_history_and_is_source_scoped(tmp_path):
+    store = PeopleStore(tmp_path)
+    person(store)
+    raw = snapshot('imessage', [('one', 'First', 'incoming', 1700000000000),
+                                ('two', 'Second', 'outgoing', 1700000001000)])
+    desktop.commit(store, reviewed(store, payload('imessage', raw)))
+    exclusion, removed, created = desktop.exclude(store, {'source': 'imessage', 'source_account_id': 'desktop-account',
+                                                           'external_id': 'one', 'scope': 'identity'})
+    assert (removed, created) == (2, True)
+    assert exclusion['identity'] == {'kind': 'phone', 'value': '+12025550123'}
+    assert desktop.history(store, 'imessage', 'desktop-account') == []
+    assert report(store)['threads'] == []
+    other = payload('imessage', account='other-account')
+    other_receipt, _ = desktop.commit(store, reviewed(store, other))
+    assert other_receipt['excluded'] == 0
+    assert len(desktop.history(store, 'imessage', 'other-account')) == 1
+    expanded = snapshot('imessage', [('one', 'First', 'incoming', 1700000000000),
+                                     ('three', 'Third', 'incoming', 1700000002000)])
+    replay, _ = desktop.commit(store, reviewed(store, payload('imessage', expanded)))
+    assert replay['excluded'] == 2
+    assert replay['inserted'] == 0
+    assert desktop.history(store, 'imessage', 'desktop-account') == []
+
+
+def test_exclusion_validation_does_not_create_arbitrary_blocks(tmp_path):
+    store = PeopleStore(tmp_path)
+    with pytest.raises(PeopleError) as error:
+        desktop.exclude(store, {'source': 'signal', 'source_account_id': 'desktop-account',
+                                'external_id': 'missing', 'scope': 'message'})
+    assert error.value.status == 404
+    with pytest.raises(PeopleError):
+        desktop.exclude(store, {'source': 'signal', 'source_account_id': 'desktop-account',
+                                'external_id': 'missing', 'scope': 'conversation'})
+    assert desktop.exclusions(store, 'signal', 'desktop-account') == []
+
+
 @pytest.mark.parametrize('raw', [b'encrypted SQLCipher bytes', b'', b'SQLite format 3\x00' + b'bad' * 500])
 def test_encrypted_or_damaged_snapshot_rejected(tmp_path, raw):
     store = PeopleStore(tmp_path)
@@ -281,11 +339,17 @@ def test_native_snapshot_tools_real_home(tmp_path):
         assert json.loads(result.output)['messages'][0]['external_id'] == 'message-1'
         result = await provider.invoke('people_desktop_imports', {})
         assert len(json.loads(result.output)['imports']) == 1
+        result = await provider.invoke('people_desktop_exclude', {'source': 'signal', 'source_account_id': 'desktop-account', 'external_id': 'message-1', 'scope': 'message'})
+        assert result.success, result.error
+        assert json.loads(result.output)['removed'] == 1
+        result = await provider.invoke('people_desktop_exclusions', {'source': 'signal', 'source_account_id': 'desktop-account'})
+        assert len(json.loads(result.output)['exclusions']) == 1
         result = await provider.invoke('people_desktop_preview', {**data, 'root': '/outside'})
         assert not result.success
         assert result.metadata['status'] == 400
         definitions = {tool.name: tool for tool in await provider.list_tools()}
         assert definitions['people_desktop_commit'].requires_approval is True
+        assert definitions['people_desktop_exclude'].requires_approval is True
         assert definitions['people_desktop_preview'].requires_approval is False
     try:
         asyncio.run(scenario())
@@ -324,6 +388,13 @@ def test_http_snapshot_preview_commit_history(tmp_path):
                     assert (await response.json())['imports'] == [receipt]
                 async with client.get(base + '/history', params={'source': 'imessage', 'source_account_id': 'desktop-account'}) as response:
                     assert len((await response.json())['messages']) == 1
+                async with client.post(base + '/exclusions', json={'source': 'imessage', 'source_account_id': 'desktop-account', 'external_id': 'message-1', 'scope': 'message'}) as response:
+                    assert response.status == 201
+                    assert (await response.json())['removed'] == 1
+                async with client.get(base + '/exclusions', params={'source': 'imessage', 'source_account_id': 'desktop-account'}) as response:
+                    assert len((await response.json())['exclusions']) == 1
+                async with client.get(base + '/history', params={'source': 'imessage', 'source_account_id': 'desktop-account'}) as response:
+                    assert (await response.json())['messages'] == []
                 async with client.post(base + '/commit', json={**request, 'source_digest': 'wrong'}) as response:
                     assert response.status == 409
                 async with client.post(base + '/preview', json={**data, 'home': '/outside'}) as response:

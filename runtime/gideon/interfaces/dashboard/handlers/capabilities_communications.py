@@ -160,9 +160,14 @@ async def handle(request):
         if '/desktop/' in request.path:
             if request.path.endswith('/imports'):
                 return web.json_response({'imports': desktop.imports(store)})
+            if request.path.endswith('/exclusions') and request.method == 'GET':
+                return web.json_response({'exclusions': desktop.exclusions(store, request.query.get('source', ''), request.query.get('source_account_id', ''))})
             if request.path.endswith('/history'):
                 return web.json_response({'messages': desktop.history(store, request.query.get('source', ''), request.query.get('source_account_id', ''))})
             data = await request.json()
+            if request.path.endswith('/exclusions'):
+                exclusion, removed, created = desktop.exclude(store, data)
+                return web.json_response({'exclusion': exclusion, 'removed': removed, 'created': created}, status=201 if created else 200)
             if request.path.endswith('/preview'):
                 return web.json_response(desktop.preview(store, data))
             receipt, created = desktop.commit(store, data)
@@ -287,6 +292,8 @@ def register(app):
     desktop_base = "/api/capabilities/communications/desktop"
     app.router.add_get(desktop_base + "/imports", handle)
     app.router.add_get(desktop_base + "/history", handle)
+    app.router.add_get(desktop_base + "/exclusions", handle)
+    app.router.add_post(desktop_base + "/exclusions", handle)
     app.router.add_post(desktop_base + "/preview", handle)
     app.router.add_post(desktop_base + "/commit", handle)
     mirror = "/api/capabilities/communications/mirror"
