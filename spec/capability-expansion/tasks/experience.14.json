@@ -1,0 +1,30 @@
+{
+  "schema_version":1,
+  "task":"experience.14",
+  "status":"locally_qualified",
+  "base_revision":"568f4193a35a26b70c97f4ee5dcceb4785b9d333",
+  "requires":[],
+  "contract":"Connect an existing claimed Moltbook account by named Gideon credential, enforcing the official https://www.moltbook.com/api/v1 bearer boundary. Guard profile, claim-status, feed and comment reads. Require explicit approval for post/comment writes, persist idempotent content-redacted receipts before dispatch, and keep published, pending_verification, failed and uncertain outcomes distinct. Account registration and automatic challenge solving are excluded; no live external mutation occurs during local qualification.",
+  "acceptance":[
+    "A named credential configures an existing account without returning or persisting its secret in adapter state, receipts or UI; non-www production endpoints and credential-bearing URLs are refused.",
+    "Actual HTTP protocol-server reads use bearer auth and current profile/status/feed/comments endpoints with bounded queries and durable content-free history.",
+    "Post and comment writes do not dispatch without explicit approval; approved requests use current wire bodies, persist before dispatch, replay idempotently and distinguish pending verification, published, rate-limited failure and uncertain outcomes.",
+    "Owner API, console and native tools traverse the real adapter and HTTP protocol server. Native writes require approval; registration is absent. Live Moltbook account and outbound mutation proof remains pending separate authorization and credentials."
+  ],
+  "production_files":[
+    "runtime/gideon/workspace/capabilities/experience/moltbook.py",
+    "runtime/gideon/workspace/capabilities/experience/moltbook_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience_moltbook.py",
+    "apps/console/src/features/capabilities/experience/Moltbook.tsx"
+  ],
+  "test_files":[
+    "checks/runtime/capabilities/experience/test_moltbook.py",
+    "checks/runtime/capabilities/experience/moltbook_ui_server.py",
+    "apps/console/src/features/capabilities/experience/Moltbook.test.tsx"
+  ],
+  "runtime_test_files":["checks/runtime/capabilities/experience/test_moltbook.py"],
+  "ui_test_files":["apps/console/src/features/capabilities/experience/Moltbook.test.tsx"],
+  "extra_files":["runtime/gideon/extensions/apps/native/gideon-moltbook/app.json"],
+  "evidence":"/tmp/gideon-experience.14-checks-u4wjh98q/evidence.json",
+  "qualification":{"runtime_tests":11,"ui_tests":2,"production_lines":206,"test_lines":209,"repair_cycles":2,"runtime_evidence":"/tmp/gideon-experience.14-checks-s1__3db5/evidence.json","external_proof":"pending: no account credential supplied and no live outbound posts/comments authorized","limitations":["Shared experience route registration, page mounting and moltbook.sqlite3 durability enrollment remain root integration hooks."]}
+}
