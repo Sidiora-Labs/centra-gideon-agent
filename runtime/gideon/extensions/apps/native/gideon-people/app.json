@@ -2,14 +2,14 @@
   "name": "gideon-people",
   "version": "1.0.0",
   "displayName": "People and Relationships",
-  "description": "Manage people, reviewed contact imports, relationship touchpoints and coverage-aware thread evidence. No external messaging.",
+  "description": "Manage people, reviewed contact imports, relationship touchpoints and coverage-aware thread evidence and read-only mail account mirrors. No outbound messaging.",
   "icon": "Users",
   "author": "Gideon",
   "tags": ["tool", "bundled"],
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.communications.tools:create_provider",
-    "capabilities": ["people", "contact-import", "relationship-care"]
+    "capabilities": ["people", "contact-import", "relationship-care", "mail-mirror"]
   },
   "native": true
 }

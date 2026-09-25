@@ -1,3 +1,5 @@
+import asyncio
+
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import web
@@ -6,11 +8,26 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
+from gideon.workspace.capabilities.communications import mirrors
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/mirror/' in request.path:
+            account_id = request.match_info.get('account_id')
+            if request.path.endswith('/capabilities'):
+                return web.json_response({'adapters': mirrors.COVERAGE})
+            if request.path.endswith('/messages'):
+                return web.json_response({'messages': mirrors.messages(store, account_id), 'account': mirrors.get_account(store, account_id)})
+            if request.path.endswith('/sync'):
+                mirrors.fields(await request.json(), set())
+                return web.json_response({'sync': await asyncio.to_thread(mirrors.sync, store, account_id)})
+            if request.path.endswith('/upload'):
+                return web.json_response(mirrors.upload(store, account_id, await request.json()))
+            if request.method == 'GET':
+                return web.json_response({'account': mirrors.get_account(store, account_id)} if account_id else {'accounts': mirrors.accounts(store)})
+            return web.json_response({'account': mirrors.save_account(store, await request.json(), account_id)}, status=200 if account_id else 201)
         if '/import/' in request.path:
             data = await request.json()
             if request.path.endswith('/preview'):
@@ -49,6 +66,15 @@ async def handle(request):
 
 
 def register(app):
+    mirror = "/api/capabilities/communications/mirror"
+    app.router.add_get(mirror + "/capabilities", handle)
+    app.router.add_get(mirror + "/accounts", handle)
+    app.router.add_post(mirror + "/accounts", handle)
+    app.router.add_get(mirror + "/accounts/{account_id}", handle)
+    app.router.add_put(mirror + "/accounts/{account_id}", handle)
+    app.router.add_get(mirror + "/accounts/{account_id}/messages", handle)
+    app.router.add_post(mirror + "/accounts/{account_id}/upload", handle)
+    app.router.add_post(mirror + "/accounts/{account_id}/sync", handle)
     app.router.add_get('/api/capabilities/communications/threads', handle)
     app.router.add_post('/api/capabilities/communications/threads/evidence', handle)
     app.router.add_post('/api/capabilities/communications/import/preview', handle)

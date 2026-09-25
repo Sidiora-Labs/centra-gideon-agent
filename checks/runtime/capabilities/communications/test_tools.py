@@ -48,6 +48,8 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     by_name = {tool.name: tool for tool in definitions}
     reads = {'people_list', 'people_get', 'people_import_preview', 'people_care_report'}
     writes = {'people_create', 'people_update', 'people_record_touchpoint', 'people_import_commit', 'people_record_thread_evidence'}
+    reads |= {'people_mirror_accounts', 'people_mirror_capabilities', 'people_mirror_messages'}
+    writes |= {'people_mirror_create', 'people_mirror_update', 'people_mirror_upload', 'people_mirror_sync'}
     assert set(by_name) == reads | writes
     for name, tool in by_name.items():
         assert tool.provider == 'gideon-people'
