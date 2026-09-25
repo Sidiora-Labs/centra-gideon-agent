@@ -1,24 +1,29 @@
 {
   "schema_version": 1,
   "task": "platform.22",
-  "status": "locally_qualified",
+  "status": "in_progress_partial",
   "base_revision": "04e73cb1",
-  "contract": "A fixed domain-adapter registry exposes only canonical non-secret durability entries through platform.21 signed peer transport. workspace.records covers the existing projects and tasks stores, including their sync-only tombstones, and refines their direct-peer collision policy to last-write-wins by canonical updated_at so a one-sided fast-forward applies. Batches have strict schema/domain/sender/sequence/batch identity and complete adapter coverage. A machine-local replication.sqlite3 retains outbound sequences, inbound cursors, idempotent receipts and peer-specific common-ancestor hashes; it contains no domain rows and never replicates. Existing durability reconciliation applies records, preserves local data on both-sides-edited conflicts before last-write comparison, and records both exact versions in the existing ConflictQueue.",
+  "contract": "A fixed domain-adapter registry exposes only canonical non-secret records through platform.21 signed peer transport. workspace.records covers projects/tasks with canonical tombstones; knowledge.records covers authoritative KnowledgeStore items without embeddings or derived indexes; creative.catalog covers authoritative current JSON records for ingredients, moodboards, universes, authors, works, stories and series. Strict batches, per-peer cursors, common-ancestor hashes and the existing ConflictQueue preserve replay and conflict semantics. SQLite adapters fast-forward one-sided changes, propagate deletion only from an agreed ancestor, hold both-sided edits, and restore explicitly selected remote fields while preserving every unselected current local field.",
   "acceptance": [
     "Two isolated homes exchange actual canonical project records through signed guarded HTTP, persist cursor/ancestor state across service restart, update records and propagate hard-delete tombstones without duplicates.",
     "Independent edits from a common accepted batch hold the receiving local record and persist exact local/remote versions once in the existing conflict queue.",
     "Identical batch replay returns the original receipt; changed same-sequence content, cursor gaps, wrong sender, mixed schema versions, incomplete/unknown entry coverage and disabled directional policy are refused.",
     "Export is fixed to declared non-secret, non-derived inventory entries and never contains peer private keys, proof nonces, peer-policy databases, replication state or arbitrary requested paths.",
-    "Authenticated HTTP and native status expose coverage, cursors and conflict metadata without domain rows or secrets; console performs a real signed canonical-domain push and shows the persisted cursor."
+    "Authenticated HTTP and native status expose coverage, cursors and conflict metadata without domain rows or secrets; console performs a real signed canonical-domain push and shows the persisted cursor.",
+    "Two isolated homes perform create, edit, delete and service-restart cycles for knowledge.records and creative.catalog canonical records with signed scope policy and idempotent replay.",
+    "Knowledge and creative both-sided edits retain exact versions in the existing queue; selected peer fields can be restored without overwriting unselected newer local fields.",
+    "Disabled knowledge.records and creative.catalog send policies refuse export before canonical data is read."
   ],
   "limitations": [
-    "This task qualifies the extensible adapter/cursor/conflict path and workspace.records projects/tasks adapter. Other canonical domains require explicit adapters with their own schema and behavior tests.",
-    "Conflict resolution continues through Gideon's existing durability review surface; this slice records and links conflicts rather than creating a second resolver.",
+    "Platform.22 remains in progress/partial: this slice qualifies workspace.records, knowledge.records and creative.catalog, not every PortOS category or every related binary/file/revision substore.",
+    "Unsupported original categories are brain, memory, goals, character, digitalTwin, meatspace, universe outside creative.catalog, pipeline, mediaCollections, videoHistory, storyBuilder, usage, fableLoom, artists, albums, tracks, creativeDirectorProjects, writersRoomFolders, writersRoomExercises, musicVideoProjects, commissionFeedback, creativeCommissions, decks, and catalog outside the mapped creative catalog; authors, moodBoards and writersRoomWorks are covered only by the canonical creative.catalog rows declared here.",
+    "knowledge.records excludes uploaded source files and all derived embeddings, chunks, FTS/index state, entity extraction and watched-source cursors; creative.catalog excludes draft artifacts, request ledgers, revision history, suggestions, polish proposals, continuity and voice projections.",
     "Local loopback proves two-home signed transport; no externally provisioned peer or public certificate is claimed."
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/platform/peers.py",
     "runtime/gideon/workspace/capabilities/platform/replication.py",
+    "runtime/gideon/workspace/capabilities/platform/replication_adapters.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_replication.py",
     "runtime/gideon/workspace/capabilities/platform/replication_tools.py",
     "apps/console/src/features/capabilities/platform/Replication.tsx"
@@ -45,15 +50,15 @@
     "Add further domains only through an explicit DOMAINS adapter entry whose inventory entries are canonical, non-secret, non-derived and independently qualified."
   ],
   "evidence": [
-    "/tmp/gideon-platform.22-checks-aw8bvy7w/evidence.json",
-    "/tmp/gideon-platform.22-checks-vykbb7aw/evidence.json"
+    "/tmp/gideon-platform.22-checks-gkaaczc4/evidence.json"
   ],
   "qualification": {
-    "runtime_tests": 8,
+    "state": "locally_qualified_partial",
+    "runtime_tests": 12,
     "ui_tests": 2,
-    "production_lines": 235,
-    "test_lines": 290,
+    "production_lines": 451,
+    "test_lines": 451,
     "repair_cycles": 2,
-    "stages": "Compile and runtime passed in repair cycle 1 after the workspace adapter gained canonical updated_at fast-forward semantics; the UI-only second repair passed after matching the shared Button aria-disabled contract."
+    "stages": "Compile, runtime and UI passed. Repair 1 added full creative table and authenticated restore coverage after ratio preflight. Repair 2 fixed deterministic common-ancestor fast-forward and the initial empty-cursor journey; the dependency-only stop was resolved by linking the repository installed packages without modifying them."
   }
 }
