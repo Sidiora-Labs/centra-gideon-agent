@@ -170,6 +170,90 @@ class WorkStore(IngredientStore):
         artifact = self.artifacts.get(draft["artifact_id"], version=draft["artifact_version"])
         return {**draft, "missing": artifact is None, "text": artifact.content if artifact else ""}
 
+    def import_revision(self, record):
+        """Install one validated immutable revision without changing the current work."""
+        keys(record, FIELDS | {"id", "revision", "created_at", "updated_at"})
+        identity, revision = identifier(record.get("id")), integer(record.get("revision"))
+        for field in ("created_at", "updated_at"):
+            try:
+                value = datetime.fromisoformat(record.get(field))
+            except (TypeError, ValueError) as error:
+                raise CatalogError("Invalid work revision timestamp") from error
+            if value.utcoffset() is None:
+                raise CatalogError("Invalid work revision timestamp")
+        if datetime.fromisoformat(record["updated_at"]) < datetime.fromisoformat(record["created_at"]):
+            raise CatalogError("Work revision update predates creation")
+        with self.connection() as db:
+            current = self._work(db, identity)
+            if revision > current["revision"]:
+                raise CatalogError("Work revision exceeds the canonical current work", 409)
+            for field, table in (("author_ref", "author_revisions"), ("universe_ref", "universe_revisions")):
+                ref = record.get(field)
+                if ref is not None and (not isinstance(ref, dict) or set(ref) != {"id", "revision"}
+                        or not db.execute(f"SELECT 1 FROM {table} WHERE id=? AND revision=?",
+                                           (identifier(ref.get("id")), integer(ref.get("revision")))).fetchone()):
+                    raise CatalogError("Pinned context revision not found", 404)
+            values = self._values(db, self.editable(record), (record,))
+            canonical = {**values, "id": identity, "revision": revision,
+                         "created_at": record["created_at"], "updated_at": record["updated_at"]}
+            if canonical != record:
+                raise CatalogError("Work revision is not canonical")
+            prior = db.execute("SELECT record FROM work_revisions WHERE id=? AND revision=?",
+                               (identity, revision)).fetchone()
+            encoded = json.dumps(record, sort_keys=True)
+            if prior:
+                if json.loads(prior[0]) != record:
+                    raise CatalogError("Immutable work revision conflicts", 409)
+                return record
+            if revision == current["revision"] and current != record:
+                raise CatalogError("Current work does not match its immutable revision", 409)
+            db.execute("INSERT INTO work_revisions VALUES(?,?,?)", (identity, revision, encoded))
+        return record
+
+    def import_draft(self, work_id, draft, content, description, content_sha256):
+        """Install one WorkStore-owned readonly Markdown draft and its canonical metadata."""
+        keys(draft, {"id", "artifact_id", "artifact_version", "note", "created_at", "characters"})
+        work_id, draft_id = identifier(work_id), identifier(draft.get("id"))
+        expected_slug = "creative-draft-" + draft_id
+        if draft.get("artifact_id") != expected_slug or draft.get("artifact_version") != 1:
+            raise CatalogError("Invalid authored draft artifact reference")
+        text(content, 1000000)
+        if not content.strip() or draft.get("characters") != len(content):
+            raise CatalogError("Invalid authored draft content")
+        if (not isinstance(content_sha256, str) or len(content_sha256) != 64
+                or hashlib.sha256(content.encode()).hexdigest() != content_sha256):
+            raise CatalogError("Authored draft content hash does not match")
+        if not isinstance(description, str) or len(description) != 64 or any(c not in "0123456789abcdef" for c in description):
+            raise CatalogError("Invalid authored draft provenance")
+        text(draft.get("note"), 2000)
+        integer(draft.get("characters"), 1, 1000000)
+        try:
+            created = datetime.fromisoformat(draft.get("created_at"))
+        except (TypeError, ValueError) as error:
+            raise CatalogError("Invalid authored draft timestamp") from error
+        if created.utcoffset() is None:
+            raise CatalogError("Invalid authored draft timestamp")
+        with self.connection() as db:
+            work = self._work(db, work_id)
+            prior = db.execute("SELECT work_id,record FROM work_drafts WHERE id=?", (draft_id,)).fetchone()
+            if prior and (prior[0] != work_id or json.loads(prior[1]) != draft):
+                raise CatalogError("Immutable authored draft conflicts", 409)
+            artifact = self.artifacts.get(expected_slug, version=1)
+            if artifact and (artifact.content != content or not artifact.readonly
+                             or artifact.kind != "markdown" or artifact.description != description):
+                raise CatalogError("Immutable authored draft artifact conflicts", 409)
+            if artifact is None:
+                artifact = self.artifacts.create(name=work["title"] + " draft", slug=expected_slug,
+                    kind="markdown", content=content, description=description, readonly=True)
+            persisted = self.artifacts.get(expected_slug, version=1)
+            if (persisted is None or persisted.content != content or not persisted.readonly
+                    or persisted.kind != "markdown" or persisted.description != description):
+                raise CatalogError("Authored draft artifact persistence could not be confirmed", 500)
+            if not prior:
+                db.execute("INSERT INTO work_drafts VALUES(?,?,?)",
+                           (draft_id, work_id, json.dumps(draft, sort_keys=True)))
+        return draft
+
     def get(self, id):
         work = self.export(id)
         with self.connection() as db:
@@ -206,4 +290,3 @@ class WorkStore(IngredientStore):
             rows = [json.loads(r[0]) for r in db.execute("SELECT record FROM works ORDER BY id")]
         rows = [r for r in rows if q.casefold() in r["title"].casefold()]
         return {"items": rows[offset:offset + limit], "total": len(rows), "offset": offset, "limit": limit}
-
