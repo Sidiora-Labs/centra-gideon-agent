@@ -263,3 +263,7 @@ All listed capabilities remain in scope. The first task in each lane is immediat
 ## Final integration acceptance
 
 Run focused task gates when code changes, then one integrated console build and real browser journeys per completed wave. Validate registered API/tool/UI paths and restart persistence together. Exercise hosted isolation with two real isolated local homes and actual auth middleware; no production deployment or external messaging is implied by local implementation authorization. Record unavailable external/native journeys honestly. Finish only when the full backlog is qualified to its declared boundary, not when the first ten tasks pass.
+
+## Progress records
+
+Task records remain the qualification evidence. `python3 tooling/capability_progress.py` reports the current checkout without changing files. Add `--write` to synchronize backlog and KVX statuses from those records. This command does not run gates, publish commits, or deploy. Only explicitly locally qualified records count as done; partial and external-pending states remain in progress.
