@@ -1,0 +1,15 @@
+{
+  "name": "gideon-peers",
+  "version": "1.0.0",
+  "displayName": "Peer Identity",
+  "description": "Inspect public peer identities and directional category policy.",
+  "icon": "Network",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.peer_tools:create_provider",
+    "capabilities": ["platform_peer_projection"]
+  },
+  "native": true
+}
