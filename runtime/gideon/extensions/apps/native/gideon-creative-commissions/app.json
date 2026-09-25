@@ -1,0 +1,23 @@
+{
+  "name": "gideon-creative-commissions",
+  "version": "1.0.0",
+  "displayName": "Creative Commissions",
+  "description": "Schedule canonical creative direction plans and retain bounded run feedback.",
+  "icon": "CalendarClock",
+  "author": "Gideon",
+  "tags": ["tool", "action", "bundled", "creative", "automation"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.creative.commission_tools:create_provider",
+    "capabilities": ["creative-commissions"]
+  },
+  "providers": [
+    {
+      "type": "action",
+      "entity": "creative",
+      "implementation": "gideon.workspace.capabilities.creative.commissions:create_provider",
+      "capabilities": ["execute"]
+    }
+  ],
+  "native": true
+}

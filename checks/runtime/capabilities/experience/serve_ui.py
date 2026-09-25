@@ -7,13 +7,20 @@ from pathlib import Path
 from aiohttp import web
 
 from gideon.interfaces.dashboard.handlers.capabilities_experience import STORE, register
+from gideon.interfaces.dashboard.handlers.capabilities_experience_moltbook import register as register_moltbook
 from gideon.workspace.capabilities.experience import ExperienceStore
 
 
 async def main():
-    app = web.Application()
+    @web.middleware
+    async def owner(request, handler):
+        request["user"] = "experience-owner"
+        return await handler(request)
+
+    app = web.Application(middlewares=[owner])
     app[STORE] = ExperienceStore(Path(sys.argv[1]))
     register(app)
+    register_moltbook(app)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)

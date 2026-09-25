@@ -22,6 +22,11 @@
       "type": "tool",
       "implementation": "gideon.workspace.capabilities.experience.game_assets_provider:create_provider",
       "capabilities": ["experience_game_assets_get", "experience_game_assets_compile", "experience_game_assets_publish"]
+    },
+    {
+      "type": "tool",
+      "implementation": "gideon.workspace.capabilities.experience.moltworld_provider:create_provider",
+      "capabilities": ["experience_moltworld_get", "experience_moltworld_configure", "experience_moltworld_status", "experience_moltworld_observe", "experience_moltworld_action"]
     }
   ]
 }

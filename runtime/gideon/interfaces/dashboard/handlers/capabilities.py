@@ -67,6 +67,7 @@ def register(app):
         ('/api/capabilities/music/videos', 'music_video'),
         ('/api/capabilities/platform/ownership', 'ownership'),
         ('/api/capabilities/platform/gsd', 'gsd'),
+        ('/api/capabilities/experience/moltbook/config', 'experience_moltbook'),
     )
     for path, module_name in additional:
         if not any(route.resource.canonical == path for route in app.router.routes()):

@@ -70,6 +70,7 @@ def test_new_media_database_and_listener_settings_survive_snapshot(tmp_path, mon
 
 
 @pytest.mark.parametrize("relative", [
+    "capabilities/experience/moltbook.sqlite3",
     "capabilities/platform/integration_apps.sqlite3",
     "capabilities/platform/remote-agent-sessions.sqlite3",
     "capabilities/platform_quotas.sqlite3",

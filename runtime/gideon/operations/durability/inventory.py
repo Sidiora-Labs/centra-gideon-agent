@@ -95,6 +95,7 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_experience_moltbook", kind=KIND_SQLITE, path="capabilities/experience/moltbook.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_creative_direction", kind=KIND_SQLITE, path="capabilities/creative/direction.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_platform_integrations", kind=KIND_SQLITE, path="capabilities/platform/integration_apps.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_platform_remote_sessions", kind=KIND_SQLITE, path="capabilities/platform/remote-agent-sessions.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),

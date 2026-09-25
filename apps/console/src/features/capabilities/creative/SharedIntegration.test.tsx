@@ -30,3 +30,11 @@ it('mounts creative direction with the exact shared route', async () => {
   expect(await screen.findByRole('heading', { name: 'Creative direction and production plans' })).toBeInTheDocument()
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/direction', expect.anything()))
 })
+
+it('mounts recurring commissions with the exact shared route', async () => {
+  location.hash = '#/capabilities/creative?view=commissions'
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [] })))
+  render(<Page apiRoot="/api/capabilities/creative/ingredients" />)
+  expect(await screen.findByRole('heading', { name: 'Recurring creative commissions' })).toBeInTheDocument()
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/commissions'))
+})
