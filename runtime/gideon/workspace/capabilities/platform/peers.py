@@ -27,6 +27,7 @@ CATEGORIES = (
     "knowledge.records",
     "media.assets",
     "creative.catalog",
+    "creative.direction",
     "identity.goals",
     "identity.profile",
     "communications.contacts",
