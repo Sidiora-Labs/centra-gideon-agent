@@ -45,6 +45,8 @@ def register(app: web.Application, home: Path | None = None):
     from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_privacy import register as register_privacy
     from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_brokers import register as register_brokers
     from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo import register as register_spokeo
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_whitepages import register as register_whitepages
     register_privacy(app, bound_home)
     register_brokers(app, bound_home)
     register_spokeo(app, bound_home)
+    register_whitepages(app, bound_home)

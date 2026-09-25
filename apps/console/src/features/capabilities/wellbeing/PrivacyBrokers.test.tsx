@@ -226,3 +226,18 @@ test('Spokeo controls scan, prepare, require approval, submit and verify over re
   expect(persisted.verified_at).toBeTruthy()
   view.unmount()
 })
+
+test('selected Whitepages case mounts the approved email workflow without sending', async () => {
+  const broker = await json(base + '/brokers', 'POST', {
+    request_id: 'whitepages-broker', name: 'Whitepages', website: 'https://www.whitepages.com',
+    optout_url: 'https://www.whitepages.com/suppression_requests', source: 'supported email protocol' })
+  const row = await json(`${base}/subjects/${subject}/broker-cases`, 'POST', {
+    request_id: 'whitepages-case', broker_id: broker.id })
+  window.history.replaceState(null, '', `#/capabilities/wellbeing/privacy?subject=${subject}&broker_case=${row.id}`)
+  const view = render(<PrivacyBrokers subject={subject} />)
+  const selected = await screen.findByRole('region', { name: 'Selected broker case' })
+  expect(within(selected).getByRole('region', { name: 'Whitepages approved email' })).toBeInTheDocument()
+  expect(within(selected).getByText(/Preparation creates a draft only/)).toBeInTheDocument()
+  expect(within(selected).queryByRole('button', { name: 'Send approved Whitepages email' })).not.toBeInTheDocument()
+  view.unmount()
+})

@@ -3,6 +3,7 @@ import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
+import { WhitepagesBrokerPanel } from './WhitepagesBrokerPanel'
 
 type Broker = { id: string; name: string; website: string; optout_url: string; source: string; enabled: boolean }
 type Case = { id: string; revision: number; subject_id: string; broker_id: string; state: string; evidence_basis: string; evidence: string; reason: string; next_recheck_at: string; allowed_transitions: string[]; broker?: Broker }
@@ -162,6 +163,7 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
         </div>}
         {!spokeoPlan && providerStatus && <p role="status">{providerStatus}</p>}
       </section>}
+      {selected.broker?.name.trim().toLowerCase() === 'whitepages' && <WhitepagesBrokerPanel brokerCase={selected} onChanged={row => setCases(current => current.map(item => item.id === row.id ? { ...item, ...row, broker: item.broker } : item))} />}
       <form onSubmit={observe} className="space-y-3"><label>Owner observation<select aria-label="Owner observation" value={outcome} onChange={event => setOutcome(event.target.value)}>{['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => <option key={value}>{value}</option>)}</select></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy}>Record user-attested observation</Button></form>
       <Field label="Transition reason"><TextInput value={reason} onChange={setReason} /></Field>
       <div className="flex flex-wrap gap-2">{selected.allowed_transitions.map(state => <Button key={state} variant="secondary" disabled={busy} onClick={() => transition(state)}>Move to {state}</Button>)}<Button variant="secondary" disabled={busy} onClick={recheck}>Request re-check</Button></div>
