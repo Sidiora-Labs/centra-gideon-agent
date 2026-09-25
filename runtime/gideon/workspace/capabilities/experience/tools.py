@@ -8,12 +8,14 @@ from .navigation import NavigationReceipts
 from .speech_owner import SpeechOwner
 from .ambient import AmbientDisplay
 from .avatar import AvatarStore
+from .native_calls import get_native_calls
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "native_calls_get": ({}, False, "Read machine-local native call readiness and durable requests; no call is initiated."),
     "avatar_list": ({}, False, "Read published avatar variants and actual source availability."),
     "avatar_bundled": ({}, True, "Install the original authored robot asset and clip mapping."),
     "avatar_publish": ({"title": STRING, "artifact_slug": STRING, "artifact_version": REVISION, "clips": {"type":"object","description":"idle required; optional working, needs_input, waiting_approval, error, speaking; values must be real asset clip names"}}, True, "Publish an existing animated canonical model as an avatar variant."),
@@ -46,6 +48,7 @@ class ExperienceTools(ToolProvider):
     def __init__(self, store=None):
         self._store = store
         self._jobs = None
+        self._native_calls = None
 
     @property
     def store(self):
@@ -74,6 +77,10 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
+            if operation == "native_calls_get":
+                if self._native_calls is None:
+                    self._native_calls = get_native_calls(self.store)
+                return ToolResult(success=True, output=json.dumps({"readiness": self._native_calls.readiness(), "requests": self._native_calls.list()}))
             if operation == "avatar_list": result = {"avatars": AvatarStore(self.store).list()}
             elif operation == "avatar_bundled": result = {"avatar": AvatarStore(self.store).bundled()}
             elif operation == "avatar_publish": result = {"avatar": AvatarStore(self.store).publish(args)}
