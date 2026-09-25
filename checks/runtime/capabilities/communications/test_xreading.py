@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from aiohttp import ClientSession, web
+from gideon.core.config.credentials import delete_credential, save_credential
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore
 from gideon.workspace.capabilities.communications import social, xreading
@@ -141,6 +142,91 @@ def test_real_provider_page_normalization_and_explicit_partial_coverage():
     assert xreading.normalize_page(user, {'meta': {'result_count': 0}})['posts'] == []
     partial = xreading.normalize_page(user, {**page, 'errors': [{'title': 'Partial data'}]})
     assert partial['coverage'] == 'partial'
+
+
+def test_actual_read_adapter_uses_named_credential_and_bounded_paginated_api(tmp_path, monkeypatch):
+    async def scenario():
+        seen = []
+
+        async def user(request):
+            seen.append((request.path, dict(request.query), request.headers.get('Authorization')))
+            return web.json_response({'data': {'id': '123', 'username': 'alice'}})
+
+        async def posts(request):
+            seen.append((request.path, dict(request.query), request.headers.get('Authorization')))
+            return web.json_response({
+                'data': [{'id': '456', 'text': 'Read through the actual adapter', 'created_at': '2026-09-25T09:00:00Z'}],
+                'meta': {'next_token': 'next-page'},
+            })
+
+        app = web.Application()
+        app.router.add_get('/2/users/by/username/{handle}', user)
+        app.router.add_get('/2/users/{user_id}/tweets', posts)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        root = f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/2/'
+        try:
+            result = await xreading.remote(
+                {'handle': 'alice', 'credential_ref': 'X_LOCAL_READ_TOKEN'},
+                'requested-page', _api_root=root,
+            )
+        finally:
+            await runner.cleanup()
+        assert result['coverage'] == 'available_page_only'
+        assert result['next_token'] == 'next-page'
+        assert result['posts'] == [{
+            'id': '456', 'text': 'Read through the actual adapter',
+            'created_at': '2026-09-25T09:00:00Z', 'url': 'https://x.com/i/status/456',
+        }]
+        assert seen == [
+            ('/2/users/by/username/alice', {}, 'Bearer local-read-secret'),
+            ('/2/users/123/tweets', {
+                'max_results': '100', 'tweet.fields': 'created_at,author_id',
+                'pagination_token': 'requested-page',
+            }, 'Bearer local-read-secret'),
+        ]
+
+    with runtime_home(tmp_path):
+        monkeypatch.setenv('GIDEON_CREDENTIAL_BACKEND', 'dotenv')
+        save_credential('X_LOCAL_READ_TOKEN', 'local-read-secret')
+        try:
+            asyncio.run(scenario())
+        finally:
+            delete_credential('X_LOCAL_READ_TOKEN')
+
+
+def test_actual_read_adapter_refuses_redirects_and_oversized_responses(tmp_path, monkeypatch):
+    async def scenario():
+        async def redirect(_request):
+            raise web.HTTPFound('https://example.com/untrusted')
+
+        async def large(_request):
+            return web.Response(body=b'x' * (2 * 1024 * 1024 + 1), content_type='application/json')
+
+        for handler, expected in ((redirect, 'HTTP 302'), (large, 'exceeds limit')):
+            app = web.Application()
+            app.router.add_get('/2/users/by/username/{handle}', handler)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, '127.0.0.1', 0)
+            await site.start()
+            root = f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/2/'
+            try:
+                with pytest.raises(PeopleError) as error:
+                    await xreading.remote({'handle': 'alice', 'credential_ref': 'X_LOCAL_READ_TOKEN'}, _api_root=root)
+                assert expected in str(error.value)
+            finally:
+                await runner.cleanup()
+
+    with runtime_home(tmp_path):
+        monkeypatch.setenv('GIDEON_CREDENTIAL_BACKEND', 'dotenv')
+        save_credential('X_LOCAL_READ_TOKEN', 'local-read-secret')
+        try:
+            asyncio.run(scenario())
+        finally:
+            delete_credential('X_LOCAL_READ_TOKEN')
 
 
 @pytest.mark.parametrize('user,page', [(None, {}), ({'data': []}, {}), ({'data': {'id': 'bad', 'username': 'a'}}, {}), ({'data': {'id': '1', 'username': 'a'}}, {'data': {}}), ({'data': {'id': '1', 'username': 'a'}}, {'meta': {'next_token': 2}}), ({'data': {'id': '1', 'username': 'a'}}, {'data': [{'id': '1', 'text': 'a'}, {'id': '1', 'text': 'b'}]}), ({'data': {'id': '1', 'username': 'a'}}, {'data': [None]})])
