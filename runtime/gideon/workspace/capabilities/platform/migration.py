@@ -150,11 +150,9 @@ def _inspect(data):
         raise MigrationError("Archive contains no supported collection index")
     coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
     coordinated_records = len(domains) > 1 and set(domains) <= coordinated_families
-    mixed_song = ("songs" in domains and len(domains) > 1
-                  and set(domains) - {"songs"} <= coordinated_families)
-    if "inbox" in domains and len(domains) > 1:
-        raise MigrationError("Inbox capture history is immutable and requires a separate atomic import")
-    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not (coordinated_records or mixed_song):
+    grouped_import = (len(domains) > 1 and bool(set(domains) & {"songs", "inbox"})
+                      and set(domains) <= coordinated_families | {"songs", "inbox"})
+    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not (coordinated_records or grouped_import):
         raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
@@ -485,9 +483,11 @@ def _inspect(data):
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
         raise MigrationError("Archive contains no supported records")
-    if coordinated_records or mixed_song:
-        _ordered_canonical_records([row for row in records if row["domain"] != "songs"])
-        if mixed_song and sum(row["domain"] == "songs" for row in records) != 1:
+    if coordinated_records or grouped_import:
+        canonical_rows = [row for row in records if row["domain"] not in ("songs", "inbox")]
+        if canonical_rows:
+            _ordered_canonical_records(canonical_rows)
+        if grouped_import and "songs" in domains and sum(row["domain"] == "songs" for row in records) != 1:
             raise MigrationError("Mixed archives require exactly one song group")
     referenced_assets = {attachment["filename"] for row in records if row["domain"] == "songs" for attachment in row["values"]["attachments"]}
     if set(assets) != referenced_assets:
@@ -504,11 +504,11 @@ def preview(data):
               "coverage": {"supported": domains, "unsupported": "all other snapshot domains"},
               "records": [{"source_id": row["source_id"], "domain": row["domain"],
                            "name": row["values"].get("name") or row["values"]["title"]} for row in records]}
-    if "songs" in domains and len(domains) > 1:
-        result["commit_groups"] = [
-            {"id": "canonical", "domains": [domain for domain in domains if domain != "songs"]},
-            {"id": "song", "domains": ["songs"]},
-        ]
+    if len(domains) > 1 and set(domains) & {"songs", "inbox"}:
+        canonical_domains = [domain for domain in domains if domain not in ("songs", "inbox")]
+        result["commit_groups"] = ([{"id": "canonical", "domains": canonical_domains}] if canonical_domains else []) + (
+            [{"id": "inbox", "domains": ["inbox"]}] if "inbox" in domains else []) + (
+            [{"id": "song", "domains": ["songs"]}] if "songs" in domains else [])
         result["completion_policy"] = ("Groups commit independently. Completed groups are retained; "
                                        "an exact reviewed retry resumes unfinished groups.")
     return result
@@ -523,10 +523,10 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
     coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
-    if "songs" in domains and len(domains) > 1 and set(domains) - {"songs"} <= coordinated_families:
+    if len(domains) > 1 and set(domains) & {"songs", "inbox"} and set(domains) <= coordinated_families | {"songs", "inbox"}:
         if projects is None or tasks is None or repertoire is None or artifacts is None:
             raise MigrationError("Canonical grouped migration stores are unavailable", 503)
-        if any(domain in domains for domain in ("ideas", "journals", "memories", "links", "buckets")) and knowledge is None:
+        if ("inbox" in domains or any(domain in domains for domain in ("ideas", "journals", "memories", "links", "buckets"))) and knowledge is None:
             raise MigrationError("Canonical knowledge store is unavailable", 503)
         return _commit_grouped_records(tasks, store, knowledge, projects, repertoire, artifacts,
                                        digest, token, records, generated)
@@ -1506,12 +1506,17 @@ def _read_grouped_journal(path):
             "generated_at", "plan_hash", "groups", "receipt", "receipt_hash"} or journal.get("schema") != 1
             or journal.get("kind") != "independent_groups" or not SHA256.fullmatch(str(journal.get("archive_digest", "")))
             or not SHA256.fullmatch(str(journal.get("review_token", ""))) or not SHA256.fullmatch(str(journal.get("plan_hash", "")))
-            or not isinstance(journal.get("groups"), list) or [group.get("id") for group in journal["groups"]] != ["canonical", "song"]
+            or not isinstance(journal.get("groups"), list)
             or (journal["receipt"] is None) != (journal["receipt_hash"] is None)
             or journal["receipt"] is not None and (not isinstance(journal["receipt"], dict)
                 or not SHA256.fullmatch(str(journal["receipt_hash"]))
                 or hashlib.sha256(json.dumps(journal["receipt"], sort_keys=True).encode()).hexdigest() != journal["receipt_hash"]):
         raise MigrationError("A grouped migration journal has an unsupported shape", 409)
+    group_ids = [group.get("id") for group in journal["groups"]]
+    expected_order = [name for name in ("canonical", "inbox", "song") if name in group_ids]
+    if (group_ids != expected_order or len(group_ids) < 2 or not set(group_ids) & {"inbox", "song"}
+            or len(group_ids) != len(set(group_ids))):
+        raise MigrationError("A grouped migration journal has an unsupported group order", 409)
     for group in journal["groups"]:
         if (set(group) != {"id", "state", "receipt", "error"} or group["state"] not in ("pending", "complete")
                 or group["receipt"] is not None and not isinstance(group["receipt"], dict)
@@ -1537,7 +1542,8 @@ def _grouped_receipt(journal):
 
 
 def _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts, digest, records):
-    canonical = _ordered_canonical_records([row for row in records if row["domain"] != "songs"])
+    canonical_rows = [row for row in records if row["domain"] not in ("songs", "inbox")]
+    canonical = _ordered_canonical_records(canonical_rows) if canonical_rows else []
     names = set()
     for row in canonical:
         if row["domain"] == "people":
@@ -1560,7 +1566,25 @@ def _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts
         elif row["domain"] in ("ideas", "journals", "memories", "links") and knowledge.db.execute(
                 "SELECT 1 FROM items WHERE id=?", (row["values"]["id"],)).fetchone():
             raise MigrationError("Migration target identity already exists", 409)
-    song = next(row for row in records if row["domain"] == "songs")
+    inbox_rows = [row for row in records if row["domain"] == "inbox"]
+    if inbox_rows:
+        CaptureInbox(knowledge)
+        planned_items = {row["values"]["id"] for row in canonical
+                         if row["domain"] in ("ideas", "journals", "memories", "links")}
+        for row in inbox_rows:
+            values = row["values"]
+            if (knowledge.db.execute("SELECT 1 FROM capability_knowledge_captures WHERE id=? OR request_id=?",
+                    (values["id"], "migration-inbox-" + values["id"])).fetchone()
+                    or knowledge.db.execute("SELECT 1 FROM capability_knowledge_capture_events WHERE request_id=?",
+                                            ("migration-event-" + values["id"],)).fetchone()):
+                raise MigrationError("Migration target identity already exists", 409)
+            if (values["destination_id"] is not None and values["destination_id"] not in planned_items
+                    and not knowledge.db.execute("SELECT 1 FROM items WHERE id=?", (values["destination_id"],)).fetchone()):
+                raise MigrationError("Inbox record references a missing canonical destination", 409)
+    songs = [row for row in records if row["domain"] == "songs"]
+    if not songs:
+        return
+    song = songs[0]
     with repertoire._db() as db:
         if db.execute("SELECT 1 FROM items WHERE id=?", (song["values"]["id"],)).fetchone():
             raise MigrationError("Migration target identity already exists", 409)
@@ -1579,9 +1603,28 @@ def _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts
                 raise MigrationError("Canonical attachment slug already contains different bytes", 409)
 
 
+def _validate_inbox_group(knowledge, records):
+    db = knowledge.db
+    for record in records:
+        values = record["values"]
+        row = db.execute("SELECT * FROM capability_knowledge_captures WHERE id=?", (values["id"],)).fetchone()
+        events = list(db.execute(
+            "SELECT request_id,event,payload,happened_at FROM capability_knowledge_capture_events WHERE capture_id=?",
+            (values["id"],)))
+        expected = {"id": values["id"], "request_id": "migration-inbox-" + values["id"], "input_origin": "text",
+                    "original_text": values["text"], "audio_item_id": None, "audio_sha256": None,
+                    "captured_at": values["captured_at"], "status": values["status"], "transcript": None,
+                    "error": values["error"], "revision": 1, "destination_id": values["destination_id"], "pending": None}
+        expected_event = ("migration-event-" + values["id"], "migration_snapshot",
+                          json.dumps(values["event"], sort_keys=True), values["captured_at"])
+        if row is None or dict(row) != expected or [tuple(event) for event in events] != [expected_event]:
+            raise MigrationError("A completed inbox migration group has canonical identity drift", 409)
+
+
 def _commit_grouped_records(tasks, people, knowledge, projects, repertoire, artifacts,
                             digest, token, records, generated):
-    canonical = [row for row in records if row["domain"] != "songs"]
+    canonical = [row for row in records if row["domain"] not in ("songs", "inbox")]
+    inbox = [row for row in records if row["domain"] == "inbox"]
     songs = [row for row in records if row["domain"] == "songs"]
     plan = [{**row, "values": {**row["values"], "attachments": [
         {key: value for key, value in attachment.items() if key != "bytes"}
@@ -1594,29 +1637,40 @@ def _commit_grouped_records(tasks, people, knowledge, projects, repertoire, arti
         if journal["review_token"] != token or journal["plan_hash"] != plan_hash:
             raise MigrationError("Archive was already grouped with different reviewed content", 409)
         if all(group["state"] == "complete" for group in journal["groups"]):
-            _recover_canonical_journals(tasks, people, knowledge, projects)
-            _recover_song_journals(repertoire, artifacts)
+            if canonical:
+                _recover_canonical_journals(tasks, people, knowledge, projects)
+            if inbox:
+                _validate_inbox_group(knowledge, inbox)
+            if songs:
+                _recover_song_journals(repertoire, artifacts)
             return journal["receipt"], False
     else:
         _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts, digest, records)
+        groups = ([{"id": "canonical", "state": "pending", "receipt": None, "error": None}] if canonical else [])
+        groups += ([{"id": "inbox", "state": "pending", "receipt": None, "error": None}] if inbox else [])
+        groups += ([{"id": "song", "state": "pending", "receipt": None, "error": None}] if songs else [])
         journal = {"schema": 1, "kind": "independent_groups", "archive_digest": digest, "review_token": token,
                    "generated_at": generated, "plan_hash": plan_hash,
-                   "groups": [{"id": "canonical", "state": "pending", "receipt": None, "error": None},
-                              {"id": "song", "state": "pending", "receipt": None, "error": None}],
+                   "groups": groups,
                    "receipt": None, "receipt_hash": None}
         _write_journal(path, journal)
     for group in journal["groups"]:
         if group["state"] == "complete":
             if group["id"] == "canonical":
                 _recover_canonical_journals(tasks, people, knowledge, projects)
+            elif group["id"] == "inbox":
+                _validate_inbox_group(knowledge, inbox)
             else:
                 _recover_song_journals(repertoire, artifacts)
             continue
         try:
-            receipt, group_created = (_commit_canonical_records(
-                tasks, people, knowledge, projects, digest, token, canonical, generated)
-                if group["id"] == "canonical"
-                else _commit_song(repertoire, artifacts, digest, token, songs, generated))
+            if group["id"] == "canonical":
+                receipt, group_created = _commit_canonical_records(
+                    tasks, people, knowledge, projects, digest, token, canonical, generated)
+            elif group["id"] == "inbox":
+                receipt, group_created = _commit_knowledge(knowledge, digest, token, inbox, generated)
+            else:
+                receipt, group_created = _commit_song(repertoire, artifacts, digest, token, songs, generated)
         except MigrationError as error:
             group["error"] = str(error)
             journal["receipt"] = _grouped_receipt(journal)

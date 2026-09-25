@@ -18,7 +18,7 @@ from gideon.workspace.capabilities.platform.migration import FORMAT, MigrationEr
 PROJECT = "81818181-8181-4181-8181-818181818181"
 
 
-def mixed_archive():
+def mixed_archive(*, include_inbox=False):
     now = "2026-09-25T10:00:00Z"
     attachment = b"%PDF-1.7\nmixed score\n"
     song = {"id": "song_mixed", "title": "Mixed Song", "artist": "Ada", "instrument": "guitar",
@@ -40,6 +40,13 @@ def mixed_archive():
         "brain/songs/song_mixed/index.json": json.dumps(song).encode(),
         "brain/songbook/score.pdf": attachment,
     }
+    if include_inbox:
+        capture_id = "82828282-8282-4282-8282-828282828282"
+        files["brain/inbox/index.json"] = json.dumps({"schemaVersion": 1, "type": "inbox"}).encode()
+        files[f"brain/inbox/{capture_id}/index.json"] = json.dumps({"id": capture_id,
+            "capturedText": "Immutable grouped capture", "capturedAt": now, "source": "brain_ui",
+            "status": "needs_review", "classification": {"destination": "unknown", "confidence": 0.4,
+            "title": "Grouped capture", "extracted": {}}}).encode()
     manifest = {"generatedAt": now, "fileCount": len(files),
                 "files": {name: hashlib.sha256(value).hexdigest() for name, value in files.items()}}
     stream = io.BytesIO()
