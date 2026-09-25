@@ -8,6 +8,8 @@ from gideon.workspace.capabilities.creative.moodboards import BoardStore
 STORE = web.AppKey("creative_store", IngredientStore)
 PREFIX = "/api/capabilities/creative/ingredients"
 from gideon.workspace.capabilities.creative.universes import UniverseStore
+from gideon.workspace.capabilities.creative.graph import UniverseGraph
+GRAPHS = web.AppKey("creative_graphs", UniverseGraph)
 UNIVERSES = web.AppKey("creative_universes", UniverseStore)
 
 BOARDS = web.AppKey("creative_boards", BoardStore)
@@ -98,10 +100,27 @@ async def handle(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def universe_graph(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        graph = request.app[GRAPHS]
+        id = request.match_info['id']
+        action = request.path.rsplit('/', 1)[-1]
+        result = graph.graph(id) if action == 'graph' else getattr(graph, action.replace('-', '_'))(id, await request.json())
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
     app[UNIVERSES] = UniverseStore(app[STORE].home)
+    app[GRAPHS] = UniverseGraph(app[UNIVERSES])
+    app.router.add_get("/api/capabilities/creative/universes/{id}/graph", universe_graph)
+    app.router.add_post("/api/capabilities/creative/universes/{id}/merge-preview", universe_graph)
+    app.router.add_post("/api/capabilities/creative/universes/{id}/merge", universe_graph)
     app.router.add_get("/api/capabilities/creative/universes", universes)
     app.router.add_post("/api/capabilities/creative/universes", universes)
     app.router.add_get("/api/capabilities/creative/universes/{id}", universes)

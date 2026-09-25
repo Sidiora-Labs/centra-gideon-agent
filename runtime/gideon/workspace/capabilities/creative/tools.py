@@ -5,6 +5,7 @@ from copy import deepcopy
 from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from .moodboards import BoardStore
 from .universes import UniverseStore
+from .graph import UniverseGraph
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -47,11 +48,16 @@ def schemas():
     result["creative_board_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_universe_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_board_sources"] = obj({"q": STRING})
+    result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
+    result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
+    result["creative_universe_merge"] = obj({"id": STRING, "payload": obj({"source_id": STRING, "request_id": STRING,
+        "target_revision": NUMBER, "source_revision": NUMBER, "canon_choices": {"type": "object", "additionalProperties": {"enum": ["target", "source"]}},
+        "identity_choice": {"enum": ["target", "source"]}}, ["source_id", "request_id", "target_revision", "source_revision"])}, ["id", "payload"])
     return result
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore"}
+WRITES = {"create", "update", "restore", "merge"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -59,6 +65,7 @@ class CreativeToolProvider(ToolProvider):
         self.ingredients = IngredientStore(home)
         self.boards = BoardStore(self.ingredients.home)
         self.universes = UniverseStore(self.ingredients.home)
+        self.graphs = UniverseGraph(self.universes)
 
     @property
     def name(self):
@@ -85,10 +92,12 @@ class CreativeToolProvider(ToolProvider):
             keys(arguments, set(schema["properties"]))
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
-            _, entity, action = tool_name.split("_")
+            _, entity, action = tool_name.split("_", 2)
             store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes}[entity]
             args = dict(arguments)
-            if action == "revisions":
+            if action in ("graph", "merge_preview", "merge"):
+                result = getattr(self.graphs, action)(**args)
+            elif action == "revisions":
                 offset = integer(args.get("offset", 0), 0, 1000000)
                 limit = integer(args.get("limit", 25), 1, 100)
                 records = store.revisions(args["id"])

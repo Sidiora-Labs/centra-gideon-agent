@@ -1,3 +1,4 @@
+import UniverseGraph from './UniverseGraph'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -111,6 +112,7 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
       {draft.board_refs.map(ref => <p key={`${ref.id}:${ref.revision}`} className="break-all">{boards.find(b => b.id === ref.id)?.title || ref.id} · pinned revision {ref.revision}{selected?.board_status?.find(s => s.id === ref.id && s.revision === ref.revision)?.missing && ' — Moodboard missing'}<a href={`${apiRoot.replace(/universes$/, 'boards')}/${ref.id}/export?revision=${ref.revision}`}>Open pinned moodboard</a><Button onClick={() => setDraft({ ...draft, board_refs: draft.board_refs.filter(r => r !== ref) })}>Unpin moodboard {ref.id}</Button></p>)}
       <Button disabled={busy || (!!id && !selected)} onClick={() => void save()}>Save universe</Button>
       {selected && <><Button disabled={busy} onClick={() => void download()}>Export universe</Button><section aria-label="Universe history">{history.map(item => <p key={item.revision}>Revision {item.revision}: {item.title}<Button disabled={busy || item.revision === selected.revision} onClick={() => void save(item.revision)}>Restore universe revision {item.revision}</Button></p>)}</section></>}
+      {selected && <UniverseGraph key={selected.id} id={selected.id} revision={selected.revision} apiRoot={apiRoot} onMerged={() => { setReload(v => v + 1); setRefresh(v => v + 1) }} />}
       {exported && <label className="block">Universe export<textarea readOnly className={control} value={exported} /></label>}
     </section></div></main>
 }
