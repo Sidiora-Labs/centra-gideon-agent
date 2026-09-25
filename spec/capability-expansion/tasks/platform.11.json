@@ -1,0 +1,46 @@
+{
+  "task": "platform.11",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "e29bc781",
+  "contract": "Original project .planning artifacts are source of truth: bounded allowlisted document/phase reads and SHA-guarded edits. Explicit phase plan/execute/verify creates a real OPEN task in the project GSD list, deduplicates pending requests and never claims execution or promotes documents into runtime instructions.",
+  "acceptance": [
+    "Read actual bound project planning documents and phase PLAN/SUMMARY evidence without inferring completion.",
+    "Edit original document with observed SHA, preserve unrelated source, reject stale writes/path escapes/invalid content and reload after source change.",
+    "Create real NativeTaskProvider open phase tasks under actual project GSD task list; repeated open action resolves same task across reads.",
+    "Console edits source and creates tasks through real HTTP; native read/request tools use actual actor context and no stubs."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/gsd.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_gsd.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Gsd.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_gsd.py",
+    "checks/runtime/capabilities/platform/gsd_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Gsd.test.tsx",
+    "checks/runtime/capabilities/platform/ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_gsd.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Gsd.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.11-checks-wh9iiq1q/evidence.json",
+  "qualification": {
+    "runtime_tests": 9,
+    "ui_tests": 2,
+    "production_lines": 166,
+    "test_lines": 273,
+    "repair_cycles": 1,
+    "limitations": [
+      "Phase actions create real open work requests; no external GSD execution is claimed."
+    ]
+  }
+}
