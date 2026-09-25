@@ -5,12 +5,14 @@ import json
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from .narration import get_narration_jobs
 from .navigation import NavigationReceipts
+from .speech_owner import SpeechOwner
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "speech_state": ({}, False, "Read proactive opt-in and audible owner expiry without lease credentials."),
     "story_list": ({}, False, "List authored stories."),
     "story_get": ({"id": STRING}, False, "Read an authored story and its revision."),
     "story_create": ({"story": STORY}, True, "Create a validated authored story graph."),
@@ -63,7 +65,8 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
-            if operation == "story_list": result = {"stories": self.store.stories()}
+            if operation == "speech_state": result = {"owner": SpeechOwner(self.store).state()}
+            elif operation == "story_list": result = {"stories": self.store.stories()}
             elif operation == "story_get": result = {"story": self.store.story(key)}
             elif operation == "story_create": result = {"story": self.store.save(args["story"])}
             elif operation == "story_update": result = {"story": self.store.save(args["story"], key)}
