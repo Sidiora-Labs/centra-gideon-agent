@@ -11,37 +11,50 @@
     "music.03@b92f20f2",
     "music.06@68f466d5"
   ],
-  "contract": "A recurring creative commission is a typed standing brief with a supported ability, canonical direction sources, bounded deterministic plan, provider-neutral canonical dispatch configuration, current cadence and retry budget. The shared TriggerStore remains the only clock authority. Every occurrence has one deterministic run identity and one idempotently linked DirectionStore project; upstream media, music, music-video or series-production admission receipts, attempts, failures and immutable output references remain durable. Feedback is an author-separated revisioned reaction keyed to an actual commission/run/output identity and only a bounded live window is supplied as data to later direction projects.",
+  "contract": "A recurring creative commission is a typed standing brief with a supported ability, canonical direction sources, bounded deterministic plan, provider-neutral canonical dispatch configuration, current cadence and retry budget. The shared TriggerStore remains the only clock authority. Every occurrence has one deterministic run identity and one idempotently linked DirectionStore project; upstream media, music, music-video or series-production admission receipts, attempts, failures and immutable output references remain durable. Feedback is an author-separated revisioned reaction keyed to an actual commission/run/output identity and only a bounded live window is supplied as data to later direction projects. Peer feedback is authored in a durable outbox only against a receiver-published canonical target, explicitly approved for that peer, signed over the complete reaction and lineage payload with the canonical peer identity, and accepted only when the receiving owner resolves the exact commission, run, project revision, source pins and output. Execution mode is explicit: planning executes and labels only the bounded direction plan, while generate requires a normalized ability configuration and a durable upstream admission receipt. Each occurrence reserves one durable claimed attempt before work and never replays an upstream admission whose outcome became uncertain.",
   "acceptance": [
     "Create validates video, image, music, music-video or series ability, typed intent/style/constraints/seeds, canonical work or series sources, a bounded direction plan and daily, weekly, custom cron, interval or guarded calendar recurrence cadence. It writes one deterministic shared clock trigger and surfaces trigger persistence failure instead of claiming the schedule is armed.",
+    "A new commission persists mode planning or generate. Planning rejects ability dispatch configuration and completes only as planned; generate requires ability-specific typed configuration before persistence and cannot complete without a submitted or completed canonical receipt. Legacy records without mode are presented and executed as planning, so an old optional dispatch cannot start provider work implicitly.",
     "A real due TriggerStore fire dispatches the commission action provider. The provider rereads enabled state, schedule revision and cadence hash before work, so disabling or changing a commission before a stale tick creates no project or run.",
     "Each occurrence creates at most one idempotent DirectionStore project, executes its bounded non-generation plan through real direction operations and records exact project/output artifact/version/hash links. Calendar recurrences preserve authored local wall time across daylight-saving changes, honor exclusions and finite bounds, and rearm the same shared one-shot trigger after a real success or failure. Repeated delivery returns the same completed run; failures retain bounded classifications and retry attempts until exhausted.",
     "When dispatch is configured, image and video use canonical MediaJobs generation operations, music uses the configured MusicGeneration job service, music-video uses its pinned local render project, and series uses the approval-gated SeriesProductionStore. Each commission attempt has a deterministic upstream request ID and durable normalized receipt; queued work is reported as submitted, while absent configuration, provider or renderer is external_unavailable and remains retryable without fabricated output.",
+    "Before direction or provider work, execution transactionally reserves one attempt with a process claim. A concurrent delivery for the same occurrence returns the existing in-progress run without creating a project or dispatch. Restart recovers a dead direction-phase claim as an interrupted retryable attempt, while a dead dispatch-phase claim becomes dispatch_unknown with its deterministic request ID and cannot be blindly replayed. Terminal writes must still own the exact claim and replace the reserved attempt.",
     "Restart preserves commission, trigger, run attempts, linked project and outputs. Manual HTTP and native tool runs use the same execution path and do not accept provider, model, credential, home or runtime overrides.",
-    "A feedback reaction resolves an actual linked output and is isolated by author. Rerating increments the same deterministic record, deletion leaves a tombstone, another author's reaction is unchanged, and later runs pin the revisions of only the bounded live feedback they consumed."
+    "A feedback reaction resolves an actual linked output and is isolated by author. Rerating increments the same deterministic record, deletion leaves a tombstone, another author's reaction is unchanged, and later runs pin the revisions of only the bounded live feedback they consumed.",
+    "A commission owner resolves an actual linked output as a published feedback target with exact commission, run, direction-project revision, source revisions and artifact version/hash. A separate peer can author and durably revision or tombstone its own reaction only after an exact caller-attested peer-and-target approval. Canonical PeerStore directional policy, proof expiry/nonce and an inner Ed25519 signature bound to the complete payload protect transport. The owner resolves every pin against its local canonical records before mutation; orphan or changed pins fail closed. Exact delivery replay returns the original durable receipt, changed replay conflicts, higher author revisions apply, stale revisions cannot overwrite later feedback, and another author remains unchanged."
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/commissions.py",
     "runtime/gideon/workspace/capabilities/creative/commission_dispatch.py",
     "runtime/gideon/workspace/capabilities/creative/commission_tools.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_commissions.py",
-    "apps/console/src/features/capabilities/creative/Commissions.tsx"
+    "apps/console/src/features/capabilities/creative/Commissions.tsx",
+    "runtime/gideon/workspace/capabilities/creative/peer_feedback.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_peer_feedback.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "runtime/gideon/interfaces/dashboard/token_auth.py"
   ],
   "test_files": [
     "checks/runtime/capabilities/creative/test_commissions.py",
     "checks/runtime/capabilities/creative/commission_server.py",
-    "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
+    "apps/console/src/features/capabilities/creative/Commissions.test.tsx",
+    "checks/runtime/capabilities/creative/test_peer_feedback.py"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/creative/test_commissions.py"
+    "checks/runtime/capabilities/creative/test_commissions.py",
+    "checks/runtime/capabilities/creative/test_peer_feedback.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
   ],
   "limits": [
     "Provider-backed output is produced only by the configured canonical job or production service. A submitted receipt is admission evidence and never claims that media or manuscript output completed.",
-    "Peer propagation of reaction records is deferred to the sharing slice; local author isolation, revision lineage and tombstones are implemented here.",
-    "Root integration must register the unique HTTP handler, console route, native tool provider and creative-commission trigger action provider."
+    "Root integration must register the unique HTTP handler, console route, native tool provider and creative-commission trigger action provider.",
+    "Peer feedback approval is an explicit caller attestation bound to one peer and one canonical target hash; the adapter reports it as caller-attested and does not claim an independently verified human approval.",
+    "Peer feedback uses the canonical platform.22 PeerStore for Ed25519 proof, nonce replay protection, directional policy and guarded transport; root integration must add creative.commission_feedback to its category inventory and mount a thin receive handler. The creative slice does not duplicate that transport.",
+    "Local loopback proves two-home signed propagation; no externally provisioned peer or public certificate is claimed.",
+    "No paid or external provider output was invoked for qualification. Configured provider success still requires a real deployment credential/service, and dispatch_unknown requires operator reconciliation with its persisted upstream request ID rather than automatic replay.",
+    "The exact signed peer-feedback receive POST is implemented as a handler-authenticated token-middleware exception and mounted by the creative registrar. Its final middleware and registrar qualification is unverified in OSS: the first focused run found only a stale 401 expectation for the middleware's actual 403 nearby-route denial; after that assertion was repaired, the second run was interrupted by the user-requested stop before pytest rendered its result."
   ],
   "qualified_increments": [
     {
@@ -79,6 +92,34 @@
       "test_lines": 890,
       "test_to_production_ratio": 1.003382187147689,
       "repair_reruns": 2
+    },
+    {
+      "name": "explicit execution modes durable claims and signed peer feedback",
+      "command": "python3 tooling/capability_workflow.py verify creative.16",
+      "evidence": "/tmp/gideon-creative.16-checks-vmv2ft_1/evidence.json",
+      "compile": "passed",
+      "runtime": "120 passed",
+      "ui": "6 passed",
+      "production_lines": 1384,
+      "test_lines": 1417,
+      "test_to_production_ratio": 1.0238439306358382,
+      "repair_reruns": 0
+    }
+  ],
+  "unverified_increments": [
+    {
+      "name": "signed peer-feedback dashboard ingress",
+      "reason": "OSS execution stopped by user before post-fix focused verification completed",
+      "files": [
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_peer_feedback.py",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+        "runtime/gideon/interfaces/dashboard/token_auth.py",
+        "checks/runtime/capabilities/creative/test_peer_feedback.py"
+      ],
+      "attempted_command": "/tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/creative/test_peer_feedback.py -q -k 'real_dashboard_middleware or creative_registrar'",
+      "first_attempt": "exit 1: 1 failed, 1 passed, 31 deselected; expected 401 but actual nearby-route denial was 403 Forbidden",
+      "post_fix_attempt": "interrupted exit 130 after pytest emitted F; result unknown and unverified",
+      "persistent_state": "~/.gideon/capabilities/creative/peer_feedback.sqlite3 stores private outbox, send receipts and inbound idempotence receipts; accepted reactions and tombstones remain in canonical commissions.sqlite3"
     }
   ]
 }

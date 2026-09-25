@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import wave
 from datetime import datetime, timezone
 
@@ -20,6 +21,7 @@ from gideon.workspace.capabilities.creative.commissions import (
     TRIGGER_PREFIX,
     _recurrence_next,
     digest,
+    process_identity,
 )
 from gideon.workspace.capabilities.creative.commission_dispatch import CommissionDispatcher, normalize_dispatch
 from gideon.workspace.capabilities.creative.direction import DirectionStore
@@ -72,6 +74,8 @@ def test_create_persists_typed_brief_and_real_trigger(tmp_path):
     works, work, _ = source(tmp_path)
     store, _, triggers = make_store(tmp_path)
     commission = store.create(payload(work))
+    assert commission['mode'] == 'planning'
+    assert commission['mode_source'] == 'explicit'
     assert commission['revision'] == 1
     assert commission['target_ability'] == 'series'
     assert commission['brief']['constraints'] == {'rating': 'PG'}
@@ -100,6 +104,139 @@ def test_create_is_idempotent_and_request_conflicts_are_explicit(tmp_path):
         store.create(changed)
     assert conflict.value.status == 409
     assert len(store.list()['items']) == 1
+
+
+def test_generation_requires_typed_config_and_planning_rejects_dispatch(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, _ = make_store(tmp_path)
+    generated = payload(work, request='blank-generation')
+    generated.update(target_ability='image', mode='generate')
+    with pytest.raises(CatalogError, match='requires typed ability configuration'):
+        store.create(generated)
+    blank = payload(work, request='blank-image')
+    blank.update(target_ability='image', mode='generate', dispatch={'input': {'prompt': ''}})
+    with pytest.raises(CatalogError, match='Invalid text length'):
+        store.create(blank)
+    planned = payload(work, request='planning-dispatch')
+    planned.update(target_ability='image', mode='planning',
+        dispatch={'input': {'prompt': 'This must not be dispatched.'}})
+    with pytest.raises(CatalogError, match='Planning mode does not accept'):
+        store.create(planned)
+    assert store.list() == {'items': []}
+
+
+@pytest.mark.parametrize(('ability', 'dispatch', 'message'), [
+    ('image', {'input': {}}, 'Invalid text length'),
+    ('image', {'input': {'prompt': 'x', 'size': 2}}, 'Invalid image size'),
+    ('image', {'input': {'prompt': 'x', 'controls': []}}, 'typed collections'),
+    ('video', {'input': {'prompt': 'x'}}, 'duration'),
+    ('video', {'input': {'prompt': 'x', 'duration_seconds': 0}}, 'between 1 and 60'),
+    ('video', {'input': {'prompt': 'x', 'duration_seconds': 5, 'controls': []}}, 'controls are invalid'),
+    ('music', {'track_id': 'track', 'track_revision': 1, 'prompt': 'x', 'music_length_ms': 2999,
+               'force_instrumental': True, 'license': 'terms'}, 'Invalid integer'),
+    ('music', {'track_id': 'track', 'track_revision': 1, 'prompt': 'x', 'music_length_ms': 3000,
+               'force_instrumental': 'yes', 'license': 'terms'}, 'Instrumental mode'),
+])
+def test_generation_config_matches_canonical_ability_bounds(ability, dispatch, message, tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, _ = make_store(tmp_path)
+    body = payload(work, request='invalid-' + ability + '-' + digest(dispatch)[:8])
+    body.update(target_ability=ability, mode='generate', dispatch=dispatch)
+    with pytest.raises(CatalogError, match=message):
+        store.create(body)
+    assert store.list() == {'items': []}
+
+
+def test_update_requires_coherent_mode_transition(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, _ = make_store(tmp_path)
+    body = payload(work, request='mode-transition')
+    body['target_ability'] = 'image'
+    commission = store.create(body)
+    with pytest.raises(CatalogError, match='requires typed ability configuration'):
+        store.update(commission['id'], {'revision': 1, 'mode': 'generate'})
+    generated = store.update(commission['id'], {'revision': 1, 'mode': 'generate',
+        'dispatch': {'input': {'prompt': 'A bounded transition.', 'size': '', 'controls': {}, 'loras': []}}})
+    assert generated['mode'] == 'generate'
+    with pytest.raises(CatalogError, match='does not accept'):
+        store.update(commission['id'], {'revision': generated['revision'], 'mode': 'planning'})
+
+
+async def test_legacy_record_with_dispatch_is_planning_only_and_never_admits_media(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, direction, _ = make_store(tmp_path)
+    commission = store.create(payload(work, request='legacy-plan'))
+    with store.db() as db:
+        record = json.loads(db.execute('SELECT record FROM creative_commissions WHERE id=?', (commission['id'],)).fetchone()[0])
+        record.pop('mode')
+        record['dispatch'] = {'input': {'prompt': 'Legacy optional configuration must remain inert.'}}
+        db.execute('UPDATE creative_commissions SET record=? WHERE id=?', (json.dumps(record), commission['id']))
+    legacy = store.get(commission['id'])
+    assert legacy['mode'] == 'planning'
+    assert legacy['mode_source'] == 'legacy'
+    run = await store.execute(commission['id'], 'manual:legacy', trigger='manual')
+    assert run['status'] == 'planned'
+    assert run['dispatch_receipts'] == []
+    assert len(direction.list()) == 1
+
+
+async def test_live_claim_blocks_duplicate_attempt_and_stale_direction_claim_requires_retry(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, direction, _ = make_store(tmp_path)
+    commission = store.create(payload(work, request='claimed'))
+    run_id = digest(commission['id'] + ':manual:claimed')
+    stamp = datetime.now(timezone.utc).isoformat()
+    running = {'id': run_id, 'commission_id': commission['id'], 'occurrence': 'manual:claimed', 'trigger': 'manual',
+        'status': 'running', 'project_id': None, 'outputs': [], 'dispatch_receipts': [], 'feedback_refs': [],
+        'attempts': [{'number': 1, 'status': 'running', 'started_at': stamp, 'finished_at': '', 'error': ''}],
+        'claim_id': 'live', 'claim_pid': os.getpid(), 'claim_identity': process_identity(os.getpid()),
+        'claimed_at': stamp, 'phase': 'direction', 'created_at': stamp, 'updated_at': stamp}
+    with store.db() as db:
+        db.execute('INSERT INTO creative_commission_runs VALUES(?,?,?,?)',
+                   (run_id, commission['id'], 'manual:claimed', json.dumps(running)))
+    concurrent = await store.execute(commission['id'], 'manual:claimed', trigger='manual')
+    assert concurrent['status'] == 'in_progress'
+    assert len(concurrent['attempts']) == 1
+    assert direction.list() == []
+    with store.db() as db:
+        current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run_id,)).fetchone()[0])
+        current.update(claim_pid=999999999, claim_identity='dead:claim')
+        db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current), run_id))
+    interrupted = await store.execute(commission['id'], 'manual:claimed', trigger='manual')
+    assert interrupted['status'] == 'failed'
+    assert interrupted['attempts'][0]['status'] == 'failed'
+    assert interrupted['attempts'][0]['error'] == 'execution-interrupted'
+    assert direction.list() == []
+    recovered = await store.retry(commission['id'], run_id)
+    assert recovered['status'] == 'planned'
+    assert [row['status'] for row in recovered['attempts']] == ['failed', 'planned']
+    assert len(direction.list()) == 1
+
+
+async def test_stale_dispatch_claim_is_quarantined_without_blind_replay(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, direction, _ = make_store(tmp_path)
+    body = payload(work, request='uncertain-dispatch')
+    body.update(target_ability='image', mode='generate',
+        dispatch={'input': {'prompt': 'An uncertain admission.', 'size': '', 'controls': {}, 'loras': []}})
+    commission = store.create(body)
+    run_id = digest(commission['id'] + ':manual:uncertain')
+    stamp = datetime.now(timezone.utc).isoformat()
+    running = {'id': run_id, 'commission_id': commission['id'], 'occurrence': 'manual:uncertain', 'trigger': 'manual',
+        'status': 'running', 'project_id': None, 'outputs': [], 'dispatch_receipts': [], 'feedback_refs': [],
+        'attempts': [{'number': 1, 'status': 'running', 'started_at': stamp, 'finished_at': '', 'error': ''}],
+        'claim_id': 'dead', 'claim_pid': 999999999, 'claim_identity': 'dead:claim', 'claimed_at': stamp,
+        'phase': 'dispatching', 'dispatch_request_id': 'commission-' + run_id[:48] + '-1',
+        'created_at': stamp, 'updated_at': stamp}
+    with store.db() as db:
+        db.execute('INSERT INTO creative_commission_runs VALUES(?,?,?,?)',
+                   (run_id, commission['id'], 'manual:uncertain', json.dumps(running)))
+    uncertain = await store.execute(commission['id'], 'manual:uncertain', trigger='manual')
+    assert uncertain['status'] == 'dispatch_unknown'
+    assert uncertain['attempts'][0]['error'] == 'upstream-admission-unknown'
+    assert direction.list() == []
+    with pytest.raises(CatalogError, match='retryable failed'):
+        await store.retry(commission['id'], run_id)
 
 
 @pytest.mark.parametrize('ability', ['video', 'image', 'music', 'music-video', 'series'])
@@ -156,7 +293,7 @@ async def test_real_scheduler_due_fire_executes_exactly_one_linked_project(tmp_p
     result = await provider.execute(config, ActionContext(event='trigger.fired', payload=fire))
     assert result.success
     run = json.loads(result.stdout)
-    assert run['status'] == 'completed'
+    assert run['status'] == 'planned'
     assert run['trigger'] == 'schedule'
     assert run['project_id']
     assert len(run['outputs']) == 1
@@ -217,10 +354,10 @@ async def test_failure_is_recorded_and_real_retry_reuses_occurrence(tmp_path):
         content=TEXT, description='restored exact source', readonly=True)
     assert restored.slug == draft['artifact_id']
     recovered = await store.retry(commission['id'], failed['id'])
-    assert recovered['status'] == 'completed'
+    assert recovered['status'] == 'planned'
     assert recovered['id'] == failed['id']
     assert len(recovered['attempts']) == 2
-    assert recovered['attempts'][1]['status'] == 'completed'
+    assert recovered['attempts'][1]['status'] == 'planned'
     assert len(direction.list()) == 1
 
 
@@ -324,7 +461,7 @@ async def test_http_create_manual_run_feedback_disable_and_restart(tmp_path):
         response = await client.post(f'/api/capabilities/creative/commissions/{commission["id"]}/run', json={'request_id': 'http-run'})
         assert response.status == 200
         run = await response.json()
-        assert run['status'] == 'completed'
+        assert run['status'] == 'planned'
         response = await client.post(f'/api/capabilities/creative/commissions/{commission["id"]}/feedback', json={
             'run_id': run['id'], 'author': 'http-owner', 'output': output_ref(run), 'rating': 'liked', 'note': 'Keep', 'tags': []})
         assert response.status == 200
@@ -664,7 +801,7 @@ async def test_real_recurrence_due_fire_rearms_next_occurrence_after_dispatch(tm
         ActionContext(event='trigger.fired', payload=due.fires[0].to_dict()))
     assert result.success
     run = json.loads(result.stdout)
-    assert run['status'] == 'completed'
+    assert run['status'] == 'planned'
     assert len(direction.list()) == 1
     rearmed = triggers.get(TRIGGER_PREFIX + commission['id']).trigger
     assert rearmed.enabled is True
@@ -694,8 +831,8 @@ async def test_failed_recurrence_fire_records_attempt_rearms_and_can_retry(tmp_p
     works.artifacts.create(name='Restored source', slug=draft['artifact_id'], kind='markdown', content=TEXT,
                            description='restored', readonly=True)
     retried = await store.retry(commission['id'], failed['id'])
-    assert retried['status'] == 'completed'
-    assert [attempt['status'] for attempt in retried['attempts']] == ['failed', 'completed']
+    assert retried['status'] == 'planned'
+    assert [attempt['status'] for attempt in retried['attempts']] == ['failed', 'planned']
 
 
 def test_exhausted_finite_recurrence_disarms_truthfully_after_restart(tmp_path):
@@ -725,9 +862,14 @@ async def test_unconfigured_media_dispatch_is_explicit_and_queues_no_job(ability
     store, _, _ = make_store(tmp_path)
     store.dispatcher = dispatcher
     body = payload(work, request='dispatch-' + ability)
-    body.update(target_ability=ability, dispatch=dispatch)
+    body.update(target_ability=ability, mode='generate', dispatch=dispatch)
     commission = store.create(body)
-    run = await store.execute(commission['id'], 'manual:unconfigured', trigger='manual')
+    config = store.triggers.get(TRIGGER_PREFIX + commission['id']).trigger.workflow['inline']['config']
+    admitted = await CommissionActionProvider(store).execute(config,
+        ActionContext(event='trigger.fired', payload={'scheduled_for': 1200}))
+    assert not admitted.success
+    run = json.loads(admitted.stdout)
+    assert run['trigger'] == 'schedule'
     assert run['status'] == 'failed'
     assert run['attempts'][0]['error'] == ability + '_provider_unavailable'
     assert run['dispatch_receipts'] == [{
@@ -736,6 +878,24 @@ async def test_unconfigured_media_dispatch_is_explicit_and_queues_no_job(ability
         'error_code': ability + '_provider_unavailable', 'artifact_refs': [],
     }]
     assert jobs.list() == {'items': []}
+
+
+async def test_retry_keeps_occurrence_mode_and_dispatch_snapshot_after_commission_update(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, _ = make_store(tmp_path)
+    body = payload(work, request='pinned-generation', attempts=2)
+    body.update(target_ability='image', mode='generate',
+        dispatch={'input': {'prompt': 'Pinned generation request.', 'size': '', 'controls': {}, 'loras': []}})
+    commission = store.create(body)
+    first = await store.execute(commission['id'], 'manual:pinned-generation', trigger='manual')
+    assert first['status'] == 'failed'
+    assert first['mode'] == 'generate'
+    changed = store.update(commission['id'], {'revision': commission['revision'], 'mode': 'planning', 'dispatch': {}})
+    assert changed['mode'] == 'planning'
+    retried = await store.retry(commission['id'], first['id'])
+    assert retried['status'] == 'exhausted'
+    assert retried['mode'] == 'generate'
+    assert [row['status'] for row in retried['dispatch_receipts']] == ['external_unavailable', 'external_unavailable']
 
 
 async def test_unconfigured_music_dispatch_persists_receipts_and_retry_identity(tmp_path):
@@ -749,7 +909,7 @@ async def test_unconfigured_music_dispatch_persists_receipts_and_retry_identity(
     store, _, _ = make_store(tmp_path)
     store.dispatcher = CommissionDispatcher(tmp_path, music_generation=music)
     body = payload(work, request='dispatch-music')
-    body.update(target_ability='music', dispatch={'track_id': track['id'], 'track_revision': track['revision'],
+    body.update(target_ability='music', mode='generate', dispatch={'track_id': track['id'], 'track_revision': track['revision'],
         'prompt': 'A restrained mystery score.', 'music_length_ms': 3000, 'force_instrumental': True,
         'license': 'Use is subject to the configured provider terms.'})
     commission = store.create(body)
@@ -793,7 +953,7 @@ async def test_music_video_dispatch_uses_real_pinned_ffmpeg_project(tmp_path):
     store, _, _ = make_store(tmp_path)
     store.dispatcher = CommissionDispatcher(tmp_path, music_video=video)
     body = payload(work, request='dispatch-music-video')
-    body.update(target_ability='music-video', dispatch={'project_id': project['id'], 'revision': project['revision']})
+    body.update(target_ability='music-video', mode='generate', dispatch={'project_id': project['id'], 'revision': project['revision']})
     commission = store.create(body)
     run = await store.execute(commission['id'], 'manual:music-video', trigger='manual')
     assert run['status'] == 'submitted'
@@ -821,7 +981,7 @@ async def test_series_dispatch_enters_real_approval_gated_production(tmp_path):
     store = CommissionStore(tmp_path, direction=direction, triggers=TriggerStore(base_dir=tmp_path),
                             dispatcher=CommissionDispatcher(tmp_path, production=production))
     body = payload(work, request='dispatch-series')
-    body.update(sources=[{'kind': 'series', 'id': series['id'], 'revision': series['revision']}],
+    body.update(mode='generate', sources=[{'kind': 'series', 'id': series['id'], 'revision': series['revision']}],
         dispatch={'series_id': series['id'], 'series_revision': series['revision'], 'mode': 'model', 'max_attempts': 2})
     commission = store.create(body)
     run = await store.execute(commission['id'], 'manual:series', trigger='manual')
@@ -844,7 +1004,7 @@ def test_dispatch_routing_overrides_fail_before_persistence(ability, dispatch, t
     _, work, _ = source(tmp_path)
     store, _, _ = make_store(tmp_path)
     body = payload(work, request='override-' + ability)
-    body.update(target_ability=ability, dispatch=dispatch)
+    body.update(target_ability=ability, mode='generate', dispatch=dispatch)
     with pytest.raises(CatalogError, match='provider-neutral'):
         store.create(body)
     assert store.list() == {'items': []}

@@ -346,6 +346,8 @@ async def editorial_controls(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    from gideon.interfaces.dashboard.handlers.capabilities_creative_peer_feedback import register as register_peer_feedback
+    register_peer_feedback(app, app[STORE].home)
     app[SERIES] = SeriesStore(app[STORE].home)
     app[VOICE] = VoiceStore(app[SERIES])
     app.router.add_get("/api/capabilities/creative/series/{id}/voice", voice)

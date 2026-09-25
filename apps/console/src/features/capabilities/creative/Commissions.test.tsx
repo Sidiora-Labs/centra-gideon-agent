@@ -46,6 +46,27 @@ function fillSource() {
 }
 
 describe('recurring creative commissions', () => {
+  it('uses typed controls for every generation ability', () => {
+    render(<Commissions apiRoot={apiRoot} />)
+    fireEvent.change(screen.getByLabelText('Execution mode'), { target: { value: 'generate' } })
+    expect(screen.getByLabelText('Series production mode')).toBeVisible()
+    expect(screen.queryByLabelText('Ability dispatch JSON')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'image' } })
+    expect(screen.getByLabelText('Generation prompt')).toBeVisible()
+    expect(screen.getByLabelText('Image size')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'video' } })
+    expect(screen.getByLabelText('Duration seconds')).toBeVisible()
+    expect(screen.getByLabelText('Aspect ratio')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'music' } })
+    expect(screen.getByLabelText('Track ID')).toBeVisible()
+    expect(screen.getByLabelText('Track revision')).toBeVisible()
+    expect(screen.getByLabelText('Length milliseconds')).toBeVisible()
+    expect(screen.getByLabelText('License statement')).toBeVisible()
+    fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'music-video' } })
+    expect(screen.getByLabelText('Music video project ID')).toBeVisible()
+    expect(screen.getByLabelText('Project revision')).toBeVisible()
+  })
+
   it('creates a scheduled brief, runs a real direction project, and records linked feedback', async () => {
     render(<Commissions apiRoot={apiRoot} />)
     fillSource()
@@ -54,7 +75,8 @@ describe('recurring creative commissions', () => {
     const detail = await screen.findByRole('region', { name: 'Commission detail' })
     expect(detail).toHaveTextContent('active')
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
-    await waitFor(() => expect(detail).toHaveTextContent('completed'))
+    await waitFor(() => expect(detail).toHaveTextContent('planned'))
+    expect(detail).toHaveTextContent('planning only')
     expect(detail).toHaveTextContent('1 attempt')
     expect(detail).toHaveTextContent('Output creative-direction-')
     fireEvent.click(screen.getByRole('button', { name: 'Like' }))
@@ -71,10 +93,10 @@ describe('recurring creative commissions', () => {
     render(<Commissions apiRoot={apiRoot} />)
     fireEvent.click(await screen.findByRole('button', { name: 'UI standing treatment' }))
     const detail = await screen.findByRole('region', { name: 'Commission detail' })
-    expect(detail).toHaveTextContent('completed')
+    expect(detail).toHaveTextContent('planned')
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
     await waitFor(() => expect(detail).toHaveTextContent('disabled'))
-    expect(detail).toHaveTextContent('completed')
+    expect(detail).toHaveTextContent('planned')
     expect(screen.getByRole('button', { name: 'Enable' })).toBeEnabled()
   })
 
@@ -113,11 +135,11 @@ describe('recurring creative commissions', () => {
     fillSource()
     fireEvent.change(screen.getByLabelText('Commission name'), { target: { value: 'Image commission' } })
     fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'image' } })
-    fireEvent.change(screen.getByLabelText('Ability dispatch JSON'), {
-      target: { value: JSON.stringify({ input: { prompt: 'A brass key on a quiet platform.', size: '', controls: {}, loras: [] } }) },
-    })
+    fireEvent.change(screen.getByLabelText('Execution mode'), { target: { value: 'generate' } })
+    fireEvent.change(screen.getByLabelText('Generation prompt'), { target: { value: 'A brass key on a quiet platform.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create commission' }))
     const detail = await screen.findByRole('region', { name: 'Commission detail' })
+    expect(detail).toHaveTextContent('generation')
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
     await waitFor(() => expect(detail).toHaveTextContent('failed'))
     expect(detail).toHaveTextContent('Dispatch media_jobs/image_generate: external_unavailable image_provider_unavailable')
