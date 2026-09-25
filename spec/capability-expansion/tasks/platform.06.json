@@ -2,40 +2,40 @@
   "task": "platform.06",
   "status": "locally_qualified_external_pending",
   "schema_version": 1,
-  "contract": "An explicitly armed private inference listener invokes an existing direct ModelProvider with tools disabled. It re-resolves CredentialStore peer references on every request, enforces bounded non-streaming admission, cancels active requests during stop, records canonical successful usage and bounded local failure outcomes. Lifecycle controls own the listener, not GPU installation or upstream service startup.",
+  "contract": "An explicitly armed private inference listener invokes an existing direct ModelProvider with tools disabled. An optional operator-selected openai-compatible-v1 recipe binds an already registered SidecarRunner: provision validates real runtime files without starting or installing them; start uses the real load/call protocol and requires affirmative readiness before listener bind; readiness never starts a stopped child; stop closes admission, cancels requests, asks the child to stop/unload and terminates supervision. Peer credentials remain references and GPU readiness is never inferred.",
   "source_evidence": [
     "runtime/gideon/integrations/local_models/provider.py:1 management and inference are explicitly separate axes",
     "runtime/gideon/workspace/capabilities/platform/connections.py existing connection endpoint/credential references from platform.03",
     "runtime/gideon/interfaces/dashboard/handlers/providers.py existing model catalog operations"
   ],
   "qualification": {
-    "runtime_tests": 16,
-    "ui_tests": 2,
-    "production_lines": 213,
-    "test_lines": 312,
-    "repair_cycles": 0,
-    "limitations": [
-      "Successful inference and concurrency/cancellation against actual model service not exercised; unavailable provider failure is not success proof.",
-      "Two distinct physical hosts and admitted GPU startup/install recipe remain unavailable; upstream process lifecycle is not implemented."
-    ]
+    "prior_listener_runtime_tests": 16,
+    "prior_listener_ui_tests": 2,
+    "runtime_tests": 27,
+    "ui_tests": 3,
+    "production_lines": 108,
+    "test_lines": 141,
+    "repair_cycles": 1,
+    "evidence": "/tmp/gideon-platform.06-checks-cl1y20fn/evidence.json"
   },
   "acceptance": [
     "Two actual local listeners isolate peer keys and stop independently; configured model metadata explicitly not-probed.",
     "Credential rotation/revocation takes immediate effect; listener arm survives service cleanup while explicit disarm persists.",
     "Stale/invalid configuration, bind collision, model switch, tools and streaming requests fail honestly without claimed inference.",
-    "Actual missing provider failure records unknown usage and no prompt/secret; authenticated dashboard and console start/stop real listener; native reads same state."
+    "Actual missing provider failure records unknown usage and no prompt/secret; authenticated dashboard and console start/stop real listener; native reads same state.",
+    "Explicit runtime provision validates a registered runner and concrete worker/interpreter files without installation or process start.",
+    "Runtime start uses the real SidecarRunner protocol, refuses a worker that does not affirm recipe load/readiness and leaves no listener or child alive.",
+    "Runtime readiness is observational for stopped children; dashboard and console expose provision, readiness and complete stop/disarm controls."
   ],
-  "base_revision": "dea8fc90",
+  "base_revision": "b32b70f5",
   "external_acceptance_pending": [
     "Successful inference and concurrency/cancellation against actual model service not exercised; unavailable provider failure is not success proof.",
-    "Two distinct physical hosts and admitted GPU startup/install recipe remain unavailable; upstream process lifecycle is not implemented."
+    "Two distinct physical hosts and successful startup/readiness of an actual GPU runtime remain unavailable on this machine; the concrete supervised lifecycle is locally qualified only through honest unavailable/refusal paths."
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/platform/inference_host.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_inference_host.py",
-    "runtime/gideon/workspace/capabilities/platform/tools.py",
-    "apps/console/src/features/capabilities/platform/InferenceHost.tsx",
-    "apps/console/src/features/capabilities/platform/Page.tsx"
+    "apps/console/src/features/capabilities/platform/InferenceHost.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_inference_host.py",
@@ -51,5 +51,5 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
   ],
-  "evidence": "/tmp/gideon-platform.06-checks-tryot0xk/evidence.json"
+  "evidence": "/tmp/gideon-platform.06-checks-cl1y20fn/evidence.json"
 }

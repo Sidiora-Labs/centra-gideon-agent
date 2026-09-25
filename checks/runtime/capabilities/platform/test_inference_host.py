@@ -1,6 +1,7 @@
 import asyncio
 import json
 import socket
+import sys
 import aiohttp
 import pytest
 from aiohttp import web
@@ -11,6 +12,8 @@ from gideon.workspace.capabilities.platform.inference_host import InferenceHost,
 from gideon.workspace.capabilities.platform.tools import create_provider
 from gideon.interfaces.dashboard.handlers.capabilities_inference_host import register
 from gideon.interfaces.dashboard.token_auth import token_auth_middleware, generate_token, use_ephemeral_secret
+from gideon.integrations.local_models.sidecar import SidecarRunner, register_runner, unregister_runner
+from gideon.integrations.local_models import _sidecar_child
 
 SECRET = 'local-qualification-peer-key-1234567890'
 PREFIX = '/api/capabilities/platform/inference-host'
@@ -28,11 +31,17 @@ def home(tmp_path, monkeypatch):
     CredentialStore(tmp_path).put('peer-key', {'type': 'static_token', 'value': SECRET})
     use_ephemeral_secret()
     yield tmp_path
+    unregister_runner('missing-runtime')
+    unregister_runner('contract-runtime')
     set_default_registry(previous)
 
 
 def config(revision=0, **fields):
     return dict(revision=revision, provider='Configured inference', bind='127.0.0.1', port=0, capacity=1, peers={'peer-a': 'peer-key'}, **fields)
+
+
+def runtime_config(app):
+    return {'app': app, 'recipe': 'openai-compatible-v1'}
 
 
 def url(host):
@@ -54,9 +63,138 @@ def test_unconfigured_state_does_not_claim_serving_or_hardware(home):
     assert state['queued'] == 0
     assert state['credentials'] == ['peer-key']
     assert state['providers'] == ['Configured inference']
-    assert 'unavailable' in state['runtime_lifecycle']
+    assert state['runtime']['status'] == 'unconfigured'
+    assert state['runtime_apps'] == []
+    assert 'no supervised runtime selected' in state['runtime_lifecycle']
     assert SECRET not in json.dumps(state)
     assert not host.path.exists()
+
+
+@pytest.mark.asyncio
+async def test_provision_requires_real_registered_runtime_files_without_starting(home):
+    runner = SidecarRunner(app='missing-runtime', worker=home / 'missing.py', python=sys.executable)
+    register_runner(runner)
+    host = InferenceHost(home)
+    configured = await host.configure(config(runtime=runtime_config(runner.app)))
+    assert configured['runtime']['status'] == 'configured'
+    assert configured['runtime_apps'] == ['missing-runtime']
+    with pytest.raises(HostError, match='files are unavailable') as failure:
+        await host.provision()
+    assert failure.value.status == 503
+    assert host.view()['runtime']['status'] == 'unavailable'
+    assert host.view()['runtime']['evidence'] == {'reason': 'runtime_files_missing'}
+    assert runner.generation == 0
+    assert runner.is_alive() is False
+    assert host.runner is None
+    assert host.state()['enabled'] is False
+
+
+@pytest.mark.asyncio
+async def test_real_sidecar_supervisor_refuses_non_runtime_worker_and_cleans_up(home):
+    runner = SidecarRunner(app='contract-runtime', worker=_sidecar_child.__file__, python=sys.executable)
+    register_runner(runner)
+    host = InferenceHost(home)
+    await host.configure(config(runtime=runtime_config(runner.app)))
+    prepared = await host.provision()
+    assert prepared['runtime']['status'] == 'prepared'
+    assert prepared['runtime']['evidence'] == {'recipe': 'openai-compatible-v1'}
+    assert runner.generation == 0
+    with pytest.raises(HostError, match='refused its recipe') as failure:
+        await host.start()
+    assert failure.value.status == 503
+    assert runner.generation == 1
+    assert runner.is_alive() is False
+    assert host.runner is None
+    assert host.port is None
+    assert host.state()['enabled'] is False
+    assert host.view()['runtime']['status'] == 'unavailable'
+    stopped = await host.stop()
+    assert stopped['runtime']['status'] == 'stopped'
+    assert stopped['runtime']['evidence'] == {'alive': False}
+
+
+@pytest.mark.asyncio
+async def test_readiness_is_observational_and_does_not_spawn_stopped_runtime(home):
+    runner = SidecarRunner(app='contract-runtime', worker=_sidecar_child.__file__, python=sys.executable)
+    register_runner(runner)
+    host = InferenceHost(home)
+    await host.configure(config(runtime=runtime_config(runner.app)))
+    await host.provision()
+    result = await host.readiness()
+    assert result['runtime']['status'] == 'stopped'
+    assert result['runtime']['evidence'] == {'alive': False}
+    assert runner.generation == 0
+    assert runner.is_alive() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('runtime', [
+    {'app': 'contract-runtime'},
+    {'recipe': 'openai-compatible-v1'},
+    {'app': 'contract-runtime', 'recipe': 'unknown'},
+    {'app': '', 'recipe': 'openai-compatible-v1'},
+    {'app': 'x' * 101, 'recipe': 'openai-compatible-v1'},
+    {'app': 'contract-runtime', 'recipe': 'openai-compatible-v1', 'secret': SECRET},
+])
+async def test_runtime_binding_is_exact_bounded_and_never_persists_secrets(home, runtime):
+    host = InferenceHost(home)
+    with pytest.raises(HostError):
+        await host.configure(config(runtime=runtime))
+    assert host.path.exists() is False
+    assert host.runner is None
+    assert SECRET not in json.dumps(host.view())
+
+
+@pytest.mark.asyncio
+async def test_runtime_binding_survives_restart_without_claiming_process_state(home):
+    runner = SidecarRunner(app='contract-runtime', worker=_sidecar_child.__file__, python=sys.executable)
+    register_runner(runner)
+    host = InferenceHost(home)
+    configured = await host.configure(config(runtime=runtime_config(runner.app)))
+    assert configured['runtime']['status'] == 'configured'
+    reopened = InferenceHost(home)
+    state = reopened.view()
+    assert state['runtime']['app'] == 'contract-runtime'
+    assert state['runtime']['recipe'] == 'openai-compatible-v1'
+    assert state['runtime']['status'] == 'configured'
+    assert state['runtime']['evidence'] == {}
+    assert state['runtime_apps'] == ['contract-runtime']
+    assert state['listening'] is False
+    assert state['enabled'] is False
+    assert runner.generation == 0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_runtime_actions_preserve_real_unavailable_state(home):
+    runner = SidecarRunner(app='missing-runtime', worker=home / 'absent-worker.py', python=sys.executable)
+    register_runner(runner)
+    app = web.Application(middlewares=[token_auth_middleware(port=8001)])
+    register(app)
+    auth = {'Cookie': 'gideon_token_8001=' + generate_token('runtime-owner')}
+    async with TestClient(TestServer(app)) as client:
+        configured = await client.post(PREFIX, headers=auth, json={
+            'action': 'configure',
+            'config': config(runtime=runtime_config(runner.app)),
+        })
+        assert configured.status == 200
+        assert (await configured.json())['runtime']['status'] == 'configured'
+        provisioned = await client.post(PREFIX, headers=auth, json={'action': 'provision'})
+        assert provisioned.status == 503
+        assert (await provisioned.json()) == {'error': 'Configured inference runtime files are unavailable'}
+        readiness = await client.post(PREFIX, headers=auth, json={'action': 'readiness'})
+        assert readiness.status == 200
+        observed = await readiness.json()
+        assert observed['runtime']['status'] == 'stopped'
+        assert observed['runtime']['evidence'] == {'alive': False}
+        assert observed['listening'] is False
+        assert observed['enabled'] is False
+        stopped = await client.post(PREFIX, headers=auth, json={'action': 'stop'})
+        assert stopped.status == 200
+        final = await stopped.json()
+        assert final['runtime']['status'] == 'stopped'
+        assert final['runtime']['evidence'] == {'alive': False}
+    assert runner.generation == 0
+    assert runner.is_alive() is False
 
 
 @pytest.mark.asyncio
