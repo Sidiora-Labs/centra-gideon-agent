@@ -2,49 +2,75 @@
   "id": "wellbeing.14",
   "schema_version": 1,
   "status": "locally_qualified",
-  "base_revision": "d1a2ffe6c08191b2492819e73c4534b791f71b72",
+  "base_revision": "809b6bfa",
   "production_files": [
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py",
     "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_spokeo.py"
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo_provider.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json"
   ],
   "test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py"
   ],
-  "ui_test_files": [],
-  "contract": "The existing durable subject-scoped privacy case ledger gains one concrete Spokeo HTML protocol adapter. It performs read-only exposure GETs against the documented /{first}-{last}/{state} search shape, discovers and validates the same-origin POST opt-out form, submits only listing_url and email after exact per-request approval plus the disabled-by-default live-submit environment gate, and confirms removal only through a later read-only negative rescan. broker_scan and broker_submit consent are checked before network access. Provider evidence is content-addressed without persisting submitted identity values.",
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+  ],
+  "contract": "The supported Spokeo adapter is consumed through explicit console and discoverable native-provider operations for scan, prepare, approved submit and verify. Every action targets an existing consented durable case at an exact revision. Preparation submits nothing and returns disabled, contract-only or live readiness explicitly. Submission requires a per-request approval checkbox/constant, native tool approval, the exact approval phrase and, outside a contract server, the disabled-by-default runtime live-submit gate. Verification confirms removal only from a later negative provider rescan.",
   "remaining_limits": [
     "Local qualification uses a real HTTP contract server implementing the supported Spokeo request and response protocol; it is protocol evidence, not proof that the live broker currently accepts the flow",
+    "Contract-server readiness is labelled separately from live-broker readiness in the console",
     "No live Spokeo opt-out was submitted during development; live submission requires both exact owner approval text and GIDEON_ALLOW_LIVE_SPOKEO_SUBMIT=1",
     "Spokeo CAPTCHA, changed forms, cross-origin actions, redirects and inconclusive verification fail closed or require a human",
     "Other data brokers remain catalog/manual-case entries without provider adapters; this slice does not claim full broker parity",
-    "Broker catalog and case metadata are owner-visible inside the secret local privacy database",
-    "No private database export or replication; central secret durability inventory remains root-owned",
-    "Dashboard registration and Privacy page composition remain root-owned integration hooks"
+    "Dashboard registration of capabilities_wellbeing_broker_spokeo.register remains a root-owned shared integration hook"
+  ],
+  "integration_hooks": [
+    "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo.register with the shared dashboard application; no shared registration file is changed in this slice"
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
-  "exit_code": 0,
-  "evidence_log": "/tmp/gideon-wellbeing.14-checks-yjgwy1l9/evidence.json",
-  "repair_cycles": 1,
-  "production_lines": 255,
-  "test_lines": 291,
-  "test_ratio": 1.1411764705882352,
-  "file_hashes": {
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_spokeo.py": "64997d6dd7340c7c4c1e2202216fddf5b04c02fd3146c341a364c9b7f9086f0a",
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py": "5ba577efca628db7d011b36a6bc8bf36645e7473da8152cd560900434e55e930",
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py": "fbf83695fdbbd1944116af452d87dd70da8aba71882fce5be4a4680617889e3a",
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py": "51e0b8f49ed59428d45a463b5125967b1ed21c7de4da378d5c824f97c4fb046b"
-  },
   "acceptance_coverage": [
-    "Spokeo positive and negative search pages become typed provider_protocol case observations",
-    "opt-out preparation validates a same-origin POST form and performs no submission",
-    "submission refuses missing approval and live mode remains disabled by default",
-    "approved contract submission discloses only profile URL and email and records no plaintext identity in case events",
-    "verification confirms removal only after a negative provider rescan and keeps a still-listed case awaiting processing",
-    "consent, revision, provider identity, CAPTCHA, protocol drift, origin and response-size boundaries fail closed",
-    "real no-store HTTP provider routes exercise the same adapter and durable lifecycle"
-  ]
+    "real HTTP console scan, preparation, separately approved submission and negative-rescan verification persist durable provider outcomes",
+    "console labels contract-only readiness and never submits during preparation or before the approval checkbox",
+    "native app registry resolves an actual provider factory with a canonical-origin-only settings signature",
+    "four exact native schemas require tool approval and submission additionally requires the literal owner approval phrase",
+    "production factory cannot accept caller home, arbitrary provider origin, contract mode or endpoint overrides",
+    "generic manual broker cases retain their existing non-provider workflow"
+  ],
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.14-checks-0uumku1q/evidence.json",
+  "ui_repair_evidence_log": "/tmp/gideon-wellbeing.14-checks-ykxxjcxy/evidence.json",
+  "repair_cycles": 2,
+  "production_lines": 126,
+  "test_lines": 129,
+  "test_ratio": 1.0238095238095237,
+  "qualification": {
+    "compile": "passed in initial full gate",
+    "runtime": "10 passed in initial full gate",
+    "ui": "4 passed in affected-stage repair 2",
+    "failed_ui_evidence": [
+      "/tmp/gideon-wellbeing.14-checks-0uumku1q/evidence.json",
+      "/tmp/gideon-wellbeing.14-checks-husphsz1/evidence.json"
+    ],
+    "repairs": [
+      "Awaited the durable case-list refresh after opt-out preparation instead of reading the prior revision synchronously",
+      "Aligned the final UI assertion with the typed adapter ledger evidence basis provider_protocol; verified_rescan belongs to the separate legacy verifier path"
+    ]
+  },
+  "file_hashes": {
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py": "150c6bb2d87e8ee66d8e72690f21644e614ee9f8c678e4c8befd64b9c5b0ba14",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo_provider.py": "1f418c109eb6045485fa54c5f133fde8c7782fb3c62ebf6c98c2dccf64c57948",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx": "cdae3a23a21310aea1181722d3a7662e91f7edd9200fa6f59a790a79176f43ef",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py": "ffd90d5fe6123a2ce7b1df56700d5160afc8420f08cee4e82e04315447dc14db",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py": "267192430ed0bd17f3d60f97ac9c647d2cfcdec351d59d9406560d2d897400e8",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "ee67fa19f02546167557b229a6a900213beeef1ad39eba835d64a1f2e5eb3ff3",
+    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
+  }
 }

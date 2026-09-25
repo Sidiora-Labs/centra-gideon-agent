@@ -71,13 +71,15 @@ class SpokeoProtocol:
         self._profile(profile_url)
         self._email(email)
         form, form_url, body = await self._form()
+        live_enabled = os.getenv('GIDEON_ALLOW_LIVE_SPOKEO_SUBMIT') == '1'
         return self._result('prepared', form_url, body), {
             'provider': PROVIDER,
             'method': 'POST',
             'form_url': form_url,
             'disclosed_fields': ['listing_url', 'email'],
             'approval_phrase': APPROVAL,
-            'live_submission_enabled': self.contract_mode or os.getenv('GIDEON_ALLOW_LIVE_SPOKEO_SUBMIT') == '1',
+            'submission_mode': 'contract' if self.contract_mode else 'live' if live_enabled else 'disabled',
+            'live_submission_enabled': self.contract_mode or live_enabled,
         }
 
     async def submit(self, profile_url, email, approval):

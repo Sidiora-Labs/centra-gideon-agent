@@ -9,6 +9,7 @@ import PrivacyBrokers from './PrivacyBrokers'
 
 let server: ChildProcess
 let origin = ''
+let contractOrigin = ''
 let home = ''
 let subject = ''
 let caseId = ''
@@ -29,28 +30,61 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), 'gideon-brokers-ui-'))
   const root = resolve('../..')
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-u', '-c', `
-import asyncio, os
+import asyncio, json, os
 from pathlib import Path
 from aiohttp import web
 from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_privacy import register as register_privacy
 from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_brokers import register as register_brokers
+from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo import register as register_spokeo
+from gideon.workspace.capabilities.wellbeing.privacy_broker_spokeo import SpokeoCaseAdapter, SpokeoProtocol
+from gideon.workspace.capabilities.wellbeing.privacy_brokers import PrivacyBrokerStore
 async def main():
+ contract_state = {'listed': True, 'posts': []}
+ contract = web.Application()
+ async def search(request):
+  body = '<html><article>Jane Doe lives in Oakland, CA</article></html>' if contract_state['listed'] else '<html><h1>No results found</h1></html>'
+  return web.Response(text=body)
+ async def optout(request):
+  return web.Response(text='<form action="/optout/submit" method="post"><input type="hidden" name="csrf" value="ui-token"><input name="url"><input name="email"></form>')
+ async def submit(request):
+  contract_state['posts'].append(dict(await request.post()))
+  return web.Response(text='<html>Request received. Check your email for the confirmation email.</html>')
+ async def state(request):
+  return web.json_response({'listed': contract_state['listed'], 'posts': contract_state['posts']})
+ async def remove(request):
+  contract_state['listed'] = False
+  return web.json_response({'listed': False})
+ contract.router.add_get('/Jane-Doe/CA', search)
+ contract.router.add_get('/optout', optout)
+ contract.router.add_post('/optout/submit', submit)
+ contract.router.add_get('/contract/state', state)
+ contract.router.add_post('/contract/remove', remove)
+ contract_runner = web.AppRunner(contract)
+ await contract_runner.setup()
+ contract_site = web.TCPSite(contract_runner, '127.0.0.1', 0)
+ await contract_site.start()
+ contract_origin = 'http://127.0.0.1:' + str(contract_site._server.sockets[0].getsockname()[1])
  app = web.Application()
  home = Path(os.environ['GIDEON_HOME'])
  register_privacy(app, home)
  register_brokers(app, home)
+ register_spokeo(app, adapter=SpokeoCaseAdapter(PrivacyBrokerStore(home), SpokeoProtocol(contract_origin, contract_mode=True)))
  runner = web.AppRunner(app)
  await runner.setup()
  site = web.TCPSite(runner, '127.0.0.1', 0)
  await site.start()
- print(site._server.sockets[0].getsockname()[1], flush=True)
+ print(json.dumps({'port': site._server.sockets[0].getsockname()[1], 'contract_origin': contract_origin}), flush=True)
  await asyncio.Event().wait()
 asyncio.run(main())
 `], { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'runtime'), GIDEON_HOME: home } })
   origin = await new Promise<string>((accept, reject) => {
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP server exited ${code}`)))
-    server.stdout!.once('data', data => accept(`http://127.0.0.1:${String(data).trim()}`))
+    server.stdout!.once('data', data => {
+      const ready = JSON.parse(String(data).trim())
+      contractOrigin = ready.contract_origin
+      accept(`http://127.0.0.1:${ready.port}`)
+    })
     server.stderr!.on('data', data => { if (String(data).includes('Traceback')) reject(new Error(String(data))) })
   })
   globalThis.fetch = (input, init) => networkFetch(new URL(String(input), origin), init)
@@ -150,5 +184,45 @@ test('server validation remains visible and an owner report cannot become verifi
   const persisted = await json(`${base}/broker-cases/${caseId}`)
   expect(persisted.state).not.toBe('confirmed_removed')
   expect(persisted.evidence_basis).not.toBe('verified_rescan')
+  view.unmount()
+})
+
+test('Spokeo controls scan, prepare, require approval, submit and verify over real HTTP', async () => {
+  const broker = await json(base + '/brokers', 'POST', {
+    request_id: 'spokeo-broker', name: 'Spokeo', website: contractOrigin,
+    optout_url: contractOrigin + '/optout', source: 'supported protocol' })
+  const row = await json(`${base}/subjects/${subject}/broker-cases`, 'POST', {
+    request_id: 'spokeo-case', broker_id: broker.id })
+  window.history.replaceState(null, '', `#/capabilities/wellbeing/privacy?subject=${subject}&broker_case=${row.id}`)
+  const view = render(<PrivacyBrokers subject={subject} />)
+  const provider = await screen.findByRole('region', { name: 'Spokeo provider controls' })
+  expect(within(provider).getByText(/No action runs automatically/)).toBeInTheDocument()
+  change('Spokeo first name', 'Jane')
+  change('Spokeo last name', 'Doe')
+  change('Spokeo city', 'Oakland')
+  change('Spokeo state', 'CA')
+  fireEvent.click(within(provider).getByRole('button', { name: 'Scan Spokeo' }))
+  await waitFor(() => expect(screen.getByText('State: found · evidence: provider_protocol · revision 2')).toBeInTheDocument())
+  change('Spokeo profile URL', contractOrigin + '/Jane-Doe/CA/id-1')
+  change('Spokeo contact email', 'owner@example.test')
+  fireEvent.click(within(provider).getByRole('button', { name: 'Prepare opt-out' }))
+  await screen.findByText('Contract server is ready for an owner-approved submission. This is not live-broker readiness; preparation sent no opt-out request.')
+  await waitFor(() => expect(screen.getByText('State: optout_in_progress · evidence: provider_protocol · revision 3')).toBeInTheDocument())
+  let contract = await (await networkFetch(contractOrigin + '/contract/state')).json()
+  expect(contract.posts).toEqual([])
+  const submit = within(provider).getByRole('button', { name: 'Submit approved opt-out' })
+  expect(submit).toBeDisabled()
+  fireEvent.click(within(provider).getByLabelText('I approve this Spokeo opt-out submission'))
+  expect(submit).toBeEnabled()
+  fireEvent.click(submit)
+  await waitFor(() => expect(screen.getByText('State: submitted · evidence: provider_protocol · revision 4')).toBeInTheDocument())
+  contract = await (await networkFetch(contractOrigin + '/contract/state')).json()
+  expect(contract.posts).toEqual([{ csrf: 'ui-token', url: contractOrigin + '/Jane-Doe/CA/id-1', email: 'owner@example.test' }])
+  await networkFetch(contractOrigin + '/contract/remove', { method: 'POST' })
+  fireEvent.click(within(provider).getByRole('button', { name: 'Verify removal' }))
+  await waitFor(() => expect(screen.getByText('State: confirmed_removed · evidence: provider_protocol · revision 5')).toBeInTheDocument())
+  const persisted = await json(`${base}/broker-cases/${row.id}`)
+  expect(persisted).toMatchObject({ state: 'confirmed_removed', evidence_basis: 'provider_protocol', verifier: 'spokeo-html-v1' })
+  expect(persisted.verified_at).toBeTruthy()
   view.unmount()
 })

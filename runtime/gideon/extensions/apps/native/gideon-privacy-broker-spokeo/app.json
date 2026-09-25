@@ -1,0 +1,30 @@
+{
+  "name": "gideon-privacy-broker-spokeo",
+  "version": "1.0.0",
+  "displayName": "Spokeo Privacy Broker",
+  "description": "Scan, prepare, explicitly approve, submit and verify durable Spokeo privacy cases.",
+  "icon": "ShieldCheck",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "wellbeing", "privacy"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.wellbeing.privacy_broker_spokeo_provider:create_provider",
+    "capabilities": ["privacy-broker-spokeo"],
+    "settingsSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string",
+          "const": "https://www.spokeo.com",
+          "default": "https://www.spokeo.com",
+          "x-meta": {
+            "label": "Provider origin",
+            "help": "Fixed Spokeo origin. Live submission also requires explicit owner approval and the runtime live-submit gate."
+          }
+        }
+      }
+    }
+  },
+  "native": true
+}

@@ -94,6 +94,7 @@ async def test_real_spokeo_html_protocol_drives_scan_prepare_submit_and_verified
         assert prepared['plan']['form_url'] == origin + '/optout/submit'
         assert prepared['plan']['disclosed_fields'] == ['listing_url', 'email']
         assert prepared['plan']['approval_phrase'] == APPROVAL
+        assert prepared['plan']['submission_mode'] == 'contract'
         assert prepared['plan']['live_submission_enabled'] is True
         assert contract['posts'] == []
 
