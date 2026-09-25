@@ -22,7 +22,9 @@
       "platform_feature_ownership",
       "platform_feature_claim",
       "platform_gsd_project",
-      "platform_gsd_phase_task"
+      "platform_gsd_phase_task",
+      "platform_maintenance",
+      "platform_maintenance_control"
     ]
   },
   "native": true
