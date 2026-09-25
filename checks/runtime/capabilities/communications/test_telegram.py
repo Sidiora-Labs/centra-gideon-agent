@@ -8,6 +8,7 @@ import pytest
 from aiohttp import ClientSession, web
 from gideon.core.config.credentials import save_credential
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
+from gideon.interfaces.dashboard.token_auth import token_auth_middleware
 from gideon.integrations.notification_providers.base import NotificationDeliveryProvider
 from gideon.integrations.notification_providers.registry import register_provider, route, unregister_provider
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore
@@ -317,3 +318,46 @@ def test_http_authorized_webhook_and_operational_routes(home):
         finally:
             await runner.cleanup()
     asyncio.run(scenario())
+
+
+def test_full_auth_middleware_delegates_only_post_webhook_to_telegram_policy(home):
+    store = PeopleStore()
+    config(store)
+
+    async def scenario():
+        app = web.Application(middlewares=[token_auth_middleware(local_only=False)])
+        register(app)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        base = f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/communications/telegram'
+        valid = {'X-Telegram-Bot-Api-Secret-Token': 'local-test-secret'}
+        try:
+            async with ClientSession() as client:
+                for method, path in (('get', '/config'), ('post', '/command'), ('post', '/deliveries')):
+                    async with getattr(client, method)(base + path, json={} if method == 'post' else None) as response:
+                        assert response.status in (401, 403)
+
+                async with client.post(base + '/webhook', json=update(101)) as response:
+                    assert response.status == 403
+                async with client.post(base + '/webhook', json=update(102), headers={'X-Telegram-Bot-Api-Secret-Token': 'wrong'}) as response:
+                    assert response.status == 403
+                async with client.post(base + '/webhook', json=update(103, chat=777), headers=valid) as response:
+                    assert response.status == 403
+                async with client.post(base + '/webhook', json=update(104, user=777), headers=valid) as response:
+                    assert response.status == 403
+                async with client.post(base + '/webhook', json=update(105), headers=valid) as response:
+                    assert response.status == 200
+                    body = await response.json()
+                    assert body['created'] is True
+                    assert body['receipt']['command'] == '/care'
+                async with client.get(base + '/webhook', headers=valid) as response:
+                    assert response.status in (401, 403)
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(scenario())
+    rows = telegram.deliveries(store)
+    assert len(rows) == 1
+    assert rows[0]['state'] == 'queued'
