@@ -5,6 +5,7 @@ type Receipt = { backend: string; operation: string; request_id: string; resourc
 type Run = { id: string; status: string; project_id?: string; outputs: Output[]; dispatch_receipts?: Receipt[]; attempts: Array<{ number: number; status: string; error: string }> }
 type Reaction = { id: string; revision: number; author: string; rating: string; deleted: boolean }
 type Commission = { id: string; revision: number; name: string; target_ability: string; mode: string; mode_source?: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
+type Peer = { id: string; label: string }
 
 const api = '/api/capabilities/creative/commissions'
 
@@ -33,10 +34,19 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   const [projectRevision, setProjectRevision] = useState(1)
   const [seriesMode, setSeriesMode] = useState('model')
   const [error, setError] = useState('')
+  const [peers, setPeers] = useState<Peer[]>([])
+  const [peerId, setPeerId] = useState('')
+  const [approved, setApproved] = useState<Record<string, boolean>>({})
+  const [deliveries, setDeliveries] = useState<Record<string, string>>({})
 
   async function list() {
     const data = await fetch(apiRoot).then(response => response.json())
     setItems(data.items || [])
+  }
+  async function listPeers() {
+    const data = await fetch(`${apiRoot}/peer-feedback/peers`).then(response => response.json())
+    const available = data.items || []
+    setPeers(available); setPeerId(current => current || available[0]?.id || '')
   }
   async function load(id: string) {
     const data = await fetch(`${apiRoot}/${id}`).then(response => response.json())
@@ -92,8 +102,23 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
     if (!response.ok) return setError(data.error || 'Unable to save feedback')
     await load(selected.id)
   }
+  async function deliver(row: Reaction) {
+    if (!selected || !peerId || !approved[row.id]) return
+    setError('')
+    const response = await fetch(`${apiRoot}/${selected.id}/feedback/${row.id}/deliver`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        peer_id: peerId,
+        approval: { decision: 'approved', commission_id: selected.id, peer_id: peerId,
+          reaction_id: row.id, reaction_revision: row.revision },
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) return setError(data.error || 'Unable to deliver feedback')
+    setApproved(current => ({ ...current, [row.id]: false }))
+    setDeliveries(current => ({ ...current, [row.id]: `${data.receipt.state} · revision ${data.reaction_revision}` }))
+  }
 
-  useEffect(() => { void list() }, [])
+  useEffect(() => { void list(); void listPeers() }, [apiRoot])
   return <main>
     <h1>Recurring creative commissions</h1>
     <p>Schedule a typed standing brief. Each occurrence creates one attributable direction project and retains its attempts, outputs, and bounded feedback context.</p>
@@ -140,7 +165,18 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
         </div>)}
         {(run.dispatch_receipts || []).map(receipt => <div key={receipt.request_id}>Dispatch {receipt.backend}/{receipt.operation}: {receipt.status} {receipt.resource_id || receipt.error_code}</div>)}
       </li>)}</ul>
-      <h3>Feedback</h3><ul>{(selected.feedback || []).map(row => <li key={row.id}>{row.author}: {row.rating}{row.deleted ? ' (removed)' : ''}</li>)}</ul>
+      <h3>Feedback</h3><ul>{(selected.feedback || []).map(row => <li key={row.id}>
+        {row.author}: {row.rating}{row.deleted ? ' (removed)' : ''}
+        {!row.deleted && peers.length > 0 && <>
+          <label>Feedback peer<select aria-label={`Feedback peer ${row.id}`} value={peerId} onChange={event => setPeerId(event.target.value)}>
+            {peers.map(peer => <option key={peer.id} value={peer.id}>{peer.label}</option>)}
+          </select></label>
+          <label><input aria-label={`Approve feedback delivery ${row.id}`} type="checkbox" checked={Boolean(approved[row.id])}
+            onChange={event => setApproved(current => ({ ...current, [row.id]: event.target.checked }))} />Approve revision {row.revision} for delivery</label>
+          <button disabled={!peerId || !approved[row.id]} onClick={() => void deliver(row)}>Send feedback to peer</button>
+        </>}
+        {deliveries[row.id] && <span role="status">Delivered: {deliveries[row.id]}</span>}
+      </li>)}</ul>
     </section>}
   </main>
 }

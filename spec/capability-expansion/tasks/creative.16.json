@@ -21,12 +21,14 @@
     "Before direction or provider work, execution transactionally reserves one attempt with a process claim. A concurrent delivery for the same occurrence returns the existing in-progress run without creating a project or dispatch. Restart recovers a dead direction-phase claim as an interrupted retryable attempt, while a dead dispatch-phase claim becomes dispatch_unknown with its deterministic request ID and cannot be blindly replayed. Terminal writes must still own the exact claim and replace the reserved attempt.",
     "Restart preserves commission, trigger, run attempts, linked project and outputs. Manual HTTP and native tool runs use the same execution path and do not accept provider, model, credential, home or runtime overrides.",
     "A feedback reaction resolves an actual linked output and is isolated by author. Rerating increments the same deterministic record, deletion leaves a tombstone, another author's reaction is unchanged, and later runs pin the revisions of only the bounded live feedback they consumed.",
-    "A commission owner resolves an actual linked output as a published feedback target with exact commission, run, direction-project revision, source revisions and artifact version/hash. A separate peer can author and durably revision or tombstone its own reaction only after an exact caller-attested peer-and-target approval. Canonical PeerStore directional policy, proof expiry/nonce and an inner Ed25519 signature bound to the complete payload protect transport. The owner resolves every pin against its local canonical records before mutation; orphan or changed pins fail closed. Exact delivery replay returns the original durable receipt, changed replay conflicts, higher author revisions apply, stale revisions cannot overwrite later feedback, and another author remains unchanged."
+    "A commission owner resolves an actual linked output as a published feedback target with exact commission, run, direction-project revision, source revisions and artifact version/hash. A separate peer can author and durably revision or tombstone its own reaction only after an exact caller-attested peer-and-target approval. Canonical PeerStore directional policy, proof expiry/nonce and an inner Ed25519 signature bound to the complete payload protect transport. The owner resolves every pin against its local canonical records before mutation; orphan or changed pins fail closed. Exact delivery replay returns the original durable receipt, changed replay conflicts, higher author revisions apply, stale revisions cannot overwrite later feedback, and another author remains unchanged.",
+    "Owner HTTP and native consumers list only configured enabled peers with creative.commission_feedback send policy. Delivery requires an explicit approval bound to the exact commission, peer, reaction and reaction revision, accepts no endpoint, and uses the durable signed send receipt so repeated delivery cannot contact the peer twice. The console never sends on load, reaction creation, peer selection or approval alone."
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/commissions.py",
     "runtime/gideon/workspace/capabilities/creative/commission_dispatch.py",
     "runtime/gideon/workspace/capabilities/creative/commission_tools.py",
+    "runtime/gideon/extensions/apps/native/gideon-creative-commissions/app.json",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_commissions.py",
     "apps/console/src/features/capabilities/creative/Commissions.tsx",
     "runtime/gideon/workspace/capabilities/creative/peer_feedback.py",
@@ -38,11 +40,13 @@
     "checks/runtime/capabilities/creative/test_commissions.py",
     "checks/runtime/capabilities/creative/commission_server.py",
     "apps/console/src/features/capabilities/creative/Commissions.test.tsx",
-    "checks/runtime/capabilities/creative/test_peer_feedback.py"
+    "checks/runtime/capabilities/creative/test_peer_feedback.py",
+    "checks/runtime/capabilities/creative/test_commission_peer_consumers.py"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/creative/test_commissions.py",
-    "checks/runtime/capabilities/creative/test_peer_feedback.py"
+    "checks/runtime/capabilities/creative/test_peer_feedback.py",
+    "checks/runtime/capabilities/creative/test_commission_peer_consumers.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
@@ -120,6 +124,22 @@
       "first_attempt": "exit 1: 1 failed, 1 passed, 31 deselected; expected 401 but actual nearby-route denial was 403 Forbidden",
       "post_fix_attempt": "interrupted exit 130 after pytest emitted F; result unknown and unverified",
       "persistent_state": "~/.gideon/capabilities/creative/peer_feedback.sqlite3 stores private outbox, send receipts and inbound idempotence receipts; accepted reactions and tombstones remain in canonical commissions.sqlite3"
+    },
+    {
+      "name": "explicit peer-feedback owner UI and native consumers",
+      "reason": "Adapted from the qualified hosted consumer contract by explicit instruction without OSS execution, tests or compilation",
+      "files": [
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_commissions.py",
+        "runtime/gideon/workspace/capabilities/creative/commission_tools.py",
+        "runtime/gideon/extensions/apps/native/gideon-creative-commissions/app.json",
+        "apps/console/src/features/capabilities/creative/Commissions.tsx",
+        "checks/runtime/capabilities/creative/commission_server.py",
+        "checks/runtime/capabilities/creative/test_commission_peer_consumers.py",
+        "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
+      ],
+      "verification": "OSS-unverified: no command, compile, test, service or external delivery was run",
+      "auth_boundary": "Owner routes remain under normal dashboard token middleware; only the pre-existing exact signed receive POST is handler-authenticated",
+      "delivery_boundary": "Only configured PeerStore identities are selectable; approval binds commission, peer, reaction and exact revision; no caller endpoint is accepted; push_prepared preserves the durable idempotent receipt"
     }
   ]
 }

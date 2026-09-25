@@ -8,7 +8,7 @@ import Commissions from './Commissions'
 
 let server: ChildProcess
 let apiRoot: string
-let fixture: { work_id: string; work_revision: number }
+let fixture: { work_id: string; work_revision: number; peer_id: string }
 let home: string
 const repository = resolve(process.cwd(), '../..')
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
     })
   })
   fixture = await fetch(apiRoot.replace('/api/capabilities/creative/commissions', '/fixture')).then(response => response.json())
-})
+}, 60_000)
 
 afterEach(cleanup)
 afterAll(async () => {
@@ -81,6 +81,17 @@ describe('recurring creative commissions', () => {
     expect(detail).toHaveTextContent('Output creative-direction-')
     fireEvent.click(screen.getByRole('button', { name: 'Like' }))
     await waitFor(() => expect(detail).toHaveTextContent('dashboard-owner: liked'))
+    expect(await fetch(apiRoot.replace('/api/capabilities/creative/commissions', '/fixture/deliveries')).then(response => response.json()))
+      .toEqual({ count: 0 })
+    const send = screen.getByRole('button', { name: 'Send feedback to peer' })
+    expect(send).toBeDisabled()
+    fireEvent.click(screen.getByLabelText(/Approve feedback delivery/))
+    expect(await fetch(apiRoot.replace('/api/capabilities/creative/commissions', '/fixture/deliveries')).then(response => response.json()))
+      .toEqual({ count: 0 })
+    fireEvent.click(send)
+    expect(await screen.findByRole('status')).toHaveTextContent('Delivered: already_current · revision 1')
+    expect(await fetch(apiRoot.replace('/api/capabilities/creative/commissions', '/fixture/deliveries')).then(response => response.json()))
+      .toEqual({ count: 1 })
     const state = await fetch(apiRoot).then(response => response.json())
     expect(state.items).toHaveLength(1)
     const stored = await fetch(`${apiRoot}/${state.items[0].id}`).then(response => response.json())
