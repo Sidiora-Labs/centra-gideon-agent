@@ -75,5 +75,21 @@
     "No integrated browser or production deployment qualification",
     "Event payload value schemas are partial because registry declares keys only",
     "HTTP request schemas remain unknown when no explicit registration schema exists"
-  ]
+  ],
+  "integration_repair": {
+    "problem": "API explorer used a router context absent from the real console.",
+    "change": "Use the actual useHashRoute navigation store; render tests directly with real hash state and actual registered HTTP handlers.",
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python node ../../node_modules/vitest/vitest.mjs run src/features/capabilities/platform/Page.test.tsx",
+    "cwd": "apps/console",
+    "exit_code": 0,
+    "tests": 5,
+    "log": "/tmp/gideon-platform-hash-repair.log",
+    "coverage": [
+      "Real hash filter and route selection",
+      "Selection survives unmount/remount",
+      "External hash navigation updates controls",
+      "Harmless HTTP read and server rejection"
+    ],
+    "limitation": "Parent assembled browser journey will confirm full shell integration."
+  }
 }

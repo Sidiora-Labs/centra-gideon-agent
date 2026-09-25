@@ -5,11 +5,19 @@
   "description": "Inspect registered APIs, prompt dependencies and shared provider bindings.",
   "icon": "Wrench",
   "author": "Gideon",
-  "tags": ["tool", "bundled"],
+  "tags": [
+    "tool",
+    "bundled"
+  ],
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.platform.tools:create_provider",
-    "capabilities": ["platform_api_catalog", "prompt_dependency_usage", "provider_connections_get"]
+    "capabilities": [
+      "platform_api_catalog",
+      "prompt_dependency_usage",
+      "provider_connections_get",
+      "platform_harness_inventory"
+    ]
   },
   "native": true
 }

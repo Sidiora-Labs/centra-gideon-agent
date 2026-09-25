@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import Harnesses from './Harnesses'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
@@ -10,21 +11,17 @@ const safeReads = new Set([endpoint, '/api/prompts/syntax'])
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
-  const [params, setParams] = useSearchParams()
+  const { query: params, setQuery } = useHashRoute('capabilities')
   const [catalog, setCatalog] = useState<Catalog>()
   const [error, setError] = useState('')
   const [response, setResponse] = useState('')
   const [busy, setBusy] = useState(false)
   const [reload, setReload] = useState(0)
-  const offset = Number(params.get('offset') || 0)
-  const query = params.get('q') || ''
-  const method = params.get('method') || ''
-  const selection = params.get('route') || ''
-  const update = (key: string, value: string) => setParams(previous => {
-    const next = new URLSearchParams(previous)
-    if (value) next.set(key, value); else next.delete(key)
-    return next
-  })
+  const offset = Number(params.offset || 0)
+  const query = params.q || ''
+  const method = params.method || ''
+  const selection = params.route || ''
+  const update = (key: string, value: string) => setQuery({ [key]: value })
   useEffect(() => {
     let current = true
     setCatalog(undefined); setError(''); setResponse('')
@@ -60,6 +57,7 @@ export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
   const rows = catalog?.routes.filter(route => (!method || route.method === method) && `${route.path} ${route.name || ''} ${route.handler || ''}`.toLowerCase().includes(query.toLowerCase())) || []
   return <main className="min-w-0 space-y-l p-l text-on-surface">
     <h1 className="text-xl">API explorer</h1>
+    <Harnesses baseUrl={baseUrl} />
     <p>Live registered HTTP routes and declared app events. Unspecified schemas remain unknown.</p>
     <div className="flex flex-wrap gap-m">
       <label>Filter this page <input aria-label="Filter this page" className="bg-surface-high rounded p-s" value={query} onChange={event => update('q', event.target.value)} /></label>
