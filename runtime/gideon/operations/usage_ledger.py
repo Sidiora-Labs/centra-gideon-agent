@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +38,11 @@ class TurnUsage:
     cost_usd: float = 0.0
     priced: bool = True
     duration_ms: int = 0
+    instance_id: str | None = None
+    provider_instance: str | None = None
+    credential_ref: str | None = None
+    subscription_source: str | None = None
+    attribution: str | None = None
 
 
 def _path() -> Path:
@@ -85,9 +90,26 @@ class UsageJournal:
             logger.debug("usage ledger trim failed", exc_info=True)
 
 
+def _emission_attribution(u: TurnUsage) -> TurnUsage:
+    from gideon.core.config.loader import config_dir
+    from gideon.operations.durability.shards import machine_id
+    instance = machine_id(config_dir())
+    fields = dict(instance_id=instance, provider_instance=None, credential_ref=None, subscription_source=None, attribution="instance_only")
+    try:
+        from gideon.integrations.llm.registry import get_default_registry
+        from gideon.integrations.llm.branded_specs import registered_spec
+        entry = get_default_registry().get_entry(u.provider)
+        spec = registered_spec(entry.type)
+        source = spec.credential_source if spec and spec.type == entry.type and not entry.credential and not entry.options.get("api_key") else ""
+        fields.update(provider_instance=entry.name, credential_ref=entry.credential, subscription_source=source or None, attribution="binding_at_emission")
+    except Exception:
+        logger.debug("Usage binding attribution unavailable; preserving turn accounting", exc_info=True)
+    return replace(u, **fields)
+
+
 def record_turn(u: TurnUsage) -> None:
     try:
-        UsageJournal(_path()).append(u)
+        UsageJournal(_path()).append(_emission_attribution(u))
     except Exception:
         logger.debug("usage ledger append failed", exc_info=True)
 

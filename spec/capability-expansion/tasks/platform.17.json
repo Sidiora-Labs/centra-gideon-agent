@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "task": "platform.17",
+  "status": "locally_qualified_external_pending",
+  "base_revision": "32bd3507",
+  "contract": "Forward-only canonical TurnUsage/record_turn attribution records actual bound allocation machine identity and exact provider-instance/credential reference plus declared subscription source at emission. No secret values or credential resolution. Missing/generic provider and historical rows retain unknown attribution. Read projections group only stored snapshots; rotation/currentregistry never rewrites history. Retained per-turn scope is distinct from existing guarded-call audit views; no vendor billing/quota claim.",
+  "acceptance": [
+    "Real AgentEvent/record_from_event writes canonical additive attribution and existing token/cost fields without secret leakage.",
+    "Exact registry/connection credential rotations preserve prior snapshots and distinct accounting groups; generic ACP remains unknown and emission still records.",
+    "Actual allocation instance IDs differ by home; legacy rows remain byte-identical and unknown.",
+    "HTTP/native/UI filter real canonical usage and show unpriced/unknown billing/quota without modifying source."
+  ],
+  "external_acceptance_pending": [
+    "Vendor plan, invoice and live quota authority unavailable; historical third-party CLI import schema not implemented."
+  ],
+  "production_files": [
+    "runtime/gideon/operations/usage_ledger.py",
+    "runtime/gideon/workspace/capabilities/platform/accounting.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_accounting.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Accounting.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_accounting.py",
+    "checks/runtime/capabilities/platform/accounting_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Accounting.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_accounting.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Accounting.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.17-checks-jq88lf6a/evidence.json",
+  "qualification": {
+    "runtime_tests": 8,
+    "ui_tests": 2,
+    "production_lines": 90,
+    "test_lines": 272,
+    "repair_cycles": 0,
+    "limitations": [
+      "Vendor plan, invoice and live quota authority unavailable; historical third-party CLI import schema not implemented."
+    ]
+  }
+}
