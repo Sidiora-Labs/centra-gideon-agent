@@ -61,6 +61,26 @@ FAMILIES = {
     },
 }
 
+CORRECTIONS = {
+    "epigenetic": {
+        "request_id": "shared-epi-correction", "revision": 1,
+        "biological_age": {"value": 37.9, "unit": "years"}, "notes": "Corrected transcription",
+    },
+    "eyes": {
+        "request_id": "shared-eyes-correction", "revision": 1, "observed_date": "2026-09-25",
+        "notes": "Cylinder corrected", "left": eye(-1.25, -.75, 95), "right": eye(-1, -.25, 80),
+    },
+    "lifestyle": {
+        "request_id": "shared-lifestyle-correction", "revision": 1, "smoking_status": "former",
+        "reported_bmi": 24.0, "reported_daily_alcohol": {"value": 12, "unit": "g_per_day"},
+    },
+    "body": {
+        "request_id": "shared-body-correction", "revision": 1, "notes": "Corrected scale transcription",
+        "values": {"muscle_percent": 42, "fat_percent": 18,
+                   "bone_mass": {"value": 3, "unit": "kg"}, "temperature": {"value": 37, "unit": "C"}},
+    },
+}
+
 
 @pytest.mark.asyncio
 async def test_shared_routes_native_discovery_whole_health_export_and_sqlite_backup(tmp_path, monkeypatch):
@@ -112,3 +132,55 @@ async def test_shared_routes_native_discovery_whole_health_export_and_sqlite_bac
         finally:
             for contract in FAMILIES.values():
                 registry.deregister(contract["manifest"])
+
+
+@pytest.mark.asyncio
+async def test_cross_family_corrections_preserve_history_in_whole_health_export_and_home_isolation(tmp_path):
+    owner_home = tmp_path / "owner"
+    isolated_home = tmp_path / "isolated"
+    owner_app, isolated_app = web.Application(), web.Application()
+    register(owner_app, owner_home)
+    register(isolated_app, isolated_home)
+    originals, corrected = {}, {}
+    async with TestClient(TestServer(owner_app)) as owner, TestClient(TestServer(isolated_app)) as isolated:
+        for family, contract in FAMILIES.items():
+            response = await owner.post(contract["path"], json=contract["payload"])
+            assert response.status == 201
+            originals[family] = await response.json()
+            assert originals[family]["revision"] == 1
+            resource = contract["path"] + "/" + originals[family]["id"]
+            response = await owner.put(resource, json=CORRECTIONS[family])
+            assert response.status == 200
+            corrected[family] = await response.json()
+            assert corrected[family]["revision"] == 2
+            assert corrected[family]["id"] == originals[family]["id"]
+            response = await owner.get(resource + "/history")
+            assert response.status == 200
+            assert await response.json() == {"history": [originals[family], corrected[family]]}
+
+        response = await isolated.get(BASE + "/exports/preview")
+        assert response.status == 200
+        empty = await response.json()
+        for contract in FAMILIES.values():
+            assert empty["counts"][contract["section"]] == 0
+
+        response = await owner.post(BASE + "/exports", json={"request_id": "corrected-clinical-snapshot"})
+        assert response.status == 200
+        metadata = await response.json()
+        response = await owner.get(BASE + "/exports/" + metadata["id"] + "/download")
+        assert response.status == 200
+        snapshot = json.loads(await response.read())
+        for family, contract in FAMILIES.items():
+            section = snapshot["sections"][contract["section"]]
+            assert set(section) == {"history"}
+            assert section["history"] == [originals[family], corrected[family]]
+            assert section["history"][-1]["revision"] == 2
+
+        with sqlite3.connect(owner_home / "capabilities/wellbeing.sqlite3") as database:
+            assert database.execute("SELECT count(*) FROM requests").fetchone()[0] > 0
+            assert database.execute("SELECT count(*) FROM eye_prescription_requests").fetchone()[0] > 0
+            assert database.execute("SELECT count(*) FROM body_composition_requests").fetchone()[0] > 0
+        encoded = json.dumps(snapshot, sort_keys=True)
+        assert "request_id" not in encoded
+        assert "shared-epi-correction" not in encoded
+        assert "corrected-clinical-snapshot" not in encoded
