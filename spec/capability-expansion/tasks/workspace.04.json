@@ -1,0 +1,116 @@
+{
+  "id": "workspace.04",
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "schema_version": 1,
+  "base_revision": "41d6118f65e63b8d3b64fa00d114d4fbfb65e2ef",
+  "scope": "Canonical project registration, bounded source metadata detection and safe Python/Node local HTTP templates",
+  "acceptance": [
+    "Existing project registration reuses HierarchyStore project authority across HTTP and native tools",
+    "Bounded metadata inspection never runs scripts and refuses oversized or symlink metadata",
+    "Exclusive new directory scaffolds, durable idempotency, concurrent retries and no-overwrite rejection",
+    "Both generated Python and Node services run as real processes and answer HTTP health with unknown-path 404",
+    "Actual authenticated HTTP and Chromium discovery/register/scaffold/reload/error journeys"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/projects.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Projects.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_projects.py",
+    "checks/runtime/capabilities/workspace/ui_server.py",
+    "checks/runtime/capabilities/workspace/entry.tsx",
+    "apps/console/src/features/capabilities/workspace/Projects.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_projects.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/Projects.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.04",
+  "integration_hooks": {
+    "routes": "Existing register adds /workspace/projects, /detect, /templates, /scaffold, /{id}",
+    "console": "Page includes Projects",
+    "native": "gideon-workspace discovery and scaffold tools",
+    "durability": "capabilities/workspace/project-operations.sqlite3; canonical HierarchyStore remains project authority",
+    "machine_local_exclude": "capabilities/workspace/project-operations.lock"
+  },
+  "limits": [
+    "Two dependency-free local HTTP templates only; React/Vite and Express application templates absent",
+    "SwiftUI/iOS/Xcode generation and native toolchain qualification absent",
+    "No AI-assisted detection, dependency installation, recursive workspace discovery, Git initialization or remote publishing",
+    "Exclusive directory and file creation plus recoverable receipt; no atomic complete-directory publish claim",
+    "Focused local qualification is separate from root integration"
+  ],
+  "exit_code": 0,
+  "repair_cycles": 0,
+  "evidence": {
+    "task": "workspace.04",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790295971.8508515,
+    "production_lines": 303,
+    "test_lines": 366,
+    "ratio": 1.2079207920792079,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/projects.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/test_projects.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.04-checks-vzcnfmk6/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_projects.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.04-checks-vzcnfmk6/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Projects.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.04-checks-vzcnfmk6/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.04-checks-vzcnfmk6",
+    "completed_at": 1790296005.031403,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "dae18495a90666ce28c0231c04eabc3b310f1a9648d5520b5364df379f0ecc0c",
+      "apps/console/src/features/capabilities/workspace/Projects.tsx": "0b5dfc9fd017bb62f083c5719c1bfb9073b9574d4ae7c59d713f0efaabf50652",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "8bbf950e040a19e7bee51ec51cb017fbaddc419db6752e56d3092a007d1e7dc3",
+      "runtime/gideon/workspace/capabilities/workspace/projects.py": "0077ca13831da6e5a7b9730cacbf386077dce7a314ce1189d5c944421ee35cb9",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "f0af8e739806907f7e800e7cb80e78ea5f5b85fb7af6ed0ad6906aa0e3dc3750",
+      "apps/console/src/features/capabilities/workspace/Projects.test.ts": "c9ac224c87b2d21f01fb540b8147605d83348a84921bc490b5d72646e3a662d2",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/test_projects.py": "e5a18528e41569fb55c21a40aad7fb616f8ea124beecb8ba073ed59d92539a0b",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    }
+  }
+}
