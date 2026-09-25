@@ -32,7 +32,8 @@
       "platform_schedule_forecast",
       "platform_dashboard_compositions",
       "platform_dashboard_select",
-      "platform_usage_accounting"
+      "platform_usage_accounting",
+      "platform_personal_scorecard"
     ]
   },
   "native": true
