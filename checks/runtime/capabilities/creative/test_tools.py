@@ -57,7 +57,7 @@ def test_manifest_factory_and_actual_tool_registry(tmp_path):
 def test_tool_definitions_complete_strict_and_approval_bearing(tmp_path):
     provider = CreativeToolProvider(tmp_path)
     definitions = asyncio.run(provider.list_tools())
-    assert len(definitions) == 14
+    assert len(definitions) == 21
     assert {definition.name for definition in definitions} == set(SCHEMAS)
     for definition in definitions:
         assert definition.provider == 'gideon-creative'

@@ -7,6 +7,9 @@ from gideon.workspace.capabilities.creative.moodboards import BoardStore
 
 STORE = web.AppKey("creative_store", IngredientStore)
 PREFIX = "/api/capabilities/creative/ingredients"
+from gideon.workspace.capabilities.creative.universes import UniverseStore
+UNIVERSES = web.AppKey("creative_universes", UniverseStore)
+
 BOARDS = web.AppKey("creative_boards", BoardStore)
 
 
@@ -23,6 +26,31 @@ async def boards(request):
             elif action == "export":
                 revision = int(request.query["revision"]) if "revision" in request.query else None
                 return web.json_response(store.export(id, revision), headers={"Content-Disposition": f'attachment; filename="moodboard-{id}.json"'})
+            elif action == "revisions":
+                result = {"items": store.revisions(id)}
+            elif id:
+                result = store.get(id)
+            else:
+                result = store.list(request.query.get("q", ""), int(request.query.get("offset", 0)), int(request.query.get("limit", 25)))
+        else:
+            payload = await request.json()
+            result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
+        return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
+async def universes(request):
+    store = request.app[UNIVERSES]
+    id = request.match_info.get("id")
+    action = request.path.rsplit("/", 1)[-1]
+    try:
+        if request.method == "GET":
+            if set(request.query) - {"q", "offset", "limit", "revision"}:
+                raise CatalogError("Unexpected query parameter")
+            if action == "export":
+                revision = int(request.query["revision"]) if "revision" in request.query else None
+                return web.json_response(store.export(id, revision), headers={"Content-Disposition": f'attachment; filename="universe-{id}.json"'})
             elif action == "revisions":
                 result = {"items": store.revisions(id)}
             elif id:
@@ -73,6 +101,14 @@ async def handle(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    app[UNIVERSES] = UniverseStore(app[STORE].home)
+    app.router.add_get("/api/capabilities/creative/universes", universes)
+    app.router.add_post("/api/capabilities/creative/universes", universes)
+    app.router.add_get("/api/capabilities/creative/universes/{id}", universes)
+    app.router.add_patch("/api/capabilities/creative/universes/{id}", universes)
+    app.router.add_get("/api/capabilities/creative/universes/{id}/revisions", universes)
+    app.router.add_post("/api/capabilities/creative/universes/{id}/restore", universes)
+    app.router.add_get("/api/capabilities/creative/universes/{id}/export", universes)
     app[BOARDS] = BoardStore(app[STORE].home)
     app.router.add_get("/api/capabilities/creative/boards", boards)
     app.router.add_post("/api/capabilities/creative/boards", boards)
