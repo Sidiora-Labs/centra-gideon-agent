@@ -84,6 +84,22 @@ CONTRACTS.update({
 CONTRACTS["identity_bundle_inventory"] = ({}, [], "List transferable continuity groups and exclusions; passphrase operations remain in human console", False)
 
 
+RECIPE_STEP = {"type": "object", "additionalProperties": False, "properties": {"id": IDENTIFIER, "tool": TEXT, "arguments": {"type": "object"}}, "required": ["id", "tool", "arguments"]}
+RECIPE = {"title": TEXT, "steps": {"type": "array", "items": RECIPE_STEP, "minItems": 1, "maxItems": 5}, "enabled": {"type": "boolean"}, "id": IDENTIFIER, "expected_revision": {"type": "integer", "minimum": 0}, "request_id": IDENTIFIER}
+CONTRACTS.update({
+    "identity_recipe_list": ({}, [], "List bounded identity read recipes", False),
+    "identity_recipe_get": ({"id": IDENTIFIER}, ["id"], "Read a recipe definition", False),
+    "identity_recipe_history": ({"id": IDENTIFIER}, ["id"], "Read immutable recipe revisions", False),
+    "identity_recipe_save": (RECIPE, ["title", "steps", "request_id"], "Author at most five existing identity read operations with prior-output bindings", True),
+    "identity_recipe_restore": ({"id": IDENTIFIER, "revision": REVISION, "expected_revision": REVISION, "request_id": IDENTIFIER}, ["id", "revision", "expected_revision", "request_id"], "Restore an earlier recipe as a new revision", True),
+    "identity_recipe_begin": ({"recipe_id": IDENTIFIER, "revision": REVISION, "request_id": IDENTIFIER}, ["recipe_id", "revision", "request_id"], "Begin a pinned read recipe without dispatching steps", True),
+    "identity_recipe_get_run": ({"id": IDENTIFIER}, ["id"], "Read actual step outcomes", False),
+    "identity_recipe_list_runs": ({}, [], "List actual recipe run outcomes", False),
+    "identity_recipe_advance": ({"run_id": IDENTIFIER, "expected_index": {"type": "integer", "minimum": 0}}, ["run_id", "expected_index"], "Dispatch one actual read step with live authority and revision rechecks", True),
+    "identity_recipe_cancel": ({"run_id": IDENTIFIER}, ["run_id"], "Prevent pending recipe steps from dispatching", True),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},
