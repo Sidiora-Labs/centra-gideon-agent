@@ -8,12 +8,23 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/x/accounts/' in request.path:
+            account_id = request.match_info['x_account_id']
+            draft_id = request.match_info.get('x_draft_id')
+            action = request.path.rsplit('/', 1)[-1]
+            if request.method == 'GET':
+                return web.json_response({'snapshot': xreading.snapshot(store, account_id)} if action == 'snapshot' else {'drafts': xreading.drafts(store, account_id)})
+            data = await request.json()
+            if action == 'sync':
+                return web.json_response({'snapshot': await xreading.sync(store, account_id, data)})
+            row = xreading.review(store, account_id, draft_id, data) if action == 'review' else xreading.save_draft(store, account_id, data, draft_id)
+            return web.json_response({'draft': row})
         if '/social/' in request.path:
             account_id = request.match_info.get('social_id')
             if request.path.endswith('/history'):
@@ -152,6 +163,13 @@ async def handle(request):
 
 
 def register(app):
+    x_base = '/api/capabilities/communications/x/accounts/{x_account_id}'
+    app.router.add_get(x_base + '/snapshot', handle)
+    app.router.add_post(x_base + '/sync', handle)
+    app.router.add_get(x_base + '/drafts', handle)
+    app.router.add_post(x_base + '/drafts', handle)
+    app.router.add_put(x_base + '/drafts/{x_draft_id}', handle)
+    app.router.add_post(x_base + '/drafts/{x_draft_id}/review', handle)
     social_base = "/api/capabilities/communications/social/accounts"
     app.router.add_get(social_base, handle)
     app.router.add_post(social_base, handle)

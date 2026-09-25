@@ -21,7 +21,8 @@
       "beeper-outbox",
       "telegram-operations",
       "calendar-mirror",
-      "social-account-registry"
+      "social-account-registry",
+      "x-read-compose-handoff"
     ]
   },
   "native": true

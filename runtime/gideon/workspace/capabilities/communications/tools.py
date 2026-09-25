@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop, beeper, telegram, calendar, social
+from . import mirrors, desktop, beeper, telegram, calendar, social, xreading
 
 
 def obj(properties, required=()):
@@ -42,6 +42,12 @@ TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boole
 CAL_SOURCE = {key: STRING for key in calendar.SOURCE_FIELDS}
 SOCIAL = {**{key: STRING for key in social.FIELDS if key != 'person_id'}, 'person_id': {'type': ['string', 'null']}}
 SPECS = {
+    'people_x_snapshot': ('Read the captured X page and explicit coverage.', obj({'account_id': STRING}, ('account_id',)), False),
+    'people_x_sync': ('Read one actual X API page using the registered credential reference.', obj({'account_id': STRING, 'pagination_token': STRING}, ('account_id',)), True),
+    'people_x_drafts': ('Read durable X drafts and handoff review state.', obj({'account_id': STRING}, ('account_id',)), False),
+    'people_x_draft_create': ('Save a local X draft; does not send.', obj({'account_id': STRING, 'text': STRING, 'request_key': STRING}, ('account_id', 'text', 'request_key')), True),
+    'people_x_draft_update': ('Edit a local X draft and invalidate prior review.', obj({'account_id': STRING, 'draft_id': STRING, 'text': STRING, 'revision': {'type': 'integer'}}, ('account_id', 'draft_id', 'text', 'revision')), True),
+    'people_x_review': ('Confirm review and create browser compose handoff; does not post or choose browser account.', obj({'account_id': STRING, 'draft_id': STRING, 'revision': {'type': 'integer'}, 'confirm_review': {'type': 'boolean'}}, ('account_id', 'draft_id', 'revision', 'confirm_review')), True),
     'people_social_accounts': ('Read local social account registry, without implying external verification.', obj({}), False),
     'people_social_get': ('Read one social account and revision.', obj({'account_id': STRING}, ('account_id',)), False),
     'people_social_create': ('Register a normalized social identity with explicit local request identity.', obj({'account': obj({**SOCIAL, 'request_key': STRING}, ('platform', 'handle', 'request_key'))}, ('account',)), True),
@@ -122,7 +128,20 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name.startswith('people_social_'):
+            if tool_name.startswith('people_x_'):
+                action = tool_name.removeprefix('people_x_')
+                data = {k: v for k, v in arguments.items() if k not in ('account_id', 'draft_id')}
+                if action == 'snapshot':
+                    result = {'snapshot': xreading.snapshot(store, arguments['account_id'])}
+                elif action == 'sync':
+                    result = {'snapshot': await xreading.sync(store, arguments['account_id'], data)}
+                elif action == 'drafts':
+                    result = {'drafts': xreading.drafts(store, arguments['account_id'])}
+                elif action == 'review':
+                    result = {'draft': xreading.review(store, arguments['account_id'], arguments['draft_id'], data)}
+                else:
+                    result = {'draft': xreading.save_draft(store, arguments['account_id'], data, arguments.get('draft_id'))}
+            elif tool_name.startswith('people_social_'):
                 action = tool_name.removeprefix('people_social_')
                 if action == 'accounts':
                     result = {'accounts': social.accounts(store)}
