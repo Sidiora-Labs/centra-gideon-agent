@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors
+from . import mirrors, desktop
 
 
 def obj(properties, required=()):
@@ -36,7 +36,12 @@ BATCH = obj({'source': STRING, 'source_account_id': STRING, 'captured_at': STRIN
              'messages': {'type': 'array', 'items': MESSAGE, 'maxItems': 1000}},
             ('source', 'source_account_id', 'captured_at', 'coverage_start', 'coverage_end', 'incoming_complete', 'outgoing_complete', 'messages'))
 ACCOUNT = obj({key: STRING for key in mirrors.ACCOUNT_FIELDS}, ('name', 'kind', 'owner_email'))
+DESKTOP = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING, 'content_base64': {'type': 'string', 'maxLength': 11184812}}
 SPECS = {
+    'people_desktop_preview': ('Preview a plain desktop SQLite snapshot; encrypted databases require a local export.', obj(DESKTOP, DESKTOP), False),
+    'people_desktop_commit': ('Commit a reviewed snapshot and incomplete-coverage evidence atomically.', obj({**DESKTOP, 'source_digest': STRING, 'review_token': STRING}, (*DESKTOP, 'source_digest', 'review_token')), True),
+    'people_desktop_imports': ('Read durable desktop import receipts.', obj({}), False),
+    'people_desktop_history': ('Read imported source messages.', obj({'source': STRING, 'source_account_id': STRING}, ('source', 'source_account_id')), False),
     'people_mirror_accounts': ('List configured mail sources and sync state.', obj({}), False),
     'people_mirror_capabilities': ('Read adapter coverage and external qualification gaps.', obj({}), False),
     'people_mirror_create': ('Configure an account with a credential reference, never a secret.', obj({'account': ACCOUNT}, ('account',)), True),
@@ -83,7 +88,16 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name == 'people_mirror_accounts':
+            if tool_name == 'people_desktop_preview':
+                result = desktop.preview(store, arguments)
+            elif tool_name == 'people_desktop_commit':
+                receipt, created = desktop.commit(store, arguments)
+                result = {'receipt': receipt, 'created': created}
+            elif tool_name == 'people_desktop_imports':
+                result = {'imports': desktop.imports(store)}
+            elif tool_name == 'people_desktop_history':
+                result = {'messages': desktop.history(store, arguments['source'], arguments['source_account_id'])}
+            elif tool_name == 'people_mirror_accounts':
                 result = {'accounts': mirrors.accounts(store)}
             elif tool_name == 'people_mirror_capabilities':
                 result = {'adapters': mirrors.COVERAGE}

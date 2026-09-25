@@ -1,0 +1,55 @@
+{
+  "id": "communications.05",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "0cc60078",
+  "requires": [
+    "communications.04"
+  ],
+  "contract": "Preview and commit bounded plain SQLite snapshots using actual iMessage message/handle/chat joins and Signal Desktop messages/conversations schema. Retain original bytes and immutable messages atomically with linked relationship evidence. Source coverage always incomplete; encrypted Desktop unlocking and attributed text/attachment decoding not implemented.",
+  "acceptance": [
+    "Real SQLite file preview/commit/restart/replay, source and allocation isolation",
+    "Stale review and conflicting source identities rollback atomically",
+    "Bounded deserialization and schema probes reject encrypted/damaged/nonordinary sources",
+    "Real native ToolProvider and HTTP-backed file upload UI workflows",
+    "Source provenance persisted; imported snapshots remain unknown coverage"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/desktop.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/DesktopPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_desktop.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/DesktopPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_desktop.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/DesktopPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.05",
+  "sources": [
+    "https://github.com/signalapp/Signal-Desktop/blob/main/DATABASE_SCHEMA.md"
+  ],
+  "limits": [
+    "Local encrypted Signal key extraction/decryption absent; user supplies plain SQLite export.",
+    "iMessage attributedBody text and message attachments are not decoded.",
+    "Snapshots bounded to8MiB and1000messages; live Desktop sync/access not qualified.",
+    "Signal groups and unsupported system events retained as history without inferred person linkage."
+  ],
+  "qualification": {
+    "runtime": "42 passed",
+    "console_http": "3 passed with real uploaded SQLite files",
+    "live_desktop": "not qualified; supplied plain snapshots only",
+    "integrated_browser": "pending root integration"
+  }
+}

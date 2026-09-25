@@ -5,11 +5,20 @@
   "description": "Manage people, reviewed contact imports, relationship touchpoints and coverage-aware thread evidence and read-only mail account mirrors. No outbound messaging.",
   "icon": "Users",
   "author": "Gideon",
-  "tags": ["tool", "bundled"],
+  "tags": [
+    "tool",
+    "bundled"
+  ],
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.communications.tools:create_provider",
-    "capabilities": ["people", "contact-import", "relationship-care", "mail-mirror"]
+    "capabilities": [
+      "people",
+      "contact-import",
+      "relationship-care",
+      "mail-mirror",
+      "desktop-message-import"
+    ]
   },
   "native": true
 }
