@@ -12,6 +12,8 @@ def register(app):
         module = import_module(f"gideon.interfaces.dashboard.handlers.capabilities_{lane}")
         module.register(app)
     additional = (
+        ('/api/capabilities/platform/compositions', 'compositions'),
+        ('/api/capabilities/wellbeing/exports', 'wellbeing_exports'),
         ('/api/capabilities/platform/forecast', 'forecast'),
         ('/api/capabilities/music/listening/history', 'music_listening'),
         ('/api/capabilities/knowledge/journals', 'knowledge_journals'),

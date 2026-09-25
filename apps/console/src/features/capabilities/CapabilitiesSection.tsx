@@ -15,6 +15,7 @@ const pages: Record<string, ComponentType> = {
   platform: lazy(() => import('./platform/Page')),
 }
 const nested: Record<string, ComponentType> = {
+  'wellbeing/exports': lazy(() => import('./wellbeing/Exports')),
   'knowledge/journals': lazy(() => import('./knowledge/JournalsPage')),
   'identity/lifecycle': lazy(() => import('./identity/LifecyclePage')),
   'wellbeing/life': lazy(() => import('./wellbeing/LifeCalendar')),

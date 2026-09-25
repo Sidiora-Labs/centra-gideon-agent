@@ -90,7 +90,7 @@ try {
       links.nth(index).click(),
     ])
     assert.equal(response.status(),200,'Area request failed: '+response.url())
-    await page.waitForURL(url=>url.hash===href)
+    await page.waitForURL(url=>url.hash.split('?')[0]===href)
     await page.waitForFunction(lane=>document.querySelector('nav[aria-label="Capabilities"] a[aria-current="page"]')?.getAttribute('href')==='#/capabilities/'+lane,lane)
     await page.waitForFunction(()=>!document.querySelector('[role="status"]')?.textContent?.includes('Loading'))
     assert.ok(new URL(page.url()).hash.startsWith('#/capabilities/'))
@@ -105,7 +105,7 @@ try {
   process.stdout.write(JSON.stringify({status:'passed',evidence})+'\n')
 } catch(error){
   if(page){await page.screenshot({path:resolve(evidence,'failure.png'),fullPage:true}).catch(()=>{});await writeFile(resolve(evidence,'page.txt'),await page.locator('body').innerText().catch(()=>''))}
-  await writeFile(resolve(evidence,'failure.json'),JSON.stringify({error:String(error),backendLog},null,2))
+  await writeFile(resolve(evidence,'failure.json'),JSON.stringify({error:String(error),url:page?.url(),backendLog},null,2))
   process.stderr.write(JSON.stringify({status:'failed',evidence,error:String(error)})+'\n')
   process.exitCode=1
 } finally {
