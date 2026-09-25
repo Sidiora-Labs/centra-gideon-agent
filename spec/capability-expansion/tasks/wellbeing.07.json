@@ -1,0 +1,54 @@
+{
+  "id": "wellbeing.07",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "9dda292a",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/cognition.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/cognition_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_cognition.py",
+    "apps/console/src/features/capabilities/wellbeing/Cognition.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_cognition.py",
+    "apps/console/src/features/capabilities/wellbeing/Cognition.test.tsx"
+  ],
+  "contract": "Server-issued arithmetic and color-word sessions; bounded trials/deadline, persisted stimuli and actual issue/submission timestamps, versioned exact accuracy and latency scoring, optimistic answer/cancel and stable receipts. Real clock expiry projects from persisted deadline; no invented answers. Agent/HTTP/actual-hash React consumers.",
+  "remaining_limits": [
+    "Response time includes network and server processing, not an isolated clinical measurement",
+    "1..20 trials,1..600seconds; session catalog500; no clinical inference",
+    "Root registers cognition handler, console route and updated provider metadata"
+  ],
+  "source_revision": "9dda292a",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.07; UI-only repair with --stage ui",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.07-checks-_e5524gy/evidence.json",
+  "initial_evidence_log": "/tmp/gideon-wellbeing.07-checks-k_pyqc0f/evidence.json",
+  "production_lines": 222,
+  "test_lines": 359,
+  "test_ratio": 1.617117117117117,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Cognition.tsx": "87638f746a63f244393669019f006ec6b2ebee38cffe3e6b983fb75f241f586e",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_cognition.py": "81bf8b9fe8492cc104d392cacd79e0da2fdb47170253ee803ac544394e1928ee",
+    "runtime/gideon/workspace/capabilities/wellbeing/cognition.py": "bf79179fd8ab7a1d3235929cdcc62a9307b93d8f0d4aa77269bb283dc8961244",
+    "runtime/gideon/workspace/capabilities/wellbeing/cognition_provider.py": "ed0cc10bfa8abe386d69ac228ca2574ea35efe5906c122aea7e7357ebc422c75",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "b0152a60caad1fe9f410bab117e634efd457a5071f6d2e6ecd379097f51ffe77",
+    "apps/console/src/features/capabilities/wellbeing/Cognition.test.tsx": "d3e998aa3f04005a68e37d3f11a4e32b07b609a9de24b096348ac014a14e1bba",
+    "checks/runtime/capabilities/wellbeing/test_cognition.py": "d3399f4d25597f611da16cc96d452d370ebbbf3163bbd8d0555235a00749f039"
+  },
+  "repair_cycles": 1,
+  "qualification": "26 runtime passed first run; unchanged backend retained;3 real HTTP UI journeys passed repair1",
+  "acceptance_coverage": [
+    "server-issued arithmetic and color-word stimuli",
+    "actual submission intervals",
+    "independent correct/incorrect scoring",
+    "no expected answer leakage",
+    "request receipts and stale writes",
+    "real-clock expiry",
+    "cancellation retaining answered trials",
+    "home isolation and reopen",
+    "native/HTTP consumers",
+    "actual hash React answer cancel reload and deadline refresh"
+  ]
+}
