@@ -1,6 +1,6 @@
 {
   "id": "communications.04",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "49b2f41e",
   "requires": [
@@ -16,10 +16,7 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/mirrors.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_mirrors.py",
@@ -36,7 +33,24 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-people/app.json"
   ],
+  "integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.04",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.04-checks-rvepo6f3",
+  "production_lines": 364,
+  "test_lines": 477,
+  "ratio": 1.3104395604395604,
+  "files": {
+    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx": "ef881ef7f2c2840f3b1129feb326d97ba8df5a17fd3dc5b87f9382cfbf5ffc26",
+    "runtime/gideon/workspace/capabilities/communications/mirrors.py": "829f8dfcbdca5b7ea102c322871d2539c3155a80c5efe9c882ae40c23b086624",
+    "apps/console/src/features/capabilities/communications/MirrorPanel.test.tsx": "966d3abab999e4f58f7e63af306f152773f2f115510a996610038f2cf6071e1c",
+    "checks/runtime/capabilities/communications/test_mirrors.py": "ff44b5baf3022dcb86abcb54c0cbed02f83ca06dfe9118ffbf55bdcf2e8dbb38",
+    "checks/runtime/capabilities/communications/test_tools.py": "b54cbe37fe6e21e2c696dde7ef68f5f7cf095a9c414e8e1c5f5cb023611f246f"
+  },
   "limits": [
     "IMAP TLS/Gmail/Outlook successful remote access pending real customer credentials.",
     "Teams adapter absent in this native source; not implemented.",
@@ -44,8 +58,10 @@
     "Attachment metadata is mirrored; attachment binary retrieval is not implemented."
   ],
   "qualification": {
+    "compile": "passed",
     "runtime": "46 passed",
     "console_http": "3 passed",
+    "external_sends": "none performed",
     "external_imap": "pending real credential-backed connection",
     "teams": "unimplemented",
     "integrated_browser": "pending root integration"
