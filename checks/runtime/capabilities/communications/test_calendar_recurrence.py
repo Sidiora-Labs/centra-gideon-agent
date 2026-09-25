@@ -215,6 +215,87 @@ def test_subdaily_exceptions_and_expansion_cap_fail_closed():
         calendar.parse_ics(unbounded, 'UTC', '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')
 
 
+def test_event_duration_repeats_across_dst_and_all_day_dates():
+    timed = item('duration', 'DTSTART;TZID=America/New_York:20260307T090000', None,
+                 'DURATION:PT90M', 'RRULE:FREQ=DAILY;COUNT=3')
+    all_day = item('all-day-duration', 'DTSTART;VALUE=DATE:20260307', None,
+                   'DURATION:P2D', 'RRULE:FREQ=DAILY;COUNT=2')
+    events, warnings = calendar.parse_ics(envelope(timed, all_day), 'America/New_York',
+                                         '2026-03-01T00:00:00+00:00', '2026-04-01T00:00:00+00:00')
+    assert warnings == []
+    timed_rows = [row for row in events if row['uid'] == 'duration']
+    assert [(row['start'], row['end']) for row in timed_rows] == [
+        ('2026-03-07T14:00:00+00:00', '2026-03-07T15:30:00+00:00'),
+        ('2026-03-08T13:00:00+00:00', '2026-03-08T14:30:00+00:00'),
+        ('2026-03-09T13:00:00+00:00', '2026-03-09T14:30:00+00:00'),
+    ]
+    all_day_rows = [row for row in events if row['uid'] == 'all-day-duration']
+    assert [(row['start'], row['end']) for row in all_day_rows] == [
+        ('2026-03-07', '2026-03-09'), ('2026-03-08', '2026-03-10')]
+
+
+def test_rdate_period_end_and_duration_override_master_duration():
+    master = item('periods', 'DTSTART:20260101T090000Z', None, 'DURATION:PT30M',
+                  'RRULE:FREQ=DAILY;COUNT=2',
+                  'RDATE;VALUE=PERIOD:20260103T090000Z/20260103T110000Z,20260104T090000Z/PT3H')
+    events, _ = calendar.parse_ics(envelope(master), 'UTC',
+                                   '2026-01-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
+    assert [(row['start'], row['end']) for row in events] == [
+        ('2026-01-01T09:00:00+00:00', '2026-01-01T09:30:00+00:00'),
+        ('2026-01-02T09:00:00+00:00', '2026-01-02T09:30:00+00:00'),
+        ('2026-01-03T09:00:00+00:00', '2026-01-03T11:00:00+00:00'),
+        ('2026-01-04T09:00:00+00:00', '2026-01-04T12:00:00+00:00'),
+    ]
+    assert events[-1]['id'].endswith('#2026-01-04T09:00:00+00:00')
+
+
+def test_local_rdate_periods_preserve_timezone_and_canonical_provenance():
+    master = item('local-periods', 'DTSTART;TZID=America/New_York:20260306T090000', None,
+                  'DURATION:PT15M', 'RRULE:FREQ=DAILY;COUNT=1',
+                  'RDATE;TZID=America/New_York;VALUE=PERIOD:20260307T090000/PT2H,20260309T090000/20260309T123000')
+    events, warnings = calendar.parse_ics(envelope(master), 'America/New_York',
+                                         '2026-03-01T00:00:00+00:00', '2026-04-01T00:00:00+00:00')
+    assert warnings == []
+    assert len(events) == 3
+    assert events[0]['start'] == '2026-03-06T14:00:00+00:00'
+    assert events[0]['end'] == '2026-03-06T14:15:00+00:00'
+    assert events[1]['start'] == '2026-03-07T14:00:00+00:00'
+    assert events[1]['end'] == '2026-03-07T16:00:00+00:00'
+    assert events[2]['start'] == '2026-03-09T13:00:00+00:00'
+    assert events[2]['end'] == '2026-03-09T16:30:00+00:00'
+    assert events[1]['recurrence_id'] == '2026-03-07T09:00:00-05:00'
+    assert events[2]['recurrence_id'] == '2026-03-09T09:00:00-04:00'
+    assert events[1]['id'] == 'local-periods#2026-03-07T09:00:00-05:00'
+    assert events[2]['id'] == 'local-periods#2026-03-09T09:00:00-04:00'
+    assert all(row['recurring'] is True for row in events)
+    assert all(row['all_day'] is False for row in events)
+    assert all(row['recurrence_unexpanded'] is False for row in events)
+
+
+@pytest.mark.parametrize('properties,match', [
+    (('DTEND:20260101T100000Z', 'DURATION:PT1H'), 'both DTEND and DURATION'),
+    (('DURATION:P0D',), 'positive'),
+    (('DURATION:P1M',), 'Invalid RFC'),
+    (('DURATION:P1DT',), 'Invalid RFC'),
+    (('DURATION:PT1H', 'DURATION:PT2H'), 'Duplicate'),
+    (('RDATE;VALUE=PERIOD:20260102T090000Z',), 'requires a start'),
+    (('RDATE;VALUE=PERIOD:20260102T100000Z/20260102T090000Z',), 'must follow'),
+])
+def test_invalid_duration_and_period_forms_fail_closed(properties, match):
+    content = envelope(item('invalid-period', 'DTSTART:20260101T090000Z', None,
+                            'RRULE:FREQ=DAILY;COUNT=1', *properties))
+    with pytest.raises(PeopleError, match=match):
+        calendar.parse_ics(content, 'UTC', '2026-01-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
+
+
+def test_rdate_period_cannot_change_an_all_day_series_value_type():
+    content = envelope(item('all-day-period', 'DTSTART;VALUE=DATE:20260101', None,
+                            'DURATION:P1D', 'RRULE:FREQ=DAILY;COUNT=1',
+                            'RDATE;VALUE=PERIOD:20260102T090000Z/PT1H'))
+    with pytest.raises(PeopleError, match='date-time start'):
+        calendar.parse_ics(content, 'UTC', '2026-01-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
+
+
 def test_window_bounds_value_types_and_duplicate_overrides_are_rejected():
     with pytest.raises(PeopleError, match='at most 366 days'):
         calendar.parse_ics(recurring_calendar(), 'UTC', '2026-01-01T00:00:00+00:00', '2027-01-03T00:00:00+00:00')
