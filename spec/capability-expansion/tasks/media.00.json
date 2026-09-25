@@ -1,0 +1,29 @@
+{
+  "id": "media.00",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "3e7d39b9",
+  "contract": "Eight discovered native media tools execute existing SketchStore and MediaLibrary with frozen artifact scope and typed bounded parameters. No filesystem paths or caller-selected homes/providers.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/tools.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-media/app.json"
+  ],
+  "remaining_limits": [
+    "Root tool metadata/catalog integration pending; local invocation tests do not establish end-user agent session delivery."
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.00",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.00-checks-f2kk8wxu/evidence.json",
+  "production_lines": 71,
+  "test_lines": 101,
+  "ratio": 1.4225352112676057
+}
