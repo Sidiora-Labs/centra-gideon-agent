@@ -505,8 +505,11 @@ async def api_provider_models(request: web.Request) -> web.Response:
         out.append(d)
     result = {"models": out}
     from gideon.workspace.capabilities.platform.connections import ScopedCatalog
+
     if isinstance(catalog, ScopedCatalog):
-        result["model_catalog"] = [model.to_dict() for model in await catalog.full_catalog()]
+        result["model_catalog"] = [
+            model.to_dict() for model in await catalog.full_catalog()
+        ]
     return web.json_response(result)
 
 

@@ -15,15 +15,27 @@ from gideon.interfaces.dashboard.state import ConsoleState
 
 
 async def main():
-    home = Path(os.environ["GIDEON_HOME"]); home.mkdir(parents=True, exist_ok=True)
+    home = Path(os.environ["GIDEON_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
     store = KnowledgeStore(str(home / "knowledge.db"))
-    state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0); state._knowledge_store = store
-    app = web.Application(); app["state"] = state; register(app)
-    runner = web.AppRunner(app); await runner.setup()
-    listener = web.TCPSite(runner, "127.0.0.1", 0); await listener.start()
-    print(json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True)
-    try: await asyncio.Event().wait()
-    finally: await runner.cleanup(); store.close()
+    state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
+    state._knowledge_store = store
+    app = web.Application()
+    app["state"] = state
+    register(app)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    listener = web.TCPSite(runner, "127.0.0.1", 0)
+    await listener.start()
+    print(
+        json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True
+    )
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        store.close()
 
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -141,9 +141,7 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
             src_conn.backup(dst_conn)
         return True
     except Exception as exc:  # noqa: BLE001
-        print(
-            f"⚠️  sqlite backup failed for {src.name} ({exc})"
-        )
+        print(f"⚠️  sqlite backup failed for {src.name} ({exc})")
         return False
 
 
@@ -153,7 +151,10 @@ def _tree_ignore_dbs(db_names: set[str]):
 
     def _ignore(directory: str, contents: list[str]) -> set[str]:
         return {
-            n for n in contents if n in db_names or any(n == db + suffix for db in db_names for suffix in ("-wal", "-shm"))
+            n
+            for n in contents
+            if n in db_names
+            or any(n == db + suffix for db in db_names for suffix in ("-wal", "-shm"))
         }
 
     return _ignore

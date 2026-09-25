@@ -1,4 +1,5 @@
 """Transactional autobiography records with immutable answer revisions."""
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,9 @@ def _fields(prompt: str, theme: str, text: str, parent_id: str | None) -> dict:
         value = values[key]
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
             raise ValueError(f"{key} must contain 1..{limit} characters")
-    if parent_id is not None and (not isinstance(parent_id, str) or len(parent_id) != 32):
+    if parent_id is not None and (
+        not isinstance(parent_id, str) or len(parent_id) != 32
+    ):
         raise ValueError("parent_id must be a local story identifier or null")
     return {**values, "parent_id": parent_id}
 
@@ -77,29 +80,46 @@ class StoryStore:
     def _save(db, story):
         body = json.dumps(story, ensure_ascii=False)
         db.execute("INSERT OR REPLACE INTO stories VALUES (?, ?)", (story["id"], body))
-        db.execute("INSERT INTO revisions VALUES (?, ?, ?)",
-                   (story["id"], story["revision"], body))
+        db.execute(
+            "INSERT INTO revisions VALUES (?, ?, ?)",
+            (story["id"], story["revision"], body),
+        )
 
-    def create(self, *, prompt: str, theme: str, text: str,
-               parent_id: str | None = None, request_id: str) -> dict:
+    def create(
+        self,
+        *,
+        prompt: str,
+        theme: str,
+        text: str,
+        parent_id: str | None = None,
+        request_id: str,
+    ) -> dict:
         fields = _fields(prompt, theme, text, parent_id)
         if not isinstance(request_id, str) or not 1 <= len(request_id) <= 128:
             raise ValueError("request_id must contain 1..128 characters")
         fingerprint = json.dumps(fields, sort_keys=True, ensure_ascii=False)
         with self._db() as db:
-            prior = db.execute("SELECT fingerprint,response FROM requests WHERE id=?",
-                               (request_id,)).fetchone()
+            prior = db.execute(
+                "SELECT fingerprint,response FROM requests WHERE id=?", (request_id,)
+            ).fetchone()
             if prior:
                 if prior[0] != fingerprint:
                     raise ConflictError("request_id was used for a different answer")
                 return json.loads(prior[1])
             self._parent(db, parent_id)
             now = datetime.now(timezone.utc).isoformat()
-            story = {"id": uuid4().hex, **fields, "created_at": now,
-                     "updated_at": now, "revision": 1}
+            story = {
+                "id": uuid4().hex,
+                **fields,
+                "created_at": now,
+                "updated_at": now,
+                "revision": 1,
+            }
             self._save(db, story)
-            db.execute("INSERT INTO requests VALUES (?,?,?)",
-                       (request_id, fingerprint, json.dumps(story)))
+            db.execute(
+                "INSERT INTO requests VALUES (?,?,?)",
+                (request_id, fingerprint, json.dumps(story)),
+            )
             return story
 
     def get(self, story_id: str) -> dict:
@@ -112,11 +132,21 @@ class StoryStore:
 
     @staticmethod
     def _list(db):
-        return sorted((json.loads(row[0]) for row in db.execute("SELECT body FROM stories")),
-                      key=lambda story: (story["created_at"], story["id"]))
+        return sorted(
+            (json.loads(row[0]) for row in db.execute("SELECT body FROM stories")),
+            key=lambda story: (story["created_at"], story["id"]),
+        )
 
-    def update(self, story_id: str, *, expected_revision: int, prompt: str,
-               theme: str, text: str, parent_id: str | None = None) -> dict:
+    def update(
+        self,
+        story_id: str,
+        *,
+        expected_revision: int,
+        prompt: str,
+        theme: str,
+        text: str,
+        parent_id: str | None = None,
+    ) -> dict:
         fields = _fields(prompt, theme, text, parent_id)
         _revision(expected_revision)
         with self._db() as db:
@@ -124,8 +154,12 @@ class StoryStore:
             if old["revision"] != expected_revision:
                 raise ConflictError("Story changed; reload before saving")
             self._parent(db, parent_id, story_id)
-            story = {**old, **fields, "revision": expected_revision + 1,
-                     "updated_at": datetime.now(timezone.utc).isoformat()}
+            story = {
+                **old,
+                **fields,
+                "revision": expected_revision + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
             self._save(db, story)
             return story
 
@@ -147,7 +181,9 @@ class StoryStore:
             stories = self._list(db)
             included = {current["id"]}
             while True:
-                expanded = included | {s["id"] for s in stories if s["parent_id"] in included}
+                expanded = included | {
+                    s["id"] for s in stories if s["parent_id"] in included
+                }
                 if expanded == included:
                     return [s for s in stories if s["id"] in included]
                 included = expanded
@@ -167,4 +203,8 @@ class StoryStore:
 
     def export(self) -> dict:
         with self._db() as db:
-            return {"schema_version": 1, "stories": self._list(db), "history": self._history(db)}
+            return {
+                "schema_version": 1,
+                "stories": self._list(db),
+                "history": self._history(db),
+            }

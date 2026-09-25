@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from gideon.core.config.loader import config_dir
+
 from .graph import identifier, revision, validate_graph
 
 
@@ -47,18 +48,27 @@ class ExperienceStore:
     def _story(self, db, key, version=None):
         identifier(key)
         if version is None:
-            row = db.execute("SELECT revision FROM stories WHERE id=? AND deleted=0", (key,)).fetchone()
+            row = db.execute(
+                "SELECT revision FROM stories WHERE id=? AND deleted=0", (key,)
+            ).fetchone()
             if not row:
                 raise NotFound("story not found")
             version = row[0]
-        row = db.execute("SELECT body FROM versions WHERE id=? AND revision=?", (key, version)).fetchone()
+        row = db.execute(
+            "SELECT body FROM versions WHERE id=? AND revision=?", (key, version)
+        ).fetchone()
         if not row:
             raise NotFound("story revision not found")
         return json.loads(row[0])
 
     def stories(self):
         with self.connection() as db:
-            return [self._story(db, row[0]) for row in db.execute("SELECT id FROM stories WHERE deleted=0 ORDER BY rowid DESC LIMIT 200")]
+            return [
+                self._story(db, row[0])
+                for row in db.execute(
+                    "SELECT id FROM stories WHERE deleted=0 ORDER BY rowid DESC LIMIT 200"
+                )
+            ]
 
     def story(self, key):
         with self.connection() as db:
@@ -69,7 +79,9 @@ class ExperienceStore:
         with self.connection() as db:
             if key is None:
                 key, version = uuid4().hex, 1
-                db.execute("INSERT INTO stories(id,revision) VALUES(?,?)", (key, version))
+                db.execute(
+                    "INSERT INTO stories(id,revision) VALUES(?,?)", (key, version)
+                )
             else:
                 previous = self._story(db, key)
                 if revision(body.get("revision")) != previous["revision"]:
@@ -77,7 +89,9 @@ class ExperienceStore:
                 version = previous["revision"] + 1
                 db.execute("UPDATE stories SET revision=? WHERE id=?", (version, key))
             story = {"id": key, **graph, "revision": version}
-            db.execute("INSERT INTO versions VALUES(?,?,?)", (key, version, json.dumps(story)))
+            db.execute(
+                "INSERT INTO versions VALUES(?,?,?)", (key, version, json.dumps(story))
+            )
             return story
 
     def delete(self, key, expected):
@@ -87,7 +101,9 @@ class ExperienceStore:
             db.execute("UPDATE stories SET deleted=1 WHERE id=?", (key,))
 
     def _session(self, db, key):
-        row = db.execute("SELECT body FROM sessions WHERE id=?", (identifier(key),)).fetchone()
+        row = db.execute(
+            "SELECT body FROM sessions WHERE id=?", (identifier(key),)
+        ).fetchone()
         if not row:
             raise NotFound("session not found")
         return json.loads(row[0])
@@ -105,23 +121,36 @@ class ExperienceStore:
         with self.connection() as db:
             if story_id is not None:
                 identifier(story_id)
-            rows = db.execute("SELECT body FROM sessions WHERE (? IS NULL OR json_extract(body,'$.story_id')=?) ORDER BY rowid DESC LIMIT 200", (story_id, story_id))
+            rows = db.execute(
+                "SELECT body FROM sessions WHERE (? IS NULL OR json_extract(body,'$.story_id')=?) ORDER BY rowid DESC LIMIT 200",
+                (story_id, story_id),
+            )
             return [json.loads(r[0]) for r in rows]
 
     def _replay(self, db, scope, body):
         request_id = identifier(body.get("request_id"))
         encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
-        row = db.execute("SELECT input,result FROM requests WHERE scope=? AND id=?", (scope, request_id)).fetchone()
+        row = db.execute(
+            "SELECT input,result FROM requests WHERE scope=? AND id=?",
+            (scope, request_id),
+        ).fetchone()
         if row and row[0] != encoded:
             raise Conflict("request identifier was already used with different input")
         return encoded, json.loads(row[1]) if row else None
 
     def _remember(self, db, scope, body, encoded, result):
-        db.execute("INSERT INTO requests VALUES(?,?,?,?)", (scope, body["request_id"], encoded, json.dumps(result)))
+        db.execute(
+            "INSERT INTO requests VALUES(?,?,?,?)",
+            (scope, body["request_id"], encoded, json.dumps(result)),
+        )
         return result
 
     def start(self, body):
-        if not isinstance(body, dict) or set(body) != {"story_id", "story_revision", "request_id"}:
+        if not isinstance(body, dict) or set(body) != {
+            "story_id",
+            "story_revision",
+            "request_id",
+        }:
             raise ValueError("start requires story_id, story_revision and request_id")
         with self.connection() as db:
             encoded, replay = self._replay(db, "start", body)
@@ -130,13 +159,25 @@ class ExperienceStore:
             story = self._story(db, body["story_id"])
             if story["revision"] != revision(body["story_revision"]):
                 raise Conflict("story revision changed")
-            session = {"id": uuid4().hex, "story_id": story["id"], "story_revision": story["revision"],
-                       "current_node": story["start_node"], "history": [], "revision": 1}
-            db.execute("INSERT INTO sessions VALUES(?,?)", (session["id"], json.dumps(session)))
+            session = {
+                "id": uuid4().hex,
+                "story_id": story["id"],
+                "story_revision": story["revision"],
+                "current_node": story["start_node"],
+                "history": [],
+                "revision": 1,
+            }
+            db.execute(
+                "INSERT INTO sessions VALUES(?,?)", (session["id"], json.dumps(session))
+            )
             return self._remember(db, "start", body, encoded, self._view(db, session))
 
     def choose(self, key, body):
-        if not isinstance(body, dict) or set(body) != {"choice_id", "revision", "request_id"}:
+        if not isinstance(body, dict) or set(body) != {
+            "choice_id",
+            "revision",
+            "request_id",
+        }:
             raise ValueError("choice requires choice_id, revision and request_id")
         identifier(body["choice_id"])
         with self.connection() as db:
@@ -147,14 +188,25 @@ class ExperienceStore:
             if session["revision"] != revision(body["revision"]):
                 raise Conflict("session revision changed")
             node = self._view(db, session)["node"]
-            choice = next((c for c in node["choices"] if c["id"] == body["choice_id"]), None)
+            choice = next(
+                (c for c in node["choices"] if c["id"] == body["choice_id"]), None
+            )
             if choice is None:
                 raise ValueError("choice is unavailable at the current node")
             if len(session["history"]) >= 1000:
                 raise Conflict("session reached the 1000 choice limit")
             session["revision"] += 1
-            session["history"].append({"request_id": body["request_id"], "choice_id": choice["id"],
-                                       "from_node": node["id"], "to_node": choice["target"], "revision": session["revision"]})
+            session["history"].append(
+                {
+                    "request_id": body["request_id"],
+                    "choice_id": choice["id"],
+                    "from_node": node["id"],
+                    "to_node": choice["target"],
+                    "revision": session["revision"],
+                }
+            )
             session["current_node"] = choice["target"]
-            db.execute("UPDATE sessions SET body=? WHERE id=?", (json.dumps(session), key))
+            db.execute(
+                "UPDATE sessions SET body=? WHERE id=?", (json.dumps(session), key)
+            )
             return self._remember(db, key, body, encoded, self._view(db, session))

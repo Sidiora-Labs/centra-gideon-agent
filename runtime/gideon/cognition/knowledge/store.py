@@ -2893,8 +2893,12 @@ class KnowledgeStore:
         "is_archived",
     }
 
-    def update_item(self, item_id, *, touch: bool = True, expected: dict | None = None, **fields):
-        if expected is not None and (not isinstance(expected, dict) or set(expected) - self._ITEM_COLUMNS):
+    def update_item(
+        self, item_id, *, touch: bool = True, expected: dict | None = None, **fields
+    ):
+        if expected is not None and (
+            not isinstance(expected, dict) or set(expected) - self._ITEM_COLUMNS
+        ):
             raise ValueError("Expected item fields must be canonical columns")
         if not fields:
             return
@@ -2927,12 +2931,18 @@ class KnowledgeStore:
         self.db.execute("BEGIN IMMEDIATE" if expected is not None else "BEGIN")
         try:
             if expected is not None:
-                current = self.db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-                if current is None or any(current[key] != value for key, value in expected.items()):
+                current = self.db.execute(
+                    "SELECT * FROM items WHERE id = ?", (item_id,)
+                ).fetchone()
+                if current is None or any(
+                    current[key] != value for key, value in expected.items()
+                ):
                     self.db.execute("ROLLBACK")
                     return False
                 if fts_fields:
-                    old_row = self.db.execute("SELECT rowid,title,content FROM items WHERE id=?", (item_id,)).fetchone()
+                    old_row = self.db.execute(
+                        "SELECT rowid,title,content FROM items WHERE id=?", (item_id,)
+                    ).fetchone()
                     old_fts_tags = _fts_tags(self._tags_for_item(item_id))
             if safe:
                 self.db.execute(

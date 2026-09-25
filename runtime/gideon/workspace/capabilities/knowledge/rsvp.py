@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 
-
 _PUNCTUATION = re.compile(r"^[^\w\s]+$", re.UNICODE)
 _OPENING = re.compile(r"^[\(\[\{\u00ab\u2018\u201c'\"\u00bf\u00a1]+$", re.UNICODE)
 
@@ -28,7 +27,13 @@ def words(text: str) -> list[dict]:
                 result[-1]["text"] += value
                 result[-1]["end"] = match.end()
             continue
-        result.append({"text": prefix + value, "start": prefix_start if prefix_start is not None else match.start(), "end": match.end()})
+        result.append(
+            {
+                "text": prefix + value,
+                "start": prefix_start if prefix_start is not None else match.start(),
+                "end": match.end(),
+            }
+        )
         prefix = ""
         prefix_start = None
     if prefix and result:
@@ -37,7 +42,11 @@ def words(text: str) -> list[dict]:
 
 
 def delay_multiplier(value: str) -> float:
-    if re.search(r"[.!?\u2026\u3002\uff01\uff1f](?:[\"'\u201d\u2019\u00bb\)\]\}]+)?$", value or "", re.UNICODE):
+    if re.search(
+        r"[.!?\u2026\u3002\uff01\uff1f](?:[\"'\u201d\u2019\u00bb\)\]\}]+)?$",
+        value or "",
+        re.UNICODE,
+    ):
         return 1.8
     if re.search(r"[,;:](?:[\"'\u201d\u2019\u00bb\)\]\}]+)?$", value or "", re.UNICODE):
         return 1.3
@@ -78,7 +87,9 @@ class RsvpStates:
 
     def get(self, item_id: str) -> dict:
         item, tokens, revision = self._item(item_id)
-        row = self.db.execute("SELECT * FROM capability_knowledge_rsvp WHERE item_id=?", (item_id,)).fetchone()
+        row = self.db.execute(
+            "SELECT * FROM capability_knowledge_rsvp WHERE item_id=?", (item_id,)
+        ).fetchone()
         changed = bool(row and row["content_revision"] != revision)
         state = {
             "item_id": item_id,
@@ -86,7 +97,11 @@ class RsvpStates:
             "word_index": min(int(row["word_index"]), len(tokens) - 1) if row else 0,
             "wpm": int(row["wpm"]) if row else 350,
             "chunk_size": int(row["chunk_size"]) if row else 1,
-            "bookmark_index": min(int(row["bookmark_index"]), len(tokens) - 1) if row and row["bookmark_index"] is not None else None,
+            "bookmark_index": (
+                min(int(row["bookmark_index"]), len(tokens) - 1)
+                if row and row["bookmark_index"] is not None
+                else None
+            ),
             "word_count": len(tokens),
             "content_revision": revision,
             "content_changed": changed,
@@ -96,33 +111,58 @@ class RsvpStates:
             self._write(state)
         return state
 
-    def _validated(self, item_id: str, payload: dict, required: set[str]) -> tuple[dict, list[dict], str]:
+    def _validated(
+        self, item_id: str, payload: dict, required: set[str]
+    ) -> tuple[dict, list[dict], str]:
         if not isinstance(payload, dict) or set(payload) != required:
             raise CaptureError("RSVP state has an invalid request shape")
         item, tokens, revision = self._item(item_id)
         if payload["content_revision"] != revision:
-            raise CaptureError("Knowledge content changed; reopen RSVP before saving", 409)
+            raise CaptureError(
+                "Knowledge content changed; reopen RSVP before saving", 409
+            )
         return item, tokens, revision
 
     def save(self, item_id: str, payload: dict) -> dict:
-        _, tokens, revision = self._validated(item_id, payload, {"word_index", "wpm", "chunk_size", "content_revision"})
-        if type(payload["word_index"]) is not int or not 0 <= payload["word_index"] < len(tokens):
+        _, tokens, revision = self._validated(
+            item_id, payload, {"word_index", "wpm", "chunk_size", "content_revision"}
+        )
+        if type(payload["word_index"]) is not int or not 0 <= payload[
+            "word_index"
+        ] < len(tokens):
             raise CaptureError("word_index is outside the canonical word range")
         if type(payload["wpm"]) is not int or not 100 <= payload["wpm"] <= 1000:
             raise CaptureError("wpm must be between 100 and 1000")
-        if payload["chunk_size"] not in (1, 2) or type(payload["chunk_size"]) is not int:
+        if (
+            payload["chunk_size"] not in (1, 2)
+            or type(payload["chunk_size"]) is not int
+        ):
             raise CaptureError("chunk_size must be 1 or 2")
         current = self.get(item_id)
-        current.update(word_index=payload["word_index"], wpm=payload["wpm"], chunk_size=payload["chunk_size"], content_revision=revision, content_changed=False)
+        current.update(
+            word_index=payload["word_index"],
+            wpm=payload["wpm"],
+            chunk_size=payload["chunk_size"],
+            content_revision=revision,
+            content_changed=False,
+        )
         self._write(current)
         return self.get(item_id)
 
     def bookmark(self, item_id: str, payload: dict) -> dict:
-        _, tokens, revision = self._validated(item_id, payload, {"word_index", "content_revision"})
-        if type(payload["word_index"]) is not int or not 0 <= payload["word_index"] < len(tokens):
+        _, tokens, revision = self._validated(
+            item_id, payload, {"word_index", "content_revision"}
+        )
+        if type(payload["word_index"]) is not int or not 0 <= payload[
+            "word_index"
+        ] < len(tokens):
             raise CaptureError("word_index is outside the canonical word range")
         current = self.get(item_id)
-        current.update(bookmark_index=payload["word_index"], content_revision=revision, content_changed=False)
+        current.update(
+            bookmark_index=payload["word_index"],
+            content_revision=revision,
+            content_changed=False,
+        )
         self._write(current)
         return self.get(item_id)
 
@@ -139,6 +179,14 @@ class RsvpStates:
         self.db.execute(
             "INSERT INTO capability_knowledge_rsvp(item_id,word_index,wpm,chunk_size,bookmark_index,content_revision,updated_at) VALUES(?,?,?,?,?,?,?) "
             "ON CONFLICT(item_id) DO UPDATE SET word_index=excluded.word_index,wpm=excluded.wpm,chunk_size=excluded.chunk_size,bookmark_index=excluded.bookmark_index,content_revision=excluded.content_revision,updated_at=excluded.updated_at",
-            (state["item_id"], state["word_index"], state["wpm"], state["chunk_size"], state.get("bookmark_index"), state["content_revision"], now),
+            (
+                state["item_id"],
+                state["word_index"],
+                state["wpm"],
+                state["chunk_size"],
+                state.get("bookmark_index"),
+                state["content_revision"],
+                now,
+            ),
         )
         self.db.commit()

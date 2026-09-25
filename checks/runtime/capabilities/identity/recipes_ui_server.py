@@ -1,14 +1,20 @@
 """Real application used by the console interaction test."""
+
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
+
 from aiohttp import web
+
 from gideon.interfaces.dashboard.handlers.capabilities_identity_recipes import register
 
 
 async def main():
     from gideon.workspace.capabilities.identity.goals import GoalStore
-    GoalStore(Path(sys.argv[1]) / "capabilities/identity/goals.sqlite3").save_goal(title="Build telescope", request_id="seed-goal")
+
+    GoalStore(Path(sys.argv[1]) / "capabilities/identity/goals.sqlite3").save_goal(
+        title="Build telescope", request_id="seed-goal"
+    )
     app = web.Application()
     register(app, home=Path(sys.argv[1]))
     runner = web.AppRunner(app)

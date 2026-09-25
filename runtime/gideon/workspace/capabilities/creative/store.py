@@ -39,7 +39,11 @@ def integer(value, low=1, high=2**31):
 
 
 def text(value, maximum, required=False):
-    if not isinstance(value, str) or len(value) > maximum or (required and not value.strip()):
+    if (
+        not isinstance(value, str)
+        or len(value) > maximum
+        or (required and not value.strip())
+    ):
         raise CatalogError("Invalid text length")
     return value.strip() if required else value
 
@@ -48,8 +52,11 @@ def validate(value):
     keys(value, FIELDS)
     if value.get("type") not in TYPES:
         raise CatalogError("Unknown ingredient type")
-    result = {"type": value["type"], "title": text(value.get("title"), 200, True),
-              "body": text(value.get("body", ""), 100000)}
+    result = {
+        "type": value["type"],
+        "title": text(value.get("title"), 200, True),
+        "body": text(value.get("body", ""), 100000),
+    }
     for field, cap in (("tags", 32), ("source_refs", 64), ("relations", 128)):
         items = value.get(field, [])
         if not isinstance(items, list) or len(items) > cap:
@@ -59,9 +66,15 @@ def validate(value):
             if field == "tags":
                 item = text(item, 64, True).casefold()
             else:
-                allowed = {"kind", "id"} if field == "source_refs" else {"kind", "target_id"}
+                allowed = (
+                    {"kind", "id"} if field == "source_refs" else {"kind", "target_id"}
+                )
                 keys(item, allowed)
-                kinds = ("artifact", "knowledge") if field == "source_refs" else ("related", "contains")
+                kinds = (
+                    ("artifact", "knowledge")
+                    if field == "source_refs"
+                    else ("related", "contains")
+                )
                 if item.get("kind") not in kinds:
                     raise CatalogError("Invalid reference kind")
                 key = "id" if field == "source_refs" else "target_id"
@@ -101,13 +114,18 @@ class IngredientStore:
             db.close()
 
     def _get(self, db, id):
-        row = db.execute("SELECT record FROM ingredients WHERE id=?", (identifier(id),)).fetchone()
+        row = db.execute(
+            "SELECT record FROM ingredients WHERE id=?", (identifier(id),)
+        ).fetchone()
         if not row:
             raise CatalogError("Ingredient not found", 404)
         return json.loads(row[0])
 
     def _relations(self, db, id, record):
-        records = {key: json.loads(body) for key, body in db.execute("SELECT id,record FROM ingredients")}
+        records = {
+            key: json.loads(body)
+            for key, body in db.execute("SELECT id,record FROM ingredients")
+        }
         records[id] = record
         for edge in record["relations"]:
             if edge["target_id"] == id or edge["target_id"] not in records:
@@ -131,8 +149,13 @@ class IngredientStore:
 
     def _write(self, db, record):
         encoded = json.dumps(record, sort_keys=True)
-        db.execute("INSERT INTO revisions VALUES(?,?,?)", (record["id"], record["revision"], encoded))
-        db.execute("INSERT OR REPLACE INTO ingredients VALUES(?,?)", (record["id"], encoded))
+        db.execute(
+            "INSERT INTO revisions VALUES(?,?,?)",
+            (record["id"], record["revision"], encoded),
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO ingredients VALUES(?,?)", (record["id"], encoded)
+        )
         return record
 
     def create(self, payload):
@@ -141,16 +164,29 @@ class IngredientStore:
         values = validate({k: v for k, v in payload.items() if k in FIELDS})
         encoded = json.dumps(values, sort_keys=True)
         with self.connection() as db:
-            prior = db.execute("SELECT payload,record FROM requests WHERE id=?", (request,)).fetchone()
+            prior = db.execute(
+                "SELECT payload,record FROM requests WHERE id=?", (request,)
+            ).fetchone()
             if prior:
                 if prior[0] != encoded:
-                    raise CatalogError("Request ID already used with different values", 409)
+                    raise CatalogError(
+                        "Request ID already used with different values", 409
+                    )
                 return json.loads(prior[1])
             now = datetime.now(timezone.utc).isoformat()
-            record = {**values, "id": str(uuid4()), "revision": 1, "created_at": now, "updated_at": now}
+            record = {
+                **values,
+                "id": str(uuid4()),
+                "revision": 1,
+                "created_at": now,
+                "updated_at": now,
+            }
             self._relations(db, record["id"], record)
             self._write(db, record)
-            db.execute("INSERT INTO requests VALUES(?,?,?)", (request, encoded, json.dumps(record)))
+            db.execute(
+                "INSERT INTO requests VALUES(?,?,?)",
+                (request, encoded, json.dumps(record)),
+            )
             return record
 
     def update(self, id, patch):
@@ -163,7 +199,12 @@ class IngredientStore:
             if old["revision"] != revision:
                 raise CatalogError("Ingredient changed; reload before saving", 409)
             values = validate({k: patch.get(k, old[k]) for k in FIELDS})
-            record = {**old, **values, "revision": revision + 1, "updated_at": datetime.now(timezone.utc).isoformat()}
+            record = {
+                **old,
+                **values,
+                "revision": revision + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
             self._relations(db, id, record)
             return self._write(db, record)
 
@@ -175,10 +216,16 @@ class IngredientStore:
             current = self._get(db, id)
             if current["revision"] != revision:
                 raise CatalogError("Ingredient changed; reload before restoring", 409)
-            row = db.execute("SELECT record FROM revisions WHERE id=? AND revision=?", (id, target)).fetchone()
+            row = db.execute(
+                "SELECT record FROM revisions WHERE id=? AND revision=?", (id, target)
+            ).fetchone()
             if not row:
                 raise CatalogError("Revision not found", 404)
-            record = {**json.loads(row[0]), "revision": revision + 1, "updated_at": datetime.now(timezone.utc).isoformat()}
+            record = {
+                **json.loads(row[0]),
+                "revision": revision + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
             self._relations(db, id, record)
             return self._write(db, record)
 
@@ -189,7 +236,13 @@ class IngredientStore:
     def revisions(self, id):
         with self.connection() as db:
             self._get(db, id)
-            return [json.loads(row[0]) for row in db.execute("SELECT record FROM revisions WHERE id=? ORDER BY revision DESC", (id,))]
+            return [
+                json.loads(row[0])
+                for row in db.execute(
+                    "SELECT record FROM revisions WHERE id=? ORDER BY revision DESC",
+                    (id,),
+                )
+            ]
 
     def list(self, q="", type="", tag="", offset=0, limit=25):
         text(q, 200)
@@ -199,28 +252,52 @@ class IngredientStore:
         integer(offset, 0, 1000000)
         integer(limit, 1, 100)
         with self.connection() as db:
-            rows = [json.loads(row[0]) for row in db.execute("SELECT record FROM ingredients ORDER BY id")]
-        rows = [r for r in rows if (not type or r["type"] == type)
-                and (not tag or tag.casefold() in r["tags"])
-                and (not q or q.casefold() in (r["title"] + " " + r["body"]).casefold())]
-        return {"items": rows[offset:offset + limit], "total": len(rows), "offset": offset, "limit": limit}
+            rows = [
+                json.loads(row[0])
+                for row in db.execute("SELECT record FROM ingredients ORDER BY id")
+            ]
+        rows = [
+            r
+            for r in rows
+            if (not type or r["type"] == type)
+            and (not tag or tag.casefold() in r["tags"])
+            and (not q or q.casefold() in (r["title"] + " " + r["body"]).casefold())
+        ]
+        return {
+            "items": rows[offset : offset + limit],
+            "total": len(rows),
+            "offset": offset,
+            "limit": limit,
+        }
 
     def source_status(self, record):
-        from gideon.workspace.artifacts.native import NativeArtifactProvider
         from gideon.cognition.knowledge.store import knowledge_db_path
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
 
         result = []
         for source in record["source_refs"]:
             exists = False
             if source["kind"] == "artifact":
                 try:
-                    exists = NativeArtifactProvider(self.home / "artifacts").get(source["id"]) is not None
+                    exists = (
+                        NativeArtifactProvider(self.home / "artifacts").get(
+                            source["id"]
+                        )
+                        is not None
+                    )
                 except ValueError:
                     pass
             else:
                 path = knowledge_db_path(self.home, create=False)
                 if path.exists():
-                    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as db:
-                        exists = db.execute("SELECT 1 FROM items WHERE id=?", (source["id"],)).fetchone() is not None
+                    with closing(
+                        sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+                    ) as db:
+                        exists = (
+                            db.execute(
+                                "SELECT 1 FROM items WHERE id=?", (source["id"],)
+                            ).fetchone()
+                            is not None
+                        )
             result.append({**source, "missing": not exists})
         return result

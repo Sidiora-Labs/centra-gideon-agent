@@ -1,57 +1,100 @@
 """Pinned recipes executed through the actual session tool and approval engine."""
+
 import asyncio
 import hashlib
 import json
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
+
 from jsonschema import Draft202012Validator
+
 from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.engine.agents.native.runtime import NativeAgentRuntime, _ToolInventory
-from gideon.integrations.llm.events import AgentEvent, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, EVENT_PERMISSION_REQUEST
+from gideon.integrations.llm.events import (
+    EVENT_PERMISSION_REQUEST,
+    EVENT_TOOL_CALL,
+    EVENT_TOOL_RESULT,
+    AgentEvent,
+)
 from gideon.integrations.tool_providers.base import ToolResult
+from gideon.workspace.capabilities.identity.recipe_runtime_platform import (
+    require_runtime,
+)
 from gideon.workspace.capabilities.identity.recipes import RecipeStore
-from gideon.workspace.capabilities.identity.recipe_runtime_platform import require_runtime
 from gideon.workspace.capabilities.identity.store import ConflictError
 
 _ACTIVE = {}
 
 
 def fingerprint(definition):
-    return hashlib.sha256(json.dumps(asdict(definition), sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(asdict(definition), sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 class GuardedRecipes:
     def __init__(self, home, state):
         self.home, self.state = Path(home).resolve(), state
-        self.store = RecipeStore(self.home / "capabilities/identity/recipes.sqlite3", guarded=True)
+        self.store = RecipeStore(
+            self.home / "capabilities/identity/recipes.sqlite3", guarded=True
+        )
 
     def _scope(self, session_key, *, control=False):
         if self.home != config_dir().resolve():
             raise ValueError("Recipe session belongs to a different active home")
-        if not isinstance(session_key, str) or not session_key.startswith(("dashboard:", "cli:")) or (not control and session_restrictions.is_restricted(session_key)):
+        if (
+            not isinstance(session_key, str)
+            or not session_key.startswith(("dashboard:", "cli:"))
+            or (not control and session_restrictions.is_restricted(session_key))
+        ):
             raise ValueError("Guarded recipes require a persistent private session")
 
     def _runtime(self, session_key, *, admission=True):
         self._scope(session_key)
         runtime = self.state.sessions.get_provider(session_key) if self.state else None
-        if not isinstance(runtime, NativeAgentRuntime) or runtime._session_key != session_key:
+        if (
+            not isinstance(runtime, NativeAgentRuntime)
+            or runtime._session_key != session_key
+        ):
             raise ValueError("An existing native session is required")
         if admission:
             require_runtime(runtime)
             if runtime._dry_run:
-                raise ValueError("Observe-only sessions cannot dispatch guarded actions")
+                raise ValueError(
+                    "Observe-only sessions cannot dispatch guarded actions"
+                )
         return runtime
 
     async def _definitions(self, session_key):
         runtime = self._runtime(session_key)
-        inventory = await _ToolInventory.discover(runtime._tool_providers, runtime._unattended)
-        return {row.name: row for row in inventory.definitions if row.name in runtime._tool_index and not row.name.startswith(("identity_recipe_", "identity_guarded_"))}
+        inventory = await _ToolInventory.discover(
+            runtime._tool_providers, runtime._unattended
+        )
+        return {
+            row.name: row
+            for row in inventory.definitions
+            if row.name in runtime._tool_index
+            and not row.name.startswith(("identity_recipe_", "identity_guarded_"))
+        }
 
     async def catalog(self, session_key):
         definitions = await self._definitions(session_key)
-        return {"session_key": session_key, "tools": [{"name": row.name, "provider": row.provider, "description": row.description, "parameters": row.parameters, "requires_approval": row.requires_approval, "fingerprint": fingerprint(row)} for row in definitions.values()]}
+        return {
+            "session_key": session_key,
+            "tools": [
+                {
+                    "name": row.name,
+                    "provider": row.provider,
+                    "description": row.description,
+                    "parameters": row.parameters,
+                    "requires_approval": row.requires_approval,
+                    "fingerprint": fingerprint(row),
+                }
+                for row in definitions.values()
+            ],
+        }
 
     async def save(self, *, session_key, **fields):
         definitions = await self._definitions(session_key)
@@ -73,8 +116,16 @@ class GuardedRecipes:
             if run.get("session_key") and run["session_key"] != session_key:
                 raise ConflictError("Run belongs to another session")
             if "session_key" not in run:
-                run.update(session_key=session_key, tool_fingerprints={step["tool"]: fingerprint(definitions[step["tool"]]) for step in recipe["steps"]})
-                db.execute("UPDATE runs SET body=? WHERE id=?", (json.dumps(run), run["id"]))
+                run.update(
+                    session_key=session_key,
+                    tool_fingerprints={
+                        step["tool"]: fingerprint(definitions[step["tool"]])
+                        for step in recipe["steps"]
+                    },
+                )
+                db.execute(
+                    "UPDATE runs SET body=? WHERE id=?", (json.dumps(run), run["id"])
+                )
         return run
 
     def get_run(self, id):
@@ -95,8 +146,12 @@ class GuardedRecipes:
     async def _definition(self, run, tool):
         definitions = await self._definitions(run["session_key"])
         definition = definitions.get(tool)
-        if definition is None or fingerprint(definition) != run["tool_fingerprints"].get(tool):
-            raise ValueError("Tool permissions or schema changed; start a freshly reviewed run")
+        if definition is None or fingerprint(definition) != run[
+            "tool_fingerprints"
+        ].get(tool):
+            raise ValueError(
+                "Tool permissions or schema changed; start a freshly reviewed run"
+            )
         current = self.store.get(run["recipe_id"])
         if not current["enabled"] or current["revision"] != run["recipe_revision"]:
             raise ValueError("Recipe authority was revoked")
@@ -106,22 +161,34 @@ class GuardedRecipes:
         run = self.get_run(run_id)
         if type(expected_index) is not int or expected_index < 0:
             raise ValueError("Expected nonnegative step index")
-        if expected_index < run["next_index"] or run["status"] not in ("ready", "deferred") or (self.home, run_id) in _ACTIVE:
+        if (
+            expected_index < run["next_index"]
+            or run["status"] not in ("ready", "deferred")
+            or (self.home, run_id) in _ACTIVE
+        ):
             return run
         if expected_index != run["next_index"]:
             raise ConflictError("Run step changed")
         runtime = self._runtime(run["session_key"])
         entry = self.state.sessions._sessions.get(run["session_key"])
         if entry.semaphore.locked():
-            return self._update(run_id, status="deferred", defer_reason="Existing session is busy; dispatch again when idle")
+            return self._update(
+                run_id,
+                status="deferred",
+                defer_reason="Existing session is busy; dispatch again when idle",
+            )
         await entry.semaphore.acquire()
         try:
-            await self._definition(run, run["recipe_snapshot"]["steps"][expected_index]["tool"])
+            await self._definition(
+                run, run["recipe_snapshot"]["steps"][expected_index]["tool"]
+            )
             if self.state.sessions.get_provider(run["session_key"]) is not runtime:
                 raise ValueError("Session owner changed")
             self._update(run_id, status="ready", permission=None)
             adapter = _RuntimeStep(self, run_id, runtime)
-            task = asyncio.create_task(self._execute(run_id, expected_index, adapter, entry))
+            task = asyncio.create_task(
+                self._execute(run_id, expected_index, adapter, entry)
+            )
             _ACTIVE[(self.home, run_id)] = (task, adapter)
         except BaseException:
             entry.semaphore.release()
@@ -132,7 +199,9 @@ class GuardedRecipes:
     async def _execute(self, run_id, index, adapter, entry):
         try:
             run = self.get_run(run_id)
-            store = RecipeStore(self.store.path, allowed_tools=run["tool_fingerprints"], guarded=True)
+            store = RecipeStore(
+                self.store.path, allowed_tools=run["tool_fingerprints"], guarded=True
+            )
             await store.advance(run_id, index, adapter)
         finally:
             entry.semaphore.release()
@@ -154,14 +223,25 @@ class GuardedRecipes:
         if decision == "approve":
             try:
                 await self._definition(run, permission["tool"])
-                call = AgentEvent(kind=EVENT_TOOL_CALL, title=permission["tool"], tool_input=permission["arguments"], tool_call_id=request_id)
-                reason = await runtime._policy_refusal(call, permission["tool"], permission["arguments"])
+                call = AgentEvent(
+                    kind=EVENT_TOOL_CALL,
+                    title=permission["tool"],
+                    tool_input=permission["arguments"],
+                    tool_call_id=request_id,
+                )
+                reason = await runtime._policy_refusal(
+                    call, permission["tool"], permission["arguments"]
+                )
                 if reason:
                     raise ValueError(reason)
             except Exception:
                 await runtime.reject_tool(request_id)
                 raise
-        await (runtime.approve_tool(request_id) if decision == "approve" else runtime.reject_tool(request_id))
+        await (
+            runtime.approve_tool(request_id)
+            if decision == "approve"
+            else runtime.reject_tool(request_id)
+        )
         await asyncio.sleep(0)
         return self.get_run(run_id)
 
@@ -171,7 +251,9 @@ class GuardedRecipes:
         with sqlite3.connect(self.store.path) as db:
             if run["status"] in ("deferred", "waiting_approval"):
                 run["status"] = "cancelled"
-                db.execute("UPDATE runs SET body=? WHERE id=?", (json.dumps(run), run_id))
+                db.execute(
+                    "UPDATE runs SET body=? WHERE id=?", (json.dumps(run), run_id)
+                )
         run = self.store.cancel(run_id)
         active = _ACTIVE.get((self.home, run_id))
         if active:
@@ -181,7 +263,9 @@ class GuardedRecipes:
             else:
                 active[1].runtime._cancel.request(reason="user")
         if session_restrictions.is_restricted(run["session_key"]):
-            return {key: run[key] for key in ("id", "status", "session_key", "next_index")} | {"steps": [], "permission": None}
+            return {
+                key: run[key] for key in ("id", "status", "session_key", "next_index")
+            } | {"steps": [], "permission": None}
         return run
 
 
@@ -195,18 +279,41 @@ class _RuntimeStep:
         Draft202012Validator(definition.parameters).validate(arguments)
         if self.runtime is not self.service._runtime(run["session_key"]):
             raise ValueError("Session owner changed")
-        call = AgentEvent(kind=EVENT_TOOL_CALL, title=tool_name, tool_input=arguments, tool_call_id="recipe-" + self.run_id + "-" + str(run["next_index"]))
+        call = AgentEvent(
+            kind=EVENT_TOOL_CALL,
+            title=tool_name,
+            tool_input=arguments,
+            tool_call_id="recipe-" + self.run_id + "-" + str(run["next_index"]),
+        )
         self.runtime._messages.append(self.runtime._assistant_msg("", [call]))
-        result = ToolResult(success=False, error="Native tool engine returned no result")
+        result = ToolResult(
+            success=False, error="Native tool engine returned no result"
+        )
         async for event in self.runtime._execute_tool_batch([call]):
             if event.kind == EVENT_PERMISSION_REQUEST:
-                self.service._update(self.run_id, status="waiting_approval", permission={"request_id": event.request_id, "tool": tool_name, "arguments": arguments, "risk": event.risk_level})
+                self.service._update(
+                    self.run_id,
+                    status="waiting_approval",
+                    permission={
+                        "request_id": event.request_id,
+                        "tool": tool_name,
+                        "arguments": arguments,
+                        "risk": event.risk_level,
+                    },
+                )
             elif event.kind == EVENT_TOOL_RESULT:
                 self.service._update(self.run_id, permission=None)
-                failed = event.tool_output.startswith("Error:") or event.tool_meta.get("ok") is False
+                failed = (
+                    event.tool_output.startswith("Error:")
+                    or event.tool_meta.get("ok") is False
+                )
                 try:
                     output = json.loads(event.tool_output)
                 except (ValueError, TypeError):
                     output = {"text": event.tool_output}
-                result = ToolResult(success=not failed, output=json.dumps(output), error=event.tool_output if failed else "")
+                result = ToolResult(
+                    success=not failed,
+                    output=json.dumps(output),
+                    error=event.tool_output if failed else "",
+                )
         return result

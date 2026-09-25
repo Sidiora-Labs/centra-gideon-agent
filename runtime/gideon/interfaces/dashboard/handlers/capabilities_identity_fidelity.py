@@ -1,6 +1,9 @@
 """Human-supplied observations and explicit provider evaluations."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.fidelity import FidelityStore
 from gideon.workspace.capabilities.identity.fidelity_generation import run_evaluation
@@ -17,7 +20,9 @@ async def handle(request):
     try:
         if request.method == "GET":
             if kind == "cases":
-                result = store.get_case(identifier) if identifier else store.list_cases()
+                result = (
+                    store.get_case(identifier) if identifier else store.list_cases()
+                )
             else:
                 result = store.get_run(identifier) if identifier else store.list_runs()
         else:
@@ -42,7 +47,9 @@ async def handle(request):
 
 
 def register(app: web.Application, *, store_path: Path | None = None):
-    app[KEY] = FidelityStore(store_path or config_dir() / "capabilities/identity/fidelity.sqlite3")
+    app[KEY] = FidelityStore(
+        store_path or config_dir() / "capabilities/identity/fidelity.sqlite3"
+    )
     app.router.add_get(PREFIX + "/{kind:cases|runs}", handle)
     app.router.add_get(PREFIX + "/{kind:cases|runs}/{id}", handle)
     app.router.add_post(PREFIX + "/{kind:cases|observations|run}", handle)

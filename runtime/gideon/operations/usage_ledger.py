@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import logging
-import hashlib
 import math
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-import fcntl
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.constants import dashboard_session_key
@@ -102,17 +102,40 @@ class UsageJournal:
 def _emission_attribution(u: TurnUsage) -> TurnUsage:
     from gideon.core.config.loader import config_dir
     from gideon.operations.durability.shards import machine_id
+
     instance = machine_id(config_dir())
-    fields = dict(instance_id=instance, provider_instance=None, credential_ref=None, subscription_source=None, attribution="instance_only")
+    fields = dict(
+        instance_id=instance,
+        provider_instance=None,
+        credential_ref=None,
+        subscription_source=None,
+        attribution="instance_only",
+    )
     try:
-        from gideon.integrations.llm.registry import get_default_registry
         from gideon.integrations.llm.branded_specs import registered_spec
+        from gideon.integrations.llm.registry import get_default_registry
+
         entry = get_default_registry().get_entry(u.provider)
         spec = registered_spec(entry.type)
-        source = spec.credential_source if spec and spec.type == entry.type and not entry.credential and not entry.options.get("api_key") else ""
-        fields.update(provider_instance=entry.name, credential_ref=entry.credential, subscription_source=source or None, attribution="binding_at_emission")
+        source = (
+            spec.credential_source
+            if spec
+            and spec.type == entry.type
+            and not entry.credential
+            and not entry.options.get("api_key")
+            else ""
+        )
+        fields.update(
+            provider_instance=entry.name,
+            credential_ref=entry.credential,
+            subscription_source=source or None,
+            attribution="binding_at_emission",
+        )
     except Exception:
-        logger.debug("Usage binding attribution unavailable; preserving turn accounting", exc_info=True)
+        logger.debug(
+            "Usage binding attribution unavailable; preserving turn accounting",
+            exc_info=True,
+        )
     return replace(u, **fields)
 
 
@@ -130,7 +153,12 @@ _IMPORT_MAX_LINES = 50_000
 
 
 def _positive_int(value, field):
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0 or int(value) != value:
+    if (
+        type(value) not in (int, float)
+        or not math.isfinite(value)
+        or value < 0
+        or int(value) != value
+    ):
         raise ValueError(f"Invalid {field}")
     return int(value)
 
@@ -165,13 +193,27 @@ def _json_lines(content):
 
 
 def _import_id(format_name, session, event):
-    material = json.dumps([format_name, session, event], sort_keys=True, separators=(",", ":"))
+    material = json.dumps(
+        [format_name, session, event], sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(material.encode()).hexdigest()
 
 
-def _import_row(*, format_name, source_name, file_sha, record_id, ts, session, provider, model, counts):
+def _import_row(
+    *,
+    format_name,
+    source_name,
+    file_sha,
+    record_id,
+    ts,
+    session,
+    provider,
+    model,
+    counts,
+):
     from gideon.core.config.loader import config_dir
     from gideon.operations.durability.shards import machine_id
+
     session_hash = hashlib.sha256(session.encode()).hexdigest()[:24]
     return TurnUsage(
         ts=ts,
@@ -200,27 +242,67 @@ def _import_row(*, format_name, source_name, file_sha, record_id, ts, session, p
 
 def _claude_rows(entries, source_name, file_sha):
     rows, seen = [], set()
-    session = next((value.get("sessionId") for _, value in entries if isinstance(value.get("sessionId"), str)), None)
+    session = next(
+        (
+            value.get("sessionId")
+            for _, value in entries
+            if isinstance(value.get("sessionId"), str)
+        ),
+        None,
+    )
     if not session:
         raise ValueError("Claude Code transcript requires sessionId")
     for line_number, value in entries:
-        usage = value.get("message", {}).get("usage") if value.get("type") == "assistant" and isinstance(value.get("message"), dict) else None
+        usage = (
+            value.get("message", {}).get("usage")
+            if value.get("type") == "assistant"
+            and isinstance(value.get("message"), dict)
+            else None
+        )
         if not isinstance(usage, dict):
             continue
         event = value["message"].get("id") or value.get("uuid")
         counts = {
             "input_tokens": _positive_int(usage.get("input_tokens", 0), "input tokens"),
-            "output_tokens": _positive_int(usage.get("output_tokens", 0), "output tokens"),
-            "cache_read_tokens": _positive_int(usage.get("cache_read_input_tokens", 0), "cache read tokens"),
-            "cache_creation_tokens": _positive_int(usage.get("cache_creation_input_tokens", 0), "cache creation tokens"),
+            "output_tokens": _positive_int(
+                usage.get("output_tokens", 0), "output tokens"
+            ),
+            "cache_read_tokens": _positive_int(
+                usage.get("cache_read_input_tokens", 0), "cache read tokens"
+            ),
+            "cache_creation_tokens": _positive_int(
+                usage.get("cache_creation_input_tokens", 0), "cache creation tokens"
+            ),
         }
         if not event:
-            event = hashlib.sha256(json.dumps([value.get("timestamp"), value.get("requestId"), value["message"].get("model"), counts], sort_keys=True).encode()).hexdigest()
+            event = hashlib.sha256(
+                json.dumps(
+                    [
+                        value.get("timestamp"),
+                        value.get("requestId"),
+                        value["message"].get("model"),
+                        counts,
+                    ],
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
         record_id = _import_id("claude_code_jsonl", session, str(event))
         if record_id in seen:
             continue
         seen.add(record_id)
-        rows.append(_import_row(format_name="claude_code_jsonl", source_name=source_name, file_sha=file_sha, record_id=record_id, ts=_timestamp(value.get("timestamp")), session=session, provider="claude", model=value["message"].get("model"), counts=counts))
+        rows.append(
+            _import_row(
+                format_name="claude_code_jsonl",
+                source_name=source_name,
+                file_sha=file_sha,
+                record_id=record_id,
+                ts=_timestamp(value.get("timestamp")),
+                session=session,
+                provider="claude",
+                model=value["message"].get("model"),
+                counts=counts,
+            )
+        )
     return rows
 
 
@@ -238,18 +320,37 @@ def _codex_counts(usage):
 
 
 def _codex_rows(entries, source_name, file_sha):
-    metadata = next((value.get("payload") for _, value in entries if value.get("type") == "session_meta" and isinstance(value.get("payload"), dict)), None)
+    metadata = next(
+        (
+            value.get("payload")
+            for _, value in entries
+            if value.get("type") == "session_meta"
+            and isinstance(value.get("payload"), dict)
+        ),
+        None,
+    )
     session = metadata.get("id") if metadata else None
     if not isinstance(session, str) or not session:
         raise ValueError("Codex rollout requires session metadata")
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else None
-    previous = dict.fromkeys(("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"), 0)
+    previous = dict.fromkeys(
+        ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"),
+        0,
+    )
     rows, seen = [], set()
     for line_number, value in entries:
         payload = value.get("payload")
-        if value.get("type") == "turn_context" and isinstance(payload, dict) and isinstance(payload.get("model"), str):
+        if (
+            value.get("type") == "turn_context"
+            and isinstance(payload, dict)
+            and isinstance(payload.get("model"), str)
+        ):
             model = payload["model"]
-        if value.get("type") != "event_msg" or not isinstance(payload, dict) or payload.get("type") != "token_count":
+        if (
+            value.get("type") != "event_msg"
+            or not isinstance(payload, dict)
+            or payload.get("type") != "token_count"
+        ):
             continue
         info = payload.get("info")
         usage = info.get("total_token_usage") if isinstance(info, dict) else None
@@ -268,7 +369,19 @@ def _codex_rows(entries, source_name, file_sha):
         previous = current
         if not any(delta.values()):
             continue
-        rows.append(_import_row(format_name="codex_rollout_jsonl", source_name=source_name, file_sha=file_sha, record_id=record_id, ts=_timestamp(value.get("timestamp")), session=session, provider="codex", model=model, counts=delta))
+        rows.append(
+            _import_row(
+                format_name="codex_rollout_jsonl",
+                source_name=source_name,
+                file_sha=file_sha,
+                record_id=record_id,
+                ts=_timestamp(value.get("timestamp")),
+                session=session,
+                provider="codex",
+                model=model,
+                counts=delta,
+            )
+        )
     return rows
 
 
@@ -284,22 +397,47 @@ def _import_lock():
 def import_cli_usage(format_name, content, source_name):
     if format_name not in _IMPORT_FORMATS:
         raise ValueError("Unsupported CLI usage format")
-    if not isinstance(content, str) or not content or len(content.encode()) > _IMPORT_MAX_BYTES:
+    if (
+        not isinstance(content, str)
+        or not content
+        or len(content.encode()) > _IMPORT_MAX_BYTES
+    ):
         raise ValueError("Usage import must be a non-empty file up to 4 MiB")
-    if not isinstance(source_name, str) or not _SOURCE_NAME.fullmatch(source_name) or source_name in (".", ".."):
+    if (
+        not isinstance(source_name, str)
+        or not _SOURCE_NAME.fullmatch(source_name)
+        or source_name in (".", "..")
+    ):
         raise ValueError("Usage import requires a safe source filename")
     entries, invalid_lines, total_lines = _json_lines(content)
     file_sha = hashlib.sha256(content.encode()).hexdigest()
-    candidates = (_claude_rows if format_name == "claude_code_jsonl" else _codex_rows)(entries, source_name, file_sha)
+    candidates = (_claude_rows if format_name == "claude_code_jsonl" else _codex_rows)(
+        entries, source_name, file_sha
+    )
     if not candidates:
         raise ValueError("Usage import contains no supported usage records")
     with _import_lock():
         journal = UsageJournal(_path())
-        existing = {row.get("import_record_id") for row in journal.rows() if row.get("import_record_id")}
+        existing = {
+            row.get("import_record_id")
+            for row in journal.rows()
+            if row.get("import_record_id")
+        }
         imported = [row for row in candidates if row.import_record_id not in existing]
         for row in imported:
             journal.append(row)
-    return {"format": format_name, "source_name": source_name, "source_file_sha256": file_sha, "total_lines": total_lines, "invalid_lines": invalid_lines, "candidate_records": len(candidates), "imported_records": len(imported), "duplicate_records": len(candidates) - len(imported), "priced": False, "recorded_cost_usd": 0.0}
+    return {
+        "format": format_name,
+        "source_name": source_name,
+        "source_file_sha256": file_sha,
+        "total_lines": total_lines,
+        "invalid_lines": invalid_lines,
+        "candidate_records": len(candidates),
+        "imported_records": len(imported),
+        "duplicate_records": len(candidates) - len(imported),
+        "priced": False,
+        "recorded_cost_usd": 0.0,
+    }
 
 
 def import_cli_usage_file(format_name, path):
@@ -308,7 +446,9 @@ def import_cli_usage_file(format_name, path):
         raise ValueError("Usage import requires a regular file")
     if source.stat().st_size > _IMPORT_MAX_BYTES:
         raise ValueError("Usage import exceeds size limit")
-    return import_cli_usage(format_name, source.read_text(encoding="utf-8"), source.name)
+    return import_cli_usage(
+        format_name, source.read_text(encoding="utf-8"), source.name
+    )
 
 
 @dataclass(frozen=True)

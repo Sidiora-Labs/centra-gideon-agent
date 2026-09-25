@@ -11,7 +11,9 @@ async def invoke_apple(home, arguments):
     store = AppleHealthStore(home)
     operation, payload = arguments.get("operation"), arguments.get("payload", {})
     if operation in ("apple_preview", "apple_commit"):
-        result = await asyncio.to_thread(store.preview if operation == "apple_preview" else store.commit, payload)
+        result = await asyncio.to_thread(
+            store.preview if operation == "apple_preview" else store.commit, payload
+        )
     elif operation == "apple_metrics":
         result = await asyncio.to_thread(store.list_metrics, **payload)
     else:

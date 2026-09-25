@@ -5,9 +5,10 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
 import pytest
 
-PRELUDE = '''
+PRELUDE = """
 import asyncio,json,time,sqlite3
 from pathlib import Path
 from gideon.core.config import config_dir,AppConfig
@@ -29,17 +30,29 @@ async def configure(enabled=True,revision=0,key='enable'):
  return await store.configure(loop_id=loop.id,enabled=enabled,expected_revision=revision,request_id=key,state=state,service=service)
 async def action(name,revision=1,key=None):
  return await store.action(action=name,expected_revision=revision,request_id=key or name,state=state,service=service)
-'''
+"""
 
 
 def run(home, body):
-    program = PRELUDE + '\nasync def main():\n' + textwrap.indent(textwrap.dedent(body), ' ') + '\nasyncio.run(main())\n'
-    result = subprocess.run([sys.executable, '-c', program], env={**os.environ, 'GIDEON_HOME': str(home)}, text=True, capture_output=True)
+    program = (
+        PRELUDE
+        + "\nasync def main():\n"
+        + textwrap.indent(textwrap.dedent(body), " ")
+        + "\nasyncio.run(main())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        env={**os.environ, "GIDEON_HOME": str(home)},
+        text=True,
+        capture_output=True,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_actual_loop_start_pause_resume_stop_and_replay(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 assert store.status()['policy']['revision']==0
 assert store.status()['loop'] is None
 assert store.status()['provider_readiness']=='unknown'
@@ -83,11 +96,14 @@ assert not nudge_allowed(parallel.session_name)
 assert loops.get(other.id).status==LoopStatus.READY
 assert LifecycleStore(home).status()==store.status()
 assert store.status()['provider_readiness']=='unknown'
-''')
+""",
+    )
 
 
 def test_disabled_and_route_revocation_guard_actual_manager_and_nudge(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 await configure()
 await action('start')
 trigger=service.get_by_session(manager.session_key(loop.id))
@@ -122,11 +138,14 @@ assert nudge_allowed(trigger.session_name)
 assert store.policy()['revision']==4
 assert store.policy()['route_fingerprint']==route_fingerprint(loops.get(loop.id))
 assert loops.get(other.id).status==LoopStatus.RUNNING
-''')
+""",
+    )
 
 
 def test_thinking_claim_replay_quota_and_real_unavailable_delivery(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 await configure()
 await action('start')
 request=store.request_thinking(request_id='reflect-first',preset='reflect')
@@ -160,11 +179,14 @@ try:
 except ConflictError:
  pass
 assert LifecycleStore(home).status()['requests']==[receipt]
-''')
+""",
+    )
 
 
 def test_pending_approval_revocation_and_interrupted_claim_are_honest(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 await configure()
 await action('start')
 request=store.request_thinking(request_id='pending',preset='review')
@@ -184,11 +206,14 @@ try:
  raise AssertionError('missing request accepted')
 except KeyError:
  pass
-''')
+""",
+    )
 
 
 def test_invalid_home_revision_route_and_unavailable_runtime(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 foreign=LifecycleStore(home/'other')
 try:
  foreign.status()
@@ -232,11 +257,14 @@ try:
 except ValueError:
  pass
 assert store.status()['requests']==[]
-''')
+""",
+    )
 
 
 def test_actual_http_native_and_privacy_contract(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 from aiohttp import web
 from aiohttp.test_utils import TestClient,TestServer
 from gideon.interfaces.dashboard.handlers.capabilities_identity_lifecycle import register,PREFIX
@@ -295,4 +323,5 @@ async with TestClient(TestServer(app)) as client:
  assert len((await response.json())['requests'])==1
 service.stop()
 set_dashboard_state(None)
-''')
+""",
+    )

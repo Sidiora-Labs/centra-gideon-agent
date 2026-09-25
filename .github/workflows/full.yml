@@ -305,32 +305,116 @@ jobs:
       run: uv python install 3.12
     - name: Install (locked)
       run: uv sync --locked --extra dev
-    - name: "measure \u2014 validate every shipped listing and stamp a copy"
+    - name: "prepare \u2014 build canonical fixture repositories"
       run: |
         set -eu
-        cp examples/registry/app-registry.json "$RUNNER_TEMP/measured.json"
+        fixture_root="$RUNNER_TEMP/registry-fixture-repos"
+        mkdir -p "$fixture_root"
+        for source in examples/registry/fixtures/apps/*; do
+          destination="$fixture_root/$(basename "$source")"
+          cp -R "$source" "$destination"
+          git -C "$destination" init -q -b main
+          git -C "$destination" add -A
+          git -C "$destination" \
+            -c user.name='Registry fixture' \
+            -c user.email='registry-fixture@example.invalid' \
+            commit -qm fixture
+        done
+        FIXTURE_ROOT="$fixture_root" uv run python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        fixtures = Path("examples/registry/fixtures/registries")
+        base = Path(os.environ["FIXTURE_ROOT"]).as_uri()
+
+        def materialize(name: str) -> dict:
+            raw = (fixtures / f"{name}.json").read_text(encoding="utf-8")
+            if "{{REPO_BASE}}" not in raw:
+                raise SystemExit(f"{name}.json lost its repository placeholder")
+            return json.loads(raw.replace("{{REPO_BASE}}", base))
+
+        valid = materialize("valid")
+        warning = materialize("warning")
+        valid["apps"].extend(warning["apps"])
+        Path(os.environ["RUNNER_TEMP"], "measured.json").write_text(
+            json.dumps(valid, indent=2) + "\n", encoding="utf-8"
+        )
+        Path(os.environ["RUNNER_TEMP"], "dangerous.json").write_text(
+            json.dumps(materialize("dangerous"), indent=2) + "\n", encoding="utf-8"
+        )
+        PY
+    - name: "measure \u2014 exercise real fetch, manifest, license and scanner checks"
+      run: |
+        set -eu
         uv run python examples/registry/validate_registry.py \
           "$RUNNER_TEMP/measured.json" --write \
+          --allow-file-repos \
           --markdown "$GITHUB_STEP_SUMMARY" \
           --report "$RUNNER_TEMP/report.json"
-    - name: "compare \u2014 no listing may have lost or outlived its verdict"
-      env:
-        MEASURED: ${{ runner.temp }}/measured.json
-      run: "uv run python - <<'PY'\nimport json, os, sys\nfrom pathlib import Path\n\ncommitted = json.loads(Path(\"\
-        examples/registry/app-registry.json\").read_text(\"utf-8\"))\nmeasured = json.loads(Path(os.environ[\"MEASURED\"\
-        ]).read_text(\"utf-8\"))\nrows = {r[\"name\"]: r for r in committed[\"apps\"]}\nfresh = {r[\"name\"]: r\
-        \ for r in measured[\"apps\"]}\n\nproblems = []\n# ANTI-VACUITY, and it is the first check on purpose: every\
-        \ loop below is green over\n# an empty registry, so an index that lost its listings would pass this job\
-        \ while\n# proving nothing at all.\nif not rows:\n    problems.append(\n        \"the shipped app-registry.json\
-        \ lists NOTHING \u2014 every check below would pass \"\n        \"vacuously over it\"\n    )\nfor name,\
-        \ row in sorted(rows.items()):\n    want = fresh.get(name, {}).get(\"last_scan_verdict\")\n    got = row.get(\"\
-        last_scan_verdict\")\n    if got is None:\n        problems.append(\n            f\"{name}: carries no 'last_scan_verdict'.\
-        \ The pre-install surface renders \"\n            f\"that as \\\"No scan on record\\\", which is what an\
-        \ UNSCANNED listing looks \"\n            f\"like \u2014 this one measured {want!r}.\"\n        )\n    elif\
-        \ want is not None and got != want:\n        problems.append(\n            f\"{name}: committed verdict\
-        \ {got!r} but this run measured {want!r}. The \"\n            f\"published verdict is stale.\"\n       \
-        \ )\n    if not row.get(\"last_validated\"):\n        problems.append(f\"{name}: carries no 'last_validated'\
-        \ date.\")\n\nif problems:\n    for problem in problems:\n        print(f\"::error title=registry verdict::{problem}\"\
-        )\n    print(\n        \"Re-stamp with: python examples/registry/validate_registry.py \"\n        \"examples/registry/app-registry.json\
-        \ --write   (then commit the result)\",\n        file=sys.stderr,\n    )\n    raise SystemExit(1)\nprint(f\"\
-        {len(rows)} shipped listing(s), each carrying the verdict this run measured\")\nPY\n"
+        if uv run python examples/registry/validate_registry.py \
+          "$RUNNER_TEMP/dangerous.json" --allow-file-repos \
+          --report "$RUNNER_TEMP/dangerous-report.json"; then
+          echo '::error title=registry verdict::dangerous fixture was accepted'
+          exit 1
+        fi
+    - name: "compare \u2014 pin all verdict outcomes and shipped stamp structure"
+      run: |
+        test -s examples/registry/app-registry.json
+        test -s examples/registry/validate_registry.py
+        uv run python - <<'PY'
+        import json
+        import os
+        import re
+        from pathlib import Path
+
+        measured = json.loads(Path(os.environ["RUNNER_TEMP"], "measured.json").read_text("utf-8"))
+        dangerous = json.loads(Path(os.environ["RUNNER_TEMP"], "dangerous-report.json").read_text("utf-8"))
+        shipped = json.loads(Path("examples/registry/app-registry.json").read_text("utf-8"))
+        validator_path = Path("examples/registry/validate_registry.py")
+
+        rows = {row["name"]: row for row in measured["apps"]}
+        expected = {
+            "registry-fixture-clean": "clean",
+            "registry-fixture-warning": "warning",
+        }
+        problems = []
+        if set(rows) != set(expected):
+            problems.append(f"offline registry names were {sorted(rows)}, expected {sorted(expected)}")
+        for name, verdict in expected.items():
+            row = rows.get(name, {})
+            if row.get("last_scan_verdict") != verdict:
+                problems.append(f"{name}: measured {row.get('last_scan_verdict')!r}, expected {verdict!r}")
+            if not row.get("last_validated"):
+                problems.append(f"{name}: successful validation was not stamped")
+
+        danger_rows = dangerous.get("rows", [])
+        if dangerous.get("listable") is not False or dangerous.get("rows_validated") != 1 or len(danger_rows) != 1:
+            problems.append("dangerous fixture did not produce one blocked validation result")
+        elif danger_rows[0].get("verdict") != "dangerous" or not any(
+            reason.get("code", "").startswith("scanner_dangerous:")
+            for reason in danger_rows[0].get("blocking", [])
+        ):
+            problems.append("dangerous fixture was not blocked by a recorded scanner rule")
+
+        shipped_rows = shipped.get("apps", [])
+        if not shipped_rows:
+            problems.append("the shipped app-registry.json lists nothing")
+        stamp = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        for row in shipped_rows:
+            if row.get("last_scan_verdict") not in {"clean", "low", "warning"}:
+                problems.append(f"{row.get('name')}: carries no listable scan verdict")
+            if not stamp.match(str(row.get("last_validated", ""))):
+                problems.append(f"{row.get('name')}: carries no valid last_validated timestamp")
+
+        if not validator_path.is_file():
+            problems.append("registry validator is missing")
+        if problems:
+            for problem in problems:
+                print(f"::error title=registry verdict::{problem}")
+            raise SystemExit(1)
+        print(
+            f"offline scanner contract passed for {len(rows)} listable fixtures and one blocked fixture; "
+            f"{len(shipped_rows)} staged listing stamp(s) remain structurally present"
+        )
+        PY

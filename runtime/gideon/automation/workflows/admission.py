@@ -14,7 +14,9 @@ from gideon.automation.loop.tick import (
     TickState,
 )
 from gideon.automation.loop.tick import evaluate as evaluate_step
-from gideon.automation.loop.tick import step_config_from_phase
+from gideon.automation.loop.tick import (
+    step_config_from_phase,
+)
 from gideon.automation.workflows import pool
 from gideon.automation.workflows.models import LANE_COMPUTE, LANE_IO, LANE_LLM, Node
 

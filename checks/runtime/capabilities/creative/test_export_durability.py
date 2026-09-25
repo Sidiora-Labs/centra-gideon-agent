@@ -6,37 +6,49 @@ from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.snapshot import snapshot_main
 
 
-def test_real_manuscript_export_records_pins_and_files_survive_snapshot_extraction(tmp_path, monkeypatch):
+def test_real_manuscript_export_records_pins_and_files_survive_snapshot_extraction(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "source-home"
     monkeypatch.setenv("GIDEON_HOME", str(home))
     works = WorkStore(home)
-    work = works.create({
-        "request_id": "durable-work",
-        "title": "Durable manuscript",
-        "kind": "work",
-        "prompt": "Preserve this manuscript",
-        "author_ref": None,
-        "universe_ref": None,
-        "active_draft_id": None,
-    })
-    drafted = works.draft(work["id"], {
-        "request_id": "durable-draft",
-        "revision": work["revision"],
-        "text": "# Source\n\nCanonical export bytes.",
-        "note": "snapshot proof",
-    })
+    work = works.create(
+        {
+            "request_id": "durable-work",
+            "title": "Durable manuscript",
+            "kind": "work",
+            "prompt": "Preserve this manuscript",
+            "author_ref": None,
+            "universe_ref": None,
+            "active_draft_id": None,
+        }
+    )
+    drafted = works.draft(
+        work["id"],
+        {
+            "request_id": "durable-draft",
+            "revision": work["revision"],
+            "text": "# Source\n\nCanonical export bytes.",
+            "note": "snapshot proof",
+        },
+    )
     store = ManuscriptExports(home, works=works)
-    receipt = store.create({
-        "request_id": "durable-export",
-        "source_kind": "work",
-        "source_id": drafted["work"]["id"],
-        "source_revision": drafted["work"]["revision"],
-        "title": "Durable edition",
-        "creator": "Gideon",
-        "language": "en",
-        "identifier": "urn:gideon:durable-export",
-    })
-    original = {kind: store.file(receipt["id"], kind)[0].read_bytes() for kind in ("epub", "print")}
+    receipt = store.create(
+        {
+            "request_id": "durable-export",
+            "source_kind": "work",
+            "source_id": drafted["work"]["id"],
+            "source_revision": drafted["work"]["revision"],
+            "title": "Durable edition",
+            "creator": "Gideon",
+            "language": "en",
+            "identifier": "urn:gideon:durable-export",
+        }
+    )
+    original = {
+        kind: store.file(receipt["id"], kind)[0].read_bytes()
+        for kind in ("epub", "print")
+    }
     assert receipt["selections"][0] == {
         "title": "Durable manuscript",
         "work_id": drafted["work"]["id"],

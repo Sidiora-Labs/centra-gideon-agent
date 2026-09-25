@@ -18,7 +18,10 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge import register
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.workspace.capabilities.knowledge.anniversaries import anniversaries, source_record
+from gideon.workspace.capabilities.knowledge.anniversaries import (
+    anniversaries,
+    source_record,
+)
 
 
 @pytest.fixture
@@ -28,11 +31,15 @@ def store(tmp_path):
     result.close()
 
 
-def create(store, title, stamp, kind="note", metadata=None, content="A remembered day."):
+def create(
+    store, title, stamp, kind="note", metadata=None, content="A remembered day."
+):
     extra = {"created_at": stamp}
     if metadata is not None:
         extra["file_metadata"] = metadata
-    identity = store.create_typed_item(item_type=kind, title=title, content=content, extra=extra)
+    identity = store.create_typed_item(
+        item_type=kind, title=title, content=content, extra=extra
+    )
     assert identity is not None
     store.db.execute("UPDATE items SET created_at = ? WHERE id = ?", (stamp, identity))
     store.db.commit()
@@ -50,7 +57,11 @@ def test_prior_year_types_and_source_links(store):
     result = anniversaries(store, date="2026-09-25", timezone="Europe/Berlin")
     assert [row["source_id"] for row in result["items"]] == [note, journal, fleeting]
     assert [row["years_ago"] for row in result["items"]] == [1, 2, 3]
-    assert [row["source_type"] for row in result["items"]] == ["note", "journal", "fleeting"]
+    assert [row["source_type"] for row in result["items"]] == [
+        "note",
+        "journal",
+        "fleeting",
+    ]
     assert result["items"][0]["source_link"] == f"#/knowledge/item/{note}"
     assert result["items"][0]["original_at"] == "2025-09-25T09:30:00+02:00"
     assert result["total"] == 3
@@ -58,9 +69,24 @@ def test_prior_year_types_and_source_links(store):
 
 
 def test_source_date_has_priority_over_ingestion(store):
-    old = create(store, "Imported", "2026-09-25", metadata={"original_at": "2022-09-25T12:00:00Z"})
-    alternate = create(store, "Imported source", "2026-01-01", metadata={"source_created_at": "2021-09-25"})
-    create(store, "Imported other day", "2025-09-25", metadata={"original_at": "2020-01-01"})
+    old = create(
+        store,
+        "Imported",
+        "2026-09-25",
+        metadata={"original_at": "2022-09-25T12:00:00Z"},
+    )
+    alternate = create(
+        store,
+        "Imported source",
+        "2026-01-01",
+        metadata={"source_created_at": "2021-09-25"},
+    )
+    create(
+        store,
+        "Imported other day",
+        "2025-09-25",
+        metadata={"original_at": "2020-01-01"},
+    )
     result = anniversaries(store, date="2026-09-25")
     assert [row["source_id"] for row in result["items"]] == [old, alternate]
     assert [row["years_ago"] for row in result["items"]] == [4, 5]
@@ -102,7 +128,9 @@ def test_exact_leap_day_policy(store):
 
 
 def test_invalid_original_date_is_not_replaced_by_import_date(store):
-    create(store, "Corrupt source", "2025-09-25", metadata={"original_at": "not-a-date"})
+    create(
+        store, "Corrupt source", "2025-09-25", metadata={"original_at": "not-a-date"}
+    )
     create(store, "Missing source", "2025-09-25", metadata={"original_at": None})
     valid = create(store, "Valid", "2024-09-25")
     result = anniversaries(store, date="2026-09-25")
@@ -128,8 +156,12 @@ def test_archived_deleted_and_inactive_sources_are_not_exposed(store):
 def test_pagination_is_stable_and_complete(store):
     identities = [create(store, f"Note {i}", "2025-09-25") for i in range(7)]
     first = anniversaries(store, date="2026-09-25", limit=3)
-    second = anniversaries(store, date="2026-09-25", limit=3, offset=first["next_offset"])
-    last = anniversaries(store, date="2026-09-25", limit=3, offset=second["next_offset"])
+    second = anniversaries(
+        store, date="2026-09-25", limit=3, offset=first["next_offset"]
+    )
+    last = anniversaries(
+        store, date="2026-09-25", limit=3, offset=second["next_offset"]
+    )
     rows = first["items"] + second["items"] + last["items"]
     assert [row["source_id"] for row in rows] == sorted(identities)
     assert first["next_offset"] == 3
@@ -166,12 +198,23 @@ def test_reopen_reads_authoritative_edits(tmp_path):
     second.close()
 
 
-@pytest.mark.parametrize("parameters", [
-    {"limit": 0}, {"limit": 101}, {"limit": True}, {"limit": 1.5},
-    {"offset": -1}, {"offset": 1000001}, {"offset": False},
-    {"timezone": "Missing/Zone"}, {"timezone": "../../etc/passwd"},
-    {"date": "2025-02-29"}, {"date": "20260925"}, {"date": ""},
-])
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"limit": 0},
+        {"limit": 101},
+        {"limit": True},
+        {"limit": 1.5},
+        {"offset": -1},
+        {"offset": 1000001},
+        {"offset": False},
+        {"timezone": "Missing/Zone"},
+        {"timezone": "../../etc/passwd"},
+        {"date": "2025-02-29"},
+        {"date": "20260925"},
+        {"date": ""},
+    ],
+)
 def test_bounded_parameter_validation(store, parameters):
     with pytest.raises(ValueError):
         anniversaries(store, **parameters)
@@ -190,9 +233,14 @@ def test_default_date_uses_requested_timezone(store):
 def memory_store(tmp_path):
     archive = SemanticArchive(db_path=tmp_path / "memory.db")
     archive.init()
-    assert archive.write_episodic("A remembered expedition to the northern mountains, with friends.")
+    assert archive.write_episodic(
+        "A remembered expedition to the northern mountains, with friends."
+    )
     row = archive.db.execute("SELECT id FROM episodic_memories").fetchone()
-    archive.db.execute("UPDATE episodic_memories SET created_at = ? WHERE id = ?", ("2025-09-25T12:00:00Z", row["id"]))
+    archive.db.execute(
+        "UPDATE episodic_memories SET created_at = ? WHERE id = ?",
+        ("2025-09-25T12:00:00Z", row["id"]),
+    )
     archive.db.commit()
     return archive, row["id"]
 
@@ -205,7 +253,9 @@ def test_real_memory_service_and_deleted_memory(store, tmp_path):
     assert result["items"][0]["source_type"] == "memory"
     assert result["items"][0]["source_id"] == identity
     assert result["items"][0]["source_link"].endswith(quote(identity))
-    assert source_record(store, service, "memory", identity)["content"].startswith("A remembered expedition")
+    assert source_record(store, service, "memory", identity)["content"].startswith(
+        "A remembered expedition"
+    )
     assert archive.delete_episodic(identity)
     assert anniversaries(store, service, date="2026-09-25")["total"] == 0
     assert source_record(store, service, "memory", identity) is None
@@ -222,41 +272,79 @@ def test_real_http_list_detail_validation_and_isolation(tmp_path):
     async def journey():
         left = KnowledgeStore(str(tmp_path / "left.db"))
         right = KnowledgeStore(str(tmp_path / "right.db"))
-        identity = create(left, "Private note", "2025-09-25", content="The actual original text")
+        identity = create(
+            left, "Private note", "2025-09-25", content="The actual original text"
+        )
         left_app = web.Application()
         right_app = web.Application()
         left_app["state"] = state_for(left)
         right_app["state"] = state_for(right)
         register(left_app)
         register(right_app)
-        async with TestClient(TestServer(left_app)) as a, TestClient(TestServer(right_app)) as b:
-            response = await a.get("/api/capabilities/knowledge/anniversaries?date=2026-09-25")
+        async with (
+            TestClient(TestServer(left_app)) as a,
+            TestClient(TestServer(right_app)) as b,
+        ):
+            response = await a.get(
+                "/api/capabilities/knowledge/anniversaries?date=2026-09-25"
+            )
             assert response.status == 200
             payload = await response.json()
             assert payload["items"][0]["source_id"] == identity
             detail = await a.get(f"/api/capabilities/knowledge/sources/note/{identity}")
             assert detail.status == 200
             assert (await detail.json())["content"] == "The actual original text"
-            isolated = await b.get("/api/capabilities/knowledge/anniversaries?date=2026-09-25")
+            isolated = await b.get(
+                "/api/capabilities/knowledge/anniversaries?date=2026-09-25"
+            )
             assert (await isolated.json())["total"] == 0
-            unavailable = await b.get(f"/api/capabilities/knowledge/sources/note/{identity}")
+            unavailable = await b.get(
+                f"/api/capabilities/knowledge/sources/note/{identity}"
+            )
             assert unavailable.status == 404
-            for query in ("limit=0", "limit=101", "offset=-1", "offset=abc", "date=2025-02-29", "timezone=Unknown/Zone", "limit=1&limit=2"):
-                invalid = await a.get(f"/api/capabilities/knowledge/anniversaries?{query}")
+            for query in (
+                "limit=0",
+                "limit=101",
+                "offset=-1",
+                "offset=abc",
+                "date=2025-02-29",
+                "timezone=Unknown/Zone",
+                "limit=1&limit=2",
+            ):
+                invalid = await a.get(
+                    f"/api/capabilities/knowledge/anniversaries?{query}"
+                )
                 assert invalid.status == 400, query
                 assert (await invalid.json())["error"]
-            for selector in ("home", "account", "runtime", "provider", "model", "user", "tenant"):
-                refused = await a.get(f"/api/capabilities/knowledge/anniversaries?{selector}=other")
+            for selector in (
+                "home",
+                "account",
+                "runtime",
+                "provider",
+                "model",
+                "user",
+                "tenant",
+            ):
+                refused = await a.get(
+                    f"/api/capabilities/knowledge/anniversaries?{selector}=other"
+                )
                 assert refused.status == 400, selector
-                source_refused = await a.get(f"/api/capabilities/knowledge/sources/note/{identity}?{selector}=other")
+                source_refused = await a.get(
+                    f"/api/capabilities/knowledge/sources/note/{identity}?{selector}=other"
+                )
                 assert source_refused.status == 400
-            wrong_type = await a.get(f"/api/capabilities/knowledge/sources/memory/{identity}")
+            wrong_type = await a.get(
+                f"/api/capabilities/knowledge/sources/memory/{identity}"
+            )
             assert wrong_type.status == 404
-            read_only = await a.post("/api/capabilities/knowledge/anniversaries", json={"title": "New"})
+            read_only = await a.post(
+                "/api/capabilities/knowledge/anniversaries", json={"title": "New"}
+            )
             assert read_only.status == 405
             assert left.db.execute("SELECT count(*) FROM items").fetchone()[0] == 1
         left.close()
         right.close()
+
     asyncio.run(journey())
 
 
@@ -272,12 +360,16 @@ def test_real_http_memory_exact_source(tmp_path):
         app["state"] = state
         register(app)
         async with TestClient(TestServer(app)) as client:
-            response = await client.get("/api/capabilities/knowledge/anniversaries?date=2026-09-25")
+            response = await client.get(
+                "/api/capabilities/knowledge/anniversaries?date=2026-09-25"
+            )
             data = await response.json()
             assert response.status == 200
             assert data["sources"]["memory"] == "available"
             assert data["items"][0]["source_id"] == identity
-            detail = await client.get(f"/api/capabilities/knowledge/sources/memory/{identity}")
+            detail = await client.get(
+                f"/api/capabilities/knowledge/sources/memory/{identity}"
+            )
             content = await detail.json()
             assert detail.status == 200
             assert content["source_type"] == "memory"
@@ -286,4 +378,5 @@ def test_real_http_memory_exact_source(tmp_path):
             assert archive.embed_fn is None
         store.close()
         archive.close()
+
     asyncio.run(journey())

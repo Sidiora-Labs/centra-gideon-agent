@@ -1,13 +1,26 @@
 """Actual dashboard handlers served on an isolated loopback port for UI journeys."""
+
 import asyncio
+
 from aiohttp import web
+
+from gideon.interfaces.dashboard.handlers.capabilities_comparisons import (
+    register as register_comparisons,
+)
+from gideon.interfaces.dashboard.handlers.capabilities_gsd import (
+    register as register_gsd,
+)
+from gideon.interfaces.dashboard.handlers.capabilities_harnesses import (
+    register as register_harnesses,
+)
+from gideon.interfaces.dashboard.handlers.capabilities_ownership import (
+    register as register_ownership,
+)
 from gideon.interfaces.dashboard.handlers.capabilities_platform import register
+from gideon.interfaces.dashboard.handlers.capabilities_references import (
+    register as register_references,
+)
 from gideon.interfaces.dashboard.handlers.prompts import api_prompt_syntax
-from gideon.interfaces.dashboard.handlers.capabilities_harnesses import register as register_harnesses
-from gideon.interfaces.dashboard.handlers.capabilities_comparisons import register as register_comparisons
-from gideon.interfaces.dashboard.handlers.capabilities_references import register as register_references
-from gideon.interfaces.dashboard.handlers.capabilities_ownership import register as register_ownership
-from gideon.interfaces.dashboard.handlers.capabilities_gsd import register as register_gsd
 from gideon.interfaces.dashboard.token_auth import token_auth_middleware
 
 

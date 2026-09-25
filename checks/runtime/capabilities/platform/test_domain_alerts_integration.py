@@ -1,4 +1,5 @@
 """Shared runtime wiring for canonical personal-domain observations."""
+
 import pytest
 
 from gideon.cognition.proactive.collect import collect_all
@@ -6,7 +7,11 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.integrations.inbox import InboxStore
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.operations.resilience.doctor import DoctorContext, all_probes, run_capability
+from gideon.operations.resilience.doctor import (
+    DoctorContext,
+    all_probes,
+    run_capability,
+)
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
 from gideon.workspace.notification_kinds import kind_for_legacy, resolve_kind
@@ -73,7 +78,9 @@ def test_domain_notification_is_a_configurable_attention_kind():
     assert kind.default_severity == 2
     assert kind.attention is True
     assert kind.configurable is True
-    assert kind.production_owner == "gideon.workspace.capabilities.platform.domain_alerts"
+    assert (
+        kind.production_owner == "gideon.workspace.capabilities.platform.domain_alerts"
+    )
     assert kind_for_legacy("personal_domain_alert") == kind
 
 

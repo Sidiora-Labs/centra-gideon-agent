@@ -195,7 +195,9 @@ def _journal_mod() -> Any:
 
 
 def _run_store() -> Any:
-    from gideon.automation.workflows import store as run_store  # noqa: PLC0415 - cycle-free  # fmt: skip
+    from gideon.automation.workflows import (  # noqa: PLC0415 - cycle-free
+        store as run_store,
+    )
 
     return run_store
 

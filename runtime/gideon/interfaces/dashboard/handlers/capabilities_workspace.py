@@ -1,8 +1,10 @@
 """Owner workspace context endpoints using authoritative runtime references."""
+
 import asyncio
 import json
 
 from aiohttp import web
+
 from gideon.core.config.loader import config_dir
 from gideon.core.http_request import read_json_body
 from gideon.workspace.capabilities.workspace import ConflictError, SnapshotStore
@@ -10,16 +12,24 @@ from gideon.workspace.capabilities.workspace import ConflictError, SnapshotStore
 
 def store():
     from .files import _dashboard_roots
-    return SnapshotStore(config_dir() / "capabilities" / "workspace", allowed_roots=[p for _, p in _dashboard_roots()])
+
+    return SnapshotStore(
+        config_dir() / "capabilities" / "workspace",
+        allowed_roots=[p for _, p in _dashboard_roots()],
+    )
 
 
 async def references(request, task_ids):
-    from .terminal import api_terminal_list
     from gideon.engine.tasks.registry import get_task
+
+    from .terminal import api_terminal_list
+
     response = await api_terminal_list(request)
     if response.status != 200:
         raise ValueError("Terminal inventory unavailable")
-    terminals = [s["session_id"] for s in json.loads(response.body)["sessions"] if s.get("alive")]
+    terminals = [
+        s["session_id"] for s in json.loads(response.body)["sessions"] if s.get("alive")
+    ]
     tasks = [task_id for task_id in task_ids if await get_task(task_id) is not None]
     return {"terminal_ids": terminals, "task_ids": tasks}
 
@@ -31,9 +41,18 @@ async def endpoint(request):
         snapshots = store()
         snapshot_id = request.match_info.get("id")
         if request.method == "GET":
-            result = snapshots.get(snapshot_id) if snapshot_id else snapshots.list(offset=int(request.query.get("offset", 0)), limit=int(request.query.get("limit", 100)))
+            result = (
+                snapshots.get(snapshot_id)
+                if snapshot_id
+                else snapshots.list(
+                    offset=int(request.query.get("offset", 0)),
+                    limit=int(request.query.get("limit", 100)),
+                )
+            )
         elif request.method == "DELETE":
-            result = snapshots.delete(snapshot_id, int(request.query.get("revision", "")))
+            result = snapshots.delete(
+                snapshot_id, int(request.query.get("revision", ""))
+            )
         elif snapshot_id:
             selected = snapshots.get(snapshot_id)
             refs = await references(request, selected["task_ids"])
@@ -41,25 +60,35 @@ async def endpoint(request):
         else:
             body = await read_json_body(request)
             from gideon.workspace.capabilities.workspace.store import identifiers
+
             refs = await references(request, identifiers(body.get("task_ids", [])))
             result = await asyncio.to_thread(snapshots.capture, body, **refs)
         return web.json_response(result)
     except ConflictError as error:
         return web.json_response({"error": str(error)}, status=409)
     except FileNotFoundError:
-        return web.json_response({"error": "Snapshot or workspace not found"}, status=404)
+        return web.json_response(
+            {"error": "Snapshot or workspace not found"}, status=404
+        )
     except (ValueError, TypeError, AttributeError) as error:
         return web.json_response({"error": str(error)}, status=400)
     except (OSError, TimeoutError):
-        return web.json_response({"error": "Workspace context temporarily unavailable"}, status=503)
+        return web.json_response(
+            {"error": "Workspace context temporarily unavailable"}, status=503
+        )
 
 
 def processes(request):
     from gideon.workspace.capabilities.workspace.processes import get_registry
+
     from .files import _dashboard_roots
+
     registry = request.app.get("workspace_process_registry")
     if registry is None:
-        registry = get_registry(config_dir() / "capabilities" / "workspace", allowed_roots=[p for _, p in _dashboard_roots()])
+        registry = get_registry(
+            config_dir() / "capabilities" / "workspace",
+            allowed_roots=[p for _, p in _dashboard_roots()],
+        )
         request.app["workspace_process_registry"] = registry
     return registry
 
@@ -73,11 +102,21 @@ async def process_endpoint(request):
         operation = request.match_info.get("operation")
         if request.method == "GET":
             if operation == "log-window":
-                result = registry.log_window(process_id,after=int(request.query.get("after",0)),limit=int(request.query.get("limit",4096)))
+                result = registry.log_window(
+                    process_id,
+                    after=int(request.query.get("after", 0)),
+                    limit=int(request.query.get("limit", 4096)),
+                )
             elif operation == "logs":
-                result = registry.logs(process_id, limit=int(request.query.get("limit", 65536)))
+                result = registry.logs(
+                    process_id, limit=int(request.query.get("limit", 65536))
+                )
             else:
-                result = registry.get(process_id) if process_id else registry.list(offset=int(request.query.get("offset", 0)))
+                result = (
+                    registry.get(process_id)
+                    if process_id
+                    else registry.list(offset=int(request.query.get("offset", 0)))
+                )
         elif operation == "stop":
             body = await read_json_body(request)
             result = await registry.stop(process_id, body.get("revision"))
@@ -87,7 +126,9 @@ async def process_endpoint(request):
     except ConflictError as error:
         return web.json_response({"error": str(error)}, status=409)
     except FileNotFoundError:
-        return web.json_response({"error": "Process or workspace not found"}, status=404)
+        return web.json_response(
+            {"error": "Process or workspace not found"}, status=404
+        )
     except PermissionError as error:
         return web.json_response({"error": str(error)}, status=403)
     except (ValueError, TypeError, AttributeError) as error:
@@ -98,11 +139,13 @@ async def process_endpoint(request):
 
 async def close_processes(app):
     from gideon.workspace.capabilities.workspace.processes import close_registry
+
     await close_registry(config_dir() / "capabilities" / "workspace")
 
 
 def ports():
     from gideon.workspace.capabilities.workspace.ports import get_port_registry
+
     return get_port_registry(config_dir() / "capabilities" / "workspace")
 
 
@@ -117,7 +160,11 @@ async def port_endpoint(request):
             if operation == "inventory":
                 result = registry.inventory()
             else:
-                result = registry.get(record_id) if record_id else registry.list(offset=int(request.query.get("offset", 0)))
+                result = (
+                    registry.get(record_id)
+                    if record_id
+                    else registry.list(offset=int(request.query.get("offset", 0)))
+                )
         elif record_id:
             body = await read_json_body(request)
             result = registry.release(record_id, body.get("revision"))
@@ -136,13 +183,19 @@ async def port_endpoint(request):
 
 async def close_ports(app):
     from gideon.workspace.capabilities.workspace.ports import close_port_registry
+
     close_port_registry(config_dir() / "capabilities" / "workspace")
 
 
 def projects():
     from gideon.workspace.capabilities.workspace.projects import ProjectService
+
     from .files import _dashboard_roots
-    return ProjectService(config_dir() / "capabilities" / "workspace", allowed_roots=[p for _, p in _dashboard_roots()])
+
+    return ProjectService(
+        config_dir() / "capabilities" / "workspace",
+        allowed_roots=[p for _, p in _dashboard_roots()],
+    )
 
 
 async def project_endpoint(request):
@@ -153,7 +206,11 @@ async def project_endpoint(request):
         project_id = request.match_info.get("id")
         operation = request.match_info.get("operation")
         if request.method == "GET":
-            result = service.templates() if operation == "templates" else service.get(project_id) if project_id else service.list()
+            result = (
+                service.templates()
+                if operation == "templates"
+                else service.get(project_id) if project_id else service.list()
+            )
         else:
             body = await read_json_body(request)
             if operation == "detect":
@@ -174,150 +231,223 @@ async def project_endpoint(request):
 
 
 async def git_endpoint(request):
-    if not request.get('user') or request.get('app'):
-        return web.json_response({'error':'Owner authentication required'},status=403)
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
     from gideon.workspace.capabilities.workspace.git_ops import GitService
+
     from .files import _dashboard_roots
+
     try:
-        service = GitService(config_dir() / 'capabilities' / 'workspace',allowed_roots=[p for _,p in _dashboard_roots()])
-        project_id = request.match_info.get('project_id')
-        if request.method == 'POST':
+        service = GitService(
+            config_dir() / "capabilities" / "workspace",
+            allowed_roots=[p for _, p in _dashboard_roots()],
+        )
+        project_id = request.match_info.get("project_id")
+        if request.method == "POST":
             result = await service.mutate(await read_json_body(request))
-        elif request.match_info.get('history'):
+        elif request.match_info.get("history"):
             result = service.list(project_id)
         else:
             result = await service.inspect(project_id)
         return web.json_response(result)
     except ConflictError as error:
-        return web.json_response({'error':str(error)},status=409)
+        return web.json_response({"error": str(error)}, status=409)
     except FileNotFoundError:
-        return web.json_response({'error':'Project or repository not found'},status=404)
-    except (ValueError,TypeError) as error:
-        return web.json_response({'error':str(error)},status=400)
-    except (OSError,TimeoutError):
-        return web.json_response({'error':'Git operation unavailable'},status=503)
+        return web.json_response(
+            {"error": "Project or repository not found"}, status=404
+        )
+    except (ValueError, TypeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except (OSError, TimeoutError):
+        return web.json_response({"error": "Git operation unavailable"}, status=503)
 
 
 def desktops():
     from gideon.workspace.capabilities.workspace.desktop import get_desktop_registry
+
     from .files import _dashboard_roots
-    return get_desktop_registry(config_dir()/'capabilities'/'workspace',allowed_roots=[p for _,p in _dashboard_roots()])
+
+    return get_desktop_registry(
+        config_dir() / "capabilities" / "workspace",
+        allowed_roots=[p for _, p in _dashboard_roots()],
+    )
 
 
 async def desktop_endpoint(request):
-    if not request.get('user') or request.get('app'):
-        return web.json_response({'error':'Owner authentication required'},status=403)
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
     try:
-        registry=desktops()
-        sid=request.match_info.get('id')
-        operation=request.match_info.get('operation')
-        if request.method=='GET':
-            if operation=='frame':
-                return web.Response(body=await registry.frame(sid),content_type='image/png',headers={'Cache-Control':'no-store'})
-            result=registry.availability() if operation=='availability' else registry.get(sid) if sid else registry.list()
+        registry = desktops()
+        sid = request.match_info.get("id")
+        operation = request.match_info.get("operation")
+        if request.method == "GET":
+            if operation == "frame":
+                return web.Response(
+                    body=await registry.frame(sid),
+                    content_type="image/png",
+                    headers={"Cache-Control": "no-store"},
+                )
+            result = (
+                registry.availability()
+                if operation == "availability"
+                else registry.get(sid) if sid else registry.list()
+            )
         else:
-            body=await read_json_body(request)
-            if operation=='input':result=await registry.input(sid,body)
-            elif operation=='stop':result=await registry.stop(sid,body.get('revision'))
-            else:result=await registry.start(body)
+            body = await read_json_body(request)
+            if operation == "input":
+                result = await registry.input(sid, body)
+            elif operation == "stop":
+                result = await registry.stop(sid, body.get("revision"))
+            else:
+                result = await registry.start(body)
         return web.json_response(result)
     except ConflictError as error:
-        return web.json_response({'error':str(error)},status=409)
+        return web.json_response({"error": str(error)}, status=409)
     except FileNotFoundError:
-        return web.json_response({'error':'Desktop or project not found'},status=404)
-    except (ValueError,TypeError) as error:
-        return web.json_response({'error':str(error)},status=400)
-    except (OSError,TimeoutError):
-        return web.json_response({'error':'Desktop temporarily unavailable'},status=503)
+        return web.json_response({"error": "Desktop or project not found"}, status=404)
+    except (ValueError, TypeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except (OSError, TimeoutError):
+        return web.json_response(
+            {"error": "Desktop temporarily unavailable"}, status=503
+        )
 
 
 async def close_desktops(app):
     from gideon.workspace.capabilities.workspace.desktop import close_desktop_registry
-    await close_desktop_registry(config_dir()/'capabilities'/'workspace')
+
+    await close_desktop_registry(config_dir() / "capabilities" / "workspace")
 
 
 async def external_terminal_endpoint(request):
-    if not request.get('user') or request.get('app'):
-        return web.json_response({'error':'Owner authentication required'},status=403)
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
     from gideon.workspace.capabilities.workspace.iterm import ExternalTerminalMirror
-    mirror=ExternalTerminalMirror()
+
+    mirror = ExternalTerminalMirror()
     try:
-        if request.query:raise ValueError('External terminal query overrides are not supported')
-        identity=request.match_info.get('id')
-        if identity=='availability':result=mirror.availability()
-        else:result=await mirror.screen(identity) if identity else await mirror.inventory()
-        return web.json_response(result,headers={'Cache-Control':'no-store'})
+        if request.query:
+            raise ValueError("External terminal query overrides are not supported")
+        identity = request.match_info.get("id")
+        if identity == "availability":
+            result = mirror.availability()
+        else:
+            result = (
+                await mirror.screen(identity) if identity else await mirror.inventory()
+            )
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
     except FileNotFoundError:
-        return web.json_response({'error':'Native pane no longer exists'},status=404)
+        return web.json_response({"error": "Native pane no longer exists"}, status=404)
     except ValueError as error:
-        return web.json_response({'error':str(error)},status=400)
-    except (OSError,TimeoutError):
-        return web.json_response({'error':'Native mirror unavailable; requires local macOS, iTerm2 SDK and native authorization'},status=503)
+        return web.json_response({"error": str(error)}, status=400)
+    except (OSError, TimeoutError):
+        return web.json_response(
+            {
+                "error": "Native mirror unavailable; requires local macOS, iTerm2 SDK and native authorization"
+            },
+            status=503,
+        )
 
 
 async def provider_terminal_endpoint(request):
-    if not request.get('user') or request.get('app'):
-        return web.json_response({'error':'Owner authentication required'},status=403)
-    from gideon.workspace.capabilities.workspace.provider_terminal import profiles,upload
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
+    from gideon.workspace.capabilities.workspace.provider_terminal import (
+        profiles,
+        upload,
+    )
+
     try:
-        if request.method=='GET':return web.json_response({'profiles':profiles()})
-        if request.content_length is not None and request.content_length>8388608:
-            raise ValueError('Image must be at most 8 MiB')
-        body=bytearray()
+        if request.method == "GET":
+            return web.json_response({"profiles": profiles()})
+        if request.content_length is not None and request.content_length > 8388608:
+            raise ValueError("Image must be at most 8 MiB")
+        body = bytearray()
         async for chunk in request.content.iter_chunked(65536):
             body.extend(chunk)
-            if len(body)>8388608:raise ValueError('Image must be at most 8 MiB')
-        return web.json_response(upload(bytes(body),str(request['user'])))
-    except (ValueError,OSError) as error:
-        return web.json_response({'error':str(error)},status=400)
+            if len(body) > 8388608:
+                raise ValueError("Image must be at most 8 MiB")
+        return web.json_response(upload(bytes(body), str(request["user"])))
+    except (ValueError, OSError) as error:
+        return web.json_response({"error": str(error)}, status=400)
 
 
 async def storage_endpoint(request):
-    if not request.get('user') or request.get('app'):
-        return web.json_response({'error':'Owner authentication required'},status=403)
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
     from gideon.workspace.capabilities.workspace.storage import StorageDiagnosis
+
     from .files import _dashboard_roots
+
     try:
-        service=StorageDiagnosis(config_dir(),allowed_roots=[p for _,p in _dashboard_roots()])
-        if request.method=='POST':
-            result=await asyncio.to_thread(service.scan,await read_json_body(request))
+        service = StorageDiagnosis(
+            config_dir(), allowed_roots=[p for _, p in _dashboard_roots()]
+        )
+        if request.method == "POST":
+            result = await asyncio.to_thread(
+                service.scan, await read_json_body(request)
+            )
         else:
-            project_id=request.query.get('project_id')
-            if set(request.query)-{'project_id','token'}:raise ValueError('Unknown storage query')
-            result=await asyncio.to_thread(service.report,project_id)
+            project_id = request.query.get("project_id")
+            if set(request.query) - {"project_id", "token"}:
+                raise ValueError("Unknown storage query")
+            result = await asyncio.to_thread(service.report, project_id)
         return web.json_response(result)
     except FileNotFoundError:
-        return web.json_response({'error':'Project not found'},status=404)
-    except (ValueError,TypeError) as error:
-        return web.json_response({'error':str(error)},status=400)
+        return web.json_response({"error": "Project not found"}, status=404)
+    except (ValueError, TypeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
     except OSError:
-        return web.json_response({'error':'Storage diagnosis unavailable'},status=503)
+        return web.json_response({"error": "Storage diagnosis unavailable"}, status=503)
 
 
 def register(app):
-    app.router.add_get('/api/capabilities/workspace/storage',storage_endpoint)
-    app.router.add_post('/api/capabilities/workspace/storage/scan',storage_endpoint)
-    app.router.add_get('/api/capabilities/workspace/provider-terminals',provider_terminal_endpoint)
-    app.router.add_post('/api/capabilities/workspace/provider-terminals/images',provider_terminal_endpoint)
-    app.router.add_get('/api/capabilities/workspace/external-terminals',external_terminal_endpoint)
-    app.router.add_get('/api/capabilities/workspace/external-terminals/{id}',external_terminal_endpoint)
+    app.router.add_get("/api/capabilities/workspace/storage", storage_endpoint)
+    app.router.add_post("/api/capabilities/workspace/storage/scan", storage_endpoint)
+    app.router.add_get(
+        "/api/capabilities/workspace/provider-terminals", provider_terminal_endpoint
+    )
+    app.router.add_post(
+        "/api/capabilities/workspace/provider-terminals/images",
+        provider_terminal_endpoint,
+    )
+    app.router.add_get(
+        "/api/capabilities/workspace/external-terminals", external_terminal_endpoint
+    )
+    app.router.add_get(
+        "/api/capabilities/workspace/external-terminals/{id}",
+        external_terminal_endpoint,
+    )
     app.on_cleanup.append(close_desktops)
-    app.router.add_get('/api/capabilities/workspace/desktops',desktop_endpoint)
-    app.router.add_post('/api/capabilities/workspace/desktops',desktop_endpoint)
-    app.router.add_get('/api/capabilities/workspace/desktops/{operation:availability}',desktop_endpoint)
-    app.router.add_get('/api/capabilities/workspace/desktops/{id}',desktop_endpoint)
-    app.router.add_get('/api/capabilities/workspace/desktops/{id}/{operation:frame}',desktop_endpoint)
-    app.router.add_post('/api/capabilities/workspace/desktops/{id}/{operation:input|stop}',desktop_endpoint)
-    app.router.add_post('/api/capabilities/workspace/git/operations',git_endpoint)
-    app.router.add_get('/api/capabilities/workspace/git/{project_id}/{history:operations}',git_endpoint)
-    app.router.add_get('/api/capabilities/workspace/git/{project_id}',git_endpoint)
+    app.router.add_get("/api/capabilities/workspace/desktops", desktop_endpoint)
+    app.router.add_post("/api/capabilities/workspace/desktops", desktop_endpoint)
+    app.router.add_get(
+        "/api/capabilities/workspace/desktops/{operation:availability}",
+        desktop_endpoint,
+    )
+    app.router.add_get("/api/capabilities/workspace/desktops/{id}", desktop_endpoint)
+    app.router.add_get(
+        "/api/capabilities/workspace/desktops/{id}/{operation:frame}", desktop_endpoint
+    )
+    app.router.add_post(
+        "/api/capabilities/workspace/desktops/{id}/{operation:input|stop}",
+        desktop_endpoint,
+    )
+    app.router.add_post("/api/capabilities/workspace/git/operations", git_endpoint)
+    app.router.add_get(
+        "/api/capabilities/workspace/git/{project_id}/{history:operations}",
+        git_endpoint,
+    )
+    app.router.add_get("/api/capabilities/workspace/git/{project_id}", git_endpoint)
     prefix = "/api/capabilities/workspace"
     app.router.add_get(prefix, endpoint)
     app.router.add_post(prefix, endpoint)
     app.router.add_get(prefix + "/processes", process_endpoint)
     app.router.add_post(prefix + "/processes", process_endpoint)
     app.router.add_get(prefix + "/processes/{id}", process_endpoint)
-    app.router.add_get(prefix + "/processes/{id}/{operation:logs|log-window}", process_endpoint)
+    app.router.add_get(
+        prefix + "/processes/{id}/{operation:logs|log-window}", process_endpoint
+    )
     app.router.add_post(prefix + "/processes/{id}/{operation:stop}", process_endpoint)
     app.on_cleanup.append(close_processes)
     app.router.add_get(prefix + "/ports", port_endpoint)
@@ -329,7 +459,9 @@ def register(app):
     app.router.add_get(prefix + "/projects", project_endpoint)
     app.router.add_post(prefix + "/projects", project_endpoint)
     app.router.add_get(prefix + "/projects/{operation:templates}", project_endpoint)
-    app.router.add_post(prefix + "/projects/{operation:detect|scaffold}", project_endpoint)
+    app.router.add_post(
+        prefix + "/projects/{operation:detect|scaffold}", project_endpoint
+    )
     app.router.add_get(prefix + "/projects/{id}", project_endpoint)
     app.router.add_get(prefix + "/{id}", endpoint)
     app.router.add_delete(prefix + "/{id}", endpoint)

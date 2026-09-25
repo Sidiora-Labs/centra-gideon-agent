@@ -98,7 +98,9 @@ class NativeArtifactProvider(ArtifactProvider):
     def __init__(self, root: Path | str | None = None) -> None:
         self._root = Path(root) if root else (config_dir() / "artifacts")
         with _ROOT_LOCKS_GUARD:
-            self._lock = _ROOT_LOCKS.setdefault(str(self._root.resolve()), threading.RLock())
+            self._lock = _ROOT_LOCKS.setdefault(
+                str(self._root.resolve()), threading.RLock()
+            )
 
     @property
     def mutation_lock(self):
@@ -913,7 +915,10 @@ class NativeArtifactProvider(ArtifactProvider):
             raise ValueError("artifact state is not a safe directory")
         digest = hashlib.sha256()
         try:
-            paths = sorted(directory.rglob("*"), key=lambda candidate: candidate.relative_to(directory).as_posix())
+            paths = sorted(
+                directory.rglob("*"),
+                key=lambda candidate: candidate.relative_to(directory).as_posix(),
+            )
         except OSError as exc:
             raise ValueError("artifact state is unreadable") from exc
         for path in paths:
@@ -960,7 +965,9 @@ class NativeArtifactProvider(ArtifactProvider):
 
                 shutil.rmtree(directory)
             except (OSError, ValueError):
-                logger.warning("conditional artifact delete failed: %s", slug, exc_info=True)
+                logger.warning(
+                    "conditional artifact delete failed: %s", slug, exc_info=True
+                )
                 return False
         changes.emit(changes.DELETE, slug)
         return True

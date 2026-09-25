@@ -1,25 +1,41 @@
 """A real artifact-backed application for moodboard console qualification."""
+
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
+
 from aiohttp import web
+
 from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE, register
-from gideon.workspace.capabilities.creative import IngredientStore
+from gideon.workspace.artifacts.handlers import api_artifact_raw
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.artifacts.registry import register_provider
-from gideon.workspace.artifacts.handlers import api_artifact_raw
+from gideon.workspace.capabilities.creative import IngredientStore
 
 
 async def main():
     home = Path(sys.argv[1])
     provider = NativeArtifactProvider(home / "artifacts")
     register_provider(provider)
-    provider.create(name="Literary sample", kind="markdown", content="The night train crossed the city.")
+    provider.create(
+        name="Literary sample",
+        kind="markdown",
+        content="The night train crossed the city.",
+    )
     provider.create(name="Long sample", kind="markdown", content="A" * 5000)
     from gideon.workspace.capabilities.creative.works import WorkStore
+
     works = WorkStore(home)
-    works.authors.create({"request_id": "writer", "title": "Pinned writer", "voice": {"tone": "Quiet"}})
-    works.universes.create({"request_id": "world", "title": "Pinned world", "canon": [{"id": "law", "title": "Night"}]})
+    works.authors.create(
+        {"request_id": "writer", "title": "Pinned writer", "voice": {"tone": "Quiet"}}
+    )
+    works.universes.create(
+        {
+            "request_id": "world",
+            "title": "Pinned world",
+            "canon": [{"id": "law", "title": "Night"}],
+        }
+    )
     catalog = IngredientStore(home)
     catalog.create({"request_id": "city", "type": "place", "title": "Linked city"})
     app = web.Application()

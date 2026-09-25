@@ -8,14 +8,17 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.sdk.background import WorkerContext, WorkerControl
 from gideon.workspace.artifacts.native import NativeArtifactProvider
-from gideon.workspace.capabilities.media.downloads import JobCancellation, SourceDownloader, capabilities
+from gideon.workspace.capabilities.media.downloads import (
+    JobCancellation,
+    SourceDownloader,
+    capabilities,
+)
 from gideon.workspace.capabilities.media.downloads_http import register_downloads
 from gideon.workspace.capabilities.media.jobs import MediaJobs, MediaWorker
 from gideon.workspace.capabilities.media.jobs_http import register_jobs
 from gideon.workspace.capabilities.media.library import MediaLibrary
 from gideon.workspace.capabilities.media.sketches import SketchError, SketchStore
 from gideon.workspace.capabilities.media.tools import MediaToolProvider
-
 
 URL = "https://www.youtube.com/watch?v=abcdefghijk"
 
@@ -32,40 +35,59 @@ def request(kind="video", url=URL):
 
 
 def submit(jobs, request_id="source-1", value=None):
-    return jobs.submit({"operation": "source_download", "request_id": request_id, "input": value or request()})
+    return jobs.submit(
+        {
+            "operation": "source_download",
+            "request_id": request_id,
+            "input": value or request(),
+        }
+    )
 
 
 def test_prepare_accepts_bounded_single_youtube_sources(jobs):
     assert jobs.downloads.prepare(request()) == request()
-    assert jobs.downloads.prepare(request("audio", "https://youtu.be/abcdefghijk?t=12")) == {
+    assert jobs.downloads.prepare(
+        request("audio", "https://youtu.be/abcdefghijk?t=12")
+    ) == {
         "url": "https://youtu.be/abcdefghijk?t=12",
         "kind": "audio",
     }
-    assert jobs.downloads.prepare(request(url="https://m.youtube.com/shorts/abcdefghijk"))["kind"] == "video"
+    assert (
+        jobs.downloads.prepare(request(url="https://m.youtube.com/shorts/abcdefghijk"))[
+            "kind"
+        ]
+        == "video"
+    )
 
 
-@pytest.mark.parametrize("url", [
-    "http://youtube.com/watch?v=abcdefghijk",
-    "https://youtube.com/playlist?list=abcdefghijk",
-    "https://youtube.com/watch?v=short",
-    "https://youtube.com.evil.test/watch?v=abcdefghijk",
-    "https://user@youtube.com/watch?v=abcdefghijk",
-    "https://127.0.0.1/watch?v=abcdefghijk",
-    "file:///etc/passwd",
-    "",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://youtube.com/watch?v=abcdefghijk",
+        "https://youtube.com/playlist?list=abcdefghijk",
+        "https://youtube.com/watch?v=short",
+        "https://youtube.com.evil.test/watch?v=abcdefghijk",
+        "https://user@youtube.com/watch?v=abcdefghijk",
+        "https://127.0.0.1/watch?v=abcdefghijk",
+        "file:///etc/passwd",
+        "",
+    ],
+)
 def test_prepare_refuses_non_video_or_untrusted_urls(jobs, url):
     with pytest.raises(SketchError, match="single HTTPS YouTube"):
         jobs.downloads.prepare(request(url=url))
     assert jobs.list()["items"] == []
 
 
-@pytest.mark.parametrize("body", [
-    {"url": URL},
-    {"kind": "video"},
-    {"url": URL, "kind": "captions"},
-    {"url": URL, "kind": "video", "output": "/tmp/x"},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"url": URL},
+        {"kind": "video"},
+        {"url": URL, "kind": "captions"},
+        {"url": URL, "kind": "video", "output": "/tmp/x"},
+    ],
+)
 def test_prepare_rejects_missing_unknown_or_unsupported_fields(jobs, body):
     with pytest.raises(SketchError):
         jobs.downloads.prepare(body)
@@ -91,7 +113,10 @@ def test_publish_creates_real_versioned_video_artifact_with_provenance(jobs):
     assert artifact.kind == "video"
     assert artifact.source == "import"
     assert artifact.tags == ["download", "source", "video"]
-    assert jobs.sketches.artifacts.raw_bytes(artifact.slug, version=1) == (data, "video/mp4")
+    assert jobs.sketches.artifacts.raw_bytes(artifact.slug, version=1) == (
+        data,
+        "video/mp4",
+    )
     event = artifact.events[0]
     assert event.metadata["media_job_id"] == "job-1"
     assert event.metadata["source_url"] == URL
@@ -101,7 +126,14 @@ def test_publish_creates_real_versioned_video_artifact_with_provenance(jobs):
 
 def test_publish_creates_audio_artifact_and_library_projection(jobs):
     data = b"ID3" + b"audio-payload"
-    result = jobs.downloads.publish(request("audio"), "job-audio", {"id": "abcdefghijk", "title": "Audio source"}, data, "mp3", 12)
+    result = jobs.downloads.publish(
+        request("audio"),
+        "job-audio",
+        {"id": "abcdefghijk", "title": "Audio source"},
+        data,
+        "mp3",
+        12,
+    )
     assert result["kind"] == "audio"
     assert result["mime"] == "audio/mpeg"
     stored = jobs.sketches.artifacts.get(result["artifact_id"])
@@ -118,19 +150,28 @@ def test_publish_is_idempotent_but_rejects_identity_conflicts(jobs):
     with pytest.raises(SketchError, match="identity conflict"):
         jobs.downloads.publish(request(), "stable", meta, data + b"changed", "mp4", 10)
     with pytest.raises(SketchError, match="identity conflict"):
-        jobs.downloads.publish(request(url="https://youtu.be/zyxwvutsrqp"), "stable", meta, data, "mp4", 10)
+        jobs.downloads.publish(
+            request(url="https://youtu.be/zyxwvutsrqp"), "stable", meta, data, "mp4", 10
+        )
     assert jobs.sketches.artifacts.raw_bytes(first["artifact_id"])[0] == data
 
 
-@pytest.mark.parametrize("data,extension,kind", [
-    (b"", "mp4", "video"),
-    (b"bytes", "exe", "video"),
-    (b"bytes", "mp4", "audio"),
-    (b"x" * (33554432 + 1), "mp4", "video"),
-])
-def test_publish_rejects_empty_oversized_or_mismatched_results(jobs, data, extension, kind):
+@pytest.mark.parametrize(
+    "data,extension,kind",
+    [
+        (b"", "mp4", "video"),
+        (b"bytes", "exe", "video"),
+        (b"bytes", "mp4", "audio"),
+        (b"x" * (33554432 + 1), "mp4", "video"),
+    ],
+)
+def test_publish_rejects_empty_oversized_or_mismatched_results(
+    jobs, data, extension, kind
+):
     with pytest.raises(SketchError, match="empty, oversized or unsupported"):
-        jobs.downloads.publish(request(kind), "bad", {"title": "Bad"}, data, extension, 2)
+        jobs.downloads.publish(
+            request(kind), "bad", {"title": "Bad"}, data, extension, 2
+        )
     assert jobs.sketches.artifacts.list() == []
 
 
@@ -156,7 +197,11 @@ class RecordedReader:
 
     def metadata(self, url):
         self.calls.append(("metadata", url))
-        return {"id": "abcdefghijk", "title": "Fetched source", "duration": self.duration}
+        return {
+            "id": "abcdefghijk",
+            "title": "Fetched source",
+            "duration": self.duration,
+        }
 
     async def media(self, metadata, kind):
         self.calls.append(("media", metadata["id"], kind))
@@ -167,23 +212,33 @@ class RecordedReader:
 
 def test_worker_runs_download_and_retains_real_artifact(jobs):
     readers = []
-    jobs.downloads.reader_factory = lambda cancelled: readers.append(RecordedReader(cancelled)) or readers[-1]
+    jobs.downloads.reader_factory = (
+        lambda cancelled: readers.append(RecordedReader(cancelled)) or readers[-1]
+    )
     queued = submit(jobs)
-    MediaWorker(jobs).run_once(WorkerContext("gideon-media", "default", WorkerControl()))
+    MediaWorker(jobs).run_once(
+        WorkerContext("gideon-media", "default", WorkerControl())
+    )
     finished = jobs.get(queued["id"])
     assert finished["status"] == "succeeded"
     assert finished["attempt"] == 1
     assert finished["result"]["artifact_id"] == "media-source-" + queued["id"]
     assert readers[0].calls == [("metadata", URL), ("media", "abcdefghijk", "video")]
-    raw = jobs.sketches.artifacts.raw_bytes(finished["result"]["artifact_id"], version=1)
+    raw = jobs.sketches.artifacts.raw_bytes(
+        finished["result"]["artifact_id"], version=1
+    )
     assert raw == (b"\x00\x00\x00\x18ftypisomfetched", "video/mp4")
     assert finished["events"][-1]["result"] == finished["result"]
 
 
 def test_worker_records_duration_failure_without_artifact(jobs):
-    jobs.downloads.reader_factory = lambda cancelled: RecordedReader(cancelled, duration=21601)
+    jobs.downloads.reader_factory = lambda cancelled: RecordedReader(
+        cancelled, duration=21601
+    )
     queued = submit(jobs)
-    MediaWorker(jobs).run_once(WorkerContext("gideon-media", "default", WorkerControl()))
+    MediaWorker(jobs).run_once(
+        WorkerContext("gideon-media", "default", WorkerControl())
+    )
     failed = jobs.get(queued["id"])
     assert failed["status"] == "failed"
     assert failed["result"] is None
@@ -215,15 +270,31 @@ async def test_http_submission_and_capabilities_use_existing_media_boundary(jobs
         assert info["max_artifact_bytes"] == 33554432
         assert info["max_duration_seconds"] == 21600
         assert info["kinds"] == ["video", "audio"]
-        denied_query = await client.get("/api/capabilities/media/source-download?probe=1")
+        denied_query = await client.get(
+            "/api/capabilities/media/source-download?probe=1"
+        )
         assert denied_query.status == 400
-        response = await client.post("/api/capabilities/media/jobs", json={"operation": "source_download", "request_id": "http-source", "input": request()})
+        response = await client.post(
+            "/api/capabilities/media/jobs",
+            json={
+                "operation": "source_download",
+                "request_id": "http-source",
+                "input": request(),
+            },
+        )
         assert response.status == 202
         queued = await response.json()
         loaded = await client.get("/api/capabilities/media/jobs/" + queued["id"])
         assert loaded.status == 200
         assert (await loaded.json())["input"] == request()
-        unsafe = await client.post("/api/capabilities/media/jobs", json={"operation": "source_download", "request_id": "unsafe", "input": request(url="http://127.0.0.1/video")})
+        unsafe = await client.post(
+            "/api/capabilities/media/jobs",
+            json={
+                "operation": "source_download",
+                "request_id": "unsafe",
+                "input": request(url="http://127.0.0.1/video"),
+            },
+        )
         assert unsafe.status == 400
     assert len(jobs.list()["items"]) == 1
 
@@ -231,7 +302,10 @@ async def test_http_submission_and_capabilities_use_existing_media_boundary(jobs
 @pytest.mark.asyncio
 async def test_native_tool_queues_same_durable_job(jobs):
     provider = MediaToolProvider(jobs.sketches, MediaLibrary(jobs.sketches.artifacts))
-    result = await provider.invoke("media_source_download_submit", {"request_id": "native-source", "input": request("audio")})
+    result = await provider.invoke(
+        "media_source_download_submit",
+        {"request_id": "native-source", "input": request("audio")},
+    )
     assert result.success
     queued = json.loads(result.output)
     assert queued["operation"] == "source_download"
@@ -241,14 +315,26 @@ async def test_native_tool_queues_same_durable_job(jobs):
     assert definition.requires_approval is False
     assert definition.parameters["additionalProperties"] is False
     assert set(definition.parameters["required"]) == {"request_id", "input"}
-    denied = await provider.invoke("media_source_download_submit", {"request_id": "native-bad", "input": request(url="https://example.test/video")})
+    denied = await provider.invoke(
+        "media_source_download_submit",
+        {
+            "request_id": "native-bad",
+            "input": request(url="https://example.test/video"),
+        },
+    )
     assert denied.success is False
     assert denied.metadata["status"] == 400
 
 
 def test_capabilities_never_claims_external_download_success():
     value = capabilities()
-    assert set(value) == {"available", "transport", "max_artifact_bytes", "max_duration_seconds", "kinds"}
+    assert set(value) == {
+        "available",
+        "transport",
+        "max_artifact_bytes",
+        "max_duration_seconds",
+        "kinds",
+    }
     assert isinstance(value["available"], bool)
     assert value["transport"] in ("guarded-video-reader", "unavailable")
     assert "downloaded" not in value

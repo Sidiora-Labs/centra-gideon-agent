@@ -5,7 +5,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.extensions.apps.app_events import PLATFORM_EVENTS
-from gideon.interfaces.dashboard.handlers.capabilities_platform import api_catalog, register
+from gideon.interfaces.dashboard.handlers.capabilities_platform import (
+    api_catalog,
+    register,
+)
 from gideon.interfaces.dashboard.handlers.prompts import api_prompt_syntax
 from gideon.interfaces.dashboard.token_auth import (
     generate_token,
@@ -32,7 +35,9 @@ def application(dynamic=True):
     register(app)
     app.router.add_get("/api/prompts/syntax", api_prompt_syntax, name="prompt-syntax")
     if dynamic:
-        app.router.add_get("/api/explorer/{record_id}", api_catalog, name="record-catalog")
+        app.router.add_get(
+            "/api/explorer/{record_id}", api_catalog, name="record-catalog"
+        )
         app.router.add_post("/api/explorer/{record_id}", api_catalog)
     return app
 
@@ -51,12 +56,16 @@ async def test_authentication_and_registered_routes():
         assert result.headers["Cache-Control"] == "no-store"
         catalog = await result.json()
         assert catalog["version"] == 1
-        expected = {(route.method, route.resource.canonical) for route in app.router.routes()}
+        expected = {
+            (route.method, route.resource.canonical) for route in app.router.routes()
+        }
         actual = {(route["method"], route["path"]) for route in catalog["routes"]}
         assert actual == expected
         assert ("GET", "/api/explorer/{record_id}") in actual
         assert ("POST", "/api/explorer/{record_id}") in actual
-        assert all(route["schema"] == {"status": "unknown"} for route in catalog["routes"])
+        assert all(
+            route["schema"] == {"status": "unknown"} for route in catalog["routes"]
+        )
         assert token not in json.dumps(catalog)
         followup = await client.get(CATALOG_PATH)
         assert followup.status == 200
@@ -89,7 +98,9 @@ async def test_pagination_round_trip_through_http():
         rows = []
         offset = 0
         while offset is not None:
-            response = await client.get(CATALOG_PATH, params={"token": token, "offset": offset, "limit": 2})
+            response = await client.get(
+                CATALOG_PATH, params={"token": token, "offset": offset, "limit": 2}
+            )
             assert response.status == 200
             page = await response.json()
             assert page["offset"] == offset
@@ -108,10 +119,22 @@ async def test_pagination_round_trip_through_http():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("query", [{"limit": 0}, {"limit": 201}, {"offset": -1}, {"offset": 100001}, {"limit": "no"}, {"offset": "2.5"}])
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"limit": 0},
+        {"limit": 201},
+        {"offset": -1},
+        {"offset": 100001},
+        {"limit": "no"},
+        {"offset": "2.5"},
+    ],
+)
 async def test_invalid_page_is_not_silently_coerced(query):
     async with TestClient(TestServer(application())) as client:
-        response = await client.get(CATALOG_PATH, params={"token": generate_token("page-owner"), **query})
+        response = await client.get(
+            CATALOG_PATH, params={"token": generate_token("page-owner"), **query}
+        )
         assert response.status == 400
         assert response.content_type == "text/plain"
         assert await response.text()
@@ -147,13 +170,19 @@ def test_only_actual_metadata_and_no_static_filesystem_details(tmp_path):
     assert "/assets/" not in encoded
     assert "__doc__" not in encoded
     assert "gideon.interfaces.dashboard" not in encoded
-    row = next(row for row in catalog["routes"] if row["name"] == "prompt-syntax" and row["method"] == "GET")
+    row = next(
+        row
+        for row in catalog["routes"]
+        if row["name"] == "prompt-syntax" and row["method"] == "GET"
+    )
     assert row["handler"] == "api_prompt_syntax"
     assert set(row) == {"method", "path", "name", "handler", "schema", "executable"}
 
 
 def test_admission_and_execution_are_separate():
-    catalog = build_catalog(application(), admit=lambda method, path: path == CATALOG_PATH)
+    catalog = build_catalog(
+        application(), admit=lambda method, path: path == CATALOG_PATH
+    )
     assert {row["path"] for row in catalog["routes"]} == {CATALOG_PATH}
     assert {row["method"] for row in catalog["routes"]} == {"GET", "HEAD"}
     assert [row["method"] for row in catalog["routes"] if row["executable"]] == ["GET"]
@@ -162,7 +191,9 @@ def test_admission_and_execution_are_separate():
     assert denied["total"] == 0
     assert denied["next_offset"] is None
     full = build_catalog(application())
-    assert all(not row["executable"] for row in full["routes"] if "{record_id}" in row["path"])
+    assert all(
+        not row["executable"] for row in full["routes"] if "{record_id}" in row["path"]
+    )
 
 
 def test_event_metadata_is_the_live_declared_contract():

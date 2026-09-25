@@ -3,6 +3,7 @@ from aiohttp import web
 from gideon.core.config.loader import config_dir
 from gideon.core.http_request import RequestValidationError, read_json_body
 from gideon.http_errors import json_error
+
 from .lifestyle_profile import LifestyleProfileStore
 from .store import MeasurementError
 
@@ -18,10 +19,13 @@ def register(app, home=None, store=None):
             if request.query:
                 raise RequestValidationError("Lifestyle list accepts no query fields")
             if request.method == "POST":
-                response = web.json_response(service.create(await read_json_body(request)), status=201)
+                response = web.json_response(
+                    service.create(await read_json_body(request)), status=201
+                )
             else:
                 response = web.json_response({"records": service.list()})
-            response.headers["Cache-Control"] = "no-store"; return response
+            response.headers["Cache-Control"] = "no-store"
+            return response
         except MeasurementError as exc:
             return json_error(exc.code, message=str(exc), status=exc.status)
         except RequestValidationError as exc:
@@ -43,9 +47,14 @@ def register(app, home=None, store=None):
             return json_error("invalid_request", message=str(exc), status=400)
 
     async def export(_):
-        return web.json_response(service.export(), headers={"Cache-Control":"no-store"})
+        return web.json_response(
+            service.export(), headers={"Cache-Control": "no-store"}
+        )
 
     base = "/api/capabilities/wellbeing/lifestyle-profiles"
-    app.router.add_post(base, collection); app.router.add_get(base, collection)
+    app.router.add_post(base, collection)
+    app.router.add_get(base, collection)
     app.router.add_get(base + "/export", export)
-    app.router.add_get(base + "/{id}/history", member); app.router.add_get(base + "/{id}", member); app.router.add_put(base + "/{id}", member)
+    app.router.add_get(base + "/{id}/history", member)
+    app.router.add_get(base + "/{id}", member)
+    app.router.add_put(base + "/{id}", member)

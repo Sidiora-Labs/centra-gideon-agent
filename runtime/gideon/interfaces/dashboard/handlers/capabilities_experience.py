@@ -16,9 +16,15 @@ async def handle(request):
     try:
         if request.method == "GET":
             if resource == "stories":
-                result = {"story": store.story(key)} if key else {"stories": store.stories()}
+                result = (
+                    {"story": store.story(key)} if key else {"stories": store.stories()}
+                )
             else:
-                result = store.session(key) if key else {"sessions": store.sessions(request.query.get("story_id"))}
+                result = (
+                    store.session(key)
+                    if key
+                    else {"sessions": store.sessions(request.query.get("story_id"))}
+                )
         elif request.method == "DELETE":
             raw = request.query.get("revision", "")
             if not raw.isdecimal():
@@ -33,7 +39,9 @@ async def handle(request):
                 result = store.choose(key, body)
             else:
                 result = store.start(body)
-        return web.json_response(result, status=201 if request.method == "POST" and key is None else 200)
+        return web.json_response(
+            result, status=201 if request.method == "POST" and key is None else 200
+        )
     except NotFound as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except Conflict as exc:
@@ -45,31 +53,61 @@ async def handle(request):
 def register(app):
     if STORE not in app:
         app[STORE] = ExperienceStore()
-    from gideon.workspace.capabilities.experience.narration_http import register_narration
-    from gideon.workspace.capabilities.experience.navigation_http import register_navigation
+    from gideon.workspace.capabilities.experience.narration_http import (
+        register_narration,
+    )
+    from gideon.workspace.capabilities.experience.navigation_http import (
+        register_navigation,
+    )
+
     register_narration(app, app[STORE])
     register_navigation(app, app[STORE])
     from gideon.workspace.capabilities.experience.speech_http import register_speech
+
     register_speech(app, app[STORE])
     from gideon.workspace.capabilities.experience.ambient_http import register_ambient
+
     register_ambient(app, app[STORE])
     from gideon.workspace.capabilities.experience.avatar_http import register_avatars
+
     register_avatars(app, app[STORE])
-    from gideon.workspace.capabilities.experience.native_calls_http import register_native_calls
+    from gideon.workspace.capabilities.experience.native_calls_http import (
+        register_native_calls,
+    )
+
     register_native_calls(app, app[STORE])
-    from gideon.workspace.capabilities.experience.native_duplex_http import register_native_duplex
+    from gideon.workspace.capabilities.experience.native_duplex_http import (
+        register_native_duplex,
+    )
+
     register_native_duplex(app, app[STORE])
-    from gideon.workspace.capabilities.experience.world_engine_http import register_world_engine
+    from gideon.workspace.capabilities.experience.world_engine_http import (
+        register_world_engine,
+    )
+
     register_world_engine(app, app[STORE])
-    from gideon.workspace.capabilities.experience.world_foundations_http import register_world_foundations
+    from gideon.workspace.capabilities.experience.world_foundations_http import (
+        register_world_foundations,
+    )
+
     register_world_foundations(app, app[STORE])
-    from gideon.workspace.capabilities.experience.game_assets_http import register_game_assets
+    from gideon.workspace.capabilities.experience.game_assets_http import (
+        register_game_assets,
+    )
+
     register_game_assets(app, app[STORE])
     from gideon.workspace.capabilities.experience.worlds_http import register_worlds
+
     register_worlds(app, app[STORE])
-    from gideon.workspace.capabilities.experience.world_travel_http import register_world_travel
+    from gideon.workspace.capabilities.experience.world_travel_http import (
+        register_world_travel,
+    )
+
     register_world_travel(app, app[STORE])
-    from gideon.workspace.capabilities.experience.moltworld_http import register_moltworld
+    from gideon.workspace.capabilities.experience.moltworld_http import (
+        register_moltworld,
+    )
+
     register_moltworld(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource

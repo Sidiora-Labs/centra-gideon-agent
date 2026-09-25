@@ -1,24 +1,29 @@
 """Native identity operations with session policy and private-source boundaries."""
+
 import asyncio
 import json
 from pathlib import Path
+
 from jsonschema import Draft202012Validator
+
 from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
-from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
-from gideon.workspace.capabilities.identity.recipes import RecipeStore
-from gideon.workspace.capabilities.identity.bundle_extended import ExtendedBundleService as BundleService
+from gideon.workspace.capabilities.identity.bundle_extended import (
+    ExtendedBundleService as BundleService,
+)
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
-from gideon.workspace.capabilities.identity.progress import ProgressStore
-from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.identity.fidelity import FidelityStore
 from gideon.workspace.capabilities.identity.fidelity_generation import run_evaluation
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
+from gideon.workspace.capabilities.identity.goals import GoalStore
+from gideon.workspace.capabilities.identity.progress import ProgressStore
+from gideon.workspace.capabilities.identity.recipes import RecipeStore
 from gideon.workspace.capabilities.identity.store import ConflictError, StoryStore
+from gideon.workspace.capabilities.identity.tool_schema import CONTRACTS, definitions
 from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.identity.twin_enrichment import propose_enrichment
-from gideon.workspace.capabilities.identity.tool_schema import CONTRACTS, definitions
 
 
 class IdentityToolProvider(ToolProvider):
@@ -37,42 +42,84 @@ class IdentityToolProvider(ToolProvider):
         return definitions()
 
     async def invoke(self, tool_name, arguments):
-        contract = next((tool for tool in definitions() if tool.name == tool_name), None)
+        contract = next(
+            (tool for tool in definitions() if tool.name == tool_name), None
+        )
         if contract is None:
             return ToolResult(success=False, error="Unknown identity operation")
         session = get_current_session_key()
-        if not session.startswith(("dashboard:", "cli:")) or session_restrictions.is_temporary(session):
-            return ToolResult(success=False, error="Identity tools require a non-temporary private conversation")
+        if not session.startswith(
+            ("dashboard:", "cli:")
+        ) or session_restrictions.is_temporary(session):
+            return ToolResult(
+                success=False,
+                error="Identity tools require a non-temporary private conversation",
+            )
         if CONTRACTS[tool_name][3] and session_restrictions.is_restricted(session):
-            return ToolResult(success=False, error="This conversation cannot change persistent identity records")
-        problem = next(iter(Draft202012Validator(contract.parameters).iter_errors(arguments)), None)
+            return ToolResult(
+                success=False,
+                error="This conversation cannot change persistent identity records",
+            )
+        problem = next(
+            iter(Draft202012Validator(contract.parameters).iter_errors(arguments)), None
+        )
         if problem:
-            return ToolResult(success=False, error="Invalid identity arguments: " + problem.message,
-                              recovery_hints=["Use the tool's declared fields and current revision."])
+            return ToolResult(
+                success=False,
+                error="Invalid identity arguments: " + problem.message,
+                recovery_hints=["Use the tool's declared fields and current revision."],
+            )
         try:
             if tool_name.startswith("identity_guarded_"):
-                from gideon.workspace.capabilities.identity.guarded_recipes import GuardedRecipes
-                from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+                from gideon.integrations.inbox_providers.native_source import (
+                    get_dashboard_state,
+                )
+                from gideon.workspace.capabilities.identity.guarded_recipes import (
+                    GuardedRecipes,
+                )
+
                 service = GuardedRecipes(self.home, get_dashboard_state())
                 operation = tool_name.removeprefix("identity_guarded_")
                 fields = dict(arguments)
                 if operation in ("catalog", "save", "begin", "restore"):
                     fields["session_key"] = session
-                elif service.get_run(fields.get("run_id", fields.get("id")))["session_key"] != session:
+                elif (
+                    service.get_run(fields.get("run_id", fields.get("id")))[
+                        "session_key"
+                    ]
+                    != session
+                ):
                     raise ValueError("Guarded run belongs to another session")
-                result = service.get_run(**fields) if operation == "get_run" else await getattr(service, operation)(**fields)
+                result = (
+                    service.get_run(**fields)
+                    if operation == "get_run"
+                    else await getattr(service, operation)(**fields)
+                )
             elif tool_name.startswith("identity_lifecycle_"):
-                from gideon.workspace.capabilities.identity.lifecycle import LifecycleStore
-                from gideon.integrations.inbox_providers.native_source import get_dashboard_state
                 from gideon.automation.triggers.nudge import get_instance
+                from gideon.integrations.inbox_providers.native_source import (
+                    get_dashboard_state,
+                )
+                from gideon.workspace.capabilities.identity.lifecycle import (
+                    LifecycleStore,
+                )
+
                 store = LifecycleStore(self.home)
                 operation = tool_name.removeprefix("identity_lifecycle_")
-                result = await store.dispatch(**arguments, state=get_dashboard_state(), service=get_instance()) if operation == "dispatch" else getattr(store, operation)(**arguments)
+                result = (
+                    await store.dispatch(
+                        **arguments, state=get_dashboard_state(), service=get_instance()
+                    )
+                    if operation == "dispatch"
+                    else getattr(store, operation)(**arguments)
+                )
             elif tool_name == "identity_recipe_advance":
                 store = RecipeStore(self.home / "capabilities/identity/recipes.sqlite3")
                 result = await store.advance(**arguments, provider=self)
             elif tool_name == "identity_fidelity_run":
-                store = FidelityStore(self.home / "capabilities/identity/fidelity.sqlite3")
+                store = FidelityStore(
+                    self.home / "capabilities/identity/fidelity.sqlite3"
+                )
                 result = await run_evaluation(store, **arguments)
                 store._sources(result["case_snapshot"]["source_ids"])
             elif tool_name == "identity_twin_enrich":
@@ -80,23 +127,44 @@ class IdentityToolProvider(ToolProvider):
                 doc = self._public_document(store, arguments["document_id"])
                 if not doc["enabled"]:
                     raise ValueError("Enable the source before proposing questions")
-                result = {"status": "proposed", "text": await propose_enrichment(doc["text"]), "document_id": doc["id"]}
+                result = {
+                    "status": "proposed",
+                    "text": await propose_enrichment(doc["text"]),
+                    "document_id": doc["id"],
+                }
             else:
-                result = await asyncio.to_thread(self._execute, tool_name, dict(arguments))
-            return ToolResult(success=True, output=json.dumps(result, ensure_ascii=False, allow_nan=False),
-                              metadata={"operation": tool_name})
+                result = await asyncio.to_thread(
+                    self._execute, tool_name, dict(arguments)
+                )
+            return ToolResult(
+                success=True,
+                output=json.dumps(result, ensure_ascii=False, allow_nan=False),
+                metadata={"operation": tool_name},
+            )
         except ConflictError as error:
-            return ToolResult(success=False, error=str(error), metadata={"status": "conflict"},
-                              recovery_hints=["Reload the current record and reconcile your intended change."])
+            return ToolResult(
+                success=False,
+                error=str(error),
+                metadata={"status": "conflict"},
+                recovery_hints=[
+                    "Reload the current record and reconcile your intended change."
+                ],
+            )
         except (ValueError, TypeError, KeyError) as error:
             return ToolResult(success=False, error=str(error))
         except Exception:
-            return ToolResult(success=False, error="Identity operation unavailable; no completion is claimed",
-                              metadata={"status": "unavailable"})
+            return ToolResult(
+                success=False,
+                error="Identity operation unavailable; no completion is claimed",
+                metadata={"status": "unavailable"},
+            )
 
     @staticmethod
     def _public_document(store, identifier):
-        doc = next((row for row in store.snapshot()["documents"] if row["id"] == identifier), None)
+        doc = next(
+            (row for row in store.snapshot()["documents"] if row["id"] == identifier),
+            None,
+        )
         if doc is None or doc["private"]:
             raise KeyError("Accessible identity document not found")
         return doc
@@ -104,15 +172,23 @@ class IdentityToolProvider(ToolProvider):
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
         if name.startswith("identity_goal_plan_"):
-            return getattr(GoalPlanStore(directory / "goals.sqlite3"), name.removeprefix("identity_goal_plan_"))(**arguments)
+            return getattr(
+                GoalPlanStore(directory / "goals.sqlite3"),
+                name.removeprefix("identity_goal_plan_"),
+            )(**arguments)
         if name.startswith("identity_recipe_"):
-            return getattr(RecipeStore(directory / "recipes.sqlite3"), name.removeprefix("identity_recipe_"))(**arguments)
+            return getattr(
+                RecipeStore(directory / "recipes.sqlite3"),
+                name.removeprefix("identity_recipe_"),
+            )(**arguments)
         if name == "identity_bundle_inventory":
             return BundleService(self.home).inventory()
         if name.startswith("identity_continuity_"):
             if name == "identity_continuity_append_anchor":
                 arguments["source"] = "agent_explicit"
-            return getattr(ContinuityStore(self.home), name.removeprefix("identity_continuity_"))(**arguments)
+            return getattr(
+                ContinuityStore(self.home), name.removeprefix("identity_continuity_")
+            )(**arguments)
         if name.startswith("identity_progress_"):
             store = ProgressStore(directory / "progress.sqlite3")
             return getattr(store, name.removeprefix("identity_progress_"))(**arguments)
@@ -124,13 +200,17 @@ class IdentityToolProvider(ToolProvider):
         if name.startswith("identity_fidelity_"):
             store = FidelityStore(directory / "fidelity.sqlite3")
             operation = name.removeprefix("identity_fidelity_")
-            result = getattr(store, "record_observation" if operation == "observe" else operation)(**arguments)
+            result = getattr(
+                store, "record_observation" if operation == "observe" else operation
+            )(**arguments)
+
             def visible(row):
                 try:
                     store._sources(row.get("case_snapshot", row)["source_ids"])
                     return True
                 except ValueError:
                     return False
+
             if isinstance(result, list):
                 return [row for row in result if visible(row)]
             if not visible(result):
@@ -149,13 +229,24 @@ class IdentityToolProvider(ToolProvider):
         operation = name.removeprefix("identity_twin_")
         if operation in ("save_document", "delete_document") and arguments.get("id"):
             self._public_document(store, arguments["id"])
-        result = store.snapshot() if operation == "get" else getattr(store, "compose" if operation == "context" else operation)(**arguments)
+        result = (
+            store.snapshot()
+            if operation == "get"
+            else getattr(store, "compose" if operation == "context" else operation)(
+                **arguments
+            )
+        )
         if "documents" in result:
-            result = {**result, "documents": [doc for doc in result["documents"] if not doc["private"]]}
+            result = {
+                **result,
+                "documents": [doc for doc in result["documents"] if not doc["private"]],
+            }
         return result
 
 
 def create_provider(config=None):
     if config:
-        raise ValueError("Identity tools use the runtime home; custom settings are not supported")
+        raise ValueError(
+            "Identity tools use the runtime home; custom settings are not supported"
+        )
     return IdentityToolProvider()

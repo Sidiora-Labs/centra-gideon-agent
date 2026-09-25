@@ -4,19 +4,27 @@ import asyncio
 import json
 import os
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.handlers.capabilities_knowledge import (
+    register as register_sources,
+)
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_ideas import register
-from gideon.interfaces.dashboard.handlers.capabilities_knowledge import register as register_sources
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 async def main():
     home = Path(os.environ["GIDEON_HOME"])
     home.mkdir(parents=True, exist_ok=True)
-    (home / 'config.json').write_text(json.dumps({'knowledge': {'vault_mode': 'two_way', 'vault_path': 'knowledge-vault'}}))
+    (home / "config.json").write_text(
+        json.dumps(
+            {"knowledge": {"vault_mode": "two_way", "vault_path": "knowledge-vault"}}
+        )
+    )
     store = KnowledgeStore(str(home / "knowledge.db"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
@@ -28,7 +36,9 @@ async def main():
     await runner.setup()
     listener = web.TCPSite(runner, "127.0.0.1", 0)
     await listener.start()
-    print(json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True)
+    print(
+        json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True
+    )
     try:
         await asyncio.Event().wait()
     finally:

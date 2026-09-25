@@ -1,4 +1,5 @@
 """Canonical current life-story replication without request or revision ledgers."""
+
 from __future__ import annotations
 
 import json
@@ -10,13 +11,18 @@ from pathlib import Path
 from gideon.operations.durability import conflicts, inventory
 from gideon.workspace.capabilities.identity.store import StoryStore
 
-
 SCOPE = "identity.stories"
 ENTRY_ID = "identity.life_stories"
 ENTRIES = (ENTRY_ID,)
 _ID = re.compile(r"[0-9a-f]{32}")
 _FIELDS = {
-    "id", "prompt", "theme", "text", "parent_id", "created_at", "updated_at",
+    "id",
+    "prompt",
+    "theme",
+    "text",
+    "parent_id",
+    "created_at",
+    "updated_at",
     "revision",
 }
 _RESTORABLE = {"prompt", "theme", "text", "parent_id"}
@@ -55,14 +61,27 @@ def validate_record(value, entity_id=None):
     if not isinstance(value, dict) or set(value) != _FIELDS:
         raise ValueError("Invalid or private identity story")
     identity = value.get("id")
-    if not isinstance(identity, str) or _ID.fullmatch(identity) is None or (entity_id is not None and identity != entity_id):
+    if (
+        not isinstance(identity, str)
+        or _ID.fullmatch(identity) is None
+        or (entity_id is not None and identity != entity_id)
+    ):
         raise ValueError("Identity story identity changed")
     for field, limit in (("prompt", 4000), ("theme", 200), ("text", 100000)):
         content = value.get(field)
-        if not isinstance(content, str) or not content.strip() or len(content) > limit or "\x00" in content:
+        if (
+            not isinstance(content, str)
+            or not content.strip()
+            or len(content) > limit
+            or "\x00" in content
+        ):
             raise ValueError(f"Invalid identity story {field}")
     parent = value.get("parent_id")
-    if parent is not None and (not isinstance(parent, str) or _ID.fullmatch(parent) is None or parent == identity):
+    if parent is not None and (
+        not isinstance(parent, str)
+        or _ID.fullmatch(parent) is None
+        or parent == identity
+    ):
         raise ValueError("Invalid identity story parent")
     if type(value.get("revision")) is not int or not 1 <= value["revision"] <= 2**31:
         raise ValueError("Invalid identity story revision")
@@ -99,8 +118,13 @@ def _validate_rows(rows):
 
 
 def validate_entries(entries):
-    if (not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict)
-            or set(entries[0]) != {"entry_id", "rows"} or entries[0]["entry_id"] != ENTRY_ID):
+    if (
+        not isinstance(entries, list)
+        or len(entries) != 1
+        or not isinstance(entries[0], dict)
+        or set(entries[0]) != {"entry_id", "rows"}
+        or entries[0]["entry_id"] != ENTRY_ID
+    ):
         raise ValueError("Invalid identity story replication coverage")
     _validate_rows(entries[0]["rows"])
 
@@ -128,7 +152,11 @@ def _depths(stories):
 
 
 def write_row(home, entry_id, row, entity_id):
-    if entry_id != ENTRY_ID or not isinstance(entity_id, str) or _ID.fullmatch(entity_id) is None:
+    if (
+        entry_id != ENTRY_ID
+        or not isinstance(entity_id, str)
+        or _ID.fullmatch(entity_id) is None
+    ):
         raise ValueError("Unknown identity story replication entry")
     store = _story_store(home)
     current = {story["id"]: story for story in store.list()}
@@ -138,11 +166,17 @@ def write_row(home, entry_id, row, entity_id):
         with store._db() as database:
             database.execute("DELETE FROM stories WHERE id=?", (entity_id,))
         return
-    if not isinstance(row, dict) or set(row) != {"id", "data"} or row["id"] != entity_id:
+    if (
+        not isinstance(row, dict)
+        or set(row) != {"id", "data"}
+        or row["id"] != entity_id
+    ):
         raise ValueError("Identity story row identity changed")
     validate_record(row["data"], entity_id)
     proposed = {**current, entity_id: row["data"]}
-    _validate_rows([{"id": identity, "data": data} for identity, data in proposed.items()])
+    _validate_rows(
+        [{"id": identity, "data": data} for identity, data in proposed.items()]
+    )
     with store._db() as database:
         database.execute(
             "INSERT INTO stories(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
@@ -152,10 +186,16 @@ def write_row(home, entry_id, row, entity_id):
 
 def _conflict(entity_id, ancestor, local, remote, now):
     return conflicts.ConflictRecord(
-        entry_id=ENTRY_ID, entity_id=entity_id, domain=inventory.DOMAIN_MEMORY,
-        surface=conflicts.surface_for_domain(inventory.DOMAIN_MEMORY), ancestor_sha=ancestor,
-        local_sha=conflicts.row_sha(local), remote_sha=conflicts.row_sha(remote),
-        local_row=local, remote_row=remote, detected_at=now,
+        entry_id=ENTRY_ID,
+        entity_id=entity_id,
+        domain=inventory.DOMAIN_MEMORY,
+        surface=conflicts.surface_for_domain(inventory.DOMAIN_MEMORY),
+        ancestor_sha=ancestor,
+        local_sha=conflicts.row_sha(local),
+        remote_sha=conflicts.row_sha(remote),
+        local_row=local,
+        remote_row=remote,
+        detected_at=now,
     )
 
 
@@ -177,10 +217,15 @@ def apply_rows(home, entry_id, remote_rows, ancestors, queue, now):
         if local_sha == remote_sha:
             continue
         if ancestor and local_sha != ancestor and remote_sha != ancestor:
-            pending.append(_conflict(
-                entity_id, ancestor, local_row or {"id": entity_id, "deleted_at": now},
-                remote_row or {"id": entity_id, "deleted_at": now}, now,
-            ))
+            pending.append(
+                _conflict(
+                    entity_id,
+                    ancestor,
+                    local_row or {"id": entity_id, "deleted_at": now},
+                    remote_row or {"id": entity_id, "deleted_at": now},
+                    now,
+                )
+            )
         elif remote_row is None:
             if ancestor and local_sha == ancestor:
                 final.pop(entity_id, None)
@@ -194,7 +239,7 @@ def apply_rows(home, entry_id, remote_rows, ancestors, queue, now):
             final[entity_id] = remote_row
             upserts[entity_id] = remote_row
             updated += 1
-    final_stories = _validate_rows(list(final.values()))
+    _validate_rows(list(final.values()))
     remote_depths = _depths(remote_stories) if remote_stories else {}
     local_stories = {row["id"]: row["data"] for row in local_rows}
     local_depths = _depths(local_stories) if local_stories else {}
@@ -210,10 +255,20 @@ def apply_rows(home, entry_id, remote_rows, ancestors, queue, now):
 def restore_fields(home, record_id, fields, now):
     queue = conflicts.ConflictQueue(home)
     record = queue.get(record_id)
-    if record is None or record.status != conflicts.STATUS_NEEDS_REVIEW or record.entry_id != ENTRY_ID:
+    if (
+        record is None
+        or record.status != conflicts.STATUS_NEEDS_REVIEW
+        or record.entry_id != ENTRY_ID
+    ):
         raise ValueError("Identity story conflict is not available")
-    if (not fields or len(fields) > len(_RESTORABLE) or len(set(fields)) != len(fields)
-            or any(not isinstance(field, str) or field not in _RESTORABLE for field in fields)):
+    if (
+        not fields
+        or len(fields) > len(_RESTORABLE)
+        or len(set(fields)) != len(fields)
+        or any(
+            not isinstance(field, str) or field not in _RESTORABLE for field in fields
+        )
+    ):
         raise ValueError("Invalid identity story conflict fields")
     local, remote = record.local_row.get("data"), record.remote_row.get("data")
     if not isinstance(local, dict) or not isinstance(remote, dict):
@@ -225,12 +280,21 @@ def restore_fields(home, record_id, fields, now):
     merged["updated_at"] = now
     current = {row["id"]: row["data"] for row in read_rows(home, ENTRY_ID)}
     current[record.entity_id] = merged
-    _validate_rows([{"id": identity, "data": data} for identity, data in current.items()])
-    write_row(home, ENTRY_ID, {"id": record.entity_id, "data": merged}, record.entity_id)
+    _validate_rows(
+        [{"id": identity, "data": data} for identity, data in current.items()]
+    )
+    write_row(
+        home, ENTRY_ID, {"id": record.entity_id, "data": merged}, record.entity_id
+    )
     record.status = conflicts.STATUS_RESOLVED
     record.resolution = "merge_fields:" + ",".join(fields)
     record.resolved_at = now
     if not queue.update(record):
         raise RuntimeError("Identity story conflict queue update failed")
-    return {"resolved": True, "id": record.id, "entry_id": ENTRY_ID,
-            "entity_id": record.entity_id, "fields": fields}
+    return {
+        "resolved": True,
+        "id": record.id,
+        "entry_id": ENTRY_ID,
+        "entity_id": record.entity_id,
+        "fields": fields,
+    }

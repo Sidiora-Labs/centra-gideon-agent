@@ -1065,7 +1065,9 @@ class ModelTypeHandler(_TypeHandler):
             MultiInstanceLocalProvider,
         )
         from gideon.integrations.local_models.registry import get_provider as get_local
-        from gideon.integrations.local_models.registry import is_local_model_provider
+        from gideon.integrations.local_models.registry import (
+            is_local_model_provider,
+        )
         from gideon.integrations.local_models.registry import (
             register_provider as reg_local,
         )

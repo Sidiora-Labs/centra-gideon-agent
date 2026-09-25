@@ -22,8 +22,14 @@ def payload(**changes):
         "reported_sex": "male",
         "sex_source": "Patient report",
         "smoking_status": "never",
-        "diet_quality": {"value": 8, "scale": {"minimum": 0, "maximum": 10, "label": "0–10 intake"}},
-        "stress": {"value": 2, "scale": {"minimum": 0, "maximum": 10, "label": "0–10 intake"}},
+        "diet_quality": {
+            "value": 8,
+            "scale": {"minimum": 0, "maximum": 10, "label": "0–10 intake"},
+        },
+        "stress": {
+            "value": 2,
+            "scale": {"minimum": 0, "maximum": 10, "label": "0–10 intake"},
+        },
         "reported_bmi": 24.2,
         "condition_labels": ["Seasonal allergies"],
         "reported_daily_alcohol": None,
@@ -42,7 +48,9 @@ async def client(home):
 
 
 async def authenticate(connection):
-    response = await connection.get("/session?token=" + generate_token("lifestyle-owner"))
+    response = await connection.get(
+        "/session?token=" + generate_token("lifestyle-owner")
+    )
     assert response.status == 200
 
 
@@ -69,7 +77,10 @@ def test_authenticated_author_correct_reload_export_and_home_isolation(tmp_path)
             assert await empty.json() == {"records": []}
             resource = BASE + "/" + created["id"]
             hidden = await second.get(resource)
-            assert hidden.status == 404 and (await hidden.json())["error"]["code"] == "not_found"
+            assert (
+                hidden.status == 404
+                and (await hidden.json())["error"]["code"] == "not_found"
+            )
             correction = {
                 "request_id": "correct-1",
                 "revision": 1,
@@ -84,13 +95,24 @@ def test_authenticated_author_correct_reload_export_and_home_isolation(tmp_path)
             assert updated["observed_at"] == created["observed_at"]
             assert updated["source"] == created["source"]
             versions = await first.get(resource + "/history")
-            assert versions.status == 200 and (await versions.json())["history"] == [created, updated]
-            stale = await first.put(resource, json={**correction, "request_id": "stale", "revision": 1})
-            assert stale.status == 409 and (await stale.json())["error"]["code"] == "conflict"
+            assert versions.status == 200 and (await versions.json())["history"] == [
+                created,
+                updated,
+            ]
+            stale = await first.put(
+                resource, json={**correction, "request_id": "stale", "revision": 1}
+            )
+            assert (
+                stale.status == 409
+                and (await stale.json())["error"]["code"] == "conflict"
+            )
             exported = await first.get(BASE + "/export")
             document = await exported.json()
             assert exported.status == 200
-            assert document["records"] == [updated] and document["history"] == [created, updated]
+            assert document["records"] == [updated] and document["history"] == [
+                created,
+                updated,
+            ]
             await first.close()
             first = await client(tmp_path / "first")
             await authenticate(first)

@@ -1,15 +1,20 @@
 """Conservative alerts projected from canonical personal-domain evidence."""
+
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 from gideon.core.config.loader import config_dir
-from gideon.integrations.inbox import InboxStore, emit_attention_item, resolve_attention_items
+from gideon.integrations.inbox import (
+    InboxStore,
+    emit_attention_item,
+    resolve_attention_items,
+)
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
 
@@ -52,7 +57,9 @@ def readiness(home: Path) -> list[dict[str, str]]:
                         )
                     }
                     required = "goals" if name == "goals" else "revisions"
-                    healthy = connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                    healthy = (
+                        connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                    )
                     state = "ready" if required in tables and healthy else "unavailable"
                 finally:
                     connection.close()
@@ -94,7 +101,9 @@ def _additional_conditions(home: Path, now: datetime) -> list[dict]:
         )
 
     if source(home, "capabilities/communications/people.sqlite3").exists():
-        for row in report(PeopleStore(home / "capabilities/communications"), now=now)["threads"]:
+        for row in report(PeopleStore(home / "capabilities/communications"), now=now)[
+            "threads"
+        ]:
             if row["state"] == "unanswered":
                 evidence = {
                     key: row[key]
@@ -135,14 +144,18 @@ def _additional_conditions(home: Path, now: datetime) -> list[dict]:
     ]
 
     async def probes():
-        return [(probe.id, await probe.run(DoctorContext(home=home))) for probe in selected]
+        return [
+            (probe.id, await probe.run(DoctorContext(home=home))) for probe in selected
+        ]
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         outcomes = pool.submit(lambda: asyncio.run(probes())).result(timeout=15)
     for identifier, outcome in outcomes:
         if outcome.ok:
             continue
-        if identifier == "memory-pipeline.freshness" and outcome.evidence.get("staging_log"):
+        if identifier == "memory-pipeline.freshness" and outcome.evidence.get(
+            "staging_log"
+        ):
             keys = ("passes", "errors", "all_ok_streak", "produced", "staging_backlog")
             add(
                 "learning_health",
@@ -153,7 +166,10 @@ def _additional_conditions(home: Path, now: datetime) -> list[dict]:
             )
         elif identifier == "crashes.recent":
             for row in outcome.evidence.get("crashes", []):
-                if row.get("ts") is not None and now.timestamp() - 7 * 86400 <= row["ts"] <= now.timestamp():
+                if (
+                    row.get("ts") is not None
+                    and now.timestamp() - 7 * 86400 <= row["ts"] <= now.timestamp()
+                ):
                     add(
                         "recorded_crash",
                         row["file"],
@@ -193,7 +209,9 @@ def conditions(home: Path, now: datetime | None = None) -> list[dict]:
         for plan in store.list_plans():
             summary = store.summary(plan["id"], days=7, as_of=now.isoformat())
             missing = [
-                row["date"] for row in summary["days"] if row["scheduled"] and row["status"] is None
+                row["date"]
+                for row in summary["days"]
+                if row["scheduled"] and row["status"] is None
             ]
             if len(missing) >= 3:
                 rows.append(
@@ -229,7 +247,9 @@ def scan(state, store: InboxStore | None = None, now: datetime | None = None) ->
     for item in list(store.items.values()):
         fingerprint = item.refs.get("domain_fingerprint")
         if fingerprint and fingerprint not in current:
-            resolve_attention_items(state, {"domain_fingerprint": fingerprint}, store=store)
+            resolve_attention_items(
+                state, {"domain_fingerprint": fingerprint}, store=store
+            )
     for row in rows:
         if row["fingerprint"] not in existing:
             emit_attention_item(

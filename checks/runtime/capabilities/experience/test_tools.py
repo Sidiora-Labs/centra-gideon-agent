@@ -11,8 +11,10 @@ from gideon.interfaces.dashboard.handlers.capabilities_experience import STORE, 
 from gideon.sdk.tool import RiskLevel, ToolProvider
 from gideon.workspace.capabilities.experience import ExperienceStore
 from gideon.workspace.capabilities.experience.narration_http import JOBS
-from gideon.workspace.capabilities.experience.tools import ExperienceTools, create_provider
-
+from gideon.workspace.capabilities.experience.tools import (
+    ExperienceTools,
+    create_provider,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -30,18 +32,29 @@ async def call(provider, name, arguments):
 
 
 def authored():
-    return {"title": "Forked road", "start_node": "fork", "nodes": [
-        {"id": "fork", "text": "Choose a road.", "kind": "scene", "choices": [
-            {"id": "left", "label": "Left", "target": "orchard"},
-            {"id": "right", "label": "Right", "target": "lake"},
-        ]},
-        {"id": "orchard", "text": "An orchard.", "kind": "ending", "choices": []},
-        {"id": "lake", "text": "A lake.", "kind": "ending", "choices": []},
-    ]}
+    return {
+        "title": "Forked road",
+        "start_node": "fork",
+        "nodes": [
+            {
+                "id": "fork",
+                "text": "Choose a road.",
+                "kind": "scene",
+                "choices": [
+                    {"id": "left", "label": "Left", "target": "orchard"},
+                    {"id": "right", "label": "Right", "target": "lake"},
+                ],
+            },
+            {"id": "orchard", "text": "An orchard.", "kind": "ending", "choices": []},
+            {"id": "lake", "text": "A lake.", "kind": "ending", "choices": []},
+        ],
+    }
 
 
 @pytest.mark.asyncio
-async def test_native_manifest_loads_registers_invokes_and_disables_real_provider(tmp_path, monkeypatch):
+async def test_native_manifest_loads_registers_invokes_and_disables_real_provider(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     path = ROOT / "runtime/gideon/extensions/apps/native/gideon-experience/app.json"
     manifest = AppManifest.from_json_file(path)
@@ -64,7 +77,9 @@ async def test_native_manifest_loads_registers_invokes_and_disables_real_provide
 
 
 @pytest.mark.asyncio
-async def test_static_tool_schemas_preserve_approval_and_do_not_create_storage(provider, tmp_path):
+async def test_static_tool_schemas_preserve_approval_and_do_not_create_storage(
+    provider, tmp_path
+):
     definitions = await provider.list_tools()
     assert len(definitions) == 29
     assert len({tool.name for tool in definitions}) == 29
@@ -86,34 +101,85 @@ async def test_static_tool_schemas_preserve_approval_and_do_not_create_storage(p
 
 
 @pytest.mark.asyncio
-async def test_tools_author_update_play_both_branches_and_preserve_source_after_delete(provider):
+async def test_tools_author_update_play_both_branches_and_preserve_source_after_delete(
+    provider,
+):
     story = (await call(provider, "story_create", {"story": authored()}))["story"]
     key = story["id"]
     assert (await call(provider, "story_get", {"id": key}))["story"] == story
     assert (await call(provider, "story_list", {}))["stories"] == [story]
-    first = await call(provider, "session_start", {"story_id": key, "story_revision": 1, "request_id": "first"})
-    second = await call(provider, "session_start", {"story_id": key, "story_revision": 1, "request_id": "second"})
-    assert (await call(provider, "session_list", {}))["sessions"][0]["id"] == second["session"]["id"]
-    left = await call(provider, "session_choose", {"id": first["session"]["id"], "revision": 1, "request_id": "left", "choice_id": "left"})
-    right = await call(provider, "session_choose", {"id": second["session"]["id"], "revision": 1, "request_id": "right", "choice_id": "right"})
+    first = await call(
+        provider,
+        "session_start",
+        {"story_id": key, "story_revision": 1, "request_id": "first"},
+    )
+    second = await call(
+        provider,
+        "session_start",
+        {"story_id": key, "story_revision": 1, "request_id": "second"},
+    )
+    assert (await call(provider, "session_list", {}))["sessions"][0]["id"] == second[
+        "session"
+    ]["id"]
+    left = await call(
+        provider,
+        "session_choose",
+        {
+            "id": first["session"]["id"],
+            "revision": 1,
+            "request_id": "left",
+            "choice_id": "left",
+        },
+    )
+    right = await call(
+        provider,
+        "session_choose",
+        {
+            "id": second["session"]["id"],
+            "revision": 1,
+            "request_id": "right",
+            "choice_id": "right",
+        },
+    )
     assert left["node"]["text"] == "An orchard."
     assert right["node"]["text"] == "A lake."
     assert left["session"]["history"][0]["choice_id"] == "left"
-    edited = await call(provider, "story_update", {"id": key, "story": {**authored(), "title": "Edited road", "revision": 1}})
+    edited = await call(
+        provider,
+        "story_update",
+        {"id": key, "story": {**authored(), "title": "Edited road", "revision": 1}},
+    )
     assert edited["story"]["revision"] == 2
-    assert await call(provider, "story_delete", {"id": key, "revision": 2}) == {"deleted": True}
+    assert await call(provider, "story_delete", {"id": key, "revision": 2}) == {
+        "deleted": True
+    }
     assert await call(provider, "story_list", {}) == {"stories": []}
     assert await call(provider, "session_get", {"id": first["session"]["id"]}) == left
-    assert await call(ExperienceTools(provider.store), "session_get", {"id": second["session"]["id"]}) == right
+    assert (
+        await call(
+            ExperienceTools(provider.store),
+            "session_get",
+            {"id": second["session"]["id"]},
+        )
+        == right
+    )
 
 
 @pytest.mark.asyncio
-async def test_tool_and_dashboard_share_narration_lifecycle_without_restart_recovery(provider):
+async def test_tool_and_dashboard_share_narration_lifecycle_without_restart_recovery(
+    provider,
+):
     app = web.Application()
     app[STORE] = provider.store
     register(app)
     story = (await call(provider, "story_create", {"story": authored()}))["story"]
-    session = (await call(provider, "session_start", {"story_id": story["id"], "story_revision": 1, "request_id": "start"}))["session"]
+    session = (
+        await call(
+            provider,
+            "session_start",
+            {"story_id": story["id"], "story_revision": 1, "request_id": "start"},
+        )
+    )["session"]
     queued = app[JOBS].start(session["id"], {"revision": 1, "request_id": "dashboard"})
     assert queued["status"] == "queued"
     assert provider.jobs is app[JOBS]
@@ -122,17 +188,29 @@ async def test_tool_and_dashboard_share_narration_lifecycle_without_restart_reco
     cancelled = await call(provider, "narration_cancel", {"id": queued["id"]})
     assert cancelled["narration"]["status"] == "cancelled"
     assert app[JOBS].get(queued["id"])["status"] == "cancelled"
-    created = await call(provider, "narration_start", {"id": session["id"], "revision": 1, "request_id": "tool"})
+    created = await call(
+        provider,
+        "narration_start",
+        {"id": session["id"], "revision": 1, "request_id": "tool"},
+    )
     assert created["narration"]["story_revision"] == 1
     assert created["narration"]["node_id"] == "fork"
-    assert (await call(provider, "narration_cancel", {"id": created["narration"]["id"]}))["narration"]["status"] == "cancelled"
+    assert (
+        await call(provider, "narration_cancel", {"id": created["narration"]["id"]})
+    )["narration"]["status"] == "cancelled"
     assert provider.jobs.artifacts.list() == []
     await provider.jobs.close()
 
 
 @pytest.mark.asyncio
 async def test_unknown_and_malformed_operations_do_not_mutate(provider):
-    for name, body in [("story_list", {}), ("experience_unknown", {}), ("experience_story_list", {"home": "/tmp/elsewhere"}), ("experience_story_create", []), ("experience_session_start", {})]:
+    for name, body in [
+        ("story_list", {}),
+        ("experience_unknown", {}),
+        ("experience_story_list", {"home": "/tmp/elsewhere"}),
+        ("experience_story_create", []),
+        ("experience_session_start", {}),
+    ]:
         result = await provider.invoke(name, body)
         assert not result.success
         assert result.error
@@ -141,7 +219,9 @@ async def test_unknown_and_malformed_operations_do_not_mutate(provider):
     missing = await provider.invoke("experience_story_get", {"id": "missing"})
     assert not missing.success
     assert missing.metadata == {"kind": "NotFound"}
-    malformed = await provider.invoke("experience_story_create", {"story": {"title": "Incomplete"}})
+    malformed = await provider.invoke(
+        "experience_story_create", {"story": {"title": "Incomplete"}}
+    )
     assert not malformed.success
     assert malformed.metadata == {"kind": "ValueError"}
 
@@ -152,10 +232,19 @@ async def test_stale_edits_and_request_conflicts_are_returned_to_agent(provider)
     start = {"story_id": story["id"], "story_revision": 1, "request_id": "open"}
     opened = await call(provider, "session_start", start)
     assert await call(provider, "session_start", start) == opened
-    await call(provider, "story_update", {"id": story["id"], "story": {**authored(), "revision": 1}})
-    result = await provider.invoke("experience_story_update", {"id": story["id"], "story": {**authored(), "revision": 1}})
+    await call(
+        provider,
+        "story_update",
+        {"id": story["id"], "story": {**authored(), "revision": 1}},
+    )
+    result = await provider.invoke(
+        "experience_story_update",
+        {"id": story["id"], "story": {**authored(), "revision": 1}},
+    )
     assert not result.success
     assert result.metadata == {"kind": "Conflict"}
-    result = await provider.invoke("experience_session_start", {**start, "story_revision": 2})
+    result = await provider.invoke(
+        "experience_session_start", {**start, "story_revision": 2}
+    )
     assert not result.success
     assert "different input" in result.error

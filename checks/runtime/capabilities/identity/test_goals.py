@@ -1,22 +1,47 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+
+from gideon.integrations.mcp_core import (
+    reset_current_session_key,
+    set_current_session_key,
+)
+from gideon.interfaces.dashboard.handlers.capabilities_identity_goals import (
+    PREFIX,
+    register,
+)
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.identity.store import ConflictError
 from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
-from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
-from gideon.interfaces.dashboard.handlers.capabilities_identity_goals import register, PREFIX
 
 
 def goal(store, **changes):
-    return store.save_goal(**{"title": "Learn astronomy", "description": "Understand the sky", "target_date": "2027-01-01", "request_id": "goal", **changes})
+    return store.save_goal(
+        **{
+            "title": "Learn astronomy",
+            "description": "Understand the sky",
+            "target_date": "2027-01-01",
+            "request_id": "goal",
+            **changes,
+        }
+    )
 
 
 def session(store, g, **changes):
-    return store.save_session(**{"goal_id": g["id"], "title": "Observe stars", "start_at": "2026-10-01T21:00:00+02:00", "end_at": "2026-10-01T22:00:00+02:00", "request_id": "session", **changes})
+    return store.save_session(
+        **{
+            "goal_id": g["id"],
+            "title": "Observe stars",
+            "start_at": "2026-10-01T21:00:00+02:00",
+            "end_at": "2026-10-01T22:00:00+02:00",
+            "request_id": "session",
+            **changes,
+        }
+    )
 
 
 def test_goal_and_session_persistence_timezone_and_replay(tmp_path):
@@ -48,12 +73,27 @@ def test_goal_and_session_persistence_timezone_and_replay(tmp_path):
 def test_revisions_replay_and_stale_mutation(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite3")
     original = goal(store)
-    changed = goal(store, id=original["id"], expected_revision=1, request_id="edit", description="New reason")
+    changed = goal(
+        store,
+        id=original["id"],
+        expected_revision=1,
+        request_id="edit",
+        description="New reason",
+    )
     assert changed["revision"] == 2
     assert changed["description"] == "New reason"
     assert changed["created_at"] == original["created_at"]
     assert changed["updated_at"] >= original["updated_at"]
-    assert goal(store, id=original["id"], expected_revision=1, request_id="edit", description="New reason") == changed
+    assert (
+        goal(
+            store,
+            id=original["id"],
+            expected_revision=1,
+            request_id="edit",
+            description="New reason",
+        )
+        == changed
+    )
     with pytest.raises(ConflictError, match="reload"):
         goal(store, id=original["id"], expected_revision=1, request_id="stale")
     assert store.get_goal(original["id"]) == changed
@@ -67,14 +107,35 @@ def test_overlap_is_global_atomic_and_adjacent_allowed(tmp_path):
     second = goal(store, title="Exercise", request_id="second")
     original = session(store, first)
     with pytest.raises(ConflictError, match="overlaps"):
-        session(store, second, request_id="overlap", start_at="2026-10-01T19:30:00Z", end_at="2026-10-01T21:00:00Z")
-    adjacent = session(store, second, request_id="adjacent", start_at="2026-10-01T20:00:00Z", end_at="2026-10-01T21:00:00Z")
+        session(
+            store,
+            second,
+            request_id="overlap",
+            start_at="2026-10-01T19:30:00Z",
+            end_at="2026-10-01T21:00:00Z",
+        )
+    adjacent = session(
+        store,
+        second,
+        request_id="adjacent",
+        start_at="2026-10-01T20:00:00Z",
+        end_at="2026-10-01T21:00:00Z",
+    )
     assert store.list_sessions() == [original, adjacent]
-    same = session(store, first, id=original["id"], expected_revision=1, request_id="rename", title="Observe Jupiter")
+    same = session(
+        store,
+        first,
+        id=original["id"],
+        expected_revision=1,
+        request_id="rename",
+        title="Observe Jupiter",
+    )
     assert same["revision"] == 2
     assert same["title"] == "Observe Jupiter"
     with pytest.raises(ConflictError, match="reload"):
-        session(store, first, id=original["id"], expected_revision=1, request_id="stale")
+        session(
+            store, first, id=original["id"], expected_revision=1, request_id="stale"
+        )
 
 
 def test_resolve_sessions_before_goal_completion_and_reopen(tmp_path):
@@ -82,10 +143,29 @@ def test_resolve_sessions_before_goal_completion_and_reopen(tmp_path):
     g = goal(store)
     s = session(store, g)
     with pytest.raises(ConflictError, match="Resolve"):
-        goal(store, id=g["id"], expected_revision=1, status="completed", request_id="complete")
-    resolved = session(store, g, id=s["id"], expected_revision=1, status="completed", request_id="resolve")
+        goal(
+            store,
+            id=g["id"],
+            expected_revision=1,
+            status="completed",
+            request_id="complete",
+        )
+    resolved = session(
+        store,
+        g,
+        id=s["id"],
+        expected_revision=1,
+        status="completed",
+        request_id="resolve",
+    )
     assert resolved["status"] == "completed"
-    closed = goal(store, id=g["id"], expected_revision=1, status="completed", request_id="complete")
+    closed = goal(
+        store,
+        id=g["id"],
+        expected_revision=1,
+        status="completed",
+        request_id="complete",
+    )
     assert closed["status"] == "completed"
     with pytest.raises(ConflictError, match="active goals"):
         session(store, g, request_id="again")
@@ -93,17 +173,35 @@ def test_resolve_sessions_before_goal_completion_and_reopen(tmp_path):
     assert reopened["status"] == "active"
     scheduled = session(store, g, request_id="again")
     assert scheduled["status"] == "scheduled"
-    cancelled = session(store, g, id=scheduled["id"], expected_revision=1, status="cancelled", request_id="cancel")
+    cancelled = session(
+        store,
+        g,
+        id=scheduled["id"],
+        expected_revision=1,
+        status="cancelled",
+        request_id="cancel",
+    )
     assert cancelled["status"] == "cancelled"
-    archived = goal(store, id=g["id"], expected_revision=3, status="archived", request_id="archive")
+    archived = goal(
+        store, id=g["id"], expected_revision=3, status="archived", request_id="archive"
+    )
     assert archived["revision"] == 4
 
 
-@pytest.mark.parametrize("changes", [
-    {"title": ""}, {"title": "x" * 201}, {"description": None}, {"status": "running"},
-    {"target_date": "2026-02-30"}, {"target_date": "20261001"}, {"expected_revision": True},
-    {"request_id": ""}, {"id": ""},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"title": ""},
+        {"title": "x" * 201},
+        {"description": None},
+        {"status": "running"},
+        {"target_date": "2026-02-30"},
+        {"target_date": "20261001"},
+        {"expected_revision": True},
+        {"request_id": ""},
+        {"id": ""},
+    ],
+)
 def test_goal_validation_no_writes(changes, tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite3")
     with pytest.raises((ValueError, TypeError)):
@@ -111,11 +209,19 @@ def test_goal_validation_no_writes(changes, tmp_path):
     assert store.list_goals() == []
 
 
-@pytest.mark.parametrize("changes", [
-    {"start_at": "2026-10-01T21:00:00"}, {"end_at": None}, {"start_at": "invalid"},
-    {"end_at": "2026-10-01T20:00:00+02:00"}, {"end_at": "2026-10-01T21:00:00+02:00"},
-    {"end_at": "2026-10-03T22:00:00+02:00"}, {"status": "active"}, {"notes": "x" * 10001},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"start_at": "2026-10-01T21:00:00"},
+        {"end_at": None},
+        {"start_at": "invalid"},
+        {"end_at": "2026-10-01T20:00:00+02:00"},
+        {"end_at": "2026-10-01T21:00:00+02:00"},
+        {"end_at": "2026-10-03T22:00:00+02:00"},
+        {"status": "active"},
+        {"notes": "x" * 10001},
+    ],
+)
 def test_session_validation_no_writes(changes, tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite3")
     g = goal(store)
@@ -140,11 +246,13 @@ def test_cross_home_reference_and_isolation(tmp_path):
 def test_concurrent_overlap_claim_only_one_winner(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite3")
     g = goal(store)
+
     def claim(index):
         try:
             return session(GoalStore(store.path), g, request_id=str(index))
         except ConflictError:
             return None
+
     with ThreadPoolExecutor(max_workers=4) as pool:
         rows = list(pool.map(claim, range(4)))
     assert sum(row is not None for row in rows) == 1
@@ -155,7 +263,9 @@ def test_concurrent_overlap_claim_only_one_winner(tmp_path):
 def test_calendar_escaping_folding_timezone_cancellation_and_stable_uid(tmp_path):
     store = GoalStore(tmp_path / "goals.sqlite3")
     g = goal(store)
-    s = session(store, g, title="Stars; moon, sky", notes="Line one\nBEGIN:VEVENT\n" + "星" * 90)
+    s = session(
+        store, g, title="Stars; moon, sky", notes="Line one\nBEGIN:VEVENT\n" + "星" * 90
+    )
     calendar = store.calendar()
     assert calendar.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
     assert calendar.endswith("END:VCALENDAR\r\n")
@@ -168,7 +278,14 @@ def test_calendar_escaping_folding_timezone_cancellation_and_stable_uid(tmp_path
     assert calendar.count("\r\nBEGIN:VEVENT\r\n") == 1
     assert all(len(line.encode()) <= 75 for line in calendar.split("\r\n"))
     assert "星" * 90 in calendar.replace("\r\n ", "")
-    cancelled = session(store, g, id=s["id"], expected_revision=1, request_id="cancel", status="cancelled")
+    cancelled = session(
+        store,
+        g,
+        id=s["id"],
+        expected_revision=1,
+        request_id="cancel",
+        status="cancelled",
+    )
     assert cancelled["revision"] == 2
     updated = store.calendar()
     assert "STATUS:CANCELLED\r\n" in updated
@@ -188,12 +305,20 @@ async def test_actual_http_lifecycle_conflicts_calendar_and_errors(tmp_path):
         g = await response.json()
         assert await (await client.post(PREFIX + "/goals", json=body)).json() == g
         assert await (await client.get(PREFIX + "/goals/" + g["id"])).json() == g
-        payload = {"goal_id": g["id"], "title": "Walk", "start_at": "2026-10-02T10:00:00Z", "end_at": "2026-10-02T11:00:00Z", "request_id": "session"}
+        payload = {
+            "goal_id": g["id"],
+            "title": "Walk",
+            "start_at": "2026-10-02T10:00:00Z",
+            "end_at": "2026-10-02T11:00:00Z",
+            "request_id": "session",
+        }
         response = await client.post(PREFIX + "/sessions", json=payload)
         assert response.status == 200
         s = await response.json()
         assert await (await client.get(PREFIX + "/sessions/" + s["id"])).json() == s
-        conflict = await client.post(PREFIX + "/sessions", json={**payload, "request_id": "collision"})
+        conflict = await client.post(
+            PREFIX + "/sessions", json={**payload, "request_id": "collision"}
+        )
         assert conflict.status == 409
         assert "overlaps" in (await conflict.json())["error"]
         calendar = await client.get(PREFIX + "/calendar")
@@ -203,7 +328,9 @@ async def test_actual_http_lifecycle_conflicts_calendar_and_errors(tmp_path):
         assert "SUMMARY:Walk" in await calendar.text()
         assert (await client.get(PREFIX + "/goals/missing")).status == 404
         assert (await client.post(PREFIX + "/goals", json=[])).status == 400
-        assert (await client.post(PREFIX + "/goals", json={**body, "home": "/tmp"})).status == 400
+        assert (
+            await client.post(PREFIX + "/goals", json={**body, "home": "/tmp"})
+        ).status == 400
         assert await (await client.get(PREFIX + "/sessions")).json() == [s]
 
 
@@ -212,14 +339,25 @@ async def test_actual_native_planning_operations_and_session_boundary(tmp_path):
     provider = IdentityToolProvider(tmp_path)
     token = set_current_session_key("dashboard:human-plans")
     try:
-        result = await provider.invoke("identity_goals_save_goal", {"title": "Garden", "request_id": "goal"})
+        result = await provider.invoke(
+            "identity_goals_save_goal", {"title": "Garden", "request_id": "goal"}
+        )
         assert result.success
         g = json.loads(result.output)
         result = await provider.invoke("identity_goals_get_goal", {"id": g["id"]})
         assert json.loads(result.output) == g
         result = await provider.invoke("identity_goals_list_goals", {})
         assert json.loads(result.output) == [g]
-        result = await provider.invoke("identity_goals_save_session", {"goal_id": g["id"], "title": "Plant", "start_at": "2026-10-01T10:00:00Z", "end_at": "2026-10-01T11:00:00Z", "request_id": "session"})
+        result = await provider.invoke(
+            "identity_goals_save_session",
+            {
+                "goal_id": g["id"],
+                "title": "Plant",
+                "start_at": "2026-10-01T10:00:00Z",
+                "end_at": "2026-10-01T11:00:00Z",
+                "request_id": "session",
+            },
+        )
         assert result.success
         s = json.loads(result.output)
         result = await provider.invoke("identity_goals_get_session", {"id": s["id"]})

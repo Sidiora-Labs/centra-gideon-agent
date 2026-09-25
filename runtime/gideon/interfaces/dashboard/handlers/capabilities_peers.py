@@ -1,6 +1,8 @@
 import asyncio
 import sqlite3
+
 from aiohttp import web
+
 from gideon.core.http_request import read_json_body
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 
@@ -12,7 +14,10 @@ def _authorized(request):
 
 async def collection(request):
     _authorized(request)
-    return web.json_response(await asyncio.to_thread(PeerStore().snapshot), headers={"Cache-Control": "no-store"})
+    return web.json_response(
+        await asyncio.to_thread(PeerStore().snapshot),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def item(request):
@@ -20,11 +25,16 @@ async def item(request):
     store = PeerStore()
     try:
         if request.method == "PUT":
-            value = await asyncio.to_thread(store.put, request.match_info["peer_id"], await read_json_body(request))
+            value = await asyncio.to_thread(
+                store.put, request.match_info["peer_id"], await read_json_body(request)
+            )
             return web.json_response(value, headers={"Cache-Control": "no-store"})
         revision = int(request.query.get("revision", ""))
         await asyncio.to_thread(store.delete, request.match_info["peer_id"], revision)
-        return web.json_response(await asyncio.to_thread(store.snapshot), headers={"Cache-Control": "no-store"})
+        return web.json_response(
+            await asyncio.to_thread(store.snapshot),
+            headers={"Cache-Control": "no-store"},
+        )
     except PeerError as error:
         return web.json_response({"error": str(error)}, status=error.status)
     except (ValueError, TypeError):
@@ -36,10 +46,18 @@ async def item(request):
 async def verify(request):
     try:
         body = await read_json_body(request)
-        if not isinstance(body, dict) or set(body) != {"proof", "payload"} or not isinstance(body["proof"], dict) or not isinstance(body["payload"], dict):
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"proof", "payload"}
+            or not isinstance(body["proof"], dict)
+            or not isinstance(body["payload"], dict)
+        ):
             raise PeerError("Signed peer envelope is invalid")
         peer = await asyncio.to_thread(PeerStore().verify_proof, body["proof"])
-        return web.json_response({"verified": True, "peer": peer, "payload": body["payload"]}, headers={"Cache-Control": "no-store"})
+        return web.json_response(
+            {"verified": True, "peer": peer, "payload": body["payload"]},
+            headers={"Cache-Control": "no-store"},
+        )
     except PeerError as error:
         return web.json_response({"error": str(error)}, status=error.status)
 
@@ -50,7 +68,12 @@ async def probe(request):
         body = await read_json_body(request)
         if not isinstance(body, dict) or set(body) != {"scope"}:
             raise PeerError("Probe scope is required")
-        result = await PeerStore().post_signed(request.match_info["peer_id"], body["scope"], "/api/capabilities/platform/peers/proofs/verify", {"probe": True})
+        result = await PeerStore().post_signed(
+            request.match_info["peer_id"],
+            body["scope"],
+            "/api/capabilities/platform/peers/proofs/verify",
+            {"probe": True},
+        )
         return web.json_response(result, headers={"Cache-Control": "no-store"})
     except PeerError as error:
         return web.json_response({"error": str(error)}, status=error.status)

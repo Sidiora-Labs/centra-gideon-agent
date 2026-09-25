@@ -1,23 +1,35 @@
 """Actual idle native session and local tool dispatch behind real HTTP."""
-import asyncio
-from pathlib import Path
+
 import sys
+from pathlib import Path
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
+import asyncio
+
 from aiohttp import web
-from guarded_fixture import fixture
-from gideon.interfaces.dashboard.handlers.capabilities_identity_guarded_recipes import register
+
+from checks.runtime.capabilities.identity.guarded_fixture import fixture
+from gideon.interfaces.dashboard.handlers.capabilities_identity_guarded_recipes import (
+    register,
+)
 
 
 async def main():
     home = Path(sys.argv[1])
     service, runtime, state, workspace, model = await fixture(home)
     app = web.Application()
-    app['state'] = state
+    app["state"] = state
     register(app, home=home)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '127.0.0.1', 0)
+    site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/guarded-recipes', flush=True)
+    print(
+        f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/guarded-recipes",
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:
@@ -25,5 +37,5 @@ async def main():
         await model.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

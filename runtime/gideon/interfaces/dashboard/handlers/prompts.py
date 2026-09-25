@@ -331,7 +331,11 @@ async def api_prompt_delete(request: web.Request) -> web.Response:
     usage = prompt_usage(provider.name, bare)
     if not usage["complete"]:
         return web.json_response(
-            {"error": "Prompt dependencies could not be read", "code": "prompt_usage_unavailable", "usage": usage},
+            {
+                "error": "Prompt dependencies could not be read",
+                "code": "prompt_usage_unavailable",
+                "usage": usage,
+            },
             status=503,
         )
     if not usage["deletable"]:

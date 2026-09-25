@@ -215,28 +215,55 @@ class RoomStore:
             shutil.rmtree(self.directory / "turns" / room_id, ignore_errors=True)
 
     def append(
-        self, room_id: str, role: str, content: str, *, speaker: str,
-        turn_id: str | None = None, interrupted: bool = False,
+        self,
+        room_id: str,
+        role: str,
+        content: str,
+        *,
+        speaker: str,
+        turn_id: str | None = None,
+        interrupted: bool = False,
     ) -> dict:
         if role not in {"user", "assistant", "system"}:
             raise ValueError("invalid room message role")
         if not isinstance(content, str) or not content.strip() or len(content) > 100000:
-            raise ValueError("content must be a nonempty string of at most 100000 characters")
+            raise ValueError(
+                "content must be a nonempty string of at most 100000 characters"
+            )
         with self._locked():
             room = self.get(room_id)
             if role == "assistant" and speaker not in {m.id for m in room.members}:
                 raise ValueError("speaker must be a room member")
-            return self._append(room, role, content, speaker=speaker,
-                                turn_id=turn_id, interrupted=interrupted)
+            return self._append(
+                room,
+                role,
+                content,
+                speaker=speaker,
+                turn_id=turn_id,
+                interrupted=interrupted,
+            )
 
-    def _append(self, room: Room, role: str, content: str, *, speaker: str,
-                turn_id: str | None = None, interrupted: bool = False) -> dict:
+    def _append(
+        self,
+        room: Room,
+        role: str,
+        content: str,
+        *,
+        speaker: str,
+        turn_id: str | None = None,
+        interrupted: bool = False,
+    ) -> dict:
         now = timestamp()
         record = {
-            "id": uuid4().hex, "role": role, "content": content,
+            "id": uuid4().hex,
+            "role": role,
+            "content": content,
             "speaker": _text(speaker, "speaker"),
-            "speaker_name": next((m.name for m in room.members if m.id == speaker), speaker),
-            "ts": now, "created_at": now,
+            "speaker_name": next(
+                (m.name for m in room.members if m.id == speaker), speaker
+            ),
+            "ts": now,
+            "created_at": now,
         }
         if turn_id:
             record["turn_id"] = turn_id
@@ -252,15 +279,20 @@ class RoomStore:
                 if stream.read(1) != b"\n":
                     stream.write(b"\n")
             else:
-                stream.write((json.dumps({"_type": "metadata", "created_at": now}) + "\n").encode())
+                stream.write(
+                    (
+                        json.dumps({"_type": "metadata", "created_at": now}) + "\n"
+                    ).encode()
+                )
             stream.write((json.dumps(record, ensure_ascii=False) + "\n").encode())
             stream.flush()
             os.fsync(stream.fileno())
         self.transcript._invalidate_cache(room.id)
         return record
 
-    def messages(self, room_id: str, *, limit: int | None = None,
-                 before: str | None = None) -> builtins.list[dict]:
+    def messages(
+        self, room_id: str, *, limit: int | None = None, before: str | None = None
+    ) -> builtins.list[dict]:
         self.get(room_id)
         if limit is not None and (type(limit) is not int or not 1 <= limit <= 501):
             raise ValueError("limit must be between 1 and 500")
@@ -276,9 +308,18 @@ class RoomStore:
                         row = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if not isinstance(row, dict) or row.get("role") not in {"user", "assistant", "system"}:
+                    if not isinstance(row, dict) or row.get("role") not in {
+                        "user",
+                        "assistant",
+                        "system",
+                    }:
                         continue
-                    row.setdefault("id", hashlib.sha256(f"{room_id}:{index}:{line}".encode()).hexdigest()[:32])
+                    row.setdefault(
+                        "id",
+                        hashlib.sha256(
+                            f"{room_id}:{index}:{line}".encode()
+                        ).hexdigest()[:32],
+                    )
                     row.setdefault("created_at", row.get("ts", ""))
                     row.setdefault("speaker_name", row.get("speaker", row["role"]))
                     if row["id"] == before:
@@ -290,11 +331,20 @@ class RoomStore:
         return list(rows)
 
     def _turn_path(self, room_id: str, turn_id: str) -> Path:
-        return self.directory / "turns" / _identifier(room_id) / (_identifier(turn_id) + ".json")
+        return (
+            self.directory
+            / "turns"
+            / _identifier(room_id)
+            / (_identifier(turn_id) + ".json")
+        )
 
     def turn(self, room_id: str, turn_id: str | None = None) -> dict | None:
         self.get(room_id)
-        path = self._turn_path(room_id, turn_id) if turn_id else self.directory / "turns" / room_id / "current.json"
+        path = (
+            self._turn_path(room_id, turn_id)
+            if turn_id
+            else self.directory / "turns" / room_id / "current.json"
+        )
         if not path.exists():
             return None
         record = json.loads(path.read_text(encoding="utf-8"))
@@ -305,9 +355,13 @@ class RoomStore:
     def _save_turn(self, record: dict) -> None:
         path = self._turn_path(record["room_id"], record["id"])
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, json.dumps(record, ensure_ascii=False), fsync=True, mode=0o600)
+        atomic_write(
+            path, json.dumps(record, ensure_ascii=False), fsync=True, mode=0o600
+        )
 
-    def begin_turn(self, room_id: str, content: str, request_id: str) -> tuple[dict, bool]:
+    def begin_turn(
+        self, room_id: str, content: str, request_id: str
+    ) -> tuple[dict, bool]:
         content = message_text(content)
         _identifier(request_id)
         if request_id == "current":
@@ -318,22 +372,40 @@ class RoomStore:
             digest = hashlib.sha256(content.encode()).hexdigest()
             if existing:
                 if existing.get("content_hash") != digest:
-                    raise RoomBusyError("request id was already used for different text")
+                    raise RoomBusyError(
+                        "request id was already used for different text"
+                    )
                 return existing, False
             current = self.turn(room_id)
             if current and current["status"] in {"queued", "running"}:
                 raise RoomBusyError("room already has an active turn")
             now = timestamp()
-            record = dict(id=request_id, room_id=room_id, status="queued", member_id=None,
-                          text="", error=None, created_at=now, updated_at=now,
-                          content_hash=digest)
+            record = dict(
+                id=request_id,
+                room_id=room_id,
+                status="queued",
+                member_id=None,
+                text="",
+                error=None,
+                created_at=now,
+                updated_at=now,
+                content_hash=digest,
+            )
             self._save_turn(record)
-            atomic_write(self._turn_path(room_id, "current"), json.dumps({"id": request_id}),
-                         fsync=True, mode=0o600)
+            atomic_write(
+                self._turn_path(room_id, "current"),
+                json.dumps({"id": request_id}),
+                fsync=True,
+                mode=0o600,
+            )
             try:
                 self._append(room, "user", content, speaker="user", turn_id=request_id)
             except Exception:
-                record.update(status="failed", error="Message could not be stored", updated_at=timestamp())
+                record.update(
+                    status="failed",
+                    error="Message could not be stored",
+                    updated_at=timestamp(),
+                )
                 self._save_turn(record)
                 raise
             return record, True
@@ -371,7 +443,11 @@ class RoomStore:
             try:
                 current = self.turn(room.id)
                 if current and current["status"] in {"queued", "running"}:
-                    self.update_turn(room.id, current["id"], status="failed",
-                                     error="Room turn interrupted by a runtime restart. Send a new message to continue.")
+                    self.update_turn(
+                        room.id,
+                        current["id"],
+                        status="failed",
+                        error="Room turn interrupted by a runtime restart. Send a new message to continue.",
+                    )
             finally:
                 lock.close()

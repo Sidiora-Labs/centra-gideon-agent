@@ -29,7 +29,11 @@ def _redacted(value):
 
 
 def _public_turn(turn):
-    return _redacted({key: value for key, value in turn.items() if key != "content_hash"}) if turn else None
+    return (
+        _redacted({key: value for key, value in turn.items() if key != "content_hash"})
+        if turn
+        else None
+    )
 
 
 def _turns(request: web.Request) -> RoomTurns:
@@ -37,7 +41,8 @@ def _turns(request: web.Request) -> RoomTurns:
         state = request.app.get("state")
         if state is None:
             raise web.HTTPServiceUnavailable(
-                text='{"error":"room runtime unavailable"}', content_type="application/json"
+                text='{"error":"room runtime unavailable"}',
+                content_type="application/json",
             )
         request.app[_TURNS] = RoomTurns(request.app[_STORE], state)
     return request.app[_TURNS]
@@ -55,7 +60,10 @@ async def api_enable_rooms(request: web.Request) -> web.Response:
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     except (ConfigPreserveError, OSError):
-        return web.json_response({"error": "Rooms could not be enabled; configuration was preserved"}, status=500)
+        return web.json_response(
+            {"error": "Rooms could not be enabled; configuration was preserved"},
+            status=500,
+        )
 
 
 async def api_rooms(request: web.Request) -> web.Response:
@@ -65,11 +73,20 @@ async def api_rooms(request: web.Request) -> web.Response:
     action = request.match_info.route.name or ""
     try:
         if not room_id and request.method == "GET":
-            return web.json_response(_redacted({
-                "rooms": [r.to_dict() for r in store.list()] if config.enabled else [],
-                "enabled": config.enabled,
-                "max_members": config.max_members, "round_budget": config.round_budget,
-            }))
+            return web.json_response(
+                _redacted(
+                    {
+                        "rooms": (
+                            [r.to_dict() for r in store.list()]
+                            if config.enabled
+                            else []
+                        ),
+                        "enabled": config.enabled,
+                        "max_members": config.max_members,
+                        "round_budget": config.round_budget,
+                    }
+                )
+            )
         if not config.enabled:
             return web.json_response({"error": "rooms are disabled"}, status=404)
         if not room_id:
@@ -90,11 +107,20 @@ async def api_rooms(request: web.Request) -> web.Response:
                 raise ValueError("limit must be between 1 and 500") from None
             if not 1 <= limit <= 500:
                 raise ValueError("limit must be between 1 and 500")
-            messages = store.messages(room_id, limit=limit + 1, before=request.query.get("before"))
+            messages = store.messages(
+                room_id, limit=limit + 1, before=request.query.get("before")
+            )
             has_more = len(messages) > limit
             messages = messages[-limit:]
-            return web.json_response(_redacted({"messages": messages, "has_more": has_more,
-                                                "before": messages[0]["id"] if has_more else None}))
+            return web.json_response(
+                _redacted(
+                    {
+                        "messages": messages,
+                        "has_more": has_more,
+                        "before": messages[0]["id"] if has_more else None,
+                    }
+                )
+            )
         if action == "turn":
             return web.json_response({"turn": _public_turn(store.turn(room_id))})
         if action == "turns":
@@ -149,7 +175,9 @@ async def api_rooms(request: web.Request) -> web.Response:
             member.id: resolved_posture(session_key(room.id, member.id))
             for member in room.members
         }
-        return web.json_response(_redacted({"room": payload, "member_postures": payload["member_postures"]}))
+        return web.json_response(
+            _redacted({"room": payload, "member_postures": payload["member_postures"]})
+        )
     except KeyError:
         return web.json_response({"error": "room not found"}, status=404)
     except RoomBusyError as exc:
@@ -176,11 +204,18 @@ def setup_room_routes(app: web.Application, store: RoomStore | None = None) -> N
     app.router.add_get("/api/rooms/{room_id}", api_rooms, allow_head=False)
     app.router.add_patch("/api/rooms/{room_id}", api_rooms)
     app.router.add_delete("/api/rooms/{room_id}", api_rooms)
-    app.router.add_get("/api/rooms/{room_id}/transcript", api_rooms, allow_head=False, name="transcript")
+    app.router.add_get(
+        "/api/rooms/{room_id}/transcript",
+        api_rooms,
+        allow_head=False,
+        name="transcript",
+    )
     app.router.add_post("/api/rooms/{room_id}/messages", api_rooms, name="messages")
     app.router.add_post("/api/rooms/{room_id}/turns", api_rooms, name="turns")
     app.router.add_post("/api/rooms/{room_id}/cancel", api_rooms, name="cancel")
-    app.router.add_get("/api/rooms/{room_id}/turn", api_rooms, allow_head=False, name="turn")
+    app.router.add_get(
+        "/api/rooms/{room_id}/turn", api_rooms, allow_head=False, name="turn"
+    )
     app.router.add_get(
         "/api/rooms/{room_id}/export", api_rooms, allow_head=False, name="export"
     )

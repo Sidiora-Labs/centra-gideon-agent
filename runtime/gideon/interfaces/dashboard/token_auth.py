@@ -38,9 +38,11 @@ from gideon.security.sel import sel as _sel_fn
 
 logger = logging.getLogger(__name__)
 
-_HANDLER_AUTH_ROUTES = frozenset({
-    ("POST", "/api/capabilities/creative/commission-feedback/receive"),
-})
+_HANDLER_AUTH_ROUTES = frozenset(
+    {
+        ("POST", "/api/capabilities/creative/commission-feedback/receive"),
+    }
+)
 
 _SECRET: bytes | None = None
 _EPHEMERAL_SECRET: bytes | None = None
@@ -314,7 +316,10 @@ _HANDLER_AUTH_ROUTES = frozenset(
         ("HEAD", "/api/capabilities/experience/world-travel/guest/{ticket}"),
         ("POST", "/api/capabilities/experience/world-travel/guest/{ticket}/leave"),
         ("GET", "/api/capabilities/experience/world-travel/guest/{ticket}/host/{tail}"),
-        ("HEAD", "/api/capabilities/experience/world-travel/guest/{ticket}/host/{tail}"),
+        (
+            "HEAD",
+            "/api/capabilities/experience/world-travel/guest/{ticket}/host/{tail}",
+        ),
     }
 )
 
@@ -322,10 +327,15 @@ _HANDLER_AUTH_ROUTES = frozenset(
 def _uses_handler_auth(request: web.Request) -> bool:
     """Whether the resolved route authenticates request credentials itself."""
     resource = request.match_info.route.resource
-    return resource is not None and (
-        request.method,
-        resource.canonical,
-    ) in _HANDLER_AUTH_ROUTES
+    return (
+        resource is not None
+        and (
+            request.method,
+            resource.canonical,
+        )
+        in _HANDLER_AUTH_ROUTES
+    )
+
 
 LINK_WINDOW_SECS = 24 * 3600
 MAX_SESSION_TTL_SECS = 365 * 24 * 3600

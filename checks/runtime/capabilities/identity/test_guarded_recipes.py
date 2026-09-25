@@ -4,7 +4,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-PRELUDE = '''
+PRELUDE = """
 import asyncio,json,sqlite3
 from pathlib import Path
 from gideon.core.config import config_dir
@@ -12,7 +12,7 @@ from gideon.workspace.capabilities.identity.recipes import RecipeStore
 from gideon.workspace.capabilities.identity.store import StoryStore,ConflictError
 from gideon.workspace.capabilities.identity.guarded_recipes import GuardedRecipes
 from gideon.integrations.tool_providers import tool_prefs
-from guarded_fixture import fixture
+from checks.runtime.capabilities.identity.guarded_fixture import fixture
 home=config_dir()
 async def wait(service,id,*statuses):
  for _ in range(500):
@@ -27,18 +27,36 @@ async def create(service,steps,key='recipe'):
  return recipe,run
 async def decide(service,run,decision='approve'):
  return await service.decide(run_id=run['id'],request_id=run['permission']['request_id'],decision=decision,session_key='dashboard:recipes')
-'''
+"""
 
 
 def run(home, body):
-    script = PRELUDE + '\nasync def main():\n' + textwrap.indent(textwrap.dedent(body), ' ') + '\nasyncio.run(main())\n'
+    script = (
+        PRELUDE
+        + "\nasync def main():\n"
+        + textwrap.indent(textwrap.dedent(body), " ")
+        + "\nasyncio.run(main())\n"
+    )
     fixture_dir = str(Path(__file__).parent)
-    result = subprocess.run([sys.executable, '-c', script], env={**os.environ, 'GIDEON_HOME': str(home), 'PYTHONPATH': fixture_dir + os.pathsep + os.environ.get('PYTHONPATH', '')}, text=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "GIDEON_HOME": str(home),
+            "PYTHONPATH": fixture_dir + os.pathsep + os.environ.get("PYTHONPATH", ""),
+        },
+        text=True,
+        capture_output=True,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_real_cross_provider_actions_require_actual_approval_and_pair_session_history(tmp_path):
-    run(tmp_path, '''
+def test_real_cross_provider_actions_require_actual_approval_and_pair_session_history(
+    tmp_path,
+):
+    run(
+        tmp_path,
+        """
 service,runtime,state,workspace,model=await fixture(home)
 catalog=await service.catalog('dashboard:recipes')
 assert any(row['name']=='write_file' and row['requires_approval'] for row in catalog['tools'])
@@ -76,11 +94,14 @@ assert runtime._model is model
 assert not state.sessions._sessions['dashboard:recipes'].semaphore.locked()
 assert GuardedRecipes(home,state).get_run(started['id'])==finished
 await model.shutdown()
-''')
+""",
+    )
 
 
 def test_reject_cancel_busy_lease_and_wrong_session_decisions_do_not_write(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 service,runtime,state,workspace,model=await fixture(home)
 recipe,started=await create(service,[{'id':'write','tool':'write_file','arguments':{'path':'refused.txt','content':'Never written'}}])
 entry=state.sessions._sessions['dashboard:recipes']
@@ -117,11 +138,14 @@ assert service.get_run(second['id'])['status']=='cancelled'
 assert not (workspace/'refused.txt').exists()
 assert service.get_run(second['id'])['steps'][0]['status']=='failed'
 await model.shutdown()
-''')
+""",
+    )
 
 
 def test_existing_policy_denial_and_live_preference_revocation_are_enforced(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 service,runtime,state,workspace,model=await fixture(home)
 recipe,started=await create(service,[{'id':'write','tool':'write_file','arguments':{'path':'denied.txt','content':'Never written'}}])
 runtime._extra_deny.append('write_file')
@@ -153,11 +177,14 @@ except ValueError as error:
 assert not state.sessions._sessions['dashboard:recipes'].semaphore.locked()
 assert StoryStore(home/'capabilities/identity/stories.sqlite3').list()==[]
 await model.shutdown()
-''')
+""",
+    )
 
 
 def test_legacy_adapter_cannot_bypass_guarded_approval_or_read_bound_outputs(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
 service,runtime,state,workspace,model=await fixture(home)
 recipe,started=await create(service,[{'id':'story','tool':'identity_story_create','arguments':{'prompt':'Question','theme':'test','text':'Private output','request_id':'bound'}}])
@@ -184,11 +211,14 @@ assert StoryStore(home/'capabilities/identity/stories.sqlite3').list()==[]
 assert runtime._messages==[]
 assert service.get_run(started['id'])['status']=='ready'
 await model.shutdown()
-''')
+""",
+    )
 
 
 def test_dry_run_foreign_home_and_unavailable_sessions_never_claim_execution(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 service,runtime,state,workspace,model=await fixture(home,dry_run=True)
 try:
  await service.catalog('dashboard:recipes')
@@ -211,4 +241,5 @@ assert runtime._messages==[]
 assert list(workspace.iterdir())==[]
 assert service.store.list_runs()==[]
 await model.shutdown()
-''')
+""",
+    )

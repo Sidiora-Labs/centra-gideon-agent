@@ -9,7 +9,10 @@ from aiohttp.test_utils import TestClient, TestServer
 from gideon.sdk.background import WorkerContext, WorkerControl
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.media.animations import AnimationService
-from gideon.workspace.capabilities.media.animations_http import POLICY, register_animations
+from gideon.workspace.capabilities.media.animations_http import (
+    POLICY,
+    register_animations,
+)
 from gideon.workspace.capabilities.media.jobs import MediaJobs, MediaWorker
 from gideon.workspace.capabilities.media.jobs_http import register_jobs
 from gideon.workspace.capabilities.media.library import MediaLibrary
@@ -83,7 +86,9 @@ def test_prepare_builds_bounded_original_animation_contract(jobs):
     assert "must not require user input" in prompt
     assert prepared["concept"] in prompt
     assert "prefers-reduced-motion" in prompt
-    interactive = jobs.animations.prompt(jobs.animations.prepare(request(interactive=True)))
+    interactive = jobs.animations.prompt(
+        jobs.animations.prepare(request(interactive=True))
+    )
     assert "may react to pointer or keyboard input" in interactive
     assert "must not require user input" not in interactive
 
@@ -125,13 +130,26 @@ def test_prepare_rejects_unbounded_or_undeclared_inputs(jobs, patch, message):
         ("<html></html>", "complete HTML"),
         ("<!doctype html><html></html>", "renderFrame"),
         (html().replace("ANIMATION_META", "META"), "runtime contract"),
-        (html().replace("<script", "<template").replace("</script>", "</template>"), "runtime contract"),
+        (
+            html().replace("<script", "<template").replace("</script>", "</template>"),
+            "runtime contract",
+        ),
         (html(body="fetch('/secret')"), "offline"),
         (html(body="new XMLHttpRequest()"), "offline"),
         (html(body="new WebSocket('ws://host')"), "offline"),
         (html(body="new EventSource('/events')"), "offline"),
-        (html(body="ctx.drawImage(new Image(),0,0)").replace("</body>", '<img src="https://example.test/a.png"></body>'), "offline"),
-        (html().replace("</head>", '<meta http-equiv="refresh" content="1; url=/x"></head>'), "offline"),
+        (
+            html(body="ctx.drawImage(new Image(),0,0)").replace(
+                "</body>", '<img src="https://example.test/a.png"></body>'
+            ),
+            "offline",
+        ),
+        (
+            html().replace(
+                "</head>", '<meta http-equiv="refresh" content="1; url=/x"></head>'
+            ),
+            "offline",
+        ),
     ],
 )
 def test_extraction_rejects_incomplete_or_networked_documents(jobs, response, message):
@@ -142,7 +160,10 @@ def test_extraction_rejects_incomplete_or_networked_documents(jobs, response, me
 
 def test_extracts_only_the_complete_document_from_provider_wrapping(jobs):
     document = html()
-    assert jobs.animations.extract("Here is the file:\n```html\n" + document + "\n```\n") == document
+    assert (
+        jobs.animations.extract("Here is the file:\n```html\n" + document + "\n```\n")
+        == document
+    )
     assert jobs.animations.extract(document) == document
     with pytest.raises(SketchError, match="2 MB"):
         jobs.animations.extract("x" * 2_000_001)
@@ -171,7 +192,10 @@ def test_publish_creates_exact_canonical_html_with_provenance(jobs):
     assert metadata["media_job_id"] == "job-1"
     assert metadata["html_sha256"] == result["sha256"]
     assert metadata["provider_use_case"] == "reasoning"
-    assert metadata["animation_request_sha256"] == hashlib.sha256(jobs.animations.prompt(prepared).encode()).hexdigest()
+    assert (
+        metadata["animation_request_sha256"]
+        == hashlib.sha256(jobs.animations.prompt(prepared).encode()).hexdigest()
+    )
 
 
 def test_publish_is_idempotent_and_fails_closed_on_identity_conflict(jobs):
@@ -180,7 +204,9 @@ def test_publish_is_idempotent_and_fails_closed_on_identity_conflict(jobs):
     assert jobs.animations.publish(prepared, "stable", html()) == first
     assert len(jobs.sketches.artifacts.list()) == 1
     with pytest.raises(SketchError, match="identity conflict"):
-        jobs.animations.publish(prepared, "stable", html(body="ctx.fillRect(1,1,20,20)"))
+        jobs.animations.publish(
+            prepared, "stable", html(body="ctx.fillRect(1,1,20,20)")
+        )
     assert len(jobs.sketches.artifacts.list()) == 1
     artifact = jobs.sketches.artifacts.get(first["artifact_id"])
     assert artifact.content == html()
@@ -203,7 +229,9 @@ def test_durable_job_submission_replay_and_request_conflict(jobs):
 
 def test_actual_worker_fails_honestly_when_no_reasoning_provider_is_configured(jobs):
     job = queued(jobs)
-    MediaWorker(jobs).run_once(WorkerContext("gideon-media", "default", WorkerControl()))
+    MediaWorker(jobs).run_once(
+        WorkerContext("gideon-media", "default", WorkerControl())
+    )
     failed = jobs.get(job["id"])
     assert failed["status"] == "failed"
     assert failed["attempt"] == 1
@@ -221,7 +249,11 @@ async def test_http_and_native_tool_share_the_durable_job_store(jobs):
     async with TestClient(TestServer(app)) as client:
         response = await client.post(
             "/api/capabilities/media/jobs",
-            json={"operation": "code_animation_generate", "request_id": "http", "input": request()},
+            json={
+                "operation": "code_animation_generate",
+                "request_id": "http",
+                "input": request(),
+            },
         )
         assert response.status == 202
         submitted = await response.json()
@@ -231,10 +263,16 @@ async def test_http_and_native_tool_share_the_durable_job_store(jobs):
         assert (await loaded.json())["id"] == submitted["id"]
         denied = await client.post(
             "/api/capabilities/media/jobs?home=other",
-            json={"operation": "code_animation_generate", "request_id": "denied", "input": request()},
+            json={
+                "operation": "code_animation_generate",
+                "request_id": "denied",
+                "input": request(),
+            },
         )
         assert denied.status == 400
-        pending_preview = await client.get("/api/capabilities/media/jobs/" + submitted["id"] + "/animation")
+        pending_preview = await client.get(
+            "/api/capabilities/media/jobs/" + submitted["id"] + "/animation"
+        )
         assert pending_preview.status == 404
 
     tool = MediaToolProvider(jobs.sketches, MediaLibrary(jobs.sketches.artifacts))
@@ -265,7 +303,9 @@ async def test_completed_http_preview_serves_exact_html_under_response_csp(jobs)
     register_jobs(app, jobs)
     register_animations(app)
     async with TestClient(TestServer(app)) as client:
-        response = await client.get("/api/capabilities/media/jobs/" + job["id"] + "/animation")
+        response = await client.get(
+            "/api/capabilities/media/jobs/" + job["id"] + "/animation"
+        )
         assert response.status == 200
         assert await response.text() == document
         assert response.content_type == "text/html"
@@ -273,19 +313,30 @@ async def test_completed_http_preview_serves_exact_html_under_response_csp(jobs)
         assert "connect-src 'none'" in POLICY
         assert "sandbox allow-scripts" in POLICY
         assert response.headers["X-Content-Type-Options"] == "nosniff"
-        denied = await client.get("/api/capabilities/media/jobs/" + job["id"] + "/animation?version=1")
+        denied = await client.get(
+            "/api/capabilities/media/jobs/" + job["id"] + "/animation?version=1"
+        )
         assert denied.status == 400
 
 
 @pytest.mark.asyncio
 async def test_preview_rejects_wrong_operation_and_missing_artifact(jobs):
     sketch = jobs.sketches.create({"width": 64, "height": 64, "request_id": "sketch"})
-    other = jobs.submit({"operation": "sketch_export", "sketch_id": sketch["id"], "revision": 1, "request_id": "other"})
+    other = jobs.submit(
+        {
+            "operation": "sketch_export",
+            "sketch_id": sketch["id"],
+            "revision": 1,
+            "request_id": "other",
+        }
+    )
     app = web.Application()
     register_jobs(app, jobs)
     register_animations(app)
     async with TestClient(TestServer(app)) as client:
-        response = await client.get("/api/capabilities/media/jobs/" + other["id"] + "/animation")
+        response = await client.get(
+            "/api/capabilities/media/jobs/" + other["id"] + "/animation"
+        )
         assert response.status == 404
         missing = await client.get("/api/capabilities/media/jobs/missing/animation")
         assert missing.status == 404
@@ -293,7 +344,9 @@ async def test_preview_rejects_wrong_operation_and_missing_artifact(jobs):
 
 def test_retry_preserves_same_animation_identity_after_provider_failure(jobs):
     job = queued(jobs)
-    MediaWorker(jobs).run_once(WorkerContext("gideon-media", "default", WorkerControl()))
+    MediaWorker(jobs).run_once(
+        WorkerContext("gideon-media", "default", WorkerControl())
+    )
     failed = jobs.get(job["id"])
     retried = jobs.retry(job["id"], {"state_revision": failed["state_revision"]})
     assert retried["status"] == "queued"

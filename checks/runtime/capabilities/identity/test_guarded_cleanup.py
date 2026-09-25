@@ -1,8 +1,10 @@
-from test_guarded_recipes import run
+from checks.runtime.capabilities.identity.test_guarded_recipes import run
 
 
 def test_mode_revocation_allows_owner_cancellation_and_restart_keeps_receipt(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 from gideon.engine import session_restrictions
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -36,4 +38,5 @@ assert restarted.get_run(started['id'])['steps'][0]['status']=='failed'
 assert (await restarted.cancel(run_id=started['id']))['status']=='cancelled'
 assert runtime._messages[-1]['role']=='tool'
 await model.shutdown()
-''')
+""",
+    )

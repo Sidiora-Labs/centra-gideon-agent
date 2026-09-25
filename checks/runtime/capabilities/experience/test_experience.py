@@ -8,7 +8,11 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.interfaces.dashboard.handlers.capabilities_experience import PREFIX, STORE, register
+from gideon.interfaces.dashboard.handlers.capabilities_experience import (
+    PREFIX,
+    STORE,
+    register,
+)
 from gideon.workspace.capabilities.experience import Conflict, ExperienceStore, NotFound
 from gideon.workspace.capabilities.experience.graph import validate_graph
 
@@ -19,18 +23,37 @@ def authored():
         "title": "The river crossing",
         "start_node": "bank",
         "nodes": [
-            {"id": "bank", "kind": "scene", "text": "The bridge and ferry lead across.", "choices": [
-                {"id": "bridge", "label": "Take the bridge", "target": "hill"},
-                {"id": "ferry", "label": "Take the ferry", "target": "harbor"},
-            ]},
-            {"id": "hill", "kind": "ending", "text": "You arrive on the hill.", "choices": []},
-            {"id": "harbor", "kind": "ending", "text": "You arrive at the harbor.", "choices": []},
+            {
+                "id": "bank",
+                "kind": "scene",
+                "text": "The bridge and ferry lead across.",
+                "choices": [
+                    {"id": "bridge", "label": "Take the bridge", "target": "hill"},
+                    {"id": "ferry", "label": "Take the ferry", "target": "harbor"},
+                ],
+            },
+            {
+                "id": "hill",
+                "kind": "ending",
+                "text": "You arrive on the hill.",
+                "choices": [],
+            },
+            {
+                "id": "harbor",
+                "kind": "ending",
+                "text": "You arrive at the harbor.",
+                "choices": [],
+            },
         ],
     }
 
 
 def start_body(story, request_id="start"):
-    return {"story_id": story["id"], "story_revision": story["revision"], "request_id": request_id}
+    return {
+        "story_id": story["id"],
+        "story_revision": story["revision"],
+        "request_id": request_id,
+    }
 
 
 def choice_body(choice="bridge", request_id="pick", revision=1):
@@ -51,15 +74,30 @@ def test_alternate_endings_survive_store_and_process_restart(tmp_path, authored)
     assert left["node"]["kind"] == right["node"]["kind"] == "ending"
     assert left["node"]["text"] == "You arrive on the hill."
     assert right["node"]["text"] == "You arrive at the harbor."
-    assert left["session"]["history"] == [{"request_id": "pick", "choice_id": "bridge", "from_node": "bank", "to_node": "hill", "revision": 2}]
+    assert left["session"]["history"] == [
+        {
+            "request_id": "pick",
+            "choice_id": "bridge",
+            "from_node": "bank",
+            "to_node": "hill",
+            "revision": 2,
+        }
+    ]
     assert ExperienceStore(tmp_path).session(first["session"]["id"]) == left
     command = "from pathlib import Path; import json,sys; from gideon.workspace.capabilities.experience import ExperienceStore; print(json.dumps(ExperienceStore(Path(sys.argv[1])).session(sys.argv[2])))"
-    result = subprocess.run([sys.executable, "-c", command, str(tmp_path), second["session"]["id"]], capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        [sys.executable, "-c", command, str(tmp_path), second["session"]["id"]],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert json.loads(result.stdout) == right
     assert len(store.sessions()) == 2
 
 
-def test_story_revisions_and_deleted_source_remain_available_to_sessions(tmp_path, authored):
+def test_story_revisions_and_deleted_source_remain_available_to_sessions(
+    tmp_path, authored
+):
     store = ExperienceStore(tmp_path)
     original = store.save(authored)
     session = store.start(start_body(original))["session"]
@@ -114,11 +152,13 @@ def test_concurrent_choices_have_one_winner_and_exact_replay(tmp_path, authored)
     store = ExperienceStore(tmp_path)
     story = store.save(authored)
     key = store.start(start_body(story))["session"]["id"]
+
     def submit(choice):
         try:
             return ExperienceStore(tmp_path).choose(key, choice_body(choice, choice))
         except Conflict:
             return None
+
     with ThreadPoolExecutor(max_workers=2) as pool:
         answers = list(pool.map(submit, ["bridge", "ferry"]))
     winners = [answer for answer in answers if answer is not None]
@@ -168,18 +208,44 @@ def test_graph_refuses_dangling_unreachable_and_trapped_cycles(authored):
     with pytest.raises(ValueError, match="target"):
         validate_graph(dangling)
     unreachable = copy.deepcopy(authored)
-    unreachable["nodes"].append({"id": "island", "kind": "ending", "text": "An island", "choices": []})
+    unreachable["nodes"].append(
+        {"id": "island", "kind": "ending", "text": "An island", "choices": []}
+    )
     with pytest.raises(ValueError, match="reachable"):
         validate_graph(unreachable)
-    trapped = {"title": "Trap", "start_node": "a", "nodes": [{"id": "a", "text": "Loop", "kind": "scene", "choices": [{"id": "again", "label": "Again", "target": "a"}]}]}
+    trapped = {
+        "title": "Trap",
+        "start_node": "a",
+        "nodes": [
+            {
+                "id": "a",
+                "text": "Loop",
+                "kind": "scene",
+                "choices": [{"id": "again", "label": "Again", "target": "a"}],
+            }
+        ],
+    }
     with pytest.raises(ValueError, match="ending"):
         validate_graph(trapped)
     reachable_cycle = copy.deepcopy(authored)
-    reachable_cycle["nodes"][0]["choices"].append({"id": "wait", "label": "Wait", "target": "bank"})
+    reachable_cycle["nodes"][0]["choices"].append(
+        {"id": "wait", "label": "Wait", "target": "bank"}
+    )
     assert len(validate_graph(reachable_cycle)["transitions"]) == 3
 
 
-@pytest.mark.parametrize("field,value", [("title", ""), ("title", "a" * 201), ("start_node", "absent"), ("nodes", []), ("nodes", "invalid"), ("nodes", [None]), ("unexpected", True)])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("title", ""),
+        ("title", "a" * 201),
+        ("start_node", "absent"),
+        ("nodes", []),
+        ("nodes", "invalid"),
+        ("nodes", [None]),
+        ("unexpected", True),
+    ],
+)
 def test_malformed_story_fields(field, value, authored, tmp_path):
     store = ExperienceStore(tmp_path)
     with pytest.raises(ValueError):
@@ -187,7 +253,16 @@ def test_malformed_story_fields(field, value, authored, tmp_path):
     assert store.stories() == []
 
 
-@pytest.mark.parametrize("field,value", [("text", ""), ("kind", "other"), ("choices", None), ("id", "../node"), ("extra", True)])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("text", ""),
+        ("kind", "other"),
+        ("choices", None),
+        ("id", "../node"),
+        ("extra", True),
+    ],
+)
 def test_malformed_node_fields(field, value, authored):
     authored["nodes"][0][field] = value
     with pytest.raises(ValueError):
@@ -237,20 +312,31 @@ async def test_http_author_play_edit_conflict_delete_and_resume(tmp_path, author
         assert response.status == 201
         opened = await response.json()
         key = opened["session"]["id"]
-        response = await client.post(PREFIX + f"/sessions/{key}/choices", json=choice_body())
+        response = await client.post(
+            PREFIX + f"/sessions/{key}/choices", json=choice_body()
+        )
         assert response.status == 200
         played = await response.json()
         assert played["node"]["id"] == "hill"
         response = await client.get(PREFIX + f"/sessions/{key}")
         assert await response.json() == played
-        response = await client.post(PREFIX + f"/sessions/{key}/choices", json=choice_body("ferry"))
+        response = await client.post(
+            PREFIX + f"/sessions/{key}/choices", json=choice_body("ferry")
+        )
         assert response.status == 409
         assert "different input" in (await response.json())["error"]
-        response = await client.put(PREFIX + "/stories/" + story["id"], json={**authored, "revision": 1, "title": "Edited"})
+        response = await client.put(
+            PREFIX + "/stories/" + story["id"],
+            json={**authored, "revision": 1, "title": "Edited"},
+        )
         assert (await response.json())["story"]["revision"] == 2
-        response = await client.put(PREFIX + "/stories/" + story["id"], json={**authored, "revision": 1})
+        response = await client.put(
+            PREFIX + "/stories/" + story["id"], json={**authored, "revision": 1}
+        )
         assert response.status == 409
-        response = await client.delete(PREFIX + "/stories/" + story["id"] + "?revision=2")
+        response = await client.delete(
+            PREFIX + "/stories/" + story["id"] + "?revision=2"
+        )
         assert await response.json() == {"deleted": True}
         response = await client.get(PREFIX + "/stories/" + story["id"])
         assert response.status == 404
@@ -259,24 +345,39 @@ async def test_http_author_play_edit_conflict_delete_and_resume(tmp_path, author
 
 
 @pytest.mark.asyncio
-async def test_http_invalid_bodies_do_not_bypass_graph_or_revision_checks(tmp_path, authored):
+async def test_http_invalid_bodies_do_not_bypass_graph_or_revision_checks(
+    tmp_path, authored
+):
     app = web.Application()
     app[STORE] = ExperienceStore(tmp_path)
     register(app)
     async with TestClient(TestServer(app)) as client:
-        for body in (None, [], {"home": "/tmp/other"}, {**authored, "start_node": "missing"}):
+        for body in (
+            None,
+            [],
+            {"home": "/tmp/other"},
+            {**authored, "start_node": "missing"},
+        ):
             response = await client.post(PREFIX + "/stories", json=body)
             assert response.status == 400
             assert "error" in await response.json()
-        response = await client.post(PREFIX + "/stories", data="{broken", headers={"Content-Type": "application/json"})
+        response = await client.post(
+            PREFIX + "/stories",
+            data="{broken",
+            headers={"Content-Type": "application/json"},
+        )
         assert response.status == 400
         response = await client.post(PREFIX + "/stories", json=authored)
         story = (await response.json())["story"]
         response = await client.delete(PREFIX + "/stories/" + story["id"])
         assert response.status == 400
-        response = await client.delete(PREFIX + "/stories/" + story["id"] + "?revision=99")
+        response = await client.delete(
+            PREFIX + "/stories/" + story["id"] + "?revision=99"
+        )
         assert response.status == 409
-        response = await client.post(PREFIX + "/sessions", json={**start_body(story), "story_revision": True})
+        response = await client.post(
+            PREFIX + "/sessions", json={**start_body(story), "story_revision": True}
+        )
         assert response.status == 400
         response = await client.get(PREFIX + "/sessions/missing")
         assert response.status == 404

@@ -18,7 +18,12 @@ from gideon.engine.rooms.safety import (
     member_spend_scope,
 )
 from gideon.engine.rooms.store import (
-    Room, RoomBusyError, RoomMember, RoomStore, message_text, session_key,
+    Room,
+    RoomBusyError,
+    RoomMember,
+    RoomStore,
+    message_text,
+    session_key,
 )
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
@@ -35,14 +40,18 @@ def member_listens(member: RoomMember, content: str) -> bool:
     if member.listen_policy == "all":
         return True
     normalized = unicodedata.normalize("NFC", content).casefold()
+
     def token_character(char: str) -> bool:
         return char in "_@-" or unicodedata.category(char)[0] in "LNM"
+
     for label in {"everyone", member.id, member.name}:
         token = "@" + unicodedata.normalize("NFC", label).casefold()
         for match in re.finditer(re.escape(token), normalized):
             if match.start() and token_character(normalized[match.start() - 1]):
                 continue
-            if match.end() < len(normalized) and token_character(normalized[match.end()]):
+            if match.end() < len(normalized) and token_character(
+                normalized[match.end()]
+            ):
                 continue
             return True
     return False
@@ -77,11 +86,14 @@ class MemberTurn:
             f"You are {self.member.name}, a member of room {self.room.name}."
             + role
             + " Respond to the shared conversation as yourself. Read teammates' previous replies; "
-              "do not impersonate them or ask the user to repeat shared context.\n"
-            + "Room members: " + "; ".join(
-                f"{member.name} (@{member.id})" + (f": {member.role}" if member.role else "")
+            "do not impersonate them or ask the user to repeat shared context.\n"
+            + "Room members: "
+            + "; ".join(
+                f"{member.name} (@{member.id})"
+                + (f": {member.role}" if member.role else "")
                 for member in self.room.members
-            ) + "\n\n"
+            )
+            + "\n\n"
             + context
         )
 
@@ -105,8 +117,14 @@ class RoomTurns:
 
     def submit(self, room_id: str, content: str, request_id: str) -> dict:
         content = message_text(content)
-        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_id) or request_id == "current":
-            raise ValueError("request_id must contain 1 to 80 letters, numbers, underscores or hyphens")
+        if (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_id)
+            or request_id == "current"
+        ):
+            raise ValueError(
+                "request_id must contain 1 to 80 letters, numbers, underscores or hyphens"
+            )
         config = AppConfig.load().rooms
         if not config.enabled:
             raise PermissionError("rooms are disabled")
@@ -117,7 +135,10 @@ class RoomTurns:
             raise ValueError("room exceeds the configured member limit")
         existing = self.store.turn(room_id, request_id)
         if existing:
-            if existing.get("content_hash") != hashlib.sha256(content.encode()).hexdigest():
+            if (
+                existing.get("content_hash")
+                != hashlib.sha256(content.encode()).hexdigest()
+            ):
                 raise RoomBusyError("request id was already used for different text")
             return existing
         lock = self.store.acquire_turn(room_id)
@@ -130,9 +151,12 @@ class RoomTurns:
             lock.close()
             raise
         self._active.add(room_id)
-        task = asyncio.create_task(self._execute(room, content, record["id"], lock),
-                                   name=f"room:{room_id}:{record['id']}")
+        task = asyncio.create_task(
+            self._execute(room, content, record["id"], lock),
+            name=f"room:{room_id}:{record['id']}",
+        )
         self._tasks[room_id] = task
+
         def finished(done: asyncio.Task) -> None:
             if self._tasks.get(room_id) is done:
                 self._tasks.pop(room_id, None)
@@ -142,6 +166,7 @@ class RoomTurns:
                 self.store.update_turn(room_id, record["id"], status="cancelled")
             else:
                 done.exception()
+
         task.add_done_callback(finished)
         return record
 
@@ -156,13 +181,21 @@ class RoomTurns:
         try:
             async with asyncio.timeout(900):
                 await self._members(room, content, turn_id)
-            self.store.update_turn(room_id, turn_id, status="completed", member_id=None, text="")
+            self.store.update_turn(
+                room_id, turn_id, status="completed", member_id=None, text=""
+            )
         except asyncio.CancelledError:
             self.store.update_turn(room_id, turn_id, status="cancelled")
             raise
         except Exception as exc:
-            error = "Room turn exceeded the 15 minute limit" if isinstance(exc, TimeoutError) else str(exc)
-            self.store.update_turn(room_id, turn_id, status="failed", error=redact_field(error)[:1000])
+            error = (
+                "Room turn exceeded the 15 minute limit"
+                if isinstance(exc, TimeoutError)
+                else str(exc)
+            )
+            self.store.update_turn(
+                room_id, turn_id, status="failed", error=redact_field(error)[:1000]
+            )
             raise
         finally:
             self._active.discard(room_id)
@@ -215,18 +248,27 @@ class RoomTurns:
                             size += len(event.text)
                             if size > 100000:
                                 await provider.cancel()
-                                raise ValueError("Member reply exceeded the 100000 character limit")
+                                raise ValueError(
+                                    "Member reply exceeded the 100000 character limit"
+                                )
                             chunks.append(event.text)
                             if time.monotonic() - last_update >= 0.25:
-                                self.store.update_turn(room_id, turn_id,
-                                                       text=redact_field("".join(chunks)))
+                                self.store.update_turn(
+                                    room_id, turn_id, text=redact_field("".join(chunks))
+                                )
                                 last_update = time.monotonic()
                         elif event.kind == EVENT_COMPLETE:
                             spend.record(event)
                             if event.stop_reason in {"error", "failed"}:
-                                raise RuntimeError(event.text or "Member could not complete the turn")
+                                raise RuntimeError(
+                                    event.text or "Member could not complete the turn"
+                                )
                         elif event.kind == "error":
-                            raise RuntimeError(event.text or event.title or "Member could not complete the turn")
+                            raise RuntimeError(
+                                event.text
+                                or event.title
+                                or "Member could not complete the turn"
+                            )
                         elif event.kind == EVENT_PERMISSION_REQUEST:
                             current_posture = profile_for_session(key)
                             approved = await approver.approve(
@@ -239,7 +281,10 @@ class RoomTurns:
                     answer = redact_field("".join(chunks))
                     if answer.strip():
                         self.store.append(
-                            room_id, "assistant", answer, speaker=member.id,
+                            room_id,
+                            "assistant",
+                            answer,
+                            speaker=member.id,
                             turn_id=turn_id,
                         )
                     saved = True
@@ -251,9 +296,14 @@ class RoomTurns:
                         answer = redact_field("".join(chunks))
                         self.store.update_turn(room_id, turn_id, text=answer)
                         if answer.strip():
-                            self.store.append(room_id, "assistant", answer,
-                                              speaker=member.id, turn_id=turn_id,
-                                              interrupted=True)
+                            self.store.append(
+                                room_id,
+                                "assistant",
+                                answer,
+                                speaker=member.id,
+                                turn_id=turn_id,
+                                interrupted=True,
+                            )
                     self.state.sessions.release(key)
 
     async def cancel(self, room_id: str) -> dict | None:
@@ -273,4 +323,6 @@ class RoomTurns:
 
     def active(self, room_id: str) -> bool:
         current = self.store.turn(room_id)
-        return room_id in self._active or bool(current and current["status"] in {"queued", "running"})
+        return room_id in self._active or bool(
+            current and current["status"] in {"queued", "running"}
+        )

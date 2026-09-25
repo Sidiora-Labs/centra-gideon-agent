@@ -22,14 +22,34 @@ def image_source(home, name="Palette study"):
     buffer = BytesIO()
     Image.new("RGB", (3, 2), "#aabbcc").save(buffer, format="PNG")
     provider = NativeArtifactProvider(home / "artifacts")
-    artifact = provider.create_binary(name=name, data=buffer.getvalue(), mime="image/png")
+    artifact = provider.create_binary(
+        name=name, data=buffer.getvalue(), mime="image/png"
+    )
     return provider, artifact, buffer.getvalue()
 
 
 def payload(source, **changes):
-    return {"title": "Atmosphere", "request_id": str(uuid4()), "ingredient_ids": [], "groups": [
-        {"id": "group-a", "title": "Light", "cards": [{"id": "card-a", "artifact_id": source.slug,
-         "artifact_version": source.version, "caption": "Cool shadows", "colors": ["#AABBCC"]}]}], **changes}
+    return {
+        "title": "Atmosphere",
+        "request_id": str(uuid4()),
+        "ingredient_ids": [],
+        "groups": [
+            {
+                "id": "group-a",
+                "title": "Light",
+                "cards": [
+                    {
+                        "id": "card-a",
+                        "artifact_id": source.slug,
+                        "artifact_version": source.version,
+                        "caption": "Cool shadows",
+                        "colors": ["#AABBCC"],
+                    }
+                ],
+            }
+        ],
+        **changes,
+    }
 
 
 def test_order_captions_colors_provenance_and_restore(tmp_path):
@@ -73,7 +93,10 @@ def test_card_source_pin_survives_removal_and_cannot_be_rebound(tmp_path):
         store.update(first["id"], {**rebound, "revision": 2})
     assert store.export(first["id"])["groups"] == []
     restored = store.restore(first["id"], {"revision": 2, "target_revision": 1})
-    assert restored["groups"][0]["cards"][0]["provenance"] == first["groups"][0]["cards"][0]["provenance"]
+    assert (
+        restored["groups"][0]["cards"][0]["provenance"]
+        == first["groups"][0]["cards"][0]["provenance"]
+    )
     assert len(store.revisions(first["id"])) == 3
 
 
@@ -103,12 +126,16 @@ def test_real_source_version_missing_and_two_homes(tmp_path):
 def test_catalog_links_and_idempotent_creates(tmp_path):
     _, source, _ = image_source(tmp_path)
     catalog = IngredientStore(tmp_path)
-    ingredient = catalog.create({"request_id": "ingredient-1", "type": "place", "title": "City"})
+    ingredient = catalog.create(
+        {"request_id": "ingredient-1", "type": "place", "title": "City"}
+    )
     store = BoardStore(tmp_path)
     request = payload(source, ingredient_ids=[ingredient["id"], ingredient["id"]])
     first = store.create(request)
     assert first["ingredient_ids"] == [ingredient["id"]]
-    assert store.get(first["id"])["ingredient_status"] == [{"id": ingredient["id"], "missing": False}]
+    assert store.get(first["id"])["ingredient_status"] == [
+        {"id": ingredient["id"], "missing": False}
+    ]
     assert store.create(request) == first
     with pytest.raises(CatalogError) as error:
         store.create({**request, "title": "Different"})
@@ -132,15 +159,26 @@ def test_search_pagination_and_source_picker(tmp_path):
     assert len({item["id"] for page in pages for item in page}) == 5
     assert store.list(q="empty")["items"] == []
     sources = store.sources("Palette")["items"]
-    assert sources == [{"id": source.slug, "title": source.name, "kind": "image", "version": 1}]
+    assert sources == [
+        {"id": source.slug, "title": source.name, "kind": "image", "version": 1}
+    ]
     assert store.sources("unknown")["items"] == []
 
 
-@pytest.mark.parametrize("change", [
-    {"title": ""}, {"title": "x" * 201}, {"groups": {}}, {"groups": [{}] * 21},
-    {"ingredient_ids": "wrong"}, {"ingredient_ids": ["../escape"]},
-    {"home": "/other"}, {"provider": "remote"}, {"revision": 1},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"title": ""},
+        {"title": "x" * 201},
+        {"groups": {}},
+        {"groups": [{}] * 21},
+        {"ingredient_ids": "wrong"},
+        {"ingredient_ids": ["../escape"]},
+        {"home": "/other"},
+        {"provider": "remote"},
+        {"revision": 1},
+    ],
+)
 def test_invalid_board_fields_leave_no_records(tmp_path, change):
     _, source, _ = image_source(tmp_path)
     store = BoardStore(tmp_path)
@@ -149,12 +187,21 @@ def test_invalid_board_fields_leave_no_records(tmp_path, change):
     assert store.list()["total"] == 0
 
 
-@pytest.mark.parametrize("change", [
-    {"artifact_id": "../escape"}, {"artifact_version": True}, {"artifact_version": 0},
-    {"artifact_version": 99}, {"caption": "x" * 2001}, {"colors": ["red"]},
-    {"colors": ["#abc"]}, {"colors": ["#112233"] * 13},
-    {"provenance": {"title": "Invented"}}, {"credential": "secret"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"artifact_id": "../escape"},
+        {"artifact_version": True},
+        {"artifact_version": 0},
+        {"artifact_version": 99},
+        {"caption": "x" * 2001},
+        {"colors": ["red"]},
+        {"colors": ["#abc"]},
+        {"colors": ["#112233"] * 13},
+        {"provenance": {"title": "Invented"}},
+        {"credential": "secret"},
+    ],
+)
 def test_invalid_cards_fail_atomically(tmp_path, change):
     _, source, _ = image_source(tmp_path)
     store = BoardStore(tmp_path)
@@ -169,7 +216,9 @@ def test_duplicate_ids_and_stale_mutations(tmp_path):
     _, source, _ = image_source(tmp_path)
     store = BoardStore(tmp_path)
     request = payload(source)
-    request["groups"][0]["cards"].append(copy.deepcopy(request["groups"][0]["cards"][0]))
+    request["groups"][0]["cards"].append(
+        copy.deepcopy(request["groups"][0]["cards"][0])
+    )
     with pytest.raises(CatalogError, match="unique"):
         store.create(request)
     first = store.create(payload(source))
@@ -207,13 +256,17 @@ def test_actual_http_and_canonical_image_bytes(tmp_path):
             assert preview.status == 200
             assert preview.headers["Content-Type"] == "image/png"
             assert await preview.read() == png
-            response = await client.patch(path, json={"revision": 1, "title": "HTTP update"})
+            response = await client.patch(
+                path, json={"revision": 1, "title": "HTTP update"}
+            )
             assert response.status == 200
             response = await client.get(path + "/export?revision=1")
             assert response.status == 200
             assert "attachment" in response.headers["Content-Disposition"]
             assert await response.json() == first
-            response = await client.post(path + "/restore", json={"revision": 2, "target_revision": 1})
+            response = await client.post(
+                path + "/restore", json={"revision": 2, "target_revision": 1}
+            )
             assert (await response.json())["revision"] == 3
             response = await client.get(path + "/revisions")
             assert len((await response.json())["items"]) == 3
@@ -225,8 +278,11 @@ def test_actual_http_and_canonical_image_bytes(tmp_path):
             assert response.status == 400
             response = await client.get(path + "/export?revision=bad")
             assert response.status == 400
-            response = await client.post(BASE, json={"title": "Hidden", "home": "/other"})
+            response = await client.post(
+                BASE, json={"title": "Hidden", "home": "/other"}
+            )
             assert response.status == 400
+
     try:
         asyncio.run(journey())
     finally:

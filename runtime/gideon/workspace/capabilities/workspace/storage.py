@@ -1,4 +1,5 @@
 """Bounded, read-only storage attribution for runtime and canonical projects."""
+
 from __future__ import annotations
 
 import os
@@ -18,7 +19,11 @@ class StorageDiagnosis:
         self.entry_limit = entry_limit
 
     def _project(self, project_id):
-        if not isinstance(project_id, str) or not project_id.strip() or len(project_id) > 256:
+        if (
+            not isinstance(project_id, str)
+            or not project_id.strip()
+            or len(project_id) > 256
+        ):
             raise ValueError("Invalid project ID")
         project = self.hierarchy.get_project(project_id)
         if project is None or not project.workspace_dir:
@@ -51,7 +56,12 @@ class StorageDiagnosis:
             try:
                 entries = os.scandir(current)
             except OSError as error:
-                errors.append({"relative_path": str(current.relative_to(root)) or ".", "error": error.__class__.__name__})
+                errors.append(
+                    {
+                        "relative_path": str(current.relative_to(root)) or ".",
+                        "error": error.__class__.__name__,
+                    }
+                )
                 continue
             with entries:
                 for entry in entries:
@@ -77,7 +87,12 @@ class StorageDiagnosis:
                                 seen.add(key)
                                 total_bytes += stat.st_size
                     except OSError as error:
-                        errors.append({"relative_path": relative, "error": error.__class__.__name__})
+                        errors.append(
+                            {
+                                "relative_path": relative,
+                                "error": error.__class__.__name__,
+                            }
+                        )
         reasons = []
         if stack or visited >= limit:
             reasons.append("entry_limit")
@@ -85,13 +100,24 @@ class StorageDiagnosis:
             reasons.append("filesystem_boundary")
         if errors:
             reasons.append("inaccessible_entries")
-        return {"bytes": total_bytes, "files": files, "directories": directories,
-                "entries_scanned": visited, "skipped_symlinks": skipped_symlinks,
-                "skipped_mounts": skipped_mounts, "complete": not reasons,
-                "partial_reasons": reasons, "errors": errors[:20]}
+        return {
+            "bytes": total_bytes,
+            "files": files,
+            "directories": directories,
+            "entries_scanned": visited,
+            "skipped_symlinks": skipped_symlinks,
+            "skipped_mounts": skipped_mounts,
+            "complete": not reasons,
+            "partial_reasons": reasons,
+            "errors": errors[:20],
+        }
 
     def scan(self, payload):
-        if not isinstance(payload, dict) or set(payload) - {"scope", "project_id", "max_entries"}:
+        if not isinstance(payload, dict) or set(payload) - {
+            "scope",
+            "project_id",
+            "max_entries",
+        }:
             raise ValueError("Invalid storage diagnosis fields")
         scope = payload.get("scope")
         if scope not in {"runtime", "project"}:
@@ -107,19 +133,47 @@ class StorageDiagnosis:
             raise ValueError("Project diagnosis requires project_id")
         project, workspace = self._project(payload["project_id"])
         metadata = self.home / "projects" / project.id
-        return {"scope": "project", "project_id": project.id, "name": project.name,
-                "workspace": str(workspace), "usage": self._scan(workspace, limit),
-                "metadata_usage": self._scan(metadata, limit) if metadata.is_dir() and not metadata.is_symlink() else None}
+        return {
+            "scope": "project",
+            "project_id": project.id,
+            "name": project.name,
+            "workspace": str(workspace),
+            "usage": self._scan(workspace, limit),
+            "metadata_usage": (
+                self._scan(metadata, limit)
+                if metadata.is_dir() and not metadata.is_symlink()
+                else None
+            ),
+        }
 
     def report(self, project_id=None):
         projects = []
-        candidates = [self._project(project_id)[0]] if project_id is not None else [row for row in self.hierarchy._all_projects_raw() if row.workspace_dir]
+        candidates = (
+            [self._project(project_id)[0]]
+            if project_id is not None
+            else [
+                row for row in self.hierarchy._all_projects_raw() if row.workspace_dir
+            ]
+        )
         for project in candidates:
             selected, workspace = self._project(project.id)
             metadata = self.home / "projects" / selected.id
-            projects.append({"project_id": selected.id, "name": selected.name,
-                             "workspace": str(workspace), "workspace_usage": self._scan(workspace),
-                             "metadata_usage": self._scan(metadata) if metadata.is_dir() and not metadata.is_symlink() else None})
-        return {"generated_at": datetime.now(timezone.utc).isoformat(),
-                "entry_limit": self.entry_limit, "runtime_usage": self._scan(self.home),
-                "projects": projects}
+            projects.append(
+                {
+                    "project_id": selected.id,
+                    "name": selected.name,
+                    "workspace": str(workspace),
+                    "workspace_usage": self._scan(workspace),
+                    "metadata_usage": (
+                        self._scan(metadata)
+                        if metadata.is_dir() and not metadata.is_symlink()
+                        else None
+                    ),
+                }
+            )
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "entry_limit": self.entry_limit,
+            "runtime_usage": self._scan(self.home),
+            "projects": projects,
+        }

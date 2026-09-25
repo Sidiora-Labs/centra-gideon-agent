@@ -1002,12 +1002,15 @@ def _workflow_job_commands(path: Path, job: str) -> str:
     return "\n".join(body)
 
 
-def test_core_ci_keeps_the_shipped_verdicts_filled() -> None:
-    """Something must call the stamper, or the rail above is a standing red waiting to happen.
+def test_core_ci_exercises_registry_verdicts_without_tutorial_network_repos() -> None:
+    """Core CI must exercise real git fetches and all scanner outcomes offline.
 
     The three staged workflows cannot: GitHub runs workflows only from ``.github/workflows/``
     at the repo ROOT, and they live under ``examples/registry/``. Until the standalone registry
-    repo exists (ET-9, owner-only, #2490) core's own ``full.yml`` owns the job.
+    repo exists (ET-9, owner-only, #2490) core's own ``full.yml`` owns the job. The shipped
+    registry is staging documentation and names ``example.invalid`` tutorial repositories, so
+    using it as network input can only fail before the scanner. Canonical fixture repositories
+    use the validator's explicit offline mode while retaining real ``ls-remote`` and clone steps.
     """
     workflows = REPO_ROOT / ".github" / "workflows"
     full = (workflows / "full.yml").read_text(encoding="utf-8")
@@ -1018,8 +1021,12 @@ def test_core_ci_keeps_the_shipped_verdicts_filled() -> None:
     assert (
         "examples/registry/app-registry.json" in commands
     ), "the job never reads the shipped index"
+    assert "examples/registry/fixtures/apps" in commands
+    assert "examples/registry/fixtures/registries" in full
+    assert "--allow-file-repos" in commands
+    assert "example.invalid/gideon" not in commands
 
-    heredoc = full.rsplit("<<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    heredoc = full.rsplit("<<'PY'\n", 1)[1].split("\n        PY", 1)[0]
     for path in (
         "examples/registry/app-registry.json",
         "examples/registry/validate_registry.py",

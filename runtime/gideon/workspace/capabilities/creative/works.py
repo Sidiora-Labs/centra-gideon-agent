@@ -1,12 +1,15 @@
 """Writing works and exercises with canonical immutable manuscript artifacts."""
+
 import hashlib
 import json
 from datetime import datetime, timezone
 from uuid import uuid4
+
 from gideon.workspace.artifacts.native import NativeArtifactProvider
+
 from .authors import AuthorStore
-from .universes import UniverseStore
 from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .universes import UniverseStore
 
 FIELDS = {"title", "kind", "prompt", "author_ref", "universe_ref", "active_draft_id"}
 
@@ -28,7 +31,9 @@ class WorkStore(IngredientStore):
             """)
 
     def _work(self, db, id):
-        row = db.execute("SELECT record FROM works WHERE id=?", (identifier(id),)).fetchone()
+        row = db.execute(
+            "SELECT record FROM works WHERE id=?", (identifier(id),)
+        ).fetchone()
         if not row:
             raise CatalogError("Work not found", 404)
         return json.loads(row[0])
@@ -38,14 +43,26 @@ class WorkStore(IngredientStore):
         kind = value.get("kind", "work")
         if kind not in ("work", "exercise"):
             raise CatalogError("Invalid work kind")
-        result = {"title": text(value.get("title"), 200, True), "kind": kind, "prompt": text(value.get("prompt", ""), 20000)}
-        for field, table in (("author_ref", "author_revisions"), ("universe_ref", "universe_revisions")):
+        result = {
+            "title": text(value.get("title"), 200, True),
+            "kind": kind,
+            "prompt": text(value.get("prompt", ""), 20000),
+        }
+        for field, table in (
+            ("author_ref", "author_revisions"),
+            ("universe_ref", "universe_revisions"),
+        ):
             ref = value.get(field)
             if ref is not None:
                 keys(ref, {"id", "revision"})
                 pair = (identifier(ref.get("id")), integer(ref.get("revision")))
                 old = any(row.get(field) == ref for row in history)
-                if not old and not db.execute(f"SELECT 1 FROM {table} WHERE id=? AND revision=?", pair).fetchone():
+                if (
+                    not old
+                    and not db.execute(
+                        f"SELECT 1 FROM {table} WHERE id=? AND revision=?", pair
+                    ).fetchone()
+                ):
                     raise CatalogError("Pinned context revision not found", 404)
                 ref = {"id": pair[0], "revision": pair[1]}
             result[field] = ref
@@ -59,7 +76,10 @@ class WorkStore(IngredientStore):
 
     def _save(self, db, record):
         encoded = json.dumps(record, sort_keys=True)
-        db.execute("INSERT INTO work_revisions VALUES(?,?,?)", (record["id"], record["revision"], encoded))
+        db.execute(
+            "INSERT INTO work_revisions VALUES(?,?,?)",
+            (record["id"], record["revision"], encoded),
+        )
         db.execute("INSERT OR REPLACE INTO works VALUES(?,?)", (record["id"], encoded))
         return record
 
@@ -69,16 +89,29 @@ class WorkStore(IngredientStore):
         body = {k: v for k, v in payload.items() if k in FIELDS}
         encoded = json.dumps(body, sort_keys=True)
         with self.connection() as db:
-            prior = db.execute("SELECT payload,record FROM work_requests WHERE id=?", (request,)).fetchone()
+            prior = db.execute(
+                "SELECT payload,record FROM work_requests WHERE id=?", (request,)
+            ).fetchone()
             if prior:
                 if prior[0] != encoded:
-                    raise CatalogError("Request ID already used with different values", 409)
+                    raise CatalogError(
+                        "Request ID already used with different values", 409
+                    )
                 return json.loads(prior[1])
             values = self._values(db, body)
             now = datetime.now(timezone.utc).isoformat()
-            record = {**values, "id": str(uuid4()), "revision": 1, "created_at": now, "updated_at": now}
+            record = {
+                **values,
+                "id": str(uuid4()),
+                "revision": 1,
+                "created_at": now,
+                "updated_at": now,
+            }
             self._save(db, record)
-            db.execute("INSERT INTO work_requests VALUES(?,?,?)", (request, encoded, json.dumps(record)))
+            db.execute(
+                "INSERT INTO work_requests VALUES(?,?,?)",
+                (request, encoded, json.dumps(record)),
+            )
             return record
 
     def update(self, id, patch):
@@ -88,9 +121,24 @@ class WorkStore(IngredientStore):
             old = self._work(db, id)
             if old["revision"] != revision:
                 raise CatalogError("Work changed; reload before saving", 409)
-            history = [json.loads(r[0]) for r in db.execute("SELECT record FROM work_revisions WHERE id=?", (id,))]
-            values = self._values(db, {k: patch.get(k, self.editable(old)[k]) for k in FIELDS}, history)
-            return self._save(db, {**old, **values, "revision": revision + 1, "updated_at": datetime.now(timezone.utc).isoformat()})
+            history = [
+                json.loads(r[0])
+                for r in db.execute(
+                    "SELECT record FROM work_revisions WHERE id=?", (id,)
+                )
+            ]
+            values = self._values(
+                db, {k: patch.get(k, self.editable(old)[k]) for k in FIELDS}, history
+            )
+            return self._save(
+                db,
+                {
+                    **old,
+                    **values,
+                    "revision": revision + 1,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
     @staticmethod
     def editable(record):
@@ -100,7 +148,9 @@ class WorkStore(IngredientStore):
         keys(payload, {"revision", "target_revision"})
         target = integer(payload.get("target_revision"))
         record = self.export(id, target)
-        return self.update(id, {**self.editable(record), "revision": payload.get("revision")})
+        return self.update(
+            id, {**self.editable(record), "revision": payload.get("revision")}
+        )
 
     def export(self, id, revision=None):
         with self.connection() as db:
@@ -108,7 +158,10 @@ class WorkStore(IngredientStore):
             if revision is None:
                 return current
             integer(revision)
-            row = db.execute("SELECT record FROM work_revisions WHERE id=? AND revision=?", (id, revision)).fetchone()
+            row = db.execute(
+                "SELECT record FROM work_revisions WHERE id=? AND revision=?",
+                (id, revision),
+            ).fetchone()
             if not row:
                 raise CatalogError("Revision not found", 404)
             return json.loads(row[0])
@@ -116,7 +169,15 @@ class WorkStore(IngredientStore):
     def drafts(self, id):
         with self.connection() as db:
             self._work(db, id)
-            return {"items": [json.loads(row[0]) for row in db.execute("SELECT record FROM work_drafts WHERE work_id=? ORDER BY rowid DESC", (id,))]}
+            return {
+                "items": [
+                    json.loads(row[0])
+                    for row in db.execute(
+                        "SELECT record FROM work_drafts WHERE work_id=? ORDER BY rowid DESC",
+                        (id,),
+                    )
+                ]
+            }
 
     def draft(self, id, payload):
         with self.connection() as db:
@@ -129,11 +190,17 @@ class WorkStore(IngredientStore):
         if not content.strip():
             raise CatalogError("Draft text is required")
         note = text(payload.get("note", ""), 2000)
-        digest = hashlib.sha256(json.dumps({"id": identifier(id), **payload}, sort_keys=True).encode()).hexdigest()
-        prior = db.execute("SELECT payload_hash,record FROM work_draft_requests WHERE id=?", (request,)).fetchone()
+        digest = hashlib.sha256(
+            json.dumps({"id": identifier(id), **payload}, sort_keys=True).encode()
+        ).hexdigest()
+        prior = db.execute(
+            "SELECT payload_hash,record FROM work_draft_requests WHERE id=?", (request,)
+        ).fetchone()
         if prior:
             if prior[0] != digest:
-                raise CatalogError("Draft request already used with different values", 409)
+                raise CatalogError(
+                    "Draft request already used with different values", 409
+                )
             return json.loads(prior[1])
         work = self._work(db, id)
         if integer(payload.get("revision")) != work["revision"]:
@@ -142,38 +209,83 @@ class WorkStore(IngredientStore):
         slug = "creative-draft-" + draft_id
         artifact = self.artifacts.get(slug, version=1)
         if artifact:
-            if artifact.content != content or not artifact.readonly or artifact.description != digest:
+            if (
+                artifact.content != content
+                or not artifact.readonly
+                or artifact.description != digest
+            ):
                 raise CatalogError("Draft artifact conflicts with this request", 409)
         else:
-            artifact = self.artifacts.create(name=work["title"] + " draft", slug=slug, kind="markdown", content=content,
-                                             description=digest, readonly=True)
+            artifact = self.artifacts.create(
+                name=work["title"] + " draft",
+                slug=slug,
+                kind="markdown",
+                content=content,
+                description=digest,
+                readonly=True,
+            )
             if artifact.slug != slug:
                 raise CatalogError("Draft artifact name changed; retry", 409)
         persisted = self.artifacts.get(slug, version=1)
-        if persisted is None or persisted.content != content or not persisted.readonly or persisted.description != digest:
+        if (
+            persisted is None
+            or persisted.content != content
+            or not persisted.readonly
+            or persisted.description != digest
+        ):
             raise CatalogError("Draft artifact persistence could not be confirmed", 500)
-        draft = {"id": draft_id, "artifact_id": artifact.slug, "artifact_version": 1, "note": note,
-                 "created_at": datetime.now(timezone.utc).isoformat(), "characters": len(content)}
-        db.execute("INSERT INTO work_drafts VALUES(?,?,?)", (draft_id, id, json.dumps(draft)))
-        record = self._save(db, {**work, "active_draft_id": draft_id, "revision": work["revision"] + 1, "updated_at": draft["created_at"]})
+        draft = {
+            "id": draft_id,
+            "artifact_id": artifact.slug,
+            "artifact_version": 1,
+            "note": note,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "characters": len(content),
+        }
+        db.execute(
+            "INSERT INTO work_drafts VALUES(?,?,?)", (draft_id, id, json.dumps(draft))
+        )
+        record = self._save(
+            db,
+            {
+                **work,
+                "active_draft_id": draft_id,
+                "revision": work["revision"] + 1,
+                "updated_at": draft["created_at"],
+            },
+        )
         result = {"work": record, "draft": draft}
-        db.execute("INSERT INTO work_draft_requests VALUES(?,?,?)", (request, digest, json.dumps(result)))
+        db.execute(
+            "INSERT INTO work_draft_requests VALUES(?,?,?)",
+            (request, digest, json.dumps(result)),
+        )
         return result
 
     def read_draft(self, id, draft_id):
         with self.connection() as db:
             self._work(db, id)
-            row = db.execute("SELECT record FROM work_drafts WHERE id=? AND work_id=?", (identifier(draft_id), id)).fetchone()
+            row = db.execute(
+                "SELECT record FROM work_drafts WHERE id=? AND work_id=?",
+                (identifier(draft_id), id),
+            ).fetchone()
             if not row:
                 raise CatalogError("Draft not found", 404)
             draft = json.loads(row[0])
-        artifact = self.artifacts.get(draft["artifact_id"], version=draft["artifact_version"])
-        return {**draft, "missing": artifact is None, "text": artifact.content if artifact else ""}
+        artifact = self.artifacts.get(
+            draft["artifact_id"], version=draft["artifact_version"]
+        )
+        return {
+            **draft,
+            "missing": artifact is None,
+            "text": artifact.content if artifact else "",
+        }
 
     def import_revision(self, record):
         """Install one validated immutable revision without changing the current work."""
         keys(record, FIELDS | {"id", "revision", "created_at", "updated_at"})
-        identity, revision = identifier(record.get("id")), integer(record.get("revision"))
+        identity, revision = identifier(record.get("id")), integer(
+            record.get("revision")
+        )
         for field in ("created_at", "updated_at"):
             try:
                 value = datetime.fromisoformat(record.get(field))
@@ -181,49 +293,93 @@ class WorkStore(IngredientStore):
                 raise CatalogError("Invalid work revision timestamp") from error
             if value.utcoffset() is None:
                 raise CatalogError("Invalid work revision timestamp")
-        if datetime.fromisoformat(record["updated_at"]) < datetime.fromisoformat(record["created_at"]):
+        if datetime.fromisoformat(record["updated_at"]) < datetime.fromisoformat(
+            record["created_at"]
+        ):
             raise CatalogError("Work revision update predates creation")
         with self.connection() as db:
             current = self._work(db, identity)
             if revision > current["revision"]:
-                raise CatalogError("Work revision exceeds the canonical current work", 409)
-            for field, table in (("author_ref", "author_revisions"), ("universe_ref", "universe_revisions")):
+                raise CatalogError(
+                    "Work revision exceeds the canonical current work", 409
+                )
+            for field, table in (
+                ("author_ref", "author_revisions"),
+                ("universe_ref", "universe_revisions"),
+            ):
                 ref = record.get(field)
-                if ref is not None and (not isinstance(ref, dict) or set(ref) != {"id", "revision"}
-                        or not db.execute(f"SELECT 1 FROM {table} WHERE id=? AND revision=?",
-                                           (identifier(ref.get("id")), integer(ref.get("revision")))).fetchone()):
+                if ref is not None and (
+                    not isinstance(ref, dict)
+                    or set(ref) != {"id", "revision"}
+                    or not db.execute(
+                        f"SELECT 1 FROM {table} WHERE id=? AND revision=?",
+                        (identifier(ref.get("id")), integer(ref.get("revision"))),
+                    ).fetchone()
+                ):
                     raise CatalogError("Pinned context revision not found", 404)
             values = self._values(db, self.editable(record), (record,))
-            canonical = {**values, "id": identity, "revision": revision,
-                         "created_at": record["created_at"], "updated_at": record["updated_at"]}
+            canonical = {
+                **values,
+                "id": identity,
+                "revision": revision,
+                "created_at": record["created_at"],
+                "updated_at": record["updated_at"],
+            }
             if canonical != record:
                 raise CatalogError("Work revision is not canonical")
-            prior = db.execute("SELECT record FROM work_revisions WHERE id=? AND revision=?",
-                               (identity, revision)).fetchone()
+            prior = db.execute(
+                "SELECT record FROM work_revisions WHERE id=? AND revision=?",
+                (identity, revision),
+            ).fetchone()
             encoded = json.dumps(record, sort_keys=True)
             if prior:
                 if json.loads(prior[0]) != record:
                     raise CatalogError("Immutable work revision conflicts", 409)
                 return record
             if revision == current["revision"] and current != record:
-                raise CatalogError("Current work does not match its immutable revision", 409)
-            db.execute("INSERT INTO work_revisions VALUES(?,?,?)", (identity, revision, encoded))
+                raise CatalogError(
+                    "Current work does not match its immutable revision", 409
+                )
+            db.execute(
+                "INSERT INTO work_revisions VALUES(?,?,?)",
+                (identity, revision, encoded),
+            )
         return record
 
     def import_draft(self, work_id, draft, content, description, content_sha256):
         """Install one WorkStore-owned readonly Markdown draft and its canonical metadata."""
-        keys(draft, {"id", "artifact_id", "artifact_version", "note", "created_at", "characters"})
+        keys(
+            draft,
+            {
+                "id",
+                "artifact_id",
+                "artifact_version",
+                "note",
+                "created_at",
+                "characters",
+            },
+        )
         work_id, draft_id = identifier(work_id), identifier(draft.get("id"))
         expected_slug = "creative-draft-" + draft_id
-        if draft.get("artifact_id") != expected_slug or draft.get("artifact_version") != 1:
+        if (
+            draft.get("artifact_id") != expected_slug
+            or draft.get("artifact_version") != 1
+        ):
             raise CatalogError("Invalid authored draft artifact reference")
         text(content, 1000000)
         if not content.strip() or draft.get("characters") != len(content):
             raise CatalogError("Invalid authored draft content")
-        if (not isinstance(content_sha256, str) or len(content_sha256) != 64
-                or hashlib.sha256(content.encode()).hexdigest() != content_sha256):
+        if (
+            not isinstance(content_sha256, str)
+            or len(content_sha256) != 64
+            or hashlib.sha256(content.encode()).hexdigest() != content_sha256
+        ):
             raise CatalogError("Authored draft content hash does not match")
-        if not isinstance(description, str) or len(description) != 64 or any(c not in "0123456789abcdef" for c in description):
+        if (
+            not isinstance(description, str)
+            or len(description) != 64
+            or any(c not in "0123456789abcdef" for c in description)
+        ):
             raise CatalogError("Invalid authored draft provenance")
         text(draft.get("note"), 2000)
         integer(draft.get("characters"), 1, 1000000)
@@ -235,42 +391,88 @@ class WorkStore(IngredientStore):
             raise CatalogError("Invalid authored draft timestamp")
         with self.connection() as db:
             work = self._work(db, work_id)
-            prior = db.execute("SELECT work_id,record FROM work_drafts WHERE id=?", (draft_id,)).fetchone()
+            prior = db.execute(
+                "SELECT work_id,record FROM work_drafts WHERE id=?", (draft_id,)
+            ).fetchone()
             if prior and (prior[0] != work_id or json.loads(prior[1]) != draft):
                 raise CatalogError("Immutable authored draft conflicts", 409)
             artifact = self.artifacts.get(expected_slug, version=1)
-            if artifact and (artifact.content != content or not artifact.readonly
-                             or artifact.kind != "markdown" or artifact.description != description):
+            if artifact and (
+                artifact.content != content
+                or not artifact.readonly
+                or artifact.kind != "markdown"
+                or artifact.description != description
+            ):
                 raise CatalogError("Immutable authored draft artifact conflicts", 409)
             if artifact is None:
-                artifact = self.artifacts.create(name=work["title"] + " draft", slug=expected_slug,
-                    kind="markdown", content=content, description=description, readonly=True)
+                artifact = self.artifacts.create(
+                    name=work["title"] + " draft",
+                    slug=expected_slug,
+                    kind="markdown",
+                    content=content,
+                    description=description,
+                    readonly=True,
+                )
             persisted = self.artifacts.get(expected_slug, version=1)
-            if (persisted is None or persisted.content != content or not persisted.readonly
-                    or persisted.kind != "markdown" or persisted.description != description):
-                raise CatalogError("Authored draft artifact persistence could not be confirmed", 500)
+            if (
+                persisted is None
+                or persisted.content != content
+                or not persisted.readonly
+                or persisted.kind != "markdown"
+                or persisted.description != description
+            ):
+                raise CatalogError(
+                    "Authored draft artifact persistence could not be confirmed", 500
+                )
             if not prior:
-                db.execute("INSERT INTO work_drafts VALUES(?,?,?)",
-                           (draft_id, work_id, json.dumps(draft, sort_keys=True)))
+                db.execute(
+                    "INSERT INTO work_drafts VALUES(?,?,?)",
+                    (draft_id, work_id, json.dumps(draft, sort_keys=True)),
+                )
         return draft
 
     def get(self, id):
         work = self.export(id)
         with self.connection() as db:
-            row = db.execute("SELECT record FROM work_drafts WHERE id=? AND work_id=?", (work["active_draft_id"], id)).fetchone()
+            row = db.execute(
+                "SELECT record FROM work_drafts WHERE id=? AND work_id=?",
+                (work["active_draft_id"], id),
+            ).fetchone()
         active = json.loads(row[0]) if row else None
-        artifact = self.artifacts.get(active["artifact_id"], version=active["artifact_version"]) if active else None
-        return {**work, "active_draft": active, "draft_missing": active is not None and artifact is None,
-                "text": artifact.content if artifact else ""}
+        artifact = (
+            self.artifacts.get(
+                active["artifact_id"], version=active["artifact_version"]
+            )
+            if active
+            else None
+        )
+        return {
+            **work,
+            "active_draft": active,
+            "draft_missing": active is not None and artifact is None,
+            "text": artifact.content if artifact else "",
+        }
 
     def context(self, id):
         work = self.export(id)
-        result = {"prompt": work["prompt"], "author": None, "universe": None, "missing": []}
-        for field, store, key in (("author_ref", self.authors, "author"), ("universe_ref", self.universes, "universe")):
+        result = {
+            "prompt": work["prompt"],
+            "author": None,
+            "universe": None,
+            "missing": [],
+        }
+        for field, store, key in (
+            ("author_ref", self.authors, "author"),
+            ("universe_ref", self.universes, "universe"),
+        ):
             ref = work[field]
             if ref:
                 try:
-                    result[key] = store.brief(ref["id"], ref["revision"]) if key == "author" else store.export(ref["id"], ref["revision"])
+                    result[key] = (
+                        store.brief(ref["id"], ref["revision"])
+                        if key == "author"
+                        else store.export(ref["id"], ref["revision"])
+                    )
                 except CatalogError as exc:
                     if exc.status != 404:
                         raise
@@ -280,13 +482,27 @@ class WorkStore(IngredientStore):
     def revisions(self, id):
         with self.connection() as db:
             self._work(db, id)
-            return [json.loads(row[0]) for row in db.execute("SELECT record FROM work_revisions WHERE id=? ORDER BY revision DESC", (id,))]
+            return [
+                json.loads(row[0])
+                for row in db.execute(
+                    "SELECT record FROM work_revisions WHERE id=? ORDER BY revision DESC",
+                    (id,),
+                )
+            ]
 
     def list(self, q="", offset=0, limit=25):
         text(q, 200)
         integer(offset, 0, 1000000)
         integer(limit, 1, 100)
         with self.connection() as db:
-            rows = [json.loads(r[0]) for r in db.execute("SELECT record FROM works ORDER BY id")]
+            rows = [
+                json.loads(r[0])
+                for r in db.execute("SELECT record FROM works ORDER BY id")
+            ]
         rows = [r for r in rows if q.casefold() in r["title"].casefold()]
-        return {"items": rows[offset:offset + limit], "total": len(rows), "offset": offset, "limit": limit}
+        return {
+            "items": rows[offset : offset + limit],
+            "total": len(rows),
+            "offset": offset,
+            "limit": limit,
+        }

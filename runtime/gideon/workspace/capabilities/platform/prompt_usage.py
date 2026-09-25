@@ -20,7 +20,9 @@ def prompt_usage(provider: str, name: str) -> dict:
         if len(raw) > 1_048_576:
             raise ValueError("binding store exceeds inspection limit")
         active = json.loads(raw)
-        if not isinstance(active, dict) or any(not isinstance(value, str) for value in active.values()):
+        if not isinstance(active, dict) or any(
+            not isinstance(value, str) for value in active.values()
+        ):
             raise ValueError("invalid prompt bindings")
     except FileNotFoundError:
         active = {}
@@ -30,14 +32,32 @@ def prompt_usage(provider: str, name: str) -> dict:
     for use_case, reference in sorted(active.items()):
         if use_case in declarations or use_case in apps:
             if reference == f"{provider}:{name}":
-                consumers.append({"kind": "binding", "id": use_case, "label": use_case_label(use_case)})
+                consumers.append(
+                    {
+                        "kind": "binding",
+                        "id": use_case,
+                        "label": use_case_label(use_case),
+                    }
+                )
     if provider == "native":
         for entry in BUNDLED_PROMPTS:
             if entry.name == name:
-                consumers.append({"kind": "native", "id": entry.use_case, "label": use_case_label(entry.use_case)})
+                consumers.append(
+                    {
+                        "kind": "native",
+                        "id": entry.use_case,
+                        "label": use_case_label(entry.use_case),
+                    }
+                )
     for use_case, entry in sorted(apps.items()):
         if entry and entry.provider == provider and entry.prompt_name == name:
-            consumers.append({"kind": "app", "id": use_case, "label": f"{entry.app}: {use_case_label(use_case)}"})
+            consumers.append(
+                {
+                    "kind": "app",
+                    "id": use_case,
+                    "label": f"{entry.app}: {use_case_label(use_case)}",
+                }
+            )
     return {
         "version": 1,
         "provider": provider,

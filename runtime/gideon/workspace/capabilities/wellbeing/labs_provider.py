@@ -12,11 +12,15 @@ async def invoke_labs(home, arguments):
     operation = arguments.get("operation")
     payload = arguments.get("payload", {})
     if operation in ("labs_preview", "labs_commit"):
-        result = await asyncio.to_thread(store.preview if operation == "labs_preview" else store.commit, payload)
+        result = await asyncio.to_thread(
+            store.preview if operation == "labs_preview" else store.commit, payload
+        )
     elif operation == "labs_correct":
         result = await asyncio.to_thread(store.correct, arguments.get("id"), payload)
     elif operation in ("labs_get", "labs_history"):
-        result = await asyncio.to_thread(store.get if operation == "labs_get" else store.history, arguments.get("id"))
+        result = await asyncio.to_thread(
+            store.get if operation == "labs_get" else store.history, arguments.get("id")
+        )
     elif operation == "labs_list":
         result = await asyncio.to_thread(store.list, **payload)
     elif operation == "labs_trends":

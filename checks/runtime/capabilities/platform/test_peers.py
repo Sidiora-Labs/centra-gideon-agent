@@ -10,9 +10,17 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.interfaces.dashboard.handlers.capabilities_peers import register
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware, use_ephemeral_secret
+from gideon.interfaces.dashboard.token_auth import (
+    generate_token,
+    token_auth_middleware,
+    use_ephemeral_secret,
+)
 from gideon.workspace.capabilities.platform.peer_tools import create_provider
-from gideon.workspace.capabilities.platform.peers import CATEGORIES, PeerError, PeerStore
+from gideon.workspace.capabilities.platform.peers import (
+    CATEGORIES,
+    PeerError,
+    PeerStore,
+)
 
 PREFIX = "/api/capabilities/platform/peers"
 SCOPE = "experience.world_guest"
@@ -27,7 +35,15 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def record(identity, endpoint="https://peer.example", revision=0, enabled=True, send=None, receive=None, label="Remote peer"):
+def record(
+    identity,
+    endpoint="https://peer.example",
+    revision=0,
+    enabled=True,
+    send=None,
+    receive=None,
+    label="Remote peer",
+):
     return {
         "label": label,
         "endpoint": endpoint,
@@ -39,10 +55,17 @@ def record(identity, endpoint="https://peer.example", revision=0, enabled=True, 
     }
 
 
-def pair(sender, receiver, sender_endpoint="https://sender.example", receiver_endpoint="https://receiver.example"):
+def pair(
+    sender,
+    receiver,
+    sender_endpoint="https://sender.example",
+    receiver_endpoint="https://receiver.example",
+):
     sender_identity = sender.snapshot()["self"]
     receiver_identity = receiver.snapshot()["self"]
-    sender.put(receiver_identity["peer_id"], record(receiver_identity, receiver_endpoint))
+    sender.put(
+        receiver_identity["peer_id"], record(receiver_identity, receiver_endpoint)
+    )
     receiver.put(sender_identity["peer_id"], record(sender_identity, sender_endpoint))
     return sender_identity, receiver_identity
 
@@ -85,7 +108,17 @@ def test_peer_policy_crud_restart_and_optimistic_conflicts(home, tmp_path):
     assert created["enabled"] is True
     assert created["created_at"] == created["updated_at"]
     assert PeerStore(home).get(remote["peer_id"]) == created
-    revised = store.put(remote["peer_id"], record(remote, revision=1, enabled=False, send=["media.assets", SCOPE], receive=[], label="Paused"))
+    revised = store.put(
+        remote["peer_id"],
+        record(
+            remote,
+            revision=1,
+            enabled=False,
+            send=["media.assets", SCOPE],
+            receive=[],
+            label="Paused",
+        ),
+    )
     assert revised["revision"] == 2
     assert revised["label"] == "Paused"
     assert revised["send_categories"] == [SCOPE, "media.assets"]
@@ -102,16 +135,19 @@ def test_peer_policy_crud_restart_and_optimistic_conflicts(home, tmp_path):
     assert missing.value.status == 404
 
 
-@pytest.mark.parametrize("change,message", [
-    ({"label": ""}, "label"),
-    ({"endpoint": "file:///tmp/peer"}, "endpoint"),
-    ({"endpoint": "https://user:pw@example.com"}, "endpoint"),
-    ({"enabled": 1}, "enabled"),
-    ({"revision": -1}, "revision"),
-    ({"send_categories": [SCOPE, SCOPE]}, "categories"),
-    ({"receive_categories": ["INVALID"]}, "categories"),
-    ({"public_key": "not-a-key"}, "public key"),
-])
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ({"label": ""}, "label"),
+        ({"endpoint": "file:///tmp/peer"}, "endpoint"),
+        ({"endpoint": "https://user:pw@example.com"}, "endpoint"),
+        ({"enabled": 1}, "enabled"),
+        ({"revision": -1}, "revision"),
+        ({"send_categories": [SCOPE, SCOPE]}, "categories"),
+        ({"receive_categories": ["INVALID"]}, "categories"),
+        ({"public_key": "not-a-key"}, "public key"),
+    ],
+)
 def test_invalid_peer_records_do_not_write(home, tmp_path, change, message):
     store = PeerStore(home)
     identity = PeerStore(tmp_path / "remote").snapshot()["self"]
@@ -141,7 +177,9 @@ def test_directional_policy_is_exact_and_disabled_peer_denies(home, tmp_path):
     with pytest.raises(PeerError, match="direction"):
         store.allows(peer["peer_id"], SCOPE, "sideways")
     current = store.get(peer["peer_id"])
-    store.put(peer["peer_id"], record(peer, revision=current["revision"], enabled=False))
+    store.put(
+        peer["peer_id"], record(peer, revision=current["revision"], enabled=False)
+    )
     assert store.allows(peer["peer_id"], SCOPE, "send") is False
     assert store.allows(peer["peer_id"], SCOPE, "receive") is False
 
@@ -152,7 +190,15 @@ def test_real_ed25519_proof_exact_recipient_scope_expiry_and_nonce(home, tmp_pat
     sender_identity, receiver_identity = pair(sender, receiver)
     before = int(time.time())
     proof = sender.create_proof(receiver_identity["peer_id"], SCOPE, ttl_seconds=30)
-    assert set(proof) == {"version", "sender", "recipient", "scope", "expires_at", "nonce", "signature"}
+    assert set(proof) == {
+        "version",
+        "sender",
+        "recipient",
+        "scope",
+        "expires_at",
+        "nonce",
+        "signature",
+    }
     assert proof["sender"] == sender_identity["peer_id"]
     assert proof["recipient"] == receiver_identity["peer_id"]
     assert proof["scope"] == SCOPE
@@ -165,16 +211,25 @@ def test_real_ed25519_proof_exact_recipient_scope_expiry_and_nonce(home, tmp_pat
         receiver.verify_proof(proof, now=before)
     assert replay.value.status == 409
     with sqlite3.connect(receiver.db_path) as connection:
-        assert connection.execute("SELECT sender,nonce,expires_at FROM nonces").fetchall() == [(sender_identity["peer_id"], proof["nonce"], proof["expires_at"])]
+        assert connection.execute(
+            "SELECT sender,nonce,expires_at FROM nonces"
+        ).fetchall() == [
+            (sender_identity["peer_id"], proof["nonce"], proof["expires_at"])
+        ]
 
 
-@pytest.mark.parametrize("field,value,message,status", [
-    ("recipient", "peer-00000000000000000000000000000000", "recipient", 401),
-    ("scope", "media.assets", "policy", 403),
-    ("expires_at", 0, "expiry", 401),
-    ("nonce", "short", "nonce", 401),
-])
-def test_proof_rejects_recipient_scope_expiry_and_nonce(home, field, value, message, status):
+@pytest.mark.parametrize(
+    "field,value,message,status",
+    [
+        ("recipient", "peer-00000000000000000000000000000000", "recipient", 401),
+        ("scope", "media.assets", "policy", 403),
+        ("expires_at", 0, "expiry", 401),
+        ("nonce", "short", "nonce", 401),
+    ],
+)
+def test_proof_rejects_recipient_scope_expiry_and_nonce(
+    home, field, value, message, status
+):
     sender = PeerStore(home / "sender")
     receiver = PeerStore(home / "receiver")
     _, receiver_identity = pair(sender, receiver)
@@ -224,14 +279,23 @@ async def test_signed_transport_uses_real_guarded_http_and_receiver_store(home):
         seen["content_type"] = request.headers.get("Content-Type")
         seen["body"] = await request.json()
         peer = receiver.verify_proof(seen["body"]["proof"])
-        return web.json_response({"accepted": seen["body"]["payload"], "peer_id": peer["id"]})
+        return web.json_response(
+            {"accepted": seen["body"]["payload"], "peer_id": peer["id"]}
+        )
 
     app = web.Application()
     app.router.add_post("/world/guest", inbound)
     async with TestServer(app) as server:
-        sender_identity, receiver_identity = pair(sender, receiver, receiver_endpoint=str(server.make_url("/")))
-        result = await sender.post_signed(receiver_identity["peer_id"], SCOPE, "/world/guest", {"guest_id": "guest-1"})
-    assert result == {"accepted": {"guest_id": "guest-1"}, "peer_id": sender_identity["peer_id"]}
+        sender_identity, receiver_identity = pair(
+            sender, receiver, receiver_endpoint=str(server.make_url("/"))
+        )
+        result = await sender.post_signed(
+            receiver_identity["peer_id"], SCOPE, "/world/guest", {"guest_id": "guest-1"}
+        )
+    assert result == {
+        "accepted": {"guest_id": "guest-1"},
+        "peer_id": sender_identity["peer_id"],
+    }
     assert seen["content_type"] == "application/json"
     assert set(seen["body"]) == {"proof", "payload"}
     assert seen["body"]["proof"]["scope"] == SCOPE
@@ -240,7 +304,9 @@ async def test_signed_transport_uses_real_guarded_http_and_receiver_store(home):
 
 
 @pytest.mark.asyncio
-async def test_inbound_verify_handler_requires_peer_proof_without_dashboard_session(home, tmp_path):
+async def test_inbound_verify_handler_requires_peer_proof_without_dashboard_session(
+    home, tmp_path
+):
     remote_store = PeerStore(tmp_path / "remote")
     remote = remote_store.snapshot()["self"]
     local_store = PeerStore(home)
@@ -251,14 +317,21 @@ async def test_inbound_verify_handler_requires_peer_proof_without_dashboard_sess
     register(app)
     async with TestClient(TestServer(app)) as client:
         proof = remote_store.create_proof(local["peer_id"], SCOPE)
-        verified = await client.post(f"{PREFIX}/proofs/verify", json={"proof": proof, "payload": {"guest_id": "guest-1"}})
+        verified = await client.post(
+            f"{PREFIX}/proofs/verify",
+            json={"proof": proof, "payload": {"guest_id": "guest-1"}},
+        )
         assert verified.status == 200
         result = await verified.json()
         assert result["verified"] is True
         assert result["peer"]["id"] == remote["peer_id"]
         assert result["payload"] == {"guest_id": "guest-1"}
         assert (await client.get(PREFIX)).status == 403
-        assert (await client.post(f"{PREFIX}/proofs/verify", json={"proof": {}, "payload": {}})).status == 401
+        assert (
+            await client.post(
+                f"{PREFIX}/proofs/verify", json={"proof": {}, "payload": {}}
+            )
+        ).status == 401
 
 
 @pytest.mark.asyncio
@@ -275,7 +348,9 @@ async def test_http_auth_crud_inbound_verify_and_native_projection(home, tmp_pat
         initial = await client.get(PREFIX, headers=headers)
         assert initial.status == 200
         assert initial.headers["Cache-Control"] == "no-store"
-        created = await client.put(f"{PREFIX}/{remote['peer_id']}", headers=headers, json=record(remote))
+        created = await client.put(
+            f"{PREFIX}/{remote['peer_id']}", headers=headers, json=record(remote)
+        )
         assert created.status == 200
         assert (await created.json())["revision"] == 1
         native = await create_provider().invoke("platform_peer_projection", {})
@@ -284,20 +359,34 @@ async def test_http_auth_crud_inbound_verify_and_native_projection(home, tmp_pat
         assert projected["peers"][0]["id"] == remote["peer_id"]
         assert "private_key" not in native.output
         proof = remote_store.create_proof(local["peer_id"], SCOPE)
-        verified = await client.post(f"{PREFIX}/proofs/verify", headers=headers, json={"proof": proof, "payload": {"guest_id": "guest-1"}})
+        verified = await client.post(
+            f"{PREFIX}/proofs/verify",
+            headers=headers,
+            json={"proof": proof, "payload": {"guest_id": "guest-1"}},
+        )
         assert verified.status == 200
         verified_body = await verified.json()
         assert verified_body["verified"] is True
         assert verified_body["peer"]["id"] == remote["peer_id"]
         assert verified_body["payload"] == {"guest_id": "guest-1"}
-        replay = await client.post(f"{PREFIX}/proofs/verify", headers=headers, json={"proof": proof, "payload": {"guest_id": "guest-1"}})
+        replay = await client.post(
+            f"{PREFIX}/proofs/verify",
+            headers=headers,
+            json={"proof": proof, "payload": {"guest_id": "guest-1"}},
+        )
         assert replay.status == 409
-        invalid_envelope = await client.post(f"{PREFIX}/proofs/verify", headers=headers, json=proof)
+        invalid_envelope = await client.post(
+            f"{PREFIX}/proofs/verify", headers=headers, json=proof
+        )
         assert invalid_envelope.status == 400
-        deleted = await client.delete(f"{PREFIX}/{remote['peer_id']}?revision=1", headers=headers)
+        deleted = await client.delete(
+            f"{PREFIX}/{remote['peer_id']}?revision=1", headers=headers
+        )
         assert deleted.status == 200
         assert (await deleted.json())["peers"] == []
-    invalid_native = await create_provider().invoke("platform_peer_projection", {"secret": True})
+    invalid_native = await create_provider().invoke(
+        "platform_peer_projection", {"secret": True}
+    )
     assert not invalid_native.success
 
 

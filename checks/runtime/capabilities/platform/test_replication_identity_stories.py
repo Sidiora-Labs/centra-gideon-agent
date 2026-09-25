@@ -5,8 +5,9 @@ import pytest
 
 from gideon.operations.durability import conflicts
 from gideon.workspace.capabilities.identity.store import StoryStore
-from gideon.workspace.capabilities.platform import replication_identity_stories as adapter
-
+from gideon.workspace.capabilities.platform import (
+    replication_identity_stories as adapter,
+)
 
 NOW = "2026-09-25T12:00:00+00:00"
 
@@ -47,10 +48,14 @@ def edit(story, **changes):
     return {"expected_revision": story["revision"], **values}
 
 
-def test_two_home_projection_preserves_current_revision_and_parent_lineage_only(tmp_path):
+def test_two_home_projection_preserves_current_revision_and_parent_lineage_only(
+    tmp_path,
+):
     source, target = tmp_path / "source", tmp_path / "target"
     source_store, root, child = create_chain(source)
-    root = source_store.update(root["id"], **edit(root, text="The harbor lights became a lasting rule."))
+    root = source_store.update(
+        root["id"], **edit(root, text="The harbor lights became a lasting rule.")
+    )
 
     projected = rows(source)
     assert [row["id"] for row in projected] == [root["id"], child["id"]]
@@ -59,9 +64,19 @@ def test_two_home_projection_preserves_current_revision_and_parent_lineage_only(
     assert row_for(source, root["id"])["data"]["revision"] == 2
 
     result = adapter.apply_rows(
-        target, adapter.ENTRY_ID, projected, {}, conflicts.ConflictQueue(target), NOW,
+        target,
+        adapter.ENTRY_ID,
+        projected,
+        {},
+        conflicts.ConflictQueue(target),
+        NOW,
     )
-    assert (result.added, result.updated, result.removed, result.conflicts) == (2, 0, 0, 0)
+    assert (result.added, result.updated, result.removed, result.conflicts) == (
+        2,
+        0,
+        0,
+        0,
+    )
     assert rows(target) == projected
     assert store(target).chain(child["id"]) == [root, child]
 
@@ -80,33 +95,61 @@ def test_fast_forward_exact_replay_conflict_restore_and_restart(tmp_path):
     source_store, root, child = create_chain(source, "shared")
     baseline = rows(source)
     initial = adapter.apply_rows(
-        target, adapter.ENTRY_ID, baseline, {}, conflicts.ConflictQueue(target), NOW,
+        target,
+        adapter.ENTRY_ID,
+        baseline,
+        {},
+        conflicts.ConflictQueue(target),
+        NOW,
     )
     assert initial.new_ancestors == {
         row["id"]: conflicts.row_sha(row) for row in baseline
     }
 
-    changed = source_store.update(child["id"], **edit(child, text="Source remembers the northern crossing."))
+    changed = source_store.update(
+        child["id"], **edit(child, text="Source remembers the northern crossing.")
+    )
     forwarded_rows = rows(source)
     forwarded = adapter.apply_rows(
-        target, adapter.ENTRY_ID, forwarded_rows, initial.new_ancestors,
-        conflicts.ConflictQueue(target), "2026-09-25T12:05:00+00:00",
+        target,
+        adapter.ENTRY_ID,
+        forwarded_rows,
+        initial.new_ancestors,
+        conflicts.ConflictQueue(target),
+        "2026-09-25T12:05:00+00:00",
     )
     assert (forwarded.added, forwarded.updated, forwarded.conflicts) == (0, 1, 0)
     assert store(target).get(child["id"]) == changed
     replayed = adapter.apply_rows(
-        target, adapter.ENTRY_ID, forwarded_rows, forwarded.new_ancestors,
-        conflicts.ConflictQueue(target), "2026-09-25T12:10:00+00:00",
+        target,
+        adapter.ENTRY_ID,
+        forwarded_rows,
+        forwarded.new_ancestors,
+        conflicts.ConflictQueue(target),
+        "2026-09-25T12:10:00+00:00",
     )
-    assert (replayed.added, replayed.updated, replayed.removed, replayed.conflicts) == (0, 0, 0, 0)
+    assert (replayed.added, replayed.updated, replayed.removed, replayed.conflicts) == (
+        0,
+        0,
+        0,
+        0,
+    )
     assert replayed.new_ancestors == forwarded.new_ancestors
 
     local_store = StoryStore(target / "capabilities/identity/stories.sqlite3")
-    local = local_store.update(changed["id"], **edit(changed, theme="Local interpretation"))
-    remote = source_store.update(changed["id"], **edit(changed, text="Source preserves exact weather and route."))
+    local = local_store.update(
+        changed["id"], **edit(changed, theme="Local interpretation")
+    )
+    remote = source_store.update(
+        changed["id"], **edit(changed, text="Source preserves exact weather and route.")
+    )
     queue = conflicts.ConflictQueue(target)
     held = adapter.apply_rows(
-        target, adapter.ENTRY_ID, rows(source), forwarded.new_ancestors, queue,
+        target,
+        adapter.ENTRY_ID,
+        rows(source),
+        forwarded.new_ancestors,
+        queue,
         "2026-09-25T12:15:00+00:00",
     )
     assert (held.added, held.updated, held.removed, held.conflicts) == (0, 0, 0, 1)
@@ -117,16 +160,24 @@ def test_fast_forward_exact_replay_conflict_restore_and_restart(tmp_path):
     assert pending[0].remote_row["data"] == remote
 
     resolved = adapter.restore_fields(
-        target, pending[0].id, ["text"], "2026-09-25T12:20:00+00:00",
+        target,
+        pending[0].id,
+        ["text"],
+        "2026-09-25T12:20:00+00:00",
     )
-    merged = StoryStore(target / "capabilities/identity/stories.sqlite3").get(child["id"])
+    merged = StoryStore(target / "capabilities/identity/stories.sqlite3").get(
+        child["id"]
+    )
     assert resolved["fields"] == ["text"]
     assert merged["theme"] == "Local interpretation"
     assert merged["text"] == remote["text"]
     assert merged["parent_id"] == root["id"]
     assert merged["revision"] == local["revision"] + 1
     assert merged["updated_at"] == "2026-09-25T12:20:00+00:00"
-    assert conflicts.ConflictQueue(target).get(pending[0].id).status == conflicts.STATUS_RESOLVED
+    assert (
+        conflicts.ConflictQueue(target).get(pending[0].id).status
+        == conflicts.STATUS_RESOLVED
+    )
 
 
 def test_tombstone_deletes_children_before_parents_and_survives_restart(tmp_path):
@@ -134,17 +185,31 @@ def test_tombstone_deletes_children_before_parents_and_survives_restart(tmp_path
     source_store, root, child = create_chain(source, "delete")
     baseline = rows(source)
     copied = adapter.apply_rows(
-        target, adapter.ENTRY_ID, baseline, {}, conflicts.ConflictQueue(target), NOW,
+        target,
+        adapter.ENTRY_ID,
+        baseline,
+        {},
+        conflicts.ConflictQueue(target),
+        NOW,
     )
     source_store.delete(child["id"], expected_revision=child["revision"])
     source_store.delete(root["id"], expected_revision=root["revision"])
     assert rows(source) == []
 
     removed = adapter.apply_rows(
-        target, adapter.ENTRY_ID, [], copied.new_ancestors,
-        conflicts.ConflictQueue(target), "2026-09-25T13:00:00+00:00",
+        target,
+        adapter.ENTRY_ID,
+        [],
+        copied.new_ancestors,
+        conflicts.ConflictQueue(target),
+        "2026-09-25T13:00:00+00:00",
     )
-    assert (removed.added, removed.updated, removed.removed, removed.conflicts) == (0, 0, 2, 0)
+    assert (removed.added, removed.updated, removed.removed, removed.conflicts) == (
+        0,
+        0,
+        2,
+        0,
+    )
     assert removed.new_ancestors == {}
     assert StoryStore(target / "capabilities/identity/stories.sqlite3").list() == []
     with sqlite3.connect(target / "capabilities/identity/stories.sqlite3") as database:
@@ -153,12 +218,16 @@ def test_tombstone_deletes_children_before_parents_and_survives_restart(tmp_path
         assert database.execute("SELECT count(*) FROM requests").fetchone()[0] == 0
 
 
-def test_complete_batch_validation_rejects_orphans_cycles_private_fields_and_bad_lineage(tmp_path):
+def test_complete_batch_validation_rejects_orphans_cycles_private_fields_and_bad_lineage(
+    tmp_path,
+):
     source, target = tmp_path / "source", tmp_path / "target"
     _, root, child = create_chain(source, "validation")
     canonical = rows(source)
     root_row = copy.deepcopy(next(row for row in canonical if row["id"] == root["id"]))
-    child_row = copy.deepcopy(next(row for row in canonical if row["id"] == child["id"]))
+    child_row = copy.deepcopy(
+        next(row for row in canonical if row["id"] == child["id"])
+    )
 
     invalid_sets = []
     invalid_sets.append([child_row])
@@ -189,7 +258,12 @@ def test_complete_batch_validation_rejects_orphans_cycles_private_fields_and_bad
             adapter.validate_entries([{"entry_id": adapter.ENTRY_ID, "rows": invalid}])
         with pytest.raises(ValueError):
             adapter.apply_rows(
-                target, adapter.ENTRY_ID, invalid, {}, conflicts.ConflictQueue(target), NOW,
+                target,
+                adapter.ENTRY_ID,
+                invalid,
+                {},
+                conflicts.ConflictQueue(target),
+                NOW,
             )
         assert rows(target) == []
     with pytest.raises(ValueError, match="coverage"):
@@ -203,17 +277,28 @@ def test_referential_failure_is_preflighted_before_conflict_or_mutation(tmp_path
     source_store, root, child = create_chain(source, "held-child")
     baseline = rows(source)
     copied = adapter.apply_rows(
-        target, adapter.ENTRY_ID, baseline, {}, conflicts.ConflictQueue(target), NOW,
+        target,
+        adapter.ENTRY_ID,
+        baseline,
+        {},
+        conflicts.ConflictQueue(target),
+        NOW,
     )
     target_store = store(target)
-    local_child = target_store.update(child["id"], **edit(child, text="Local child changed."))
+    local_child = target_store.update(
+        child["id"], **edit(child, text="Local child changed.")
+    )
     source_store.delete(child["id"], expected_revision=child["revision"])
     source_store.delete(root["id"], expected_revision=root["revision"])
     queue = conflicts.ConflictQueue(target)
 
     with pytest.raises(ValueError, match="parent is missing"):
         adapter.apply_rows(
-            target, adapter.ENTRY_ID, [], copied.new_ancestors, queue,
+            target,
+            adapter.ENTRY_ID,
+            [],
+            copied.new_ancestors,
+            queue,
             "2026-09-25T13:10:00+00:00",
         )
     assert target_store.get(root["id"]) == root
@@ -221,7 +306,9 @@ def test_referential_failure_is_preflighted_before_conflict_or_mutation(tmp_path
     assert queue.items(status=conflicts.STATUS_NEEDS_REVIEW) == []
 
 
-def test_writer_refuses_parent_first_violation_and_never_materializes_history_or_requests(tmp_path):
+def test_writer_refuses_parent_first_violation_and_never_materializes_history_or_requests(
+    tmp_path,
+):
     source, target = tmp_path / "source", tmp_path / "target"
     _, root, child = create_chain(source, "writer")
     root_row, child_row = row_for(source, root["id"]), row_for(source, child["id"])

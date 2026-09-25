@@ -3,7 +3,6 @@ import re
 
 from .sketches import SketchError, fields, integer
 
-
 RENDERERS = ("canvas2d", "svg", "css")
 _DOCUMENT = re.compile(r"<!doctype\s+html[\s\S]*?</html\s*>", re.IGNORECASE)
 _EXTERNAL = re.compile(
@@ -20,11 +19,32 @@ class AnimationService:
     def prepare(self, body):
         fields(
             body,
-            ("title", "concept", "renderer", "duration_seconds", "width", "height", "fps", "interactive"),
-            ("title", "concept", "renderer", "duration_seconds", "width", "height", "fps", "interactive"),
+            (
+                "title",
+                "concept",
+                "renderer",
+                "duration_seconds",
+                "width",
+                "height",
+                "fps",
+                "interactive",
+            ),
+            (
+                "title",
+                "concept",
+                "renderer",
+                "duration_seconds",
+                "width",
+                "height",
+                "fps",
+                "interactive",
+            ),
         )
         for key, limit in (("title", 120), ("concept", 4000)):
-            if not isinstance(body[key], str) or not 1 <= len(body[key].strip()) <= limit:
+            if (
+                not isinstance(body[key], str)
+                or not 1 <= len(body[key].strip()) <= limit
+            ):
                 raise SketchError(f"Animation {key} requires 1–{limit} characters")
         if body["renderer"] not in RENDERERS:
             raise SketchError("Animation renderer must be canvas2d, svg, or css")
@@ -39,7 +59,11 @@ class AnimationService:
         return dict(body)
 
     def prompt(self, request):
-        mode = "may react to pointer or keyboard input" if request["interactive"] else "must not require user input"
+        mode = (
+            "may react to pointer or keyboard input"
+            if request["interactive"]
+            else "must not require user input"
+        )
         return f"""Create one original, self-contained HTML animation from this brief:
 Title: {request['title']}
 Concept: {request['concept']}
@@ -59,9 +83,13 @@ Hard contract:
             raise SketchError("Animation model response is empty or exceeds 2 MB")
         match = _DOCUMENT.search(response.strip())
         if not match:
-            raise SketchError("Animation model response did not contain a complete HTML document")
+            raise SketchError(
+                "Animation model response did not contain a complete HTML document"
+            )
         html = match.group(0)
-        if _EXTERNAL.search(html) or re.search(r"<meta[^>]+http-equiv\s*=\s*['\"]?refresh", html, re.IGNORECASE):
+        if _EXTERNAL.search(html) or re.search(
+            r"<meta[^>]+http-equiv\s*=\s*['\"]?refresh", html, re.IGNORECASE
+        ):
             raise SketchError("Animation HTML must be self-contained and offline")
         if not re.search(r"\brenderFrame\s*=|\bfunction\s+renderFrame\s*\(", html):
             raise SketchError("Animation HTML is missing renderFrame(t)")
@@ -74,7 +102,9 @@ Hard contract:
         digest = hashlib.sha256(html.encode()).hexdigest()
         metadata = {
             "media_job_id": job_id,
-            "animation_request_sha256": hashlib.sha256(self.prompt(request).encode()).hexdigest(),
+            "animation_request_sha256": hashlib.sha256(
+                self.prompt(request).encode()
+            ).hexdigest(),
             "html_sha256": digest,
             "provider_use_case": "reasoning",
         }
@@ -82,20 +112,33 @@ Hard contract:
         existing = self.artifacts.get(slug)
         if existing:
             current = self.artifacts.get(slug, version=1)
-            if existing.version != 1 or not current or current.content != html or not existing.events or existing.events[0].metadata != metadata:
+            if (
+                existing.version != 1
+                or not current
+                or current.content != html
+                or not existing.events
+                or existing.events[0].metadata != metadata
+            ):
                 raise SketchError("Animation artifact identity conflict", 409)
             artifact = existing
         else:
             artifact = self.artifacts.create(
-                name=request["title"], content=html, kind="widget", slug=slug,
+                name=request["title"],
+                content=html,
+                kind="widget",
+                slug=slug,
                 description="Self-contained generated code animation",
-                tags=["animation", request["renderer"]], event_metadata=metadata,
+                tags=["animation", request["renderer"]],
+                event_metadata=metadata,
             )
         return {
             "artifact_id": artifact.slug,
             "version": artifact.version,
             "sha256": digest,
-            "frame": {key: request[key] for key in ("width", "height", "fps", "duration_seconds")},
+            "frame": {
+                key: request[key]
+                for key in ("width", "height", "fps", "duration_seconds")
+            },
             "renderer": request["renderer"],
         }
 

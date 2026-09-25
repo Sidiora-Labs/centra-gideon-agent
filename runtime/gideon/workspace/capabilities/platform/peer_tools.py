@@ -1,5 +1,7 @@
 import json
+
 from jsonschema import ValidationError, validate
+
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 
@@ -11,7 +13,16 @@ class PeerTools(ToolProvider):
     display_name = "Peer identity tools"
 
     async def list_tools(self):
-        return [ToolDefinition(name="platform_peer_projection", description="Read public peer identities and directional category policy without private keys or proof nonces.", provider=self.name, parameters=SCHEMA, requires_approval=False, risk_level=RiskLevel.SAFE)]
+        return [
+            ToolDefinition(
+                name="platform_peer_projection",
+                description="Read public peer identities and directional category policy without private keys or proof nonces.",
+                provider=self.name,
+                parameters=SCHEMA,
+                requires_approval=False,
+                risk_level=RiskLevel.SAFE,
+            )
+        ]
 
     async def invoke(self, tool_name, arguments):
         if tool_name != "platform_peer_projection":

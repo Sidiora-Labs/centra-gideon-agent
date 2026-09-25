@@ -88,6 +88,7 @@ class ProviderRegistry:
 
     def get_entry(self, name: str) -> ProviderEntry:
         from gideon.workspace.capabilities.platform.connections import effective_entry
+
         return effective_entry(_required(self._entries, name, "entry"))
 
     def capability_of(self, type_: str) -> ProviderCapability:
@@ -98,11 +99,23 @@ class ProviderRegistry:
     ) -> ModelProvider:
         selected = self.get_entry(name)
         from dataclasses import replace
+
         from gideon.workspace.capabilities.platform.connections import allowed
+
         model = str(kwargs.get("model") or selected.model)
         if not allowed(model, selected.options.get("model_access", {})):
-            raise ProviderResolutionError("Model is excluded by the connection access policy")
-        selected = replace(selected, model=model, options={key: value for key, value in selected.options.items() if key not in {"connection_id", "model_access"}})
+            raise ProviderResolutionError(
+                "Model is excluded by the connection access policy"
+            )
+        selected = replace(
+            selected,
+            model=model,
+            options={
+                key: value
+                for key, value in selected.options.items()
+                if key not in {"connection_id", "model_access"}
+            },
+        )
         invocation = dict(kwargs, entry=selected, session_key=session_key)
         return self._factories[selected.type](**invocation)
 
@@ -113,7 +126,11 @@ class ProviderRegistry:
         return self._catalog_factories.get(type_)
 
     def build_catalog(self, entry: ProviderEntry) -> ModelCatalog | None:
-        from gideon.workspace.capabilities.platform.connections import effective_entry, ScopedCatalog
+        from gideon.workspace.capabilities.platform.connections import (
+            ScopedCatalog,
+            effective_entry,
+        )
+
         entry = effective_entry(entry)
         constructor = self.catalog_of(entry.type)
         if constructor is not None:
@@ -122,9 +139,17 @@ class ProviderRegistry:
                 if entry.credential:
                     from gideon.core.config.loader import config_dir
                     from gideon.integrations.llm.credentials import CredentialStore
-                    options["api_key"] = CredentialStore(config_dir()).resolve(entry.credential).secret or ""
+
+                    options["api_key"] = (
+                        CredentialStore(config_dir()).resolve(entry.credential).secret
+                        or ""
+                    )
                 catalog = constructor(options, model=entry.model)
-                return ScopedCatalog(catalog, options["model_access"]) if "model_access" in options else catalog
+                return (
+                    ScopedCatalog(catalog, options["model_access"])
+                    if "model_access" in options
+                    else catalog
+                )
             except Exception:
                 logger.debug(
                     "Catalog construction failed for %r", entry.type, exc_info=True

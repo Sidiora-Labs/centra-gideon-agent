@@ -237,11 +237,22 @@ def test_preview_is_stable_and_binds_original_content():
 
 
 def test_preview_canonicalizes_every_segment_to_the_same_video_identity():
-    result = preview({"url": "https://m.youtube.com/shorts/dQw4w9WgXcQ", "title": "Canonical", "format": "vtt", "content": VTT, "language": "en-US"})
+    result = preview(
+        {
+            "url": "https://m.youtube.com/shorts/dQw4w9WgXcQ",
+            "title": "Canonical",
+            "format": "vtt",
+            "content": VTT,
+            "language": "en-US",
+        }
+    )
     assert result["url"] == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     assert result["video_id"] == "dQw4w9WgXcQ"
     assert result["language"] == "en-US"
-    assert all(row["source_link"].startswith(result["url"] + "&t=") for row in result["segments"])
+    assert all(
+        row["source_link"].startswith(result["url"] + "&t=")
+        for row in result["segments"]
+    )
 
 
 def test_multiline_caption_text_is_preserved_as_one_timed_segment():
@@ -312,18 +323,37 @@ def test_reviewed_import_history_is_durable_across_service_reconstruction(servic
     assert restored["id"] == created["id"]
     assert restored["status"] == "completed"
     assert restored["events"] == created["events"]
-    assert reopened.transcript(created["id"])["content"] == service.transcript(created["id"])["content"]
+    assert (
+        reopened.transcript(created["id"])["content"]
+        == service.transcript(created["id"])["content"]
+    )
 
 
 def test_progress_events_are_monotonic_and_retain_exact_stage_detail(service):
-    body = {"request_id": "ordered-event-request", "url": URL, "language": "en", "transcript": True, "video": False, "audio": False}
-    identity, _ = service._start(body["request_id"], {**body, "kind": "fetch"}, "Pending")
+    body = {
+        "request_id": "ordered-event-request",
+        "url": URL,
+        "language": "en",
+        "transcript": True,
+        "video": False,
+        "audio": False,
+    }
+    identity, _ = service._start(
+        body["request_id"], {**body, "kind": "fetch"}, "Pending"
+    )
     service._event(identity, "metadata", "running", "Metadata started")
     service._event(identity, "transcript", "running", "Caption source selected")
-    service._event(identity, "transcript", "failed", "Caption endpoint rejected the request")
+    service._event(
+        identity, "transcript", "failed", "Caption endpoint rejected the request"
+    )
     events = service.get(identity)["events"]
     assert [row["sequence"] for row in events] == [1, 2, 3, 4]
-    assert [row["stage"] for row in events] == ["queued", "metadata", "transcript", "transcript"]
+    assert [row["stage"] for row in events] == [
+        "queued",
+        "metadata",
+        "transcript",
+        "transcript",
+    ]
     assert events[-1]["detail"] == "Caption endpoint rejected the request"
     assert service.get(identity)["error"] == events[-1]["detail"]
 
@@ -446,9 +476,20 @@ def test_home_drift_refuses_import_without_writing_other_home(
     assert service.list()["total"] == 0
 
 
-def test_home_drift_refuses_artifact_write_without_creating_other_home(service, monkeypatch, tmp_path):
-    body = {"request_id": "artifact-home-drift", "url": URL, "language": "en", "transcript": False, "video": True, "audio": False}
-    identity, _ = service._start(body["request_id"], {**body, "kind": "fetch"}, "Pending")
+def test_home_drift_refuses_artifact_write_without_creating_other_home(
+    service, monkeypatch, tmp_path
+):
+    body = {
+        "request_id": "artifact-home-drift",
+        "url": URL,
+        "language": "en",
+        "transcript": False,
+        "video": True,
+        "audio": False,
+    }
+    identity, _ = service._start(
+        body["request_id"], {**body, "kind": "fetch"}, "Pending"
+    )
     other = tmp_path / "different-allocation"
     monkeypatch.setenv("GIDEON_HOME", str(other))
     with pytest.raises(CaptureError, match="Runtime home changed"):
@@ -504,7 +545,16 @@ def test_missing_job_and_transcript_are_explicit(service):
         service.transcript(identity)
 
 
-@pytest.mark.parametrize("value,expected", [(0, "00:00:00"), (59.9, "00:00:59"), (60, "00:01:00"), (3661, "01:01:01"), (21600, "06:00:00")])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (0, "00:00:00"),
+        (59.9, "00:00:59"),
+        (60, "00:01:00"),
+        (3661, "01:01:01"),
+        (21600, "06:00:00"),
+    ],
+)
 def test_markdown_clock_is_stable_and_bounded(value, expected):
     assert VideoIngests._clock(value) == expected
 

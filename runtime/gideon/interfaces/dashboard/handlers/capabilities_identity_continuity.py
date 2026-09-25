@@ -1,6 +1,9 @@
 """Human controls for heartbeat policy and canonical memory slots."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
 from gideon.workspace.capabilities.identity.store import ConflictError
@@ -20,7 +23,15 @@ async def handle(request):
                 raise ValueError("Expected a JSON object")
             if request.method == "POST" and set(body) != {"slot", "text"}:
                 raise ValueError("Expected only slot and text")
-            operation = "configure" if request.method == "PUT" else "remove_anchor" if request.path.endswith("/remove") else "append_anchor"
+            operation = (
+                "configure"
+                if request.method == "PUT"
+                else (
+                    "remove_anchor"
+                    if request.path.endswith("/remove")
+                    else "append_anchor"
+                )
+            )
             result = getattr(store, operation)(**body)
         return web.json_response(result)
     except ConflictError as error:

@@ -14,7 +14,12 @@ def tree_snapshot(root):
     result = {}
     for path in sorted(root.rglob("*")):
         stat = path.lstat()
-        result[str(path.relative_to(root))] = (stat.st_mode, stat.st_size, stat.st_mtime_ns, path.is_symlink())
+        result[str(path.relative_to(root))] = (
+            stat.st_mode,
+            stat.st_size,
+            stat.st_mtime_ns,
+            path.is_symlink(),
+        )
     return result
 
 
@@ -30,8 +35,12 @@ class StorageRuntime(unittest.TestCase):
         self.workspaces.mkdir()
         self.project = self.workspaces / "alpha"
         self.project.mkdir()
-        self.record = HierarchyStore().create_project("Alpha", workspace_dir=str(self.project))
-        self.service = StorageDiagnosis(self.home, allowed_roots=[self.workspaces], entry_limit=50)
+        self.record = HierarchyStore().create_project(
+            "Alpha", workspace_dir=str(self.project)
+        )
+        self.service = StorageDiagnosis(
+            self.home, allowed_roots=[self.workspaces], entry_limit=50
+        )
 
     def tearDown(self):
         if self.old_home is None:
@@ -53,7 +62,9 @@ class StorageRuntime(unittest.TestCase):
         self.assertEqual(row["project_id"], self.record.id)
         self.assertEqual(row["name"], "Alpha")
         self.assertEqual(row["workspace"], str(self.project))
-        self.assertEqual(row["workspace_usage"]["bytes"], len(b"actual-storage-bytes") + 4)
+        self.assertEqual(
+            row["workspace_usage"]["bytes"], len(b"actual-storage-bytes") + 4
+        )
         self.assertEqual(row["workspace_usage"]["files"], 3)
         self.assertEqual(row["workspace_usage"]["directories"], 1)
         self.assertTrue(row["workspace_usage"]["complete"])
@@ -82,7 +93,9 @@ class StorageRuntime(unittest.TestCase):
             folder = self.project / f"folder-{index:02d}"
             folder.mkdir()
             (folder / "payload").write_bytes(b"x" * 20)
-        result = self.service.scan({"scope": "project", "project_id": self.record.id, "max_entries": 3})
+        result = self.service.scan(
+            {"scope": "project", "project_id": self.record.id, "max_entries": 3}
+        )
         usage = result["usage"]
         self.assertFalse(usage["complete"])
         self.assertEqual(usage["entries_scanned"], 3)
@@ -132,7 +145,9 @@ class StorageRuntime(unittest.TestCase):
             self.service.scan({"scope": "project", "project_id": linked.id})
 
     def test_filesystem_root_cannot_be_a_canonical_project(self):
-        project = HierarchyStore().create_project("Root", workspace_dir=str(self.project))
+        project = HierarchyStore().create_project(
+            "Root", workspace_dir=str(self.project)
+        )
         record = self.home / "projects" / project.id / "project.json"
         payload = json.loads(record.read_text())
         payload["workspace_dir"] = "/"
@@ -150,10 +165,19 @@ class StorageHttpAndTools(unittest.IsolatedAsyncioTestCase):
         os.environ["GIDEON_HOME"] = str(self.root)
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        (self.repo / "measured.txt").write_text("measured through real HTTP", encoding="utf-8")
-        self.project = HierarchyStore().create_project("HTTP project", workspace_dir=str(self.repo))
-        from gideon.interfaces.dashboard.token_auth import generate_token, reset_secret_cache, token_auth_middleware
+        (self.repo / "measured.txt").write_text(
+            "measured through real HTTP", encoding="utf-8"
+        )
+        self.project = HierarchyStore().create_project(
+            "HTTP project", workspace_dir=str(self.repo)
+        )
         from gideon.interfaces.dashboard.handlers.capabilities_workspace import register
+        from gideon.interfaces.dashboard.token_auth import (
+            generate_token,
+            reset_secret_cache,
+            token_auth_middleware,
+        )
+
         reset_secret_cache()
         self.token = generate_token("storage-owner")
         app = web.Application(middlewares=[token_auth_middleware()])
@@ -180,9 +204,16 @@ class StorageHttpAndTools(unittest.IsolatedAsyncioTestCase):
         aggregate = await self.client.get(self.url)
         self.assertEqual(aggregate.status, 200)
         body = await aggregate.json()
-        row = next(item for item in body["projects"] if item["project_id"] == self.project.id)
-        self.assertEqual(row["workspace_usage"]["bytes"], len("measured through real HTTP"))
-        scan = await self.client.post(self.url + "/scan", json={"scope": "project", "project_id": self.project.id, "max_entries": 1})
+        row = next(
+            item for item in body["projects"] if item["project_id"] == self.project.id
+        )
+        self.assertEqual(
+            row["workspace_usage"]["bytes"], len("measured through real HTTP")
+        )
+        scan = await self.client.post(
+            self.url + "/scan",
+            json={"scope": "project", "project_id": self.project.id, "max_entries": 1},
+        )
         self.assertEqual(scan.status, 200)
         selected = await scan.json()
         self.assertEqual(selected["project_id"], self.project.id)
@@ -191,7 +222,9 @@ class StorageHttpAndTools(unittest.IsolatedAsyncioTestCase):
     async def test_http_refuses_apps_unknown_queries_paths_and_unknown_projects(self):
         bad_query = await self.client.get(self.url + "?path=/")
         self.assertEqual(bad_query.status, 400)
-        bad_body = await self.client.post(self.url + "/scan", json={"scope": "runtime", "path": "/"})
+        bad_body = await self.client.post(
+            self.url + "/scan", json={"scope": "runtime", "path": "/"}
+        )
         self.assertEqual(bad_body.status, 400)
         missing = await self.client.get(self.url + "?project_id=p-missing")
         self.assertEqual(missing.status, 404)
@@ -201,15 +234,22 @@ class StorageHttpAndTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_native_tool_is_safe_and_uses_same_canonical_project(self):
         from gideon.workspace.capabilities.workspace.tools import create_provider
+
         provider = create_provider()
         definitions = {item.name: item for item in await provider.list_tools()}
         definition = definitions["workspace_storage_diagnosis"]
         self.assertFalse(definition.requires_approval)
-        result = await provider.invoke("workspace_storage_diagnosis", {"project_id": self.project.id})
+        result = await provider.invoke(
+            "workspace_storage_diagnosis", {"project_id": self.project.id}
+        )
         self.assertTrue(result.success, result.error)
         body = json.loads(result.output)
-        row = next(item for item in body["projects"] if item["project_id"] == self.project.id)
-        self.assertEqual(row["workspace_usage"]["bytes"], len("measured through real HTTP"))
+        row = next(
+            item for item in body["projects"] if item["project_id"] == self.project.id
+        )
+        self.assertEqual(
+            row["workspace_usage"]["bytes"], len("measured through real HTTP")
+        )
         invalid = await provider.invoke("workspace_storage_diagnosis", {"path": "/"})
         self.assertFalse(invalid.success)
 

@@ -1,13 +1,21 @@
 import importlib
 import json
 from pathlib import Path
+
 import pytest
 from jsonschema import Draft202012Validator
+
 from gideon.engine import session_restrictions
 from gideon.extensions.apps.manifest import AppManifest
-from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
+from gideon.integrations.mcp_core import (
+    reset_current_session_key,
+    set_current_session_key,
+)
 from gideon.integrations.tool_providers.base import RiskLevel, ToolProvider
-from gideon.workspace.capabilities.identity.tools import IdentityToolProvider, create_provider
+from gideon.workspace.capabilities.identity.tools import (
+    IdentityToolProvider,
+    create_provider,
+)
 from gideon.workspace.capabilities.identity.twin import TwinStore
 
 
@@ -31,7 +39,9 @@ async def invoke(provider, name, **arguments):
 async def test_manifest_factory_discovery_and_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     root = Path(__file__).resolve().parents[4]
-    manifest_path = root / "runtime/gideon/extensions/apps/native/gideon-identity/app.json"
+    manifest_path = (
+        root / "runtime/gideon/extensions/apps/native/gideon-identity/app.json"
+    )
     raw = json.loads(manifest_path.read_text())
     manifest = AppManifest.from_dict(raw)
     assert manifest.validate() == []
@@ -65,46 +75,100 @@ async def test_manifest_factory_discovery_and_schema(tmp_path, monkeypatch):
 async def test_story_tools_persist_full_lifecycle(tmp_path, local_session):
     provider = IdentityToolProvider(tmp_path)
     assert await invoke(provider, "identity_story_list") == []
-    body = {"prompt": "An important lesson?", "theme": "Learning", "text": "Keep asking questions.", "request_id": "root"}
+    body = {
+        "prompt": "An important lesson?",
+        "theme": "Learning",
+        "text": "Keep asking questions.",
+        "request_id": "root",
+    }
     root = await invoke(provider, "identity_story_create", **body)
     assert root["revision"] == 1
     assert await invoke(provider, "identity_story_create", **body) == root
-    child = await invoke(provider, "identity_story_create", **{**body, "prompt": "Who taught you?", "parent_id": root["id"], "request_id": "child"})
-    edited = await invoke(provider, "identity_story_update", story_id=child["id"], expected_revision=1,
-                          prompt=child["prompt"], theme=child["theme"], text="My teacher.", parent_id=root["id"])
+    child = await invoke(
+        provider,
+        "identity_story_create",
+        **{
+            **body,
+            "prompt": "Who taught you?",
+            "parent_id": root["id"],
+            "request_id": "child",
+        },
+    )
+    edited = await invoke(
+        provider,
+        "identity_story_update",
+        story_id=child["id"],
+        expected_revision=1,
+        prompt=child["prompt"],
+        theme=child["theme"],
+        text="My teacher.",
+        parent_id=root["id"],
+    )
     assert edited["revision"] == 2
     reopened = IdentityToolProvider(tmp_path)
     assert await invoke(reopened, "identity_story_get", story_id=child["id"]) == edited
-    assert await invoke(reopened, "identity_story_chain", story_id=child["id"]) == [root, edited]
-    assert await invoke(reopened, "identity_story_history", story_id=child["id"]) == [child, edited]
+    assert await invoke(reopened, "identity_story_chain", story_id=child["id"]) == [
+        root,
+        edited,
+    ]
+    assert await invoke(reopened, "identity_story_history", story_id=child["id"]) == [
+        child,
+        edited,
+    ]
     exported = await invoke(reopened, "identity_story_export")
     assert exported["stories"] == [root, edited]
     assert len(exported["history"]) == 3
-    conflict = await provider.invoke("identity_story_delete", {"story_id": child["id"], "expected_revision": 1})
+    conflict = await provider.invoke(
+        "identity_story_delete", {"story_id": child["id"], "expected_revision": 1}
+    )
     assert not conflict.success
     assert conflict.metadata["status"] == "conflict"
     assert conflict.recovery_hints
-    parent_failure = await provider.invoke("identity_story_delete", {"story_id": root["id"], "expected_revision": 1})
+    parent_failure = await provider.invoke(
+        "identity_story_delete", {"story_id": root["id"], "expected_revision": 1}
+    )
     assert not parent_failure.success
     assert "follow-ups" in parent_failure.error
-    assert await invoke(provider, "identity_story_delete", story_id=child["id"], expected_revision=2) == {"deleted": child["id"]}
+    assert await invoke(
+        provider, "identity_story_delete", story_id=child["id"], expected_revision=2
+    ) == {"deleted": child["id"]}
     assert await invoke(provider, "identity_story_chain", story_id=root["id"]) == [root]
-    assert await invoke(provider, "identity_story_history", story_id=child["id"]) == [child, edited]
+    assert await invoke(provider, "identity_story_history", story_id=child["id"]) == [
+        child,
+        edited,
+    ]
 
 
 @pytest.mark.asyncio
-async def test_twin_tools_preserve_private_sources_and_real_context(tmp_path, local_session):
+async def test_twin_tools_preserve_private_sources_and_real_context(
+    tmp_path, local_session
+):
     provider = IdentityToolProvider(tmp_path)
     core = TwinStore(tmp_path / "capabilities/identity/twin.sqlite3")
-    secret = core.save_document(title="Private", text="personal secret", private=True, expected_revision=0)["documents"][0]
+    secret = core.save_document(
+        title="Private", text="personal secret", private=True, expected_revision=0
+    )["documents"][0]
     visible = await invoke(provider, "identity_twin_get")
     assert visible["documents"] == []
-    public = await invoke(provider, "identity_twin_save_document", title="Values", text="Curiosity matters.", expected_revision=1)
+    public = await invoke(
+        provider,
+        "identity_twin_save_document",
+        title="Values",
+        text="Curiosity matters.",
+        expected_revision=1,
+    )
     assert len(public["documents"]) == 1
     public_id = public["documents"][0]["id"]
     assert secret["id"] not in json.dumps(public)
-    configured = await invoke(provider, "identity_twin_configure", expected_revision=2, enabled=True,
-                              traits={"curiosity": 9}, personas=[], active_persona_id=None)
+    configured = await invoke(
+        provider,
+        "identity_twin_configure",
+        expected_revision=2,
+        enabled=True,
+        traits={"curiosity": 9},
+        personas=[],
+        active_persona_id=None,
+    )
     assert configured["enabled"]
     assert "personal secret" not in json.dumps(configured)
     context = await invoke(provider, "identity_twin_context", budget=1000)
@@ -112,7 +176,15 @@ async def test_twin_tools_preserve_private_sources_and_real_context(tmp_path, lo
     assert "personal secret" not in context["text"]
     assert context["source_ids"] == ["traits", public_id]
     for operation, arguments in [
-        ("identity_twin_save_document", {"id": secret["id"], "title": "Reveal", "text": "Reveal", "expected_revision": 3}),
+        (
+            "identity_twin_save_document",
+            {
+                "id": secret["id"],
+                "title": "Reveal",
+                "text": "Reveal",
+                "expected_revision": 3,
+            },
+        ),
         ("identity_twin_delete_document", {"id": secret["id"], "expected_revision": 3}),
         ("identity_twin_enrich", {"document_id": secret["id"]}),
     ]:
@@ -121,20 +193,41 @@ async def test_twin_tools_preserve_private_sources_and_real_context(tmp_path, lo
         assert "Accessible identity document not found" in result.error
         assert "personal secret" not in result.error
     assert core.snapshot()["revision"] == 3
-    deleted = await invoke(provider, "identity_twin_delete_document", id=public_id, expected_revision=3)
+    deleted = await invoke(
+        provider, "identity_twin_delete_document", id=public_id, expected_revision=3
+    )
     assert deleted["documents"] == []
     assert core.snapshot()["documents"] == [secret]
     assert core.snapshot()["traits"] == {"curiosity": 9}
 
 
 @pytest.mark.asyncio
-async def test_invalid_arguments_cannot_redirect_home_or_reveal_private_data(tmp_path, local_session):
+async def test_invalid_arguments_cannot_redirect_home_or_reveal_private_data(
+    tmp_path, local_session
+):
     provider = IdentityToolProvider(tmp_path)
     cases = [
-        ("identity_story_create", {"prompt": "Question", "theme": "Theme", "text": "Text", "request_id": "one", "home": "/tmp/other"}),
+        (
+            "identity_story_create",
+            {
+                "prompt": "Question",
+                "theme": "Theme",
+                "text": "Text",
+                "request_id": "one",
+                "home": "/tmp/other",
+            },
+        ),
         ("identity_twin_get", {"include_private": True}),
         ("identity_twin_context", {"include_private": True}),
-        ("identity_twin_save_document", {"title": "Private", "text": "Secret", "private": True, "expected_revision": 0}),
+        (
+            "identity_twin_save_document",
+            {
+                "title": "Private",
+                "text": "Secret",
+                "private": True,
+                "expected_revision": 0,
+            },
+        ),
         ("identity_story_update", {"story_id": "id", "expected_revision": True}),
         ("identity_story_get", {"story_id": 3}),
         ("identity_twin_context", {"budget": 10001}),
@@ -161,7 +254,15 @@ async def test_temporary_remote_and_incognito_session_policies(tmp_path, local_s
     session_restrictions.clear(local_session)
     session_restrictions.mark_incognito(local_session)
     assert await invoke(provider, "identity_story_list") == []
-    result = await provider.invoke("identity_story_create", {"prompt": "Question", "theme": "Theme", "text": "Text", "request_id": "blocked"})
+    result = await provider.invoke(
+        "identity_story_create",
+        {
+            "prompt": "Question",
+            "theme": "Theme",
+            "text": "Text",
+            "request_id": "blocked",
+        },
+    )
     assert not result.success
     assert "cannot change" in result.error
     result = await provider.invoke("identity_twin_enrich", {"document_id": "unknown"})
@@ -181,7 +282,14 @@ async def test_temporary_remote_and_incognito_session_policies(tmp_path, local_s
 async def test_two_runtime_homes_are_isolated(tmp_path, local_session):
     first = IdentityToolProvider(tmp_path / "one")
     second = IdentityToolProvider(tmp_path / "two")
-    story = await invoke(first, "identity_story_create", prompt="Home?", theme="Family", text="First home.", request_id="one")
+    story = await invoke(
+        first,
+        "identity_story_create",
+        prompt="Home?",
+        theme="Family",
+        text="First home.",
+        request_id="one",
+    )
     assert await invoke(second, "identity_story_list") == []
     unavailable = await second.invoke("identity_story_get", {"story_id": story["id"]})
     assert not unavailable.success
@@ -190,10 +298,21 @@ async def test_two_runtime_homes_are_isolated(tmp_path, local_session):
 
 
 @pytest.mark.asyncio
-async def test_disabled_enrichment_source_is_rejected_before_provider(tmp_path, local_session):
+async def test_disabled_enrichment_source_is_rejected_before_provider(
+    tmp_path, local_session
+):
     provider = IdentityToolProvider(tmp_path)
-    state = await invoke(provider, "identity_twin_save_document", title="Disabled", text="Do not send this.", enabled=False, expected_revision=0)
-    response = await provider.invoke("identity_twin_enrich", {"document_id": state["documents"][0]["id"]})
+    state = await invoke(
+        provider,
+        "identity_twin_save_document",
+        title="Disabled",
+        text="Do not send this.",
+        enabled=False,
+        expected_revision=0,
+    )
+    response = await provider.invoke(
+        "identity_twin_enrich", {"document_id": state["documents"][0]["id"]}
+    )
     assert not response.success
     assert "Enable the source" in response.error
     assert response.output == ""

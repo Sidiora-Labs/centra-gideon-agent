@@ -1,8 +1,11 @@
 """Autobiography HTTP operations; authentication is supplied by the dashboard."""
+
 from __future__ import annotations
 
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.store import ConflictError, StoryStore
 
@@ -25,13 +28,20 @@ async def handle(request: web.Request) -> web.Response:
             else:
                 result = store.get(story_id) if story_id else store.list()
         else:
-            body = ({"expected_revision": int(request.query.get("expected_revision", ""))}
-                    if request.method == "DELETE" else await request.json())
+            body = (
+                {"expected_revision": int(request.query.get("expected_revision", ""))}
+                if request.method == "DELETE"
+                else await request.json()
+            )
             if not isinstance(body, dict):
                 raise ValueError("Expected a JSON object")
             fields = {"prompt", "theme", "text", "parent_id"}
-            allowed = {"expected_revision"} if request.method == "DELETE" else fields | {
-                "request_id" if request.method == "POST" else "expected_revision"}
+            allowed = (
+                {"expected_revision"}
+                if request.method == "DELETE"
+                else fields
+                | {"request_id" if request.method == "POST" else "expected_revision"}
+            )
             if body.keys() - allowed:
                 raise ValueError("Unknown fields")
             if request.method == "POST":
@@ -51,7 +61,9 @@ async def handle(request: web.Request) -> web.Response:
 
 
 def register(app: web.Application, *, store_path: Path | None = None) -> None:
-    app[STORE_KEY] = StoryStore(store_path or config_dir() / "capabilities/identity/stories.sqlite3")
+    app[STORE_KEY] = StoryStore(
+        store_path or config_dir() / "capabilities/identity/stories.sqlite3"
+    )
     app.router.add_get(PREFIX + "/{operation:export}", handle)
     app.router.add_get(PREFIX + "/stories", handle)
     app.router.add_post(PREFIX + "/stories", handle)

@@ -6,9 +6,11 @@ import io
 from dataclasses import replace
 from threading import Event
 from urllib.parse import urlparse
+
+from gideon.security.guardrails.policy import profile_for_session
 from gideon.security.net import STRICT, egress_policy_for, evaluate, fetch
 from gideon.security.net.policy import egress_policy_for_profile
-from gideon.security.guardrails.policy import profile_for_session
+
 from .capture import CaptureError
 from .transcript_format import video_url
 

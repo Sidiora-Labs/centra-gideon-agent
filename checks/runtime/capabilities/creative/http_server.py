@@ -1,7 +1,10 @@
 """Real isolated application for console integration journeys."""
+
 import asyncio
 import sys
+
 from aiohttp import web
+
 from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE, register
 from gideon.workspace.capabilities.creative import IngredientStore
 

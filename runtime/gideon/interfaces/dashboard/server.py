@@ -461,7 +461,9 @@ async def start_dashboard(
     from gideon.interfaces.dashboard.handlers.rooms import setup_room_routes
 
     setup_room_routes(app)
-    from gideon.interfaces.dashboard.handlers.capabilities import register as register_capabilities
+    from gideon.interfaces.dashboard.handlers.capabilities import (
+        register as register_capabilities,
+    )
 
     register_capabilities(app)
     _register_mcp_routes(app)

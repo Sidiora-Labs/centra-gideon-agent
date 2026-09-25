@@ -1,17 +1,35 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.workspace.capabilities.identity.continuity import ContinuityStore, heartbeat_turns_paused
+
+from gideon.integrations.mcp_core import (
+    reset_current_session_key,
+    set_current_session_key,
+)
+from gideon.interfaces.dashboard.handlers.capabilities_identity_continuity import (
+    PREFIX,
+    register,
+)
+from gideon.workspace.capabilities.identity.continuity import (
+    ContinuityStore,
+    heartbeat_turns_paused,
+)
 from gideon.workspace.capabilities.identity.store import ConflictError
 from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
-from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
-from gideon.interfaces.dashboard.handlers.capabilities_identity_continuity import register, PREFIX
 
 
 def configure(store, **changes):
-    return store.configure(**{"heartbeat_paused": True, "expected_revision": 0, "request_id": "pause", **changes})
+    return store.configure(
+        **{
+            "heartbeat_paused": True,
+            "expected_revision": 0,
+            "request_id": "pause",
+            **changes,
+        }
+    )
 
 
 def test_empty_read_does_not_create_memory_or_report_readiness(tmp_path):
@@ -38,7 +56,9 @@ def test_pause_resume_replay_order_and_restart(tmp_path):
     assert configure(store) == first
     reopened = ContinuityStore(tmp_path)
     assert reopened.policy() == first
-    second = configure(reopened, heartbeat_paused=False, expected_revision=1, request_id="resume")
+    second = configure(
+        reopened, heartbeat_paused=False, expected_revision=1, request_id="resume"
+    )
     assert second == {"revision": 2, "heartbeat_paused": False}
     assert heartbeat_turns_paused(tmp_path) is False
     journal = reopened.status()["journal"]
@@ -58,11 +78,13 @@ def test_pause_resume_replay_order_and_restart(tmp_path):
 
 def test_concurrent_policy_writers_serialize(tmp_path):
     store = ContinuityStore(tmp_path)
+
     def claim(index):
         try:
             return configure(ContinuityStore(tmp_path), request_id=str(index))
         except ConflictError:
             return None
+
     with ThreadPoolExecutor(max_workers=3) as pool:
         rows = list(pool.map(claim, range(3)))
     assert sum(row is not None for row in rows) == 1
@@ -70,7 +92,15 @@ def test_concurrent_policy_writers_serialize(tmp_path):
     assert len(store.status()["journal"]) == 1
 
 
-@pytest.mark.parametrize("changes", [{"heartbeat_paused": 1}, {"expected_revision": True}, {"expected_revision": -1}, {"request_id": ""}])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"heartbeat_paused": 1},
+        {"expected_revision": True},
+        {"expected_revision": -1},
+        {"request_id": ""},
+    ],
+)
 def test_policy_validation_does_not_write(changes, tmp_path):
     store = ContinuityStore(tmp_path)
     with pytest.raises(ValueError):
@@ -87,7 +117,9 @@ def test_actual_slots_idempotency_tombstone_and_canonical_wal(tmp_path):
     assert added["lines"][0]["text"] == "My chosen name is Gideon."
     assert added["lines"][0]["tombstoned"] is False
     assert added["lines"][0]["reinforcements"] == 1
-    assert store.append_anchor(slot="persona", text="My chosen name is Gideon.") == added
+    assert (
+        store.append_anchor(slot="persona", text="My chosen name is Gideon.") == added
+    )
     state = ContinuityStore(tmp_path).status()
     assert state["slots"]["persona"] == added["lines"]
     assert "My chosen name is Gideon." in state["context"]
@@ -97,8 +129,12 @@ def test_actual_slots_idempotency_tombstone_and_canonical_wal(tmp_path):
     removed = store.remove_anchor(slot="persona", text="My chosen name is Gideon.")
     assert removed["lines"][0]["tombstoned"] is True
     assert removed["lines"][0]["tombstoned_by"] == "human"
-    assert store.append_anchor(slot="persona", text="My chosen name is Gideon.") == removed
-    assert store.remove_anchor(slot="persona", text="My chosen name is Gideon.") == removed
+    assert (
+        store.append_anchor(slot="persona", text="My chosen name is Gideon.") == removed
+    )
+    assert (
+        store.remove_anchor(slot="persona", text="My chosen name is Gideon.") == removed
+    )
     state = ContinuityStore(tmp_path).status()
     assert "My chosen name" not in state["context"]
     assert len(state["memory_events"]) == 2
@@ -128,15 +164,23 @@ def test_actual_prompt_assembler_consumes_canonical_slots(tmp_path, monkeypatch)
     from gideon.cognition.memory import MemoryJournal
     from gideon.cognition.vector_memory import SemanticArchive
     from gideon.extensions.skills import ProcedureLibrary
+
     store = ContinuityStore(tmp_path)
     store.append_anchor(slot="persona", text="Prefer precise answers.")
-    store.append_anchor(slot="self_notes", text="Remember unfinished telescope calibration.")
+    store.append_anchor(
+        slot="self_notes", text="Remember unfinished telescope calibration."
+    )
     memory = MemoryJournal(workspace=tmp_path / "workspace")
     semantic = SemanticArchive(tmp_path / "memory.db")
     semantic.init()
     memory.vector_store = semantic
     try:
-        assembler = PromptAssembler(memory=memory, skills=ProcedureLibrary(skills_path=tmp_path / "skills", install_builtins=False))
+        assembler = PromptAssembler(
+            memory=memory,
+            skills=ProcedureLibrary(
+                skills_path=tmp_path / "skills", install_builtins=False
+            ),
+        )
         sections = assembler._standing_memory(memory, "dashboard:continuity", "gideon")
         combined = "\n".join(sections.direct)
         assert "[MEMORY SLOTS]" in combined
@@ -146,14 +190,23 @@ def test_actual_prompt_assembler_consumes_canonical_slots(tmp_path, monkeypatch)
         assert semantic.get_semantic("slot.self_notes") is not None
     finally:
         semantic.close()
-    store.remove_anchor(slot="self_notes", text="Remember unfinished telescope calibration.")
+    store.remove_anchor(
+        slot="self_notes", text="Remember unfinished telescope calibration."
+    )
     assert "unfinished telescope" not in store.status()["context"]
 
 
 @pytest.mark.asyncio
-async def test_real_heartbeat_pause_retains_file_and_rechecks_before_dispatch(tmp_path, monkeypatch):
+async def test_real_heartbeat_pause_retains_file_and_rechecks_before_dispatch(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.engine.heartbeat import HeartbeatService, heartbeat_path, is_keep_response
+    from gideon.engine.heartbeat import (
+        HeartbeatService,
+        heartbeat_path,
+        is_keep_response,
+    )
+
     store = ContinuityStore(tmp_path)
     configure(store)
     path = heartbeat_path()
@@ -176,7 +229,11 @@ async def test_real_heartbeat_pause_retains_file_and_rechecks_before_dispatch(tm
     await heartbeat._beat()
     assert path.read_text() == content
     assert heartbeat._processing is False
-    assert [row["action"] for row in store.status()["journal"]] == ["pause", "resume", "pause"]
+    assert [row["action"] for row in store.status()["journal"]] == [
+        "pause",
+        "resume",
+        "pause",
+    ]
 
 
 @pytest.mark.asyncio
@@ -190,36 +247,65 @@ async def test_actual_http_slot_policy_and_conflicts(tmp_path):
         response = await client.put(PREFIX, json=payload)
         assert response.status == 200
         assert (await response.json())["revision"] == 1
-        assert (await client.put(PREFIX, json={**payload, "request_id": "stale"})).status == 409
-        response = await client.post(PREFIX + "/anchors", json={"slot": "self_notes", "text": "Retain calibration context"})
+        assert (
+            await client.put(PREFIX, json={**payload, "request_id": "stale"})
+        ).status == 409
+        response = await client.post(
+            PREFIX + "/anchors",
+            json={"slot": "self_notes", "text": "Retain calibration context"},
+        )
         assert response.status == 200
         added = await response.json()
         assert added["lines"][0]["text"] == "Retain calibration context"
-        response = await client.post(PREFIX + "/anchors/remove", json={"slot": "self_notes", "text": "Retain calibration context"})
+        response = await client.post(
+            PREFIX + "/anchors/remove",
+            json={"slot": "self_notes", "text": "Retain calibration context"},
+        )
         assert (await response.json())["lines"][0]["tombstoned"] is True
-        assert (await client.post(PREFIX + "/anchors", json={"slot": "bad", "text": "bad"})).status == 400
+        assert (
+            await client.post(PREFIX + "/anchors", json={"slot": "bad", "text": "bad"})
+        ).status == 400
         assert (await client.put(PREFIX, json=[])).status == 400
-        assert (await client.put(PREFIX, json={**payload, "home": "other"})).status == 400
+        assert (
+            await client.put(PREFIX, json={**payload, "home": "other"})
+        ).status == 400
     assert ContinuityStore(tmp_path / "other").status()["slots"]["self_notes"] == []
 
 
 @pytest.mark.asyncio
-async def test_native_controls_use_same_policy_and_cannot_remove_human_anchors(tmp_path):
+async def test_native_controls_use_same_policy_and_cannot_remove_human_anchors(
+    tmp_path,
+):
     provider = IdentityToolProvider(tmp_path)
     token = set_current_session_key("dashboard:continuity")
     try:
-        configured = await provider.invoke("identity_continuity_configure", dict(heartbeat_paused=True, expected_revision=0, request_id="native"))
+        configured = await provider.invoke(
+            "identity_continuity_configure",
+            dict(heartbeat_paused=True, expected_revision=0, request_id="native"),
+        )
         assert configured.success
         assert heartbeat_turns_paused(tmp_path)
-        added = await provider.invoke("identity_continuity_append_anchor", {"slot": "persona", "text": "Careful reasoning"})
+        added = await provider.invoke(
+            "identity_continuity_append_anchor",
+            {"slot": "persona", "text": "Careful reasoning"},
+        )
         assert added.success
-        assert ContinuityStore(tmp_path).status()["memory_events"][0]["source"] == "agent_explicit"
+        assert (
+            ContinuityStore(tmp_path).status()["memory_events"][0]["source"]
+            == "agent_explicit"
+        )
         result = await provider.invoke("identity_continuity_status", {})
         assert result.success
         assert "Careful reasoning" in json.loads(result.output)["context"]
-        rejected = await provider.invoke("identity_continuity_remove_anchor", {"slot": "persona", "text": "Careful reasoning"})
+        rejected = await provider.invoke(
+            "identity_continuity_remove_anchor",
+            {"slot": "persona", "text": "Careful reasoning"},
+        )
         assert not rejected.success
         assert "Unknown" in rejected.error
-        assert ContinuityStore(tmp_path).status()["slots"]["persona"][0]["tombstoned"] is False
+        assert (
+            ContinuityStore(tmp_path).status()["slots"]["persona"][0]["tombstoned"]
+            is False
+        )
     finally:
         reset_current_session_key(token)

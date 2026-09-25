@@ -1,15 +1,18 @@
 """A real artifact-backed application for moodboard console qualification."""
+
 import asyncio
+import sys
 from io import BytesIO
 from pathlib import Path
-import sys
+
 from aiohttp import web
 from PIL import Image
+
 from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE, register
-from gideon.workspace.capabilities.creative import IngredientStore
+from gideon.workspace.artifacts.handlers import api_artifact_raw
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.artifacts.registry import register_provider
-from gideon.workspace.artifacts.handlers import api_artifact_raw
+from gideon.workspace.capabilities.creative import IngredientStore
 
 
 async def main():

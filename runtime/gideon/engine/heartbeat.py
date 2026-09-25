@@ -230,7 +230,9 @@ class HeartbeatService:
             )
 
     async def _run_one_task(self, task_text: str, deliver: str) -> str | None:
-        from gideon.workspace.capabilities.identity.continuity import heartbeat_turns_paused
+        from gideon.workspace.capabilities.identity.continuity import (
+            heartbeat_turns_paused,
+        )
 
         if heartbeat_turns_paused():
             return _KEEP_SENTINEL
@@ -238,7 +240,9 @@ class HeartbeatService:
         return await self._on_task(task_text, deliver)
 
     async def _process_heartbeat_file(self) -> None:
-        from gideon.workspace.capabilities.identity.continuity import heartbeat_turns_paused
+        from gideon.workspace.capabilities.identity.continuity import (
+            heartbeat_turns_paused,
+        )
 
         if heartbeat_turns_paused():
             return

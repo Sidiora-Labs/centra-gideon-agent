@@ -1,36 +1,58 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-import json
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+
+from gideon.interfaces.dashboard.handlers.capabilities_identity import PREFIX, register
 from gideon.workspace.capabilities.identity.store import ConflictError, StoryStore
-from gideon.interfaces.dashboard.handlers.capabilities_identity import register, PREFIX
 
 
 def answer(store, request_id="first", **changes):
-    return store.create(prompt="What did you learn?", theme="School", text="I learned to listen.",
-                        request_id=request_id, **changes)
+    return store.create(
+        prompt="What did you learn?",
+        theme="School",
+        text="I learned to listen.",
+        request_id=request_id,
+        **changes,
+    )
 
 
 def edit(story, **changes):
-    return {"prompt": story["prompt"], "theme": story["theme"], "text": story["text"],
-            "parent_id": story["parent_id"], "expected_revision": story["revision"], **changes}
+    return {
+        "prompt": story["prompt"],
+        "theme": story["theme"],
+        "text": story["text"],
+        "parent_id": story["parent_id"],
+        "expected_revision": story["revision"],
+        **changes,
+    }
 
 
 def test_original_answer_and_revision_chronology(tmp_path):
     store = StoryStore(tmp_path / "stories.sqlite3")
     original = answer(store)
-    updated = store.update(original["id"], **edit(original, text="I learned to listen carefully."))
+    updated = store.update(
+        original["id"], **edit(original, text="I learned to listen carefully.")
+    )
     reopened = StoryStore(store.path)
     assert reopened.get(original["id"]) == updated
     assert updated["created_at"] == original["created_at"]
-    assert datetime.fromisoformat(updated["updated_at"]) >= datetime.fromisoformat(original["created_at"])
-    assert datetime.fromisoformat(original["created_at"]).utcoffset().total_seconds() == 0
+    assert datetime.fromisoformat(updated["updated_at"]) >= datetime.fromisoformat(
+        original["created_at"]
+    )
+    assert (
+        datetime.fromisoformat(original["created_at"]).utcoffset().total_seconds() == 0
+    )
     assert updated["revision"] == 2
     assert reopened.history(original["id"]) == [original, updated]
-    assert reopened.export() == {"schema_version": 1, "stories": [updated], "history": [original, updated]}
+    assert reopened.export() == {
+        "schema_version": 1,
+        "stories": [updated],
+        "history": [original, updated],
+    }
     assert original["text"] == "I learned to listen."
     assert original["revision"] == 1
 
@@ -44,7 +66,12 @@ def test_create_replay_is_durable_and_does_not_duplicate(tmp_path):
     assert reopened.list() == [updated]
     assert len(reopened.history(original["id"])) == 2
     with pytest.raises(ConflictError, match="different answer"):
-        reopened.create(prompt="Other", theme="Learning", text="A different answer", request_id="first")
+        reopened.create(
+            prompt="Other",
+            theme="Learning",
+            text="A different answer",
+            request_id="first",
+        )
     assert reopened.list() == [updated]
 
 
@@ -128,11 +155,13 @@ def test_concurrent_edits_have_one_winner(tmp_path):
     path = tmp_path / "stories.sqlite3"
     store = StoryStore(path)
     original = answer(store)
+
     def attempt(text):
         try:
             return StoryStore(path).update(original["id"], **edit(original, text=text))
         except ConflictError:
             return None
+
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(attempt, ["First edit", "Second edit"]))
     winner = [result for result in results if result]
@@ -142,15 +171,34 @@ def test_concurrent_edits_have_one_winner(tmp_path):
     assert winner[0]["text"] in {"First edit", "Second edit"}
 
 
-@pytest.mark.parametrize("changes", [
-    {"prompt": ""}, {"prompt": " "}, {"prompt": 1}, {"prompt": "x" * 4001},
-    {"theme": ""}, {"theme": None}, {"theme": "x" * 201},
-    {"text": ""}, {"text": []}, {"text": "x" * 100001},
-    {"parent_id": ""}, {"parent_id": 3}, {"request_id": ""}, {"request_id": "x" * 129},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"prompt": ""},
+        {"prompt": " "},
+        {"prompt": 1},
+        {"prompt": "x" * 4001},
+        {"theme": ""},
+        {"theme": None},
+        {"theme": "x" * 201},
+        {"text": ""},
+        {"text": []},
+        {"text": "x" * 100001},
+        {"parent_id": ""},
+        {"parent_id": 3},
+        {"request_id": ""},
+        {"request_id": "x" * 129},
+    ],
+)
 def test_validation_is_non_mutating(tmp_path, changes):
     store = StoryStore(tmp_path / "stories.sqlite3")
-    body = {"prompt": "Question", "theme": "Theme", "text": "Answer", "request_id": "request", **changes}
+    body = {
+        "prompt": "Question",
+        "theme": "Theme",
+        "text": "Answer",
+        "request_id": "request",
+        **changes,
+    }
     with pytest.raises(ValueError):
         store.create(**body)
     assert store.export() == {"schema_version": 1, "stories": [], "history": []}
@@ -176,20 +224,34 @@ async def test_http_author_edit_chain_conflict_and_export(tmp_path):
         response = await client.get(PREFIX + "/stories")
         assert response.status == 200
         assert await response.json() == []
-        body = {"prompt": "Where did you grow up?", "theme": "Childhood", "text": "Near a river.", "request_id": "root"}
+        body = {
+            "prompt": "Where did you grow up?",
+            "theme": "Childhood",
+            "text": "Near a river.",
+            "request_id": "root",
+        }
         response = await client.post(PREFIX + "/stories", json=body)
         assert response.status == 200
         root = await response.json()
         assert root["text"] == body["text"]
-        child_body = {**body, "prompt": "What was the river like?", "parent_id": root["id"], "request_id": "child"}
+        child_body = {
+            **body,
+            "prompt": "What was the river like?",
+            "parent_id": root["id"],
+            "request_id": "child",
+        }
         response = await client.post(PREFIX + "/stories", json=child_body)
         assert response.status == 200
         child = await response.json()
-        response = await client.put(PREFIX + "/stories/" + child["id"], json=edit(child, text="Wide and quiet."))
+        response = await client.put(
+            PREFIX + "/stories/" + child["id"], json=edit(child, text="Wide and quiet.")
+        )
         assert response.status == 200
         edited = await response.json()
         assert edited["revision"] == 2
-        response = await client.put(PREFIX + "/stories/" + child["id"], json=edit(child, text="Stale answer"))
+        response = await client.put(
+            PREFIX + "/stories/" + child["id"], json=edit(child, text="Stale answer")
+        )
         assert response.status == 409
         assert "reload" in (await response.json())["error"]
         response = await client.get(PREFIX + "/stories/" + child["id"] + "/chain")
@@ -201,10 +263,14 @@ async def test_http_author_edit_chain_conflict_and_export(tmp_path):
         assert exported["schema_version"] == 1
         assert exported["stories"] == [root, edited]
         assert len(exported["history"]) == 3
-        response = await client.delete(PREFIX + "/stories/" + root["id"] + "?expected_revision=1")
+        response = await client.delete(
+            PREFIX + "/stories/" + root["id"] + "?expected_revision=1"
+        )
         assert response.status == 409
         assert "follow-ups" in (await response.json())["error"]
-        response = await client.delete(PREFIX + "/stories/" + child["id"] + "?expected_revision=2")
+        response = await client.delete(
+            PREFIX + "/stories/" + child["id"] + "?expected_revision=2"
+        )
         assert response.status == 200
         assert (await response.json())["deleted"] == child["id"]
     reopened = StoryStore(path)
@@ -217,15 +283,31 @@ async def test_http_rejects_bad_inputs_and_cross_store_references(tmp_path):
     app = web.Application()
     register(app, store_path=tmp_path / "local.sqlite3")
     foreign = answer(StoryStore(tmp_path / "foreign.sqlite3"))
-    body = {"prompt": "Question", "theme": "Theme", "text": "Answer", "request_id": "request"}
+    body = {
+        "prompt": "Question",
+        "theme": "Theme",
+        "text": "Answer",
+        "request_id": "request",
+    }
     async with TestClient(TestServer(app)) as client:
-        for payload in ([], {}, {**body, "generated_narrative": "Disallowed"}, {**body, "revision": 9}):
+        for payload in (
+            [],
+            {},
+            {**body, "generated_narrative": "Disallowed"},
+            {**body, "revision": 9},
+        ):
             response = await client.post(PREFIX + "/stories", json=payload)
             assert response.status == 400
             assert isinstance((await response.json())["error"], str)
-        response = await client.post(PREFIX + "/stories", data="not-json", headers={"Content-Type": "application/json"})
+        response = await client.post(
+            PREFIX + "/stories",
+            data="not-json",
+            headers={"Content-Type": "application/json"},
+        )
         assert response.status == 400
-        response = await client.post(PREFIX + "/stories", json={**body, "parent_id": foreign["id"]})
+        response = await client.post(
+            PREFIX + "/stories", json={**body, "parent_id": foreign["id"]}
+        )
         assert response.status == 404
         response = await client.get(PREFIX + "/stories/" + foreign["id"])
         assert response.status == 404
@@ -234,15 +316,21 @@ async def test_http_rejects_bad_inputs_and_cross_store_references(tmp_path):
         response = await client.post(PREFIX + "/stories", json=body)
         assert response.status == 200
         root = await response.json()
-        response = await client.put(PREFIX + "/stories/" + root["id"], json=edit(root, parent_id=root["id"]))
+        response = await client.put(
+            PREFIX + "/stories/" + root["id"], json=edit(root, parent_id=root["id"])
+        )
         assert response.status == 409
         response = await client.delete(PREFIX + "/stories/" + root["id"])
         assert response.status == 400
-        response = await client.delete(PREFIX + "/stories/" + root["id"] + "?expected_revision=true")
+        response = await client.delete(
+            PREFIX + "/stories/" + root["id"] + "?expected_revision=true"
+        )
         assert response.status == 400
         response = await client.post(PREFIX + "/stories", json=body)
         assert await response.json() == root
-        response = await client.post(PREFIX + "/stories", json={**body, "text": "Changed"})
+        response = await client.post(
+            PREFIX + "/stories", json={**body, "text": "Changed"}
+        )
         assert response.status == 409
         response = await client.get(PREFIX + "/stories")
         assert await response.json() == [root]

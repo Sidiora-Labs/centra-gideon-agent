@@ -1,4 +1,5 @@
 """Authenticated HTTP projection for personal-domain readiness and scans."""
+
 from aiohttp import web
 
 from gideon.integrations.inbox import live_store
@@ -24,5 +25,7 @@ async def handle(request: web.Request) -> web.Response:
 
 def register(app: web.Application) -> None:
     path = "/api/capabilities/platform/domain-readiness"
-    app.router.add_get(path, handle, allow_head=False, name="capabilities-platform-domains")
+    app.router.add_get(
+        path, handle, allow_head=False, name="capabilities-platform-domains"
+    )
     app.router.add_post(path, handle)

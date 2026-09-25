@@ -14,8 +14,8 @@ from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.extensions.providers.use_cases import save_use_case_settings
-from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture import register
+from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace.capabilities.knowledge.capture import CaptureError, CaptureInbox
 
 
@@ -28,7 +28,14 @@ def inbox(tmp_path):
 
 
 def route_payload(capture, key="route-request-001", **updates):
-    return {"request_id": key, "revision": capture["revision"], "destination": "note", "title": "Reviewed title", "content": "Reviewed content", **updates}
+    return {
+        "request_id": key,
+        "revision": capture["revision"],
+        "destination": "note",
+        "title": "Reviewed title",
+        "content": "Reviewed content",
+        **updates,
+    }
 
 
 def audio_bytes():
@@ -69,7 +76,10 @@ def test_capture_retry_is_exactly_once(inbox):
 def test_routes_into_each_canonical_knowledge_type(inbox):
     for kind in ("note", "journal", "fleeting"):
         original = inbox.create(f"capture-type-{kind}", f"Original {kind}")
-        routed = inbox.route(original["id"], route_payload(original, key=f"route-type-{kind}", destination=kind))
+        routed = inbox.route(
+            original["id"],
+            route_payload(original, key=f"route-type-{kind}", destination=kind),
+        )
         item = inbox.store.get_item(routed["destination_id"])
         assert item["item_type"] == kind
         assert item["title"] == "Reviewed title"
@@ -98,11 +108,22 @@ def test_correction_updates_same_destination_and_preserves_history(inbox):
     original = inbox.create("capture-correct", "Immutable raw thought")
     first_payload = route_payload(original)
     first = inbox.route(original["id"], first_payload)
-    corrected = inbox.route(original["id"], route_payload(first, key="route-correct-02", destination="fleeting", content="Corrected thought"))
+    corrected = inbox.route(
+        original["id"],
+        route_payload(
+            first,
+            key="route-correct-02",
+            destination="fleeting",
+            content="Corrected thought",
+        ),
+    )
     assert corrected["destination_id"] == first["destination_id"]
     assert corrected["revision"] == 3
     assert corrected["text"] == "Immutable raw thought"
-    assert [event["payload"]["content"] for event in corrected["events"]] == ["Reviewed content", "Corrected thought"]
+    assert [event["payload"]["content"] for event in corrected["events"]] == [
+        "Reviewed content",
+        "Corrected thought",
+    ]
     item = inbox.store.get_item(corrected["destination_id"])
     assert item["item_type"] == "fleeting"
     assert item["content"] == "Corrected thought"
@@ -132,9 +153,17 @@ def test_removed_destination_does_not_resurrect(inbox):
 def test_durable_pending_route_recovers_existing_destination(inbox):
     original = inbox.create("capture-recover", "Original")
     payload = route_payload(original)
-    inbox.db.execute("UPDATE capability_knowledge_captures SET pending=? WHERE id=?", (json.dumps(payload, sort_keys=True), original["id"]))
+    inbox.db.execute(
+        "UPDATE capability_knowledge_captures SET pending=? WHERE id=?",
+        (json.dumps(payload, sort_keys=True), original["id"]),
+    )
     inbox.db.commit()
-    destination = inbox.store.create_typed_item(item_type="note", title="Reviewed title", content="Reviewed content", guid=f"capture:route:{original['id']}")
+    destination = inbox.store.create_typed_item(
+        item_type="note",
+        title="Reviewed title",
+        content="Reviewed content",
+        guid=f"capture:route:{original['id']}",
+    )
     with pytest.raises(CaptureError):
         inbox.route(original["id"], payload | {"request_id": "conflicting-pending"})
     recovered = inbox.route(original["id"], payload)
@@ -147,7 +176,10 @@ def test_original_and_events_reject_in_place_edits(inbox):
     original = inbox.create("capture-tamper-1", "Preserved original")
     routed = inbox.route(original["id"], route_payload(original))
     with pytest.raises(Exception, match="provenance is immutable"):
-        inbox.db.execute("UPDATE capability_knowledge_captures SET original_text='changed' WHERE id=?", (original["id"],))
+        inbox.db.execute(
+            "UPDATE capability_knowledge_captures SET original_text='changed' WHERE id=?",
+            (original["id"],),
+        )
     inbox.db.rollback()
     with pytest.raises(Exception, match="history is immutable"):
         inbox.db.execute("UPDATE capability_knowledge_capture_events SET payload='{}'")
@@ -168,17 +200,26 @@ def test_reopen_retains_original_receipts_and_route(tmp_path):
     second_store = KnowledgeStore(path)
     second = CaptureInbox(second_store)
     assert second.get(original["id"]) == routed
-    assert second.create("capture-persist", "Original preserved across restart")["id"] == original["id"]
-    assert second_store.get_item(routed["destination_id"])["content"] == "Reviewed content"
+    assert (
+        second.create("capture-persist", "Original preserved across restart")["id"]
+        == original["id"]
+    )
+    assert (
+        second_store.get_item(routed["destination_id"])["content"] == "Reviewed content"
+    )
     second_store.close()
 
 
 def test_chronology_and_bounded_pages(inbox):
-    created = [inbox.create(f"capture-page-{index}", f"Thought {index}") for index in range(5)]
+    created = [
+        inbox.create(f"capture-page-{index}", f"Thought {index}") for index in range(5)
+    ]
     first = inbox.list(limit=2)
     second = inbox.list(limit=2, offset=first["next_offset"])
     third = inbox.list(limit=2, offset=second["next_offset"])
-    assert [item["id"] for item in first["items"] + second["items"] + third["items"]] == [item["id"] for item in reversed(created)]
+    assert [
+        item["id"] for item in first["items"] + second["items"] + third["items"]
+    ] == [item["id"] for item in reversed(created)]
     assert first["total"] == 5
     assert third["next_offset"] is None
     assert inbox.list(offset=9)["items"] == []
@@ -186,14 +227,33 @@ def test_chronology_and_bounded_pages(inbox):
         inbox.list(limit=101)
 
 
-@pytest.mark.parametrize("key,text", [("bad", "Text"), ("capture-invalid", ""), ("capture-space", "   "), ("capture-long", "x" * 100001), ("capture-number", 42)])
+@pytest.mark.parametrize(
+    "key,text",
+    [
+        ("bad", "Text"),
+        ("capture-invalid", ""),
+        ("capture-space", "   "),
+        ("capture-long", "x" * 100001),
+        ("capture-number", 42),
+    ],
+)
 def test_capture_validation_is_persistent_state_safe(inbox, key, text):
     with pytest.raises(CaptureError):
         inbox.create(key, text)
     assert inbox.list()["total"] == 0
 
 
-@pytest.mark.parametrize("change", [{"revision": True}, {"title": ""}, {"content": " "}, {"destination": "audio"}, {"provider": "external"}, {"request_id": "short"}])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"revision": True},
+        {"title": ""},
+        {"content": " "},
+        {"destination": "audio"},
+        {"provider": "external"},
+        {"request_id": "short"},
+    ],
+)
 def test_route_validation_cannot_create_destination(inbox, change):
     original = inbox.create("capture-invalid-route", "Original")
     with pytest.raises(CaptureError):
@@ -211,20 +271,27 @@ def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
     assert voice["audio_sha256"] == hashlib.sha256(data).hexdigest()
     item = inbox.store.get_item(voice["audio_item_id"])
     from pathlib import Path
+
     assert Path(item["file_path"]).read_bytes() == data
     assert Path(item["file_path"]).parent == inbox.files_root
     assert item["item_type"] == "audio"
     assert item["file_size"] == len(data)
     with pytest.raises(CaptureError) as refused:
-        inbox.save_audio("capture-audio-01", data + b"other", "recording.wav", "audio/wav")
+        inbox.save_audio(
+            "capture-audio-01", data + b"other", "recording.wav", "audio/wav"
+        )
     assert refused.value.status == 409
 
 
-def test_unavailable_real_transcription_preserves_retryable_audio(inbox, monkeypatch, tmp_path):
+def test_unavailable_real_transcription_preserves_retryable_audio(
+    inbox, monkeypatch, tmp_path
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "no-speech-provider"))
     save_use_case_settings("stt", {"enabled": False})
     inbox = CaptureInbox(inbox.store)
-    voice = inbox.save_audio("capture-no-stt-1", audio_bytes(), "recording.wav", "audio/wav")
+    voice = inbox.save_audio(
+        "capture-no-stt-1", audio_bytes(), "recording.wav", "audio/wav"
+    )
     result = asyncio.run(inbox.transcribe(voice["id"]))
     assert result["status"] == "transcription_unavailable"
     assert result["transcript"] is None
@@ -235,13 +302,18 @@ def test_unavailable_real_transcription_preserves_retryable_audio(inbox, monkeyp
     again = asyncio.run(inbox.transcribe(voice["id"]))
     assert again["status"] == "transcription_unavailable"
     assert again["revision"] == 3
-    assert inbox.store.get_item(voice["audio_item_id"])["file_size"] == len(audio_bytes())
+    assert inbox.store.get_item(voice["audio_item_id"])["file_size"] == len(
+        audio_bytes()
+    )
 
 
 def test_changed_audio_refuses_transcription_before_provider(inbox):
-    voice = inbox.save_audio("capture-changed-audio", audio_bytes(), "recording.wav", "audio/wav")
+    voice = inbox.save_audio(
+        "capture-changed-audio", audio_bytes(), "recording.wav", "audio/wav"
+    )
     item = inbox.store.get_item(voice["audio_item_id"])
     from pathlib import Path
+
     Path(item["file_path"]).write_bytes(b"changed")
     with pytest.raises(CaptureError) as refused:
         asyncio.run(inbox.transcribe(voice["id"]))
@@ -251,11 +323,15 @@ def test_changed_audio_refuses_transcription_before_provider(inbox):
 
 def test_audio_validation_and_wrong_origin(inbox):
     with pytest.raises(CaptureError):
-        inbox.save_audio("capture-bad-mime", audio_bytes(), "recording.wav", "text/plain")
+        inbox.save_audio(
+            "capture-bad-mime", audio_bytes(), "recording.wav", "text/plain"
+        )
     with pytest.raises(CaptureError):
         inbox.save_audio("capture-empty-audio", b"", "recording.wav", "audio/wav")
     with pytest.raises(CaptureError):
-        inbox.save_audio("capture-bad-extension", audio_bytes(), "recording.exe", "audio/wav")
+        inbox.save_audio(
+            "capture-bad-extension", audio_bytes(), "recording.exe", "audio/wav"
+        )
     text = inbox.create("capture-text-asr", "Actual text")
     with pytest.raises(CaptureError):
         asyncio.run(inbox.transcribe(text["id"]))
@@ -277,12 +353,21 @@ def test_http_capture_review_retry_and_cross_store_isolation(tmp_path):
         app, store = make_app(tmp_path / "left.db")
         other, other_store = make_app(tmp_path / "right.db")
         root = "/api/capabilities/knowledge/captures"
-        async with TestClient(TestServer(app)) as client, TestClient(TestServer(other)) as isolated:
-            response = await client.post(root, json={"request_id": "http-text-capture", "text": "An actual input"})
+        async with (
+            TestClient(TestServer(app)) as client,
+            TestClient(TestServer(other)) as isolated,
+        ):
+            response = await client.post(
+                root,
+                json={"request_id": "http-text-capture", "text": "An actual input"},
+            )
             original = await response.json()
             assert response.status == 200
             assert original["text"] == "An actual input"
-            repeated = await client.post(root, json={"request_id": "http-text-capture", "text": "An actual input"})
+            repeated = await client.post(
+                root,
+                json={"request_id": "http-text-capture", "text": "An actual input"},
+            )
             assert (await repeated.json())["id"] == original["id"]
             listing = await client.get(root)
             assert (await listing.json())["total"] == 1
@@ -291,25 +376,40 @@ def test_http_capture_review_retry_and_cross_store_isolation(tmp_path):
             assert routed.status == 200
             saved = await routed.json()
             assert saved["revision"] == 2
-            assert store.get_item(saved["destination_id"])["content"] == "Reviewed content"
+            assert (
+                store.get_item(saved["destination_id"])["content"] == "Reviewed content"
+            )
             denied = await isolated.get(f"{root}/{original['id']}")
             assert denied.status == 404
             assert (await (await isolated.get(root)).json())["total"] == 0
             for selector in ("home", "account", "runtime", "provider", "model"):
-                invalid = await client.post(root, json={"request_id": "http-invalid-capture", "text": "text", selector: "other"})
+                invalid = await client.post(
+                    root,
+                    json={
+                        "request_id": "http-invalid-capture",
+                        "text": "text",
+                        selector: "other",
+                    },
+                )
                 assert invalid.status == 400
                 queried = await client.get(f"{root}?{selector}=other")
                 assert queried.status == 400
-            conflict = await client.post(f"{root}/{original['id']}/route", json=payload | {"request_id": "http-stale-request"})
+            conflict = await client.post(
+                f"{root}/{original['id']}/route",
+                json=payload | {"request_id": "http-stale-request"},
+            )
             assert conflict.status == 409
             detail = await client.get(f"{root}/{original['id']}")
             assert (await detail.json())["text"] == "An actual input"
         store.close()
         other_store.close()
+
     asyncio.run(journey())
 
 
-def test_http_audio_allocates_at_bound_store_and_refuses_overrides(tmp_path, monkeypatch):
+def test_http_audio_allocates_at_bound_store_and_refuses_overrides(
+    tmp_path, monkeypatch
+):
     async def journey():
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "initial-home"))
         save_use_case_settings("stt", {"enabled": False})
@@ -318,19 +418,32 @@ def test_http_audio_allocates_at_bound_store_and_refuses_overrides(tmp_path, mon
         root = "/api/capabilities/knowledge/captures"
         async with TestClient(TestServer(app)) as client:
             form = FormData()
-            form.add_field("audio", audio_bytes(), filename="voice.wav", content_type="audio/wav")
-            response = await client.post(root + "/audio", data=form, headers={"X-Capture-Request-ID": "http-original-audio"})
+            form.add_field(
+                "audio", audio_bytes(), filename="voice.wav", content_type="audio/wav"
+            )
+            response = await client.post(
+                root + "/audio",
+                data=form,
+                headers={"X-Capture-Request-ID": "http-original-audio"},
+            )
             assert response.status == 409
             assert not (tmp_path / "changed-global-home").exists()
             assert not (tmp_path / "files").exists()
             monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "initial-home"))
             form = FormData()
-            form.add_field("audio", audio_bytes(), filename="voice.wav", content_type="audio/wav")
-            response = await client.post(root + "/audio", data=form, headers={"X-Capture-Request-ID": "http-original-audio"})
+            form.add_field(
+                "audio", audio_bytes(), filename="voice.wav", content_type="audio/wav"
+            )
+            response = await client.post(
+                root + "/audio",
+                data=form,
+                headers={"X-Capture-Request-ID": "http-original-audio"},
+            )
             assert response.status == 200
             captured = await response.json()
             item = store.get_item(captured["audio_item_id"])
             from pathlib import Path
+
             assert Path(item["file_path"]).parent == tmp_path / "files"
             assert Path(item["file_path"]).read_bytes() == audio_bytes()
             endpoint = f"{root}/{captured['id']}/transcribe"
@@ -342,6 +455,9 @@ def test_http_audio_allocates_at_bound_store_and_refuses_overrides(tmp_path, mon
             assert result["status"] == "transcription_unavailable"
             assert result["transcript"] is None
             assert result["audio_sha256"] == captured["audio_sha256"]
-            assert not (tmp_path / "changed-global-home" / "workspace" / "knowledge").exists()
+            assert not (
+                tmp_path / "changed-global-home" / "workspace" / "knowledge"
+            ).exists()
         store.close()
+
     asyncio.run(journey())

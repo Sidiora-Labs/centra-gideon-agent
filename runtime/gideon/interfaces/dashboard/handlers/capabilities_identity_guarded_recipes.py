@@ -1,6 +1,9 @@
 """Existing-session guarded recipe dispatch and actual human permission decisions."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.guarded_recipes import GuardedRecipes
 from gideon.workspace.capabilities.identity.store import ConflictError
@@ -41,4 +44,6 @@ def register(app: web.Application, *, home: Path | None = None):
     app.router.add_get(PREFIX, handle)
     app.router.add_get(PREFIX + "/{operation:catalog}", handle)
     app.router.add_get(PREFIX + "/{operation:runs|history}/{id}", handle)
-    app.router.add_post(PREFIX + "/{operation:save|restore|begin|advance|decide|cancel}", handle)
+    app.router.add_post(
+        PREFIX + "/{operation:save|restore|begin|advance|decide|cancel}", handle
+    )

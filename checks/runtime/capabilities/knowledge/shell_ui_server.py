@@ -11,7 +11,11 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities import register
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.interfaces.dashboard.token_auth import generate_token, reset_secret_cache, token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import (
+    generate_token,
+    reset_secret_cache,
+    token_auth_middleware,
+)
 
 
 async def main():
@@ -26,7 +30,15 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"port": site._server.sockets[0].getsockname()[1], "token": generate_token("knowledge-shell")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "port": site._server.sockets[0].getsockname()[1],
+                "token": generate_token("knowledge-shell"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:

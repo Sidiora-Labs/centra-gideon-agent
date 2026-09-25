@@ -3,7 +3,10 @@
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
-from gideon.interfaces.dashboard.handlers._shared import _blocks_reads_session, _is_restricted_session
+from gideon.interfaces.dashboard.handlers._shared import (
+    _blocks_reads_session,
+    _is_restricted_session,
+)
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.rsvp import RsvpStates
 
@@ -13,7 +16,9 @@ async def operation(request):
         if request.query:
             raise CaptureError("RSVP operations do not accept query overrides")
         state = request.app["state"]
-        if _blocks_reads_session(state, request) or (request.method != "GET" and _is_restricted_session(state, request)):
+        if _blocks_reads_session(state, request) or (
+            request.method != "GET" and _is_restricted_session(state, request)
+        ):
             raise CaptureError("This session cannot access RSVP state", 403)
         service = request.app["capability_knowledge_rsvp"]
         item_id = request.match_info["item_id"]
@@ -33,7 +38,9 @@ async def operation(request):
             raise CaptureError("Unknown RSVP operation", 404)
         return web.json_response(result)
     except (CaptureError, ValueError, TypeError, KeyError) as exc:
-        return web.json_response({"error": str(exc)}, status=getattr(exc, "status", 400))
+        return web.json_response(
+            {"error": str(exc)}, status=getattr(exc, "status", 400)
+        )
 
 
 def register(app):

@@ -1,9 +1,14 @@
 """Real application used by the console interaction test."""
+
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
+
 from aiohttp import web
-from gideon.interfaces.dashboard.handlers.capabilities_identity_continuity import register
+
+from gideon.interfaces.dashboard.handlers.capabilities_identity_continuity import (
+    register,
+)
 
 
 async def main():

@@ -6,27 +6,44 @@ import pytest
 from gideon.engine import session_restrictions
 from gideon.extensions.apps.manifest import AppManifest
 from gideon.extensions.providers.registry import ProviderRegistry, ToolTypeHandler
-from gideon.integrations.mcp_core import reset_current_session_key, set_current_session_key
+from gideon.integrations.mcp_core import (
+    reset_current_session_key,
+    set_current_session_key,
+)
 from gideon.integrations.tool_providers.registry import get_provider
-
 
 ROOT = Path(__file__).parents[4]
 APPS = ROOT / "runtime/gideon/extensions/apps/native"
 
 
 @pytest.mark.asyncio
-async def test_completed_identity_and_platform_apps_register_and_dispatch(tmp_path, monkeypatch):
+async def test_completed_identity_and_platform_apps_register_and_dispatch(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     registry = ProviderRegistry()
     registry.register_type_handler("tool", ToolTypeHandler())
-    names = ("gideon-identity", "gideon-platform", "gideon-peers", "gideon-remote-media", "gideon-media-sharing", "remote-agent-sessions")
+    names = (
+        "gideon-identity",
+        "gideon-platform",
+        "gideon-peers",
+        "gideon-remote-media",
+        "gideon-media-sharing",
+        "remote-agent-sessions",
+    )
     try:
         for name in names:
-            registry.register(AppManifest.from_json_file(APPS / name / "app.json"), enabled=True)
+            registry.register(
+                AppManifest.from_json_file(APPS / name / "app.json"), enabled=True
+            )
             assert get_provider(name) is not None
 
         identity = get_provider("gideon-identity")
-        guarded = {tool.name: tool for tool in await identity.list_tools() if tool.name.startswith("identity_guarded_")}
+        guarded = {
+            tool.name: tool
+            for tool in await identity.list_tools()
+            if tool.name.startswith("identity_guarded_")
+        }
         assert len(guarded) == 7
         assert guarded["identity_guarded_catalog"].requires_approval is False
         assert guarded["identity_guarded_save"].requires_approval is True
@@ -61,7 +78,9 @@ async def test_completed_identity_and_platform_apps_register_and_dispatch(tmp_pa
         remote_tools = {tool.name: tool for tool in await remote.list_tools()}
         assert remote_tools["remote_agent_sessions"].requires_approval is False
         assert remote_tools["remote_agent_message"].requires_approval is True
-        assert (await remote.invoke("remote_agent_sessions", {"connection_id": "missing"})).success is False
+        assert (
+            await remote.invoke("remote_agent_sessions", {"connection_id": "missing"})
+        ).success is False
     finally:
         for name in reversed(names):
             registry.deregister(name)

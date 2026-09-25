@@ -1,6 +1,7 @@
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+
 from .navigation import NavigationReceipts
 from .store import Conflict, NotFound
 
@@ -12,11 +13,19 @@ async def handle(request):
     key = request.match_info.get("receipt_id")
     try:
         if request.method == "GET":
-            result = {"receipt": receipts.get(key)} if key else {"receipts": receipts.list()}
+            result = (
+                {"receipt": receipts.get(key)} if key else {"receipts": receipts.list()}
+            )
         else:
             body = await read_json_body(request)
-            result = {"receipt": receipts.acknowledge(key, body) if key else receipts.request(body)}
-        return web.json_response(result, status=201 if request.method == "POST" and not key else 200)
+            result = {
+                "receipt": (
+                    receipts.acknowledge(key, body) if key else receipts.request(body)
+                )
+            }
+        return web.json_response(
+            result, status=201 if request.method == "POST" and not key else 200
+        )
     except NotFound as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except Conflict as exc:

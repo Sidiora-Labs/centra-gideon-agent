@@ -7,7 +7,9 @@ from pathlib import Path
 from aiohttp import web
 
 from gideon.interfaces.dashboard.handlers.capabilities_experience import STORE, register
-from gideon.interfaces.dashboard.handlers.capabilities_experience_moltbook import register as register_moltbook
+from gideon.interfaces.dashboard.handlers.capabilities_experience_moltbook import (
+    register as register_moltbook,
+)
 from gideon.workspace.capabilities.experience import ExperienceStore
 
 

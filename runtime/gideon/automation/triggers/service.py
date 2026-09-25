@@ -186,7 +186,6 @@ def next_after_completion(
 ) -> float:
     from gideon.automation.triggers.arm import next_fire
     from gideon.automation.triggers.scheduling import recompute_from_completion
-
     from gideon.workspace.capabilities.platform.cadence import effective_interval
 
     interval = effective_interval(trigger, now=now, base_dir=base_dir)
@@ -209,7 +208,9 @@ class TickPass:
     result: TickResult = field(default_factory=TickResult)
 
     def advance(self, trigger: Trigger) -> None:
-        future = next_after_completion(trigger, completed_at=self.now, now=self.now, base_dir=self.base_dir)
+        future = next_after_completion(
+            trigger, completed_at=self.now, now=self.now, base_dir=self.base_dir
+        )
         if not self.persist:
             return
         if future > 0:

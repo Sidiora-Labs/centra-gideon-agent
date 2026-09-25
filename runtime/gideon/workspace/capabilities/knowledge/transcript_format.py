@@ -4,7 +4,8 @@ import html
 import json
 import math
 import re
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+
 from .capture import CaptureError, text_field
 from .reviews import digest
 

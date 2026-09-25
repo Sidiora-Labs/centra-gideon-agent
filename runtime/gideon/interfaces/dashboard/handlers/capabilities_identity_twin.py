@@ -1,6 +1,9 @@
 """Human identity HTTP operations using the application's authenticated boundary."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.store import ConflictError
 from gideon.workspace.capabilities.identity.twin import TwinStore
@@ -15,9 +18,16 @@ async def handle(request):
     operation = request.match_info.get("operation")
     try:
         if request.method == "GET":
-            result = store.compose(budget=int(request.query.get("budget", "1000"))) if operation == "context" else store.snapshot()
+            result = (
+                store.compose(budget=int(request.query.get("budget", "1000")))
+                if operation == "context"
+                else store.snapshot()
+            )
         elif request.method == "DELETE":
-            result = store.delete_document(request.match_info["id"], int(request.query.get("expected_revision", "")))
+            result = store.delete_document(
+                request.match_info["id"],
+                int(request.query.get("expected_revision", "")),
+            )
         else:
             body = await request.json()
             if not isinstance(body, dict):
@@ -27,7 +37,14 @@ async def handle(request):
             elif operation == "enrich":
                 if set(body) != {"document_id"}:
                     raise ValueError("Expected document_id only")
-                doc = next((d for d in store.snapshot()["documents"] if d["id"] == body["document_id"]), None)
+                doc = next(
+                    (
+                        d
+                        for d in store.snapshot()["documents"]
+                        if d["id"] == body["document_id"]
+                    ),
+                    None,
+                )
                 if doc is None:
                     raise KeyError("Document not found")
                 if doc["private"] or not doc["enabled"]:
@@ -35,8 +52,18 @@ async def handle(request):
                 try:
                     proposal = await propose_enrichment(doc["text"])
                 except Exception:
-                    return web.json_response({"status": "unavailable", "error": "Configured enrichment provider is unavailable; no proposal was saved"}, status=503)
-                result = {"status": "proposed", "document_id": doc["id"], "text": proposal}
+                    return web.json_response(
+                        {
+                            "status": "unavailable",
+                            "error": "Configured enrichment provider is unavailable; no proposal was saved",
+                        },
+                        status=503,
+                    )
+                result = {
+                    "status": "proposed",
+                    "document_id": doc["id"],
+                    "text": proposal,
+                }
             else:
                 result = store.configure(**body)
         return web.json_response(result)
@@ -49,7 +76,9 @@ async def handle(request):
 
 
 def register(app: web.Application, *, store_path: Path | None = None):
-    app[STORE_KEY] = TwinStore(store_path or config_dir() / "capabilities/identity/twin.sqlite3")
+    app[STORE_KEY] = TwinStore(
+        store_path or config_dir() / "capabilities/identity/twin.sqlite3"
+    )
     app.router.add_get(PREFIX, handle)
     app.router.add_put(PREFIX, handle)
     app.router.add_get(PREFIX + "/{operation:context}", handle)

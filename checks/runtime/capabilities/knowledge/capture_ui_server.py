@@ -4,13 +4,15 @@ import asyncio
 import json
 import os
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture import register
 from gideon.extensions.providers.use_cases import save_use_case_settings
+from gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture import register
+from gideon.interfaces.dashboard.state import ConsoleState
 
 
 async def main():
@@ -27,7 +29,9 @@ async def main():
     await runner.setup()
     listener = web.TCPSite(runner, "127.0.0.1", 0)
     await listener.start()
-    print(json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True)
+    print(
+        json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True
+    )
     try:
         await asyncio.Event().wait()
     finally:

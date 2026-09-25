@@ -27,7 +27,7 @@ js-render = ["playwright>=1.40"]
 video = ["yt-dlp==2026.8.19"]
 keychain = ["keyring>=24"]
 models = ["gideon-agent-harness[embeddings]", "gideon-agent-harness[stt]", "gideon-agent-harness[tts]"]
-dev = ["gideon-agent-harness[test]", "gideon-agent-harness[models]", "gideon-agent-harness[mcp]", "gideon-agent-harness[bedrock]", "black>=26,<27", "isort>=8,<9", "flake8>=7,<8", "mypy>=2,<3", "build>=1.0"]
+dev = ["gideon-agent-harness[openai]", "gideon-agent-harness[test]", "gideon-agent-harness[models]", "gideon-agent-harness[mcp]", "gideon-agent-harness[bedrock]", "black>=26,<27", "isort>=8,<9", "flake8>=7,<8", "mypy>=2,<3", "build>=1.0"]
 test = ["pytest>=7", "pytest-asyncio>=0.23", "pytest-xdist>=3", "pytest-timeout>=2", "pytest-cov>=4", "pytest-split>=0.8", "hypothesis>=6", "setuptools>=64"]
 
 [project.scripts]

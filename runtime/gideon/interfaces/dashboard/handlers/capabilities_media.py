@@ -16,7 +16,9 @@ async def dispatch(request):
             if action == "source":
                 data, mime = store.source(store.get(sketch_id))
                 return web.Response(body=data, content_type=mime)
-            return web.json_response(store.get(sketch_id) if sketch_id else {"items": store.list()})
+            return web.json_response(
+                store.get(sketch_id) if sketch_id else {"items": store.list()}
+            )
         if request.content_length and request.content_length > 1024 * 1024:
             raise SketchError("Request too large", 413)
         try:
@@ -36,7 +38,10 @@ def register(app):
     if STORE_KEY not in app:
         from gideon.core.config.loader import config_dir
         from gideon.workspace.artifacts.registry import get_provider
-        app[STORE_KEY] = SketchStore(config_dir() / "capabilities/media/sketches.sqlite3", get_provider())
+
+        app[STORE_KEY] = SketchStore(
+            config_dir() / "capabilities/media/sketches.sqlite3", get_provider()
+        )
     prefix = "/api/capabilities/media/sketches"
     app.router.add_get(prefix, dispatch)
     app.router.add_post(prefix, dispatch)
@@ -45,35 +50,57 @@ def register(app):
     app.router.add_get(prefix + "/{id}/source", dispatch)
     app.router.add_post(prefix + "/{id}/export", dispatch)
     from gideon.workspace.capabilities.media.library_http import register_library
+
     register_library(app, app[STORE_KEY].artifacts)
     from gideon.workspace.capabilities.media.annotations import AnnotationStore
-    from gideon.workspace.capabilities.media.annotations_http import register_annotations
-    register_annotations(app, AnnotationStore(app[STORE_KEY].path.parent / 'annotations.sqlite3', app[STORE_KEY].artifacts))
+    from gideon.workspace.capabilities.media.annotations_http import (
+        register_annotations,
+    )
+
+    register_annotations(
+        app,
+        AnnotationStore(
+            app[STORE_KEY].path.parent / "annotations.sqlite3", app[STORE_KEY].artifacts
+        ),
+    )
     from gideon.workspace.capabilities.media.jobs import MediaJobs
     from gideon.workspace.capabilities.media.jobs_http import register_jobs
-    register_jobs(app, MediaJobs(app[STORE_KEY].path.parent / 'jobs.sqlite3', app[STORE_KEY]))
+
+    register_jobs(
+        app, MediaJobs(app[STORE_KEY].path.parent / "jobs.sqlite3", app[STORE_KEY])
+    )
 
     from gideon.workspace.capabilities.media.animations_http import register_animations
+
     register_animations(app)
 
     from gideon.workspace.capabilities.media.downloads_http import register_downloads
+
     register_downloads(app)
 
     from gideon.workspace.capabilities.media.readiness import MediaReadiness
     from gideon.workspace.capabilities.media.readiness_http import register_readiness
-    register_readiness(app, MediaReadiness(app[STORE_KEY].path.parent / "readiness.sqlite3"))
+
+    register_readiness(
+        app, MediaReadiness(app[STORE_KEY].path.parent / "readiness.sqlite3")
+    )
 
     from gideon.workspace.capabilities.media.images_http import register_images
+
     register_images(app)
 
     from gideon.workspace.capabilities.media.datasets_http import register_datasets
+
     register_datasets(app)
 
     from gideon.workspace.capabilities.media.timelines_http import register_timelines
+
     register_timelines(app)
 
     from gideon.workspace.capabilities.media.episodes_http import register_episodes
+
     register_episodes(app)
 
     from gideon.workspace.capabilities.media.sprites_http import register_sprites
+
     register_sprites(app)

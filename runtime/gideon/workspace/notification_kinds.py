@@ -231,7 +231,10 @@ _PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
     ("learning", "report"): "gideon.cognition.learning_report",
     ("approval", "requested"): "gideon.interfaces.dashboard.state",
     ("user", "note"): "gideon.interfaces.dashboard.handlers_inbox",
-    ("personal", "domain_alert"): "gideon.workspace.capabilities.platform.domain_alerts",
+    (
+        "personal",
+        "domain_alert",
+    ): "gideon.workspace.capabilities.platform.domain_alerts",
     (GENERIC_SOURCE, GENERIC_KIND): "gideon.interfaces.dashboard.state",
 }
 

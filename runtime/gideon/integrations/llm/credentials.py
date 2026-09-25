@@ -103,7 +103,9 @@ class CredentialStore:
     def _mutate(self, name: str, descriptor: dict[str, object] | None) -> None:
         with self._state_lock:
             self._home.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self._home / ".credentials.lock", os.O_CREAT | os.O_RDWR, self.FILE_MODE)
+            fd = os.open(
+                self._home / ".credentials.lock", os.O_CREAT | os.O_RDWR, self.FILE_MODE
+            )
             with os.fdopen(fd, "a+") as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX)
                 try:

@@ -12,14 +12,23 @@ from gideon.extensions.apps.manager import app_data_dir
 from gideon.workspace.capabilities.experience import ExperienceStore
 from gideon.workspace.capabilities.experience.world_engine import APP_ID, WorldEngine
 from gideon.workspace.capabilities.experience.world_travel import SCOPE
-from gideon.workspace.capabilities.experience.world_travel_http import register_world_travel
+from gideon.workspace.capabilities.experience.world_travel_http import (
+    register_world_travel,
+)
 from gideon.workspace.capabilities.experience.worlds import get_worlds
 from gideon.workspace.capabilities.platform.peers import PeerStore
 
 
 def record(identity, endpoint, label):
-    return {"label":label, "endpoint":endpoint, "public_key":identity["public_key"], "enabled":True,
-            "send_categories":[SCOPE], "receive_categories":[SCOPE], "revision":0}
+    return {
+        "label": label,
+        "endpoint": endpoint,
+        "public_key": identity["public_key"],
+        "enabled": True,
+        "send_categories": [SCOPE],
+        "receive_categories": [SCOPE],
+        "revision": 0,
+    }
 
 
 async def serve(app):
@@ -32,13 +41,20 @@ async def serve(app):
 
 async def main():
     home = Path(sys.argv[1])
-    store, engine = ExperienceStore(home / "runtime"), WorldEngine(ExperienceStore(home / "runtime"))
-    template = Path(__file__).resolve().parents[4] / "runtime/gideon/workspace/capabilities/experience/assets/world-engine"
+    store, engine = ExperienceStore(home / "runtime"), WorldEngine(
+        ExperienceStore(home / "runtime")
+    )
+    template = (
+        Path(__file__).resolve().parents[4]
+        / "runtime/gideon/workspace/capabilities/experience/assets/world-engine"
+    )
     installed = app_manager.install(template, confirm=True)
     assert installed.ok, installed.error
     get_backend_supervisor().stop(APP_ID)
     deps = Path("/tmp/gideon-world-engine-deps")
-    (app_data_dir(APP_ID) / "engine.json").write_text(json.dumps({"worlds":str(deps / "worlds"), "video":str(deps / "video")}))
+    (app_data_dir(APP_ID) / "engine.json").write_text(
+        json.dumps({"worlds": str(deps / "worlds"), "video": str(deps / "video")})
+    )
     assert (await engine.control("start", {}))["state"] == "running"
     worlds = get_worlds(store)
     await worlds.open("ui_lounge", {})
@@ -49,9 +65,17 @@ async def main():
     origin_app = web.Application()
     register_world_travel(origin_app, store, origin)
     origin_runner, origin_url = await serve(origin_app)
-    origin_identity, destination_identity = origin.snapshot()["self"], destination.snapshot()["self"]
-    origin.put(destination_identity["peer_id"], record(destination_identity, destination_url, "Actual destination"))
-    destination.put(origin_identity["peer_id"], record(origin_identity, origin_url, "Actual origin"))
+    origin_identity, destination_identity = (
+        origin.snapshot()["self"],
+        destination.snapshot()["self"],
+    )
+    origin.put(
+        destination_identity["peer_id"],
+        record(destination_identity, destination_url, "Actual destination"),
+    )
+    destination.put(
+        origin_identity["peer_id"], record(origin_identity, origin_url, "Actual origin")
+    )
     print(f"ORIGIN_URL={origin_url} DEST_URL={destination_url}", flush=True)
     stop = asyncio.Event()
     for name in (signal.SIGTERM, signal.SIGINT):

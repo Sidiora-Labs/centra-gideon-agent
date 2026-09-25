@@ -1,6 +1,9 @@
 """Progress profile editing and direct source projections."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.store import ConflictError
@@ -27,6 +30,8 @@ async def handle(request):
 
 
 def register(app: web.Application, *, store_path: Path | None = None):
-    app[KEY] = ProgressStore(store_path or config_dir() / "capabilities/identity/progress.sqlite3")
+    app[KEY] = ProgressStore(
+        store_path or config_dir() / "capabilities/identity/progress.sqlite3"
+    )
     app.router.add_get(PREFIX, handle)
     app.router.add_put(PREFIX, handle)

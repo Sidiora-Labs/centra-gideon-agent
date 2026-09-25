@@ -1057,7 +1057,9 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
 
     if path_key in ("companion.discovery_enabled", "companion.instance_name"):
         try:
-            from gideon.integrations.companion import discovery as _discovery  # noqa: F811  # fmt: skip
+            from gideon.integrations.companion import (  # noqa: F811
+                discovery as _discovery,
+            )
 
             _discovery.reconcile()
         except Exception:

@@ -1,5 +1,6 @@
-from aiohttp import web
 from urllib.parse import unquote
+
+from aiohttp import web
 
 from .library import MediaLibrary
 from .sketches import SketchError
@@ -14,7 +15,11 @@ async def library_dispatch(request):
         if request.method == "GET":
             if artifact_id and request.query:
                 raise SketchError("Detail query parameters are not accepted")
-            return web.json_response(library.get(artifact_id) if artifact_id else library.list(dict(request.query)))
+            return web.json_response(
+                library.get(artifact_id)
+                if artifact_id
+                else library.list(dict(request.query))
+            )
         if request.query:
             raise SketchError("Mutation query parameters are not accepted")
         if request.method == "PATCH":
@@ -28,8 +33,13 @@ async def library_dispatch(request):
             data.extend(chunk)
             if len(data) > 16 * 1024 * 1024:
                 raise SketchError("Image exceeds 16 MB limit", 413)
-        item = library.import_image(bytes(data), filename=unquote(request.headers.get("X-File-Name", "")),
-            request_id=request.headers.get("X-Request-ID", ""), name=unquote(request.headers.get("X-Image-Name", "")), mime=request.content_type)
+        item = library.import_image(
+            bytes(data),
+            filename=unquote(request.headers.get("X-File-Name", "")),
+            request_id=request.headers.get("X-Request-ID", ""),
+            name=unquote(request.headers.get("X-Image-Name", "")),
+            mime=request.content_type,
+        )
         return web.json_response(item, status=201)
     except SketchError as exc:
         return web.json_response({"error": str(exc)}, status=exc.status)

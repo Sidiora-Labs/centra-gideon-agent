@@ -8,7 +8,10 @@ from aiohttp import web
 from gideon.core.config.loader import config_dir
 from gideon.core.http_request import RequestValidationError, read_json_body
 from gideon.http_errors import json_error
-from gideon.workspace.capabilities.wellbeing.store import MeasurementError, MeasurementStore
+from gideon.workspace.capabilities.wellbeing.store import (
+    MeasurementError,
+    MeasurementStore,
+)
 
 
 def register(app: web.Application, home: Path | None = None):
@@ -20,7 +23,11 @@ def register(app: web.Application, home: Path | None = None):
             identity = request.match_info.get("id")
             if request.method in ("POST", "PUT"):
                 body = await read_json_body(request)
-                value = await asyncio.to_thread(store.correct, identity, body) if identity else await asyncio.to_thread(store.create, body)
+                value = (
+                    await asyncio.to_thread(store.correct, identity, body)
+                    if identity
+                    else await asyncio.to_thread(store.create, body)
+                )
             elif request.path.endswith("/export"):
                 value = await asyncio.to_thread(store.export)
             elif request.path.endswith("/history"):
@@ -28,7 +35,16 @@ def register(app: web.Application, home: Path | None = None):
             elif identity:
                 value = await asyncio.to_thread(store.get, identity)
             else:
-                value = {"measurements": await asyncio.to_thread(store.list, from_date=request.query.get("from"), to_date=request.query.get("to"), kind=request.query.get("kind"), limit=int(request.query.get("limit", "100")), offset=int(request.query.get("offset", "0")))}
+                value = {
+                    "measurements": await asyncio.to_thread(
+                        store.list,
+                        from_date=request.query.get("from"),
+                        to_date=request.query.get("to"),
+                        kind=request.query.get("kind"),
+                        limit=int(request.query.get("limit", "100")),
+                        offset=int(request.query.get("offset", "0")),
+                    )
+                }
             return web.json_response(value)
         except MeasurementError as exc:
             return json_error(exc.code, message=str(exc), status=exc.status)
@@ -42,20 +58,40 @@ def register(app: web.Application, home: Path | None = None):
     app.router.add_get(prefix + "/measurements/{id}", handle)
     app.router.add_put(prefix + "/measurements/{id}", handle)
     app.router.add_get(prefix + "/measurements/{id}/history", handle)
-    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_privacy import register as register_privacy
-    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_brokers import register as register_brokers
-    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo import register as register_spokeo
-    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_whitepages import register as register_whitepages
-    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_beenverified import register as register_beenverified
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_beenverified import (
+        register as register_beenverified,
+    )
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo import (
+        register as register_spokeo,
+    )
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_whitepages import (
+        register as register_whitepages,
+    )
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_brokers import (
+        register as register_brokers,
+    )
+    from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_privacy import (
+        register as register_privacy,
+    )
+
     register_privacy(app, bound_home)
     register_brokers(app, bound_home)
     register_spokeo(app, bound_home)
     register_whitepages(app, bound_home)
     register_beenverified(app, bound_home)
-    from gideon.workspace.capabilities.wellbeing.epigenetic_http import register as register_epigenetic
-    from gideon.workspace.capabilities.wellbeing.eyes_http import register as register_eyes
-    from gideon.workspace.capabilities.wellbeing.lifestyle_profile_http import register as register_lifestyle_profiles
-    from gideon.workspace.capabilities.wellbeing.body_composition_http import register as register_body_composition
+    from gideon.workspace.capabilities.wellbeing.body_composition_http import (
+        register as register_body_composition,
+    )
+    from gideon.workspace.capabilities.wellbeing.epigenetic_http import (
+        register as register_epigenetic,
+    )
+    from gideon.workspace.capabilities.wellbeing.eyes_http import (
+        register as register_eyes,
+    )
+    from gideon.workspace.capabilities.wellbeing.lifestyle_profile_http import (
+        register as register_lifestyle_profiles,
+    )
+
     register_epigenetic(app, bound_home)
     register_eyes(app, bound_home)
     register_lifestyle_profiles(app, bound_home)

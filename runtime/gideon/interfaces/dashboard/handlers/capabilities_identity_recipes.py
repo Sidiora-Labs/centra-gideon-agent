@@ -1,11 +1,17 @@
 """Versioned read recipes over actual native identity tool operations."""
+
 from pathlib import Path
+
 from aiohttp import web
+
 from gideon.core.config import config_dir
-from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
-from gideon.workspace.capabilities.identity.recipes import RecipeStore, READ_TOOLS
-from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
+from gideon.integrations.mcp_core import (
+    reset_current_session_key,
+    set_current_session_key,
+)
+from gideon.workspace.capabilities.identity.recipes import READ_TOOLS, RecipeStore
 from gideon.workspace.capabilities.identity.store import ConflictError
+from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
 
 KEY = web.AppKey("identity_recipes", RecipeStore)
 PROVIDER = web.AppKey("identity_recipe_provider", IdentityToolProvider)
@@ -39,7 +45,9 @@ async def handle(request):
                 finally:
                     reset_current_session_key(token)
             else:
-                result = getattr(store, "save" if operation == "recipes" else operation)(**body)
+                result = getattr(
+                    store, "save" if operation == "recipes" else operation
+                )(**body)
         return web.json_response(result)
     except ConflictError as error:
         return web.json_response({"error": str(error)}, status=409)

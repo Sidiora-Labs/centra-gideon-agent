@@ -4,16 +4,20 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from checks.runtime.capabilities.platform.test_catalog import application
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.integrations.inbox import InboxStore
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import generate_token, use_ephemeral_secret
 from gideon.workspace.capabilities.identity.goals import GoalStore
-from gideon.workspace.capabilities.platform.domain_alerts import conditions, inventory, readiness, scan
+from gideon.workspace.capabilities.platform.domain_alerts import (
+    conditions,
+    inventory,
+    readiness,
+    scan,
+)
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
-
-from checks.runtime.capabilities.platform.test_catalog import application
 
 PATH = "/api/capabilities/platform/domain-readiness"
 NOW = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
@@ -130,7 +134,9 @@ def test_recording_gap_means_unknown_and_never_skipped(home):
     assert conditions(home, NOW) == []
 
 
-def test_readiness_is_read_only_and_distinguishes_unconfigured_unavailable(home, tmp_path):
+def test_readiness_is_read_only_and_distinguishes_unconfigured_unavailable(
+    home, tmp_path
+):
     assert {row["state"] for row in readiness(home)} == {"unconfigured"}
     assert not (home / "capabilities").exists()
     setup(home)
@@ -147,13 +153,17 @@ def test_readiness_is_read_only_and_distinguishes_unconfigured_unavailable(home,
 
 
 def test_relationship_detector_requires_complete_canonical_coverage(home):
+    from checks.runtime.capabilities.communications.test_evidence import batch, message
     from gideon.workspace.capabilities.communications.evidence import ingest
     from gideon.workspace.capabilities.communications.store import PeopleStore
-    from checks.runtime.capabilities.communications.test_evidence import batch, message
 
     store = PeopleStore(home / "capabilities/communications")
     person = store.save(
-        {"name": "Private friend", "notes": "Private relationship notes", "cadence_days": 3}
+        {
+            "name": "Private friend",
+            "notes": "Private relationship notes",
+            "cadence_days": 3,
+        }
     )
     ingest(store, batch(person["id"]))
     rows = conditions(home, NOW)
@@ -258,7 +268,10 @@ def test_crash_detector_reports_artifact_without_private_payload(home):
 
 @pytest.mark.asyncio
 async def test_authenticated_http_and_native_use_same_inventory(home):
-    from gideon.integrations.mcp_core import reset_current_session_key, set_current_session_key
+    from gideon.integrations.mcp_core import (
+        reset_current_session_key,
+        set_current_session_key,
+    )
     from gideon.workspace.capabilities.platform.tools import create_provider
 
     _, _, state, _ = setup(home)
@@ -281,7 +294,9 @@ async def test_authenticated_http_and_native_use_same_inventory(home):
         result = await create_provider().invoke("platform_domain_readiness", {})
         assert result.success
         assert json.loads(result.output) == inventory()
-        invalid = await create_provider().invoke("platform_domain_readiness", {"extra": True})
+        invalid = await create_provider().invoke(
+            "platform_domain_readiness", {"extra": True}
+        )
         assert invalid.success is False
     finally:
         reset_current_session_key(token)

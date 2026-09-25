@@ -10,7 +10,11 @@ from gideon.integrations.prompt_providers.catalog import BUNDLED_PROMPTS
 from gideon.integrations.prompt_providers.native_provider import NativePromptProvider
 from gideon.integrations.prompt_providers.registry import register_prompt_provider
 from gideon.interfaces.dashboard.handlers import prompts
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware, use_ephemeral_secret
+from gideon.interfaces.dashboard.token_auth import (
+    generate_token,
+    token_auth_middleware,
+    use_ephemeral_secret,
+)
 from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 
 
@@ -39,7 +43,11 @@ def application():
 
 
 async def create(client, name="review-instructions", content="Preserve the evidence."):
-    response = await client.post("/api/prompts", params={"token": generate_token("prompt-owner")}, json={"name": name, "content": content, "kind": "user"})
+    response = await client.post(
+        "/api/prompts",
+        params={"token": generate_token("prompt-owner")},
+        json={"name": name, "content": content, "kind": "user"},
+    )
     assert response.status == 200
     assert (await response.json())["prompt"]["content"] == content
 
@@ -52,23 +60,35 @@ async def test_active_binding_protects_then_clear_allows_real_delete():
         initial = await (await client.get(path)).json()
         assert initial["usage"]["deletable"] is True
         assert initial["usage"]["consumers"] == []
-        bound = await client.put("/api/prompts/bindings", json={"use_case": "chat", "ref": "native:review-instructions"})
+        bound = await client.put(
+            "/api/prompts/bindings",
+            json={"use_case": "chat", "ref": "native:review-instructions"},
+        )
         assert bound.status == 200
         actual = json.loads((config_dir() / "active_prompts.json").read_text())
         assert actual["chat"] == "native:review-instructions"
         detail = await (await client.get(path)).json()
         assert detail["usage"] == {
-            "version": 1, "provider": "native", "name": "review-instructions",
+            "version": 1,
+            "provider": "native",
+            "name": "review-instructions",
             "consumers": [{"kind": "binding", "id": "chat", "label": "Chat"}],
-            "total": 1, "complete": True, "deletable": False,
+            "total": 1,
+            "complete": True,
+            "deletable": False,
         }
         refused = await client.delete(path)
         assert refused.status == 409
         failure = await refused.json()
         assert failure["code"] == "prompt_in_use"
         assert failure["usage"] == detail["usage"]
-        assert NativePromptProvider().get_prompt("review-instructions").content == "Preserve the evidence."
-        clear = await client.put("/api/prompts/bindings", json={"use_case": "chat", "ref": ""})
+        assert (
+            NativePromptProvider().get_prompt("review-instructions").content
+            == "Preserve the evidence."
+        )
+        clear = await client.put(
+            "/api/prompts/bindings", json={"use_case": "chat", "ref": ""}
+        )
         assert clear.status == 200
         assert prompt_usage("native", "review-instructions")["deletable"] is True
         deleted = await client.delete(path)
@@ -84,12 +104,18 @@ async def test_native_fallback_declaration_survives_binding_override():
     async with TestClient(TestServer(application())) as client:
         await create(client, entry.name)
         await create(client, "replacement")
-        response = await client.put("/api/prompts/bindings", json={"use_case": entry.use_case, "ref": "native:replacement"})
+        response = await client.put(
+            "/api/prompts/bindings",
+            json={"use_case": entry.use_case, "ref": "native:replacement"},
+        )
         assert response.status == 200
         usage = prompt_usage("native", entry.name)
         assert usage["complete"] is True
         assert usage["deletable"] is False
-        assert any(row["kind"] == "native" and row["id"] == entry.use_case for row in usage["consumers"])
+        assert any(
+            row["kind"] == "native" and row["id"] == entry.use_case
+            for row in usage["consumers"]
+        )
         blocked = await client.delete(f"/api/prompts/{entry.name}")
         assert blocked.status == 409
         assert NativePromptProvider().get_prompt(entry.name) is not None
@@ -99,9 +125,20 @@ async def test_native_fallback_declaration_survives_binding_override():
 async def test_live_app_declaration_is_not_a_second_reference_store():
     async with TestClient(TestServer(application())) as client:
         await create(client, "app-review")
-        prompt_registry.register_use_case("review_context", provider="native", prompt_name="app-review", app="review-app")
+        prompt_registry.register_use_case(
+            "review_context",
+            provider="native",
+            prompt_name="app-review",
+            app="review-app",
+        )
         usage = prompt_usage("native", "app-review")
-        assert usage["consumers"] == [{"kind": "app", "id": "review_context", "label": "review-app: Review context"}]
+        assert usage["consumers"] == [
+            {
+                "kind": "app",
+                "id": "review_context",
+                "label": "review-app: Review context",
+            }
+        ]
         assert (await client.delete("/api/prompts/app-review")).status == 409
         prompt_registry.unregister_app("review-app")
         assert prompt_usage("native", "app-review")["deletable"] is True
@@ -110,7 +147,9 @@ async def test_live_app_declaration_is_not_a_second_reference_store():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("raw", [b"{", b"[]", b'{"chat":42}', b"\xff", b" " * 1_048_577])
+@pytest.mark.parametrize(
+    "raw", [b"{", b"[]", b'{"chat":42}', b"\xff", b" " * 1_048_577]
+)
 async def test_unreadable_truth_never_means_unreferenced(raw):
     async with TestClient(TestServer(application())) as client:
         await create(client)
@@ -133,8 +172,12 @@ async def test_unreadable_truth_never_means_unreferenced(raw):
 def test_provider_identity_and_unknown_use_cases_are_not_false_consumers():
     path = config_dir() / "active_prompts.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"chat": "remote:shared", "not_a_runtime_context": "native:shared"}))
-    prompt_registry.register_use_case("remote_context", provider="remote", prompt_name="shared", app="remote-app")
+    path.write_text(
+        json.dumps({"chat": "remote:shared", "not_a_runtime_context": "native:shared"})
+    )
+    prompt_registry.register_use_case(
+        "remote_context", provider="remote", prompt_name="shared", app="remote-app"
+    )
     native = prompt_usage("native", "shared")
     remote = prompt_usage("remote", "shared")
     assert native["complete"] is True
@@ -157,7 +200,11 @@ def test_directory_instead_of_binding_file_fails_closed():
 @pytest.mark.asyncio
 async def test_snippet_reference_protection_is_preserved():
     async with TestClient(TestServer(application())) as client:
-        response = await client.post("/api/prompt-snippets", params={"token": generate_token("snippet-owner")}, json={"name": "shared-note", "content": "Keep source citations."})
+        response = await client.post(
+            "/api/prompt-snippets",
+            params={"token": generate_token("snippet-owner")},
+            json={"name": "shared-note", "content": "Keep source citations."},
+        )
         assert response.status == 200
         await create(client, "with-snippet", "Review carefully. {{> shared-note}}")
         denied = await client.delete("/api/prompt-snippets/shared-note")

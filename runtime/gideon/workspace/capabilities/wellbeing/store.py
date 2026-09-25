@@ -16,7 +16,11 @@ class MeasurementError(ValueError):
 
 
 def text(value, field, limit, empty=False):
-    if not isinstance(value, str) or len(value) > limit or (not empty and not value.strip()):
+    if (
+        not isinstance(value, str)
+        or len(value) > limit
+        or (not empty and not value.strip())
+    ):
         raise MeasurementError(f"{field} must be text of at most {limit} characters")
     return value
 
@@ -37,11 +41,19 @@ def normalized(kind, unit, values):
     if kind not in ("body_weight", "blood_pressure"):
         raise MeasurementError("Unknown measurement kind")
     if not isinstance(values, dict) or set(values) != keys:
-        raise MeasurementError("Values must contain exactly the components for this kind")
+        raise MeasurementError(
+            "Values must contain exactly the components for this kind"
+        )
     numbers = {}
     for key, value in values.items():
-        if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 1000:
-            raise MeasurementError(f"{key} must be finite and greater than 0, at most 1000")
+        if (
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or not 0 < value <= 1000
+        ):
+            raise MeasurementError(
+                f"{key} must be finite and greater than 0, at most 1000"
+            )
         numbers[key] = float(value)
     if kind == "body_weight":
         if unit not in ("kg", "lb"):
@@ -49,7 +61,9 @@ def normalized(kind, unit, values):
         numbers["weight"] *= 0.45359237 if unit == "lb" else 1
         return "kg", numbers
     if unit != "mmHg" or numbers["systolic"] > 400 or numbers["diastolic"] > 300:
-        raise MeasurementError("Pressure requires mmHg, systolic <= 400 and diastolic <= 300")
+        raise MeasurementError(
+            "Pressure requires mmHg, systolic <= 400 and diastolic <= 300"
+        )
     if numbers["diastolic"] >= numbers["systolic"]:
         raise MeasurementError("Diastolic must be below systolic")
     return unit, numbers
@@ -81,7 +95,10 @@ class MeasurementStore:
             db.close()
 
     def _get(self, db, identity):
-        row = db.execute("SELECT data FROM revisions WHERE id=? ORDER BY revision DESC LIMIT 1", (identity,)).fetchone()
+        row = db.execute(
+            "SELECT data FROM revisions WHERE id=? ORDER BY revision DESC LIMIT 1",
+            (identity,),
+        ).fetchone()
         if row is None:
             raise MeasurementError("Measurement not found", 404, "not_found")
         return json.loads(row[0])
@@ -104,62 +121,130 @@ class MeasurementStore:
     def _write_in(self, db, identity, payload):
         if not isinstance(payload, dict):
             raise MeasurementError("Measurement must be an object")
-        allowed = {"request_id", "revision", "observed_at", "unit", "values", "notes"} if identity else {"request_id", "kind", "observed_at", "unit", "values", "source", "notes"}
+        allowed = (
+            {"request_id", "revision", "observed_at", "unit", "values", "notes"}
+            if identity
+            else {
+                "request_id",
+                "kind",
+                "observed_at",
+                "unit",
+                "values",
+                "source",
+                "notes",
+            }
+        )
         if set(payload) - allowed:
             raise MeasurementError("Unknown or immutable measurement fields")
         request_id = text(payload.get("request_id"), "request_id", 128)
         try:
-            fingerprint = json.dumps([identity, payload], sort_keys=True, allow_nan=False)
+            fingerprint = json.dumps(
+                [identity, payload], sort_keys=True, allow_nan=False
+            )
         except (ValueError, TypeError) as exc:
             raise MeasurementError("Payload must contain finite JSON values") from exc
-        prior = db.execute("SELECT payload, result FROM requests WHERE id=?", (request_id,)).fetchone()
+        prior = db.execute(
+            "SELECT payload, result FROM requests WHERE id=?", (request_id,)
+        ).fetchone()
         if prior:
             if prior[0] != fingerprint:
-                raise MeasurementError("Request ID already used for a different mutation", 409, "conflict")
+                raise MeasurementError(
+                    "Request ID already used for a different mutation", 409, "conflict"
+                )
             return json.loads(prior[1])
         if identity:
             record = self._get(db, identity)
-            if type(payload.get("revision")) is not int or payload["revision"] != record["revision"]:
-                raise MeasurementError("Measurement changed; reload before correcting", 409, "conflict")
+            if (
+                type(payload.get("revision")) is not int
+                or payload["revision"] != record["revision"]
+            ):
+                raise MeasurementError(
+                    "Measurement changed; reload before correcting", 409, "conflict"
+                )
             if "unit" in payload and "values" not in payload:
                 raise MeasurementError("Unit changes require values")
-            record.update({key: value for key, value in payload.items() if key not in ("request_id", "revision")})
+            record.update(
+                {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in ("request_id", "revision")
+                }
+            )
             record["revision"] += 1
         else:
-            record = {key: payload.get(key) for key in ("kind", "observed_at", "unit", "values", "source")}
-            record.update(id=str(uuid4()), notes=payload.get("notes", ""), created_at=datetime.now(timezone.utc).isoformat(), revision=1)
+            record = {
+                key: payload.get(key)
+                for key in ("kind", "observed_at", "unit", "values", "source")
+            }
+            record.update(
+                id=str(uuid4()),
+                notes=payload.get("notes", ""),
+                created_at=datetime.now(timezone.utc).isoformat(),
+                revision=1,
+            )
         observed_utc = instant(record["observed_at"])
         text(record["source"], "source", 256)
         text(record["notes"], "notes", 4000, empty=True)
-        record["unit"], record["values"] = normalized(record["kind"], record["unit"], record["values"])
+        record["unit"], record["values"] = normalized(
+            record["kind"], record["unit"], record["values"]
+        )
         encoded = json.dumps(record, allow_nan=False)
-        db.execute("INSERT INTO revisions VALUES(?,?,?,?,?)", (record["id"], record["revision"], observed_utc, record["kind"], encoded))
-        db.execute("INSERT INTO requests VALUES(?,?,?)", (request_id, fingerprint, encoded))
+        db.execute(
+            "INSERT INTO revisions VALUES(?,?,?,?,?)",
+            (record["id"], record["revision"], observed_utc, record["kind"], encoded),
+        )
+        db.execute(
+            "INSERT INTO requests VALUES(?,?,?)", (request_id, fingerprint, encoded)
+        )
         return record
 
     def list(self, *, from_date=None, to_date=None, kind=None, limit=100, offset=0):
-        if type(limit) is not int or type(offset) is not int or not 1 <= limit <= 500 or not 0 <= offset <= 1000000:
-            raise MeasurementError("Pagination requires limit 1..500 and offset 0..1000000")
-        start, end = instant(from_date) if from_date else None, instant(to_date) if to_date else None
+        if (
+            type(limit) is not int
+            or type(offset) is not int
+            or not 1 <= limit <= 500
+            or not 0 <= offset <= 1000000
+        ):
+            raise MeasurementError(
+                "Pagination requires limit 1..500 and offset 0..1000000"
+            )
+        start, end = instant(from_date) if from_date else None, (
+            instant(to_date) if to_date else None
+        )
         if start and end and start > end:
             raise MeasurementError("from must not follow to")
         if kind is not None and kind not in ("body_weight", "blood_pressure"):
             raise MeasurementError("Unknown measurement kind")
         with self.connection() as db:
-            rows = db.execute("""SELECT r.data FROM revisions r
+            rows = db.execute(
+                """SELECT r.data FROM revisions r
                 WHERE r.revision=(SELECT MAX(s.revision) FROM revisions s WHERE s.id=r.id)
                 AND (? IS NULL OR r.observed_utc>=?) AND (? IS NULL OR r.observed_utc<=?)
                 AND (? IS NULL OR r.kind=?) ORDER BY r.observed_utc DESC, r.id LIMIT ? OFFSET ?""",
-                (start, start, end, end, kind, kind, limit, offset)).fetchall()
+                (start, start, end, end, kind, kind, limit, offset),
+            ).fetchall()
             return [json.loads(row[0]) for row in rows]
 
     def history(self, identity):
         with self.connection() as db:
             self._get(db, identity)
-            return [json.loads(row[0]) for row in db.execute("SELECT data FROM revisions WHERE id=? ORDER BY revision", (identity,))]
+            return [
+                json.loads(row[0])
+                for row in db.execute(
+                    "SELECT data FROM revisions WHERE id=? ORDER BY revision",
+                    (identity,),
+                )
+            ]
 
     def export(self):
         with self.connection() as db:
-            history = [json.loads(row[0]) for row in db.execute("SELECT data FROM revisions ORDER BY id,revision")]
+            history = [
+                json.loads(row[0])
+                for row in db.execute("SELECT data FROM revisions ORDER BY id,revision")
+            ]
         current = {record["id"]: record for record in history}
-        return {"schema_version": 1, "measurements": list(current.values()), "history": history}
+        return {
+            "schema_version": 1,
+            "measurements": list(current.values()),
+            "history": history,
+        }

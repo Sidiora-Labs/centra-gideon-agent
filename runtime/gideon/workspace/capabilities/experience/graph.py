@@ -22,7 +22,13 @@ def text(value, limit):
 
 
 def validate_graph(body):
-    if not isinstance(body, dict) or set(body) - {"title", "start_node", "nodes", "transitions", "revision"}:
+    if not isinstance(body, dict) or set(body) - {
+        "title",
+        "start_node",
+        "nodes",
+        "transitions",
+        "revision",
+    }:
         raise ValueError("unsupported story fields")
     title, start = text(body.get("title"), 200), identifier(body.get("start_node"))
     nodes = body.get("nodes")
@@ -49,9 +55,13 @@ def validate_graph(body):
             if cid in choice_ids:
                 raise ValueError("duplicate choice identifier")
             choice_ids.add(cid)
-            normalized.append({"id": cid, "label": text(choice["label"], 200), "target": target})
+            normalized.append(
+                {"id": cid, "label": text(choice["label"], 200), "target": target}
+            )
             transitions.append({"source": key, "choice_id": cid, "target": target})
-        result.append({"id": key, "text": prose, "kind": node["kind"], "choices": normalized})
+        result.append(
+            {"id": key, "text": prose, "kind": node["kind"], "choices": normalized}
+        )
     if start not in ids or any(t["target"] not in ids for t in transitions):
         raise ValueError("start node or choice target does not exist")
     reached, pending = set(), [start]
@@ -62,7 +72,9 @@ def validate_graph(body):
             pending.extend(t["target"] for t in transitions if t["source"] == key)
     endings = {n["id"] for n in result if n["kind"] == "ending"}
     while True:
-        expanded = endings | {t["source"] for t in transitions if t["target"] in endings}
+        expanded = endings | {
+            t["source"] for t in transitions if t["target"] in endings
+        }
         if expanded == endings:
             break
         endings = expanded
@@ -70,4 +82,9 @@ def validate_graph(body):
         raise ValueError("every node must be reachable and able to reach an ending")
     if "transitions" in body and body["transitions"] != transitions:
         raise ValueError("transitions must match node choices")
-    return {"title": title, "start_node": start, "nodes": result, "transitions": transitions}
+    return {
+        "title": title,
+        "start_node": start,
+        "nodes": result,
+        "transitions": transitions,
+    }

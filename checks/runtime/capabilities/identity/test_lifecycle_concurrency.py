@@ -1,8 +1,10 @@
-from test_lifecycle import run
+from checks.runtime.capabilities.identity.test_lifecycle import run
 
 
 def test_concurrent_different_loop_bindings_serialize_before_engine_effects(tmp_path):
-    run(tmp_path, '''
+    run(
+        tmp_path,
+        """
 await manager.start(state,service,loop.id)
 await manager.start(state,service,other.id)
 assert loops.get(loop.id).status==LoopStatus.RUNNING
@@ -35,4 +37,5 @@ assert nudge_allowed(manager.session_key(other.id))
 assert len(store.status()['journal'])==1
 assert await configure(False,0,'first')==receipt
 assert LifecycleStore(home).policy()==store.policy()
-''')
+""",
+    )

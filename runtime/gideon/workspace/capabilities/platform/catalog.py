@@ -1,8 +1,8 @@
 """Bounded API metadata from live registrations, never handler execution."""
 
-from collections.abc import Callable
 import re
 import weakref
+from collections.abc import Callable
 
 from aiohttp import web
 

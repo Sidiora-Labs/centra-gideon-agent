@@ -1,4 +1,5 @@
 """Replication of immutable, explicitly imported CLI usage events."""
+
 from __future__ import annotations
 
 import fcntl
@@ -13,15 +14,19 @@ from gideon.operations.durability import conflicts, inventory
 from gideon.operations.durability.shards import machine_id
 from gideon.operations.usage_ledger import TurnUsage, UsageJournal
 
-
 SCOPE = "platform.usage"
 ENTRY_ID = "usage.imported_events"
 ENTRIES = (ENTRY_ID,)
 _FORMATS = {"claude_code_jsonl", "codex_rollout_jsonl"}
 _HASH = re.compile(r"[0-9a-f]{64}")
 _DATA_FIELDS = {
-    "event_id", "occurred_at", "input_tokens", "output_tokens",
-    "cache_read_tokens", "cache_creation_tokens", "import_format",
+    "event_id",
+    "occurred_at",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "import_format",
     "source_file_sha256",
 }
 
@@ -68,13 +73,22 @@ def validate_record(value, entity_id=None):
     if not isinstance(value, dict) or set(value) != _DATA_FIELDS:
         raise ValueError("Invalid imported usage event")
     event_id = value.get("event_id")
-    if (not isinstance(event_id, str) or _HASH.fullmatch(event_id) is None
-            or (entity_id is not None and event_id != entity_id)):
+    if (
+        not isinstance(event_id, str)
+        or _HASH.fullmatch(event_id) is None
+        or (entity_id is not None and event_id != entity_id)
+    ):
         raise ValueError("Invalid imported usage event identity")
     _timestamp(value.get("occurred_at"))
-    if any(not _count(value.get(field)) for field in (
-        "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"
-    )):
+    if any(
+        not _count(value.get(field))
+        for field in (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_creation_tokens",
+        )
+    ):
         raise ValueError("Invalid imported usage token count")
     if value.get("import_format") not in _FORMATS:
         raise ValueError("Invalid imported usage format")
@@ -100,20 +114,25 @@ def _validate_rows(rows):
 
 
 def validate_entries(entries):
-    if (not isinstance(entries, list) or len(entries) != 1
-            or not isinstance(entries[0], dict)
-            or set(entries[0]) != {"entry_id", "rows"}
-            or entries[0].get("entry_id") != ENTRY_ID):
+    if (
+        not isinstance(entries, list)
+        or len(entries) != 1
+        or not isinstance(entries[0], dict)
+        or set(entries[0]) != {"entry_id", "rows"}
+        or entries[0].get("entry_id") != ENTRY_ID
+    ):
         raise ValueError("Imported usage replication requires complete entry coverage")
     _validate_rows(entries[0].get("rows"))
 
 
 def _project(row):
-    if (row.get("source") != "cli_import"
-            or row.get("attribution") != "historical_cli_import"
-            or row.get("priced") is not False
-            or row.get("cost_usd") != 0
-            or row.get("import_format") not in _FORMATS):
+    if (
+        row.get("source") != "cli_import"
+        or row.get("attribution") != "historical_cli_import"
+        or row.get("priced") is not False
+        or row.get("cost_usd") != 0
+        or row.get("import_format") not in _FORMATS
+    ):
         return None
     value = {
         "event_id": row.get("import_record_id"),
@@ -161,26 +180,42 @@ def _usage(data, instance_id):
     event_id = data["event_id"]
     provider = "claude" if data["import_format"] == "claude_code_jsonl" else "codex"
     return TurnUsage(
-        ts=data["occurred_at"], session_key="replicated:" + event_id[:24],
-        source="cli_import", agent="", provider=provider, model="unknown",
-        input_tokens=data["input_tokens"], output_tokens=data["output_tokens"],
+        ts=data["occurred_at"],
+        session_key="replicated:" + event_id[:24],
+        source="cli_import",
+        agent="",
+        provider=provider,
+        model="unknown",
+        input_tokens=data["input_tokens"],
+        output_tokens=data["output_tokens"],
         cache_read_tokens=data["cache_read_tokens"],
-        cache_creation_tokens=data["cache_creation_tokens"], cost_usd=0.0,
-        priced=False, instance_id=instance_id,
-        provider_instance=f"{provider}-cli-import", credential_ref=None,
-        subscription_source=None, attribution="historical_cli_import",
-        import_format=data["import_format"], import_source_name="peer-replication",
-        import_file_sha256=data["source_file_sha256"], import_record_id=event_id,
+        cache_creation_tokens=data["cache_creation_tokens"],
+        cost_usd=0.0,
+        priced=False,
+        instance_id=instance_id,
+        provider_instance=f"{provider}-cli-import",
+        credential_ref=None,
+        subscription_source=None,
+        attribution="historical_cli_import",
+        import_format=data["import_format"],
+        import_source_name="peer-replication",
+        import_file_sha256=data["source_file_sha256"],
+        import_record_id=event_id,
     )
 
 
 def _conflict(entity_id, ancestor, local, remote, now):
     return conflicts.ConflictRecord(
-        entry_id=ENTRY_ID, entity_id=entity_id, domain=inventory.DOMAIN_PLATFORM,
+        entry_id=ENTRY_ID,
+        entity_id=entity_id,
+        domain=inventory.DOMAIN_PLATFORM,
         surface=conflicts.surface_for_domain(inventory.DOMAIN_PLATFORM),
-        ancestor_sha=ancestor, local_sha=conflicts.row_sha(local),
-        remote_sha=conflicts.row_sha(remote), local_row=local,
-        remote_row=remote, detected_at=now,
+        ancestor_sha=ancestor,
+        local_sha=conflicts.row_sha(local),
+        remote_sha=conflicts.row_sha(remote),
+        local_row=local,
+        remote_row=remote,
+        detected_at=now,
     )
 
 
@@ -199,9 +234,15 @@ def apply_rows(home, entry_id, remote_rows, ancestors, queue, now):
                 additions.append(remote_row)
                 continue
             if conflicts.row_sha(local_row) != conflicts.row_sha(remote_row):
-                if queue.record(_conflict(
-                    entity_id, ancestors.get(entity_id, ""), local_row, remote_row, now
-                )):
+                if queue.record(
+                    _conflict(
+                        entity_id,
+                        ancestors.get(entity_id, ""),
+                        local_row,
+                        remote_row,
+                        now,
+                    )
+                ):
                     conflict_count += 1
         journal = UsageJournal(path)
         for row in additions:
