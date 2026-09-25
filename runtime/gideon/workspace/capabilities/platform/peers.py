@@ -21,6 +21,7 @@ from gideon.security.net.client import fetch
 from gideon.security.net.policy import sync_egress_policy
 
 CATEGORIES = (
+    "workspace.records",
     "experience.world_guest",
     "experience.world_presence",
     "knowledge.records",
