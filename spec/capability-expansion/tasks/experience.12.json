@@ -1,0 +1,66 @@
+{
+  "id": "experience.12",
+  "status": "locally_qualified",
+  "base_revision": "ce639322",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/game_assets.py",
+    "runtime/gideon/workspace/capabilities/experience/game_assets_http.py",
+    "runtime/gideon/workspace/capabilities/experience/game_assets_provider.py",
+    "apps/console/src/features/capabilities/experience/GameAssets.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_game_assets.py",
+    "apps/console/src/features/capabilities/experience/GameAssets.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_game_assets.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/GameAssets.test.tsx"
+  ],
+  "contract": "A game project binds one exact immutable canonical artifact version for each sprite, artwork, music and GLB model role, plus an installed enabled managed app and a promoted or adopted experience.11 foundation fingerprint. Compilation re-reads and validates every byte, hashes a deterministic manifest, reuses an intact unchanged export, and emits a self-contained runnable HTML canvas/audio game. Publication atomically copies that exact export into the bound managed app data directory and records a read-back hash-verified receipt; configured records, missing bytes and unverified destinations are never reported as compiled or published.",
+  "dependencies": {
+    "experience.11": "ce639322 qualified durable promoted/adopted foundation fingerprint and withdrawal lifecycle",
+    "artifacts": "NativeArtifactProvider exact-version image, audio, model and HTML storage contracts",
+    "managed_apps": "Canonical installed/enabled app identity and isolated app_data_dir consumer destination"
+  },
+  "acceptance": [
+    "Install a real managed game app, promote a real foundation, and bind valid PNG sprite/artwork, PCM WAV music and embedded GLB model artifact versions",
+    "Compile a self-contained HTML game that consumes its deterministic manifest in a canvas render loop, audio control and model download, then recompile unchanged inputs without creating a version",
+    "Create a new immutable sprite artifact version, rebind it and observe a distinct compile version while the prior exact bytes remain readable",
+    "Corrupt or remove exact input/export bytes and observe compilation/publication refusal without a success receipt",
+    "Publish to the managed app data directory and verify the destination bytes and recorded SHA-256 match the compiled export"
+  ],
+  "shared_hooks": [
+    "Root dashboard handler may register register_game_assets(app, app[STORE]) from game_assets_http",
+    "Root Console experience page may mount GameAssets",
+    "Root native provider registry may expose game_assets_provider.create_provider"
+  ],
+  "remaining_limits": [
+    "The export is a bounded standalone two-dimensional canvas game with an attached downloadable GLB; it does not claim a general gameplay or three-dimensional engine",
+    "Public URL serving remains the managed app's responsibility; this slice verifies the exact consumer file inside canonical isolated app storage"
+  ],
+  "evidence": {
+    "attempt_1": "/tmp/gideon-experience.12-checks-mer99xjg/evidence.json",
+    "qualified": "/tmp/gideon-experience.12-checks-vg38v12o/evidence.json"
+  },
+  "qualification": {
+    "compile_exit": 0,
+    "runtime_passed": 6,
+    "runtime_failed": 0,
+    "ui_passed": 3,
+    "ui_failed": 0,
+    "repair_cycles": 1,
+    "production_lines": 213,
+    "test_lines": 225,
+    "ratio": 1.056338028169014,
+    "file_hashes": {
+      "apps/console/src/features/capabilities/experience/GameAssets.tsx": "b841e2ba2257a9c2fd1078fb459ea7005e4c05f3a1c6c65a19319cafda994cca",
+      "runtime/gideon/workspace/capabilities/experience/game_assets.py": "1e815969e9e464ad23fc457a252713f4522e6094d05d17de6373f233add2003f",
+      "runtime/gideon/workspace/capabilities/experience/game_assets_http.py": "c765e9330bd2f30ac806080f39fe502a7d5973675001361bde7178a781b877a4",
+      "runtime/gideon/workspace/capabilities/experience/game_assets_provider.py": "3f044e5c335680dce6eedf85342e617c42289ef085acf8548c5c859998219e9a",
+      "apps/console/src/features/capabilities/experience/GameAssets.test.tsx": "4eaf8766ffc6386f09469341ee64c8079498f8d581ecc4977d7a299bd6b667d9",
+      "checks/runtime/capabilities/experience/test_game_assets.py": "41a015826d22d06c2d06527681d637e28a166cba0d4479794bdc683c28a64522"
+    }
+  }
+}
