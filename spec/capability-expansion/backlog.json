@@ -2859,6 +2859,166 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
       "acceptance": "Complete the new-domain durability and migration workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria."
+    },
+    {
+      "id": "identity.00",
+      "owner_lane": "identity",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "identity.01",
+        "identity.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "knowledge.00",
+      "owner_lane": "knowledge",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "knowledge.01",
+        "knowledge.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "music.00",
+      "owner_lane": "music",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "music.01",
+        "music.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "media.00",
+      "owner_lane": "media",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "media.01",
+        "media.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "creative.00",
+      "owner_lane": "creative",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "creative.01",
+        "creative.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "experience.00",
+      "owner_lane": "experience",
+      "title": "Native agent tools for the completed capability services",
+      "status": "pending",
+      "requires": [
+        "experience.01",
+        "experience.02"
+      ],
+      "acceptance": [
+        "Invoke the same authoritative services through registered native ToolProvider and app manifest.",
+        "Preserve hosted scope, session privacy and existing action approval policies.",
+        "Real provider invocation and tool registration tests; executable changed test lines at least production lines."
+      ]
+    },
+    {
+      "id": "knowledge.13",
+      "title": "Bound-home capture and typed write correction",
+      "owner_lane": "knowledge",
+      "status": "pending",
+      "wave": 4,
+      "requires": [
+        "knowledge.02",
+        "knowledge.03",
+        "knowledge.04"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/knowledge",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge.py",
+        "apps/console/src/features/capabilities/knowledge",
+        "checks/runtime/capabilities/knowledge",
+        "spec/capability-expansion/tasks/knowledge.13.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify knowledge.13",
+      "acceptance": "A captured allocation must refuse new mutations after process home changes without creating files in another home; immutable replay and original-home retry remain correct.",
+      "contract": "Guard indirect canonical store maintenance side effects while retaining bound original source identity."
+    },
+    {
+      "id": "knowledge.14",
+      "title": "Typed capture idempotency migration",
+      "owner_lane": "knowledge",
+      "status": "pending",
+      "wave": 4,
+      "requires": [
+        "knowledge.03",
+        "knowledge.13"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/knowledge",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge.py",
+        "apps/console/src/features/capabilities/knowledge",
+        "checks/runtime/capabilities/knowledge",
+        "spec/capability-expansion/tasks/knowledge.14.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify knowledge.14",
+      "acceptance": "Migrate the unique typed capture identity constraint without removing existing records; enforce atomic concurrent idempotency and record explicit refusal for incompatible duplicates.",
+      "contract": "Guard indirect canonical store maintenance side effects while retaining bound original source identity."
+    },
+    {
+      "id": "wellbeing.15",
+      "title": "Actual shell navigation integration",
+      "owner_lane": "wellbeing",
+      "status": "pending",
+      "wave": 6,
+      "requires": [
+        "wellbeing.01",
+        "wellbeing.02",
+        "wellbeing.04",
+        "wellbeing.05",
+        "wellbeing.06"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/wellbeing",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing.py",
+        "apps/console/src/features/capabilities/wellbeing",
+        "checks/runtime/capabilities/wellbeing",
+        "spec/capability-expansion/tasks/wellbeing.15.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.15",
+      "acceptance": "All wellbeing pages must render under the actual hash shell, retain URL-addressable state, respond to same-subroute navigation and preserve mutation/reload continuity without an added router fixture.",
+      "contract": "Use existing useHashRoute consumer and actual HTTP fixtures; correct integration only, preserve existing runtime evidence."
     }
   ]
 }

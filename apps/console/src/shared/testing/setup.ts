@@ -9,7 +9,7 @@ import { resetDataStore } from '../data/data/store'
 configure({ asyncUtilTimeout: 5_000 })
 
 globalThis.Blob = NodeBlob as typeof Blob
-globalThis.URL.createObjectURL = NodeUrl.createObjectURL
+globalThis.URL.createObjectURL = (object) => NodeUrl.createObjectURL(object as NodeBlob)
 globalThis.URL.revokeObjectURL = NodeUrl.revokeObjectURL
 
 if (typeof globalThis.ResizeObserver === 'undefined') {

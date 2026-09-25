@@ -130,7 +130,7 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
 
           {
 }
-          {titleEditable && (
+          {Boolean(titleEditable) && (
             <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus={kind !== 'bookmark'}
               placeholder={kind === 'bookmark' ? 'Title (optional — defaults to the page title)' : `${tm.label} title`}
               aria-label={`${tm.label} title`}
@@ -149,7 +149,7 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
           )}
 
           { }
-          {tagsErr && <LoadError what="tag suggestions" error={tagsErr} onRetry={refreshTags} />}
+          {Boolean(tagsErr) && <LoadError what="tag suggestions" error={tagsErr} onRetry={refreshTags} />}
           <div className="shrink-0"><ChipInput values={tags} onChange={setTags} placeholder="Add a tag, Enter" suggestions={knownTags ?? []} /></div>
 
           { }

@@ -1,0 +1,38 @@
+{
+  "id": "integration.02",
+  "status": "locally_qualified_scoped_paths",
+  "production_files": [
+    "apps/console/src/app/shell/App.tsx",
+    "apps/console/src/app/shell/VoiceControls.tsx",
+    "apps/console/src/features/capabilities/CapabilitiesSection.tsx",
+    "apps/console/src/features/capabilities/capabilities.css"
+  ],
+  "test_files": [
+    "checks/capabilities/browser.mjs"
+  ],
+  "evidence": {
+    "typecheck": {
+      "command": "npm run typecheck",
+      "cwd": "apps/console",
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-integration-types-5.log"
+    },
+    "browser": {
+      "command": "node checks/capabilities/browser.mjs",
+      "exit_code": 0,
+      "evidence": "/tmp/gideon-capability-browser-cq8rBz/evidence.json"
+    }
+  },
+  "acceptance_coverage": [
+    "Actual hash navigation through all ten assembled capability sections with successful runtime HTTP reads",
+    "Real voice dialog navigation request and applied receipt after route change",
+    "Real canvas pointer drawing, saved state, export and reload",
+    "Desktop/mobile screenshots and viewport overflow check",
+    "Shared console TypeScript check"
+  ],
+  "remaining_limits": [
+    "Browser harness mounts the actual capability section and voice controls with actual runtime handlers; complete dashboard bootstrap is a separate pending integration journey",
+    "Later lane features need their own incremental hooks and qualification",
+    "Hosted version remains unpublished"
+  ]
+}

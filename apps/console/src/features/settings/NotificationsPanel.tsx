@@ -68,7 +68,7 @@ export function NotificationsPanel() {
 
       {
 }
-      {rulesErr && <LoadError what="notification rules" error={rulesErr} onRetry={reloadRules} />}
+      {Boolean(rulesErr) && <LoadError what="notification rules" error={rulesErr} onRetry={reloadRules} />}
       {!rulesErr && rules && <NotificationRulesMatrix doc={rules} onSaved={reloadRules} />}
       {!rulesErr && rules && <DigestSchedule schedule={rules.digest.schedule} onSaved={reloadRules} />}
     </div>
