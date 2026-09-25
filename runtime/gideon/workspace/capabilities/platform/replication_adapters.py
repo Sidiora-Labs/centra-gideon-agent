@@ -26,6 +26,7 @@ from gideon.workspace.capabilities.music.listening import ListeningStore
 from gideon.workspace.capabilities.music.store import RepertoireStore
 from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
+from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
 from gideon.workspace.capabilities.wellbeing.store import instant
 
@@ -63,7 +64,8 @@ COMMUNICATION_TABLES = {"communications.people": "people", "communications.touch
 MUSIC_ENTRIES = ("music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks")
 WELLBEING_HEALTH_ENTRIES = ("wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics")
 WELLBEING_ROUTINE_ENTRIES = ("wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records")
-WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES}
+WELLBEING_GENOME_ENTRIES = ("wellbeing.genome_sources", "wellbeing.genome_variants")
+WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES}
 SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *WELLBEING_ENTRIES})
 
 
@@ -104,6 +106,7 @@ def _wellbeing_path(home: Path) -> Path:
     AppleHealthStore(home)
     ConsumptionStore(home)
     InterventionStore(home)
+    GenomeStore(home)
     return home / "capabilities/wellbeing.sqlite3"
 
 
@@ -199,6 +202,16 @@ def validate_wellbeing_entries(scope: str, entries: list[dict]) -> None:
         plans = {row["id"] for row in rows["wellbeing.intervention_plans"]}
         if any(row["data"].get("plan_id") not in plans for row in rows["wellbeing.intervention_records"]):
             raise ValueError("Intervention observation references a missing plan")
+    if scope == "wellbeing.genome":
+        sources = {row["id"]: row["data"] for row in rows["wellbeing.genome_sources"]}
+        counts = {identity: 0 for identity in sources}
+        for row in rows["wellbeing.genome_variants"]:
+            source_id = row["data"].get("source_id")
+            if source_id not in sources:
+                raise ValueError("Genome variant references a missing source")
+            counts[source_id] += 1
+        if any(data.get("variant_count") != counts[identity] for identity, data in sources.items()):
+            raise ValueError("Genome source variant count does not match transmitted records")
 
 
 def _contains_keys(value: object, forbidden: set[str]) -> bool:
@@ -239,8 +252,9 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
             "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
             "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
             "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
+            "wellbeing.genome_sources": "genome_sources", "wellbeing.genome_variants": "genome_variants",
         }[entry_id]
-        revisioned = entry_id != "wellbeing.metrics"
+        revisioned = entry_id not in {"wellbeing.metrics", "wellbeing.genome_sources"}
         where = " WHERE revision=(SELECT max(s.revision) FROM {table} s WHERE s.id={table}.id)".format(table=table) if revisioned else ""
         if entry_id.startswith("wellbeing.substance_"):
             where += " AND json_extract(data,'$.deleted')=0"
@@ -411,6 +425,7 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
         "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
         "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
         "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
+        "wellbeing.genome_sources": "genome_sources", "wellbeing.genome_variants": "genome_variants",
     }[entry_id]
     with sqlite3.connect(_wellbeing_path(home)) as db:
         if row is None:
@@ -427,6 +442,10 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
         elif entry_id.startswith("wellbeing.substance_"):
             observed = instant(data["observed_at"]) if data.get("observed_at") else ""
             db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], data["kind"], observed, json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.genome_sources":
+            db.execute("INSERT OR REPLACE INTO genome_sources VALUES(?,?)", (entity_id, json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.genome_variants":
+            db.execute("INSERT INTO genome_variants VALUES(?,?,?,?,?,?,?)", (entity_id, data["revision"], data["source_id"], data["chromosome"], data["position"], data["rsid"], json.dumps(data, sort_keys=True)))
         else:
             parent, day = (data["plan_id"], data["date"]) if entry_id.endswith("records") else ("", "")
             db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], parent, day, json.dumps(data, sort_keys=True)))

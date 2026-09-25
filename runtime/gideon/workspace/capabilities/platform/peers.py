@@ -33,6 +33,7 @@ CATEGORIES = (
     "music.library",
     "wellbeing.health",
     "wellbeing.routines",
+    "wellbeing.genome",
     "platform.usage",
 )
 _CATEGORY = re.compile(r"[a-z][a-z0-9_]{1,31}\.[a-z][a-z0-9_]{1,63}")

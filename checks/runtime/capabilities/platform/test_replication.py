@@ -31,6 +31,7 @@ from gideon.workspace.capabilities.music.spotify import SpotifyBridge
 from gideon.workspace.capabilities.music.store import RepertoireStore
 from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
+from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
 from gideon.workspace.capabilities.wellbeing.labs import LabStore
 from gideon.workspace.capabilities.wellbeing.store import MeasurementStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
@@ -328,11 +329,12 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
         {"scope": "wellbeing.health", "entries": ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]},
         {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
+        {"scope": "wellbeing.genome", "entries": ["wellbeing.genome_sources", "wellbeing.genome_variants"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -782,3 +784,70 @@ def test_wellbeing_opt_in_scopes_current_refs_conflicts_tombstones_and_private_e
     peer = PeerStore(c_home).get(did["peer_id"])
     PeerStore(c_home).put(did["peer_id"], peer_record(did, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.routines")
+
+
+def seed_genome(home):
+    store = GenomeStore(home)
+    content = "rsid\tchromosome\tposition\tgenotype\nrs1\t1\t123\tAG\nrs2\tX\t456\t--\n"
+    payload = {"filename": "sample.tsv", "format": "tsv", "content": content, "source": "personal export", "assembly": "GRCh37"}
+    receipt = store.commit({**payload, "preview_id": store.preview(payload)["preview_id"], "request_id": "genome-import"})
+    with sqlite3.connect(home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("INSERT INTO requests VALUES(?,?,?)", ("genome-private", '{"private_key":"genome-private-key","access_grant":"local-only"}', "{}"))
+    return receipt["source"], store.list_variants(receipt["source"]["id"])
+
+
+def test_genome_scope_two_home_refs_conflict_restore_tombstones_and_privacy(home):
+    none_a, none_b = home / "genome-none-a", home / "genome-none-b"
+    _, none_peer = pair(none_a, none_b)
+    seed_genome(none_a)
+    with pytest.raises(ReplicationError, match="policy denies"): ReplicationService(none_a).export_batch(none_peer["peer_id"], "wellbeing.genome")
+
+    a_home, b_home = home / "genome-a", home / "genome-b"
+    aid, bid = pair_for(a_home, b_home, "wellbeing.genome")
+    source, variants = seed_genome(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "wellbeing.genome")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["wellbeing.genome_sources", "wellbeing.genome_variants"]
+    assert [len(item["rows"]) for item in baseline["entries"]] == [1, 2]
+    wire = json.dumps(baseline)
+    assert "genome-private-key" not in wire and "access_grant" not in wire and "requests" not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    genome_b = GenomeStore(b_home)
+    assert genome_b.get_source(source["id"])["variant_count"] == 2
+    assert [row["rsid"] for row in genome_b.list_variants(source["id"])] == ["rs1", "rs2"]
+    assert genome_b.artifacts.get(source["artifact"]["slug"], version=1) is None
+
+    GenomeStore(a_home).annotate(variants[0]["id"], {"request_id": "local-note", "revision": 1, "annotation": "local note", "annotation_source": "local review"})
+    genome_b.annotate(variants[0]["id"], {"request_id": "peer-note", "revision": 1, "annotation": "peer note", "annotation_source": "peer review"})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "wellbeing.genome")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][1]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "wellbeing.genome_variants")
+    ReplicationService(a_home).restore_fields(conflict.id, ["annotation"])
+    merged = GenomeStore(a_home).get_variant(variants[0]["id"])
+    assert merged["annotation"] == "peer note" and merged["annotation_source"] == "local review" and merged["revision"] == 3
+
+    c_home, d_home = home / "genome-c", home / "genome-d"
+    cid, did = pair_for(c_home, d_home, "wellbeing.genome")
+    doomed_source, doomed_variants = seed_genome(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.genome")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with sqlite3.connect(c_home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("DELETE FROM genome_sources WHERE id=?", (doomed_source["id"],))
+        db.execute("DELETE FROM genome_variants WHERE source_id=?", (doomed_source["id"],))
+    tombstones = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.genome")
+    removed = ReplicationService(d_home).apply_batch(cid["peer_id"], tombstones)
+    assert [item["removed"] for item in removed["entries"]] == [1, len(doomed_variants)]
+
+    bad_home, target_home = home / "genome-bad", home / "genome-target"
+    bad_id, target_id = pair_for(bad_home, target_home, "wellbeing.genome")
+    seed_genome(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "wellbeing.genome")
+    malformed["entries"][1]["rows"][0]["data"]["source_id"] = "missing-source"
+    with pytest.raises(ReplicationError, match="missing source") as rejected: ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422 and GenomeStore(target_home).list_sources() == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.genome")
