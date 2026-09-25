@@ -1,0 +1,61 @@
+{
+  "id": "music.07",
+  "status": "locally_qualified_external_unqualified",
+  "base_revision": "68f466d5",
+  "requires": [
+    "music.06"
+  ],
+  "contract": "Meshy POST /openapi/v1/image-to-3d actual adapter, fixed documented endpoints and named CredentialStore reference only. Validated canonical PNG/JPEG converted to provider dataURI; persist job request/model/license/remote task before explicit polling; successful actual GLB download validates embedded bounded geometry and becomes canonical model artifact. Three GLTFLoader/OrbitControls viewer and pinned downloads; localstop does not promise remotecancellation.",
+  "references": [
+    "https://docs.meshy.ai/en/api/image-to-3d",
+    "https://threejs.org/docs/pages/GLTFLoader.html",
+    "https://threejs.org/manual/pages/installation.html"
+  ],
+  "acceptance": [
+    "Persist explicit provider configuration without secrets in domainDB and refuse unavailable credential",
+    "Idempotent submission avoids automatic retry after unknown remoteoutcome; bounded downloads and fixed provider assethost",
+    "Canonical modelkind+GLB MIME validates and reads exactversion; actualThree parser loads original authoredfixture geometry/clips",
+    "HTTP/native/UI configure and show truthful unavailable state; productionadapter contains actual Meshy request/poll/download operations"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/image3d.py",
+    "runtime/gideon/workspace/capabilities/music/models3d_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_models3d.py",
+    "runtime/gideon/workspace/artifacts/models.py",
+    "apps/console/src/features/capabilities/music/glb.ts",
+    "apps/console/src/features/capabilities/music/ModelViewer.tsx",
+    "apps/console/src/features/capabilities/music/Models3DPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_image3d.py",
+    "checks/runtime/capabilities/music/serve_image3d.py",
+    "apps/console/src/features/capabilities/music/Models3DPage.test.tsx",
+    "apps/console/src/features/capabilities/music/glb.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_image3d.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-models3d/app.json",
+    "apps/console/package.json",
+    "apps/console/pnpm-lock.yaml"
+  ],
+  "limits": [
+    "No live reconstruction credential supplied: actualPOST/poll/download/provider success remains externallyunqualified; authoredGLB fixtures are parser/storage vectors, never providercompletion evidence",
+    "GLB export implemented; alternatefullmesh/USDZ exports and browserGPU interaction remain pending",
+    "Provider output beyond16MiB or externalbuffers/textures refused; no billedautomaticresubmission"
+  ],
+  "verification": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.07",
+    "attempts": 3,
+    "repairs": 2,
+    "runtime_tests": 60,
+    "ui_tests": 7,
+    "evidence": "/tmp/gideon-music.07-checks-laf_mm6b/evidence.json",
+    "production_lines": 384,
+    "test_lines": 404,
+    "ratio": 1.0520833333333333,
+    "scope": "Actual canonicalcredentials/storage/GLB/pinnedHTTP/native refusal and persistentunknownjob tests; five actualThreeGLTFLoader tests plus two realHTTP UIsettings journeys. RemoteMeshyPOST/poll/download and WebGLGPU viewer remain unqualified."
+  }
+}

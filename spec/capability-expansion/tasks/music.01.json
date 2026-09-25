@@ -1,0 +1,85 @@
+{
+  "id": "music.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "rules_version": "sm2-v1",
+  "integration": {
+    "handler": "gideon.interfaces.dashboard.handlers.capabilities_music.register",
+    "page": "features/capabilities/music/Page.tsx",
+    "store": "capabilities/music/repertoire.sqlite3",
+    "agent_api": "RepertoireStore.create/get/list/update/practice"
+  },
+  "acceptance": [
+    "Real HTTP author/edit/practice/replay/reopen",
+    "Transactional failure and cross-connection concurrency",
+    "Canonical artifact version validation and home isolation",
+    "All six grade vectors and DST-aware calendar-day schedule",
+    "Real console DOM interaction against an ephemeral production aiohttp app"
+  ],
+  "limits": [
+    "Root owns navigation, agent-tool registration, durability enrollment and authenticated integrated browser qualification",
+    "Index currently shows the first 100 records; API supports offset/limit pagination. Integrated browser/auth/tool/durability qualification belongs to root."
+  ],
+  "evidence": {
+    "task": "music.01",
+    "root": "/tmp/gideon-expansion-worktrees/music",
+    "started_at": 1790293541.0811703,
+    "production_lines": 277,
+    "test_lines": 386,
+    "ratio": 1.3935018050541517,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_music.py",
+          "runtime/gideon/workspace/capabilities/music/__init__.py",
+          "runtime/gideon/workspace/capabilities/music/store.py",
+          "checks/runtime/capabilities/music/serve_ui.py",
+          "checks/runtime/capabilities/music/test_repertoire.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-1m8mj4ny/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/music/checks/runtime/capabilities/music",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-1m8mj4ny/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/music/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/music/apps/console/src/features/capabilities/music/Page.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-1m8mj4ny/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-music.01-checks-1m8mj4ny",
+    "completed_at": 1790293582.0883882,
+    "files": {
+      "apps/console/src/features/capabilities/music/Page.tsx": "027e029637e8418257e5ed42aace86c015a455d7ad3e30134375c237c551a4a3",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_music.py": "63277b06abeb7bf3bab6afc65c241f0b62cabaedb41acea16d8cdfe42d9db9dc",
+      "runtime/gideon/workspace/capabilities/music/__init__.py": "1ce47a21ce2c01a224add4de9d3d185893ff2d69d78981519782b4d81f6ed8c9",
+      "runtime/gideon/workspace/capabilities/music/store.py": "a69e989eeb834b7ff7451538983a0bd32cf5f5415ddc5343e87e40ac2c9d21bc",
+      "apps/console/src/features/capabilities/music/Page.test.tsx": "cd05cba910b6a0afc878c3c17784eb4c8049c825e770a041ba374f0b4f35375f",
+      "checks/runtime/capabilities/music/serve_ui.py": "fd6fa7e6d5d75650da917983ee6c22d43efd865ac1a14682318fb996d946c9eb",
+      "checks/runtime/capabilities/music/test_repertoire.py": "4ab7942abcb4f9cfad9336e229884312e381d94297c1d1ba83f3959ab4391985"
+    }
+  },
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.01",
+  "repair_cycles": 2
+}
