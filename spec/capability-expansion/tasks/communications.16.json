@@ -2,11 +2,11 @@
   "id": "communications.16",
   "status": "in_progress",
   "schema_version": 1,
-  "base_revision": "0b8e03189ac84daadbddd1c2aa779133a889fc27",
+  "base_revision": "c88878cf",
   "requires": [
     "communications.08"
   ],
-  "contract": "Expand uploaded RFC 5545 recurrence within an explicit maximum-366-day window while preserving the source timezone's wall time across DST. Apply bounded SECONDLY through YEARLY RRULE frequencies and RFC selectors including ordinal BYDAY, BYYEARDAY, BYWEEKNO, BYSETPOS and time selectors through the proven python-dateutil recurrence engine, plus RDATE additions, EXDATE exclusions and RECURRENCE-ID moves and cancellations. Persist stable UID-plus-original-occurrence provenance in the canonical calendar event store. Provider window instances retain provider IDs and cancellation state.",
+  "contract": "Expand uploaded RFC 5545 recurrence within an explicit maximum-366-day window while preserving the source timezone's wall time across DST. Apply bounded SECONDLY through YEARLY RRULE frequencies and RFC selectors including ordinal BYDAY, BYYEARDAY, BYWEEKNO, BYSETPOS and time selectors through the proven python-dateutil recurrence engine, plus date/date-time and PERIOD RDATE additions, positive VEVENT DURATION, EXDATE exclusions and RECURRENCE-ID moves and cancellations. Persist stable UID-plus-original-occurrence provenance in the canonical calendar event store. Provider window instances retain provider IDs and cancellation state.",
   "acceptance": [
     "Daily recurrence crosses a real IANA DST boundary at constant local wall time and applies move, cancellation, exclusion and addition exceptions",
     "Subdaily frequencies, weekly BYDAY, monthly BYSETPOS and negative BYMONTHDAY, yearly position selectors and all-day exclusive ends expand deterministically within a bounded window",
@@ -24,21 +24,30 @@
     "checks/runtime/capabilities/communications/test_calendar_recurrence.py"
   ],
   "ui_test_files": [],
+  "dependency_files": [
+    "pyproject.toml",
+    "uv.lock"
+  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.16",
   "limits": [
-    "RFC RDATE PERIOD values, VEVENT DURATION, RECURRENCE-ID RANGE=THISANDFUTURE and embedded custom VTIMEZONE definitions remain open; the importer currently accepts date/date-time RDATE, requires DTEND for duration, applies single-instance overrides and resolves IANA TZID names.",
+    "RECURRENCE-ID RANGE=THISANDFUTURE and embedded custom VTIMEZONE definitions remain open; the importer applies single-instance overrides and resolves IANA TZID names.",
     "ICS expansion is bounded to 366 days and 5000 occurrences; snapshot coverage applies only inside the declared expansion window.",
-    "python-dateutil 2.9 or newer is a required runtime dependency for standards-based RRULE expansion; the shared dependency manifest hook remains root-owned.",
+    "python-dateutil 2.9 or newer is a direct runtime dependency for standards-based RRULE expansion.",
     "Google Calendar and Outlook calendarView remain the authoritative recurrence expanders for remote provider windows; successful live provider qualification requires customer credentials.",
     "Daily review shows scheduled events and cancellations, not proof of attendance."
   ],
   "qualification": {
-    "revision": "worktree pre-commit continuation",
+    "revision": "worktree pre-commit duration and period continuation",
     "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.16",
     "exit_code": 0,
-    "log": "/tmp/gideon-communications.16-checks-iyfq8zz4",
-    "runtime": "17 passed; compile passed; production_lines=33 test_lines=81 ratio=2.45",
-    "continuation_scope": "SECONDLY through YEARLY RRULE frequencies and RFC BY* selectors locally qualified; task remains in_progress for the recurrence forms listed in limits",
+    "log": "/tmp/gideon-communications.16-checks-1fhpervm",
+    "runtime": "28 passed; compile passed; production_lines=55 test_lines=71 ratio=1.29",
+    "continuation_scope": "VEVENT DURATION and RDATE PERIOD locally qualified; task remains in_progress for RANGE=THISANDFUTURE and embedded custom VTIMEZONE",
+    "prior_continuation": {
+      "revision": "c88878cf",
+      "log": "/tmp/gideon-communications.16-checks-iyfq8zz4",
+      "runtime": "17 passed; compile passed; production_lines=33 test_lines=81 ratio=2.45"
+    },
     "prior_slice": {
       "revision": "0b8e03189ac84daadbddd1c2aa779133a889fc27",
       "log": "/tmp/gideon-communications.16-checks-7yj069no",
