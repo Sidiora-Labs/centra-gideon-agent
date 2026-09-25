@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import './experience.css'
 import Narration from './Narration'
+import AmbientDisplay from './AmbientDisplay'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 
 type Choice = { id: string; label: string; target: string }
@@ -65,8 +66,10 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     const result = await requestJson<View>(`${baseUrl}/sessions/${view.session.id}/choices`, 'POST', { choice_id: choice.id, revision: view.session.revision, request_id: requestId(`${view.session.id}:${view.session.revision}:${choice.id}`) })
     setView(result)
   })
+  if (new URLSearchParams(route.split('?')[1] || '').get('ambient') === '1') return <AmbientDisplay baseUrl={baseUrl} onClose={() => { location.hash = '/capabilities/experience' }} />
   return <main className="experience-page p-4 max-w-4xl mx-auto space-y-4" aria-label="Interactive stories">
     <h1>Interactive stories</h1>
+    <Button onClick={() => { location.hash = '/capabilities/experience?ambient=1' }}>Open ambient display</Button>
     <p>Author connected scenes and play choices into different endings.</p>
     {loading && <p role="status">Loading stories…</p>}
     {error && <p role="alert">{error}</p>}
