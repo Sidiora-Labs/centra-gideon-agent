@@ -14,6 +14,10 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_ports', 'List durable loopback port reservation records.', {}, [], False),
+            ('workspace_port_inventory', 'Inspect availability within the configured port allocation.', {}, [], False),
+            ('workspace_port_reserve', 'Hold an available loopback port for a project until explicitly released.', {'project_id':{'type':'string'},'request_id':{'type':'string'},'port':{'type':'integer'}}, ['project_id','request_id'], True),
+            ('workspace_port_release', 'Release only a port socket owned by this registry.', {'id':{'type':'string'},'revision':{'type':'integer'}}, ['id','revision'], True),
             ('workspace_snapshots', 'List saved workspace contexts.', {}, [], False),
             ('workspace_snapshot_get', 'Read one saved workspace context.', {'id': {'type':'string'}}, ['id'], False),
             ('workspace_snapshot_delete', 'Delete only a saved context; never changes its workspace.', {'id':{'type':'string'}, 'revision':{'type':'integer'}}, ['id','revision'], True),
@@ -40,7 +44,22 @@ class WorkspaceToolProvider(ToolProvider):
             schema = definition.parameters
             if set(arguments) - set(schema['properties']) or set(schema['required']) - set(arguments):
                 raise ValueError('Invalid workspace tool arguments')
-            if tool_name.startswith('workspace_snapshot'):
+            for key, value in arguments.items():
+                expected = str if schema['properties'][key]['type'] == 'string' else int
+                if type(value) is not expected:
+                    raise ValueError('Invalid argument type')
+            if tool_name.startswith('workspace_port'):
+                from .ports import get_port_registry
+                ports = get_port_registry(root)
+                if tool_name == 'workspace_ports':
+                    result = ports.list()
+                elif tool_name == 'workspace_port_inventory':
+                    result = ports.inventory()
+                elif tool_name == 'workspace_port_reserve':
+                    result = ports.reserve(arguments)
+                else:
+                    result = ports.release(arguments['id'], arguments['revision'])
+            elif tool_name.startswith('workspace_snapshot'):
                 snapshots = SnapshotStore(root, allowed_roots=roots)
                 if tool_name == 'workspace_snapshots':
                     result = snapshots.list()

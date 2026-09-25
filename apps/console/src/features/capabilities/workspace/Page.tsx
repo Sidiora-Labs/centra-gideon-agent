@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Processes from './Processes'
+import Ports from './Ports'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
@@ -66,5 +67,6 @@ export default function Page() {
         {(['surviving_terminal_ids', 'missing_terminal_ids', 'surviving_task_ids', 'missing_task_ids'] as const).map(key => <p key={key}>{key.replaceAll('_', ' ')}: {comparison[key].join(', ') || 'None'}</p>)}</div>}
     </article>}
     <Processes />
+    <Ports />
   </section>
 }

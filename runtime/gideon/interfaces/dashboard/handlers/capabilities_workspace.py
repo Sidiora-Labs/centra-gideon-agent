@@ -99,6 +99,44 @@ async def close_processes(app):
     await close_registry(config_dir() / "capabilities" / "workspace")
 
 
+def ports():
+    from gideon.workspace.capabilities.workspace.ports import get_port_registry
+    return get_port_registry(config_dir() / "capabilities" / "workspace")
+
+
+async def port_endpoint(request):
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
+    try:
+        registry = ports()
+        record_id = request.match_info.get("id")
+        operation = request.match_info.get("operation")
+        if request.method == "GET":
+            if operation == "inventory":
+                result = registry.inventory()
+            else:
+                result = registry.get(record_id) if record_id else registry.list(offset=int(request.query.get("offset", 0)))
+        elif record_id:
+            body = await read_json_body(request)
+            result = registry.release(record_id, body.get("revision"))
+        else:
+            result = registry.reserve(await read_json_body(request))
+        return web.json_response(result)
+    except ConflictError as error:
+        return web.json_response({"error": str(error)}, status=409)
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except (ValueError, TypeError, AttributeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except OSError:
+        return web.json_response({"error": "Port inspection unavailable"}, status=503)
+
+
+async def close_ports(app):
+    from gideon.workspace.capabilities.workspace.ports import close_port_registry
+    close_port_registry(config_dir() / "capabilities" / "workspace")
+
+
 def register(app):
     prefix = "/api/capabilities/workspace"
     app.router.add_get(prefix, endpoint)
@@ -109,6 +147,12 @@ def register(app):
     app.router.add_get(prefix + "/processes/{id}/{operation:logs}", process_endpoint)
     app.router.add_post(prefix + "/processes/{id}/{operation:stop}", process_endpoint)
     app.on_cleanup.append(close_processes)
+    app.router.add_get(prefix + "/ports", port_endpoint)
+    app.router.add_post(prefix + "/ports", port_endpoint)
+    app.router.add_get(prefix + "/ports/{operation:inventory}", port_endpoint)
+    app.router.add_get(prefix + "/ports/{id}", port_endpoint)
+    app.router.add_post(prefix + "/ports/{id}/release", port_endpoint)
+    app.on_cleanup.append(close_ports)
     app.router.add_get(prefix + "/{id}", endpoint)
     app.router.add_delete(prefix + "/{id}", endpoint)
     app.router.add_post(prefix + "/{id}/reconcile", endpoint)
