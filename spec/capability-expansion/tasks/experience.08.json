@@ -15,7 +15,9 @@
   "test_files": [
     "checks/runtime/capabilities/experience/test_world_engine.py",
     "checks/runtime/capabilities/experience/test_tools.py",
-    "apps/console/src/features/capabilities/experience/WorldEngine.test.tsx"
+    "apps/console/src/features/capabilities/experience/WorldEngine.test.tsx",
+    "checks/capabilities/world_engine_browser_server.py",
+    "checks/capabilities/world_engine_browser.mjs"
   ],
   "extra_files": [
     "runtime/gideon/workspace/capabilities/experience/assets/world-engine/app.json"
@@ -46,5 +48,13 @@
     "ratio": 1.0164609053497942,
     "real_engine": "Actual pinned engine app installation/start/HTTP/WS join, first owner grant, message log persistence, supervisor stop/restart and replay passed. No generated content/provider calls."
   },
-  "dependency_location": "/tmp/gideon-world-engine-deps"
+  "dependency_location": "/tmp/gideon-world-engine-deps",
+  "browser_qualification": {
+    "status": "pending",
+    "attempted": false,
+    "harness": "checks/capabilities/world_engine_browser.mjs",
+    "server": "checks/capabilities/world_engine_browser_server.py",
+    "related_hosted_evidence": "/tmp/gideon-world-engine-browser-M4n7pU/failure.json",
+    "reason": "The bounded combined run stopped on hosted renderer readiness after two repairs before the source journey began. Hosted GPU absence and failure are not source browser evidence."
+  }
 }
