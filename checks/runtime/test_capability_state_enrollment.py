@@ -13,6 +13,7 @@ from gideon.workspace.snapshot import snapshot_main, _extra_restore_paths_for_te
     ("capabilities/platform/identity.key", inventory.KIND_TREE),
     ("capabilities/platform/peers.sqlite3", inventory.KIND_SQLITE),
     ("capabilities/platform/replication.sqlite3", inventory.KIND_SQLITE),
+    ("capabilities/creative/peer_feedback.sqlite3", inventory.KIND_SQLITE),
     ("capabilities/platform/media_shares.sqlite3", inventory.KIND_SQLITE),
 ])
 def test_peer_authority_cannot_be_exported_or_restored_as_domain_data(path, kind):
@@ -75,6 +76,7 @@ def test_new_media_database_and_listener_settings_survive_snapshot(tmp_path, mon
     "capabilities/platform/remote-agent-sessions.sqlite3",
     "capabilities/platform_quotas.sqlite3",
     "capabilities/platform/replication.sqlite3",
+    "capabilities/creative/peer_feedback.sqlite3",
     "capabilities/platform/media_shares.sqlite3",
 ])
 def test_new_platform_state_preserves_committed_wal_in_backup(tmp_path, monkeypatch, relative):
