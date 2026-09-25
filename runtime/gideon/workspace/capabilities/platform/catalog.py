@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 import re
+import weakref
 
 from aiohttp import web
 
@@ -11,6 +12,19 @@ CATALOG_PATH = "/api/capabilities/platform/catalog"
 SAFE_READS = frozenset({CATALOG_PATH, "/api/prompts/syntax"})
 _SYMBOL = re.compile(r"[A-Za-z_][A-Za-z0-9_.:-]{0,127}\Z")
 _PATH = re.compile(r"/api/[A-Za-z0-9_./{}:-]{1,500}\Z")
+_application = None
+
+
+def bind_application(app: web.Application) -> None:
+    global _application
+    _application = weakref.ref(app)
+
+
+def current_catalog(**options):
+    app = _application() if _application is not None else None
+    if app is None:
+        raise RuntimeError("The dashboard route registry is not available")
+    return build_catalog(app, **options)
 
 
 def _symbol(value: object) -> str | None:

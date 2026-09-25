@@ -2,7 +2,7 @@
 
 from aiohttp import web
 
-from gideon.workspace.capabilities.platform.catalog import CATALOG_PATH, build_catalog
+from gideon.workspace.capabilities.platform.catalog import CATALOG_PATH, bind_application, build_catalog
 
 
 async def api_catalog(request: web.Request) -> web.Response:
@@ -18,4 +18,5 @@ async def api_catalog(request: web.Request) -> web.Response:
 
 
 def register(app: web.Application) -> None:
+    bind_application(app)
     app.router.add_get(CATALOG_PATH, api_catalog, name="capabilities-platform-catalog")
