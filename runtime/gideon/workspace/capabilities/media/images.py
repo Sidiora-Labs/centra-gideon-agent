@@ -3,11 +3,13 @@ import hashlib
 import json
 import io
 import math
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PIL import Image
 
+from .loras import LoraCatalog
 from .sketches import SketchError, fields, integer
 
 
@@ -19,6 +21,7 @@ def selected_image():
 class ImageService:
     def __init__(self, artifacts, selector=None):
         self.artifacts = artifacts
+        self.loras = LoraCatalog(artifacts.root.parent / "models/loras")
         self.selector = selector or selected_image
 
     def source(self, artifact_id, version):
@@ -37,7 +40,7 @@ class ImageService:
             raise SketchError('Conditioning image cannot be decoded') from exc
 
     def prepare(self, body):
-        fields(body, ('prompt', 'size', 'source_artifact_id', 'source_version', 'mask_artifact_id', 'mask_version', 'controls'), ('prompt',))
+        fields(body, ('prompt', 'size', 'source_artifact_id', 'source_version', 'mask_artifact_id', 'mask_version', 'controls', 'loras'), ('prompt',))
         prompt = body['prompt']
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
             raise SketchError('Prompt must contain 1–4000 characters')
@@ -64,6 +67,20 @@ class ImageService:
                 mask = self.source(body['mask_artifact_id'], body['mask_version'])
                 if mask.size != source.size:
                     raise SketchError('Mask dimensions must match the source image')
+        adapters = body.get('loras', [])
+        if not isinstance(adapters, list) or len(adapters) > 4:
+            raise SketchError('At most four adapters may be selected')
+        for adapter in adapters:
+            if not isinstance(adapter, dict) or set(adapter) != {'id', 'sha256', 'scale'}:
+                raise SketchError('Adapter selection requires id, sha256 and scale')
+            self.loras._path(adapter['id'])
+            if not isinstance(adapter['sha256'], str) or not re.fullmatch('[0-9a-f]{64}', adapter['sha256']):
+                raise SketchError('Adapter SHA-256 must be 64 lowercase hex characters')
+            scale = adapter['scale']
+            if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or not -2 <= scale <= 2:
+                raise SketchError('Adapter scale must be between -2 and 2')
+        if len({adapter['id'] for adapter in adapters}) != len(adapters):
+            raise SketchError('Duplicate adapter selection')
         selected = self.selector()
         return dict(body, prompt=prompt.strip(), controls=dict(controls), size=size,
                     selection=f'{selected[0].name}:{selected[1]}' if selected else '')
@@ -76,7 +93,17 @@ class ImageService:
         models = await asyncio.wait_for(provider.list_models(), timeout=5)
         return dict(selection=f'{provider.name}:{model_id}', available=bool(await asyncio.wait_for(provider.is_available(), timeout=5)),
                     models=[dict(name=model.name, sizes=model.sizes, supports_edit=model.supports_edit,
-                                 supports_mask=model.supports_mask, controls={key: dict(minimum=value.minimum, maximum=value.maximum, integer=value.integer) for key, value in model.supported_controls.items()}) for model in models if model.name == model_id])
+                                 supports_mask=model.supports_mask, supports_lora=model.supports_lora, lora_base_model=model.lora_base_model, controls={key: dict(minimum=value.minimum, maximum=value.maximum, integer=value.integer) for key, value in model.supported_controls.items()}) for model in models if model.name == model_id])
+
+    async def lora_inventory(self, adapter_id=None):
+        try:
+            capabilities = await self.capabilities()
+            model = capabilities['models'][0] if capabilities['models'] else {}
+        except Exception:
+            model = {}
+        base = model.get('lora_base_model', '')
+        result = await asyncio.to_thread(self.loras.get, adapter_id, base) if adapter_id else await asyncio.to_thread(self.loras.list, base)
+        return dict(result, supports_lora=bool(model.get('supports_lora', False)), selected_base_model=base)
 
     def validate_model(self, request, model):
         if request['size'] and model.sizes and request['size'] not in model.sizes:
@@ -85,6 +112,8 @@ class ImageService:
             raise SketchError('Selected model does not support image conditioning')
         if request.get('mask_artifact_id') and not model.supports_mask:
             raise SketchError('Selected model does not advertise mask conditioning')
+        if request.get('loras') and not model.supports_lora:
+            raise SketchError('Selected model does not advertise LoRA support')
         for key, value in request['controls'].items():
             control = model.supported_controls.get(key)
             if control is None:
@@ -108,6 +137,8 @@ class ImageService:
         self.validate_model(request, model)
         with TemporaryDirectory(prefix='gideon-image-') as directory:
             parameters = dict(model=model_id, size=request['size'], n=1, **request['controls'])
+            if request.get('loras'):
+                parameters['loras'] = [self.loras.stage(adapter, model.lora_base_model, Path(directory) / f'adapter-{index}.safetensors') for index, adapter in enumerate(request['loras'])]
             if request.get('source_artifact_id'):
                 source = self.source(request['source_artifact_id'], request['source_version'])
                 source_path = Path(directory) / 'source.png'

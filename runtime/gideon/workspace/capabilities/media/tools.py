@@ -41,8 +41,11 @@ CATALOG.update({
 IMAGE_INPUT = {"type": "object", "additionalProperties": False, "required": ["prompt"], "properties": {
     "prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "size": STRING,
     "source_artifact_id": STRING, "source_version": INTEGER, "mask_artifact_id": STRING, "mask_version": INTEGER,
+    "loras": {"type": "array", "maxItems": 4, "items": {"type": "object", "additionalProperties": False, "required": ["id", "sha256", "scale"], "properties": {"id": STRING, "sha256": STRING, "scale": {"type": "number", "minimum": -2, "maximum": 2}}}},
     "controls": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "integer" if key in ("seed", "steps") else "number"} for key in ("seed", "steps", "guidance", "strength")}}}}
 CATALOG.update({
+    "media_loras_list": ("Discover installed adapters with conservative metadata compatibility; no inference effect is claimed.", (), {}, False),
+    "media_loras_get": ("Inspect one installed adapter and its exact file digest without exposing local paths.", ("adapter_id",), {"adapter_id": STRING}, False),
     "media_image_capabilities": ("Read the selected image model's advertised controls and conditioning support.", (), {}, False),
     "media_image_submit": ("Queue image generation or pinned-source conditioning; unsupported controls fail explicitly before provider inference.", ("request_id", "input"), {"request_id": STRING, "input": IMAGE_INPUT}, True),
     "media_readiness_get": ("Read the last observed image/video provider readiness; availability is not inference verification.", (), {}, False),
@@ -87,6 +90,8 @@ class MediaToolProvider(ToolProvider):
             Draft202012Validator(schema(tool_name)).validate(arguments)
             if tool_name == "media_readiness_refresh":
                 result = await self.readiness.refresh()
+            elif tool_name in ("media_loras_list", "media_loras_get"):
+                result = await self.jobs.images.lora_inventory(arguments.get("adapter_id"))
             elif tool_name == "media_image_capabilities":
                 result = await self.jobs.images.capabilities()
             else:
