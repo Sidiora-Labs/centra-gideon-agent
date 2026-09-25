@@ -1,6 +1,6 @@
 {
   "id": "communications.09",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "3b2c6f2d",
   "requires": [
@@ -15,33 +15,44 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/social.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/SocialPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/SocialPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_social.py",
-    "checks/runtime/capabilities/communications/test_tools.py",
     "apps/console/src/features/capabilities/communications/SocialPanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/communications/test_social.py",
-    "checks/runtime/capabilities/communications/test_tools.py"
+    "checks/runtime/capabilities/communications/test_social.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/communications/SocialPanel.test.tsx"
   ],
-  "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
-  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.09",
   "limits": [
-    "Registry metadata only; no external ownership, account creation, verification or connectivity claims."
+    "Registry metadata only; no external ownership, account creation, verification, connectivity, ingestion or publishing is claimed.",
+    "Shared native-tool, route and Page mounts are retained as integration evidence and excluded from task ownership because later communications slices extend those files."
   ],
   "qualification": {
-    "runtime": "43 passed",
-    "console_http": "4 passed",
-    "external_accounts": "not verified; registry only"
-  }
+    "compile": "passed",
+    "runtime_tests": 43,
+    "ui_tests": 4,
+    "production_lines": 195,
+    "test_lines": 304,
+    "ratio": 1.558974358974359,
+    "repair_cycles": 1
+  },
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "evidence": "/tmp/gideon-communications.09-checks-nn6mfpnn/evidence.json",
+  "acceptance_coverage": [
+    "Persistent NFKC/casefolded platform-handle identity is unique per platform, idempotent by request key and survives store reopen.",
+    "Strict fields, HTTPS profile metadata, named credential references and canonical person IDs reject malformed or unknown input atomically.",
+    "Optimistic edits, archive state and local-only removal retain immutable event history and never claim or mutate an external account.",
+    "Actual HTTP, approval-gated native tools and the real console server execute register, edit, archive, history, stale conflict, reopen and local removal journeys."
+  ]
 }

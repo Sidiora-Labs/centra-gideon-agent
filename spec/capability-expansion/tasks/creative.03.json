@@ -16,19 +16,14 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/universes.py",
-    "runtime/gideon/workspace/capabilities/creative/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
-    "apps/console/src/features/capabilities/creative/Universes.tsx",
-    "apps/console/src/features/capabilities/creative/Page.tsx"
+    "apps/console/src/features/capabilities/creative/Universes.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/creative/test_universes.py",
-    "checks/runtime/capabilities/creative/test_tools.py",
     "apps/console/src/features/capabilities/creative/Universes.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/creative/test_universes.py",
-    "checks/runtime/capabilities/creative/test_tools.py"
+    "checks/runtime/capabilities/creative/test_universes.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Universes.test.tsx"
@@ -58,5 +53,11 @@
     "Retained compile/runtime evidence applies to the exact unchanged UniverseStore and universe runtime-test hashes; shared creative registration files contain later independent capability additions.",
     "The fresh UI evidence qualifies the current Universes composite, including the separately implemented creative.04 graph mount; it does not requalify creative.04 behavior.",
     "No hosted journey, configured generation provider, image vision or reference-sheet rendering is claimed by this bounded universe task."
+  ],
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Page.tsx",
+    "checks/runtime/capabilities/creative/test_tools.py"
   ]
 }
