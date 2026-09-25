@@ -6,6 +6,7 @@
   "icon": "Image",
   "author": "Gideon",
   "tags": ["tool", "bundled"],
+  "permissions": {"backgroundTasks": true, "storage": true},
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.media.tools:create_provider",

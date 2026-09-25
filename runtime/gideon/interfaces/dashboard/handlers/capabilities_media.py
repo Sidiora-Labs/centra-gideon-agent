@@ -49,3 +49,6 @@ def register(app):
     from gideon.workspace.capabilities.media.annotations import AnnotationStore
     from gideon.workspace.capabilities.media.annotations_http import register_annotations
     register_annotations(app, AnnotationStore(app[STORE_KEY].path.parent / 'annotations.sqlite3', app[STORE_KEY].artifacts))
+    from gideon.workspace.capabilities.media.jobs import MediaJobs
+    from gideon.workspace.capabilities.media.jobs_http import register_jobs
+    register_jobs(app, MediaJobs(app[STORE_KEY].path.parent / 'jobs.sqlite3', app[STORE_KEY]))

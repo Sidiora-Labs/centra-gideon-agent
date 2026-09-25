@@ -1,3 +1,4 @@
+import JobsPage from './JobsPage'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import LibraryPage from './LibraryPage'
@@ -89,6 +90,8 @@ function SketchPage() {
         <Button disabled={!!dirty || busy} onClick={() => void action(async () => { const result = await request('/' + sketch.id + '/export', 'POST', { revision: sketch.revision }); setDownload('/api/artifacts/' + result.artifact_id + '/raw?version=' + result.version) })}>Export PNG</Button>
         {download && <a href={download} download="sketch.png">Download PNG</a>}
       </div>
+      <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
+      <a href="#/capabilities/media?view=jobs">Media jobs</a>
       <p role="status">Revision {sketch.revision}{dirty ? ' · Unsaved changes' : ' · Saved'}. Erase removes drawing only; the original image stays intact.</p>
       <div className="relative max-w-full" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
         {sketch.source_artifact_id && <img alt="Original image" src={base + '/' + sketch.id + '/source'} className="absolute inset-0 w-full h-full" onError={() => setError('Original image is unavailable')} />}
@@ -102,7 +105,7 @@ function SketchPage() {
 }
 
 export default function Page() {
-  const [library, setLibrary] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view') === 'library')
-  useEffect(() => { const update = () => setLibrary(new URLSearchParams(location.hash.split('?')[1] || '').get('view') === 'library'); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
-  return library ? <LibraryPage /> : <SketchPage />
+  const [view, setView] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view'))
+  useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view')); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
+  return view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
 }

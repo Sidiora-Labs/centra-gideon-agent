@@ -1,0 +1,46 @@
+{
+  "id": "media.04",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "1cc53d30",
+  "contract": "Durable SQLite job queue for actual saved sketch PNG export. Existing SDK BackgroundWorker driver and native application supervisor grant boundary; canonical artifacts only. Optimistic state revisions protect cancellation/retry, events retain attempt outputs/errors, request IDs deduplicate submission. Process boot/start identity recovers dead workers without treating live workers as lost. API, tools, and console share bound queue.",
+  "acceptance": "Real rendering pixels, SQL concurrency, process death recovery, granted/denied SDK subprocess execution, HTTP/tool queue operations, immutable cancellation outputs, CAS conflicts, UI rendering. Full supervisor boot/browser journey remains integrated qualification.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/jobs_http.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "runtime/gideon/sdk/media.py",
+    "runtime/gideon/extensions/apps/native/gideon-media/worker.py",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_jobs.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/JobsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_jobs.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/JobsPage.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-media/app.json"
+  ],
+  "durability_path": "capabilities/media/jobs.sqlite3",
+  "remaining_limits": [
+    "Only real local sketch_export is supported; no external provider or GPU result claimed",
+    "Browser interaction and full supervisor installation/boot require root integrated qualification",
+    "Canonical artifact root locks are process-local; concurrent synchronous and worker rendering of the same sketch revision is not globally serialized",
+    "Linux proc identity recovery; other platforms not qualified"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.04",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.04-checks-ndtq5tdz/evidence.json",
+  "production_lines": 246,
+  "test_lines": 296,
+  "ratio": 1.2032520325203253
+}

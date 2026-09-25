@@ -5,6 +5,7 @@ from jsonschema import Draft202012Validator, ValidationError
 
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 
+from .jobs import MediaJobs
 from .library import MediaLibrary
 from .annotations import AnnotationStore
 from .sketches import SketchError, SketchStore
@@ -36,6 +37,14 @@ CATALOG.update({
     "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
 })
 
+CATALOG.update({
+    "media_jobs_list": ("List the latest 100 durable local rendering jobs.", (), {}, False),
+    "media_jobs_get": ("Read rendering state, attempt history and any canonical result artifact.", ("job_id",), {"job_id": STRING}, False),
+    "media_jobs_submit": ("Queue a saved sketch PNG export for the supervised media worker.", ("operation", "sketch_id", "revision", "request_id"), {"operation": {"enum": ["sketch_export"]}, "sketch_id": STRING, "revision": INTEGER, "request_id": STRING}, True),
+    "media_jobs_cancel": ("Request cancellation using the current state revision; completed output remains available.", ("job_id", "state_revision"), {"job_id": STRING, "state_revision": INTEGER}, True),
+    "media_jobs_retry": ("Retry a failed or cancelled render with its current state revision; attempt history is retained.", ("job_id", "state_revision"), {"job_id": STRING, "state_revision": INTEGER}, True),
+})
+
 
 def schema(name):
     _, required, properties, _ = CATALOG[name]
@@ -45,6 +54,7 @@ def schema(name):
 class MediaToolProvider(ToolProvider):
     def __init__(self, sketches, library, annotations=None):
         self.sketches, self.library = sketches, library
+        self.jobs = MediaJobs(sketches.path.parent / 'jobs.sqlite3', sketches)
         self.annotations = annotations or AnnotationStore(sketches.path.parent / 'annotations.sqlite3', sketches.artifacts)
 
     @property
@@ -72,6 +82,14 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name.startswith('media_jobs_'):
+            action = name.removeprefix('media_jobs_')
+            if action == 'list':
+                return self.jobs.list()
+            if action == 'submit':
+                return self.jobs.submit(args)
+            job_id = args.pop('job_id')
+            return self.jobs.get(job_id) if action == 'get' else getattr(self.jobs, action)(job_id, args)
         if name.startswith('media_annotations_'):
             artifact_id, version = args.pop('artifact_id'), args.pop('version')
             if name == 'media_annotations_get':
