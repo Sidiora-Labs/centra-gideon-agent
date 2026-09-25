@@ -68,3 +68,6 @@ def register(app):
 
     from gideon.workspace.capabilities.media.episodes_http import register_episodes
     register_episodes(app)
+
+    from gideon.workspace.capabilities.media.sprites_http import register_sprites
+    register_sprites(app)
