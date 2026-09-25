@@ -1,7 +1,7 @@
 {
   "id": "creative.03",
   "schema_version": 1,
-  "status": "in_progress",
+  "status": "locally_qualified",
   "base_revision": "534028ec",
   "requires": [
     "creative.02",
@@ -32,5 +32,31 @@
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Universes.test.tsx"
+  ],
+  "evidence": [
+    "/tmp/gideon-creative.03-checks-nuab0yvd/evidence.json",
+    "/tmp/gideon-creative.03-ui-source-main/evidence.json"
+  ],
+  "qualification": {
+    "compile": "passed in retained exact-hash evidence",
+    "runtime_tests": 35,
+    "ui_tests": 4,
+    "production_lines": 289,
+    "test_lines": 368,
+    "ratio": 1.273356401384083,
+    "repair_cycles": 2,
+    "current_ui_command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python node ../../node_modules/vitest/vitest.mjs run src/features/capabilities/creative/Universes.test.tsx",
+    "current_ui_cwd": "/root/private-neo-v1/tmp/gideon-rooms-upstream/apps/console"
+  },
+  "acceptance_coverage": [
+    "Real HTTP, native and console create/edit preserve ordered canon, palette/style, canonical ingredient links and revision-pinned moodboards.",
+    "Persisted reopen, immutable history, optimistic restore and stable revision export retain canon and visual identity.",
+    "Malformed collections/colors/scope overrides, unknown new references, stale updates and idempotency conflicts fail atomically; historical missing references remain explicit.",
+    "Universe and library-reference search, bounded pagination, stale deep-link clearing and edit continuity execute through the current console UI."
+  ],
+  "limits": [
+    "Retained compile/runtime evidence applies to the exact unchanged UniverseStore and universe runtime-test hashes; shared creative registration files contain later independent capability additions.",
+    "The fresh UI evidence qualifies the current Universes composite, including the separately implemented creative.04 graph mount; it does not requalify creative.04 behavior.",
+    "No hosted journey, configured generation provider, image vision or reference-sheet rendering is claimed by this bounded universe task."
   ]
 }
