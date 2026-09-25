@@ -11,7 +11,7 @@ from .world_engine import WorldEngine
 from .ambient import AmbientDisplay
 from .store import Conflict, NotFound
 
-KINDS = ('apps', 'agents', 'work', 'goals', 'schedule', 'health')
+KINDS = ('apps', 'agents', 'work', 'goals', 'schedule', 'health', 'memory', 'operations', 'peers')
 ASSET = 'eidoverse/assets/models/crate_large_red.glb'
 
 
@@ -105,7 +105,9 @@ class Worlds:
             sources.append({'kind':'apps','id':row['name'],'title':row.get('display_name') or row['name'],'status':'enabled' if row.get('enabled') else 'disabled','url':'#/apps/' + row['name']})
         for key in list(AppConfig.load().agents)[:10]:
             sources.append({'kind':'agents','id':key,'title':key,'status':'configured','url':'#/settings'})
-        return {'sources':sources, 'unavailable':unavailable + ['peers','memory','operations'], 'limit_per_kind':10}
+        from .world_sources import extended_sources
+        extra = extended_sources(self.engine.home)
+        return {'sources':sources + extra['sources'], 'unavailable':unavailable + extra['unavailable'], 'limit_per_kind':10}
 
     async def mutate(self, world, action, body):
         if not isinstance(body, dict):
@@ -121,7 +123,10 @@ class Worlds:
             if not isinstance(kinds, list) or not kinds or any(not isinstance(kind, str) or kind not in KINDS for kind in kinds) or len(set(kinds)) != len(kinds):
                 raise ValueError('Choose explicit supported source categories')
             snapshot = await self.call(world)
-            rows = [row for row in (await self.sources())['sources'] if row['kind'] in kinds]
+            preview = await self.sources()
+            if set(kinds) & set(preview['unavailable']):
+                raise Conflict('Selected world source is unavailable')
+            rows = [row for row in preview['sources'] if row['kind'] in kinds]
             if len(rows) > 20:
                 raise ValueError('Select fewer categories; at most 20 sources per projection')
             for index, row in enumerate(rows):
@@ -129,6 +134,13 @@ class Worlds:
                 if key not in snapshot['state']['entities']:
                     operations.append({'verb':'spawn','args':{'id':key,'lib':ASSET,'pos':[index * 2,0,0],'yaw':0}})
                 operations.append({'verb':'comp','args':{'id':key,'type':'gideon_source','data':row}})
+            available = {(row['kind'], row['id']) for row in rows}
+            for key, entity in snapshot['state']['entities'].items():
+                source = entity.get('comp', {}).get('gideon_source', {})
+                if source.get('kind') in kinds and (source['kind'], source.get('id')) not in available:
+                    operations.append({'verb':'comp','args':{'id':key,'type':'gideon_source','data':{**source,'status':'not_in_current_source_preview'}}})
+            if len(operations) > 40:
+                raise ValueError('Projection change set exceeds 40 operations; select fewer categories')
         else:
             key = identifier(body['id'])
             operation = body['operation']
