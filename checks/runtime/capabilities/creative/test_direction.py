@@ -8,7 +8,7 @@ from aiohttp.test_utils import TestClient,TestServer
 from gideon.core.sqlite_compat import sqlite3
 from gideon.interfaces.dashboard.handlers.capabilities_creative_direction import PREFIX,register
 from gideon.workspace.capabilities.creative.direction import DirectionStore
-from gideon.workspace.capabilities.creative.direction_tools import DirectionTools
+from gideon.workspace.capabilities.creative.direction_tools import DirectionTools,create_provider
 from gideon.workspace.capabilities.creative.store import CatalogError
 from gideon.workspace.capabilities.creative.works import WorkStore
 
@@ -133,6 +133,7 @@ def test_real_owner_http_lifecycle_and_native_approval(tmp_path):
         native=await provider.invoke('creative_direction_action',{'action':'create','payload':payload(work,request_id='native')});assert native.success;assert json.loads(native.output)['sources'][0]['chapters'][0]['artifact_id']==draft['artifact_id']
         invalid=await provider.invoke('creative_direction_action',{'action':'wrong','payload':{}});assert not invalid.success
         manifest=json.loads(Path('runtime/gideon/extensions/apps/native/gideon-creative-direction/app.json').read_text());assert manifest['name']=='gideon-creative-direction';assert manifest['provider']['implementation']=='gideon.workspace.capabilities.creative.direction_tools:create_provider'
+        registered=create_provider({});registered_tools={tool.name:tool for tool in await registered.list_tools()};assert registered_tools['creative_direction_action'].requires_approval
     asyncio.run(run())
 
 

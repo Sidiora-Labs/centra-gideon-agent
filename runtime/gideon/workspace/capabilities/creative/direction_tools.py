@@ -21,4 +21,6 @@ class DirectionTools(ToolProvider):
             else:raise CatalogError('Invalid creative direction tool arguments')
             return ToolResult(success=True,output=json.dumps(result))
         except CatalogError as error:return ToolResult(success=False,error=str(error),metadata={'status':error.status})
-def create_provider(**kwargs):return DirectionTools()
+def create_provider(config=None):
+    if config not in (None, {}):raise ValueError('Creative direction provider does not accept configuration')
+    return DirectionTools()

@@ -47,7 +47,12 @@
     "runtime_tests": 21,
     "ui_tests": 2,
     "repairs": 1,
-    "repair": "Use canonical binary pdf kind for actual PDF export."
+    "repair": "Use canonical binary pdf kind for actual PDF export.",
+    "local_completion": {
+      "command": "/tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/music/test_decks.py -q -k linked_success_adopts_verified_art",
+      "result": "1 passed, 21 deselected",
+      "proof": "Real MediaJobs claim/finish lifecycle adopts decoded canonical image bytes across restart and refuses failed or corrupt completed output."
+    }
   },
   "breadth_continuation": "music.11"
 }

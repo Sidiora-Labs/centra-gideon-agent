@@ -36,6 +36,17 @@
     "canonical_peer_inventory": {
       "exit_code": 0,
       "log": "/tmp/gideon-expansion-20260925/oss-canonical-peer-inventory.log"
+    },
+    "expanded_runtime": {
+      "command": "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/test_capability_integration.py checks/runtime/test_capability_state_enrollment.py -q",
+      "exit_code": 0,
+      "passed": 12,
+      "log": "/tmp/gideon-expansion-20260925/oss-assembled-wave-checks.log"
+    },
+    "platform_wal": {
+      "exit_code": 0,
+      "passed": 5,
+      "log": "/tmp/gideon-expansion-20260925/oss-platform-wal.log"
     }
   },
   "remaining_limits": [

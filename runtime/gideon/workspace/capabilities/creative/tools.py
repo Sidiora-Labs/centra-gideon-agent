@@ -14,6 +14,7 @@ from .series import SeriesStore
 from .continuity import ContinuityStore
 from .voice import VoiceStore
 from .editorial import EditorialStore
+from .production_tools import CreativeProductionToolProvider, SCHEMAS as PRODUCTION_SCHEMAS
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -147,7 +148,7 @@ def schemas():
     return result
 
 
-SCHEMAS = schemas()
+SCHEMAS = {**schemas(), **PRODUCTION_SCHEMAS}
 WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair", "editorial_context_bind", "editorial_policy_configure", "editorial_custom_create", "editorial_custom_update", "editorial_custom_delete", "editorial_review", "editorial_cut_preview", "editorial_cut_apply", "editorial_cut_undo"}
 
 
@@ -165,6 +166,7 @@ class CreativeToolProvider(ToolProvider):
         self.stories = StoryStore(self.ingredients.home)
         self.series = SeriesStore(self.ingredients.home)
         self.voice = VoiceStore(self.series)
+        self.production = CreativeProductionToolProvider(self.ingredients.home)
 
     @property
     def name(self):
@@ -179,8 +181,8 @@ class CreativeToolProvider(ToolProvider):
             description=(f"{name.removeprefix('creative_').replace('_', ' ').capitalize()} in the current runtime creative library. "
                          "Mutations require the current revision; create requires a unique request_id. "
                          "Use board sources for canonical artifact IDs and versions. No generated images."),
-            parameters=deepcopy(schema), requires_approval=name.split("_", 2)[2] in WRITES,
-            risk_level=RiskLevel.CAUTION if name.split("_", 2)[2] in WRITES else RiskLevel.SAFE)
+            parameters=deepcopy(schema), requires_approval=name.split("_", 2)[2] in WRITES or name in PRODUCTION_SCHEMAS and name not in ("creative_production_list", "creative_production_get"),
+            risk_level=RiskLevel.CAUTION if name.split("_", 2)[2] in WRITES or name in PRODUCTION_SCHEMAS and name not in ("creative_production_list", "creative_production_get") else RiskLevel.SAFE)
             for name, schema in SCHEMAS.items()]
 
     async def invoke(self, tool_name, arguments):
@@ -191,6 +193,8 @@ class CreativeToolProvider(ToolProvider):
             keys(arguments, set(schema["properties"]))
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
+            if tool_name in PRODUCTION_SCHEMAS:
+                return await self.production.invoke(tool_name, arguments)
             _, entity, action = tool_name.split("_", 2)
             store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors, "work": self.works, "story": self.stories, "series": self.series}[entity]
             args = dict(arguments)

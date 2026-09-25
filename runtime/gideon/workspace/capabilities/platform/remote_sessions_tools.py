@@ -45,5 +45,5 @@ class RemoteSessionTools(ToolProvider):
             return ToolResult(success=False, error=str(error))
 
 
-def create_provider():
+def create_provider(config=None):
     return RemoteSessionTools()

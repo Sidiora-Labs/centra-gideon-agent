@@ -95,6 +95,14 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_creative_direction", kind=KIND_SQLITE, path="capabilities/creative/direction.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_integrations", kind=KIND_SQLITE, path="capabilities/platform/integration_apps.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_remote_sessions", kind=KIND_SQLITE, path="capabilities/platform/remote-agent-sessions.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_quotas", kind=KIND_SQLITE, path="capabilities/platform_quotas.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_replication", kind=KIND_SQLITE, path="capabilities/platform/replication.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
+    StateEntry(id="capability_platform_media_shares", kind=KIND_SQLITE, path="capabilities/platform/media_shares.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
+    StateEntry(id="capability_creative_export_records", kind=KIND_SQLITE, path="capabilities/creative/exports.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_creative_export_assets", kind=KIND_TREE, path="capabilities/creative/exports", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_knowledge_video_assets", kind=KIND_TREE, path="capabilities/knowledge/videos", domain=DOMAIN_KNOWLEDGE, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_media_sprites", kind=KIND_SQLITE, path="capabilities/media/sprites.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_inference_host", kind=KIND_JSON_FILE, path="capabilities/platform/inference_host.json", domain=DOMAIN_CONFIG, merge=MERGE_REPLACE_ONLY),

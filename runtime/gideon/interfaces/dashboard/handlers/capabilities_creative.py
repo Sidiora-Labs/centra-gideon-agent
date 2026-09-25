@@ -346,6 +346,16 @@ async def editorial_controls(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    from gideon.interfaces.dashboard.handlers.capabilities_creative_exports import register as register_exports
+    from gideon.interfaces.dashboard.handlers.capabilities_creative_production import register as register_production
+    from gideon.interfaces.dashboard.handlers.capabilities_creative_direction import register as register_direction
+    from gideon.workspace.capabilities.creative.direction import DirectionStore
+    from gideon.workspace.capabilities.creative.exports import ManuscriptExports
+    app['creative_exports_factory'] = lambda: ManuscriptExports(app[STORE].home)
+    app['creative_direction_factory'] = lambda: DirectionStore(app[STORE].home)
+    register_exports(app)
+    register_production(app, app[STORE].home)
+    register_direction(app)
     app[SERIES] = SeriesStore(app[STORE].home)
     app[VOICE] = VoiceStore(app[SERIES])
     app.router.add_get("/api/capabilities/creative/series/{id}/voice", voice)

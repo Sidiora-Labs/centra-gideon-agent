@@ -12,6 +12,8 @@ def register(app):
         module = import_module(f"gideon.interfaces.dashboard.handlers.capabilities_{lane}")
         module.register(app)
     additional = (
+        ('/api/capabilities/knowledge/links/buckets', 'knowledge_links'),
+        ('/api/capabilities/knowledge/vaults', 'knowledge_vaults'),
         ('/api/capabilities/knowledge/videos', 'knowledge_videos'),
         ('/api/capabilities/identity/guarded-recipes', 'identity_guarded_recipes'),
         ('/api/capabilities/wellbeing/privacy/{scope}', 'wellbeing_privacy'),

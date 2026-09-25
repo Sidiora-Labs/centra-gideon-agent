@@ -42,9 +42,34 @@ function show(entry = '/capabilities/platform', origin = baseUrl) {
 }
 
 describe('API explorer over real dashboard HTTP', () => {
+  it('assembles the qualified platform slices over their real mounted HTTP routes', async () => {
+    show()
+    for (const [label, path] of [
+      ['Subscription quota plans', '/api/capabilities/platform/quotas/plans'],
+      ['Remote agent sessions', '/api/capabilities/platform/remote-sessions'],
+      ['Integration applications', '/api/capabilities/platform/integration-apps'],
+      ['Direct peers', '/api/capabilities/platform/peers'],
+      ['Domain replication', '/api/capabilities/platform/replication'],
+      ['Remote media execution', '/api/capabilities/platform/remote-media'],
+      ['Selective media sharing', '/api/capabilities/platform/media-shares'],
+      ['Archive migration', '/api/capabilities/platform/migration'],
+    ]) {
+      expect(screen.getByRole('region', { name: label })).toBeVisible()
+      const response = await fetch(baseUrl + path, { headers: { 'X-Session-Key': 'dashboard:ui' } })
+      expect(response.status, path).toBe(200)
+      if (path !== '/api/capabilities/platform/migration') expect(response.headers.get('cache-control'), path).toBe('no-store')
+    }
+    expect(await screen.findByText('No remote agent connections configured.')).toBeVisible()
+    expect(await screen.findByText('No direct peers configured.')).toBeVisible()
+    expect(await screen.findByText('No unresolved replication conflicts.')).toBeVisible()
+    expect(await screen.findByText('No remote executions recorded.')).toBeVisible()
+    expect(await screen.findByText('No media has been shared.')).toBeVisible()
+    expect(await screen.findByText('No archive imports recorded.')).toBeVisible()
+  })
+
   it('loads registered methods, filters and preserves URL selection', async () => {
     show()
-    expect(within(screen.getByRole('main')).getByRole('status')).toHaveTextContent('Loading')
+    expect(within(screen.getByRole('main')).getByText('Loading API catalog…')).toBeVisible()
     const syntax = await screen.findByRole('button', { name: 'GET /api/prompts/syntax' })
     expect(syntax).toBeVisible()
     expect(screen.getByText(/registered routes; page starts at 1./)).toBeVisible()
@@ -93,11 +118,11 @@ describe('API explorer over real dashboard HTTP', () => {
 
   it('shows real HTTP catalog errors and offers retry', async () => {
     show('/capabilities/platform?offset=-1')
-    expect(await screen.findByRole('alert')).toHaveTextContent('offset')
+    expect(await screen.findByText(/offset must be/)).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Execute read' })).toBeNull()
     const retry = screen.getByRole('button', { name: 'Refresh' })
     fireEvent.click(retry)
-    expect(await screen.findByRole('alert')).toHaveTextContent('offset')
+    expect(await screen.findByText(/offset must be/)).toBeVisible()
     expect(screen.queryByRole('region', { name: 'Declared events' })).toBeNull()
   })
 })

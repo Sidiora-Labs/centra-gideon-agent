@@ -2,7 +2,7 @@
   "name": "gideon-experience",
   "version": "1.0.0",
   "displayName": "Interactive Stories",
-  "description": "Author branching stories, resume durable playthroughs and request source-bound narration.",
+  "description": "Author stories, operate durable world foundations, and compile bounded game exports with downloadable GLB assets.",
   "icon": "BookOpen",
   "author": "Gideon",
   "tags": ["tool", "bundled"],
@@ -11,5 +11,17 @@
     "implementation": "gideon.workspace.capabilities.experience.tools:create_provider",
     "capabilities": ["experience"]
   },
-  "native": true
+  "native": true,
+  "providers": [
+    {
+      "type": "tool",
+      "implementation": "gideon.workspace.capabilities.experience.world_foundations_provider:create_provider",
+      "capabilities": ["experience_foundations_get", "experience_controller_install", "experience_controller_control"]
+    },
+    {
+      "type": "tool",
+      "implementation": "gideon.workspace.capabilities.experience.game_assets_provider:create_provider",
+      "capabilities": ["experience_game_assets_get", "experience_game_assets_compile", "experience_game_assets_publish"]
+    }
+  ]
 }

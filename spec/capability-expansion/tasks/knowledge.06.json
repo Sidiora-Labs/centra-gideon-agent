@@ -1,6 +1,6 @@
 {
   "id": "knowledge.06",
-  "status": "implemented",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "d6df3896",
   "contract": "Daily and weekly source-grounded obligation reviews and user reflections materialize as canonical knowledge notes. Recurring reviews use existing clock triggers, bounded knowledge-write action policy, actual dispatch and ExecutionJournal.",
@@ -42,5 +42,28 @@
     "First gate41runtime passed; fixed three fixture assumptions: metadata is decoded and clock tick is async.",
     "Repair1 actual dispatch succeeded; fixed journal association fixture and paired concurrency race by excluding generated review GUIDs before source scan.",
     "Repair2 passed44runtime and3realHTTPDOM; exact source/runtime/clock/journal evidence retained."
-  ]
+  ],
+  "verification": {
+    "evidence": "/tmp/gideon-knowledge.06-checks-f8us7am7/evidence.json",
+    "status": "locally_qualified",
+    "compile_exit": 0,
+    "runtime_passed": 44,
+    "ui_passed": 3,
+    "production_lines": 404,
+    "test_lines": 434,
+    "rationale": "The retained gate exercises cited obligation discovery, timezone and scan bounds, immutable review snapshots, source conflicts, concurrent idempotency, daily and weekly revisioned schedules, disable and retry behavior, real clock dispatch into canonical notes and ExecutionJournal, native session policy, authenticated HTTP and actual DOM consumers. Current task-specific runtime and primary runtime-test hashes remain identical to the passing evidence. Shared provider, guardrail and UI-test files advanced additively with later knowledge capabilities; current source still registers the review tools through the native knowledge provider and mounts the review handler and console page.",
+    "retained_hashes": {
+      "runtime/gideon/workspace/capabilities/knowledge/reviews.py": "37692b26ea1eabb59273c839e1a6cdcdedc082b96929e521ddcddfb175a4e339",
+      "runtime/gideon/workspace/capabilities/knowledge/review_schedule.py": "d164f339a39acdadd562a2cf92b8e0f7153eedccaca3e66eeb0e04d0bf89a9ff",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_reviews.py": "e2bc2c290098e3ca02e5a1c74edb09c23e2e7b05b8aa90190654f9a10e927916",
+      "apps/console/src/features/capabilities/knowledge/ReviewsPage.tsx": "b3d01ec33b38861cd08cae0e008c1ce145f88d7459fd18e17a3564d47177d6ec",
+      "checks/runtime/capabilities/knowledge/test_reviews.py": "8702056e0a600cf83dcee86ea27188b2e7159d4182891865d7b87476666280f4",
+      "checks/runtime/capabilities/knowledge/reviews_ui_server.py": "5d905774d4f245a4ad5a1f70c30ad04d075164c6d0412584c854a28c86d37037"
+    },
+    "current_integration_hashes": {
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities.py": "a38d698c52e436c1ea56125273083cc91dacd93201d38f30284ecd3ac1f981b7",
+      "apps/console/src/features/capabilities/CapabilitiesSection.tsx": "a6ab93cd52afd54e794d5de3fc4de89d94b7f7a6e990194f45d6a2338d23631a",
+      "runtime/gideon/extensions/apps/native/gideon-personal-knowledge/app.json": "4201f44509c08f16bf998d561d100dc53136fc3eed81f2f68355335fbe8bad5f"
+    }
+  }
 }

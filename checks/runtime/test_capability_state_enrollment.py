@@ -12,6 +12,8 @@ from gideon.workspace.snapshot import snapshot_main, _extra_restore_paths_for_te
 @pytest.mark.parametrize("path,kind", [
     ("capabilities/platform/identity.key", inventory.KIND_TREE),
     ("capabilities/platform/peers.sqlite3", inventory.KIND_SQLITE),
+    ("capabilities/platform/replication.sqlite3", inventory.KIND_SQLITE),
+    ("capabilities/platform/media_shares.sqlite3", inventory.KIND_SQLITE),
 ])
 def test_peer_authority_cannot_be_exported_or_restored_as_domain_data(path, kind):
     entry = inventory.claim_for(path)
@@ -65,3 +67,42 @@ def test_new_media_database_and_listener_settings_survive_snapshot(tmp_path, mon
     restorable = _extra_restore_paths_for_test_paths()
     assert "capabilities/media/sprites.sqlite3" in restorable
     assert "capabilities/platform/inference_host.json" in restorable
+
+
+@pytest.mark.parametrize("relative", [
+    "capabilities/platform/integration_apps.sqlite3",
+    "capabilities/platform/remote-agent-sessions.sqlite3",
+    "capabilities/platform_quotas.sqlite3",
+    "capabilities/platform/replication.sqlite3",
+    "capabilities/platform/media_shares.sqlite3",
+])
+def test_new_platform_state_preserves_committed_wal_in_backup(tmp_path, monkeypatch, relative):
+    home = tmp_path / "allocation"
+    database = home / relative
+    database.parent.mkdir(parents=True)
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    entry = inventory.claim_for(relative)
+    assert entry is not None and entry.kind == inventory.KIND_SQLITE
+    assert entry in inventory.backup_entries()
+    with sqlite3.connect(database) as writer:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("CREATE TABLE receipts (id TEXT PRIMARY KEY, revision INTEGER)")
+        writer.execute("INSERT INTO receipts VALUES (?, ?)", ("retained-operation", 9))
+        writer.commit()
+        assert Path(str(database) + "-wal").stat().st_size > 0
+        assert not inventory.audit_home(home).undeclared_dbs
+        output = tmp_path / "snapshots"
+        assert snapshot_main([str(output)]) == 0
+        archives = list(output.glob("gideon-snapshot-*.tar.gz"))
+        assert len(archives) == 1
+        with tarfile.open(archives[0]) as archive:
+            names = archive.getnames()
+            member = next(name for name in names if name.endswith("/" + relative))
+            restored = tmp_path / "restored.sqlite3"
+            restored.write_bytes(archive.extractfile(member).read())
+            assert not any(name.endswith((relative + "-wal", relative + "-shm")) for name in names)
+        with sqlite3.connect(restored) as reader:
+            assert reader.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert reader.execute("SELECT id,revision FROM receipts").fetchall() == [("retained-operation", 9)]
+        assert writer.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] == 1

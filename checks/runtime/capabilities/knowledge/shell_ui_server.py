@@ -1,0 +1,39 @@
+"""Assembled authenticated capability application for Knowledge shell tests."""
+
+import asyncio
+import json
+import os
+from pathlib import Path
+
+from aiohttp import web
+
+from gideon.core.config.loader import AppConfig
+from gideon.engine.session import ConversationDirectory
+from gideon.interfaces.dashboard.handlers.capabilities import register
+from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, reset_secret_cache, token_auth_middleware
+
+
+async def main():
+    home = Path(os.environ["GIDEON_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
+    reset_secret_cache()
+    state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
+    app = web.Application(middlewares=[token_auth_middleware()])
+    app["state"] = state
+    register(app)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    print(json.dumps({"port": site._server.sockets[0].getsockname()[1], "token": generate_token("knowledge-shell")}), flush=True)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        state.knowledge_store.close()
+        reset_secret_cache()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

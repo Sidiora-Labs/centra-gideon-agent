@@ -7,13 +7,14 @@ import pytest
 
 from gideon.extensions.apps.manifest import AppManifest
 from gideon.extensions.providers.loader import load_factory
-from gideon.extensions.providers.registry import ProviderRegistry
+from gideon.extensions.providers.registry import ProviderRegistry, ToolTypeHandler
 from gideon.integrations.tool_providers import registry
 from gideon.integrations.tool_providers.base import RiskLevel
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.creative.moodboards import BoardStore
 from gideon.workspace.capabilities.creative.store import CatalogError, IngredientStore
-from gideon.workspace.capabilities.creative.tools import CreativeToolProvider, SCHEMAS, create_provider
+from gideon.workspace.capabilities.creative.production_tools import SCHEMAS as PRODUCTION_SCHEMAS
+from gideon.workspace.capabilities.creative.tools import CreativeToolProvider, SCHEMAS, WRITES, create_provider
 
 
 def invoke(provider, operation, **arguments):
@@ -29,40 +30,53 @@ def create(provider, entity='ingredient', **fields):
     return invoke(provider, entity + '_create', payload=payload)
 
 
-def test_manifest_factory_and_actual_tool_registry(tmp_path):
+def test_manifest_factory_and_actual_tool_registry_dispatches_completed_workflows(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[4]
-    manifest = AppManifest.from_json_file(root / 'runtime/gideon/extensions/apps/native/gideon-creative/app.json')
+    monkeypatch.setenv('GIDEON_HOME', str(tmp_path))
+    manifests = [AppManifest.from_json_file(root / 'runtime/gideon/extensions/apps/native' / name / 'app.json')
+                 for name in ('gideon-creative', 'gideon-creative-exports', 'gideon-creative-direction')]
+    manifest = manifests[0]
     extensions = ProviderRegistry()
-    extensions.register(manifest)
+    extensions.register_type_handler('tool', ToolTypeHandler())
+    for item in manifests:
+        extensions.register(item)
     ext = extensions._extensions['gideon-creative']
     factory = load_factory(ext)
     assert factory is create_provider
     assert manifest.native
     assert manifest.provider.type == 'tool'
     assert manifest.provider.capabilities == ['creative']
-    provider = CreativeToolProvider(tmp_path)
-    registry.register_provider(provider)
+    assert all(extensions.enable(item.name) for item in manifests)
     try:
         registered = registry.get_provider('gideon-creative')
-        assert registered is provider
         assert registered.connected
         assert registered.display_name
         record = create(registered)
         assert IngredientStore(tmp_path).get(record['id']) == record
+        work = create(registered, 'work')
+        editorial = invoke(registered, 'work_editorial_get', id=work['id'])
+        assert editorial['work_id'] == work['id']
+        series = create(registered, 'series')
+        assert invoke(registered, 'production_list', series_id=series['id']) == {'items': []}
+        exports = registry.get_provider('gideon-creative-exports')
+        direction = registry.get_provider('gideon-creative-direction')
+        assert json.loads(asyncio.run(exports.invoke('creative_manuscript_exports', {})).output) == {'items': []}
+        assert json.loads(asyncio.run(direction.invoke('creative_direction_projects', {})).output) == {'items': []}
     finally:
-        registry.unregister_provider(provider.name)
-    assert registry.get_provider(provider.name) is None
+        for item in reversed(manifests):
+            extensions.disable(item.name)
+    assert all(registry.get_provider(item.name) is None for item in manifests)
 
 
 def test_tool_definitions_complete_strict_and_approval_bearing(tmp_path):
     provider = CreativeToolProvider(tmp_path)
     definitions = asyncio.run(provider.list_tools())
-    assert len(definitions) == 79
+    assert len(definitions) == len(SCHEMAS)
     assert {definition.name for definition in definitions} == set(SCHEMAS)
     for definition in definitions:
         assert definition.provider == 'gideon-creative'
         assert definition.parameters['additionalProperties'] is False
-        mutates = definition.name.split('_', 2)[2] in {'create', 'update', 'restore', 'merge', 'draft', 'polish_propose', 'polish_promote', 'suggest', 'adopt', 'create_work', 'prepare', 'review', 'continuity_propose', 'continuity_accept', 'voice_configure', 'editorial_run', 'editorial_repair'}
+        mutates = definition.name.split('_', 2)[2] in WRITES or definition.name in PRODUCTION_SCHEMAS and definition.name not in {'creative_production_list', 'creative_production_get'}
         assert definition.requires_approval is mutates
         assert definition.risk_level == (RiskLevel.CAUTION if mutates else RiskLevel.SAFE)
         assert definition.description

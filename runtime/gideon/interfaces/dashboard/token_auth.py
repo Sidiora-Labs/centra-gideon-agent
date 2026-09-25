@@ -298,6 +298,30 @@ _BYPASS_EXACT.add("/api/auth/enroll/complete")
 _BYPASS_EXACT.add("/api/devices/pair/complete")
 _BYPASS_EXACT.add("/pair")
 
+_HANDLER_AUTH_ROUTES = frozenset(
+    {
+        ("POST", "/api/capabilities/platform/peers/proofs/verify"),
+        ("POST", "/api/capabilities/platform/replication/receive"),
+        ("POST", "/api/capabilities/platform/media-shares/receive"),
+        ("POST", "/api/capabilities/platform/remote-media/federation/{action}"),
+        ("POST", "/api/capabilities/experience/world-travel/federation/admit"),
+        ("GET", "/api/capabilities/experience/world-travel/guest/{ticket}"),
+        ("HEAD", "/api/capabilities/experience/world-travel/guest/{ticket}"),
+        ("POST", "/api/capabilities/experience/world-travel/guest/{ticket}/leave"),
+        ("GET", "/api/capabilities/experience/world-travel/guest/{ticket}/host/{tail}"),
+        ("HEAD", "/api/capabilities/experience/world-travel/guest/{ticket}/host/{tail}"),
+    }
+)
+
+
+def _uses_handler_auth(request: web.Request) -> bool:
+    """Whether the resolved route authenticates a peer proof or guest ticket itself."""
+    resource = request.match_info.route.resource
+    return resource is not None and (
+        request.method,
+        resource.canonical,
+    ) in _HANDLER_AUTH_ROUTES
+
 LINK_WINDOW_SECS = 24 * 3600
 MAX_SESSION_TTL_SECS = 365 * 24 * 3600
 
@@ -1003,6 +1027,8 @@ def token_auth_middleware(
             return await handler(request)  # type: ignore[operator]
         if path in _BYPASS_EXACT:
             return await handler(request)  # type: ignore[operator]
+        if _uses_handler_auth(request):
+            return await handler(request)  # type: ignore[operator]
         cookie_name = f"gideon_token_{port}"
         token = request.query.get("token") or ""
         from_cookie = False
@@ -1142,6 +1168,8 @@ def auth_middleware(
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
+            if _uses_handler_auth(request):
+                return await handler(request)  # type: ignore[operator]
 
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
@@ -1185,6 +1213,8 @@ def auth_middleware(
             if any(path.startswith(p) for p in _BYPASS_PREFIXES):
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
+                return await handler(request)  # type: ignore[operator]
+            if _uses_handler_auth(request):
                 return await handler(request)  # type: ignore[operator]
 
             auth_header = request.headers.get("Authorization", "")

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from gideon.workspace.capabilities.communications.store import PeopleStore, person_values
 
-FORMAT = "portos_snapshot_v1"
+FORMAT = "legacy_snapshot_v1"
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 MAX_EXPANDED_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2000

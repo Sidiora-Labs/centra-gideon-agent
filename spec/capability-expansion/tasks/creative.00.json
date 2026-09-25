@@ -1,7 +1,7 @@
 {
   "id": "creative.00",
   "schema_version": 1,
-  "status": "in_progress",
+  "status": "locally_qualified",
   "base_revision": "7a6b5286",
   "requires": [
     "creative.01",
@@ -14,6 +14,7 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/workspace/capabilities/creative/export_tools.py",
     "runtime/gideon/extensions/apps/native/gideon-creative/app.json"
   ],
   "test_files": [
@@ -22,5 +23,10 @@
   "runtime_test_files": [
     "checks/runtime/capabilities/creative/test_tools.py"
   ],
-  "ui_test_files": []
+  "ui_test_files": [],
+  "qualification": {
+    "command": "/tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/creative/test_tools.py -q -k 'manifest_factory_and_actual_tool_registry_dispatches_completed_workflows or tool_definitions_complete_strict_and_approval_bearing'",
+    "result": "2 passed, 12 deselected",
+    "proof": "Actual ProviderRegistry and ToolTypeHandler enable the creative, export and direction manifests; registered providers dispatch authoritative editorial, production, export and direction stores, preserve strict schemas and approval metadata, and unregister cleanly without external inference or generation."
+  }
 }

@@ -1,6 +1,6 @@
 {
   "id": "knowledge.08",
-  "status": "implemented",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "2854d6e1",
   "contract": "Reviewed portable idea-list Markdown maps ordered entries to existing manual collections and fleeting items with a canonical covernote. Opt-in recurring sync reuses the configured owned two-way KnowledgeVault, its global ledger and actual interval scheduler.",
@@ -43,5 +43,30 @@
   "repair_history": [
     "Preflight ratio check rejected520/527before running commands; added actual mode-restoration durable retry fixture.",
     "First syntax/runtime/UI execution passed;534/527changed executable LOC, actual canonical/vault/scheduler sources."
-  ]
+  ],
+  "verification": {
+    "evidence": "/tmp/gideon-knowledge.08-checks-uv4bk1go/evidence.json",
+    "status": "locally_qualified",
+    "compile_exit": 0,
+    "runtime_passed": 45,
+    "ui_passed": 2,
+    "production_lines": 527,
+    "test_lines": 534,
+    "rationale": "The retained gate exercises portable Markdown roundtrip and unsafe-input rejection, reviewed imports with durable identity, real canonical and vault edits, conflict preservation and deletion semantics, owned two-way vault boundaries, interval scheduling and actual clock dispatch into vault files and ExecutionJournal, native session policy, authenticated HTTP and actual DOM consumers. Current task-specific runtime, handler, UI and primary test hashes remain identical to the passing evidence. Shared provider, guardrail and provider-test files advanced additively with later knowledge capabilities; current source still registers idea tools through the native knowledge provider and mounts the idea handler and console page.",
+    "retained_hashes": {
+      "runtime/gideon/workspace/capabilities/knowledge/idea_format.py": "63b28ede2655aa524d574c80a5320594ef653d866d42a09811c31be6e0c9a71d",
+      "runtime/gideon/workspace/capabilities/knowledge/ideas.py": "2aa8d95b19d77350b9d6b73f6d0850fd563a8ee2938c74718b56fef0797516fc",
+      "runtime/gideon/workspace/capabilities/knowledge/idea_schedule.py": "673dd86bb67dcec4a20993f4ee7316e40edd383034f3b570d342c30e014f08d6",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_ideas.py": "28ea0d30f22ce068e4827b30936f9892d674b6ddc4f495bff7a8576431e31c81",
+      "apps/console/src/features/capabilities/knowledge/IdeasPage.tsx": "14ce617d5422a40a94d57c0f98be0361d86802af57563d91d023bbd199d62e02",
+      "checks/runtime/capabilities/knowledge/test_ideas.py": "9c6529e5af3e0fb1b3ef131216ca8d2b4a10d79ec983508dda33e6d149c720fa",
+      "checks/runtime/capabilities/knowledge/ideas_ui_server.py": "821358b980230563bde122baf19e9f7857d7a1a57237d328e495ec48e285148d",
+      "apps/console/src/features/capabilities/knowledge/IdeasPage.test.tsx": "ac7997c7ac6d5d78b6e2d761cce72dd748317d63ae6160010a386b1a3d158092"
+    },
+    "current_integration_hashes": {
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities.py": "a38d698c52e436c1ea56125273083cc91dacd93201d38f30284ecd3ac1f981b7",
+      "apps/console/src/features/capabilities/CapabilitiesSection.tsx": "a6ab93cd52afd54e794d5de3fc4de89d94b7f7a6e990194f45d6a2338d23631a",
+      "runtime/gideon/extensions/apps/native/gideon-personal-knowledge/app.json": "4201f44509c08f16bf998d561d100dc53136fc3eed81f2f68355335fbe8bad5f"
+    }
+  }
 }

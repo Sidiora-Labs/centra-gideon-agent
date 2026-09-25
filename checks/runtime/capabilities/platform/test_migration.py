@@ -141,7 +141,7 @@ def test_more_than_one_snapshot_root_is_rejected():
 @pytest.mark.parametrize("extra,domain", [
     ({"brain/ideas/idea/index.json": b"{}"}, "brain"),
     ({"media/item.bin": b"media"}, "media"),
-    ({"../portos-db.sql": b"select 1"}, "unsafe path"),
+    ({"../legacy-db.sql": b"select 1"}, "unsafe path"),
 ])
 def test_unsupported_domains_and_database_dump_fail_closed(extra, domain):
     with pytest.raises(MigrationError, match=domain):

@@ -1,6 +1,13 @@
 import InferenceHost from './InferenceHost'
 import Insights from './Insights'
 import IntegrationApps from './IntegrationApps'
+import MediaSharing from './MediaSharing'
+import Migration from './Migration'
+import Peers from './Peers'
+import Quotas from './Quotas'
+import RemoteMedia from './RemoteMedia'
+import { RemoteSessions } from './RemoteSessions'
+import Replication from './Replication'
 import Accounting from './Accounting'
 import Composition from './Composition'
 import Forecast from './Forecast'
@@ -75,7 +82,7 @@ export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
     <Comparisons baseUrl={baseUrl} />
     <References baseUrl={baseUrl} />
     <Ownership baseUrl={baseUrl} />
-    <InferenceHost baseUrl={baseUrl} /><IntegrationApps baseUrl={baseUrl} /><DomainReadiness baseUrl={baseUrl} /><Insights baseUrl={baseUrl} /><Accounting baseUrl={baseUrl} /><Composition baseUrl={baseUrl} /><Forecast baseUrl={baseUrl} /><Cadence baseUrl={baseUrl} /><PrScreening baseUrl={baseUrl} /><Maintenance baseUrl={baseUrl} /><Gsd baseUrl={baseUrl} />
+    <InferenceHost baseUrl={baseUrl} /><Quotas baseUrl={baseUrl} /><RemoteSessions baseUrl={baseUrl} /><IntegrationApps baseUrl={baseUrl} /><Peers baseUrl={baseUrl} /><Replication baseUrl={baseUrl} /><RemoteMedia baseUrl={baseUrl} /><MediaSharing baseUrl={baseUrl} /><Migration baseUrl={baseUrl} /><DomainReadiness baseUrl={baseUrl} /><Insights baseUrl={baseUrl} /><Accounting baseUrl={baseUrl} /><Composition baseUrl={baseUrl} /><Forecast baseUrl={baseUrl} /><Cadence baseUrl={baseUrl} /><PrScreening baseUrl={baseUrl} /><Maintenance baseUrl={baseUrl} /><Gsd baseUrl={baseUrl} />
     <p>Live registered HTTP routes and declared app events. Unspecified schemas remain unknown.</p>
     <div className="flex flex-wrap gap-m">
       <label>Filter this page <input aria-label="Filter this page" className="bg-surface-high rounded p-s" value={query} onChange={event => update('q', event.target.value)} /></label>

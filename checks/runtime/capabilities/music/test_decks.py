@@ -13,7 +13,6 @@ from gideon.workspace.capabilities.music.decks import DeckStore
 from gideon.workspace.capabilities.music.deck_layout import roster,compose,MAJORS
 from gideon.workspace.capabilities.music.deck_tools import DeckTools
 from gideon.workspace.capabilities.music.store import DomainError
-from gideon.workspace.capabilities.media.jobs import MediaWorker
 from gideon.interfaces.dashboard.handlers.capabilities_music_decks import register
 
 
@@ -173,6 +172,32 @@ def test_actual_prompt_composition_and_durable_job_submission(tmp_path):
     cancelled=store.jobs.cancel(job['id'],{'state_revision':job['state_revision']})
     assert cancelled['status']=='cancelled'
     assert store.get(item['id'])['completion']['artwork']==0
+
+
+def test_linked_success_adopts_verified_art_and_failed_or_corrupt_output_does_not(tmp_path):
+    store=store_at(tmp_path);item=store.create({'name':'Deck','kind':'playing'});ref=picture(store,'blue')
+    receipt=store.generate(item['id'],{'revision':1,'request_id':'successful','card_keys':['spades-A'],'size':'','controls':{}})
+    job=store.jobs.claim()
+    assert job['id']==receipt['jobs'][0]['job_id'] and job['status']=='running'
+    finished=store.jobs.finish(job['id'],result={'artifact_id':ref['slug'],'version':ref['version']})
+    assert finished['status']=='succeeded'
+    item=store.adopt(item['id'],'spades-A',{'revision':1,'job_id':job['id']})
+    assert item['revision']==2 and item['cards'][0]['artifact_ref']==ref
+    assert store.image(ref).getpixel((10,10))==(0,0,255,255)
+    assert store_at(tmp_path).get(item['id'])==item
+
+    failed_receipt=store.generate(item['id'],{'revision':2,'request_id':'failed','card_keys':['hearts-A'],'size':'','controls':{}})
+    failed_job=store.jobs.claim();store.jobs.finish(failed_job['id'],error='Provider rejected the request')
+    assert failed_job['id']==failed_receipt['jobs'][0]['job_id']
+    with pytest.raises(DomainError) as error:store.adopt(item['id'],'hearts-A',{'revision':2,'job_id':failed_job['id']})
+    assert error.value.code=='job_incomplete'
+
+    bad=store.artifacts.create_binary(name='Invalid image',data=b'not an image',mime='image/png',kind='image',source='import')
+    corrupt_receipt=store.generate(item['id'],{'revision':2,'request_id':'corrupt','card_keys':['diamonds-A'],'size':'','controls':{}})
+    corrupt_job=store.jobs.claim();store.jobs.finish(corrupt_job['id'],result={'artifact_id':bad.slug,'version':bad.version})
+    assert corrupt_job['id']==corrupt_receipt['jobs'][0]['job_id']
+    with pytest.raises(DomainError):store.adopt(item['id'],'diamonds-A',{'revision':2,'job_id':corrupt_job['id']})
+    assert store.get(item['id'])==item
 
 
 def test_batch_validation_before_any_job(tmp_path):

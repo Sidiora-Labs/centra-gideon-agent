@@ -41,7 +41,7 @@ def extended_sources(home):
             unavailable.append('operations')
     try:
         from gideon.workspace.capabilities.platform.peers import PeerStore
-        peer_root = home / 'capabilities/platform/peers'
+        peer_root = home / 'capabilities/platform'
         if not (peer_root / 'peers.sqlite3').is_file() or not (peer_root / 'identity.key').is_file():
             raise ValueError('Peer identity is not configured')
         snapshot = PeerStore(home).snapshot()
@@ -49,7 +49,7 @@ def extended_sources(home):
             probe = row.get('last_probe')
             status = 'disabled' if not row['enabled'] else 'configured'
             if probe:
-                status += '; probe ' + ('succeeded' if probe['ok'] else 'failed') + ' at ' + str(probe['at'])
+                status += '; probe succeeded at ' + str(probe)
             sources.append(record('peers',row['id'],row['label'],status,'#/capabilities/platform'))
     except (ImportError, OSError, ValueError, KeyError, TypeError, sqlite3.Error):
         unavailable.append('peers')

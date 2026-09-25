@@ -20,6 +20,23 @@ async def api_catalog(request: web.Request) -> web.Response:
 def register(app: web.Application) -> None:
     bind_application(app)
     app.router.add_get(CATALOG_PATH, api_catalog, name="capabilities-platform-catalog")
+    from gideon.interfaces.dashboard.handlers.capabilities_integration_apps import register as register_integration_apps
+    from gideon.interfaces.dashboard.handlers.capabilities_peers import register as register_peers
+    from gideon.interfaces.dashboard.handlers.capabilities_platform_migration import register as register_migration
+    from gideon.interfaces.dashboard.handlers.capabilities_platform_quotas import register as register_quotas
+    from gideon.interfaces.dashboard.handlers.capabilities_platform_remote_sessions import register as register_remote_sessions
+    from gideon.interfaces.dashboard.handlers.capabilities_remote_media import register as register_remote_media
+    from gideon.interfaces.dashboard.handlers.capabilities_replication import register as register_replication
+    from gideon.workspace.capabilities.platform.media_shares_http import register_media_shares
+    from gideon.workspace.capabilities.platform.remote_media import create_remote_media
     from gideon.workspace.capabilities.platform.domain_alerts_http import register as register_domains
 
+    register_quotas(app)
+    register_remote_sessions(app)
+    register_integration_apps(app)
+    register_peers(app)
+    register_replication(app)
+    register_media_shares(app)
+    register_remote_media(app, create_remote_media())
+    register_migration(app)
     register_domains(app)

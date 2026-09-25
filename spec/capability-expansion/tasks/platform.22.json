@@ -15,7 +15,7 @@
     "Disabled knowledge.records and creative.catalog send policies refuse export before canonical data is read."
   ],
   "limitations": [
-    "Platform.22 remains in progress/partial: this slice qualifies workspace.records, knowledge.records and creative.catalog, not every PortOS category or every related binary/file/revision substore.",
+    "Platform.22 remains in progress/partial: this slice qualifies workspace.records, knowledge.records and creative.catalog, not every required domain or every related binary/file/revision substore.",
     "Unsupported original categories are brain, memory, goals, character, digitalTwin, meatspace, universe outside creative.catalog, pipeline, mediaCollections, videoHistory, storyBuilder, usage, fableLoom, artists, albums, tracks, creativeDirectorProjects, writersRoomFolders, writersRoomExercises, musicVideoProjects, commissionFeedback, creativeCommissions, decks, and catalog outside the mapped creative catalog; authors, moodBoards and writersRoomWorks are covered only by the canonical creative.catalog rows declared here.",
     "knowledge.records excludes uploaded source files and all derived embeddings, chunks, FTS/index state, entity extraction and watched-source cursors; creative.catalog excludes draft artifacts, request ledgers, revision history, suggestions, polish proposals, continuity and voice projections.",
     "Local loopback proves two-home signed transport; no externally provisioned peer or public certificate is claimed."

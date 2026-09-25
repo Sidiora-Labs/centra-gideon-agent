@@ -32,6 +32,20 @@
     "resume_console_types": {
       "exit_code": 0,
       "log": "/tmp/gideon-expansion-20260925/oss-resume-console-types-repair1.log"
+    },
+    "expanded_full_application": {
+      "command": "node checks/capabilities/full_browser.mjs",
+      "exit_code": 0,
+      "evidence": "/tmp/gideon-full-console-browser-9Hcrzc/evidence.json",
+      "log": "/tmp/gideon-expansion-20260925/oss-full-integrated-wave-repair2.log"
+    },
+    "expanded_console_types": {
+      "command": "npm run typecheck",
+      "cwd": "apps/console",
+      "exit_code": 0,
+      "diagnostics": [],
+      "reported_by": "hosted_wellbeing_r2",
+      "scope": "Full source console and service-worker configurations after CreativeDirection result narrowing"
     }
   },
   "acceptance_coverage": [

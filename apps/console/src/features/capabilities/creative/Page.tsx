@@ -7,6 +7,9 @@ import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import Moodboards from './Moodboards'
+import ManuscriptExports from './ManuscriptExports'
+import Production from './Production'
+import CreativeDirection from './CreativeDirection'
 
 export type Ingredient = {
   id: string; type: string; title: string; body: string; tags: string[]; revision: number
@@ -137,10 +140,22 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
   </main>
 }
 
+function ProductionView({ apiRoot }: { apiRoot?: string }) {
+  const seriesRoot = apiRoot?.replace(/ingredients$/, 'series') || '/api/capabilities/creative/series'
+  const id = new URLSearchParams(location.hash.split('?')[1]).get('series') || ''
+  const [revision, setRevision] = useState<number>()
+  const [error, setError] = useState('')
+  useEffect(() => { let alive = true; setRevision(undefined); setError(''); if (id) requestJson<{ revision: number }>(`${seriesRoot}/${id}`).then(row => { if (alive) setRevision(row.revision) }).catch(reason => { if (alive) setError(message(reason)) }); return () => { alive = false } }, [id, seriesRoot])
+  if (!id) return <p className="p-4">Choose a series before opening production.</p>
+  if (error) return <p role="alert" className="p-4">{error}</p>
+  return revision ? <Production id={id} revision={revision} apiRoot={seriesRoot} /> : <p role="status" className="p-4">Loading series production…</p>
+}
+
 export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
   const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') || 'ingredients'
   const [boards, setBoards] = useState(readView)
   useEffect(() => { const changed = () => setBoards(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
-  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a><a href="#/capabilities/creative?view=authors">Authors</a><a href="#/capabilities/creative?view=works">Writing</a><a href="#/capabilities/creative?view=stories">Stories</a><a href="#/capabilities/creative?view=series">Series</a></nav>
-    {boards === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : boards === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : boards === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : boards === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
+  const selectedSeries = new URLSearchParams(location.hash.split('?')[1]).get('series')
+  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a><a href="#/capabilities/creative?view=authors">Authors</a><a href="#/capabilities/creative?view=works">Writing</a><a href="#/capabilities/creative?view=stories">Stories</a><a href="#/capabilities/creative?view=series">Series</a><a href={`#/capabilities/creative?view=production${selectedSeries ? `&series=${encodeURIComponent(selectedSeries)}` : ''}`}>Production</a><a href="#/capabilities/creative?view=direction">Direction</a><a href="#/capabilities/creative?view=exports">Exports</a></nav>
+    {boards === 'direction' ? <CreativeDirection apiRoot={apiRoot?.replace(/ingredients$/, 'direction')} /> : boards === 'production' ? <ProductionView apiRoot={apiRoot} /> : boards === 'exports' ? <ManuscriptExports apiRoot={apiRoot?.replace(/ingredients$/, 'exports')} /> : boards === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : boards === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : boards === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : boards === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
 }

@@ -57,8 +57,14 @@ def register(app):
     register_avatars(app, app[STORE])
     from gideon.workspace.capabilities.experience.native_calls_http import register_native_calls
     register_native_calls(app, app[STORE])
+    from gideon.workspace.capabilities.experience.native_duplex_http import register_native_duplex
+    register_native_duplex(app, app[STORE])
     from gideon.workspace.capabilities.experience.world_engine_http import register_world_engine
     register_world_engine(app, app[STORE])
+    from gideon.workspace.capabilities.experience.world_foundations_http import register_world_foundations
+    register_world_foundations(app, app[STORE])
+    from gideon.workspace.capabilities.experience.game_assets_http import register_game_assets
+    register_game_assets(app, app[STORE])
     from gideon.workspace.capabilities.experience.worlds_http import register_worlds
     register_worlds(app, app[STORE])
     from gideon.workspace.capabilities.experience.world_travel_http import register_world_travel

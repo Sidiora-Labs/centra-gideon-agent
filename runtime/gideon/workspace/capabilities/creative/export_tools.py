@@ -25,4 +25,6 @@ class ExportTools(ToolProvider):
         except ExportError as error:return ToolResult(success=False,error=str(error),metadata={'status':error.status,'code':error.code})
 
 
-def create_provider(**kwargs):return ExportTools()
+def create_provider(config=None):
+    if config not in (None, {}):raise ValueError('Creative export provider does not accept configuration')
+    return ExportTools()

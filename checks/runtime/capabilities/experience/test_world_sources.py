@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from gideon.cognition.memory import MemoryJournal
 from gideon.cognition.vector_memory import SemanticArchive
 from gideon.core.config.loader import AppConfig
@@ -12,8 +14,21 @@ from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.integrations.action_providers.services import ActionServices, get_action_services, set_action_services
 from gideon.workspace.capabilities.experience.world_sources import extended_sources
 from gideon.workspace.capabilities.experience import Conflict
+from gideon.workspace.capabilities.platform.peers import PeerStore
 from gideon.workspace.capabilities.workspace.processes import get_registry, close_registry
 from test_worlds import world
+
+
+def peer_record(identity, endpoint, *, enabled=True, send=(), receive=()):
+    return {
+        'label': 'Remote world',
+        'endpoint': endpoint,
+        'public_key': identity['public_key'],
+        'enabled': enabled,
+        'send_categories': list(send),
+        'receive_categories': list(receive),
+        'revision': 0,
+    }
 
 
 @pytest.fixture
@@ -68,6 +83,62 @@ def test_missing_sources_do_not_create_ownership_or_memory(tmp_path):
         assert list(tmp_path.rglob('*')) == before
     finally:
         set_action_services(prior)
+
+
+@pytest.mark.asyncio
+async def test_real_peer_projection_reports_policy_and_authenticated_probe_without_secrets(tmp_path):
+    scope = 'experience.world_guest'
+    local_home = tmp_path / 'local'
+    remote_home = tmp_path / 'remote'
+    disabled_home = tmp_path / 'disabled'
+    local = PeerStore(local_home)
+    remote = PeerStore(remote_home)
+    local_identity = local.snapshot()['self']
+    remote_identity = remote.snapshot()['self']
+
+    async def verify(request):
+        envelope = await request.json()
+        verified = remote.verify_proof(envelope['proof'])
+        assert verified['id'] == local_identity['peer_id']
+        assert envelope['payload'] == {'probe': True}
+        return web.json_response({'verified': True})
+
+    app = web.Application()
+    app.router.add_post('/probe', verify)
+    async with TestServer(app) as server:
+        local.put(remote_identity['peer_id'], peer_record(remote_identity, str(server.make_url('/')), send=(scope,)))
+        remote.put(local_identity['peer_id'], peer_record(local_identity, 'https://local.invalid', receive=(scope,)))
+        assert await local.post_signed(remote_identity['peer_id'], scope, '/probe', {'probe': True}) == {'verified': True}
+
+    disabled_identity = PeerStore(disabled_home).snapshot()['self']
+    local.put(disabled_identity['peer_id'], peer_record(disabled_identity, 'https://disabled.invalid', enabled=False, send=(scope,)))
+    peer_snapshot = local.snapshot()
+    probed = local.get(remote_identity['peer_id'])
+    assert isinstance(probed['last_probe'], str)
+    assert probed['last_probe']
+
+    projection = extended_sources(local_home)
+    rows = {row['id']: row for row in projection['sources'] if row['kind'] == 'peers'}
+    assert 'peers' not in projection['unavailable']
+    assert rows[remote_identity['peer_id']]['title'] == 'Remote world'
+    assert rows[remote_identity['peer_id']]['status'] == 'configured; probe succeeded at ' + probed['last_probe']
+    assert rows[disabled_identity['peer_id']]['status'] == 'disabled'
+    assert rows[remote_identity['peer_id']]['url'] == '#/capabilities/platform'
+
+    serialized = json.dumps(projection)
+    identity_document = json.loads(local.key_path.read_text())
+    assert identity_document['private_key'] not in serialized
+    assert local_identity['public_key'] not in serialized
+    assert remote_identity['public_key'] not in serialized
+    assert 'signature' not in serialized
+    assert 'nonce' not in serialized
+    assert peer_snapshot['peers'][0]['last_probe'] == probed['last_probe']
+
+    wrong_home = tmp_path / 'wrong-home'
+    isolated = extended_sources(wrong_home)
+    assert 'peers' in isolated['unavailable']
+    assert not any(row['kind'] == 'peers' for row in isolated['sources'])
+    assert not wrong_home.exists()
 
 
 @pytest.mark.asyncio

@@ -46,8 +46,10 @@ afterAll(() => {
 })
 
 function fill(keyValue = key) {
+  const bytes = new Uint8Array(encrypted.byteLength)
+  bytes.set(encrypted)
   fireEvent.change(screen.getByLabelText('Signal account label'), { target: { value: 'owned-signal' } })
-  fireEvent.change(screen.getByLabelText('Encrypted Signal SQLite file'), { target: { files: [new File([encrypted], 'signal.sqlite')] } })
+  fireEvent.change(screen.getByLabelText('Encrypted Signal SQLite file'), { target: { files: [new File([bytes.buffer], 'signal.sqlite')] } })
   fireEvent.change(screen.getByLabelText('Transient SQLCipher key'), { target: { value: keyValue } })
 }
 

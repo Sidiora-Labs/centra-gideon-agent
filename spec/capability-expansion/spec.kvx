@@ -71,28 +71,28 @@ implementation_status = "implemented_native_qualification_pending"
 title = "Provider terminal launch and image attachments"
 wave = 8
 owner_lane = "workspace"
-status = "pending"
+status = "done"
 requires = ["workspace.07"]
 verify_cmd = "python3 tooling/capability_workflow.py verify workspace.08"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.workspace.09]
 title = "Managed process logs"
 wave = 9
 owner_lane = "workspace"
-status = "pending"
+status = "done"
 requires = ["workspace.08"]
 verify_cmd = "python3 tooling/capability_workflow.py verify workspace.09"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.workspace.10]
 title = "Attributed storage diagnosis"
 wave = 10
 owner_lane = "workspace"
-status = "pending"
+status = "done"
 requires = ["workspace.09"]
 verify_cmd = "python3 tooling/capability_workflow.py verify workspace.10"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.knowledge.01]
 title = "Anniversary resurfacing"
@@ -143,10 +143,10 @@ implementation_status = "locally_qualified"
 title = "Obligation digests and weekly review"
 wave = 6
 owner_lane = "knowledge"
-status = "in_progress"
+status = "done"
 requires = ["knowledge.05"]
 verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.06"
-implementation_status = "implemented"
+implementation_status = "locally_qualified"
 
 [task.knowledge.07]
 title = "Date-keyed journals with activity drafts"
@@ -161,37 +161,37 @@ implementation_status = "locally_qualified"
 title = "Idea-list vault exchange"
 wave = 8
 owner_lane = "knowledge"
-status = "pending"
+status = "done"
 requires = ["knowledge.07"]
 verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.08"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.knowledge.09]
 title = "Video transcript and source ingestion"
 wave = 9
 owner_lane = "knowledge"
-status = "pending"
+status = "done"
 requires = ["knowledge.08"]
 verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.09"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.knowledge.10]
 title = "Link collections and repository study"
 wave = 10
 owner_lane = "knowledge"
-status = "pending"
+status = "done"
 requires = ["knowledge.09"]
 verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.10"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.knowledge.11]
 title = "External vault registration and editing"
 wave = 11
 owner_lane = "knowledge"
-status = "pending"
+status = "done"
 requires = ["knowledge.10"]
 verify_cmd = "python3 tooling/capability_workflow.py verify knowledge.11"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.knowledge.12]
 title = "RSVP reader"
@@ -377,28 +377,28 @@ implementation_status = "locally_qualified"
 title = "Privacy subjects consent and encrypted facts"
 wave = 12
 owner_lane = "wellbeing"
-status = "pending"
+status = "done"
 requires = ["wellbeing.11"]
 verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.12"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.wellbeing.13]
 title = "Organization holdings and change propagation"
 wave = 13
 owner_lane = "wellbeing"
-status = "pending"
+status = "done"
 requires = ["wellbeing.12"]
 verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.13"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.wellbeing.14]
 title = "Broker case lifecycle and verification"
 wave = 14
 owner_lane = "wellbeing"
-status = "pending"
+status = "done"
 requires = ["wellbeing.13"]
 verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.14"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.communications.01]
 title = "People and relationship touchpoints"
@@ -512,10 +512,10 @@ implementation_status = "in_progress"
 title = "Human activity timeline"
 wave = 13
 owner_lane = "communications"
-status = "pending"
+status = "in_progress"
 requires = ["communications.12"]
 verify_cmd = "python3 tooling/capability_workflow.py verify communications.13"
-implementation_status = "not_started"
+implementation_status = "in_progress"
 
 [task.media.01]
 title = "Editable sketches and original-preserving image overlays"
@@ -620,37 +620,37 @@ implementation_status = "locally_qualified"
 title = "Continuous scene episodes"
 wave = 12
 owner_lane = "media"
-status = "pending"
+status = "done"
 requires = ["media.11"]
 verify_cmd = "python3 tooling/capability_workflow.py verify media.12"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.media.13]
 title = "Sprite generation and atlas compilation"
 wave = 13
 owner_lane = "media"
-status = "pending"
+status = "done"
 requires = ["media.12"]
 verify_cmd = "python3 tooling/capability_workflow.py verify media.13"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.media.14]
 title = "Code animation workspace"
 wave = 14
 owner_lane = "media"
-status = "pending"
+status = "done"
 requires = ["media.13"]
 verify_cmd = "python3 tooling/capability_workflow.py verify media.14"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.media.15]
 title = "Media source downloader"
 wave = 15
 owner_lane = "media"
-status = "pending"
+status = "done"
 requires = ["media.14"]
 verify_cmd = "python3 tooling/capability_workflow.py verify media.15"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.01]
 title = "Creative ingredient catalog and revisions"
@@ -746,10 +746,10 @@ implementation_status = "implemented_inference_unqualified"
 title = "Voice fingerprint diagnostics"
 wave = 11
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.10"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.11"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.12]
 title = "Editorial checks and anchored reversible repairs"
@@ -764,28 +764,28 @@ implementation_status = "not_started"
 title = "Bounded series production workflow"
 wave = 13
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.12"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.13"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.14]
 title = "EPUB and print manuscript export"
 wave = 14
 owner_lane = "creative"
-status = "pending"
-requires = ["creative.13"]
+status = "done"
+requires = ["creative.06"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.14"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.15]
 title = "Creative direction and production plans"
 wave = 15
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.14"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.15"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.16]
 title = "Recurring commissions and feedback"
@@ -884,7 +884,7 @@ owner_lane = "music"
 status = "in_progress"
 requires = ["music.09"]
 verify_cmd = "python3 tooling/capability_workflow.py verify music.10"
-implementation_status = "locally_qualified_core_breadth_pending"
+implementation_status = "locally_qualified_core"
 
 [task.experience.01]
 title = "Interactive story graphs and durable player state"
@@ -926,10 +926,10 @@ implementation_status = "locally_checked_external_pending"
 title = "Fullscreen ambient display"
 wave = 5
 owner_lane = "experience"
-status = "in_progress"
+status = "done"
 requires = ["experience.04"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.05"
-implementation_status = "locally_checked_browser_pending"
+implementation_status = "locally_qualified"
 
 [task.experience.06]
 title = "Animated avatar driven by actual state"
@@ -962,37 +962,37 @@ implementation_status = "locally_checked_browser_pending"
 title = "World projection presence and editing"
 wave = 9
 owner_lane = "experience"
-status = "pending"
+status = "in_progress"
 requires = ["experience.08"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.09"
-implementation_status = "not_started"
+implementation_status = "core_locally_checked_source_continuation_pending"
 
 [task.experience.10]
 title = "Scoped world guests and travel"
 wave = 10
 owner_lane = "experience"
-status = "pending"
+status = "done"
 requires = ["experience.09"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.10"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.experience.11]
 title = "World foundations and controller lifecycle"
 wave = 11
 owner_lane = "experience"
-status = "pending"
+status = "done"
 requires = ["experience.10"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.11"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.experience.12]
 title = "Game asset binding and compilation"
 wave = 12
 owner_lane = "experience"
-status = "pending"
+status = "done"
 requires = ["experience.11"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.12"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.experience.13]
 title = "Moltworld adapter"
@@ -1061,10 +1061,10 @@ implementation_status = "locally_qualified"
 title = "Private inference host adapter"
 wave = 6
 owner_lane = "platform"
-status = "pending"
+status = "in_progress"
 requires = ["platform.05"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.06"
-implementation_status = "not_started"
+implementation_status = "locally_qualified_external_pending"
 
 [task.platform.07]
 title = "Reference repository review cursors"
@@ -1079,19 +1079,19 @@ implementation_status = "locally_qualified"
 title = "Remote agent session bridge"
 wave = 8
 owner_lane = "platform"
-status = "pending"
+status = "done"
 requires = ["platform.07"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.08"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.09]
 title = "Subscription quota plans and reservations"
 wave = 9
 owner_lane = "platform"
-status = "pending"
+status = "done"
 requires = ["platform.08"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.09"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.10]
 title = "Persistent feature ownership"
@@ -1169,73 +1169,73 @@ implementation_status = "locally_qualified_external_pending"
 title = "Personal insight and scorecard projections"
 wave = 18
 owner_lane = "platform"
-status = "pending"
+status = "done"
 requires = ["platform.17"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.18"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.19]
 title = "Domain alerts and readiness inventory"
 wave = 19
 owner_lane = "platform"
-status = "pending"
+status = "done"
 requires = ["platform.18"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.19"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.20]
 title = "Jira Datadog and repository management apps"
 wave = 20
 owner_lane = "platform"
-status = "pending"
+status = "in_progress"
 requires = ["platform.19"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.20"
-implementation_status = "not_started"
+implementation_status = "locally_qualified_external_pending"
 
 [task.platform.21]
 title = "Direct peer identity and category policy"
 wave = 21
 owner_lane = "platform"
-status = "pending"
+status = "done"
 requires = ["platform.20"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.21"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.22]
 title = "Domain replication and conflict extensions"
 wave = 22
 owner_lane = "platform"
-status = "pending"
+status = "in_progress"
 requires = ["platform.21"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.22"
-implementation_status = "not_started"
+implementation_status = "in_progress_partial"
 
 [task.platform.23]
 title = "Remote media execution"
 wave = 23
 owner_lane = "platform"
-status = "pending"
-requires = ["platform.22"]
+status = "done"
+requires = ["platform.21", "media.04"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.23"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.24]
 title = "Selective media sharing"
 wave = 24
 owner_lane = "platform"
-status = "pending"
-requires = ["platform.23"]
+status = "done"
+requires = ["platform.21", "media.02"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.24"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.platform.25]
 title = "New-domain durability and migration"
 wave = 25
 owner_lane = "platform"
-status = "pending"
+status = "in_progress"
 requires = ["platform.24"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.25"
-implementation_status = "not_started"
+implementation_status = "locally_qualified_partial"
 
 [task.identity.00]
 title = "Native agent tools for the completed capability services"
@@ -1277,10 +1277,10 @@ implementation_status = "locally_qualified"
 title = "Native agent tools for the completed capability services"
 wave = 3
 owner_lane = "creative"
-status = "in_progress"
+status = "done"
 requires = ["creative.01", "creative.02"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.00"
-implementation_status = "in_progress"
+implementation_status = "locally_qualified"
 
 [task.experience.00]
 title = "Native agent tools for the completed capability services"
@@ -1349,52 +1349,88 @@ implementation_status = "locally_qualified"
 title = "Guarded cross-provider recipe execution"
 wave = 12
 owner_lane = "identity"
-status = "pending"
+status = "done"
 requires = ["identity.08"]
 verify_cmd = "python3 tooling/capability_workflow.py verify identity.12"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.experience.15]
 title = "Native duplex audio and paired desktop execution"
 wave = 15
 owner_lane = "experience"
-status = "pending"
+status = "done"
 requires = ["experience.07"]
 verify_cmd = "python3 tooling/capability_workflow.py verify experience.15"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.music.11]
 title = "Card sample analysis prompt generation and universe casting"
 wave = 11
 owner_lane = "music"
-status = "pending"
+status = "in_progress"
 requires = ["music.10", "creative.04"]
 verify_cmd = "python3 tooling/capability_workflow.py verify music.11"
-implementation_status = "not_started"
+implementation_status = "locally_qualified_external_unqualified"
 
 [task.creative.17]
 title = "Editorial registry prose checks and anchored repair"
 wave = 12
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.11"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.17"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.18]
 title = "Editorial context families and actual model checks"
 wave = 12
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.17"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.18"
-implementation_status = "not_started"
+implementation_status = "locally_qualified"
 
 [task.creative.19]
 title = "Editorial overrides judges panels ranking and cuts"
 wave = 12
 owner_lane = "creative"
-status = "pending"
+status = "done"
 requires = ["creative.18"]
 verify_cmd = "python3 tooling/capability_workflow.py verify creative.19"
+implementation_status = "locally_qualified"
+
+[task.communications.14]
+title = "Microsoft Teams conversation history integration"
+wave = 14
+owner_lane = "communications"
+status = "done"
+requires = ["communications.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.14"
+implementation_status = "locally_qualified"
+
+[task.communications.15]
+title = "Encrypted Signal archive acquisition"
+wave = 15
+owner_lane = "communications"
+status = "done"
+requires = ["communications.05"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.15"
+implementation_status = "locally_qualified"
+
+[task.communications.16]
+title = "Complete calendar recurrence and exceptions"
+wave = 16
+owner_lane = "communications"
+status = "done"
+requires = ["communications.08"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.16"
+implementation_status = "locally_qualified"
+
+[task.communications.17]
+title = "Approved outbound email and verification linkage"
+wave = 17
+owner_lane = "communications"
+status = "pending"
+requires = ["communications.04"]
+verify_cmd = "python3 tooling/capability_workflow.py verify communications.17"
 implementation_status = "not_started"
