@@ -74,6 +74,13 @@ CONTRACTS.update({
 })
 
 
+CONTRACTS.update({
+    "identity_continuity_status": ({}, [], "Read heartbeat pause policy and canonical continuity slots; provider readiness remains unknown", False),
+    "identity_continuity_configure": ({"heartbeat_paused": {"type": "boolean"}, "expected_revision": {"type": "integer", "minimum": 0}, "request_id": IDENTIFIER}, ["heartbeat_paused", "expected_revision", "request_id"], "Pause or resume scheduled heartbeat turns only", True),
+    "identity_continuity_append_anchor": ({"slot": {"enum": ["persona", "self_notes"]}, "text": TEXT}, ["slot", "text"], "Append to a bounded existing continuity slot without resurrecting human tombstones", True),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},
