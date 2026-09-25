@@ -35,6 +35,24 @@ CONTRACTS = {
 }
 
 
+RULE = {"type": "object", "additionalProperties": False,
+        "properties": {"type": {"enum": ["equals", "contains", "not_contains"]}, "value": TEXT, "case_sensitive": {"type": "boolean"}},
+        "required": ["type", "value"]}
+CASE = {"id": IDENTIFIER, "request_id": IDENTIFIER, "expected_revision": {"type": "integer", "minimum": 0}, "prompt": TEXT,
+        "source_ids": {"type": "array", "items": IDENTIFIER, "minItems": 1, "maxItems": 10, "uniqueItems": True},
+        "rules": {"type": "array", "items": RULE, "minItems": 1, "maxItems": 20},
+        "category": {"enum": ["behavioral", "values", "boundary", "conversation"]}}
+CONTRACTS.update({
+    "identity_fidelity_list_cases": ({}, [], "List source-linked literal fidelity cases", False),
+    "identity_fidelity_get_case": ({"id": IDENTIFIER}, ["id"], "Read an accessible fidelity case", False),
+    "identity_fidelity_save_case": (CASE, ["prompt", "source_ids", "rules"], "Save explicit literal expectations against human identity sources", True),
+    "identity_fidelity_list_runs": ({}, [], "List accessible recorded evaluations with honest provenance", False),
+    "identity_fidelity_get_run": ({"id": IDENTIFIER}, ["id"], "Read an accessible evaluation and rule results", False),
+    "identity_fidelity_observe": ({"case_id": IDENTIFIER, "answer": TEXT, "request_id": IDENTIFIER}, ["case_id", "answer", "request_id"], "Score a supplied observation; does not establish provider execution", True),
+    "identity_fidelity_run": ({"case_id": IDENTIFIER, "request_id": IDENTIFIER}, ["case_id", "request_id"], "Run the configured model against source-linked literal expectations", True),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},

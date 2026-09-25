@@ -5,11 +5,18 @@
   "description": "Author life stories, preserve follow-up chains, and manage human identity context.",
   "icon": "UserRound",
   "author": "Gideon",
-  "tags": ["tool", "bundled"],
+  "tags": [
+    "tool",
+    "bundled"
+  ],
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.identity.tools:create_provider",
-    "capabilities": ["stories", "human_identity"]
+    "capabilities": [
+      "stories",
+      "human_identity",
+      "literal_fidelity"
+    ]
   },
   "native": true
 }
