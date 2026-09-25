@@ -15,7 +15,8 @@
     "capabilities": [
       "workspace_contexts",
       "managed_processes",
-      "port_reservations"
+      "port_reservations",
+      "project_discovery"
     ]
   },
   "native": true

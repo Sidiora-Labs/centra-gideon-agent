@@ -14,6 +14,11 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_projects', 'List canonical projects in allowed workspace roots.', {}, [], False),
+            ('workspace_project_detect', 'Read bounded project metadata without executing scripts.', {'workspace':{'type':'string'}}, ['workspace'], False),
+            ('workspace_project_templates', 'List local runnable templates and interpreter availability.', {}, [], False),
+            ('workspace_project_register', 'Register an existing workspace in the canonical project store.', {key:{'type':'string'} for key in ('name','workspace','request_id')}, ['name','workspace','request_id'], True),
+            ('workspace_project_scaffold', 'Create a new local service from a fixed template without overwriting files.', {key:{'type':'string'} for key in ('name','parent','directory','template','request_id')}, ['name','parent','directory','template','request_id'], True),
             ('workspace_ports', 'List durable loopback port reservation records.', {}, [], False),
             ('workspace_port_inventory', 'Inspect availability within the configured port allocation.', {}, [], False),
             ('workspace_port_reserve', 'Hold an available loopback port for a project until explicitly released.', {'project_id':{'type':'string'},'request_id':{'type':'string'},'port':{'type':'integer'}}, ['project_id','request_id'], True),
@@ -48,7 +53,20 @@ class WorkspaceToolProvider(ToolProvider):
                 expected = str if schema['properties'][key]['type'] == 'string' else int
                 if type(value) is not expected:
                     raise ValueError('Invalid argument type')
-            if tool_name.startswith('workspace_port'):
+            if tool_name.startswith('workspace_project'):
+                from .projects import ProjectService
+                projects = ProjectService(root, allowed_roots=roots)
+                if tool_name == 'workspace_projects':
+                    result = projects.list()
+                elif tool_name == 'workspace_project_templates':
+                    result = projects.templates()
+                elif tool_name == 'workspace_project_detect':
+                    result = projects.detect(arguments['workspace'])
+                elif tool_name == 'workspace_project_register':
+                    result = projects.register(arguments)
+                else:
+                    result = projects.scaffold(arguments)
+            elif tool_name.startswith('workspace_port'):
                 from .ports import get_port_registry
                 ports = get_port_registry(root)
                 if tool_name == 'workspace_ports':

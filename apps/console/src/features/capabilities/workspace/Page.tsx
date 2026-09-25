@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Processes from './Processes'
 import Ports from './Ports'
+import Projects from './Projects'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
@@ -68,5 +69,6 @@ export default function Page() {
     </article>}
     <Processes />
     <Ports />
+    <Projects />
   </section>
 }
