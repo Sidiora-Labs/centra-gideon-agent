@@ -1,0 +1,42 @@
+{
+  "id": "media.14",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "6f91466c",
+  "contract": "A supervised media job asks the active reasoning provider, through the existing one_shot_completion provider-resolution path, for one original self-contained HTML animation. Strict bounded format inputs and an explicit renderFrame(t)/ANIMATION_META runtime contract are embedded in the prompt. Only a complete inline document without network references or request APIs is published as an immutable canonical widget artifact with request and response hashes. API, native tools and console use the same durable job; the console reopens jobs, shows honest state and previews completed HTML in a scripts-only sandbox.",
+  "acceptance": "Validation, prompt contract, HTML extraction, offline rejection, exact canonical bytes/provenance, idempotency/conflict behavior, request replay, restart persistence, retry, actual no-provider failure, HTTP/native consumers, console inputs/navigation/job link and no fabricated preview are exercised. No provider response is mocked and no bundled template is presented as inference. External inference remains unqualified without configured credentials.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/animations.py",
+    "runtime/gideon/workspace/capabilities/media/animations_http.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/AnimationPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_animations.py",
+    "apps/console/src/features/capabilities/media/AnimationPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_animations.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/AnimationPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "No external reasoning-model inference was performed; configured provider credentials and availability are required",
+    "The provider is text-only in this slice; canonical image, universe and audio conditioning are not implemented",
+    "HTML preview combines a scripts-only iframe sandbox with response CSP that denies connections and external assets; downloaded HTML remains untrusted user-controlled content outside that preview",
+    "Generated HTML is retained; browser video recording and audio synchronization remain unimplemented",
+    "Live browser preview and aggregate application integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.14",
+  "evidence": "/tmp/gideon-media.14-checks-7vkfymbt/evidence.json",
+  "production_lines": 161,
+  "test_lines": 334,
+  "ratio": 2.0745341614906834,
+  "repair_cycles": 0,
+  "exit_code": 0
+}

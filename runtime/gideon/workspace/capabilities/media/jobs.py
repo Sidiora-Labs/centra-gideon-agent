@@ -18,6 +18,7 @@ from .cleanup import CleanupService
 from .datasets import DatasetStore
 from .training import DiffusersTrainer
 from .images import ImageService
+from .animations import AnimationService
 from .sketches import SketchError, fields, integer
 
 
@@ -41,6 +42,7 @@ class MediaJobs:
         self.path, self.sketches = Path(path), sketches
         self.images = images or ImageService(sketches.artifacts)
         self.cleanup = CleanupService(self.images)
+        self.animations = AnimationService(sketches.artifacts)
         self.sprites = SpriteService(self.path.parent / "sprites.sqlite3", self.images)
         self.videos = videos or VideoService(self.images)
         self.timelines = TimelineStore(self.path.parent / "timelines.sqlite3", self.videos)
@@ -82,7 +84,10 @@ class MediaJobs:
         if not isinstance(body, dict):
             raise SketchError('Expected an object')
         image_request = None
-        if body.get('operation') in ('sprite_generate', 'sprite_compile'):
+        if body.get('operation') == 'code_animation_generate':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.animations.prepare(body['input'])
+        elif body.get('operation') in ('sprite_generate', 'sprite_compile'):
             fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
             image_request = self.sprites.prepare_generate(body['input']) if body['operation'] == 'sprite_generate' else self.sprites.prepare_compile(body['input'])
         elif body.get('operation') == 'episode_render':
@@ -231,7 +236,9 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            if job['operation'] in ('sprite_generate', 'sprite_compile'):
+            if job['operation'] == 'code_animation_generate':
+                result = asyncio.run(self.jobs.animations.execute(job['input'], job['id']))
+            elif job['operation'] in ('sprite_generate', 'sprite_compile'):
                 stopped = lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested'
                 progress = lambda value: self.jobs.progress(job['id'], value)
                 result = asyncio.run(self.jobs.sprites.generate(job['input'], job['id'], stopped, progress)) if job['operation'] == 'sprite_generate' else self.jobs.sprites.compile(job['input'], job['id'], stopped, progress)

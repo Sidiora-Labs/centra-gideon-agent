@@ -1,4 +1,5 @@
 import SpritePage from './SpritePage'
+import AnimationPage from './AnimationPage'
 import EpisodePage from './EpisodePage'
 import TimelinePage from './TimelinePage'
 import VideoPage from './VideoPage'
@@ -73,7 +74,7 @@ function SketchPage() {
   return <section className="p-4 space-y-4 overflow-auto" aria-label="Image sketches">
     <h1>Image sketches</h1>
     <nav aria-label="Media workspaces" className="flex flex-wrap gap-3"><a href="#/capabilities/media?view=library">Media library</a>
-<a href="#/capabilities/media?view=jobs">Media jobs</a><a href="#/capabilities/media?view=readiness">Media readiness</a><a href="#/capabilities/media?view=images">Generate image</a><a href="#/capabilities/media?view=datasets">Training datasets</a><a href="#/capabilities/media?view=sprites">Sprite production</a><a href="#/capabilities/media?view=episodes">Continuous episodes</a><a href="#/capabilities/media?view=timelines">Video timeline</a><a href="#/capabilities/media?view=videos">Generate video</a><a href="#/capabilities/media?view=cleanup">Image cleanup</a></nav>
+<a href="#/capabilities/media?view=jobs">Media jobs</a><a href="#/capabilities/media?view=readiness">Media readiness</a><a href="#/capabilities/media?view=images">Generate image</a><a href="#/capabilities/media?view=datasets">Training datasets</a><a href="#/capabilities/media?view=sprites">Sprite production</a><a href="#/capabilities/media?view=animation">Code animation</a><a href="#/capabilities/media?view=episodes">Continuous episodes</a><a href="#/capabilities/media?view=timelines">Video timeline</a><a href="#/capabilities/media?view=videos">Generate video</a><a href="#/capabilities/media?view=cleanup">Image cleanup</a></nav>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-3">
       <label>Source artifact ID (optional)<input aria-label="Source artifact ID" value={source} onChange={e => setSource(e.target.value)} /></label>
@@ -115,5 +116,5 @@ function SketchPage() {
 export default function Page() {
   const [view, setView] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view'))
   useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view')); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
-  return view === 'sprites' ? <SpritePage /> : view === 'episodes' ? <EpisodePage /> : view === 'timelines' ? <TimelinePage /> : view === 'videos' ? <VideoPage /> : view === 'cleanup' ? <CleanupPage /> : view === 'datasets' ? <DatasetsPage /> : view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
+  return view === 'animation' ? <AnimationPage /> : view === 'sprites' ? <SpritePage /> : view === 'episodes' ? <EpisodePage /> : view === 'timelines' ? <TimelinePage /> : view === 'videos' ? <VideoPage /> : view === 'cleanup' ? <CleanupPage /> : view === 'datasets' ? <DatasetsPage /> : view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
 }
