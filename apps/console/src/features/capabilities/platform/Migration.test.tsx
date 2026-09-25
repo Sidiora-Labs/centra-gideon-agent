@@ -54,6 +54,19 @@ function knowledgeFixture() {
   return tarFile({ 'snapshot-memory/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-memory/data/${name}`, value])) })
 }
 
+function expandedKnowledgeFixture() {
+  const idea = '13131313-1313-4313-8313-131313131313'
+  const day = '2026-09-23'
+  const data: Record<string, Buffer> = {
+    'brain/ideas/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'ideas', updatedAt: '2026-09-23T00:00:00Z', config: {} })),
+    [`brain/ideas/${idea}/index.json`]: Buffer.from(JSON.stringify({ id: idea, title: 'UI imported idea', status: 'active', oneLiner: 'A real migrated idea', notes: 'Preserved notes', tags: ['idea'], createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-02-01T00:00:00Z' })),
+    'brain/journals/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'journals', updatedAt: '2026-09-23T00:00:00Z', config: {} })),
+    [`brain/journals/${day}/index.json`]: Buffer.from(JSON.stringify({ id: day, date: day, content: 'UI imported journal', segments: [{ text: 'UI imported journal', at: '2026-09-23T10:00:00Z', source: 'text' }], createdAt: '2026-09-23T10:00:00Z', updatedAt: '2026-09-23T10:00:00Z' })),
+  }
+  const manifest = { generatedAt: '2026-09-23T10:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
+  return tarFile({ 'snapshot-expanded/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-expanded/data/${name}`, value])) })
+}
+
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
@@ -113,6 +126,19 @@ it('imports a checksummed memory into canonical knowledge and reports its durabl
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 memories ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
-  expect(state.supported_domains).toEqual(['people', 'memories', 'links'])
+  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links'])
   expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.memories === 1)).toBe(true)
+})
+
+it('reviews and atomically imports mixed ideas and journals through the actual API', async () => {
+  render(<Migration baseUrl={baseUrl} />)
+  const file = new File([expandedKnowledgeFixture()], 'expanded.tar.gz', { type: 'application/gzip' })
+  fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
+  expect(await screen.findByText('Domains: ideas, journals')).toBeVisible()
+  expect(screen.getByText('ideas: UI imported idea')).toBeVisible()
+  expect(screen.getByText('journals: Journal for 2026-09-23')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
+  expect(await screen.findByText(/1 ideas, 1 journals ·/)).toBeVisible()
 })

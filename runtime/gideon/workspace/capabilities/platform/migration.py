@@ -4,12 +4,18 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
+import shutil
 import tarfile
+import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
 
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
+from gideon.engine.tasks.models import Project
+from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
+from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy
 from gideon.workspace.capabilities.communications.store import PeopleStore, person_values
 
 FORMAT = "portos_snapshot_v1"
@@ -121,16 +127,16 @@ def _inspect(data):
     for name, expected in normalized.items():
         if hashlib.sha256(data_files[name]).hexdigest() != expected:
             raise MigrationError(f"Checksum mismatch for {name}", 409)
-    allowed = re.compile(r"^brain/(?:people|memories|links)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
+    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
     unsupported = sorted(name for name in data_files if not allowed.fullmatch(name))
     if unsupported:
         domains = sorted({name.split("/", 1)[0] for name in unsupported})
         raise MigrationError(f"Archive contains unsupported domains: {', '.join(domains)}")
-    domains = [domain for domain in ("people", "memories", "links") if f"brain/{domain}/index.json" in data_files]
+    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    if "people" in domains and len(domains) > 1:
-        raise MigrationError("People and knowledge domains require separate atomic imports")
+    if ("people" in domains or "projects" in domains) and len(domains) > 1:
+        raise MigrationError("People, projects and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
         if index.get("schemaVersion") != 1 or index.get("type") != domain:
@@ -162,18 +168,46 @@ def _inspect(data):
             if len(records) > MAX_PEOPLE:
                 raise MigrationError("Migration is limited to 500 people records")
             continue
-        if not UUID.fullmatch(record_id):
+        if domain == "projects":
+            if not UUID.fullmatch(record_id) or set(record) - {"id", "name", "status", "nextAction", "notes", "tags", "createdAt", "updatedAt", "originInstanceId"}:
+                raise MigrationError("Projects record identity or fields are unsupported")
+            if record.get("status") not in ("active", "waiting", "blocked", "someday", "done"):
+                raise MigrationError("Projects record status is unsupported")
+            tags = record.get("tags", [])
+            if not isinstance(record.get("name"), str) or not record["name"].strip() or len(record["name"]) > 200 or not isinstance(record.get("nextAction"), str) or not record["nextAction"].strip() or not isinstance(tags, list) or not all(isinstance(v, str) and len(v) <= 50 for v in tags):
+                raise MigrationError("Projects record fields are invalid")
+            for value in (record.get("createdAt"), record.get("updatedAt")):
+                try:
+                    if not isinstance(value, str) or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                        raise ValueError()
+                except (ValueError, OverflowError):
+                    raise MigrationError("Projects record timestamps are invalid") from None
+            details = [record.get("notes", ""), "Next action: " + record["nextAction"], "Legacy status: " + record["status"]]
+            if tags:
+                details.append("Tags: " + ", ".join(tags))
+            records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "name": record["name"].strip(),
+                            "status": "archived" if record["status"] == "done" else "active", "brief": "\n".join(filter(None, details)),
+                            "created_at": record.get("createdAt"), "updated_at": record.get("updatedAt")}})
+            continue
+        if domain != "journals" and not UUID.fullmatch(record_id):
             raise MigrationError(f"{domain.title()} record identity must be a UUID")
         common = {"id", "title", "tags", "createdAt", "updatedAt", "originInstanceId"}
         allowed_fields = common | ({"content", "mood", "source", "sourceRef", "sourceCreatedAt", "sourceUpdatedAt"} if domain == "memories" else
-                                   {"url", "description", "note", "linkType", "isRepo", "repoHost", "repoOwner", "repoName", "isGitHubRepo", "gitHubOwner", "gitHubRepo", "localPath", "cloneStatus", "cloneError", "cloneInstanceId", "cloneInterrupted", "malwareScan", "repoIntake", "repoStudy", "bucketId", "bucketOrder"})
+                                   {"url", "description", "note", "linkType", "isRepo", "repoHost", "repoOwner", "repoName", "isGitHubRepo", "gitHubOwner", "gitHubRepo", "localPath", "cloneStatus", "cloneError", "cloneInstanceId", "cloneInterrupted", "malwareScan", "repoIntake", "repoStudy", "bucketId", "bucketOrder"} if domain == "links" else
+                                   {"status", "oneLiner", "notes"} if domain == "ideas" else
+                                   {"date", "content", "segments"})
         if set(record) - allowed_fields:
             raise MigrationError(f"{domain.title()} record contains unsupported fields")
-        title = record.get("title")
-        content = record.get("content", "") if domain == "memories" else "\n".join(filter(None, [record.get("description", ""), record.get("note", "")]))
+        if domain == "journals" and (record_id != record.get("date") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", record_id)):
+            raise MigrationError("Journals record identity must match its ISO date")
+        title = record.get("title") or (f"Journal for {record_id}" if domain == "journals" else None)
+        content = record.get("content", "") if domain in ("memories", "journals") else "\n".join(filter(None, [record.get("oneLiner", ""), record.get("notes", "")])) if domain == "ideas" else "\n".join(filter(None, [record.get("description", ""), record.get("note", "")]))
         url = record.get("url", "") if domain == "links" else ""
-        tags = record.get("tags", [])
-        if not isinstance(title, str) or not title.strip() or len(title) > 500 or not isinstance(content, str) or len(content) > 10000:
+        tags = record.get("tags", []) if domain != "journals" else []
+        if domain == "ideas" and (record.get("status") not in ("active", "done") or not isinstance(record.get("oneLiner"), str) or not record["oneLiner"].strip()):
+            raise MigrationError("Ideas record status or one-liner is invalid")
+        content_limit = 100000 if domain == "journals" else 10000
+        if not isinstance(title, str) or not title.strip() or len(title) > 500 or not isinstance(content, str) or len(content) > content_limit:
             raise MigrationError(f"{domain.title()} record text is invalid")
         if not isinstance(tags, list) or len(tags) > 100 or not all(isinstance(v, str) and 0 < len(v) <= 50 for v in tags):
             raise MigrationError(f"{domain.title()} record tags are invalid")
@@ -187,13 +221,22 @@ def _inspect(data):
                     raise ValueError()
             except (ValueError, OverflowError):
                 raise MigrationError(f"{domain.title()} record timestamps are invalid") from None
+        segments = record.get("segments", []) if domain == "journals" else []
+        if domain == "journals" and (not isinstance(segments, list) or any(not isinstance(v, dict) or set(v) - {"text", "at", "source"} or not isinstance(v.get("text"), str) or not isinstance(v.get("at"), str) or v.get("source") not in ("text", "voice", "edit") for v in segments)):
+            raise MigrationError("Journals record segments are invalid")
         metadata = {"migration_format": FORMAT, "source_collection": domain, "source_record_id": record_id,
                     "source": record.get("source"), "source_ref": record.get("sourceRef"), "mood": record.get("mood"),
-                    "link_type": record.get("linkType"), "repository": {key: record.get(key) for key in ("isRepo", "repoHost", "repoOwner", "repoName") if key in record}}
+                    "link_type": record.get("linkType"), "legacy_status": record.get("status"), "journal_date": record_id if domain == "journals" else None,
+                    "journal_timezone": "UTC" if domain == "journals" else None, "journal_revision": 1 if domain == "journals" else None,
+                    "segments": segments, "repository": {key: record.get(key) for key in ("isRepo", "repoHost", "repoOwner", "repoName") if key in record}}
         records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "title": title.strip(), "content": content,
-                        "item_type": "note" if domain == "memories" else "bookmark", "summary": record.get("description", ""), "url": normalize_url(url) if url else "",
+                        "item_type": "note" if domain == "memories" else "bookmark" if domain == "links" else "fleeting" if domain == "ideas" else "journal",
+                        "summary": record.get("description", "") or record.get("oneLiner", ""), "url": normalize_url(url) if url else "",
                         "tags": tags, "provider": "legacy-migration", "source_id": "legacy-archive", "guid": f"{domain}:{record_id}",
-                        "file_metadata": metadata, "created_at": created, "updated_at": updated}})
+                        "file_metadata": metadata, "created_at": created, "updated_at": updated,
+                        "is_archived": 1 if domain == "ideas" and record.get("status") == "done" else 0}})
+        if domain == "journals":
+            records[-1]["values"]["guid"] = "date_journal:" + knowledge_digest([record_id, "UTC"])
         if len(records) > MAX_KNOWLEDGE:
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
@@ -210,12 +253,16 @@ def preview(data):
                          "name": row["values"].get("name") or row["values"]["title"]} for row in records]}
 
 
-def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None):
+def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None):
     if not isinstance(data, dict) or set(data) != {"format", "content", "archive_digest", "review_token"}:
         raise MigrationError("Commit requires the reviewed archive, digest and review token")
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
+    if domains == ["projects"]:
+        if projects is None:
+            raise MigrationError("Canonical project store is unavailable", 503)
+        return _commit_project(projects, digest, token, records, generated)
     if domains != ["people"]:
         if knowledge is None:
             raise MigrationError("Canonical knowledge store is unavailable", 503)
@@ -259,9 +306,9 @@ def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
             values = row["values"]
             if db.execute("SELECT 1 FROM items WHERE id=?", (values["id"],)).fetchone():
                 raise MigrationError("Migration target identity already exists", 409)
-            db.execute("INSERT INTO items (id,title,content,item_type,summary,status,url,word_count,provider,source_id,guid,file_metadata,created_at,updated_at) VALUES (?,?,?,?,?,'active',?,?,?,?,?,?,?,?)",
+            db.execute("INSERT INTO items (id,title,content,item_type,summary,status,url,word_count,provider,source_id,guid,file_metadata,is_archived,created_at,updated_at) VALUES (?,?,?,?,?,'active',?,?,?,?,?,?,?,?,?)",
                        (values["id"], values["title"], values["content"], values["item_type"], values["summary"], values["url"],
-                        len(values["content"].split()), values["provider"], values["source_id"], values["guid"], json.dumps(values["file_metadata"]), values["created_at"], values["updated_at"]))
+                        len(values["content"].split()), values["provider"], values["source_id"], values["guid"], json.dumps(values["file_metadata"]), values.get("is_archived", 0), values["created_at"], values["updated_at"]))
             store._write_item_tags(values["id"], values["tags"], source="user", now=values["created_at"])
             rowid = db.execute("SELECT rowid FROM items WHERE id=?", (values["id"],)).fetchone()[0]
             db.execute("INSERT INTO items_fts (rowid,title,content,tags) VALUES (?,?,?,?)", (rowid, values["title"], values["content"], _fts_tags(values["tags"])))
@@ -278,10 +325,53 @@ def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
     return receipt, True
 
 
-def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None):
+def _commit_project(store: BoundHierarchy, digest, token, records, generated):
+    if len(records) != 1:
+        raise MigrationError("Project archives must contain exactly one project for atomic publication")
+    row = records[0]["values"]
+    root = store._projects_dir()
+    target = root / row["id"]
+    receipt_path = target / ".migration-receipt.json"
+    if target.exists():
+        try:
+            prior = json.loads(receipt_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            raise MigrationError("Migration target identity already exists", 409) from None
+        if prior.get("archive_digest") != digest or prior.get("review_token") != token:
+            raise MigrationError("Migration target identity already exists", 409)
+        return prior["receipt"], False
+    if store.get_project_by_name(row["name"]):
+        raise MigrationError("A canonical project with this name already exists", 409)
+    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated, "committed_at": datetime.now(timezone.utc).isoformat(),
+               "domains": {"projects": 1}, "records": [{"source_id": row["id"], "project_id": row["id"], "domain": "projects"}]}
+    staging = tempfile.mkdtemp(prefix=".migration-", dir=root)
+    try:
+        stage = os.path.join(staging)
+        os.mkdir(os.path.join(stage, "context"))
+        project = Project(id=row["id"], name=row["name"], status=row["status"], brief=row["brief"], created_at=row["created_at"], updated_at=row["updated_at"])
+        with open(os.path.join(stage, "project.json"), "w", encoding="utf-8") as stream:
+            json.dump(project.to_dict(), stream, indent=2)
+        with open(os.path.join(stage, ".migration-receipt.json"), "w", encoding="utf-8") as stream:
+            json.dump({"archive_digest": digest, "review_token": token, "receipt": receipt}, stream)
+        os.rename(stage, target)
+    except FileExistsError:
+        raise MigrationError("Migration target identity already exists", 409) from None
+    finally:
+        if os.path.exists(staging):
+            shutil.rmtree(staging, ignore_errors=True)
+    return receipt, True
+
+
+def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None):
     with closing(store.connect()) as db:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_migrations'").fetchone()
         result = [] if not exists else [json.loads(row[0]) for row in db.execute("SELECT receipt FROM platform_migrations ORDER BY rowid DESC LIMIT 20")]
     if knowledge is not None and knowledge.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_migrations'").fetchone():
         result += [json.loads(row[0]) for row in knowledge.db.execute("SELECT receipt FROM platform_migrations ORDER BY rowid DESC LIMIT 20")]
+    if projects is not None:
+        for path in projects._projects_dir().glob("*/.migration-receipt.json"):
+            try:
+                result.append(json.loads(path.read_text())["receipt"])
+            except (OSError, KeyError, json.JSONDecodeError):
+                continue
     return sorted(result, key=lambda row: row["committed_at"], reverse=True)[:20]
