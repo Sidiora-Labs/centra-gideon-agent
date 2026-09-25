@@ -50,8 +50,8 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     writes = {'people_create', 'people_update', 'people_record_touchpoint', 'people_import_commit', 'people_record_thread_evidence'}
     reads |= {'people_mirror_accounts', 'people_mirror_capabilities', 'people_mirror_messages'}
     writes |= {'people_mirror_create', 'people_mirror_update', 'people_mirror_upload', 'people_mirror_sync'}
-    reads |= {'people_desktop_preview', 'people_desktop_imports', 'people_desktop_history'}
-    writes |= {'people_desktop_commit'}
+    reads |= {'people_desktop_preview', 'people_desktop_imports', 'people_desktop_history', 'people_desktop_exclusions'}
+    writes |= {'people_desktop_commit', 'people_desktop_exclude'}
     reads |= {'people_beeper_settings', 'people_beeper_page', 'people_beeper_asset', 'people_beeper_outbox'}
     writes |= {'people_beeper_configure', 'people_beeper_refresh', 'people_beeper_asset_fetch', 'people_beeper_draft', 'people_beeper_send', 'people_beeper_reconcile', 'people_beeper_discard', 'people_beeper_recover'}
     reads |= {'people_telegram_config', 'people_telegram_command', 'people_telegram_deliveries'}

@@ -37,6 +37,7 @@ BATCH = obj({'source': STRING, 'source_account_id': STRING, 'captured_at': STRIN
             ('source', 'source_account_id', 'captured_at', 'coverage_start', 'coverage_end', 'incoming_complete', 'outgoing_complete', 'messages'))
 ACCOUNT = obj({key: STRING for key in mirrors.ACCOUNT_FIELDS}, ('name', 'kind', 'owner_email'))
 DESKTOP = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING, 'content_base64': {'type': 'string', 'maxLength': 11184812}}
+DESKTOP_REF = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING}
 OUTBOX_ACTION = {'outbox_id': STRING, 'revision': {'type': 'integer', 'minimum': 1}}
 TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boolean'}, 'bot_credential_ref': STRING, 'webhook_credential_ref': STRING, 'allowed_chat_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'allowed_user_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'revision': {'type': 'integer', 'minimum': 0}}
 CAL_SOURCE = {key: STRING for key in calendar.SOURCE_FIELDS}
@@ -96,6 +97,8 @@ SPECS = {
     'people_desktop_commit': ('Commit a reviewed snapshot and incomplete-coverage evidence atomically.', obj({**DESKTOP, 'source_digest': STRING, 'review_token': STRING}, (*DESKTOP, 'source_digest', 'review_token')), True),
     'people_desktop_imports': ('Read durable desktop import receipts.', obj({}), False),
     'people_desktop_history': ('Read imported source messages.', obj({'source': STRING, 'source_account_id': STRING}, ('source', 'source_account_id')), False),
+    'people_desktop_exclusions': ('Read durable desktop message tombstones and identity blocks.', obj(DESKTOP_REF, DESKTOP_REF), False),
+    'people_desktop_exclude': ('Exclude one imported message or its resolved identity from history and every later replay.', obj({**DESKTOP_REF, 'external_id': STRING, 'scope': {'enum': ['message', 'identity']}}, (*DESKTOP_REF, 'external_id', 'scope')), True),
     'people_mirror_accounts': ('List configured mail sources and sync state.', obj({}), False),
     'people_mirror_capabilities': ('Read adapter coverage and external qualification gaps.', obj({}), False),
     'people_mirror_create': ('Configure an account with a credential reference, never a secret.', obj({'account': ACCOUNT}, ('account',)), True),
@@ -260,6 +263,11 @@ class PeopleTools(ToolProvider):
                 result = {'imports': desktop.imports(store)}
             elif tool_name == 'people_desktop_history':
                 result = {'messages': desktop.history(store, arguments['source'], arguments['source_account_id'])}
+            elif tool_name == 'people_desktop_exclusions':
+                result = {'exclusions': desktop.exclusions(store, arguments['source'], arguments['source_account_id'])}
+            elif tool_name == 'people_desktop_exclude':
+                exclusion, removed, created = desktop.exclude(store, arguments)
+                result = {'exclusion': exclusion, 'removed': removed, 'created': created}
             elif tool_name == 'people_mirror_accounts':
                 result = {'accounts': mirrors.accounts(store)}
             elif tool_name == 'people_mirror_capabilities':

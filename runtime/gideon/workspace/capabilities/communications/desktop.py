@@ -13,6 +13,7 @@ from .store import PeopleError, fields, person_values, text
 
 MAX_BYTES = 8 * 1024 * 1024
 INPUT = {'source', 'source_account_id', 'content_base64'}
+EXCLUSION_FIELDS = {'source', 'source_account_id', 'external_id', 'scope'}
 SHAPES = {
     'imessage': {'message': {'guid', 'date', 'text', 'is_from_me', 'handle_id'}, 'handle': {'id'}, 'chat': {'guid'}, 'chat_message_join': {'message_id', 'chat_id'}},
     'signal': {'messages': {'id', 'conversationId', 'sent_at', 'received_at', 'type', 'body'}, 'conversations': {'id', 'e164', 'type'}},
@@ -126,7 +127,67 @@ def preview(store, data):
 def schema(db):
     db.execute('CREATE TABLE IF NOT EXISTS desktop_imports (source TEXT NOT NULL,account TEXT NOT NULL,digest TEXT NOT NULL,receipt TEXT NOT NULL,raw BLOB NOT NULL,UNIQUE(source,account,digest))')
     db.execute('CREATE TABLE IF NOT EXISTS desktop_messages (source TEXT NOT NULL,account TEXT NOT NULL,external_id TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(source,account,external_id))')
+    db.execute('CREATE TABLE IF NOT EXISTS desktop_exclusions (source TEXT NOT NULL,account TEXT NOT NULL,scope TEXT NOT NULL,value TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(source,account,scope,value))')
     evidence.schema(db)
+
+
+def _source_account(data, allowed):
+    fields(data, allowed)
+    source = data.get('source')
+    if source not in SHAPES:
+        raise PeopleError('Choose iMessage or Signal Desktop')
+    return source, text(data.get('source_account_id'), 'source_account_id', 100, True)
+
+
+def exclusions(store, source, account):
+    source, account = _source_account({'source': source, 'source_account_id': account}, {'source', 'source_account_id'})
+    with closing(store.connect()) as db, db:
+        schema(db)
+        return [json.loads(body) for body, in db.execute(
+            'SELECT body FROM desktop_exclusions WHERE source=? AND account=? ORDER BY rowid', (source, account))]
+
+
+def exclude(store, data):
+    source, account = _source_account(data, EXCLUSION_FIELDS)
+    external_id = text(data.get('external_id'), 'external_id', 500, True)
+    scope = data.get('scope')
+    if scope not in ('message', 'identity'):
+        raise PeopleError('Exclusion scope must be message or identity')
+    with closing(store.connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        schema(db)
+        found = db.execute('SELECT body FROM desktop_messages WHERE source=? AND account=? AND external_id=?',
+                           (source, account, external_id)).fetchone()
+        prior = [json.loads(body) for body, in db.execute(
+            'SELECT body FROM desktop_exclusions WHERE source=? AND account=? AND scope=?', (source, account, scope))]
+        replay = next((item for item in prior if item['external_id'] == external_id), None)
+        if found is None:
+            if replay:
+                return replay, 0, False
+            raise PeopleError('Desktop message not found', 404)
+        row = json.loads(found[0])
+        identity = row.get('identity')
+        if scope == 'identity' and not identity:
+            raise PeopleError('Message has no resolved identity to block')
+        value = json.dumps(identity, sort_keys=True) if scope == 'identity' else external_id
+        previous = db.execute('SELECT body FROM desktop_exclusions WHERE source=? AND account=? AND scope=? AND value=?',
+                              (source, account, scope, value)).fetchone()
+        if previous:
+            return json.loads(previous[0]), 0, False
+        exclusion = {'source': source, 'source_account_id': account, 'scope': scope, 'value': value,
+                     'external_id': external_id, 'identity': identity if scope == 'identity' else None,
+                     'created_at': datetime.now(timezone.utc).isoformat()}
+        db.execute('INSERT INTO desktop_exclusions VALUES (?,?,?,?,?)',
+                   (source, account, scope, value, json.dumps(exclusion, sort_keys=True)))
+        candidates = db.execute('SELECT external_id,body FROM desktop_messages WHERE source=? AND account=?',
+                                (source, account)).fetchall()
+        removed = ([identity_id for identity_id, _ in candidates if identity_id == external_id]
+                   if scope == 'message' else
+                   [identity_id for identity_id, body in candidates if json.loads(body).get('identity') == identity])
+        for identity_id in removed:
+            db.execute('DELETE FROM desktop_messages WHERE source=? AND account=? AND external_id=?', (source, account, identity_id))
+            db.execute('DELETE FROM relationship_messages WHERE source=? AND source_account_id=? AND external_id=?', (source, account, identity_id))
+        return exclusion, len(removed), True
 
 
 def commit(store, data):
@@ -152,8 +213,18 @@ def commit(store, data):
         old = db.execute('SELECT receipt FROM desktop_imports WHERE source=? AND account=? AND digest=?', (source, account, projected['source_digest'])).fetchone()
         if old:
             return json.loads(old[0]), False
-        inserted, linked = 0, 0
+        blocked_messages = {value for scope, value in db.execute(
+            'SELECT scope,value FROM desktop_exclusions WHERE source=? AND account=?', (source, account)) if scope == 'message'}
+        blocked_identities = {value for scope, value in db.execute(
+            'SELECT scope,value FROM desktop_exclusions WHERE source=? AND account=?', (source, account)) if scope == 'identity'}
+        inserted, linked, excluded = 0, 0, 0
+        accepted = []
         for row in projected['rows']:
+            identity_key = json.dumps(row['identity'], sort_keys=True) if row['identity'] else ''
+            if row['external_id'] in blocked_messages or identity_key in blocked_identities:
+                excluded += 1
+                continue
+            accepted.append(row)
             canonical = {k: v for k, v in row.items() if k not in ('person_id', 'eligible')}
             body = json.dumps(canonical, sort_keys=True)
             previous = db.execute('SELECT body FROM desktop_messages WHERE source=? AND account=? AND external_id=?', (source, account, row['external_id'])).fetchone()
@@ -174,11 +245,11 @@ def commit(store, data):
                     db.execute('INSERT INTO relationship_messages VALUES (?,?,?,?)', (source, account, row['external_id'], json.dumps(event)))
                     linked += 1
         coverage = {'source': source, 'source_account_id': account, 'captured_at': captured,
-                    'coverage_start': min((r['occurred_at'] for r in projected['rows'] if r['eligible']), default=captured),
+                    'coverage_start': min((r['occurred_at'] for r in accepted if r['eligible']), default=captured),
                     'coverage_end': captured, 'incoming_complete': False, 'outgoing_complete': False}
         db.execute('INSERT INTO relationship_coverage VALUES (?,?,?) ON CONFLICT(source,source_account_id) DO UPDATE SET body=excluded.body', (source, account, json.dumps(coverage)))
         receipt = {k: projected[k] for k in ('source', 'source_account_id', 'source_digest', 'review_token', 'coverage', 'qualification')}
-        receipt.update(inserted=inserted, linked=linked, messages=len(projected['rows']), captured_at=captured)
+        receipt.update(inserted=inserted, linked=linked, excluded=excluded, messages=len(projected['rows']), captured_at=captured)
         db.execute('INSERT INTO desktop_imports VALUES (?,?,?,?,?)', (source, account, projected['source_digest'], json.dumps(receipt), raw))
     return receipt, True
 
