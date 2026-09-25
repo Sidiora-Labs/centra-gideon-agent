@@ -70,6 +70,7 @@ _MIME_TO_EXT = {
     "video/webm": "webm",
     "video/quicktime": "mov",
     "audio/wav": "wav",
+    "audio/midi": "mid",
     "audio/mpeg": "mp3",
     "audio/ogg": "ogg",
     "audio/flac": "flac",
