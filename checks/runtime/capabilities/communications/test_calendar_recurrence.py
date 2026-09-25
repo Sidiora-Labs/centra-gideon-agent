@@ -117,16 +117,102 @@ def test_interval_until_and_unmatched_override_are_bounded_truthfully():
 
 
 @pytest.mark.parametrize('rule,match', [
-    ('FREQ=HOURLY;COUNT=2', 'FREQ'),
-    ('FREQ=DAILY;BYSETPOS=1', 'BYSETPOS'),
     ('FREQ=DAILY;COUNT=0', 'bounds'),
     ('FREQ=DAILY;INTERVAL=no', 'integers'),
+    ('FREQ=DAILY;FREQ=WEEKLY', 'duplicate'),
+    ('FREQ=DAILY;BYEASTER=1', 'BYEASTER'),
 ])
-def test_unsupported_or_unbounded_rule_parts_fail_closed(rule, match):
+def test_invalid_or_nonstandard_rule_parts_fail_closed(rule, match):
     content = envelope(item('bad-rule', 'DTSTART:20260101T090000Z', 'DTEND:20260101T100000Z',
                             'RRULE:' + rule))
     with pytest.raises(PeopleError, match=match):
         calendar.parse_ics(content, 'UTC', '2026-01-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
+
+
+def test_last_weekday_bysetpos_preserves_wall_time_across_dst():
+    master = item('payroll', 'DTSTART;TZID=America/New_York:20260130T090000',
+                  'DTEND;TZID=America/New_York:20260130T093000', 'SUMMARY:Payroll',
+                  'RRULE:FREQ=MONTHLY;COUNT=4;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1')
+    events, warnings = calendar.parse_ics(envelope(master), 'America/New_York',
+                                         '2026-01-01T00:00:00+00:00', '2026-05-01T00:00:00+00:00')
+    assert warnings == []
+    assert [row['start'] for row in events] == [
+        '2026-01-30T14:00:00+00:00',
+        '2026-02-27T14:00:00+00:00',
+        '2026-03-31T13:00:00+00:00',
+        '2026-04-30T13:00:00+00:00',
+    ]
+    assert [row['recurrence_id'] for row in events] == [
+        '2026-01-30T09:00:00-05:00',
+        '2026-02-27T09:00:00-05:00',
+        '2026-03-31T09:00:00-04:00',
+        '2026-04-30T09:00:00-04:00',
+    ]
+
+
+def test_subdaily_frequencies_and_time_selectors_expand_in_the_window():
+    hourly = item('hourly', 'DTSTART:20260101T000000Z', 'DTEND:20260101T001500Z',
+                  'RRULE:FREQ=HOURLY;INTERVAL=6;COUNT=5')
+    minute = item('minute', 'DTSTART:20260101T010000Z', 'DTEND:20260101T010100Z',
+                  'RRULE:FREQ=MINUTELY;INTERVAL=20;COUNT=3')
+    second = item('second', 'DTSTART:20260101T020000Z', 'DTEND:20260101T020010Z',
+                  'RRULE:FREQ=SECONDLY;INTERVAL=30;COUNT=3')
+    selected = item('selected', 'DTSTART:20260101T090000Z', 'DTEND:20260101T091500Z',
+                    'RRULE:FREQ=DAILY;COUNT=4;BYHOUR=9,17;BYMINUTE=30;BYSECOND=0')
+    events, _ = calendar.parse_ics(envelope(hourly, minute, second, selected), 'UTC',
+                                   '2026-01-01T00:00:00+00:00', '2026-01-03T00:00:00+00:00')
+    starts = {uid: [row['start'] for row in events if row['uid'] == uid]
+              for uid in ('hourly', 'minute', 'second', 'selected')}
+    assert starts['hourly'] == [
+        '2026-01-01T00:00:00+00:00', '2026-01-01T06:00:00+00:00',
+        '2026-01-01T12:00:00+00:00', '2026-01-01T18:00:00+00:00',
+        '2026-01-02T00:00:00+00:00']
+    assert starts['minute'] == [
+        '2026-01-01T01:00:00+00:00', '2026-01-01T01:20:00+00:00',
+        '2026-01-01T01:40:00+00:00']
+    assert starts['second'] == [
+        '2026-01-01T02:00:00+00:00', '2026-01-01T02:00:30+00:00',
+        '2026-01-01T02:01:00+00:00']
+    assert starts['selected'] == [
+        '2026-01-01T09:30:00+00:00', '2026-01-01T17:30:00+00:00',
+        '2026-01-02T09:30:00+00:00', '2026-01-02T17:30:00+00:00']
+
+
+def test_year_position_selectors_and_ordinal_weekdays_are_supported():
+    ordinal = item('ordinal', 'DTSTART:20260101T120000Z', 'DTEND:20260101T123000Z',
+                   'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=1MO')
+    year_day = item('year-day', 'DTSTART:20260101T130000Z', 'DTEND:20260101T133000Z',
+                    'RRULE:FREQ=YEARLY;COUNT=2;BYYEARDAY=100')
+    week_no = item('week-no', 'DTSTART:20260101T140000Z', 'DTEND:20260101T143000Z',
+                   'RRULE:FREQ=YEARLY;COUNT=2;BYWEEKNO=20;BYDAY=MO;WKST=MO')
+    events, _ = calendar.parse_ics(envelope(ordinal, year_day, week_no), 'UTC',
+                                   '2026-01-01T00:00:00+00:00', '2027-01-01T00:00:00+00:00')
+    starts = {uid: [row['start'] for row in events if row['uid'] == uid]
+              for uid in ('ordinal', 'year-day', 'week-no')}
+    assert starts == {
+        'ordinal': ['2026-11-02T12:00:00+00:00'],
+        'year-day': ['2026-04-10T13:00:00+00:00'],
+        'week-no': ['2026-05-11T14:00:00+00:00'],
+    }
+
+
+def test_subdaily_exceptions_and_expansion_cap_fail_closed():
+    master = item('shift', 'DTSTART:20260101T000000Z', 'DTEND:20260101T001000Z',
+                  'RRULE:FREQ=HOURLY;COUNT=4', 'EXDATE:20260101T010000Z')
+    moved = item('shift', 'DTSTART:20260101T023000Z', 'DTEND:20260101T024000Z',
+                 'RECURRENCE-ID:20260101T020000Z', 'SUMMARY:Moved shift')
+    events, _ = calendar.parse_ics(envelope(master, moved), 'UTC',
+                                   '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')
+    assert [row['start'] for row in events] == [
+        '2026-01-01T00:00:00+00:00',
+        '2026-01-01T02:30:00+00:00',
+        '2026-01-01T03:00:00+00:00',
+    ]
+    assert events[1]['overridden'] is True
+    unbounded = envelope(item('flood', 'DTSTART:20260101T000000Z', 'DTEND:20260101T000001Z',
+                              'RRULE:FREQ=SECONDLY'))
+    with pytest.raises(PeopleError, match='exceeds 5000'):
+        calendar.parse_ics(unbounded, 'UTC', '2026-01-01T00:00:00+00:00', '2026-01-02T00:00:00+00:00')
 
 
 def test_window_bounds_value_types_and_duplicate_overrides_are_rejected():
