@@ -11,6 +11,8 @@ from gideon.workspace.capabilities.creative.universes import UniverseStore
 from gideon.workspace.capabilities.creative.graph import UniverseGraph
 from gideon.workspace.capabilities.creative.authors import AuthorStore
 from gideon.workspace.capabilities.creative.works import WorkStore
+from gideon.workspace.capabilities.creative.polishing import PolishingStore
+POLISHING = web.AppKey("creative_polishing", PolishingStore)
 WORKS = web.AppKey("creative_works", WorkStore)
 AUTHORS = web.AppKey("creative_authors", AuthorStore)
 GRAPHS = web.AppKey("creative_graphs", UniverseGraph)
@@ -177,10 +179,32 @@ async def universe_graph(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def polishing(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        store = request.app[POLISHING]
+        id = request.match_info['id']
+        proposal = request.match_info.get('proposal_id')
+        if request.method == 'GET':
+            result = store.get(id, proposal) if proposal else store.list(id)
+        else:
+            payload = await request.json()
+            result = store.promote(id, proposal, payload) if proposal else await store.propose(id, payload)
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
     app[WORKS] = WorkStore(app[STORE].home)
+    app[POLISHING] = PolishingStore(app[WORKS])
+    app.router.add_get("/api/capabilities/creative/works/{id}/polishing", polishing)
+    app.router.add_post("/api/capabilities/creative/works/{id}/polishing", polishing)
+    app.router.add_get("/api/capabilities/creative/works/{id}/polishing/{proposal_id}", polishing)
+    app.router.add_post("/api/capabilities/creative/works/{id}/polishing/{proposal_id}/promote", polishing)
     app.router.add_get("/api/capabilities/creative/works", works)
     app.router.add_post("/api/capabilities/creative/works", works)
     app.router.add_get("/api/capabilities/creative/works/{id}", works)

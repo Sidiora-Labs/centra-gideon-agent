@@ -1,0 +1,46 @@
+{
+  "id": "creative.07",
+  "schema_version": 1,
+  "status": "implemented_inference_unqualified",
+  "base_revision": "bd0ab349",
+  "requires": [
+    "creative.06"
+  ],
+  "contract": "Bounded model-driven polishing uses existing configured reasoning provider and typed JSON output,90s timeout,4000character span/8000replacement cap. Authored proposals additional mode. Readonly canonical candidate, exact passage/diff review and optimistic explicit promotion reuse artifact and preserve base.",
+  "acceptance": [
+    "Real configured model invocation produces validated changed candidate; cannot be qualified by authored mode or fabricated service output.",
+    "Actual HTTP/UI/native authored proposal, diff review, explicit promotion/reopen and restore preserve original draft/history.",
+    "Reject stale work, unbounded/unchanged proposals, scope overrides and cross-home candidates; idempotent request and promotion.",
+    "No caller provider/model/session overrides; report unavailable actual inference as separate pending qualification while executable adapter remains reviewable."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/polishing.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Polishing.tsx",
+    "apps/console/src/features/capabilities/creative/Works.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_polishing.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Polishing.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_polishing.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Polishing.test.tsx"
+  ],
+  "inference_evidence": "/tmp/gideon-creative-07-inference-oss.json",
+  "inference": {
+    "task": "creative.07",
+    "actual_provider_attempt": true,
+    "inference_qualified": false,
+    "error": "Configured polishing model failed: RuntimeError"
+  },
+  "pending_acceptance": [
+    "Actual configured model produces a validated candidate; local configured provider attempt returned503 RuntimeError with no available credentials."
+  ],
+  "qualification_note": "Focused executable/store/HTTP/native/UI checks passed; this is a source checkpoint, not full model-inference qualification."
+}
