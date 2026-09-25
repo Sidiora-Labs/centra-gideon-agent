@@ -1,0 +1,53 @@
+{
+  "id": "wellbeing.14",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "883d134e",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_brokers.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+  ],
+  "contract": "A durable local broker catalog and subject-scoped revisioned case/event ledger in the existing secret privacy.sqlite3. Owner observations and manual lifecycle steps remain explicitly user_attested. Confirmed removal and reappearance require an internal typed scanner observation and are absent from owner HTTP controls. broker_scan and broker_submit consent gates are enforced independently; API and UI never scan, submit, send, or represent an owner report as provider verification.",
+  "remaining_limits": [
+    "No external broker discovery, scan, opt-out submission, verification request or message send",
+    "Confirmed removal requires a future read-only scanner adapter to supply a real VerifiedBrokerObservation; local qualification covers the trusted adapter boundary and ledger semantics, not a live broker result",
+    "Broker catalog and case metadata are owner-visible inside the secret local privacy database",
+    "No private database export or replication; central secret durability inventory remains root-owned",
+    "Dashboard registration, Privacy page composition and metadata-only native tool registration remain root-owned integration hooks"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.14-checks-p3y5yxw3/evidence.json",
+  "repair_cycles": 0,
+  "production_lines": 351,
+  "test_lines": 415,
+  "test_ratio": 1.1823361823361824,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx": "b12f243668f8b93c1e97e22d05566ddcaf569e9518305e409a2a75c2f6e63535",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_brokers.py": "7e38a0f35ad8ad9f352d2fa1df1fd488652e7754f67c1f958b6136e86c850bbf",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py": "0afd04d66f65361a8823bd764ae0b49376d81d735e5b6dbf4a696c9bc42f63d7",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "91ba6ab7bccf37ba8caf38baf49f0aa99c9324af10ecb024b06486762a37e4bf",
+    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py": "10475cba3b4e03cf95d149bab792c54ee1ff5827446a4f0ba2d26229f265e0dc"
+  },
+  "acceptance_coverage": [
+    "durable broker catalog and one revisioned case per subject and broker",
+    "explicit broker_scan and broker_submit consent boundaries",
+    "owner observations and legal manual transitions retain user_attested provenance",
+    "confirmed removal and reappearance are unreachable through owner HTTP and require a typed internal verifier result",
+    "revision conflicts, idempotent request receipts, concurrent retry safety and state-dependent recheck cadence",
+    "subject isolation, complete revision/event history, no-store HTTP responses and durable reopen",
+    "real HTTP React catalog, case, observation, lifecycle, recheck, history, error and URL-selection workflow",
+    "no external sends and no UI or route that promotes owner observation to verified removal"
+  ]
+}

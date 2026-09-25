@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "task": "platform.20",
+  "status": "locally_qualified_external_pending",
+  "base_revision": "206d4681e3bbf586fab337724e0e7487bf4e435c",
+  "contract": "Persistent Jira Cloud, Datadog Logs and GitHub REST applications store only documented HTTPS origins and existing named credential references. Exact read and mutation plans are durable and idempotent; every remote operation is prepared for explicit owner review, native mutation execution requires canonical approval, uncertain mutation outcomes are never blindly repeated, and GitHub Actions secret values are sealed with the repository public key before transport. Repository annotations retain local policy across remote refresh. No credential value enters the database, HTTP projection or console.",
+  "acceptance": [
+    "Real documented Jira v3/agile, Datadog v1/v2 and GitHub REST request plans use bounded inputs, named CredentialStore resolution and guarded network fetch with no redirects.",
+    "Connections, exact review plans, idempotency keys, receipts, Jira report projections and GitHub repository annotations survive store reopen without persisting secret values.",
+    "Owner HTTP and console flows configure references, prepare exact requests and explicitly approve execution; missing credentials fail before network activity and mutation receipts remain inspectable.",
+    "Unique native tools expose Jira, Datadog and GitHub aliases; execution is approval-gated while overview and local preparation are safe operations."
+  ],
+  "external_acceptance_pending": [
+    "Authenticated provider read journeys and explicitly designated live mutations were not run because no provider credentials or external mutation target were authorized for qualification."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/integration_apps/__init__.py",
+    "runtime/gideon/workspace/capabilities/platform/integration_apps/contracts.py",
+    "runtime/gideon/workspace/capabilities/platform/integration_apps/client.py",
+    "runtime/gideon/workspace/capabilities/platform/integration_apps/store.py",
+    "runtime/gideon/workspace/capabilities/platform/integration_apps/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_integration_apps.py",
+    "apps/console/src/features/capabilities/platform/IntegrationApps.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_integration_apps.py",
+    "checks/runtime/capabilities/platform/integration_apps_ui_server.py",
+    "apps/console/src/features/capabilities/platform/IntegrationApps.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_integration_apps.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/IntegrationApps.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-integration-apps/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.20-checks-vllt5v0n/evidence.json",
+  "qualification": {
+    "runtime_tests": 25,
+    "ui_tests": 2,
+    "production_lines": 443,
+    "test_lines": 464,
+    "repair_cycles": 2,
+    "limitations": [
+      "Authenticated provider read journeys and explicitly designated live mutations were not run because no provider credentials or external mutation target were authorized for qualification."
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "gideon-integration-apps",
+  "version": "1.0.0",
+  "displayName": "Jira, Datadog and GitHub",
+  "description": "Prepare, review and explicitly approve documented integration API operations with named credentials and durable receipts.",
+  "icon": "Plug",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "platform", "jira", "datadog", "github"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.integration_apps.tools:create_provider",
+    "capabilities": ["jira", "datadog", "github"]
+  },
+  "native": true
+}

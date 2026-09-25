@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "integration.03",
+  "status": "ui_locally_qualified_compile_blocked_unrelated",
+  "base_revision": "5588371a",
+  "contract": "Mount already-qualified Jira, Datadog and GitHub integration applications inside the platform page with its supplied baseUrl, and mount privacy broker cases inside the selected privacy subject without replacing encrypted fact history, organization holdings controls or existing hash-route fields.",
+  "acceptance": [
+    "The assembled platform page reaches the real integration-app HTTP handler through baseUrl and persists only the named credential reference.",
+    "The assembled privacy page renders encrypted fact history, organization controls and broker cases concurrently for the selected subject.",
+    "Subject, fact, broker case and unrelated shell query fields remain reachable in the existing hash route."
+  ],
+  "production_files": [
+    "apps/console/src/features/capabilities/platform/Page.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Privacy.tsx"
+  ],
+  "test_files": [
+    "apps/console/src/features/capabilities/IntegrationMounts.test.tsx"
+  ],
+  "evidence": {
+    "compile": {
+      "command": "node node_modules/typescript/bin/tsc -p apps/console/tsconfig.json --noEmit --pretty false",
+      "exit_code": 2,
+      "log": "/tmp/gideon-integration.03-compile.log",
+      "observed": "Unrelated unused-symbol errors in communications/LifecyclePanel.test.tsx and wellbeing/SharedHealth.test.tsx"
+    },
+    "ui": {
+      "command": "node /tmp/gideon-expansion-worktrees/integration-apps/node_modules/vitest/vitest.mjs run src/features/capabilities/IntegrationMounts.test.tsx",
+      "exit_code": 0,
+      "log": "/tmp/gideon-integration.03-ui-repair2.log"
+    }
+  },
+  "qualification": {
+    "ui_tests": 2,
+    "repair_cycles": 2,
+    "limitations": [
+      "Central handler registration and durability inventory enrollment are owned and qualified by the root integration lane."
+    ]
+  }
+}
