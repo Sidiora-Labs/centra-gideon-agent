@@ -1,0 +1,100 @@
+{
+  "id": "identity.05",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Canonical optional birth date and IANA timezone produce age or unknown at requested date",
+    "Project completed planning sessions directly from authoritative records without duplicate copied events",
+    "Track native task references and report actual current status or missing source using existing typed Task schema",
+    "Preserve distinctions between planned session time and measured effort, and unknown health or skill metrics",
+    "Revision and request-id protected profile editing through actual HTTP console and native tools"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/progress.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_progress.py",
+    "apps/console/src/features/capabilities/identity/ProgressPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_progress.py",
+    "checks/runtime/capabilities/identity/progress_ui_server.py",
+    "apps/console/src/features/capabilities/identity/ProgressPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_progress.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/ProgressPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity05-baseline",
+  "remaining_limits": [
+    "No invented XP/HP/skill scores; health and measured effort remain unknown",
+    "External task providers not projected",
+    "Root-owned shared registration requires integration"
+  ],
+  "evidence": {
+    "task": "identity.05",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790296296.3634772,
+    "production_lines": 167,
+    "test_lines": 279,
+    "ratio": 1.6706586826347305,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_progress.py",
+          "runtime/gideon/workspace/capabilities/identity/progress.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/progress_ui_server.py",
+          "checks/runtime/capabilities/identity/test_progress.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.05-checks-5eoo7e5i/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_progress.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.05-checks-5eoo7e5i/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/ProgressPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.05-checks-5eoo7e5i/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.05-checks-5eoo7e5i",
+    "completed_at": 1790296314.8995347,
+    "files": {
+      "apps/console/src/features/capabilities/identity/ProgressPage.tsx": "6248d76642d551250cbc9390b2701b76967e229ecc91df771ff12497e7fc8306",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_progress.py": "b7ee4a2bfa5ca02e98eef9bb82d0a1db22aa4438704b2027554e1ad8d32d8fa7",
+      "runtime/gideon/workspace/capabilities/identity/progress.py": "2c645ac7e474eaa114985297089eb940e5c8133caa9ac97e4e1093c849bec228",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "c713cf595f28a518480c98d55a973ac7bdc565f59b4e2b39f336c82f6aeb4d4f",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "41aaba57f10f6c6d115befd5fa59569019f6518a99a2f3996f2fe9125fda4c9f",
+      "apps/console/src/features/capabilities/identity/ProgressPage.test.tsx": "70b3cd0a4aefae709c5028e07b8ae24996f5eba3bccff99013cde02bfe96c2bc",
+      "checks/runtime/capabilities/identity/progress_ui_server.py": "f76b6940824e2fbe3f2faf1a5323a7bafb8161d47580c417ed843d4c7814ed7f",
+      "checks/runtime/capabilities/identity/test_progress.py": "09fe492e768ad3acf99c699fb01c37e7f4cef8f220d808c4d8582dcf26dda399"
+    }
+  },
+  "repair_cycles": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.05"
+}

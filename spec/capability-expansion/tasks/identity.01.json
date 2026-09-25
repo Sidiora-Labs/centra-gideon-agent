@@ -1,0 +1,95 @@
+{
+  "id": "identity.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "changed_paths": [
+    "apps/console/src/features/capabilities/identity/Page.tsx",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+    "runtime/gideon/workspace/capabilities/identity/store.py",
+    "apps/console/src/features/capabilities/identity/Page.test.tsx",
+    "checks/runtime/capabilities/identity/test_stories.py",
+    "checks/runtime/capabilities/identity/ui_server.py"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.01",
+  "exit_code": 0,
+  "evidence": {
+    "task": "identity.01",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790293395.0486772,
+    "production_lines": 298,
+    "test_lines": 351,
+    "ratio": 1.1778523489932886,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+          "runtime/gideon/workspace/capabilities/identity/store.py",
+          "checks/runtime/capabilities/identity/test_stories.py",
+          "checks/runtime/capabilities/identity/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.01-checks-zugqbfx1/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.01-checks-zugqbfx1/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/Page.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.01-checks-zugqbfx1/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.01-checks-zugqbfx1",
+    "completed_at": 1790293453.61042,
+    "files": {
+      "apps/console/src/features/capabilities/identity/Page.tsx": "427b94c23d281735a26a813175c368ac92df5794e095d2e30118f82aa0e774d9",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py": "8afbd0cc637fa943b12570a3c33b8b6f937b7a34325454ba6f41a65dd0438c3b",
+      "runtime/gideon/workspace/capabilities/identity/store.py": "edebe1945a3749d2d847eb042df23f3ad3152bd709f3a3d95aa5044fe7e03388",
+      "apps/console/src/features/capabilities/identity/Page.test.tsx": "2eb73ba8900e1660d6f57ff3a8140faeb38b2841fb0cdf27aa060502589cc450",
+      "checks/runtime/capabilities/identity/test_stories.py": "2c7772e61b05f1f4d063b3fa0e11b741d192fd5ae87b9a0919d22bfb3c9e62ff",
+      "checks/runtime/capabilities/identity/ui_server.py": "e37b78bc5a3bc1382a9da6ba365b878f99315e49319b1bd94d010abbac072ffa"
+    }
+  },
+  "acceptance_coverage": [
+    "Transactional authoring and immutable answer revisions",
+    "Idempotent create and optimistic edit/delete conflicts",
+    "Acyclic local parent references and coherent deletion",
+    "Complete family retrieval and persistent chronology export",
+    "Real aiohttp HTTP lifecycle and isolated stores",
+    "Real HTTP-backed React author/follow-up/edit/export/delete flow",
+    "URL reload and stale-edit draft preservation"
+  ],
+  "integration_hooks": {
+    "register": "gideon.interfaces.dashboard.handlers.capabilities_identity.register(app)",
+    "page": "apps/console/src/features/capabilities/identity/Page.tsx",
+    "store": "config_dir()/capabilities/identity/stories.sqlite3",
+    "api": "/api/capabilities/identity"
+  },
+  "remaining_limits": [
+    "Root-owned API, navigation, native tool metadata and durability registration pending integrated qualification",
+    "No automatic interview generation in this task",
+    "No full browser/release matrix was run"
+  ],
+  "repair_cycles": 1
+}

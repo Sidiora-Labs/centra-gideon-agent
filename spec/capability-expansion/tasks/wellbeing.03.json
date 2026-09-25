@@ -1,0 +1,58 @@
+{
+  "id": "wellbeing.03",
+  "status": "locally_qualified",
+  "base_revision": "1c75867e",
+  "schema_version": 1,
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/apple_health.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/apple_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_apple.py",
+    "apps/console/src/features/capabilities/wellbeing/AppleHealth.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_apple_health.py",
+    "apps/console/src/features/capabilities/wellbeing/AppleHealth.test.tsx"
+  ],
+  "contract": "Bounded local XML/ZIP/Health Auto Export JSON/FHIR preview and commit. Original bytes preserved in canonical artifact companion. XML quantity and sleep interval metrics; JSON qty/Min/Max/Avg series; FHIR numerical laboratory observations reuse existing laboratory revisions. Same wellbeing SQLite ledger. Atomic combined metric/lab commit with duplicate-safe receipts and explicit unsupported counts.",
+  "acceptance_coverage": [
+    "standard internal Apple XML schema",
+    "XML quantities and sleep intervals",
+    "Health Auto Export numeric components",
+    "ZIP metrics and clinical JSON",
+    "FHIR laboratory ranges/provenance",
+    "original bytes and hash",
+    "no mutation during preview",
+    "atomic conflict rollback",
+    "duplicate-safe imports",
+    "date/unit filters",
+    "isolated homes",
+    "native tool and real HTTP paths",
+    "real-network React upload/preview/commit/source flows"
+  ],
+  "remaining_limits": [
+    "8 MiB raw and 32 MiB expanded ZIP; 20000 records; preview first100; queries max500",
+    "Unsupported XML categories/workouts and nonnumeric FHIR observations explicitly counted; no diagnosis or unit conversion",
+    "FHIR comparator observations skipped; differing reference range units rejected",
+    "UTF8 XML only; external DTD and entities refused",
+    "Root registers apple handler, console route and refreshed tool metadata",
+    "Native HealthKit and external Apple account sync are not part of local export import"
+  ],
+  "source_revision": "1c75867e",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.03",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.03-checks-mwjduf_r/evidence.json",
+  "production_lines": 388,
+  "test_lines": 398,
+  "test_ratio": 1.0257731958762886,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/AppleHealth.tsx": "276af7fb45667fe39076a1d0785dfce9de1fdac1067f071a193ab565965c85d7",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_apple.py": "852ada238a98e1e273e1e2bc1e40249fc0f6b1afdef5d78391575ee1edf06914",
+    "runtime/gideon/workspace/capabilities/wellbeing/apple_health.py": "9fbea53ac703336c6cdb1eda133127c925c05ac5fd56cdc623793a303c4c0ca3",
+    "runtime/gideon/workspace/capabilities/wellbeing/apple_provider.py": "9ac57137f9904a3b8c3ee70212bb71831b58a0afed6edac2f48606faa694be40",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "66a99366b1123bc8a9e0d620a1594da06bf5c4140d01c5e0a2c69a8e32df0bdb",
+    "apps/console/src/features/capabilities/wellbeing/AppleHealth.test.tsx": "e5c37acf983fc3dfbf077a75e09a3e090a9a1e563bf3b6ece9a8a2e02c6561e3",
+    "checks/runtime/capabilities/wellbeing/test_apple_health.py": "b26822bd3b7ec8f3b97d80b10dbcf80880c3fc03e2e5cbf6f0cd72b199e5c077"
+  },
+  "repair_cycles": 0
+}
