@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { HashRouter } from 'react-router-dom'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -48,8 +47,8 @@ afterAll(async () => {
 const content = 'analyte,observed_at,value,unit,reference_low,reference_high,external_id,notes\nGlucose,2026-09-25T09:00:00+02:00,92,mg/dL,70,100,first,original result\nGlucose,2026-09-26T09:00:00+02:00,95,mg/dL,70,100,second,second result'
 
 test('CSV preview, commit, correction, original reference and chronological trend use real HTTP', async () => {
-  window.history.replaceState(null, '', '#/capabilities/wellbeing/labs')
-  const view = render(<HashRouter><Labs /></HashRouter>)
+  window.history.replaceState(null, '', '#/capabilities/wellbeing/labs?shell=retained')
+  const view = render(<Labs />)
   await screen.findByText('No laboratory records.')
   fireEvent.change(screen.getByLabelText('Filename'), { target: { value: 'lab.csv' } })
   fireEvent.change(screen.getByLabelText('Laboratory source'), { target: { value: 'uploaded report' } })
@@ -78,16 +77,18 @@ test('CSV preview, commit, correction, original reference and chronological tren
   fireEvent.click(screen.getByRole('button', { name: 'Save laboratory correction' }))
   await screen.findByText('Revision 2: 93 mg/dL · transcription corrected')
   expect(screen.getByText('Revision 1: 92 mg/dL · original result')).toBeInTheDocument()
-  expect(location.hash).toContain('?id=')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('id')).toBeTruthy()
   const id = new URLSearchParams(location.hash.split('?')[1]).get('id')
   const saved = await (await networkFetch(`${origin}/api/capabilities/wellbeing/labs/${id}`)).json()
   expect(saved.value).toBe(93)
   expect(saved.source).toBe('uploaded report')
   expect(saved.reference_high).toBe(100)
   view.unmount()
-  render(<HashRouter><Labs /></HashRouter>)
+  render(<Labs />)
   await screen.findByText('Revision 2: 93 mg/dL · transcription corrected')
   expect(screen.getByLabelText('Result value')).toHaveValue('93')
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/labs')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   fireEvent.change(screen.getByLabelText('Reference low'), { target: { value: '120' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save laboratory correction' }))
   expect((await screen.findByRole('alert')).textContent).toContain('reference_low')
@@ -98,8 +99,8 @@ test('CSV preview, commit, correction, original reference and chronological tren
 })
 
 test('changed input hides stale preview and duplicate-safe commit reports actual counts', async () => {
-  window.history.replaceState(null, '', '#/capabilities/wellbeing/labs')
-  render(<HashRouter><Labs /></HashRouter>)
+  window.history.replaceState(null, '', '#/capabilities/wellbeing/labs?shell=retained')
+  render(<Labs />)
   await waitFor(() => expect(screen.queryByText('Loading laboratory records…')).not.toBeInTheDocument())
   fireEvent.change(screen.getByLabelText('Filename'), { target: { value: 'copied.csv' } })
   fireEvent.change(screen.getByLabelText('Laboratory source'), { target: { value: 'uploaded report' } })

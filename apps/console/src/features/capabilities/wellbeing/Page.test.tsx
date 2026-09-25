@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { HashRouter } from 'react-router-dom'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,8 +45,8 @@ afterAll(async () => {
 })
 
 test('body entry and correction retain original history after reopening selection', async () => {
-  window.history.replaceState(null, '', '#/capabilities/wellbeing')
-  const view = render(<HashRouter><Page /></HashRouter>)
+  window.history.replaceState(null, '', '#/capabilities/wellbeing?shell=retained')
+  const view = render(<Page />)
   await screen.findByText('No measurements in this date range.')
   fireEvent.change(screen.getByLabelText('Weight (kg)'), { target: { value: '74.2' } })
   fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'scale' } })
@@ -57,7 +56,7 @@ test('body entry and correction retain original history after reopening selectio
   await screen.findByText('Correction history')
   expect(screen.getByText('Revision 1: 74.2 kg')).toBeInTheDocument()
   expect(screen.getByLabelText('Source')).toBeDisabled()
-  expect(location.hash).toContain('?id=')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('id')).toBeTruthy()
   fireEvent.change(screen.getByLabelText('Weight (kg)'), { target: { value: '74.8' } })
   fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Corrected transcription' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save correction' }))
@@ -69,13 +68,19 @@ test('body entry and correction retain original history after reopening selectio
   expect(stored.values).toEqual({ weight: 74.8 })
   expect(stored.source).toBe('scale')
   view.unmount()
-  render(<HashRouter><Page /></HashRouter>)
+  render(<Page />)
   await screen.findByText('Revision 2: 74.8 kg')
   expect(screen.getByLabelText('Weight (kg)')).toHaveValue('74.8')
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   const exported = await (await networkFetch(`${origin}/api/capabilities/wellbeing/export`)).json()
   expect(exported.measurements).toEqual([stored])
   expect(exported.history).toHaveLength(2)
   expect(exported.history[0].values.weight).toBe(74.2)
+  fireEvent.click(screen.getByRole('button', { name: 'New measurement' }))
+  await screen.findByLabelText('Measurement kind')
+  expect(new URLSearchParams(location.hash.split('?')[1]).has('id')).toBe(false)
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   fireEvent.change(screen.getByLabelText('From (timestamp with offset)'), { target: { value: '2099-01-01T00:00:00Z' } })
   fireEvent.click(screen.getByRole('button', { name: 'Filter dates' }))
   await screen.findByText('No measurements in this date range.')
@@ -85,8 +90,8 @@ test('body entry and correction retain original history after reopening selectio
 })
 
 test('pressure controls reject invalid correction without losing persisted provenance', async () => {
-  window.history.replaceState(null, '', '#/capabilities/wellbeing')
-  render(<HashRouter><Page /></HashRouter>)
+  window.history.replaceState(null, '', '#/capabilities/wellbeing?shell=retained')
+  render(<Page />)
   await waitFor(() => expect(screen.queryByText('Loading measurements…')).not.toBeInTheDocument())
   fireEvent.change(screen.getByLabelText('Measurement kind'), { target: { value: 'blood_pressure' } })
   fireEvent.change(screen.getByLabelText('Systolic (mmHg)'), { target: { value: '124' } })

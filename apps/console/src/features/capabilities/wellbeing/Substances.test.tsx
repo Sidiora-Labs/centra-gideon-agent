@@ -5,7 +5,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import Substances from './Substances'
-import { HashRouter } from 'react-router-dom'
 
 let server: ChildProcess
 let origin: string
@@ -47,7 +46,7 @@ afterAll(async () => {
 
 const base = '/api/capabilities/wellbeing/substances'
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
-const open = () => { window.location.hash = ''; return render(<HashRouter><Substances /></HashRouter>) }
+const open = () => { window.history.replaceState(null, '', '#/capabilities/wellbeing/substances?shell=retained'); return render(<Substances />) }
 
 test('real entries preserve correction history and delete through the gateway', async () => {
   open()
@@ -67,6 +66,8 @@ test('real entries preserve correction history and delete through the gateway', 
   await screen.findByRole('heading', { name: 'Edit consumption entry' })
   expect(screen.getByLabelText('Entry source')).toBeDisabled()
   expect(screen.getByLabelText('Entry notes')).toHaveValue('with lunch')
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/substances')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   change('Servings or units', '1')
   change('Entry notes', 'corrected serving')
   fireEvent.click(screen.getByRole('button', { name: 'Save consumption entry' }))
@@ -81,6 +82,8 @@ test('real entries preserve correction history and delete through the gateway', 
   fireEvent.click(screen.getByRole('button', { name: 'Delete consumption entry' }))
   await screen.findByText('No consumption entries.')
   expect(screen.getByText('Ethanol: Not recorded g · 0 logged days')).toBeInTheDocument()
+  expect(new URLSearchParams(location.hash.split('?')[1]).has('id')).toBe(false)
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   const history = await (await networkFetch(origin + base + '/entries/' + identity + '/history')).json()
   expect(history.history).toHaveLength(3)
   expect(history.history[2].deleted).toBe(true)
@@ -114,6 +117,7 @@ test('product presets snapshot labeled zero nicotine and survive preset changes'
   fireEvent.click(screen.getByRole('button', { name: 'Manage product presets' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Zero product · nicotine' }))
   await screen.findByRole('heading', { name: 'Edit product preset' })
+  await screen.findByLabelText('Product name')
   change('Product name', 'Changed product')
   change('Labeled nicotine per unit (mg)', '4')
   fireEvent.click(screen.getByRole('button', { name: 'Save product preset' }))

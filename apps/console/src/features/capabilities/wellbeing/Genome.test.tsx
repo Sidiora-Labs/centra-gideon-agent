@@ -5,7 +5,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import Genome from './Genome'
-import { HashRouter } from 'react-router-dom'
 
 let server: ChildProcess
 let origin: string
@@ -47,7 +46,7 @@ afterAll(async () => {
 
 const base = '/api/capabilities/wellbeing/genome'
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
-const open = () => { window.location.hash = ''; return render(<HashRouter><Genome /></HashRouter>) }
+const open = () => { window.history.replaceState(null, '', '#/capabilities/wellbeing/genome?shell=retained'); return render(<Genome />) }
 const tsv = '\ufeffrsid\tchromosome\tposition\tgenotype\r\nrs123\t1\t100\tAG\r\nrs456\tX\t200\t--\r\n'
 
 test('real source preview, original bytes, annotation revisions and filters', async () => {
@@ -98,9 +97,11 @@ test('real source preview, original bytes, annotation revisions and filters', as
   fireEvent.click(screen.getByRole('button', { name: 'Filter variants' }))
   await screen.findByText('No matching variants.')
   view.unmount()
-  render(<HashRouter><Genome /></HashRouter>)
+  render(<Genome />)
   await screen.findByText('Revision 3: Revised personal note · manual note')
   expect(screen.getByLabelText('Authored annotation')).toHaveValue('Revised personal note')
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/genome')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
 })
 
 test('VCF sample selection, replay and malformed files preserve sources', async () => {
@@ -132,6 +133,8 @@ test('VCF sample selection, replay and malformed files preserve sources', async 
   await screen.findByText('Indexed 1 variants; 0 duplicates.')
   const catalog = await (await networkFetch(origin + base + '/sources')).json()
   expect(catalog.sources).toHaveLength(2)
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/genome')
+  expect(new URLSearchParams(location.hash.split('?')[1]).has('variant')).toBe(false)
   fireEvent.change(screen.getByLabelText('Choose genome file'), { target: { files: [new File(['invalid data'], 'broken.vcf')] } })
   await screen.findByText('Selected: broken.vcf')
   fireEvent.click(screen.getByRole('button', { name: 'Preview genome' }))

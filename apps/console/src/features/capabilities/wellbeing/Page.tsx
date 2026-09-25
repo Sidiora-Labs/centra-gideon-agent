@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
 import { records, type Measurement } from './api'
@@ -41,8 +41,9 @@ function Editor({ record, onSaved }: { record: Measurement | null; onSaved: (row
 }
 
 export default function Page() {
-  const [params, setParams] = useSearchParams()
-  const identity = params.get('id')
+  const { query: params, setQuery: setRouteQuery } = useHashRoute('capabilities')
+  const setParams = (values: Record<string, string>) => setRouteQuery({ id: null, ...values })
+  const identity = params.id
   const [rows, setRows] = useState<Measurement[]>([])
   const [selected, setSelected] = useState<Measurement | null>(null)
   const [history, setHistory] = useState<Measurement[]>([])

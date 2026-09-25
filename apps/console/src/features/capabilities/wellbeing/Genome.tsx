@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
@@ -28,8 +28,9 @@ function Annotation({ row, saved }: { row: Variant; saved: () => void }) {
 }
 
 export default function Genome() {
-  const [params, setParams] = useSearchParams()
-  const sourceId = params.get('source'), variantId = params.get('variant')
+  const { query: params, setQuery: setRouteQuery } = useHashRoute('capabilities')
+  const setParams = (values: Record<string, string>) => setRouteQuery({ source: null, variant: null, ...values })
+  const sourceId = params.source, variantId = params.variant
   const [filename, setFilename] = useState(''), [content, setContent] = useState(''), [format, setFormat] = useState('tsv'), [assembly, setAssembly] = useState(''), [source, setSource] = useState(''), [sample, setSample] = useState('')
   const [sources, setSources] = useState<Source[]>([]), [variants, setVariants] = useState<Variant[]>([]), [selected, setSelected] = useState<Variant | null>(null), [history, setHistory] = useState<Variant[]>([])
   const [preview, setPreview] = useState<Preview | null>(null), [message, setMessage] = useState(''), [error, setError] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false)

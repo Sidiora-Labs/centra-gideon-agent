@@ -5,7 +5,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import Interventions from './Interventions'
-import { HashRouter } from 'react-router-dom'
 
 let server: ChildProcess
 let origin: string
@@ -47,7 +46,7 @@ afterAll(async () => {
 
 const base = '/api/capabilities/wellbeing/interventions'
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
-const open = () => { window.location.hash = ''; return render(<HashRouter><Interventions /></HashRouter>) }
+const open = () => { window.history.replaceState(null, '', '#/capabilities/wellbeing/interventions?shell=retained'); return render(<Interventions />) }
 const today = new Date().toISOString().slice(0, 10)
 const start = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
 
@@ -89,15 +88,18 @@ test('actual plan creation, explicit adherence and correction history', async ()
   expect(records.records[0].plan_revision).toBe(1)
   expect(records.records[0].source).toBe('personal plan')
   view.unmount()
-  render(<HashRouter><Interventions /></HashRouter>)
+  render(<Interventions />)
   await screen.findByText('Revision 2: skipped · Corrected my mistaken observation')
   expect(screen.getByLabelText('Adherence notes')).toHaveValue('Corrected my mistaken observation')
+  expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/interventions')
+  expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
 })
 
 test('archive keeps historical observations and enforces unique scheduled days', async () => {
   open()
   fireEvent.click(await screen.findByRole('button', { name: 'Daily walk' }))
   await screen.findByRole('heading', { name: 'Record adherence' })
+  expect(new URLSearchParams(location.hash.split('?')[1]).has('record')).toBe(false)
   change('Scheduled date', today)
   fireEvent.click(screen.getByRole('button', { name: 'Save adherence record' }))
   expect((await screen.findByRole('alert')).textContent).toContain('already has a record')
