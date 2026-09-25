@@ -1,0 +1,56 @@
+{
+  "id": "wellbeing.12",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "82afda9a",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_privacy.py",
+    "apps/console/src/features/capabilities/wellbeing/Privacy.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_privacy.py",
+    "apps/console/src/features/capabilities/wellbeing/Privacy.test.tsx"
+  ],
+  "contract": "Local privacy subjects and revisioned scoped consent; authenticated encrypted identity facts using canonical project_archive AES-GCM envelope with request-only passphrase, masked reads, source/history, explicit audited reveal and immediate revocation. Entire private DB including metadata classified secret. No values/passphrases accepted by agent tools or included in health exports.",
+  "remaining_limits": [
+    "No persisted passphrase/key custody or recovery; user must retain passphrase",
+    "Subject aliases/fact labels/source/consent methods/audit reasons are visible authorized-owner metadata",
+    "No automatic model/twin/scan/submission disclosure",
+    "No private DB replication; central secret inventory integration root-owned",
+    "Original encrypted revisions retained; no deletion/retention workflow promised"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.12",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.12-checks-i_0l24rg/evidence.json",
+  "repair_cycles": 0,
+  "production_lines": 340,
+  "test_lines": 412,
+  "test_ratio": 1.2117647058823529,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Privacy.tsx": "f694eb9289a621e2a450dc68d8dbf84d84c047bbf2dfe3efd9c6aea2b837d555",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_privacy.py": "f8f526ea97bfb9856bffb78a26b9720c1ac7b60647197f94768846f2fc9f8fb2",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy.py": "5deeacde213e2f72bbf21c6b2f084ac5b64b3a8943b5de5b482ebe77e3111006",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_provider.py": "62ee3d65abf3fd1522ed3841a244f0a0b8351fab11f5f636aa802a1f45b40ed5",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "5ba3af67884e6bde03acef235b37d91a3a17ae3d6501387f19340f36644f6e16",
+    "apps/console/src/features/capabilities/wellbeing/Privacy.test.tsx": "d7733ed83ff0b1e08e01e89d3bc48ded4f1952897f68640c42e9d54536db92a3",
+    "checks/runtime/capabilities/wellbeing/test_privacy.py": "e634ed7ee1711d1cfbe86db3c12e0e1d41b25c606e65cefe2bbdd629e961fdd7"
+  },
+  "dependencies": [
+    "Canonical gideon.automation.workflows.project_archive authenticated encryption envelope",
+    "Existing captured-home integrations.llm.credentials.CredentialStore inspected; plaintext0600 custody not selected for private fact passphrases",
+    "Root-owned secret inventory and nonreplication classification capabilities/privacy.sqlite3"
+  ],
+  "acceptance_coverage": [
+    "real AES-GCM ciphertext and encrypted request receipts, SQLite byte-level plaintext absence",
+    "scoped subject consent grants/revocation and optimistic revisions",
+    "masked metadata list/get/history and no secret-value agent operations",
+    "correct old-key authentication and encrypted historical revisions",
+    "reveal audit success/denial, wrong-key/tamper/context-swapping refusal",
+    "private subject/fact metadata excluded from wellbeing archive",
+    "two-home owner HTTP isolation and no-store",
+    "real HTTP React consent/create/reveal/correct/revoke/reload and input clearing"
+  ]
+}
