@@ -24,7 +24,8 @@
       "social-account-registry",
       "x-read-compose-handoff",
       "stacker-territory-actions",
-      "agent-platform-assignments"
+      "agent-platform-assignments",
+      "recorded-activity-timeline"
     ]
   },
   "native": true

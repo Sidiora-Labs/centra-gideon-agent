@@ -1,0 +1,79 @@
+{
+  "id": "workspace.08",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "scope": "Configured provider launch and validated startup image attachment through the existing owner terminal session registry",
+  "base_revision": "1b059c611cd7562b689f809b58cd22cc49e8efdf",
+  "acceptance": [
+    "Resolve configured Codex engine from authoritative provider registry; no caller argv/env executable",
+    "Validate actual image bytes, retain canonical artifact version, materialize private session image; CLI consumes real --image argument",
+    "Actual owner HTTP and WS PTY launch, terminal output and close use existing session lifecycle",
+    "Console selects configured engine, uploads real image, renders existing TerminalView and preserves errors"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/provider_terminal.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "runtime/gideon/interfaces/dashboard/handlers/terminal.py",
+    "apps/console/src/features/capabilities/workspace/ProviderTerminals.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_provider_terminal.py",
+    "checks/runtime/capabilities/workspace/provider_ui_server.py",
+    "apps/console/src/features/capabilities/workspace/ProviderTerminals.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_provider_terminal.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/ProviderTerminals.test.ts"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.08",
+  "limitations": [
+    "Only configured Codex dialect startup image flags currently supported",
+    "No authenticated provider inference claim; actual interactive startup uses isolated temporary credentials/home",
+    "Hosted managed inference CLI grant is a separate policy adaptation",
+    "Live image injection into an already running provider and persisted launch identity across runtime restart remain pending"
+  ],
+  "evidence": {
+    "compile_runtime": "/tmp/gideon-workspace.08-checks-ugzx7bpz/evidence.json",
+    "runtime_result": "Four unchanged runtime cases and eight subtests from initial gate retained; corrected actual interactive CLI case separately passed in 7.18s, with live process and real onboarding text required",
+    "failed_ui_stages": [
+      "/tmp/gideon-workspace.08-checks-ugzx7bpz/evidence.json",
+      "/tmp/gideon-workspace.08-checks-p0ey273p/evidence.json",
+      "/tmp/gideon-workspace.08-checks-draihmot/evidence.json"
+    ],
+    "ui_result": "Invalid image case passed in initial stage; actual CLI launch/image/onboarding/render/close case passed in final affected-case continuation",
+    "repair_cycles": 2,
+    "ratio": 1.5301204819277108,
+    "current_ratio": 1.6011904761904763,
+    "continuation": {
+      "diagnostic": "/tmp/workspace08-ui-continuation.json",
+      "failed_after_fixture_repair": "/tmp/workspace08-ui-repair.json",
+      "qualified_ui": "/tmp/workspace08-ui-visible-repair.json",
+      "qualified_diagnostics": "/tmp/workspace08-ui-diagnostics-FUw6KH",
+      "runtime_command": "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest -q checks/runtime/capabilities/workspace/test_provider_terminal.py::ProviderTerminal::test_real_cli_receives_image_in_existing_websocket_pty",
+      "runtime_exit_code": 0,
+      "runtime_result": "1 passed,5 warnings in 7.18s",
+      "repairs": [
+        "Create isolated CODEX_HOME directory; initial runtime warning-only assertion was insufficient and is superseded",
+        "Scroll newly launched terminal into view; actual CLI text reached xterm but offscreen rendering was paused"
+      ],
+      "aborted_invocations": "Two incorrect-cwd edit commands accidentally launched unchanged cases; immediately interrupted with exit130 and not counted as qualification",
+      "files": {
+        "runtime/gideon/workspace/capabilities/workspace/provider_terminal.py": "d662618486704f25b315b75f9ac0d133041989a5e0da95545a4317273cad9ec6",
+        "runtime/gideon/workspace/capabilities/workspace/tools.py": "98e7a30507af3f24f1922080e6023170c89d2c3b0c4d94c78da33df196b11684",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "6ec85dabb812e249a9895a547440b20ea78036b4bdf263b7173ff1ec15039603",
+        "runtime/gideon/interfaces/dashboard/handlers/terminal.py": "a2f23fb1a5fbcdf08036e71b8ba0815a26d6b775b841ec955443870443811349",
+        "apps/console/src/features/capabilities/workspace/ProviderTerminals.tsx": "a5cf5248353c45a7fd357a85da6dc2d5f9db1ae4566b6108de155488fe4cd611",
+        "apps/console/src/features/capabilities/workspace/Page.tsx": "d553d6df5c72663b733a81fced8620edc7b0fac3ab191815c1f3990a8fcc5290",
+        "checks/runtime/capabilities/workspace/test_provider_terminal.py": "439f6f49c59cfce4180826ac31b8e1f57f755f647c9afd8cf8f2620a9fff2360",
+        "checks/runtime/capabilities/workspace/provider_ui_server.py": "8c5c07651b162bab701ab6c3234cb29f3e187f3c1a230dbdb9f35285c0227836",
+        "apps/console/src/features/capabilities/workspace/ProviderTerminals.test.ts": "c8b07b3080f81274335d49e434adb376fb301e0f955deac9c32e221cb06077df"
+      }
+    }
+  },
+  "blockers": []
+}

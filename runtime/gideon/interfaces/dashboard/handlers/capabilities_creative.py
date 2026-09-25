@@ -15,6 +15,8 @@ from gideon.workspace.capabilities.creative.polishing import PolishingStore
 from gideon.workspace.capabilities.creative.stories import StoryStore
 from gideon.workspace.capabilities.creative.series import SeriesStore
 from gideon.workspace.capabilities.creative.continuity import ContinuityStore
+from gideon.workspace.capabilities.creative.voice import VoiceStore
+VOICE = web.AppKey("creative_voice", VoiceStore)
 CONTINUITY = web.AppKey("creative_continuity", ContinuityStore)
 SERIES = web.AppKey("creative_series", SeriesStore)
 STORIES = web.AppKey("creative_stories", StoryStore)
@@ -282,10 +284,26 @@ async def continuity(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def voice(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        store = request.app[VOICE]
+        id = request.match_info['id']
+        result = store.configure(id, await request.json()) if request.method == 'PATCH' else store.report(id)
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
     app[SERIES] = SeriesStore(app[STORE].home)
+    app[VOICE] = VoiceStore(app[SERIES])
+    app.router.add_get("/api/capabilities/creative/series/{id}/voice", voice)
+    app.router.add_patch("/api/capabilities/creative/series/{id}/voice", voice)
+    app.router.add_get("/api/capabilities/creative/series/{id}/voice/export", voice)
     app.router.add_get("/api/capabilities/creative/series", series)
     app.router.add_post("/api/capabilities/creative/series", series)
     app.router.add_get("/api/capabilities/creative/series/{id}", series)

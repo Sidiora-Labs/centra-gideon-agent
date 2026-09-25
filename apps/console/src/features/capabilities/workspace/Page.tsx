@@ -1,3 +1,4 @@
+import ProviderTerminals from './ProviderTerminals'
 import ExternalTerminals from './ExternalTerminals'
 import Desktops from './Desktops'
 import Git from './Git'
@@ -72,6 +73,6 @@ export default function Page() {
     </article>}
     <Processes />
     <Ports />
-    <Projects /><Git /><Desktops /><ExternalTerminals />
+    <Projects /><Git /><Desktops /><ExternalTerminals /><ProviderTerminals />
   </section>
 }

@@ -212,7 +212,7 @@ async def test_http_native_actual_print_and_pinned_download(tmp_path):
         assert (await client.patch(base+'/'+item['id'],json={'revision':1,'name':'stale'})).status==409
         assert (await client.get(base+'/missing')).status==404
     tools=DeckTools(store)
-    assert len(await tools.list_tools())==9
+    assert {'music_decks_'+name for name in ('list','get','create','update','card','history','export','generate','adopt')} <= {tool.name for tool in await tools.list_tools()}
     for action,args in [('get',{'id':item['id']}),('list',{}),('history',{'id':item['id']}),('export',{'id':item['id'],'data':{'revision':2}})]:
         result=await tools.invoke('music_decks_'+action,args)
         assert result.success and json.loads(result.output) is not None

@@ -8,7 +8,7 @@ from gideon.workspace.capabilities.music.decks import DeckStore
 from gideon.workspace.capabilities.music.store import DomainError
 
 
-def register(app,store=None):
+def register(app,store=None,assist=None):
     home=config_dir();store=store or DeckStore(home,NativeArtifactProvider(root=home/'artifacts'))
     async def handle(request):
         try:
@@ -34,3 +34,7 @@ def register(app,store=None):
     app.router.add_get(base+'/{id}/history',handle);app.router.add_patch(base+'/{id}/cards/{key}',handle)
     for action in ('export','generate'):app.router.add_post(base+'/{id}/'+action,handle)
     app.router.add_post(base+'/{id}/cards/{key}/adopt',handle)
+
+    from gideon.workspace.capabilities.music.deck_assist import DeckAssist
+    from .capabilities_music_deck_assist import register as register_assist
+    register_assist(app,assist or DeckAssist(store))

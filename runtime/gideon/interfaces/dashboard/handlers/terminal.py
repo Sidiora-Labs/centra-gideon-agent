@@ -41,6 +41,7 @@ _ORPHAN_TIMEOUT_S = 300
 _pending_cwd: dict[str, str] = {}
 
 _pending_sandbox: dict[str, str] = {}
+_pending_provider_argv: dict[str, list[str]] = {}
 
 
 def _sel():
@@ -138,6 +139,8 @@ async def _safe_send(sess: "_TerminalSession", data: bytes) -> None:
 
 async def _kill_session(sess: _TerminalSession) -> None:
     """Kill PTY process and close FDs for a session."""
+    from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
+    cleanup(sess.session_id)
     if sess.master_fd >= 0:
         try:
             asyncio.get_running_loop().remove_reader(sess.master_fd)
@@ -262,6 +265,7 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                 "GIDEON_TERMINAL": "1",
                 "DISABLE_AUTO_UPDATE": "true",
             }
+            provider_argv = _pending_provider_argv.pop(session_id, None)
             persistent = _persist_enabled(request)
             if persistent:
                 tname = _tmux_session_name(session_id)
@@ -273,11 +277,10 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                     "-A",
                     "-s",
                     tname,
-                    shell,
-                    "-l",
+                    *(provider_argv or [shell, "-l"]),
                 ]
             else:
-                argv = [shell, "-l"]
+                argv = provider_argv or [shell, "-l"]
             _req_sandbox = _pending_sandbox.pop(session_id, "")
             if _req_sandbox:
                 from gideon.integrations.sandbox_providers import (
@@ -363,6 +366,8 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                 pass
             sess.master_fd = -1
         registry.pop(session_id, None)
+        from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
+        cleanup(session_id)
         if sess.ws and not sess.ws.closed:
             try:
                 await sess.ws.send_str(json.dumps({"type": "exited", "code": code}))
@@ -522,10 +527,14 @@ async def api_terminal_create(request: web.Request) -> web.Response:
     shell = cfg.get("shell") or os.environ.get("SHELL", "/bin/bash")
     requested_cwd = ""
     requested_sandbox = ""
+    requested_provider = None
+    requested_image = None
     if request.body_exists:
         try:
             body = await read_json_body(request)
             if isinstance(body, dict):
+                requested_provider = body.get("provider_id")
+                requested_image = body.get("image")
                 if isinstance(body.get("cwd"), str):
                     requested_cwd = body["cwd"]
                 if isinstance(body.get("sandbox"), str):
@@ -550,6 +559,21 @@ async def api_terminal_create(request: web.Request) -> web.Response:
                 status=403,
             )
         _pending_cwd[session_id] = requested_cwd
+    if requested_provider is not None:
+        if len(_pending_provider_argv)>=max_sessions:
+            _pending_cwd.pop(session_id,None)
+            return web.json_response({'error':'Maximum pending provider terminals reached'},status=429)
+        if request.get('app') or not isinstance(requested_provider,str):
+            return web.json_response({'error':'Owner provider selection required'},status=403)
+        from gideon.workspace.capabilities.workspace.provider_terminal import prepare
+        try:
+            _pending_provider_argv[session_id]=prepare(session_id,requested_provider,requested_image)
+        except (ValueError,OSError) as error:
+            _pending_cwd.pop(session_id,None)
+            return web.json_response({'error':str(error)},status=400)
+    elif requested_image is not None:
+        _pending_cwd.pop(session_id,None)
+        return web.json_response({'error':'Image requires a configured provider'},status=400)
     if requested_sandbox and requested_sandbox != "none":
         from gideon.integrations.sandbox_providers import get_provider
 
@@ -601,6 +625,13 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
     session_id = request.match_info.get("session_id", "")
     registry = _get_registry(request)
     sess = registry.pop(session_id, None)  # type: ignore[arg-type]
+    pending=_pending_provider_argv.pop(session_id,None)
+    if pending is not None and sess is None:
+        from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
+        cleanup(session_id)
+        _pending_cwd.pop(session_id,None)
+        _pending_sandbox.pop(session_id,None)
+        return web.json_response({'deleted':session_id})
 
     persistent = sess.persistent if sess else _persist_enabled(request)
     detached = False

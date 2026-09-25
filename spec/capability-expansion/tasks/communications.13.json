@@ -1,0 +1,50 @@
+{
+  "id": "communications.13",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "449c6cd4",
+  "requires": [
+    "communications.12"
+  ],
+  "contract": "Read-only local-day communications activity projection from canonical touchpoints, relationship messages, calendar events, social and assignment history. Stable provenance identities, person/kind filters, query-bound seek pagination, timezone correctness, scan limits and schedule-versus-attendance distinction. No competing event store.",
+  "acceptance": [
+    "Canonical records merge with stable IDs and provenance links without duplicate desktop/mail mirror projections",
+    "Local-day DST/date boundaries, all-day calendar overlap/cancellation and strict person filters",
+    "Query-bound pagination, bounded scans and explicit incomplete local coverage",
+    "Real native/HTTP/Console filtering, source links, pagination and error journeys; no secret-bearing metadata in summaries"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/timeline.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/TimelinePanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_timeline.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/TimelinePanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_timeline.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/TimelinePanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.13",
+  "limits": [
+    "Recorded communications activity only, not a complete life/activity record.",
+    "Calendar entries are schedules, not proof of attendance.",
+    "At most10000rows per canonical source scanned, with truncation coverage surfaced.",
+    "Seek pagination follows current records and is not a frozen snapshot."
+  ],
+  "qualification": {
+    "runtime": "37 passed",
+    "console_http": "3 passed",
+    "scope": "canonical recorded communications activity; schedule is not attendance"
+  }
+}

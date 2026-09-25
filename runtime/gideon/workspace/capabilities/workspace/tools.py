@@ -14,6 +14,7 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_provider_terminal_profiles', 'Read configured interactive provider engine availability.', {}, [], False),
             ('workspace_external_terminals', 'Read existing native iTerm pane metadata without taking ownership.', {}, [], False),
             ('workspace_external_terminal_screen', 'Read the visible text of one existing native iTerm pane.', {'id':{'type':'string'}}, ['id'], False),
             ('workspace_desktops', 'List isolated desktop lifecycle records.', {}, [], False),
@@ -62,7 +63,10 @@ class WorkspaceToolProvider(ToolProvider):
                 expected = str if schema['properties'][key]['type'] == 'string' else int
                 if type(value) is not expected:
                     raise ValueError('Invalid argument type')
-            if tool_name.startswith('workspace_external_terminal'):
+            if tool_name == 'workspace_provider_terminal_profiles':
+                from .provider_terminal import profiles
+                result=profiles()
+            elif tool_name.startswith('workspace_external_terminal'):
                 from .iterm import ExternalTerminalMirror
                 mirror=ExternalTerminalMirror()
                 result=await mirror.screen(arguments['id']) if tool_name.endswith('_screen') else await mirror.inventory()

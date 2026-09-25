@@ -1,0 +1,52 @@
+{
+  "id": "music.11",
+  "status": "locally_qualified_external_unqualified",
+  "base_revision": "f526fbb1",
+  "requires": [
+    "music.10",
+    "creative.04"
+  ],
+  "contract": "Actual isolated model completion and vision staging via registered provider SDK, pinned canonical images, immutable universe canon snapshots and validated casting IDs. Durable reviewable analysis/prompt proposals with explicit failed/interrupted states, original deck revision apply guard and canonical output artifact provenance.",
+  "acceptance": [
+    "Implement actual registered-model text/vision adapter, typed bounded response validation, terminal completion requirement and cleanup; absent providers explicitly fail without synthetic content.",
+    "Ground selected card prompts and casting in canonical UniverseStore revision, validating every returned card and canon ID; apply validated proposals atomically preserving other cards.",
+    "Expose proposal/provider/read/apply through API/UI/native with persisted request replay and immutable source context."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/deck_assist.py",
+    "runtime/gideon/workspace/capabilities/music/deck_model.py",
+    "runtime/gideon/workspace/capabilities/music/deck_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_deck_assist.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_decks.py",
+    "apps/console/src/features/capabilities/music/DeckAssist.tsx",
+    "apps/console/src/features/capabilities/music/DeckPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_deck_assist.py",
+    "checks/runtime/capabilities/music/serve_deck_assist.py",
+    "apps/console/src/features/capabilities/music/DeckAssist.test.tsx",
+    "checks/runtime/capabilities/music/test_decks.py",
+    "apps/console/src/features/capabilities/music/DeckPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_deck_assist.py",
+    "checks/runtime/capabilities/music/test_decks.py"
+  ],
+  "limits": [
+    "External model text/vision generation and applying a real successful provider proposal remain unqualified without configured credentials; parser/applier use authored schema vectors, never fake providers.",
+    "At most12 selected cards per proposal and60000 input characters; larger universe context must be reduced explicitly.",
+    "Existing .10 physical printer and external image-generation limitations remain unchanged."
+  ],
+  "evidence": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.11",
+    "path": "/tmp/gideon-music.11-checks-vyc2y3ss/evidence.json",
+    "production_lines": 228,
+    "test_lines": 249,
+    "ratio": 1.0921052631578947,
+    "repairs": 0,
+    "ui_tests": 4
+  },
+  "extra_files": [
+    "spec/capability-expansion/tasks/music.10.json"
+  ]
+}

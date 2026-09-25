@@ -1,0 +1,47 @@
+{
+  "id": "media.12",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "7a4f3b69",
+  "contract": "Immutable episode plan revisions lint establish/continue/reuse scene order and pinned canonical clips. Worker preflights pending generated scenes against actual advertised model, pins selection, sequences predecessor references, records explicit policy-authorized establishment fallback, and retains scene attempts/outputs/events across interruption and retry. Actual timeline renderer stitches completed clips into canonical MP4. Generated or reused clips trimmed before continuation require a separately trimmed canonical endpoint. API/native tools/console expose plans/history/jobs/scene lineage and fallback status.",
+  "acceptance": "Real FFmpeg two-clip episode playback order and provenance, checkpoint interruption/reopen/resume without replaying completed scenes, CAS/replay/history, structural lint and wrong-endpoint rejection, actual unavailable-provider preflight without fake output, real HTTP/native consumers and UI lineage/dirty/loading behavior.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/episodes.py",
+    "runtime/gideon/workspace/capabilities/media/episodes_http.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/EpisodePage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_episodes.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/EpisodePage.test.tsx",
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_episodes.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/EpisodePage.test.tsx",
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "No external generated-scene inference or continuation visual quality proof; credentials unavailable",
+    "Fully reused clips qualify assembly and checkpoint lifecycle, not model generation",
+    "Continuation capability may use final-frame-only conditioning; fallback explicitly recorded, never silent",
+    "Assembly mutes original clip audio; soundtrack editing available through resulting timeline",
+    "Provider calls interrupted before scene output checkpoint may require regeneration on retry; completed scene checkpoints retained",
+    "Live browser and aggregate supervisor integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.12",
+  "evidence": "/tmp/gideon-media.12-checks-dgnknhag/evidence.json",
+  "production_lines": 285,
+  "test_lines": 292,
+  "ratio": 1.024561403508772,
+  "repair_cycles": 0,
+  "exit_code": 0
+}

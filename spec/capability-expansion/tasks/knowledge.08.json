@@ -1,0 +1,47 @@
+{
+  "id": "knowledge.08",
+  "status": "implemented",
+  "schema_version": 1,
+  "base_revision": "2854d6e1",
+  "contract": "Reviewed portable idea-list Markdown maps ordered entries to existing manual collections and fleeting items with a canonical covernote. Opt-in recurring sync reuses the configured owned two-way KnowledgeVault, its global ledger and actual interval scheduler.",
+  "acceptance": [
+    "Roundtrip supported UUID/title/category/status/dates/tags/prompt/help/orderedideas; preserve/report scalar/stringlist extra metadata and reject malformed numbering/unsafe YAML.",
+    "Reviewed import uses currenthash and immutable retry receipts, canonical collection+fleeting identity, originaldates and exact source links.",
+    "Actual file edits update ideas; local idea edits export; both-sided edits preserve both and surface vault conflict; deleted files and collections are not recreated.",
+    "No second projector/watcher or config mutation: off/mirror/external roots unavailable, existing owned two-way engine/ledger handles loop prevention and tombstones.",
+    "Existing interval trigger/action policy and real clock dispatch produce actual vault files and ExecutionJournal; same fired slot idempotent and action binding cannot cross allocations.",
+    "Native strict session/approval policy and actual HTTP plus DOM import/export/review/sync/schedule consumers."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/idea_format.py",
+    "runtime/gideon/workspace/capabilities/knowledge/ideas.py",
+    "runtime/gideon/workspace/capabilities/knowledge/idea_schedule.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_ideas.py",
+    "runtime/gideon/security/guardrails/rungs.py",
+    "apps/console/src/features/capabilities/knowledge/IdeasPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_ideas.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/ideas_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/IdeasPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_ideas.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/IdeasPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Owned-vault projection retains the existing canonical Knowledge page wrapper; portable downloads use direct idea-list Markdown.",
+    "Requires existing two-way mode and configured vault path within captured home; external vault registration remains separate.",
+    "100 lists/100 ideas each and256KiB portable documents are bounded; nested YAML metadata/aliases rejected explicitly.",
+    "Original list position is held by the canonical covernote adapter; generic collection membership remains the existing shelf model."
+  ],
+  "repair_history": [
+    "Preflight ratio check rejected520/527before running commands; added actual mode-restoration durable retry fixture.",
+    "First syntax/runtime/UI execution passed;534/527changed executable LOC, actual canonical/vault/scheduler sources."
+  ]
+}
