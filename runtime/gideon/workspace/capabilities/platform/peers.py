@@ -35,6 +35,7 @@ CATEGORIES = (
     "creative.catalog",
     "creative.commissions",
     "creative.direction",
+    "creative.work_documents",
     "identity.goals",
     "identity.profile",
     "identity.stories",

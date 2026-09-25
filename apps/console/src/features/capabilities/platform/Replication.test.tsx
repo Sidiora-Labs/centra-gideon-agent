@@ -31,6 +31,7 @@ it('pushes the actual canonical domain through signed self-peer HTTP and reloads
   expect(screen.getByText('knowledge.records: knowledge.items')).toBeVisible()
   expect(screen.getByText(/creative.catalog: creative.ingredients/)).toBeVisible()
   expect(screen.getByText('creative.direction: creative.direction_projects')).toBeVisible()
+  expect(screen.getByText('creative.work_documents: creative.work_versions, creative.work_drafts')).toBeVisible()
   expect(screen.getByText(/identity.goals: identity.goals/)).toBeVisible()
   expect(screen.getByText(/identity.profile: identity.progress_profile/)).toBeVisible()
   expect(screen.getByText('memory.records: memory.semantic_records')).toBeVisible()
