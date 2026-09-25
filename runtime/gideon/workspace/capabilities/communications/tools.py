@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle
+from . import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline
 
 
 def obj(properties, required=()):
@@ -42,6 +42,7 @@ TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boole
 CAL_SOURCE = {key: STRING for key in calendar.SOURCE_FIELDS}
 SOCIAL = {**{key: STRING for key in social.FIELDS if key != 'person_id'}, 'person_id': {'type': ['string', 'null']}}
 SPECS = {
+    'people_activity_timeline': ('Read current local communications activity with provenance, date/person/kind filters and honest schedule/coverage limits.', obj({'date': STRING, 'timezone': STRING, 'person_id': STRING, 'kind': STRING, 'cursor': STRING, 'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}, ('date',)), False),
     'people_platform_agents': ('List actual configured agent identities eligible for local assignment.', obj({}), False),
     'people_platform_assignments': ('Read account assignments and current dependency availability.', obj({}), False),
     'people_platform_assignment_get': ('Read one assignment and usability projection.', obj({'assignment_id': STRING}, ('assignment_id',)), False),
@@ -141,7 +142,9 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name.startswith('people_platform_'):
+            if tool_name == 'people_activity_timeline':
+                result = timeline.read(store, {**arguments, 'timezone': zone})
+            elif tool_name.startswith('people_platform_'):
                 action = tool_name.removeprefix('people_platform_')
                 if action == 'agents':
                     result = {'agents': lifecycle.agents()}

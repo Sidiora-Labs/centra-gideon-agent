@@ -58,7 +58,7 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     writes |= {'people_telegram_configure', 'people_telegram_queue', 'people_telegram_send'}
     reads |= {'people_calendar_sources', 'people_calendar_daily'}
     writes |= {'people_calendar_create', 'people_calendar_update', 'people_calendar_upload', 'people_calendar_sync'}
-    reads |= {'people_platform_agents', 'people_platform_assignments', 'people_platform_assignment_get', 'people_platform_assignment_history', 'people_stacker_territories', 'people_stacker_actions', 'people_x_snapshot', 'people_x_drafts', 'people_social_accounts', 'people_social_get', 'people_social_history'}
+    reads |= {'people_activity_timeline', 'people_platform_agents', 'people_platform_assignments', 'people_platform_assignment_get', 'people_platform_assignment_history', 'people_stacker_territories', 'people_stacker_actions', 'people_x_snapshot', 'people_x_drafts', 'people_social_accounts', 'people_social_get', 'people_social_history'}
     writes |= {'people_platform_assignment_create', 'people_platform_assignment_change', 'people_stacker_read', 'people_stacker_prepare', 'people_stacker_review', 'people_stacker_submit', 'people_stacker_reconcile', 'people_x_sync', 'people_x_draft_create', 'people_x_draft_update', 'people_x_review', 'people_social_create', 'people_social_update', 'people_social_remove'}
     assert set(by_name) == reads | writes
     for name, tool in by_name.items():

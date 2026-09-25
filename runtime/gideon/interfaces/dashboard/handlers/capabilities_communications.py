@@ -8,12 +8,20 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if request.path.endswith('/activity-timeline'):
+            data = dict(request.query)
+            if 'limit' in data:
+                try:
+                    data['limit'] = int(data['limit'])
+                except ValueError:
+                    raise PeopleError('Timeline limit must be an integer') from None
+            return web.json_response(timeline.read(store, data))
         if '/platform-assignments' in request.path:
             assignment_id = request.match_info.get('assignment_id')
             if request.path.endswith('/agents'):
@@ -191,6 +199,7 @@ async def handle(request):
 
 
 def register(app):
+    app.router.add_get('/api/capabilities/communications/activity-timeline', handle)
     assignment_base = '/api/capabilities/communications/platform-assignments'
     app.router.add_get(assignment_base, handle)
     app.router.add_get(assignment_base + '/agents', handle)
