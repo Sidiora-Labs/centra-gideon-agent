@@ -1,0 +1,49 @@
+{
+  "id": "creative.19",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "0a0340c6",
+  "requires": [
+    "creative.18"
+  ],
+  "contract": "Editorial policy is bound to the canonical series chapter-to-work scope, with optimistic enabled/severity/readiness overrides and revisioned custom model checks. Explicit judge, reader-panel and comparative-rank actions use only the configured reasoning adapter and pin source revisions. Anchored cut findings create immutable reviewed polishing candidates; apply and undo reuse canonical work promotion and revision restoration.",
+  "acceptance": [
+    "Per-series policy persists effective enabled state, severity and transparent readiness gates; standalone works retain an explicit isolated scope and request/revision conflicts fail closed.",
+    "Custom checks support create, update and delete with bounded prompts and exact series scope; their configured-model findings use the same typed anchored runner and never accept routing or credential overrides.",
+    "Judge, panel and comparative ranking are explicit configured-provider actions with bounded typed outputs, exact candidate identities or manuscript quotes, immutable source revision provenance and truthful unavailable/stale states.",
+    "Reviewed cuts preview without changing the manuscript, apply only through an immutable polishing candidate, and undo through canonical WorkStore revision restoration without altering unrelated text.",
+    "Real HTTP, native tool and console controls exercise the same stores, close provider/model/home/runtime override shapes, and preserve original editorial catalog and repair behavior."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/editorial_controls.py",
+    "runtime/gideon/workspace/capabilities/creative/context_checks.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Editorial.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_editorial_controls.py",
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_editorial_controls.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "evidence": "/tmp/gideon-creative.19-checks-gdraqhwh/evidence.json",
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 34,
+    "ui_tests": 7,
+    "production_lines": 432,
+    "test_lines": 457,
+    "ratio": 1.0578703703703705,
+    "attempts": 3
+  },
+  "limits": [
+    "A configured external reasoning model was unavailable in isolated local qualification, so successful judge, panel, rank and custom-check inference remains an external qualification gap.",
+    "Parent creative.12 remains incomplete until successful configured-model journeys and the complete multi-issue editorial acceptance are qualified; child source presence alone does not close it."
+  ]
+}

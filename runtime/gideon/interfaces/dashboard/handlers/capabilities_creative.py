@@ -317,6 +317,32 @@ async def editorial(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def editorial_controls(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        store = request.app[EDITORIAL]
+        id = request.match_info['id']
+        path = request.path
+        payload = await request.json()
+        if path.endswith('/policy'):
+            result = store.controls.configure(id, payload, {row['id'] for row in store.catalog(id)})
+        elif '/custom-checks' in path:
+            operation = 'delete' if request.method == 'DELETE' else 'update' if 'custom_id' in request.match_info else 'create'
+            result = store.controls.custom(id, {**payload, 'operation': operation, 'id': request.match_info.get('custom_id')})
+        elif path.endswith('/reviews'):
+            result = await store.controls.review(id, payload)
+        elif 'finding_id' in request.match_info:
+            result = await store.controls.cut(store, id, request.match_info['run_id'], request.match_info['finding_id'], payload)
+        elif path.endswith('/apply'):
+            result = store.controls.apply_cut(id, request.match_info['cut_id'], payload)
+        else:
+            result = store.controls.undo_cut(id, request.match_info['cut_id'], payload)
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
@@ -353,6 +379,14 @@ def register(app):
     app.router.add_post("/api/capabilities/creative/works/{id}/editorial/context", editorial)
     app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs", editorial)
     app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/repair", editorial)
+    app.router.add_patch("/api/capabilities/creative/works/{id}/editorial/policy", editorial_controls)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/custom-checks", editorial_controls)
+    app.router.add_patch("/api/capabilities/creative/works/{id}/editorial/custom-checks/{custom_id}", editorial_controls)
+    app.router.add_delete("/api/capabilities/creative/works/{id}/editorial/custom-checks/{custom_id}", editorial_controls)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/reviews", editorial_controls)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/cut", editorial_controls)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/cuts/{cut_id}/apply", editorial_controls)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/cuts/{cut_id}/undo", editorial_controls)
     app[CONTINUITY] = ContinuityStore(app[WORKS])
     app.router.add_get("/api/capabilities/creative/works/{id}/continuity", continuity)
     app.router.add_get("/api/capabilities/creative/works/{id}/continuity/export", continuity)
