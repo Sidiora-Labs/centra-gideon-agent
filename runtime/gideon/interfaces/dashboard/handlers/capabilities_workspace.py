@@ -72,7 +72,9 @@ async def process_endpoint(request):
         process_id = request.match_info.get("id")
         operation = request.match_info.get("operation")
         if request.method == "GET":
-            if operation == "logs":
+            if operation == "log-window":
+                result = registry.log_window(process_id,after=int(request.query.get("after",0)),limit=int(request.query.get("limit",4096)))
+            elif operation == "logs":
                 result = registry.logs(process_id, limit=int(request.query.get("limit", 65536)))
             else:
                 result = registry.get(process_id) if process_id else registry.list(offset=int(request.query.get("offset", 0)))
@@ -291,7 +293,7 @@ def register(app):
     app.router.add_get(prefix + "/processes", process_endpoint)
     app.router.add_post(prefix + "/processes", process_endpoint)
     app.router.add_get(prefix + "/processes/{id}", process_endpoint)
-    app.router.add_get(prefix + "/processes/{id}/{operation:logs}", process_endpoint)
+    app.router.add_get(prefix + "/processes/{id}/{operation:logs|log-window}", process_endpoint)
     app.router.add_post(prefix + "/processes/{id}/{operation:stop}", process_endpoint)
     app.on_cleanup.append(close_processes)
     app.router.add_get(prefix + "/ports", port_endpoint)

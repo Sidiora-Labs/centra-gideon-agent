@@ -1,3 +1,4 @@
+import ProcessLogs from './ProcessLogs'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -59,6 +60,7 @@ export default function Processes() {
       <div className="flex flex-wrap gap-2"><Button loading={busy} onClick={() => void act(async () => { setText((await requestJson<{ text: string }>(`${base}/${row.id}/logs`)).text); update(await requestJson<Process>(`${base}/${row.id}`)) })}>Read process logs</Button>
       <Button variant="danger" loading={busy} disabled={!['running', 'starting'].includes(row.status)} onClick={() => void act(async () => { update(await requestJson<Process>(`${base}/${row.id}/stop`, 'POST', { revision: row.revision })) })}>Stop process</Button></div>
       {text !== null && <pre className="max-h-72 overflow-auto whitespace-pre-wrap" aria-label="Process logs">{text || 'No output yet.'}</pre>}
+      <ProcessLogs key={row.id} id={row.id} />
     </article>}
   </section>
 }

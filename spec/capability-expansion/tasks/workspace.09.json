@@ -1,0 +1,96 @@
+{
+  "id": "workspace.09",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "scope": "Managed process log windows, live tail pause/resume, retained line filter and download",
+  "base_revision": "806028680b9b3b012a2ec4847d421a618f0b3ef4",
+  "acceptance": [
+    "Real stdout/stderr Unicode stream is retained with cumulative redacted character cursor",
+    "Cursor windows survive restart, report retention gaps and reject invalid ahead cursors",
+    "Existing process ownership and owner HTTP/native tool checks remain authoritative",
+    "Console follows actual output, pauses/resumes without duplication, filters and downloads retained text"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/processes.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/ProcessLogs.tsx",
+    "apps/console/src/features/capabilities/workspace/Processes.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_process_logs.py",
+    "apps/console/src/features/capabilities/workspace/ProcessLogs.test.ts"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.09",
+  "limitations": [
+    "Retains latest65536 redacted Unicode characters per managed process, not arbitrary host logs",
+    "Migrated cursors begin at existing retained tail; earlier historical truncation is unknown",
+    "Polling at most1Hz; no full historical archive or separate stdout/stderr channel indexing"
+  ],
+  "evidence": {
+    "task": "workspace.09",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790301528.620419,
+    "production_lines": 80,
+    "test_lines": 240,
+    "ratio": 3.0,
+    "stage": "all",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/processes.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/test_process_logs.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.09-checks-uhaermu8/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_process_logs.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.09-checks-uhaermu8/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/ProcessLogs.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.09-checks-uhaermu8/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.09-checks-uhaermu8",
+    "completed_at": 1790301569.1870966,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/ProcessLogs.tsx": "de9beff756a6b44d2cb5aec4c20bcaa2aa6a15b831f7f69c4126d08771205c8b",
+      "apps/console/src/features/capabilities/workspace/Processes.tsx": "33f995be5256d6939fa29a4f13d4551b9dbaf6acc76ad998179ed0e444e232b9",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "016a1333ca48beabcaa7b65ce9566fcbed171d0062c90ed41ac6026e93e93ef6",
+      "runtime/gideon/workspace/capabilities/workspace/processes.py": "e2a674811e8ed577b3ea140c5b0984388987a46ee1194ff8343ed457a4536317",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "ec90fab04720e12fc0feda4c6e55e548a3cce27900cb2181c5db037cc0682423",
+      "apps/console/src/features/capabilities/workspace/ProcessLogs.test.ts": "856680a76b26cca896d2034fe53506dda3acb1dcf01a7e4de99add18ba6db987",
+      "checks/runtime/capabilities/workspace/test_process_logs.py": "fe1e0edd55ae0a25eb9db74a38e4fd0bcf6f2ecf29352608f1fa12f8b34436fe"
+    }
+  },
+  "qualification_notes": [
+    "First gate passed compile,18 runtime cases and13subtests,2realHTTPChromium cases;6runtime cases new plus12 imported existing process regressions",
+    "Runtime import collection also discovered existing Process tests; no extra rerun performed and original qualified source retained",
+    "UI uses a real process waiting on a temporary filesystem signal to prove pause then resume rather than timing assumptions"
+  ]
+}

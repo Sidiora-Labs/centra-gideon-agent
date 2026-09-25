@@ -39,6 +39,7 @@ class WorkspaceToolProvider(ToolProvider):
             ('workspace_process_start', 'Start an approved command in an allowed project directory.', {key:{'type':'string'} for key in ('project_id','workspace','command','request_id')}, ['project_id','workspace','command','request_id'], True),
             ('workspace_processes', 'List managed process lifecycle records.', {}, [], False),
             ('workspace_process_get', 'Read current process status.', {'id':{'type':'string'}}, ['id'], False),
+            ('workspace_process_log_window', 'Read a bounded redacted process log window with a durable character cursor.', {'id':{'type':'string'},'after':{'type':'integer'},'limit':{'type':'integer'}}, ['id'], False),
             ('workspace_process_logs', 'Read the bounded output tail of a managed process.', {'id':{'type':'string'}}, ['id'], False),
             ('workspace_process_stop', 'Stop only a process owned by this registry.', {'id':{'type':'string'}, 'revision':{'type':'integer'}}, ['id','revision'], True),
         ]:
@@ -126,6 +127,8 @@ class WorkspaceToolProvider(ToolProvider):
                     result = registry.list()
                 elif tool_name == 'workspace_process_get':
                     result = registry.get(arguments['id'])
+                elif tool_name == 'workspace_process_log_window':
+                    result=registry.log_window(arguments['id'],after=arguments.get('after',0),limit=arguments.get('limit',4096))
                 elif tool_name == 'workspace_process_logs':
                     result = registry.logs(arguments['id'])
                 else:
