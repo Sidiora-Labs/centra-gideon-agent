@@ -95,6 +95,9 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_music_spotify", kind=KIND_SQLITE, path="capabilities/music/spotify.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_music_listening", kind=KIND_SQLITE, path="capabilities/music/listening.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_identity_lifecycle", kind=KIND_SQLITE, path="capabilities/identity/lifecycle.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_models_loras", kind=KIND_TREE, path="models/loras", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_models_lora_training", kind=KIND_TREE, path="models/lora-training", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_platform_cadence", kind=KIND_JSON_FILE, path="capabilities/platform/cadence.json", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),

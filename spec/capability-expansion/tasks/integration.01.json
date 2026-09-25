@@ -21,7 +21,8 @@
     "undeclared_store_and_sidecars": "/tmp/gideon-expansion-20260925/oss-integration-runtime.log",
     "result": "All six runtime behaviors passed across their recorded focused runs",
     "extended_routes_inventory_and_snapshots": "/tmp/gideon-expansion-20260925/oss-integration-next-repair1.log",
-    "ephemeral_desktop_exclusion_and_cadence_persistence": "/tmp/gideon-expansion-20260925/oss-snapshot-session-exclusion.log"
+    "ephemeral_desktop_exclusion_and_cadence_persistence": "/tmp/gideon-expansion-20260925/oss-snapshot-session-exclusion.log",
+    "lifecycle_journal_listening_forecast_routes": "/tmp/gideon-expansion-20260925/oss-integrated-emission-routes.log"
   },
   "remaining_limits": [
     "Later task routes/stores require incremental registration",

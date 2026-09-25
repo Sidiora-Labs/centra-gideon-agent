@@ -73,6 +73,10 @@ async def test_all_capability_routes_share_the_actual_authenticated_application(
             response=await client.get(base+'/api/capabilities/music/catalog/artists')
             assert response.status==200,await response.text()
             for path in [
+                '/api/capabilities/identity/lifecycle',
+                '/api/capabilities/knowledge/journals?date=2026-09-25&timezone=UTC',
+                '/api/capabilities/music/listening/history',
+                '/api/capabilities/platform/forecast',
                 '/api/capabilities/knowledge/reviews',
                 '/api/capabilities/identity/goal-plans',
                 '/api/capabilities/wellbeing/memory/cards',
