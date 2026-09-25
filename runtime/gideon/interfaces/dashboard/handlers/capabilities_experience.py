@@ -61,6 +61,8 @@ def register(app):
     register_world_engine(app, app[STORE])
     from gideon.workspace.capabilities.experience.worlds_http import register_worlds
     register_worlds(app, app[STORE])
+    from gideon.workspace.capabilities.experience.world_travel_http import register_world_travel
+    register_world_travel(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource
         app.router.add_get(path, handle)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import WorldTravel from './WorldTravel'
 type Source = { kind: string; id: string; title: string; status: string; url: string }
 type Snapshot = { world: string; seq: number; state: { entities: Record<string, { pos?: number[]; comp?: { gideon_source?: Source } }> }; present: { id: string; agent: boolean }[] }
 const kinds = ['apps', 'agents', 'work', 'goals', 'schedule', 'health', 'memory', 'operations', 'peers']
@@ -25,7 +26,7 @@ export default function Worlds({ baseUrl = '/api/capabilities/experience' }: { b
     setReceipt(result.complete ? `${result.operations.length} world changes recorded` : 'World operation partially applied or refused; inspect current objects before retrying')
     await refresh()
   }
-  return <section aria-label="World workspace" className="space-y-3 rounded border p-4">
+  return <><WorldTravel baseUrl={baseUrl} world={name} open={snapshot !== null} /><section aria-label="World workspace" className="space-y-3 rounded border p-4">
     <h2>World workspace</h2><p>Choose source metadata explicitly. Projected objects reference the original records; moving an object does not edit its source.</p>
     {error && <p role="alert">{error}</p>}{receipt && <p role="status">{receipt}</p>}
     <label>World name<input value={name} pattern="[A-Za-z0-9_-]{1,64}" onChange={e => setName(e.target.value)} /></label>
@@ -42,5 +43,5 @@ export default function Worlds({ baseUrl = '/api/capabilities/experience' }: { b
       <ul aria-label="World objects">{Object.entries(snapshot.state.entities).map(([id, entity]) => <li key={id}><Button onClick={() => { setObject(id); setPosition((entity.pos || [0, 0, 0]).map(String)) }}>{entity.comp?.gideon_source?.title || id}</Button> · {(entity.pos || []).join(', ')} {entity.comp?.gideon_source && <span>{entity.comp.gideon_source.status} · <a href={entity.comp.gideon_source.url}>Open source</a></span>}</li>)}</ul>
       <iframe title="Selected persistent world" src={baseUrl + '/world-engine/host/?world=' + encodeURIComponent(snapshot.world)} className="h-[60vh] w-full" allow="fullscreen" />
     </>}
-  </section>
+  </section></>
 }
