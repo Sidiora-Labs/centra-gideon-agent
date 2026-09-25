@@ -223,6 +223,7 @@ def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
 def test_unavailable_real_transcription_preserves_retryable_audio(inbox, monkeypatch, tmp_path):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "no-speech-provider"))
     save_use_case_settings("stt", {"enabled": False})
+    inbox = CaptureInbox(inbox.store)
     voice = inbox.save_audio("capture-no-stt-1", audio_bytes(), "recording.wav", "audio/wav")
     result = asyncio.run(inbox.transcribe(voice["id"]))
     assert result["status"] == "transcription_unavailable"
@@ -310,11 +311,19 @@ def test_http_capture_review_retry_and_cross_store_isolation(tmp_path):
 
 def test_http_audio_allocates_at_bound_store_and_refuses_overrides(tmp_path, monkeypatch):
     async def journey():
+        monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "initial-home"))
+        save_use_case_settings("stt", {"enabled": False})
         app, store = make_app(tmp_path / "bound.db")
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "changed-global-home"))
-        save_use_case_settings("stt", {"enabled": False})
         root = "/api/capabilities/knowledge/captures"
         async with TestClient(TestServer(app)) as client:
+            form = FormData()
+            form.add_field("audio", audio_bytes(), filename="voice.wav", content_type="audio/wav")
+            response = await client.post(root + "/audio", data=form, headers={"X-Capture-Request-ID": "http-original-audio"})
+            assert response.status == 409
+            assert not (tmp_path / "changed-global-home").exists()
+            assert not (tmp_path / "files").exists()
+            monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "initial-home"))
             form = FormData()
             form.add_field("audio", audio_bytes(), filename="voice.wav", content_type="audio/wav")
             response = await client.post(root + "/audio", data=form, headers={"X-Capture-Request-ID": "http-original-audio"})

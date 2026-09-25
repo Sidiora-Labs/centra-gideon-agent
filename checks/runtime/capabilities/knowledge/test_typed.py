@@ -213,25 +213,26 @@ def test_pagination_bounds_and_stable_chronology(typed):
 def test_bound_runtime_home_cannot_drift(typed, tmp_path):
     before = os.environ.get('GIDEON_HOME')
     alternate = tmp_path / 'unrelated'
+    requests = [prepare(typed, kind, fields, 'pinned-' + kind)[1] for kind, fields in [('project', {'name': 'Pinned project'}), ('admin', {'title': 'Pinned task'}), ('person', {'name': 'Pinned contact'}), ('idea', {'title': 'Pinned idea'})]]
     try:
         os.environ['GIDEON_HOME'] = str(alternate)
-        for kind, fields in [('project', {'name': 'Pinned project'}), ('admin', {'title': 'Pinned task'})]:
-            _, payload = prepare(typed, kind, fields, 'pinned-' + kind)
+        for payload in requests:
             with pytest.raises(CaptureError) as error:
                 commit(typed, payload)
             assert error.value.status == 409
-        _, payload = prepare(typed, 'person', {'name': 'Pinned contact'}, 'pinned-person')
-        result = commit(typed, payload)
-        assert result['destination_id']
+        assert typed.list()['total'] == 0
         assert not (typed.home / 'projects').exists()
         assert not (typed.home / 'tasks').exists()
-        assert (typed.home / 'capabilities/communications/people.sqlite3').exists()
+        assert not (typed.home / 'capabilities').exists()
         assert not alternate.exists()
     finally:
         if before is None:
             os.environ.pop('GIDEON_HOME', None)
         else:
             os.environ['GIDEON_HOME'] = before
+    for payload in requests:
+        assert commit(typed, payload)['destination_id']
+    assert typed.list()['total'] == 4
 
 
 def test_native_tools_use_real_receipts_and_session_guards(typed):

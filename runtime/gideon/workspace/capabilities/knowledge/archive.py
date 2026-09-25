@@ -100,9 +100,9 @@ def conversation(record):
 
 
 class ConversationArchive:
-    def __init__(self, store):
+    def __init__(self, store, home=None):
         self.store, self.db = store, store.db
-        self.runtime_home = runtime_home()
+        self.runtime_home = Path(home).resolve() if home is not None else runtime_home()
         self.files_root = Path(self.db.execute('PRAGMA database_list').fetchone()[2]).resolve().parent / 'files'
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS capability_knowledge_archives (request_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, receipt TEXT);
