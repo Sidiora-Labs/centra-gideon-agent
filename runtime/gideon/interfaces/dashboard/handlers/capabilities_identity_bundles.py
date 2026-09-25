@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 from aiohttp import web
 from gideon.core.config import config_dir
-from gideon.workspace.capabilities.identity.bundles import BundleService
+from gideon.workspace.capabilities.identity.bundle_extended import ExtendedBundleService as BundleService
 from gideon.workspace.capabilities.identity.store import ConflictError
 
 KEY = web.AppKey("identity_bundles", BundleService)
@@ -20,7 +20,12 @@ async def handle(request):
             if not isinstance(body, dict):
                 raise ValueError("Expected a JSON object")
             operation = {"export": "export_bundle", "preview": "preview", "apply": "apply_bundle"}[request.match_info["operation"]]
-            result = await asyncio.to_thread(getattr(service, operation), **body)
+            if operation == "apply_bundle":
+                from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
+                async with _get_config_lock():
+                    result = await asyncio.to_thread(getattr(service, operation), **body)
+            else:
+                result = await asyncio.to_thread(getattr(service, operation), **body)
         return web.json_response(result, headers={"Cache-Control": "no-store"})
     except ConflictError as error:
         return web.json_response({"error": str(error)}, status=409, headers={"Cache-Control": "no-store"})
