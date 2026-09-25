@@ -1,0 +1,15 @@
+{
+  "name": "gideon-wellbeing-eyes",
+  "version": "1.0.0",
+  "displayName": "Eye prescriptions",
+  "description": "Record and export authored eye prescriptions with immutable correction history and no medical interpretation.",
+  "icon": "Eye",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "wellbeing"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.wellbeing.eyes_provider:create_provider",
+    "capabilities": ["wellbeing-eye-prescriptions"]
+  },
+  "native": true
+}
