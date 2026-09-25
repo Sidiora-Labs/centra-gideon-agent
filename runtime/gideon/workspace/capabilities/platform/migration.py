@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -11,13 +12,17 @@ import tarfile
 import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
 from gideon.engine.tasks.models import Project, Task, TaskPriority, TaskStatus
+from gideon.workspace.artifacts.models import kind_for_mime
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
 from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.communications.store import PeopleStore, person_values
+from gideon.workspace.capabilities.music.store import DomainError, RepertoireStore
 
 FORMAT = "legacy_snapshot_v1"
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
@@ -25,8 +30,13 @@ MAX_EXPANDED_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2000
 MAX_PEOPLE = 500
 MAX_KNOWLEDGE = 500
+MAX_SONG_ATTACHMENTS = 30
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+SONG_MIMES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".txt": "text/plain",
+              ".md": "text/markdown", ".mid": "audio/midi", ".midi": "audio/midi", ".mp3": "audio/mpeg",
+              ".wav": "audio/wav", ".m4a": "audio/mp4", ".ogg": "audio/ogg"}
 
 
 class MigrationError(ValueError):
@@ -128,22 +138,26 @@ def _inspect(data):
     for name, expected in normalized.items():
         if hashlib.sha256(data_files[name]).hexdigest() != expected:
             raise MigrationError(f"Checksum mismatch for {name}", 409)
-    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links|buckets|inbox|admin|threads)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
-    unsupported = sorted(name for name in data_files if not allowed.fullmatch(name))
+    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links|buckets|inbox|admin|threads|songs)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
+    song_asset = re.compile(r"^brain/songbook/([A-Za-z0-9][A-Za-z0-9._-]{0,299})$")
+    unsupported = sorted(name for name in data_files if not allowed.fullmatch(name) and not song_asset.fullmatch(name))
     if unsupported:
         domains = sorted({name.split("/", 1)[0] for name in unsupported})
         raise MigrationError(f"Archive contains unsupported domains: {', '.join(domains)}")
-    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads") if f"brain/{domain}/index.json" in data_files]
+    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads", "songs") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    if any(domain in domains for domain in ("people", "projects", "admin", "threads")) and len(domains) > 1:
-        raise MigrationError("People, projects, tasks and knowledge domains require separate atomic imports")
+    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1:
+        raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
         if index.get("schemaVersion") != 1 or index.get("type") != domain:
             raise MigrationError(f"{domain.title()} collection schema version is unsupported")
     records = []
+    assets = {match.group(1): data for name, data in data_files.items() if (match := song_asset.fullmatch(name))}
     for name in sorted(data_files):
+        if song_asset.fullmatch(name):
+            continue
         if name.endswith("/index.json") and name.count("/") == 2:
             continue
         domain = name.split("/")[1]
@@ -245,6 +259,89 @@ def _inspect(data):
                             "blocked_reason_kind": "external" if mapped_status == TaskStatus.BLOCKED else "",
                             "created_at": created, "updated_at": updated, "refs": refs,
                             "source_state": {key: record[key] for key in ("source", "externalState", "closedAt") if key in record}}})
+            continue
+        if domain == "songs":
+            fields = {"id", "title", "artist", "instrument", "stage", "tags", "key", "capo", "tuning", "sourceUrl", "links",
+                      "content", "notes", "scrollDurationSec", "attachments", "practice", "createdAt", "updatedAt", "originInstanceId"}
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", record_id) or set(record) - fields:
+                raise MigrationError("Songs record identity or fields are unsupported")
+            title, artist, instrument = record.get("title"), record.get("artist", ""), record.get("instrument", "guitar")
+            stage, tags, content = record.get("stage", "new"), record.get("tags", []), record.get("content", {})
+            if (not isinstance(title, str) or not title.strip() or len(title) > 300 or not isinstance(artist, str) or len(artist) > 300
+                    or instrument not in ("guitar", "piano", "ukulele", "bass", "voice", "drums", "other")
+                    or stage not in ("new", "learning", "learned", "memorized")
+                    or not isinstance(tags, list) or len(tags) > 50 or any(not isinstance(tag, str) or not 0 < len(tag) <= 50 for tag in tags)
+                    or not isinstance(content, dict) or set(content) != {"format", "text"}
+                    or content.get("format") not in ("chordpro", "tab", "plain", "drum")
+                    or not isinstance(content.get("text"), str) or len(content["text"]) > 200000):
+                raise MigrationError("Songs record core fields are invalid")
+            key, capo, tuning, source_url, notes = record.get("key", ""), record.get("capo", 0), record.get("tuning", ""), record.get("sourceUrl", ""), record.get("notes", "")
+            if (not isinstance(key, str) or len(key) > 20 or type(capo) is not int or not 0 <= capo <= 12
+                    or not isinstance(tuning, str) or len(tuning) > 40 or not isinstance(source_url, str) or len(source_url) > 2000
+                    or source_url and not re.fullmatch(r"https?://[^\s]+", source_url) or not isinstance(notes, str) or len(notes) > 5000):
+                raise MigrationError("Songs record musical fields are invalid")
+            parsed_source = urlsplit(source_url) if source_url else None
+            if parsed_source and (not parsed_source.hostname or parsed_source.username or parsed_source.password):
+                raise MigrationError("Songs record musical fields are invalid")
+            links, scroll = record.get("links", []), record.get("scrollDurationSec")
+            if (not isinstance(links, list) or len(links) > 20 or any(not isinstance(link, dict) or set(link) - {"type", "id", "label"}
+                    or not isinstance(link.get("type"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", link["type"])
+                    or not isinstance(link.get("id"), str) or not 0 < len(link["id"]) <= 200
+                    or not isinstance(link.get("label", ""), str) or len(link.get("label", "")) > 300 for link in links)
+                    or scroll is not None and (type(scroll) is not int or not 15 <= scroll <= 3600)):
+                raise MigrationError("Songs links or scroll duration are invalid")
+            attachments = record.get("attachments", [])
+            if not isinstance(attachments, list) or len(attachments) > MAX_SONG_ATTACHMENTS:
+                raise MigrationError("Songs attachment metadata is invalid")
+            planned = []
+            for attachment in attachments:
+                if (not isinstance(attachment, dict) or set(attachment) != {"filename", "label", "mime", "size", "sha256"}
+                        or not isinstance(attachment.get("filename"), str) or not song_asset.fullmatch("brain/songbook/" + attachment["filename"])
+                        or not isinstance(attachment.get("label"), str) or len(attachment["label"]) > 300
+                        or type(attachment.get("size")) is not int or attachment["size"] < 0 or not SHA256.fullmatch(str(attachment.get("sha256", "")))):
+                    raise MigrationError("Songs attachment metadata is invalid")
+                extension = os.path.splitext(attachment["filename"])[1].lower()
+                expected_mime, raw_asset = SONG_MIMES.get(extension), assets.get(attachment["filename"])
+                if expected_mime is None or attachment.get("mime") != expected_mime:
+                    raise MigrationError("Songs attachment type is unsupported")
+                if raw_asset is None:
+                    raise MigrationError("Songs attachment bytes are missing from this snapshot", 409)
+                if len(raw_asset) != attachment["size"] or hashlib.sha256(raw_asset).hexdigest() != attachment["sha256"]:
+                    raise MigrationError("Songs attachment size or checksum does not match", 409)
+                slug = "legacy-song-" + hashlib.sha256((record_id + ":" + attachment["filename"]).encode()).hexdigest()[:32]
+                text_kind = {".txt": "text", ".md": "markdown", ".svg": "svg"}.get(extension)
+                if text_kind:
+                    try:
+                        raw_asset.decode("utf-8")
+                    except UnicodeDecodeError:
+                        raise MigrationError("Text song attachments must be valid UTF-8") from None
+                planned.append({**attachment, "slug": slug, "version": 1, "kind": text_kind or kind_for_mime(expected_mime), "bytes": raw_asset})
+            if len({attachment["filename"] for attachment in attachments}) != len(attachments):
+                raise MigrationError("Songs attachment filenames must be unique")
+            practice = record.get("practice")
+            if practice is not None:
+                if (not isinstance(practice, dict) or set(practice) != {"ease", "intervalDays", "nextReview", "lastReviewed", "sessions", "lastQuality"}
+                        or type(practice["ease"]) not in (int, float) or not math.isfinite(practice["ease"]) or not 1.3 <= practice["ease"] <= 5
+                        or type(practice["intervalDays"]) is not int or not 0 <= practice["intervalDays"] <= 36500
+                        or type(practice["sessions"]) is not int or practice["sessions"] < 0
+                        or type(practice["lastQuality"]) is not int or not 0 <= practice["lastQuality"] <= 5):
+                    raise MigrationError("Songs practice history is invalid")
+                for value in (practice["nextReview"], practice["lastReviewed"]):
+                    try:
+                        if not isinstance(value, str) or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                            raise ValueError()
+                    except (ValueError, OverflowError):
+                        raise MigrationError("Songs practice timestamps are invalid") from None
+            for value in (record.get("createdAt"), record.get("updatedAt")):
+                try:
+                    if not isinstance(value, str) or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                        raise ValueError()
+                except (ValueError, OverflowError):
+                    raise MigrationError("Songs record timestamps are invalid") from None
+            records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "title": title.strip(), "artist": artist,
+                            "instrument": instrument, "stage": stage, "tags": tags, "key": key, "capo": capo, "tuning": tuning,
+                            "source_url": source_url, "links": links, "notation": content, "notes": notes, "scroll_duration_seconds": scroll,
+                            "attachments": planned, "practice": practice, "created_at": record["createdAt"], "updated_at": record["updatedAt"]}})
             continue
         if domain == "buckets":
             fields = {"id", "name", "color", "icon", "order", "createdAt", "updatedAt", "originInstanceId"}
@@ -381,7 +478,12 @@ def _inspect(data):
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
         raise MigrationError("Archive contains no supported records")
-    token = hashlib.sha256((archive_digest + json.dumps(records, sort_keys=True)).encode()).hexdigest()
+    referenced_assets = {attachment["filename"] for row in records if row["domain"] == "songs" for attachment in row["values"]["attachments"]}
+    if set(assets) != referenced_assets:
+        raise MigrationError("Snapshot contains unreferenced songbook attachment bytes")
+    token_rows = [{**row, "values": {**row["values"], "attachments": [{key: value for key, value in attachment.items() if key != "bytes"}
+                  for attachment in row["values"].get("attachments", [])]}} for row in records]
+    token = hashlib.sha256((archive_digest + json.dumps(token_rows, sort_keys=True)).encode()).hexdigest()
     return archive_digest, token, records, manifest["generatedAt"], domains
 
 
@@ -394,7 +496,8 @@ def preview(data):
 
 
 def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
-           tasks: BoundTasks | None = None):
+           tasks: BoundTasks | None = None, repertoire: RepertoireStore | None = None,
+           artifacts: NativeArtifactProvider | None = None):
     if not isinstance(data, dict) or set(data) != {"format", "content", "archive_digest", "review_token"}:
         raise MigrationError("Commit requires the reviewed archive, digest and review token")
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
@@ -408,6 +511,10 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
         if tasks is None:
             raise MigrationError("Canonical task store is unavailable", 503)
         return _commit_task(tasks, store, knowledge, projects, digest, token, records, generated)
+    if domains == ["songs"]:
+        if repertoire is None or artifacts is None:
+            raise MigrationError("Canonical repertoire and artifact stores are unavailable", 503)
+        return _commit_song(repertoire, artifacts, digest, token, records, generated)
     if domains != ["people"]:
         if knowledge is None:
             raise MigrationError("Canonical knowledge store is unavailable", 503)
@@ -612,8 +719,169 @@ def _commit_task(tasks, people, knowledge, projects, digest, token, records, gen
     return receipt, True
 
 
+def _journal_root(repertoire):
+    root = repertoire.root.parent / "platform" / "migration-journals"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_journal(path, body):
+    descriptor, temporary = tempfile.mkstemp(prefix=".journal-", suffix=".json", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(body, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _artifact_digest(artifacts, plan):
+    artifact = artifacts.get(plan["slug"], version=1)
+    if artifact is None:
+        return None
+    if plan["kind"] in ("text", "markdown", "svg"):
+        return hashlib.sha256((artifact.content or "").encode()).hexdigest()
+    raw = artifacts.raw_bytes(plan["slug"], version=1)
+    return hashlib.sha256(raw[0]).hexdigest() if raw else None
+
+
+def _read_song_journal(path):
+    try:
+        journal = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise MigrationError("A song migration recovery journal is unreadable", 409) from None
+    common = {"schema", "status", "archive_digest", "review_token", "import_id", "song_id", "artifacts"}
+    expected = common | ({"receipt"} if journal.get("status") == "complete" else set())
+    if (not isinstance(journal, dict) or set(journal) != expected or journal.get("schema") != 1
+            or journal.get("status") not in ("prepared", "artifacts_ready", "complete")
+            or not SHA256.fullmatch(str(journal.get("archive_digest", "")))
+            or not SHA256.fullmatch(str(journal.get("review_token", "")))
+            or not isinstance(journal.get("import_id"), str) or not isinstance(journal.get("song_id"), str)
+            or not isinstance(journal.get("artifacts"), list)):
+        raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
+    for plan in journal["artifacts"]:
+        if (not isinstance(plan, dict) or not isinstance(plan.get("slug"), str)
+                or not SHA256.fullmatch(str(plan.get("sha256", ""))) or type(plan.get("owned")) is not bool):
+            raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
+    if journal["status"] == "complete" and not isinstance(journal["receipt"], dict):
+        raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
+    return journal
+
+
+def _recover_song_journals(repertoire, artifacts):
+    root = _journal_root(repertoire)
+    for path in root.glob("*.json"):
+        journal = _read_song_journal(path)
+        if journal.get("status") == "complete":
+            continue
+        try:
+            repertoire.rollback_import(journal["import_id"], journal["review_token"])
+        except DomainError as exc:
+            if exc.code != "import_not_found":
+                raise MigrationError("Interrupted song import changed and cannot be rolled back automatically", 409) from exc
+        for plan in journal["artifacts"]:
+            if not plan.get("owned"):
+                continue
+            observed = _artifact_digest(artifacts, plan)
+            if observed is None:
+                continue
+            if observed != plan["sha256"] or not artifacts.delete(plan["slug"]):
+                raise MigrationError("Interrupted song attachment cannot be rolled back safely", 409)
+        path.unlink()
+
+
+def _materialize_attachment(artifacts, plan, archive_digest):
+    existing = artifacts.get(plan["slug"], version=1)
+    if existing is not None:
+        if _artifact_digest(artifacts, plan) != plan["sha256"]:
+            raise MigrationError("Canonical attachment slug already contains different bytes", 409)
+        return
+    common = {"name": plan["label"] or plan["filename"], "slug": plan["slug"], "source": "import",
+              "description": "Restored song attachment: " + plan["filename"], "tags": ["archive-migration", "song-attachment"],
+              "event_metadata": {"archive_digest": archive_digest, "source_filename": plan["filename"]}}
+    if plan["kind"] in ("text", "markdown", "svg"):
+        artifact = artifacts.create(content=plan["bytes"].decode("utf-8"), kind=plan["kind"], **common)
+    else:
+        artifact = artifacts.create_binary(data=plan["bytes"], mime=plan["mime"], kind=plan["kind"], **common)
+    if artifact.slug != plan["slug"] or artifact.version != 1 or _artifact_digest(artifacts, plan) != plan["sha256"]:
+        artifacts.delete(artifact.slug)
+        raise MigrationError("Canonical attachment publication did not preserve its identity or checksum", 409)
+
+
+def _commit_song(repertoire, artifacts, digest, token, records, generated):
+    if len(records) != 1:
+        raise MigrationError("Song archives must contain exactly one song for recoverable publication")
+    _recover_song_journals(repertoire, artifacts)
+    journal_path = _journal_root(repertoire) / (digest + ".json")
+    if journal_path.exists():
+        prior = _read_song_journal(journal_path)
+        if prior.get("status") != "complete" or prior.get("review_token") != token:
+            raise MigrationError("Archive was already imported with different content", 409)
+        return prior["receipt"], False
+    row, values = records[0], records[0]["values"]
+    plans = []
+    for attachment in values["attachments"]:
+        plan = {key: value for key, value in attachment.items() if key != "bytes"}
+        existing = artifacts.get(plan["slug"], version=1)
+        if existing is not None and _artifact_digest(artifacts, plan) != plan["sha256"]:
+            raise MigrationError("Canonical attachment slug already contains different bytes", 409)
+        plan["owned"] = existing is None
+        plans.append(plan)
+    import_id = "platform-song-" + digest
+    journal = {"schema": 1, "status": "prepared", "archive_digest": digest, "review_token": token,
+               "import_id": import_id, "song_id": values["id"], "artifacts": plans}
+    _write_journal(journal_path, journal)
+    imported = False
+    try:
+        for attachment in values["attachments"]:
+            _materialize_attachment(artifacts, attachment, digest)
+        journal["status"] = "artifacts_ready"
+        _write_journal(journal_path, journal)
+        practice = values["practice"]
+        schedule = {"stage": values["stage"], "ease": practice["ease"] if practice else 2.5,
+                    "interval": practice["intervalDays"] if practice else 0, "repetitions": practice["sessions"] if practice else 0,
+                    "due_at": practice["nextReview"] if practice else None, "last_practiced_at": practice["lastReviewed"] if practice else None,
+                    "last_grade": practice["lastQuality"] if practice else None}
+        try:
+            result = repertoire.import_song(import_id=import_id, source_fingerprint=token, item_id=values["id"],
+                created_at=values["created_at"], updated_at=values["updated_at"], schedule=schedule,
+                data={"title": values["title"], "artist": values["artist"], "instrument": values["instrument"], "body": values["notes"],
+                      "tags": values["tags"], "key": values["key"], "capo": values["capo"], "tuning": values["tuning"],
+                      "notation": values["notation"], "source_url": values["source_url"], "links": values["links"],
+                      "scroll_duration_seconds": values["scroll_duration_seconds"],
+                      "attachment_refs": [{"slug": plan["slug"], "version": 1} for plan in plans]})
+        except DomainError as exc:
+            raise MigrationError(str(exc), exc.status) from exc
+        imported = True
+        receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
+                   "committed_at": datetime.now(timezone.utc).isoformat(), "domains": {"songs": 1},
+                   "records": [{"source_id": row["source_id"], "song_id": values["id"], "domain": "songs",
+                                "attachment_refs": result["item"]["attachment_refs"]}]}
+        journal.update(status="complete", receipt=receipt)
+        _write_journal(journal_path, journal)
+        return receipt, True
+    except Exception:
+        if imported:
+            repertoire.rollback_import(import_id, token)
+        for plan in plans:
+            if plan["owned"] and _artifact_digest(artifacts, plan) == plan["sha256"]:
+                artifacts.delete(plan["slug"])
+        if journal_path.exists():
+            journal_path.unlink()
+        raise
+
+
 def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
-             tasks: BoundTasks | None = None):
+             tasks: BoundTasks | None = None, repertoire: RepertoireStore | None = None,
+             artifacts: NativeArtifactProvider | None = None):
     with closing(store.connect()) as db:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_migrations'").fetchone()
         result = [] if not exists else [json.loads(row[0]) for row in db.execute("SELECT receipt FROM platform_migrations ORDER BY rowid DESC LIMIT 20")]
@@ -629,4 +897,13 @@ def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projec
         for task in tasks._all_tasks():
             result += [item["receipt"] for item in task.evidence
                        if item.get("type") == "platform_migration" and isinstance(item.get("receipt"), dict)]
+    if repertoire is not None and artifacts is not None:
+        _recover_song_journals(repertoire, artifacts)
+        for path in _journal_root(repertoire).glob("*.json"):
+            try:
+                journal = _read_song_journal(path)
+                if journal.get("status") == "complete":
+                    result.append(journal["receipt"])
+            except KeyError:
+                raise MigrationError("A song migration recovery journal has an unsupported shape", 409) from None
     return sorted(result, key=lambda row: row["committed_at"], reverse=True)[:20]
