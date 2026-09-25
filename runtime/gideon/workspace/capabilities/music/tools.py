@@ -40,7 +40,7 @@ class MusicToolProvider(ToolProvider):
                         properties.update(q={'type': 'string', 'maxLength': 200}, archived={'type': 'boolean'})
                 elif action != 'get':
                     descriptions = {
-                        'create': 'Repertoire: title,instrument,body,attachment_refs[{slug,version}]. Catalog artists:name,bio; albums:title,artist_id,track_ids; tracks:title,artist_id,notes.',
+                        'create': 'Repertoire: title,artist,instrument,body,tags,key,capo,tuning,notation{format,text},source_url,links[{type,id,label}],scroll_duration_seconds,attachment_refs[{slug,version}]. Catalog artists:name,bio; albums:title,artist_id,track_ids; tracks:title,artist_id,notes.',
                         'update': 'Changed editable fields plus current revision. Catalog archived is boolean. Server-owned history, renders and scheduling are immutable.',
                         'practice': 'attempt_id, grade integer0..5, occurred_at offset ISO timestamp, timezone IANA name, revision. Retry identical attempt input.',
                         'attach': 'revision,artifact_ref{slug,version},source{kind:imported,label,license}. Actual canonical PCM WAV only; unverified generation claims unavailable.',

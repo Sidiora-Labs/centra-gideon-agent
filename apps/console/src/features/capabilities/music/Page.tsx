@@ -10,8 +10,11 @@ import CatalogPage from './CatalogPage'
 import { Button } from '../../../shared/ui/Button'
 
 type Attachment = { slug: string; version: number }
+type AttachmentAvailability = Attachment & { available: boolean; name: string; kind: string; mime: string; source: string }
 type Attempt = { attempt_id: string; grade: number; occurred_at: string; timezone: string; due_at: string }
-type Item = { id: string; title: string; instrument: string; body: string; attachment_refs: Attachment[]; stage: string; due_at: string | null; revision: number; practice_history: Attempt[] }
+type Notation = { format: 'chordpro' | 'tab' | 'plain' | 'drum'; text: string }
+type SongLink = { type: string; id: string; label: string }
+type Item = { id: string; title: string; artist: string; instrument: string; body: string; tags: string[]; key: string; capo: number; tuning: string; notation: Notation; source_url: string; links: SongLink[]; scroll_duration_seconds: number | null; attachment_refs: Attachment[]; attachment_availability: AttachmentAvailability[]; stage: string; due_at: string | null; revision: number; practice_history: Attempt[] }
 const selected = () => window.location.hash.split('/music/')[1]?.split('?')[0] || ''
 const fieldClass = 'w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
 
@@ -20,8 +23,18 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
   const [id, setId] = useState(selected)
   const [item, setItem] = useState<Item | null>(null)
   const [title, setTitle] = useState('')
-  const [instrument, setInstrument] = useState('')
+  const [artist, setArtist] = useState('')
+  const [instrument, setInstrument] = useState('guitar')
   const [body, setBody] = useState('')
+  const [tags, setTags] = useState('')
+  const [songKey, setSongKey] = useState('')
+  const [capo, setCapo] = useState(0)
+  const [tuning, setTuning] = useState('')
+  const [notationFormat, setNotationFormat] = useState<Notation['format']>('plain')
+  const [notationText, setNotationText] = useState('')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [links, setLinks] = useState('[]')
+  const [scrollDuration, setScrollDuration] = useState('')
   const [refs, setRefs] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -36,7 +49,10 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
     return value
   }
   function show(next: Item) {
-    setItem(next); setTitle(next.title); setInstrument(next.instrument); setBody(next.body)
+    setItem(next); setTitle(next.title); setArtist(next.artist); setInstrument(next.instrument); setBody(next.body)
+    setTags(next.tags.join(', ')); setSongKey(next.key); setCapo(next.capo); setTuning(next.tuning)
+    setNotationFormat(next.notation.format); setNotationText(next.notation.text); setSourceUrl(next.source_url)
+    setLinks(JSON.stringify(next.links, null, 2)); setScrollDuration(next.scroll_duration_seconds === null ? '' : String(next.scroll_duration_seconds))
     setRefs(next.attachment_refs.map(ref => `${ref.slug}@${ref.version}`).join('\n'))
     setItems(previous => [...previous.filter(row => row.id !== next.id), next])
   }
@@ -53,7 +69,7 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
     request(id ? `/items/${encodeURIComponent(id)}` : '/items?limit=100').then(value => {
       if (!active) return
       if (id) show(value.item)
-      else { setItems(value.items); setItem(null); setTitle(''); setInstrument(''); setBody(''); setRefs('') }
+      else { setItems(value.items); setItem(null); setTitle(''); setArtist(''); setInstrument('guitar'); setBody(''); setTags(''); setSongKey(''); setCapo(0); setTuning(''); setNotationFormat('plain'); setNotationText(''); setSourceUrl(''); setLinks('[]'); setScrollDuration(''); setRefs('') }
     }).catch(err => { if (active) setError(String(err.message)) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [id, apiBase])
@@ -66,7 +82,14 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
         if (split < 1) throw new Error('Attachments use slug@version, one per line')
         return { slug: line.slice(0, split), version: Number(line.slice(split + 1)) }
       }) : []
-      const value = await request(item ? `/items/${item.id}` : '/items', item ? 'PATCH' : 'POST', { title, instrument, body, attachment_refs, ...(item ? { revision: item.revision } : {}) })
+      const related = JSON.parse(links)
+      if (!Array.isArray(related)) throw new Error('Related records must be a JSON array')
+      const value = await request(item ? `/items/${item.id}` : '/items', item ? 'PATCH' : 'POST', {
+        title, artist, instrument, body, tags: tags.split(',').map(tag => tag.trim()).filter(Boolean), key: songKey,
+        capo, tuning, notation: { format: notationFormat, text: notationText }, source_url: sourceUrl,
+        links: related, scroll_duration_seconds: scrollDuration === '' ? null : Number(scrollDuration),
+        attachment_refs, ...(item ? { revision: item.revision } : {})
+      })
       show(value.item); open(value.item.id)
     } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
@@ -86,15 +109,34 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
       {!id && <nav aria-label="Repertoire">{items.length ? items.map(row => <a className="block p-2 text-primary" key={row.id} href={`#/capabilities/music/${row.id}`} onClick={() => setId(row.id)}>{row.title} · {row.stage}</a>) : <p>No repertoire yet. Add your first piece.</p>}</nav>}
       {id && <Button variant="secondary" onClick={() => open('')}>All repertoire</Button>}
       <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void save() }}>
-        <label>Title<input className={fieldClass} required maxLength={200} value={title} onChange={event => setTitle(event.target.value)} /></label>
-        <label>Instrument<input className={fieldClass} maxLength={100} value={instrument} onChange={event => setInstrument(event.target.value)} /></label>
-        <label>Score or practice notes<textarea className={fieldClass} rows={8} maxLength={100000} value={body} onChange={event => setBody(event.target.value)} /></label>
+        <label>Title<input className={fieldClass} required maxLength={300} value={title} onChange={event => setTitle(event.target.value)} /></label>
+        <label>Artist<input className={fieldClass} maxLength={300} value={artist} onChange={event => setArtist(event.target.value)} /></label>
+        <label>Instrument<select className={fieldClass} value={instrument} onChange={event => setInstrument(event.target.value)}>{['guitar', 'piano', 'ukulele', 'bass', 'voice', 'drums', 'other'].map(value => <option key={value}>{value}</option>)}</select></label>
+        <label>Tags<input className={fieldClass} placeholder="folk, recital" value={tags} onChange={event => setTags(event.target.value)} /></label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label>Song key<input className={fieldClass} maxLength={20} value={songKey} onChange={event => setSongKey(event.target.value)} /></label>
+          <label>Capo<input className={fieldClass} type="number" min={0} max={12} value={capo} onChange={event => setCapo(Number(event.target.value))} /></label>
+          <label>Tuning<input className={fieldClass} maxLength={40} value={tuning} onChange={event => setTuning(event.target.value)} /></label>
+        </div>
+        <label>Notation format<select className={fieldClass} value={notationFormat} onChange={event => setNotationFormat(event.target.value as Notation['format'])}>{['chordpro', 'tab', 'plain', 'drum'].map(value => <option key={value}>{value}</option>)}</select></label>
+        <label>Notation<textarea className={`${fieldClass} font-mono`} rows={10} maxLength={200000} value={notationText} onChange={event => setNotationText(event.target.value)} /></label>
+        <label>Practice notes<textarea className={fieldClass} rows={4} maxLength={100000} value={body} onChange={event => setBody(event.target.value)} /></label>
+        <label>Source URL<input className={fieldClass} type="url" maxLength={2000} value={sourceUrl} onChange={event => setSourceUrl(event.target.value)} /></label>
+        <label>Related records JSON<textarea className={`${fieldClass} font-mono`} rows={4} value={links} onChange={event => setLinks(event.target.value)} /></label>
+        <label>Scroll duration seconds<input className={fieldClass} type="number" min={15} max={3600} value={scrollDuration} onChange={event => setScrollDuration(event.target.value)} /></label>
         <label>Artifact attachments (slug@version)<textarea className={fieldClass} value={refs} onChange={event => setRefs(event.target.value)} /></label>
         <Button type="submit" disabled={busy || !title.trim()}>{item ? 'Save changes' : 'Add piece'}</Button>
       </form>
       {item && <article aria-label="Practice reader" className="flex flex-col gap-3">
-        <h2>{item.title}</h2><pre className="whitespace-pre-wrap break-words font-sans">{item.body}</pre>
-        {item.attachment_refs.map(ref => <a key={`${ref.slug}@${ref.version}`} className="text-primary" href={`/api/artifacts/${encodeURIComponent(ref.slug)}/versions/${ref.version}`} target="_blank" rel="noreferrer">{ref.slug} version {ref.version}</a>)}
+        <h2>{item.title}</h2><p>{item.artist || 'Unknown artist'} · {item.instrument}{item.key ? ` · ${item.key}` : ''}{item.capo ? ` · capo ${item.capo}` : ''}{item.tuning ? ` · ${item.tuning}` : ''}</p>
+        {item.notation.text && <pre aria-label="Song notation" className="overflow-x-auto whitespace-pre font-mono">{item.notation.text}</pre>}
+        {item.body && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
+        {item.source_url && <a className="text-primary" href={item.source_url} target="_blank" rel="noreferrer">Original source</a>}
+        {item.links.length > 0 && <ul aria-label="Related music records">{item.links.map(link => <li key={`${link.type}:${link.id}`}>{link.label || link.id} · {link.type}</li>)}</ul>}
+        {item.scroll_duration_seconds !== null && <p>Scroll target: {item.scroll_duration_seconds} seconds</p>}
+        {item.attachment_availability.map(ref => ref.available
+          ? <a key={`${ref.slug}@${ref.version}`} className="text-primary" href={`/api/artifacts/${encodeURIComponent(ref.slug)}/versions/${ref.version}`} target="_blank" rel="noreferrer">{ref.name || ref.slug} · {ref.kind || ref.mime} · version {ref.version}</a>
+          : <p key={`${ref.slug}@${ref.version}`}>{ref.slug} version {ref.version} is not available in this workspace</p>)}
         <p>Stage: {item.stage}. Next practice: {item.due_at ? new Date(item.due_at).toLocaleString() : 'Not scheduled'}</p>
         <label>Practice grade<select className={fieldClass} value={grade} onChange={event => setGrade(Number(event.target.value))}>{['0 — No recall', '1 — Incorrect', '2 — Difficult recall', '3 — Correct with effort', '4 — Correct', '5 — Easy'].map((label, index) => <option key={index} value={index}>{label}</option>)}</select></label>
         <label>Practice timezone<input className={fieldClass} value={zone} onChange={event => setZone(event.target.value)} /></label>
