@@ -1,6 +1,6 @@
 {
   "id": "communications.08",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "af76658a",
   "requires": [
@@ -43,15 +43,29 @@
   ],
   "limits": [
     "Live Google/Outlook calendar sync pending actual authorized connection credentials.",
-    "ICS RRULE/RDATE/EXDATE/DURATION are retained as unsupported warnings; occurrences are not expanded. Remote calendar-window APIs request expanded instances.",
+    "The original calendar mirror gate treated ICS recurrence as partial; communications.16 subsequently qualified bounded RRULE/RDATE/EXDATE/DURATION expansion without weakening this task's snapshot and coverage contract.",
     "ICS local timestamps during DST folds/gaps are rejected; UTC exports supported.",
     "Remote window bounded366days/5000events; ICS1MiB/1000events.",
     "Ambient consumer integration owned by experience lane."
   ],
+  "historical_evidence": {
+    "implementation_commit": "3b2c6f2d4f99b7268df6a94227fbf0a0e3c8549e",
+    "evidence": "/tmp/gideon-communications.08-checks-uw4trgwy/evidence.json",
+    "file_identity": "Every task file at the implementation commit exactly matches the retained qualified evidence. Current shared handler/provider/Page changes belong to later communications tasks; current calendar and console changes are the separately qualified communications.16 recurrence extension."
+  },
   "qualification": {
-    "runtime": "43 passed",
-    "console_http": "4 passed",
-    "remote_google_outlook": "pending authorized credentials",
-    "ambient_integration": "projection supplied to experience lane"
+    "status": "locally_qualified",
+    "evidence": "/tmp/gideon-communications.08-checks-uw4trgwy/evidence.json",
+    "compile_exit": 0,
+    "runtime_passed": 43,
+    "runtime_failed": 0,
+    "ui_passed": 4,
+    "ui_failed": 0,
+    "production_lines": 376,
+    "test_lines": 392,
+    "ratio": 1.0425531914893618,
+    "later_calendar_extension": "/tmp/gideon-communications.16-checks-xb6u8evx/evidence.json",
+    "remote_google_outlook": "Provider normalization, authenticated read-only client behavior, failure durability and canonical persistence qualified locally; successful live sync remains pending customer-authorized credentials.",
+    "ambient_integration": "Daily projection supplied to the experience lane."
   }
 }
