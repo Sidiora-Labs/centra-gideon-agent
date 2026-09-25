@@ -55,7 +55,7 @@ def test_manifest_loads_real_native_provider(runtime):
 def test_discovery_declares_risk_and_strict_input_shapes(runtime):
     provider = create_provider()
     tools = asyncio.run(provider.list_tools())
-    assert len(tools) == 38
+    assert len(tools) == 46
     assert len({tool.name for tool in tools}) == len(tools)
     by_name = {tool.name: tool for tool in tools}
     for name in ("knowledge_anniversaries", "knowledge_anniversary_source", "knowledge_capture_list", "knowledge_capture_get"):
@@ -93,6 +93,35 @@ def test_native_video_review_import_and_exact_transcript(runtime):
     assert "Grounded segment" in json.loads(transcript.output)["content"]
     repeated = invoke(provider, "knowledge_video_import", {"request_id": "native-video-request", **body, "preview_id": preview["preview_id"]})
     assert json.loads(repeated.output) == job
+
+
+def test_native_external_vault_register_scan_read_search_and_atomic_write(runtime, tmp_path, monkeypatch):
+    home = tmp_path / "vault-tool-home"
+    allowed = tmp_path / "vault-tool-allowed"
+    vault = allowed / "notes"
+    home.mkdir()
+    vault.mkdir(parents=True)
+    (vault / "Home.md").write_text("# Home\nNative searchable [[Other]]")
+    (vault / "Other.md").write_text("# Other")
+    (home / "config.json").write_text(json.dumps({"knowledge": {"external_vault_roots": [str(allowed)]}}))
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    provider = KnowledgeCapabilityTools(runtime)
+    provider._home = home
+    registered = invoke(provider, "knowledge_vault_register", {"name": "Native", "path": str(vault)})
+    assert registered.success
+    identity = json.loads(registered.output)["id"]
+    scanned = invoke(provider, "knowledge_vault_scan", {"id": identity})
+    assert scanned.success and json.loads(scanned.output)["total"] == 2
+    opened = invoke(provider, "knowledge_vault_read", {"id": identity, "path": "Home.md"})
+    note = json.loads(opened.output)
+    assert note["wikilinks"] == ["Other"]
+    searched = invoke(provider, "knowledge_vault_search", {"id": identity, "query": "searchable"})
+    assert json.loads(searched.output)["results"][0]["path"] == "Home.md"
+    saved = invoke(provider, "knowledge_vault_write", {"id": identity, "request_id": "native-vault-write", "path": "Home.md", "content": "Native updated", "expected_hash": note["current_hash"]})
+    assert saved.success
+    assert (vault / "Home.md").read_text() == "Native updated"
+    graph = invoke(provider, "knowledge_vault_graph", {"id": identity})
+    assert graph.success and len(json.loads(graph.output)["nodes"]) == 2
 
 
 @pytest.mark.parametrize("name,args", [

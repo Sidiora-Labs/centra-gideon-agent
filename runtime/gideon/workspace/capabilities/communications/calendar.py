@@ -11,6 +11,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
+from dateutil.rrule import rrulestr
 from gideon.core.config.credentials import get_credential
 from .store import PeopleError, fields, instant, text
 
@@ -143,60 +144,44 @@ def _window(start, end, master_start):
     return beginning.astimezone(timezone.utc), ending.astimezone(timezone.utc)
 
 
-def _rule(value):
-    result = {}
+def _rule(value, anchor):
+    components = {}
+    allowed = {'FREQ', 'UNTIL', 'COUNT', 'INTERVAL', 'BYSECOND', 'BYMINUTE', 'BYHOUR',
+               'BYDAY', 'BYMONTHDAY', 'BYYEARDAY', 'BYWEEKNO', 'BYMONTH', 'BYSETPOS', 'WKST'}
     for item in value.split(';'):
         if '=' not in item:
             raise PeopleError('Invalid RRULE property')
         key, raw = item.split('=', 1)
-        if key not in {'FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'BYMONTHDAY', 'BYMONTH', 'WKST'} or key in result:
+        if key not in allowed or key in components:
             raise PeopleError('Unsupported or duplicate RRULE component: ' + key)
-        result[key] = raw
-    if result.get('FREQ') not in {'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'}:
-        raise PeopleError('RRULE FREQ must be DAILY, WEEKLY, MONTHLY or YEARLY')
+        components[key] = raw
+    if components.get('FREQ') not in {'SECONDLY', 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'}:
+        raise PeopleError('RRULE has an invalid FREQ')
     try:
-        result['INTERVAL'] = int(result.get('INTERVAL', '1'))
-        result['COUNT'] = int(result['COUNT']) if 'COUNT' in result else None
-    except ValueError:
-        raise PeopleError('RRULE interval and count must be integers') from None
-    if result['INTERVAL'] < 1 or result['INTERVAL'] > 366 or result['COUNT'] is not None and not 1 <= result['COUNT'] <= 5000:
+        interval = int(components.get('INTERVAL', '1'))
+        count = int(components['COUNT']) if 'COUNT' in components else None
+    except (TypeError, ValueError):
+        raise PeopleError('RRULE interval and count must be positive integers') from None
+    if interval < 1 or count is not None and count < 1:
         raise PeopleError('RRULE interval or count is outside supported bounds')
-    return result
+    try:
+        return rrulestr(value, dtstart=anchor, forceset=False)
+    except (TypeError, ValueError, OverflowError):
+        raise PeopleError('Invalid RRULE property') from None
 
 
-def _matches(day_value, anchor, rule):
-    delta = (day_value - anchor.date()).days
-    if delta < 0:
-        return False
-    freq, interval = rule['FREQ'], rule['INTERVAL']
-    months = (day_value.year - anchor.year) * 12 + day_value.month - anchor.month
-    if freq == 'DAILY' and delta % interval:
-        return False
-    if freq == 'WEEKLY' and delta // 7 % interval:
-        return False
-    if freq == 'MONTHLY' and (months < 0 or months % interval):
-        return False
-    if freq == 'YEARLY' and ((day_value.year - anchor.year) < 0 or (day_value.year - anchor.year) % interval):
-        return False
-    weekdays = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
-    tokens = rule.get('BYDAY', '').split(',') if rule.get('BYDAY') else []
-    if tokens and day_value.weekday() not in [weekdays.get(token[-2:]) for token in tokens]:
-        return False
-    if not tokens and freq == 'WEEKLY' and day_value.weekday() != anchor.weekday():
-        return False
-    months_allowed = [int(value) for value in rule.get('BYMONTH', '').split(',') if value]
-    if months_allowed and day_value.month not in months_allowed:
-        return False
-    if not months_allowed and freq == 'YEARLY' and day_value.month != anchor.month:
-        return False
-    month_days = [int(value) for value in rule.get('BYMONTHDAY', '').split(',') if value]
-    month_end = (date(day_value.year + (day_value.month == 12), day_value.month % 12 + 1, 1) - timedelta(days=1)).day
-    resolved = [value if value > 0 else month_end + value + 1 for value in month_days]
-    if resolved and day_value.day not in resolved:
-        return False
-    if not resolved and freq in ('MONTHLY', 'YEARLY') and not tokens and day_value.day != anchor.day:
-        return False
-    return True
+def _expand_rule(value, anchor, all_day, lower, upper):
+    rule = _rule(value, anchor)
+    threshold = lower.astimezone(anchor.tzinfo)
+    candidates = []
+    for occurrence in rule.xafter(threshold, count=5001, inc=True):
+        occurrence_utc = occurrence.astimezone(timezone.utc)
+        if occurrence_utc >= upper:
+            break
+        candidates.append(occurrence.date() if all_day else occurrence)
+        if len(candidates) > 5000:
+            raise PeopleError('RRULE expansion exceeds 5000 occurrences')
+    return candidates
 
 
 def _occurrence(master, raw, start_local, original_key, default_zone):
@@ -277,8 +262,8 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                 events.append(master)
                 continue
             base_local, all_day = _local_time(*raw['DTSTART'], default_zone)
-            anchor = datetime.combine(base_local, datetime.min.time()) if all_day else base_local
-            lower, upper = _window(window_start, window_end, anchor.replace(tzinfo=anchor.tzinfo or timezone.utc).astimezone(timezone.utc))
+            anchor = datetime.combine(base_local, datetime.min.time(), timezone.utc) if all_day else base_local
+            lower, upper = _window(window_start, window_end, anchor.astimezone(timezone.utc))
             exclusions = set()
             additions = []
             for name, target in (('EXDATE', exclusions), ('RDATE', additions)):
@@ -299,25 +284,7 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                 overrides[key] = override
             candidates = []
             if 'RRULE' in raw:
-                rule = _rule(raw['RRULE'][0])
-                cursor = anchor.date()
-                count = 0
-                until = None
-                if rule.get('UNTIL'):
-                    until_value, _ = _local_time(rule['UNTIL'], {}, default_zone)
-                    until = until_value if isinstance(until_value, datetime) else datetime.combine(until_value, datetime.max.time(), anchor.tzinfo)
-                while count < (rule['COUNT'] or 5000) and len(candidates) <= 5000:
-                    if _matches(cursor, anchor, rule):
-                        occurrence = cursor if all_day else datetime.combine(cursor, anchor.timetz()).replace(tzinfo=anchor.tzinfo)
-                        if until is not None and occurrence > until:
-                            break
-                        count += 1
-                        occurrence_utc = datetime.combine(occurrence, datetime.min.time(), timezone.utc) if all_day else occurrence.astimezone(timezone.utc)
-                        if occurrence_utc >= upper:
-                            break
-                        if occurrence_utc >= lower:
-                            candidates.append(occurrence)
-                    cursor += timedelta(days=1)
+                candidates.extend(_expand_rule(raw['RRULE'][0], anchor, all_day, lower, upper))
             else:
                 candidates.append(base_local)
             candidates.extend(additions)

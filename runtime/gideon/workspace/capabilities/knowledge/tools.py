@@ -13,6 +13,7 @@ from gideon.workspace.capabilities.knowledge.ideas import IdeaLists
 from gideon.workspace.capabilities.knowledge.idea_schedule import IdeaSchedules, IdeaSyncActionProvider
 from gideon.workspace.capabilities.knowledge.transcript_format import preview as transcript_preview
 from gideon.workspace.capabilities.knowledge.videos import VideoIngests
+from gideon.workspace.capabilities.knowledge.external_vaults import ExternalVaults
 from gideon.workspace.capabilities.knowledge.journals import DateJournals
 from gideon.workspace.capabilities.knowledge.reviews import ReviewService
 from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
@@ -36,6 +37,14 @@ _JOURNAL_FIELDS = {key: value for key, value in _REVIEW_FIELDS.items() if key !=
 _IDEA_CONTENT = {"type": "string", "minLength": 1, "maxLength": 262144}
 _VIDEO_PREVIEW = {"url": {"type": "string", "maxLength": 2048}, "title": {"type": "string", "minLength": 1, "maxLength": 300}, "format": {"enum": ["vtt", "srt", "json"]}, "content": {"type": "string", "minLength": 1, "maxLength": 1048576}, "language": {"type": "string", "minLength": 1, "maxLength": 30}}
 _TOOLS = {
+    "knowledge_vault_list": ("List explicitly allowed external Markdown vault registrations and indexed note counts.", False, {}, []),
+    "knowledge_vault_register": ("Register an existing Markdown directory beneath configured external_vault_roots.", True, {"name": {"type": "string", "minLength": 1, "maxLength": 200}, "path": {"type": "string", "minLength": 1, "maxLength": 1000}}, ["name", "path"]),
+    "knowledge_vault_scan": ("Scan one registered vault and index canonical Knowledge references without recreating missing files.", True, {"id": _ID}, ["id"]),
+    "knowledge_vault_read": ("Read an indexed vault note with its current conflict hash and canonical source link.", False, {"id": _ID, "path": {"type": "string", "minLength": 1, "maxLength": 1000}}, ["id", "path"]),
+    "knowledge_vault_write": ("Atomically create or update a vault note when its expected content hash still matches.", True, {"id": _ID, "request_id": _REQUEST, "path": {"type": "string", "minLength": 1, "maxLength": 1000}, "content": {"type": "string", "maxLength": 1048576}, "expected_hash": {"type": "string", "maxLength": 128}}, ["id", "request_id", "path", "content", "expected_hash"]),
+    "knowledge_vault_delete": ("Delete a vault note only when its expected content hash matches; archive the canonical reference.", True, {"id": _ID, "request_id": _REQUEST, "path": {"type": "string", "minLength": 1, "maxLength": 1000}, "expected_hash": _ID}, ["id", "request_id", "path", "expected_hash"]),
+    "knowledge_vault_search": ("Search live indexed Markdown content within one registered vault.", False, {"id": _ID, "query": {"type": "string", "minLength": 1, "maxLength": 500}}, ["id", "query"]),
+    "knowledge_vault_graph": ("Read resolved and unresolved wikilink edges within one registered vault.", False, {"id": _ID}, ["id"]),
     "knowledge_video_list": ("List durable public-video ingest jobs, progress and caption-reader availability.", False, _PAGING, []),
     "knowledge_video_get": ("Read one durable video ingest and its ordered progress events.", False, {"id": _ID}, ["id"]),
     "knowledge_video_preview": ("Parse user-supplied timed captions for review without fetching or writing.", False, _VIDEO_PREVIEW, list(_VIDEO_PREVIEW)),
@@ -109,6 +118,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._topics = None
         self._ideas = None
         self._videos = None
+        self._vaults = None
         self._idea_schedules = None
         self._journals = None
         self._reviews = None
@@ -159,7 +169,18 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_video_"):
+            if tool_name.startswith("knowledge_vault_"):
+                if self._vaults is None: self._vaults = ExternalVaults(self._store, self._home)
+                identity = arguments.get("id")
+                if tool_name == "knowledge_vault_list": result = self._vaults.list()
+                elif tool_name == "knowledge_vault_register": result = self._vaults.register(arguments)
+                elif tool_name == "knowledge_vault_scan": result = self._vaults.scan(identity)
+                elif tool_name == "knowledge_vault_read": result = self._vaults.detail(identity, arguments["path"])
+                elif tool_name == "knowledge_vault_write": result = self._vaults.write(identity, {key: value for key, value in arguments.items() if key != "id"})
+                elif tool_name == "knowledge_vault_delete": result = self._vaults.delete(identity, {key: value for key, value in arguments.items() if key != "id"})
+                elif tool_name == "knowledge_vault_search": result = self._vaults.search(identity, arguments["query"])
+                else: result = self._vaults.graph(identity)
+            elif tool_name.startswith("knowledge_video_"):
                 if self._videos is None:
                     self._videos = VideoIngests(self._store, self._home)
                 if tool_name == "knowledge_video_list":

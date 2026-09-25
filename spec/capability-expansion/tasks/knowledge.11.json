@@ -1,0 +1,53 @@
+{
+  "id": "knowledge.11",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "a6983224",
+  "contract": "Explicitly allowed external Markdown vaults register through the existing canonical Knowledge source registry. Live files remain owner-controlled sources while bounded scans index canonical Knowledge items, and all explicit mutations use contained paths, immutable request receipts, expected hashes and atomic replacement.",
+  "acceptance": [
+    "Register only existing directories whose resolved identity is within captured configuration knowledge.external_vault_roots; deduplicate real paths and refuse home drift.",
+    "Validate forward-slash Markdown paths, realpath every target or existing parent, skip operational folders and refuse symlink files, symlink escapes, traversal, hidden paths and absolute paths.",
+    "Scan at most 5000 notes and 64 MiB into existing Knowledge source and item tables with exact source/path identity, tags, folders, wikilinks and canonical item links; no parallel note datastore.",
+    "Archive canonical references when owner files disappear or are explicitly deleted and never recreate absent external files during scan.",
+    "Read returns the live content hash; create, update and delete use immutable request replay and current expected_hash so concurrent external edits return409 without byte loss.",
+    "Write same-directory atomic replacements with fsync, preserve vault files when registration is disabled, and derive search plus resolved/unresolved graph edges from current indexed notes.",
+    "Native tools, actual HTTP endpoints and real DOM journeys exercise registration, scan, read, search, graph, atomic write, conflict refusal and root-policy rejection."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/external_vaults.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_vaults.py",
+    "apps/console/src/features/capabilities/knowledge/VaultsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_external_vaults.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/vaults_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/VaultsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_external_vaults.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/VaultsPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Allowed roots are operator-configured filesystem authority; hosted adaptation must use allocation-owned Connections and cannot accept arbitrary customer host paths.",
+    "This task indexes local materialized Markdown. Cloud-provider hydration, proprietary vault formats and non-Markdown attachments remain external adapter responsibilities.",
+    "Search is bounded literal matching over current indexed vault notes; canonical Knowledge retrieval remains available through the indexed item links.",
+    "Central handler registration and shared Knowledge navigation are integrated by the root lane."
+  ],
+  "verification": {
+    "task": "knowledge.11",
+    "command": "python3 tooling/capability_workflow.py verify knowledge.11",
+    "retained_compile_runtime_evidence": "/tmp/gideon-knowledge.11-checks-xnnvltjq/evidence.json",
+    "final_ui_evidence": "/tmp/gideon-knowledge.11-checks-x8i946nl/evidence.json",
+    "status": "locally_qualified",
+    "production_lines": 270,
+    "test_lines": 325,
+    "runtime_tests": 58,
+    "ui_tests": 4,
+    "note": "Runtime source and test hashes are unchanged from the retained 58-test pass. The final UI journey waits for allowed-root readiness, then exercises the actual outside-root rejection and confirms no registration was created."
+  }
+}

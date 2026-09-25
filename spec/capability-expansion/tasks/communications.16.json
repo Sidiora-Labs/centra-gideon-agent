@@ -1,47 +1,50 @@
 {
   "id": "communications.16",
-  "status": "locally_qualified",
+  "status": "in_progress",
   "schema_version": 1,
-  "base_revision": "e1ffb99e",
+  "base_revision": "0b8e03189ac84daadbddd1c2aa779133a889fc27",
   "requires": [
     "communications.08"
   ],
-  "contract": "Expand uploaded RFC 5545 recurrence within an explicit maximum-366-day window while preserving the source timezone's wall time across DST. Apply bounded DAILY, WEEKLY, MONTHLY and YEARLY RRULE intervals/counts/until and common BYDAY/BYMONTHDAY/BYMONTH selectors, RDATE additions, EXDATE exclusions, RECURRENCE-ID moves and cancellations. Persist stable UID-plus-original-occurrence provenance in the canonical calendar event store. Provider window instances retain provider IDs and cancellation state.",
+  "contract": "Expand uploaded RFC 5545 recurrence within an explicit maximum-366-day window while preserving the source timezone's wall time across DST. Apply bounded SECONDLY through YEARLY RRULE frequencies and RFC selectors including ordinal BYDAY, BYYEARDAY, BYWEEKNO, BYSETPOS and time selectors through the proven python-dateutil recurrence engine, plus RDATE additions, EXDATE exclusions and RECURRENCE-ID moves and cancellations. Persist stable UID-plus-original-occurrence provenance in the canonical calendar event store. Provider window instances retain provider IDs and cancellation state.",
   "acceptance": [
     "Daily recurrence crosses a real IANA DST boundary at constant local wall time and applies move, cancellation, exclusion and addition exceptions",
-    "Weekly BYDAY, monthly negative BYMONTHDAY, yearly selectors and all-day exclusive ends expand deterministically within a bounded window",
+    "Subdaily frequencies, weekly BYDAY, monthly BYSETPOS and negative BYMONTHDAY, yearly position selectors and all-day exclusive ends expand deterministically within a bounded window",
     "Unsupported RRULE components, invalid counts or intervals, mismatched value types, duplicate overrides and windows beyond 366 days fail closed without replacing stored events",
     "Re-import dedup includes both source content and expansion window; changed exceptions replace current occurrences without old replay resurrection",
     "Provider instance IDs and cancellations remain canonical, while real HTTP and console ICS upload and daily-review journeys expose expanded occurrences"
   ],
   "production_files": [
-    "runtime/gideon/workspace/capabilities/communications/calendar.py",
-    "apps/console/src/features/capabilities/communications/CalendarPanel.tsx"
+    "runtime/gideon/workspace/capabilities/communications/calendar.py"
   ],
   "test_files": [
-    "checks/runtime/capabilities/communications/test_calendar_recurrence.py",
-    "apps/console/src/features/capabilities/communications/CalendarPanel.test.tsx"
+    "checks/runtime/capabilities/communications/test_calendar_recurrence.py"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/communications/test_calendar_recurrence.py"
   ],
-  "ui_test_files": [
-    "apps/console/src/features/capabilities/communications/CalendarPanel.test.tsx"
-  ],
+  "ui_test_files": [],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.16",
   "limits": [
-    "RRULE expansion supports one start time per recurrence date and fails closed on unsupported sub-daily or BYSETPOS forms rather than claiming partial expansion.",
+    "RFC RDATE PERIOD values, VEVENT DURATION, RECURRENCE-ID RANGE=THISANDFUTURE and embedded custom VTIMEZONE definitions remain open; the importer currently accepts date/date-time RDATE, requires DTEND for duration, applies single-instance overrides and resolves IANA TZID names.",
     "ICS expansion is bounded to 366 days and 5000 occurrences; snapshot coverage applies only inside the declared expansion window.",
+    "python-dateutil 2.9 or newer is a required runtime dependency for standards-based RRULE expansion; the shared dependency manifest hook remains root-owned.",
     "Google Calendar and Outlook calendarView remain the authoritative recurrence expanders for remote provider windows; successful live provider qualification requires customer credentials.",
     "Daily review shows scheduled events and cancellations, not proof of attendance."
   ],
   "qualification": {
-    "revision": "worktree pre-commit",
+    "revision": "worktree pre-commit continuation",
     "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.16",
     "exit_code": 0,
-    "log": "/tmp/gideon-communications.16-checks-7yj069no",
-    "runtime": "13 passed",
-    "console": "4 passed",
+    "log": "/tmp/gideon-communications.16-checks-iyfq8zz4",
+    "runtime": "17 passed; compile passed; production_lines=33 test_lines=81 ratio=2.45",
+    "continuation_scope": "SECONDLY through YEARLY RRULE frequencies and RFC BY* selectors locally qualified; task remains in_progress for the recurrence forms listed in limits",
+    "prior_slice": {
+      "revision": "0b8e03189ac84daadbddd1c2aa779133a889fc27",
+      "log": "/tmp/gideon-communications.16-checks-7yj069no",
+      "runtime": "13 passed",
+      "console": "4 passed"
+    },
     "live_google_outlook": "pending customer calendar credentials; provider event normalization and canonical window persistence qualified locally"
   }
 }
