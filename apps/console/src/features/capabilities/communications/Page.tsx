@@ -12,6 +12,7 @@ import { TelegramPanel } from './TelegramPanel'
 import { BeeperPanel } from './BeeperPanel'
 import { DesktopPanel } from './DesktopPanel'
 import { MirrorPanel } from './MirrorPanel'
+import { OutboundEmailPanel } from './OutboundEmailPanel'
 import { ThreadsPanel } from './ThreadsPanel'
 import { ImportPanel } from './ImportPanel'
 import { Button } from '../../../shared/ui/Button'
@@ -70,7 +71,7 @@ export default function Page() {
   return <main className="h-full overflow-auto p-4 text-on-surface" aria-label="People and relationships">
     <h1 className="text-xl">People and relationships</h1>
     <ImportPanel onImported={() => setVersion(v => v + 1)} />
-    <TimelinePanel /><LifecyclePanel /><StackerPanel /><XPanel /><SocialPanel /><CalendarPanel /><TelegramPanel /><BeeperPanel /><DesktopPanel /><SignalArchivePanel /><TeamsPanel /><MirrorPanel /><ThreadsPanel />
+    <TimelinePanel /><LifecyclePanel /><StackerPanel /><XPanel /><SocialPanel /><CalendarPanel /><TelegramPanel /><BeeperPanel /><DesktopPanel /><SignalArchivePanel /><TeamsPanel /><MirrorPanel /><OutboundEmailPanel /><ThreadsPanel />
     <div className="my-3 flex gap-2"><Button onClick={() => open('')}>New person</Button><Button variant="secondary" onClick={() => setVersion(v => v + 1)} disabled={busy}>Reload</Button></div>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {loading ? <p role="status">Loading people…</p> : <div className="grid gap-6 md:grid-cols-2">
