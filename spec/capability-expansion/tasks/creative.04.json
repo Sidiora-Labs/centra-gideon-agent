@@ -16,24 +16,31 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/graph.py",
-    "runtime/gideon/workspace/capabilities/creative/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
-    "apps/console/src/features/capabilities/creative/UniverseGraph.tsx",
-    "apps/console/src/features/capabilities/creative/Universes.tsx"
+    "apps/console/src/features/capabilities/creative/UniverseGraph.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/creative/test_graph.py",
-    "checks/runtime/capabilities/creative/test_tools.py",
     "apps/console/src/features/capabilities/creative/UniverseGraph.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/creative/test_graph.py",
-    "checks/runtime/capabilities/creative/test_tools.py"
+    "checks/runtime/capabilities/creative/test_graph.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/UniverseGraph.test.tsx"
   ],
   "repair_cycles": 1,
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Universes.tsx",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "historical_evidence": {
+    "base_revision": "5a37464f",
+    "implementation_commit": "a400d15a12677d04b186523069f3f749c0065deb",
+    "evidence": "/tmp/gideon-creative.04-checks-8_2007x7/evidence.json",
+    "scope": "The retained gate covered the unique graph implementation and its then-current shared HTTP/native/UI hooks. Later tasks changed only shared integration files and removed one unused test helper."
+  },
   "qualification": {
     "evidence": "/tmp/gideon-creative.04-checks-8_2007x7/evidence.json",
     "compile_exit": 0,
@@ -45,7 +52,7 @@
     "test_lines": 332,
     "ratio": 1.7291666666666667,
     "implementation_commit": "a400d15a12677d04b186523069f3f749c0065deb",
-    "hash_reconciliation": "Current graph.py, UniverseGraph.tsx, Universes.tsx and test_graph.py exactly match the qualified evidence. Later creative tasks changed shared handler/provider files and removed one unused ready helper from UniverseGraph.test.tsx without changing graph assertions or behavior.",
+    "hash_reconciliation": "Current graph.py, UniverseGraph.tsx and test_graph.py exactly match the qualified evidence. UniverseGraph.test.tsx differs only by removal of one unused ready helper, without changing graph assertions or behavior. Later creative tasks changed only shared integration files excluded from task ownership.",
     "fresh_gate_attempt": "/tmp/gideon-creative.04-checks-yo34h12x/evidence.json",
     "fresh_gate_blocker": "The stale base-revision line counter includes later unrelated additions to the shared creative handler and provider, so it stopped before compile at ratio 0.543801652892562. No unchanged behavior test was rerun."
   }
