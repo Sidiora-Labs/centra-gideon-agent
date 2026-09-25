@@ -1,3 +1,4 @@
+import Universes from './Universes'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -133,9 +134,9 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
 }
 
 export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
-  const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') === 'boards'
+  const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') || 'ingredients'
   const [boards, setBoards] = useState(readView)
   useEffect(() => { const changed = () => setBoards(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
-  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a></nav>
-    {boards ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
+  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a></nav>
+    {boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
 }

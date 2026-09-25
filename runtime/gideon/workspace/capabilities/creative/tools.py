@@ -4,6 +4,8 @@ from copy import deepcopy
 
 from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from .moodboards import BoardStore
+from .universes import UniverseStore
+from .graph import UniverseGraph
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -28,9 +30,15 @@ BOARD = {"title": STRING, "groups": {"type": "array", "items": GROUP},
          "ingredient_ids": {"type": "array", "items": STRING}}
 
 
+UNIVERSE = {"title": STRING, "canon": {"type": "array", "items": obj({"id": STRING, "title": STRING, "body": STRING}, ["id", "title"])},
+            "visual_identity": obj({"colors": {"type": "array", "items": STRING}, "style_notes": STRING}),
+            "ingredient_ids": {"type": "array", "items": STRING},
+            "board_refs": {"type": "array", "items": obj({"id": STRING, "revision": NUMBER}, ["id", "revision"])}}
+
+
 def schemas():
     result = {}
-    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD)):
+    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE)):
         result[f"creative_{entity}_list"] = obj({**PAGE, **({"type": {"enum": list(TYPES)}, "tag": STRING} if entity == "ingredient" else {})})
         result[f"creative_{entity}_get"] = obj({"id": STRING}, ["id"])
         result[f"creative_{entity}_create"] = obj({"payload": obj({**fields, "request_id": STRING}, ["title", "request_id", *(["type"] if entity == "ingredient" else [])])}, ["payload"])
@@ -38,18 +46,26 @@ def schemas():
         result[f"creative_{entity}_revisions"] = obj({"id": STRING, "offset": PAGE["offset"], "limit": PAGE["limit"]}, ["id"])
         result[f"creative_{entity}_restore"] = obj({"id": STRING, "payload": obj({"revision": NUMBER, "target_revision": NUMBER}, ["revision", "target_revision"])}, ["id", "payload"])
     result["creative_board_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_universe_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_board_sources"] = obj({"q": STRING})
+    result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
+    result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
+    result["creative_universe_merge"] = obj({"id": STRING, "payload": obj({"source_id": STRING, "request_id": STRING,
+        "target_revision": NUMBER, "source_revision": NUMBER, "canon_choices": {"type": "object", "additionalProperties": {"enum": ["target", "source"]}},
+        "identity_choice": {"enum": ["target", "source"]}}, ["source_id", "request_id", "target_revision", "source_revision"])}, ["id", "payload"])
     return result
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore"}
+WRITES = {"create", "update", "restore", "merge"}
 
 
 class CreativeToolProvider(ToolProvider):
     def __init__(self, home=None):
         self.ingredients = IngredientStore(home)
         self.boards = BoardStore(self.ingredients.home)
+        self.universes = UniverseStore(self.ingredients.home)
+        self.graphs = UniverseGraph(self.universes)
 
     @property
     def name(self):
@@ -76,10 +92,12 @@ class CreativeToolProvider(ToolProvider):
             keys(arguments, set(schema["properties"]))
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
-            _, entity, action = tool_name.split("_")
-            store = self.ingredients if entity == "ingredient" else self.boards
+            _, entity, action = tool_name.split("_", 2)
+            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes}[entity]
             args = dict(arguments)
-            if action == "revisions":
+            if action in ("graph", "merge_preview", "merge"):
+                result = getattr(self.graphs, action)(**args)
+            elif action == "revisions":
                 offset = integer(args.get("offset", 0), 0, 1000000)
                 limit = integer(args.get("limit", 25), 1, 100)
                 records = store.revisions(args["id"])
