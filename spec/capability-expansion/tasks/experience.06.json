@@ -1,6 +1,6 @@
 {
   "id": "experience.06",
-  "status": "locally_checked_browser_pending",
+  "status": "locally_qualified",
   "base_revision": "3981aca2",
   "requires": [
     "music.07"
@@ -22,7 +22,9 @@
   "test_files": [
     "checks/runtime/capabilities/experience/test_avatar.py",
     "checks/runtime/capabilities/experience/test_tools.py",
-    "apps/console/src/features/capabilities/experience/AvatarPanel.test.tsx"
+    "apps/console/src/features/capabilities/experience/AvatarPanel.test.tsx",
+    "checks/capabilities/experience_browser.mjs",
+    "checks/capabilities/experience_server.py"
   ],
   "extra_files": [
     "runtime/gideon/workspace/capabilities/experience/assets/robot.glb"
@@ -36,7 +38,7 @@
   ],
   "contract": "Avatar variants bind validated animated canonical GLB versions, source hashes and actual clip names. Original authored articulated robot has real mesh geometry and six motion clips. Shared Three loader renders; real activity feed and native audio playback events choose clips; reduced motion and unknown sources stop animation. Native tools share registry and selected source.",
   "remaining_limits": [
-    "Real WebGL rendering/GPU interaction and audible speech-driven visual transition require browser qualification; no provider-generated model success claimed",
+    "Chromium WebGL 2 rendered the authored robot through ANGLE SwiftShader; discrete GPU hardware and audible speech-driven visual transition remain external, with no provider-generated model success claimed",
     "Bundled robot uses authored hierarchical joint motion; no phoneme/viseme lip sync or generated skinning claimed"
   ],
   "dependencies": [
@@ -49,5 +51,64 @@
     "production_lines": 324,
     "test_lines": 332,
     "ratio": 1.0246913580246915
+  },
+  "browser_qualification": {
+    "status": "passed",
+    "command": "EXPERIENCE_BROWSER_PHASE=avatar node checks/capabilities/experience_browser.mjs",
+    "evidence": "/tmp/gideon-experience-browser-82UevD/evidence.json",
+    "browser": "Chromium 151.0.7922.77",
+    "authored_avatar": {
+      "artifact": "gideon-robot:1",
+      "clips": [
+        "idle",
+        "working",
+        "needs_input",
+        "waiting_approval",
+        "error",
+        "speaking"
+      ]
+    },
+    "webgl": {
+      "context": "webgl2",
+      "vendor": "Google Inc. (Google)",
+      "renderer": "ANGLE Vulkan SwiftShader Device (Subzero)",
+      "canvas": [
+        640,
+        400
+      ],
+      "colored_pixels": 26950,
+      "hardware_claim": "Software SwiftShader browser rendering; no discrete GPU hardware claim"
+    },
+    "runtime_transition": {
+      "loop_id": "f301a15c",
+      "driver": "canonical AutoNudgeService plus loop HTTP lifecycle",
+      "browser_states": [
+        "idle",
+        "working",
+        "idle"
+      ],
+      "observed_durable_statuses": [
+        "running",
+        "paused"
+      ]
+    },
+    "screenshots": [
+      "/tmp/gideon-experience-browser-82UevD/avatar-idle.png",
+      "/tmp/gideon-experience-browser-82UevD/avatar-runtime-transition.png",
+      "/tmp/gideon-experience-browser-82UevD/avatar-runtime-paused.png"
+    ],
+    "attempts": [
+      "/tmp/gideon-experience-browser-N5SMpz/failure.json",
+      "/tmp/gideon-experience-browser-82UevD/evidence.json"
+    ],
+    "repairs": [
+      "initialized the canonical AutoNudgeService in the dedicated qualification server so the real loop start/pause lifecycle is available"
+    ],
+    "remaining_external": [
+      "audible PCM and physical audio device",
+      "speech-driven speaking transition",
+      "discrete GPU hardware",
+      "provider-generated rigged model variants"
+    ]
   }
 }

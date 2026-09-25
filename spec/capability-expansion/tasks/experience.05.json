@@ -1,6 +1,6 @@
 {
   "id": "experience.05",
-  "status": "locally_checked_browser_pending",
+  "status": "locally_qualified",
   "base_revision": "ad0ecb2d",
   "dependencies": [
     "596a3309",
@@ -17,7 +17,8 @@
   "test_files": [
     "checks/runtime/capabilities/experience/test_ambient.py",
     "checks/runtime/capabilities/experience/test_tools.py",
-    "apps/console/src/features/capabilities/experience/AmbientDisplay.test.tsx"
+    "apps/console/src/features/capabilities/experience/AmbientDisplay.test.tsx",
+    "checks/capabilities/experience_browser.mjs"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/experience/test_ambient.py",
@@ -28,7 +29,6 @@
   ],
   "contract": "Fullscreen ambient presentation of existing scheduled automations, native tasks, human goals/planned sessions/progress, recorded health measurements, canonical digest and existing pinned artifact tiles. Presentation preferences persist with revision; visibility-aware source refresh and explicit unavailable/freshness/error states.",
   "remaining_limits": [
-    "Native browser fullscreen permission and responsive visual geometry require real browser qualification; local DOM exercises actual unsupported API branch",
     "External calendar events and mortality estimates remain unavailable; no synthetic health or measured-effort data"
   ],
   "qualification": {
@@ -43,5 +43,22 @@
       "Assert actual inline fontSize instead of unsupported camelCase style matcher expectation",
       "Missing progress profile reports unavailable/null totals; explicit refresh recovers draft after concurrent preference conflict"
     ]
+  },
+  "browser_qualification": {
+    "status": "passed",
+    "browser": "Google Chrome for Testing 151.0.7922.77",
+    "command": "node checks/capabilities/experience_browser.mjs",
+    "evidence": "/tmp/gideon-experience-browser-UKCyel/experience.05-evidence.json",
+    "screenshots": [
+      "/tmp/gideon-experience-browser-UKCyel/ambient-desktop.png",
+      "/tmp/gideon-experience-browser-UKCyel/ambient-fullscreen.png",
+      "/tmp/gideon-experience-browser-UKCyel/ambient-mobile.png"
+    ],
+    "checks": [
+      "actual user-gesture requestFullscreen and observed fullscreenElement",
+      "1440x960 and 390x844 viewport geometry without horizontal overflow",
+      "real ambient dashboard snapshot"
+    ],
+    "note": "All experience.05 assertions completed before the combined journey stopped in the later experience.06 selector step."
   }
 }
