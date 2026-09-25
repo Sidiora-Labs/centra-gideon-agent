@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -276,7 +276,9 @@ def restore_fields(home, record_id, fields, now):
     for field in fields:
         merged[field] = remote[field]
     if record.entry_id == COLLECTION_ENTRY:
-        merged["updated_at"] = now
+        created = _timestamp(merged["created_at"], "created_at")
+        restored = _timestamp(now, "updated_at")
+        merged["updated_at"] = now if restored > created else (created + timedelta(microseconds=1)).isoformat()
     current = {entry_id: read_rows(home, entry_id) for entry_id in ENTRIES}
     ancestors = {entry_id: {row["id"]: conflicts.row_sha(row) for row in current[entry_id]} for entry_id in ENTRIES}
     current[record.entry_id] = [row for row in current[record.entry_id] if row["id"] != record.entity_id]

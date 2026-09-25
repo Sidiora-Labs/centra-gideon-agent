@@ -168,13 +168,13 @@ def test_collection_conflict_selected_restore_keeps_local_fields(tmp_path):
     pending = queue.items(status=conflicts.STATUS_NEEDS_REVIEW)
     assert len(pending) == 1 and pending[0].entry_id == adapter.COLLECTION_ENTRY
     restored = adapter.restore_fields(
-        target, pending[0].id, ["name"], "2026-09-25T14:20:00+00:00",
+        target, pending[0].id, ["name"], "2000-01-01T00:00:00+00:00",
     )
     merged = collection(target, manual)
     assert restored["fields"] == ["name"]
     assert merged["name"] == "Remote title"
     assert merged["icon"] == "local"
-    assert merged["updated_at"] == "2026-09-25T14:20:00+00:00"
+    assert adapter._timestamp(merged["updated_at"], "updated_at") > adapter._timestamp(merged["created_at"], "created_at")
     assert conflicts.ConflictQueue(target).get(pending[0].id).status == conflicts.STATUS_RESOLVED
 
 
