@@ -267,3 +267,14 @@ Run focused task gates when code changes, then one integrated console build and 
 ## Progress records
 
 Task records remain the qualification evidence. `python3 tooling/capability_progress.py` reports the current checkout without changing files. Add `--write` to synchronize backlog and KVX statuses from those records. This command does not run gates, publish commits, or deploy. Only explicitly locally qualified records count as done; partial and external-pending states remain in progress.
+
+## Structured clinical record completion
+
+The existing wellbeing.02 clinical-history scope includes four typed record families beyond laboratory panels. Reuse the allocation-local wellbeing database with distinct tables; do not duplicate laboratory, genome, weight, substance, or life-calendar records. Every family requires optimistic revisions, immutable correction history, idempotent requests, explicit source and observation dates, bounded validation, signed hosted HTTP, native tools, a discoverable console form, and canonical export. No diagnostic interpretation or invented measurements are generated.
+
+- Epigenetic results: source report identity, observed date, reported biological and chronological ages, pace-of-aging value, and named organ scores with their authored units or scale. Preserve missing values as missing and distinguish reported values from derived calculations.
+- Eye prescriptions: left/right sphere, cylinder and axis with explicit diopter/degree units, observation date, source and notes. Corrections retain prior prescriptions.
+- Lifestyle profile observations: reported sex and its source, smoking status, diet-quality and stress values with declared scales, reported BMI, chronic-condition labels, and optional reported daily alcohol quantity. Reuse existing birth-date/sleep and recorded consumption owners rather than copying them into a second authority.
+- Body-composition observations: reported muscle and fat percentages, bone mass with explicit mass unit, and temperature with explicit unit. Normalize supported units without losing original values or provenance; keep weight records in their existing owner.
+
+Acceptance for each family: author through the real console and signed API; reload the exact canonical record; correct it while preserving history; refuse stale, invalid and cross-allocation writes; retrieve the same data through its native tool and export. Tests use authored records and actual stores. Peer sharing remains a separate default-denied, explicitly selected domain and must never copy request ledgers or local execution authority.
