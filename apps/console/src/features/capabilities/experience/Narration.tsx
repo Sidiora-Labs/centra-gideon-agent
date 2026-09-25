@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { gatewayRequest, requestJson, responseError } from '../../../shared/data/gatewayRequest'
+import OwnedAudio from './OwnedAudio'
 import { Button } from '../../../shared/ui/Button'
 
 type Job = { id: string; status: string; error: string; node_id: string }
@@ -55,6 +56,6 @@ export default function Narration({ sessionId, revision, baseUrl = '/api/capabil
     {active && <Button onClick={() => void cancel()}>Cancel narration</Button>}
     {job && <p role="status">Narration: {job.status}{job.error ? ` — ${job.error}` : ''}</p>}
     {error && <p role="alert">{error}</p>}
-    {audio && <audio aria-label="Scene narration audio" controls src={audio} />}
+    {audio && <OwnedAudio src={audio} baseUrl={baseUrl} />}
   </section>
 }
