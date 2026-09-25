@@ -148,7 +148,7 @@ def _inspect(data):
     domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads", "songs") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    coordinated_records = len(domains) > 1 and set(domains) <= {"projects", "admin", "threads"}
+    coordinated_records = len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}
     if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not coordinated_records:
         raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
@@ -480,7 +480,7 @@ def _inspect(data):
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
         raise MigrationError("Archive contains no supported records")
-    if len(domains) > 1 and set(domains) <= {"projects", "admin", "threads"}:
+    if len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}:
         _ordered_canonical_records(records)
     referenced_assets = {attachment["filename"] for row in records if row["domain"] == "songs" for attachment in row["values"]["attachments"]}
     if set(assets) != referenced_assets:
@@ -507,7 +507,7 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
-    if len(domains) > 1 and set(domains) <= {"projects", "admin", "threads"}:
+    if len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}:
         if projects is None or tasks is None:
             raise MigrationError("Canonical project and task stores are unavailable", 503)
         return _commit_canonical_records(tasks, store, knowledge, projects, digest, token, records, generated)
@@ -658,7 +658,7 @@ def _commit_project(store: BoundHierarchy, digest, token, records, generated, re
     return receipt, True
 
 
-def _resolve_task_refs(refs, people, knowledge, projects, tasks):
+def _resolve_task_refs(refs, people, knowledge, projects, tasks, archive_digest=None):
     resolved = []
     for ref in refs:
         kind, source_id = ref["kind"], ref["id"]
@@ -673,7 +673,12 @@ def _resolve_task_refs(refs, people, knowledge, projects, tasks):
             if projects is None or projects.get_project(source_id) is None:
                 raise MigrationError("Thread references a missing canonical project", 409)
         elif kind == "brain.person":
-            matches = [row["id"] for row in people.people() if ("Legacy record: " + source_id) in row.get("notes", "").splitlines()]
+            inventory = people.people()
+            coordinated = ("migration-" + hashlib.sha256(
+                (archive_digest + ":" + source_id).encode()).hexdigest()[:32]) if archive_digest else None
+            exact = [row["id"] for row in inventory if row["id"] == coordinated]
+            matches = exact or [row["id"] for row in inventory
+                                if ("Legacy record: " + source_id) in row.get("notes", "").splitlines()]
             if len(matches) != 1:
                 raise MigrationError("Thread person reference does not resolve uniquely", 409)
             target_id = matches[0]
@@ -711,7 +716,7 @@ def _commit_task(tasks, people, knowledge, projects, digest, token, records, gen
                 or marker_fingerprint not in ((record_fingerprint,) if require_fingerprint else (None, record_fingerprint))):
             raise MigrationError("Migration target identity already exists", 409)
         return marker["receipt"], False
-    resolved_refs = _resolve_task_refs(values["refs"], people, knowledge, projects, tasks)
+    resolved_refs = _resolve_task_refs(values["refs"], people, knowledge, projects, tasks, digest)
     task.evidence = [{"type": "platform_migration", "archive_digest": digest, "review_token": token, "receipt": receipt,
                       "source_collection": row["domain"], "source_record_id": row["source_id"], "references": resolved_refs,
                       "source_state": values["source_state"], "record_fingerprint": record_fingerprint}]
@@ -893,16 +898,18 @@ def _ordered_canonical_records(records):
         raise MigrationError("Coordinated archives require between 2 and 100 canonical records")
     targets, keys = set(), set()
     for row in records:
-        adapter = "project" if row["domain"] == "projects" else "task"
-        target, key = (adapter, row["values"]["id"]), row["domain"] + ":" + row["source_id"]
+        adapter = "person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else "task"
+        identity = row["source_id"] if adapter == "person" else row["values"]["id"]
+        target, key = (adapter, identity), row["domain"] + ":" + row["source_id"]
         if target in targets or key in keys:
             raise MigrationError("Coordinated archive contains a duplicate canonical identity", 409)
         targets.add(target); keys.add(key)
+    people = sorted((row for row in records if row["domain"] == "people"), key=lambda row: row["source_id"])
     projects = sorted((row for row in records if row["domain"] == "projects"), key=lambda row: row["source_id"])
     pending = {row["values"]["id"]: row for row in records if row["domain"] in ("admin", "threads")}
-    if len(projects) + len(pending) != len(records):
+    if len(people) + len(projects) + len(pending) != len(records):
         raise MigrationError("This canonical coordinator does not support one or more archive families")
-    ordered, published = list(projects), set()
+    ordered, published = [*people, *projects], set()
     while pending:
         ready = []
         for identity, row in pending.items():
@@ -921,7 +928,7 @@ def _ordered_canonical_records(records):
 
 def _canonical_step(row):
     return {"key": row["domain"] + ":" + row["source_id"],
-            "adapter": "project" if row["domain"] == "projects" else "task",
+            "adapter": "person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else "task",
             "domain": row["domain"], "state": "pending", "record": row,
             "record_hash": hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()}
 
@@ -947,10 +954,10 @@ def _read_canonical_journal(path):
     keys = set()
     for step in journal["steps"]:
         if (not isinstance(step, dict) or set(step) != {"key", "adapter", "domain", "state", "record", "record_hash"}
-                or step.get("adapter") not in ("project", "task") or step.get("state") not in ("pending", "applied")
-                or step.get("domain") not in ("projects", "admin", "threads") or not isinstance(step.get("record"), dict)
+                or step.get("adapter") not in ("person", "project", "task") or step.get("state") not in ("pending", "applied")
+                or step.get("domain") not in ("people", "projects", "admin", "threads") or not isinstance(step.get("record"), dict)
                 or step["record"].get("domain") != step["domain"]
-                or step["adapter"] != ("project" if step["domain"] == "projects" else "task")
+                or step["adapter"] != ("person" if step["domain"] == "people" else "project" if step["domain"] == "projects" else "task")
                 or step["key"] != step["domain"] + ":" + str(step["record"].get("source_id", ""))
                 or not SHA256.fullmatch(str(step.get("record_hash", "")))
                 or hashlib.sha256(json.dumps(step["record"], sort_keys=True).encode()).hexdigest() != step["record_hash"]
@@ -960,28 +967,69 @@ def _read_canonical_journal(path):
     return journal
 
 
-def _canonical_state(step, journal, tasks, projects):
+def _coordinated_person_id(journal, step):
+    return "migration-" + hashlib.sha256(
+        (journal["archive_digest"] + ":" + step["record"]["source_id"]).encode()).hexdigest()[:32]
+
+
+def _person_state(people, step, journal):
+    person_id = _coordinated_person_id(journal, step)
+    expected = {**step["record"]["values"], "id": person_id}
+    with closing(people.connect()) as db:
+        row = db.execute("SELECT body,revision FROM people WHERE id=?", (person_id,)).fetchone()
+        touches = db.execute("SELECT count(*) FROM touchpoints WHERE person_id=?", (person_id,)).fetchone()[0]
+    if row is None:
+        return "absent"
+    try:
+        actual = json.loads(row[0])
+    except json.JSONDecodeError:
+        return "drift"
+    return "owned" if row[1] == 1 and touches == 0 and actual == expected else "drift"
+
+
+def _canonical_state(step, journal, tasks, people, projects):
+    if step["adapter"] == "person":
+        return _person_state(people, step, journal)
     return (_project_state(projects, step["record"], journal) if step["adapter"] == "project"
             else _task_state(tasks, step["record"], journal))
 
 
 def _apply_canonical_step(step, journal, tasks, people, knowledge, projects):
     common = (journal["archive_digest"], journal["review_token"], [step["record"]], journal["generated_at"], journal["receipt"])
-    if step["adapter"] == "project":
+    if step["adapter"] == "person":
+        person_id = _coordinated_person_id(journal, step)
+        body = {**step["record"]["values"], "id": person_id}
+        with closing(people.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+            db.execute("INSERT INTO people VALUES (?,?,1)", (person_id, json.dumps(body)))
+    elif step["adapter"] == "project":
         _commit_project(projects, *common, require_fingerprint=True)
     else:
         _commit_task(tasks, people, knowledge, projects, *common, require_fingerprint=True)
 
 
-def _compensate_canonical_steps(journal, tasks, projects):
-    states = [(_canonical_state(step, journal, tasks, projects), step) for step in journal["steps"]]
+def _compensate_canonical_steps(journal, tasks, people, projects):
+    states = [(_canonical_state(step, journal, tasks, people, projects), step) for step in journal["steps"]]
     if any(state == "drift" for state, _ in states):
         raise MigrationError("Coordinated migration identity changed; automatic compensation refused", 409)
     for state, step in reversed(states):
         if state != "owned":
             continue
-        identity = step["record"]["values"]["id"]
-        deleted = (projects.delete_project(identity) if step["adapter"] == "project" else TaskMutation(tasks).delete(identity))
+        if step["adapter"] == "person":
+            identity = _coordinated_person_id(journal, step)
+            expected = json.dumps({**step["record"]["values"], "id": identity})
+            with closing(people.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                cursor = db.execute(
+                    "DELETE FROM people WHERE id=? AND revision=1 AND body=? "
+                    "AND NOT EXISTS (SELECT 1 FROM touchpoints WHERE person_id=?)",
+                    (identity, expected, identity))
+                deleted = cursor.rowcount == 1
+        else:
+            identity = step["record"]["values"]["id"]
+            deleted = (projects.delete_project(identity) if step["adapter"] == "project" else TaskMutation(tasks).delete(identity))
         if not deleted:
             raise MigrationError("Canonical migration compensation could not be completed", 409)
 
@@ -989,7 +1037,7 @@ def _compensate_canonical_steps(journal, tasks, projects):
 def _resume_canonical_records(path, journal, tasks, people, knowledge, projects):
     try:
         for step in journal["steps"]:
-            state = _canonical_state(step, journal, tasks, projects)
+            state = _canonical_state(step, journal, tasks, people, projects)
             if step["state"] == "applied":
                 if state != "owned":
                     raise MigrationError("Applied canonical migration record has identity drift", 409)
@@ -1005,7 +1053,7 @@ def _resume_canonical_records(path, journal, tasks, people, knowledge, projects)
         _write_journal(path, journal)
         return journal["receipt"]
     except Exception:
-        _compensate_canonical_steps(journal, tasks, projects)
+        _compensate_canonical_steps(journal, tasks, people, projects)
         if path.exists():
             path.unlink()
         raise
@@ -1015,7 +1063,7 @@ def _recover_canonical_journals(tasks, people, knowledge, projects):
     for path in _canonical_coordinator_root(tasks).glob("*.json"):
         journal = _read_canonical_journal(path)
         if journal["status"] == "complete":
-            if any(_canonical_state(step, journal, tasks, projects) != "owned" for step in journal["steps"]):
+            if any(_canonical_state(step, journal, tasks, people, projects) != "owned" for step in journal["steps"]):
                 raise MigrationError("A completed canonical migration has identity drift", 409)
         else:
             _resume_canonical_records(path, journal, tasks, people, knowledge, projects)
@@ -1040,17 +1088,32 @@ def _commit_canonical_records(tasks, people, knowledge, projects, digest, token,
         return journal["receipt"], False
     names = set()
     for row in ordered:
-        identity = row["values"]["id"]
-        if row["domain"] == "projects":
+        if row["domain"] == "people":
+            identity = _coordinated_person_id({"archive_digest": digest}, _canonical_step(row))
+            with closing(people.connect()) as db:
+                occupied = db.execute("SELECT 1 FROM people WHERE id=?", (identity,)).fetchone()
+            if occupied:
+                raise MigrationError("Migration target identity already exists", 409)
+        elif row["domain"] == "projects":
+            identity = row["values"]["id"]
             name = row["values"]["name"].casefold()
             if name in names or (projects._projects_dir() / identity).exists() or projects.get_project_by_name(row["values"]["name"]):
                 raise MigrationError("Migration target identity already exists", 409)
             names.add(name)
-        elif tasks._task_path(identity).exists():
-            raise MigrationError("Migration target identity already exists", 409)
+        else:
+            identity = row["values"]["id"]
+            if tasks._task_path(identity).exists():
+                raise MigrationError("Migration target identity already exists", 409)
     counts = {domain: sum(row["domain"] == domain for row in ordered) for domain in sorted({row["domain"] for row in ordered})}
-    receipt_records = [{"source_id": row["source_id"], "domain": row["domain"],
-                        "project_id" if row["domain"] == "projects" else "task_id": row["values"]["id"]} for row in ordered]
+    receipt_records = []
+    for row in ordered:
+        record = {"source_id": row["source_id"], "domain": row["domain"]}
+        if row["domain"] == "people":
+            record.update(person_id="migration-" + hashlib.sha256(
+                (digest + ":" + row["source_id"]).encode()).hexdigest()[:32], revision=1)
+        else:
+            record["project_id" if row["domain"] == "projects" else "task_id"] = row["values"]["id"]
+        receipt_records.append(record)
     receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
                "committed_at": datetime.now(timezone.utc).isoformat(), "domains": counts, "records": receipt_records}
     journal = {"schema": 2, "kind": "canonical_records", "status": "prepared", "archive_digest": digest,
