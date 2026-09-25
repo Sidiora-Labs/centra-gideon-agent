@@ -148,7 +148,10 @@ def _inspect(data):
     domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads", "songs") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    coordinated_records = len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}
+    coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
+    coordinated_records = len(domains) > 1 and set(domains) <= coordinated_families
+    if "inbox" in domains and len(domains) > 1:
+        raise MigrationError("Inbox capture history is immutable and requires a separate atomic import")
     if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not coordinated_records:
         raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
@@ -480,7 +483,7 @@ def _inspect(data):
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
         raise MigrationError("Archive contains no supported records")
-    if len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}:
+    if coordinated_records:
         _ordered_canonical_records(records)
     referenced_assets = {attachment["filename"] for row in records if row["domain"] == "songs" for attachment in row["values"]["attachments"]}
     if set(assets) != referenced_assets:
@@ -507,7 +510,8 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
-    if len(domains) > 1 and set(domains) <= {"people", "projects", "admin", "threads"}:
+    coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
+    if len(domains) > 1 and set(domains) <= coordinated_families:
         if projects is None or tasks is None:
             raise MigrationError("Canonical project and task stores are unavailable", 503)
         return _commit_canonical_records(tasks, store, knowledge, projects, digest, token, records, generated)
@@ -898,7 +902,9 @@ def _ordered_canonical_records(records):
         raise MigrationError("Coordinated archives require between 2 and 100 canonical records")
     targets, keys = set(), set()
     for row in records:
-        adapter = "person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else "task"
+        adapter = ("person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else
+                   "collection" if row["domain"] == "buckets" else
+                   "knowledge" if row["domain"] in ("ideas", "journals", "memories", "links") else "task")
         identity = row["source_id"] if adapter == "person" else row["values"]["id"]
         target, key = (adapter, identity), row["domain"] + ":" + row["source_id"]
         if target in targets or key in keys:
@@ -906,10 +912,13 @@ def _ordered_canonical_records(records):
         targets.add(target); keys.add(key)
     people = sorted((row for row in records if row["domain"] == "people"), key=lambda row: row["source_id"])
     projects = sorted((row for row in records if row["domain"] == "projects"), key=lambda row: row["source_id"])
+    collections = sorted((row for row in records if row["domain"] == "buckets"), key=lambda row: row["source_id"])
+    knowledge = sorted((row for row in records if row["domain"] in ("ideas", "journals", "memories", "links")),
+                       key=lambda row: (row["domain"], row["source_id"]))
     pending = {row["values"]["id"]: row for row in records if row["domain"] in ("admin", "threads")}
-    if len(people) + len(projects) + len(pending) != len(records):
+    if len(people) + len(projects) + len(collections) + len(knowledge) + len(pending) != len(records):
         raise MigrationError("This canonical coordinator does not support one or more archive families")
-    ordered, published = [*people, *projects], set()
+    ordered, published = [*people, *projects, *collections, *knowledge], set()
     while pending:
         ready = []
         for identity, row in pending.items():
@@ -928,7 +937,9 @@ def _ordered_canonical_records(records):
 
 def _canonical_step(row):
     return {"key": row["domain"] + ":" + row["source_id"],
-            "adapter": "person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else "task",
+            "adapter": ("person" if row["domain"] == "people" else "project" if row["domain"] == "projects" else
+                        "collection" if row["domain"] == "buckets" else
+                        "knowledge" if row["domain"] in ("ideas", "journals", "memories", "links") else "task"),
             "domain": row["domain"], "state": "pending", "record": row,
             "record_hash": hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()}
 
@@ -953,11 +964,15 @@ def _read_canonical_journal(path):
         raise MigrationError("A canonical migration recovery journal has an unsupported shape", 409)
     keys = set()
     for step in journal["steps"]:
+        adapter_for = {"people": "person", "projects": "project", "buckets": "collection",
+                       "ideas": "knowledge", "journals": "knowledge", "memories": "knowledge", "links": "knowledge",
+                       "admin": "task", "threads": "task"}
         if (not isinstance(step, dict) or set(step) != {"key", "adapter", "domain", "state", "record", "record_hash"}
-                or step.get("adapter") not in ("person", "project", "task") or step.get("state") not in ("pending", "applied")
-                or step.get("domain") not in ("people", "projects", "admin", "threads") or not isinstance(step.get("record"), dict)
+                or step.get("adapter") not in ("person", "project", "collection", "knowledge", "task")
+                or step.get("state") not in ("pending", "applied") or step.get("domain") not in adapter_for
+                or not isinstance(step.get("record"), dict)
                 or step["record"].get("domain") != step["domain"]
-                or step["adapter"] != ("person" if step["domain"] == "people" else "project" if step["domain"] == "projects" else "task")
+                or step["adapter"] != adapter_for[step["domain"]]
                 or step["key"] != step["domain"] + ":" + str(step["record"].get("source_id", ""))
                 or not SHA256.fullmatch(str(step.get("record_hash", "")))
                 or hashlib.sha256(json.dumps(step["record"], sort_keys=True).encode()).hexdigest() != step["record_hash"]
@@ -987,9 +1002,63 @@ def _person_state(people, step, journal):
     return "owned" if row[1] == 1 and touches == 0 and actual == expected else "drift"
 
 
-def _canonical_state(step, journal, tasks, people, projects):
+def _knowledge_state(knowledge, step, journal):
+    if knowledge is None:
+        return "drift"
+    db, values = knowledge.db, step["record"]["values"]
+    row = db.execute(
+        "SELECT rowid,id,title,content,item_type,summary,status,url,word_count,provider,source_id,guid,"
+        "file_metadata,is_archived,created_at,updated_at FROM items WHERE id=?", (values["id"],)).fetchone()
+    memberships = [tuple(candidate) for candidate in db.execute(
+        "SELECT collection_id,added_at FROM collection_items WHERE item_id=? ORDER BY collection_id", (values["id"],))]
+    if row is None:
+        return "drift" if memberships else "absent"
+    try:
+        metadata = json.loads(row["file_metadata"])
+    except (TypeError, json.JSONDecodeError):
+        return "drift"
+    expected = {"id": values["id"], "title": values["title"], "content": values["content"],
+                "item_type": values["item_type"], "summary": values["summary"], "status": "active",
+                "url": values["url"], "word_count": len(values["content"].split()), "provider": values["provider"],
+                "source_id": values["source_id"], "guid": values["guid"], "file_metadata": values["file_metadata"],
+                "is_archived": values.get("is_archived", 0), "created_at": values["created_at"],
+                "updated_at": values["updated_at"]}
+    actual = {key: (metadata if key == "file_metadata" else row[key]) for key in expected}
+    tags = [tuple(candidate) for candidate in db.execute(
+        "SELECT t.name,it.source,it.added_at FROM item_tags it JOIN tags t ON t.id=it.tag_id "
+        "WHERE it.item_id=? ORDER BY t.name", (values["id"],))]
+    expected_tags = sorted((name, "user", values["created_at"]) for name in set(values["tags"]))
+    bucket_id = values["file_metadata"].get("bucket_id") if step["domain"] == "links" else None
+    expected_memberships = [] if bucket_id is None else [(bucket_id, values["created_at"])]
+    return "owned" if actual == expected and tags == expected_tags and memberships == expected_memberships else "drift"
+
+
+def _collection_state(knowledge, step, journal):
+    if knowledge is None:
+        return "drift"
+    db, values = knowledge.db, step["record"]["values"]
+    row = db.execute(
+        "SELECT id,name,kind,query,icon,position,created_at,updated_at FROM collections WHERE id=?", (values["id"],)).fetchone()
+    if row is None:
+        return "absent"
+    expected = {"id": values["id"], "name": values["name"], "kind": "manual", "query": "",
+                "icon": values["icon"], "position": values["position"], "created_at": values["created_at"],
+                "updated_at": values["updated_at"]}
+    allowed = {candidate["record"]["values"]["id"] for candidate in journal["steps"]
+               if candidate["domain"] == "links"
+               and candidate["record"]["values"]["file_metadata"].get("bucket_id") == values["id"]}
+    actual_members = {candidate[0] for candidate in db.execute(
+        "SELECT item_id FROM collection_items WHERE collection_id=?", (values["id"],))}
+    return "owned" if dict(row) == expected and actual_members <= allowed else "drift"
+
+
+def _canonical_state(step, journal, tasks, people, knowledge, projects):
     if step["adapter"] == "person":
         return _person_state(people, step, journal)
+    if step["adapter"] == "knowledge":
+        return _knowledge_state(knowledge, step, journal)
+    if step["adapter"] == "collection":
+        return _collection_state(knowledge, step, journal)
     return (_project_state(projects, step["record"], journal) if step["adapter"] == "project"
             else _task_state(tasks, step["record"], journal))
 
@@ -1004,14 +1073,61 @@ def _apply_canonical_step(step, journal, tasks, people, knowledge, projects):
             if db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone():
                 raise MigrationError("Migration target identity already exists", 409)
             db.execute("INSERT INTO people VALUES (?,?,1)", (person_id, json.dumps(body)))
+    elif step["adapter"] == "collection":
+        if knowledge is None:
+            raise MigrationError("Canonical knowledge store is unavailable", 503)
+        values, db = step["record"]["values"], knowledge.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if db.execute("SELECT 1 FROM collections WHERE id=?", (values["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+            db.execute("INSERT INTO collections (id,name,kind,query,icon,position,created_at,updated_at) "
+                       "VALUES (?,?,'manual','',?,?,?,?)",
+                       (values["id"], values["name"], values["icon"], values["position"],
+                        values["created_at"], values["updated_at"]))
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+        from gideon.cognition.knowledge import maintenance
+        maintenance.mark_dirty(reason="coordinated archive migration")
+    elif step["adapter"] == "knowledge":
+        if knowledge is None:
+            raise MigrationError("Canonical knowledge store is unavailable", 503)
+        values, db = step["record"]["values"], knowledge.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if db.execute("SELECT 1 FROM items WHERE id=?", (values["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+            bucket_id = values["file_metadata"].get("bucket_id") if step["domain"] == "links" else None
+            if bucket_id is not None and not db.execute("SELECT 1 FROM collections WHERE id=?", (bucket_id,)).fetchone():
+                raise MigrationError("Link references a missing canonical bucket", 409)
+            db.execute(
+                "INSERT INTO items (id,title,content,item_type,summary,status,url,word_count,provider,source_id,guid,file_metadata,is_archived,created_at,updated_at) VALUES (?,?,?,?,?,'active',?,?,?,?,?,?,?,?,?)",
+                (values["id"], values["title"], values["content"], values["item_type"], values["summary"], values["url"],
+                 len(values["content"].split()), values["provider"], values["source_id"], values["guid"],
+                 json.dumps(values["file_metadata"]), values.get("is_archived", 0), values["created_at"], values["updated_at"]))
+            knowledge._write_item_tags(values["id"], values["tags"], source="user", now=values["created_at"])
+            rowid = db.execute("SELECT rowid FROM items WHERE id=?", (values["id"],)).fetchone()[0]
+            db.execute("INSERT INTO items_fts (rowid,title,content,tags) VALUES (?,?,?,?)",
+                       (rowid, values["title"], values["content"], _fts_tags(values["tags"])))
+            if bucket_id is not None:
+                db.execute("INSERT INTO collection_items (collection_id,item_id,added_at) VALUES (?,?,?)",
+                           (bucket_id, values["id"], values["created_at"]))
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+        from gideon.cognition.knowledge import maintenance
+        maintenance.mark_dirty(reason="coordinated archive migration")
     elif step["adapter"] == "project":
         _commit_project(projects, *common, require_fingerprint=True)
     else:
         _commit_task(tasks, people, knowledge, projects, *common, require_fingerprint=True)
 
 
-def _compensate_canonical_steps(journal, tasks, people, projects):
-    states = [(_canonical_state(step, journal, tasks, people, projects), step) for step in journal["steps"]]
+def _compensate_canonical_steps(journal, tasks, people, knowledge, projects):
+    states = [(_canonical_state(step, journal, tasks, people, knowledge, projects), step) for step in journal["steps"]]
     if any(state == "drift" for state, _ in states):
         raise MigrationError("Coordinated migration identity changed; automatic compensation refused", 409)
     for state, step in reversed(states):
@@ -1027,6 +1143,47 @@ def _compensate_canonical_steps(journal, tasks, people, projects):
                     "AND NOT EXISTS (SELECT 1 FROM touchpoints WHERE person_id=?)",
                     (identity, expected, identity))
                 deleted = cursor.rowcount == 1
+        elif step["adapter"] == "knowledge":
+            if knowledge is None:
+                raise MigrationError("Canonical migration compensation could not be completed", 409)
+            values, db = step["record"]["values"], knowledge.db
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                if _knowledge_state(knowledge, step, journal) != "owned":
+                    raise MigrationError("Canonical migration compensation could not be completed", 409)
+                row = db.execute("SELECT rowid,title,content FROM items WHERE id=?", (values["id"],)).fetchone()
+                tags = _fts_tags(values["tags"])
+                db.execute("INSERT INTO items_fts (items_fts,rowid,title,content,tags) VALUES ('delete',?,?,?,?)",
+                           (row["rowid"], row["title"], row["content"], tags))
+                db.execute("DELETE FROM collection_items WHERE item_id=?", (values["id"],))
+                db.execute("DELETE FROM item_tags WHERE item_id=?", (values["id"],))
+                cursor = db.execute("DELETE FROM items WHERE id=?", (values["id"],))
+                db.execute("COMMIT")
+                deleted = cursor.rowcount == 1
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+            from gideon.cognition.knowledge import maintenance
+            maintenance.mark_dirty(reason="coordinated archive compensation")
+        elif step["adapter"] == "collection":
+            if knowledge is None:
+                raise MigrationError("Canonical migration compensation could not be completed", 409)
+            values, db = step["record"]["values"], knowledge.db
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                current = _collection_state(knowledge, step, journal)
+                remaining = db.execute(
+                    "SELECT count(*) FROM collection_items WHERE collection_id=?", (values["id"],)).fetchone()[0]
+                if current != "owned" or remaining:
+                    raise MigrationError("Canonical migration compensation could not be completed", 409)
+                cursor = db.execute("DELETE FROM collections WHERE id=?", (values["id"],))
+                db.execute("COMMIT")
+                deleted = cursor.rowcount == 1
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+            from gideon.cognition.knowledge import maintenance
+            maintenance.mark_dirty(reason="coordinated archive compensation")
         else:
             identity = step["record"]["values"]["id"]
             deleted = (projects.delete_project(identity) if step["adapter"] == "project" else TaskMutation(tasks).delete(identity))
@@ -1037,7 +1194,7 @@ def _compensate_canonical_steps(journal, tasks, people, projects):
 def _resume_canonical_records(path, journal, tasks, people, knowledge, projects):
     try:
         for step in journal["steps"]:
-            state = _canonical_state(step, journal, tasks, people, projects)
+            state = _canonical_state(step, journal, tasks, people, knowledge, projects)
             if step["state"] == "applied":
                 if state != "owned":
                     raise MigrationError("Applied canonical migration record has identity drift", 409)
@@ -1053,7 +1210,7 @@ def _resume_canonical_records(path, journal, tasks, people, knowledge, projects)
         _write_journal(path, journal)
         return journal["receipt"]
     except Exception:
-        _compensate_canonical_steps(journal, tasks, people, projects)
+        _compensate_canonical_steps(journal, tasks, people, knowledge, projects)
         if path.exists():
             path.unlink()
         raise
@@ -1063,7 +1220,7 @@ def _recover_canonical_journals(tasks, people, knowledge, projects):
     for path in _canonical_coordinator_root(tasks).glob("*.json"):
         journal = _read_canonical_journal(path)
         if journal["status"] == "complete":
-            if any(_canonical_state(step, journal, tasks, people, projects) != "owned" for step in journal["steps"]):
+            if any(_canonical_state(step, journal, tasks, people, knowledge, projects) != "owned" for step in journal["steps"]):
                 raise MigrationError("A completed canonical migration has identity drift", 409)
         else:
             _resume_canonical_records(path, journal, tasks, people, knowledge, projects)
@@ -1100,6 +1257,14 @@ def _commit_canonical_records(tasks, people, knowledge, projects, digest, token,
             if name in names or (projects._projects_dir() / identity).exists() or projects.get_project_by_name(row["values"]["name"]):
                 raise MigrationError("Migration target identity already exists", 409)
             names.add(name)
+        elif row["domain"] == "buckets":
+            if knowledge is None or knowledge.db.execute(
+                    "SELECT 1 FROM collections WHERE id=?", (row["values"]["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+        elif row["domain"] in ("ideas", "journals", "memories", "links"):
+            if knowledge is None or knowledge.db.execute(
+                    "SELECT 1 FROM items WHERE id=?", (row["values"]["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
         else:
             identity = row["values"]["id"]
             if tasks._task_path(identity).exists():
@@ -1111,6 +1276,10 @@ def _commit_canonical_records(tasks, people, knowledge, projects, digest, token,
         if row["domain"] == "people":
             record.update(person_id="migration-" + hashlib.sha256(
                 (digest + ":" + row["source_id"]).encode()).hexdigest()[:32], revision=1)
+        elif row["domain"] == "buckets":
+            record["collection_id"] = row["values"]["id"]
+        elif row["domain"] in ("ideas", "journals", "memories", "links"):
+            record["item_id"] = row["values"]["id"]
         else:
             record["project_id" if row["domain"] == "projects" else "task_id"] = row["values"]["id"]
         receipt_records.append(record)
