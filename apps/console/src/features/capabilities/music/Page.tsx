@@ -1,3 +1,4 @@
+import VideoPage from './VideoPage'
 import MidiPage from './MidiPage'
 import { useEffect, useRef, useState } from 'react'
 import RoundsPage from './RoundsPage'
@@ -104,8 +105,9 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
 export default function Page(props: { apiBase?: string }) {
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => { const changed = () => setHash(window.location.hash); window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed) }, [])
+  if (hash.includes('/music/videos')) return <VideoPage />
   if (hash.includes('/music/midi')) return <MidiPage />
   if (hash.includes('/music/rounds')) return <RoundsPage />
   if (hash.includes('/music/generation')) return <GenerationPage />
-  return hash.includes('/music/catalog') ? <CatalogPage /> : <><a className="p-4 text-primary" href="#/capabilities/music/catalog/tracks">Music catalog</a><a className="p-4 text-primary" href="#/capabilities/music/generation">Music generation</a><a className="p-4 text-primary" href="#/capabilities/music/rounds">Musical canons</a><a className="p-4 text-primary" href="#/capabilities/music/midi">Audio to MIDI</a><RepertoirePage {...props} /></>
+  return hash.includes('/music/catalog') ? <CatalogPage /> : <><a className="p-4 text-primary" href="#/capabilities/music/catalog/tracks">Music catalog</a><a className="p-4 text-primary" href="#/capabilities/music/generation">Music generation</a><a className="p-4 text-primary" href="#/capabilities/music/rounds">Musical canons</a><a className="p-4 text-primary" href="#/capabilities/music/midi">Audio to MIDI</a><a className="p-4 text-primary" href="#/capabilities/music/videos">Music videos</a><RepertoirePage {...props} /></>
 }
