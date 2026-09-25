@@ -1,3 +1,4 @@
+import Cadence from './Cadence'
 import PrScreening from './PrScreening'
 import Maintenance from './Maintenance'
 import { useEffect, useState } from 'react'
@@ -67,7 +68,7 @@ export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
     <Comparisons baseUrl={baseUrl} />
     <References baseUrl={baseUrl} />
     <Ownership baseUrl={baseUrl} />
-    <PrScreening baseUrl={baseUrl} /><Maintenance baseUrl={baseUrl} /><Gsd baseUrl={baseUrl} />
+    <Cadence baseUrl={baseUrl} /><PrScreening baseUrl={baseUrl} /><Maintenance baseUrl={baseUrl} /><Gsd baseUrl={baseUrl} />
     <p>Live registered HTTP routes and declared app events. Unspecified schemas remain unknown.</p>
     <div className="flex flex-wrap gap-m">
       <label>Filter this page <input aria-label="Filter this page" className="bg-surface-high rounded p-s" value={query} onChange={event => update('q', event.target.value)} /></label>

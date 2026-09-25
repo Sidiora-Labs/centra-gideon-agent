@@ -182,12 +182,14 @@ def sleep_for(triggers: list[Trigger], *, now: float) -> float:
 
 
 def next_after_completion(
-    trigger: Trigger, *, completed_at: float, now: float
+    trigger: Trigger, *, completed_at: float, now: float, base_dir: Any = None
 ) -> float:
     from gideon.automation.triggers.arm import next_fire
     from gideon.automation.triggers.scheduling import recompute_from_completion
 
-    interval = _interval_secs(trigger)
+    from gideon.workspace.capabilities.platform.cadence import effective_interval
+
+    interval = effective_interval(trigger, now=now, base_dir=base_dir)
     if interval <= 0:
         return next_fire(trigger, now=max(now, completed_at))
     return recompute_from_completion(
@@ -207,7 +209,7 @@ class TickPass:
     result: TickResult = field(default_factory=TickResult)
 
     def advance(self, trigger: Trigger) -> None:
-        future = next_after_completion(trigger, completed_at=self.now, now=self.now)
+        future = next_after_completion(trigger, completed_at=self.now, now=self.now, base_dir=self.base_dir)
         if not self.persist:
             return
         if future > 0:

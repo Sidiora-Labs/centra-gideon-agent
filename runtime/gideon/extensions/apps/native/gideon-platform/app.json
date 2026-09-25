@@ -26,7 +26,9 @@
       "platform_maintenance",
       "platform_maintenance_control",
       "platform_pr_screening",
-      "platform_pr_capture"
+      "platform_pr_capture",
+      "platform_task_cadence",
+      "platform_task_cadence_set"
     ]
   },
   "native": true
