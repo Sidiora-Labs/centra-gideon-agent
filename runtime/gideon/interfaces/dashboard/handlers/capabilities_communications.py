@@ -9,6 +9,7 @@ from gideon.workspace.capabilities.communications import PeopleError, PeopleStor
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
 from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline, teams, signal_archive
+from gideon.interfaces.dashboard.handlers.capabilities_communications_outbound import register as register_outbound_email
 
 
 async def handle(request):
@@ -219,6 +220,7 @@ async def handle(request):
 
 
 def register(app):
+    register_outbound_email(app)
     signal_base = '/api/capabilities/communications/signal-archive'
     app.router.add_get(signal_base + '/imports', handle)
     app.router.add_get(signal_base + '/history', handle)
