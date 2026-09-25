@@ -3,7 +3,7 @@
   "task": "platform.22",
   "status": "in_progress_partial",
   "base_revision": "04e73cb1",
-  "contract": "A fixed domain-adapter registry exposes only canonical non-secret records through platform.21 signed peer transport. workspace.records covers projects/tasks with canonical tombstones; knowledge.records covers authoritative KnowledgeStore items without embeddings or derived indexes; creative.catalog covers authoritative current JSON records for ingredients, moodboards, universes, authors, works, stories and series. Strict batches, per-peer cursors, common-ancestor hashes and the existing ConflictQueue preserve replay and conflict semantics. SQLite adapters fast-forward one-sided changes, propagate deletion only from an agreed ancestor, hold both-sided edits, and restore explicitly selected remote fields while preserving every unselected current local field. identity.goals maps human goal, planned-session, hierarchy-plan and check-in current rows under its own explicit directional scope. identity.profile maps the human progress profile, public twin configuration and non-private twin documents under a separate explicit directional scope; private twin documents remain local and a colliding remote public ID is refused rather than overwriting one. Request ledgers, immutable revisions, evaluation history, recipes, lifecycle, continuity journals and encrypted bundles do not replicate.",
+  "contract": "A fixed domain-adapter registry exposes only canonical non-secret records through platform.21 signed peer transport. workspace.records covers projects/tasks with canonical tombstones; knowledge.records covers authoritative KnowledgeStore items without embeddings or derived indexes; creative.catalog covers authoritative current JSON records for ingredients, moodboards, universes, authors, works, stories and series. Strict batches, per-peer cursors, common-ancestor hashes and the existing ConflictQueue preserve replay and conflict semantics. SQLite adapters fast-forward one-sided changes, propagate deletion only from an agreed ancestor, hold both-sided edits, and restore explicitly selected remote fields while preserving every unselected current local field. identity.goals maps human goal, planned-session, hierarchy-plan and check-in current rows under its own explicit directional scope. identity.profile maps the human progress profile, public twin configuration and non-private twin documents under a separate explicit directional scope; private twin documents remain local and a colliding remote public ID is refused rather than overwriting one. Request ledgers, immutable revisions, evaluation history, recipes, lifecycle, continuity journals and encrypted bundles do not replicate. communications.contacts maps canonical people and their source-identified touchpoints under a separate explicit directional scope. Complete-batch validation requires every touchpoint person_id to reference a transmitted person and refuses ambiguous duplicate contact identities before mutation. Social accounts, credential references, message bodies, calendar sources/events, import receipts and communication histories remain local.",
   "acceptance": [
     "Two isolated homes exchange actual canonical project records through signed guarded HTTP, persist cursor/ancestor state across service restart, update records and propagate hard-delete tombstones without duplicates.",
     "Independent edits from a common accepted batch hold the receiving local record and persist exact local/remote versions once in the existing conflict queue.",
@@ -15,13 +15,16 @@
     "Disabled knowledge.records and creative.catalog send policies refuse export before canonical data is read.",
     "Two isolated homes exchange canonical human goals, planned sessions, goal plans and check-ins under identity.goals; independently edited goals hold local and restore selected fields, and an agreed deletion propagates after restart.",
     "identity.profile exchanges the progress profile, public twin configuration and non-private identity documents; private identity text is absent from wire payloads and survives conflict restoration, while public document edits and deletion use the same ancestor semantics.",
-    "identity.goals and identity.profile are independent explicit peer-policy scopes and disabled send policy refuses each before reading canonical records."
+    "identity.goals and identity.profile are independent explicit peer-policy scopes and disabled send policy refuses each before reading canonical records.",
+    "Two isolated homes exchange canonical contacts and source-identified touchpoints with exact person references; independently edited people hold local and restore selected fields, and agreed person/touchpoint deletion converges after restart.",
+    "communications.contacts refuses incomplete touchpoint references before mutating the receiver, excludes social credential references and non-contact communication tables, and disabled policy refuses export before reading canonical rows."
   ],
   "limitations": [
     "Platform.22 remains in progress/partial: qualified scopes are workspace.records, knowledge.records, creative.catalog, identity.goals and identity.profile; this is not full required federation-domain parity.",
     "Residual required-domain mapping: brain and memory await scoped canonical Memory/Knowledge families beyond knowledge items; character is covered only for the canonical progress profile and not XP, HP or external-source event history; digitalTwin is covered only for public current profile/documents and excludes enrichment questions, imports, private documents, fidelity/evaluation runs and context history; goals exclude request ledgers and revision history; meatspace, universe outside creative.catalog, pipeline, mediaCollections, videoHistory, storyBuilder, usage, fableLoom, artists, albums, tracks, creativeDirectorProjects, writersRoomFolders, writersRoomExercises, musicVideoProjects, commissionFeedback, creativeCommissions, decks and catalog outside creative.catalog remain unsupported.",
     "Knowledge uploaded source files and derived embeddings, chunks, FTS/index state, entity extraction and watched-source cursors remain excluded; creative revision/request/draft/artifact/suggestion/polish/continuity/voice stores remain excluded.",
     "Identity request ledgers, story/revision history, fidelity runs, recipes, lifecycle/continuity journals and encrypted portability bundles remain local; private twin documents are never exported even when identity.profile is permitted.",
+    "Communications residual mapping: current people and touchpoints are covered; message mirrors and bodies, calendar sources/events, social accounts and credential references, import receipts/raw sources, relationship evidence/coverage, platform assignments, drafts/outboxes and all communication history remain unsupported by this scope.",
     "Local loopback proves two-home signed transport; no externally provisioned peer or public certificate is claimed."
   ],
   "production_files": [
@@ -54,15 +57,15 @@
     "Add further domains only through an explicit DOMAINS adapter entry whose inventory entries are canonical, non-secret, non-derived and independently qualified."
   ],
   "evidence": [
-    "/tmp/gideon-platform.22-checks-vlgaxp_e/evidence.json"
+    "/tmp/gideon-platform.22-checks-mcrhtutt/evidence.json"
   ],
   "qualification": {
     "state": "locally_qualified_partial",
-    "runtime_tests": 14,
+    "runtime_tests": 15,
     "ui_tests": 2,
-    "production_lines": 524,
-    "test_lines": 547,
-    "repair_cycles": 1,
-    "stages": "Compile, runtime and UI passed. The single repair populated canonical goal_checkins goal_id and observed_at columns as well as its JSON body, so native indexed retrieval works after replication."
+    "production_lines": 584,
+    "test_lines": 610,
+    "repair_cycles": 0,
+    "stages": "Compile, runtime and UI passed on the first gate. The communications journey covered references, field restore, cascading tombstones, pre-mutation malformed-reference refusal, credential exclusion and directional policy."
   }
 }

@@ -19,6 +19,7 @@ from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
+from gideon.workspace.capabilities.communications.store import PeopleStore
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,8 @@ IDENTITY_TABLES = {
     "identity.goal_checkins": "goal_checkins",
 }
 IDENTITY_ENTRIES = frozenset({*IDENTITY_TABLES, "identity.progress_profile", "identity.twin_profile", "identity.twin_documents"})
-SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES})
+COMMUNICATION_TABLES = {"communications.people": "people", "communications.touchpoints": "touchpoints"}
+SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES})
 
 
 def _knowledge(home: Path) -> KnowledgeStore:
@@ -70,6 +72,27 @@ def _identity_paths(home: Path) -> tuple[Path, Path, Path]:
     return goals, progress, twin
 
 
+def _people(home: Path) -> PeopleStore:
+    return PeopleStore(home / "capabilities/communications")
+
+
+def validate_entries(scope: str, entries: list[dict]) -> None:
+    if scope != "communications.contacts":
+        return
+    people = entries[0]["rows"]
+    touchpoints = entries[1]["rows"]
+    ids = {row.get("id") for row in people}
+    identities: list[dict] = []
+    for row in people:
+        data = row.get("data")
+        values = data.get("identities") if isinstance(data, dict) else None
+        if not isinstance(row.get("id"), str) or not isinstance(values, list) or any(value in identities for value in values):
+            raise ValueError("Invalid or ambiguous canonical contact identities")
+        identities.extend(values)
+    if any(not isinstance(row.get("data"), dict) or row["data"].get("person_id") not in ids for row in touchpoints):
+        raise ValueError("Touchpoint coverage references a missing canonical person")
+
+
 def read_rows(home: Path, entry_id: str) -> list[dict]:
     if entry_id == "knowledge.items":
         store = _knowledge(home)
@@ -78,6 +101,12 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
             return [{"id": row["id"], "data": store.get_item(row["id"])} for row in rows]
         finally:
             store.db.close()
+    if entry_id in COMMUNICATION_TABLES:
+        store, table = _people(home), COMMUNICATION_TABLES[entry_id]
+        with store.connect() as db:
+            if table == "people":
+                return [{"id": row[0], "data": {**json.loads(row[1]), "revision": row[2]}} for row in db.execute("SELECT id,body,revision FROM people ORDER BY id")]
+            return [{"id": row[0], "data": json.loads(row[1])} for row in db.execute("SELECT id,body FROM touchpoints ORDER BY id")]
     if entry_id in IDENTITY_ENTRIES:
         goals, progress, twin = _identity_paths(home)
         if entry_id in IDENTITY_TABLES:
@@ -183,13 +212,43 @@ def _write_identity(home: Path, entry_id: str, row: dict | None, entity_id: str)
         db.execute("UPDATE twin SET body=? WHERE id=1", (json.dumps(state, sort_keys=True),))
 
 
+def _write_communications(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
+    store = _people(home)
+    try:
+        with store.connect() as db:
+            if entry_id == "communications.people":
+                if row is None:
+                    db.execute("DELETE FROM touchpoints WHERE person_id=?", (entity_id,))
+                    db.execute("DELETE FROM people WHERE id=?", (entity_id,))
+                else:
+                    data = dict(row["data"]); revision = data.pop("revision")
+                    if type(revision) is not int or revision < 1 or data.get("id") != entity_id:
+                        raise ValueError("Invalid canonical person row")
+                    identities = data.get("identities", [])
+                    for body, other_id in db.execute("SELECT body,id FROM people WHERE id<>?", (entity_id,)):
+                        if any(identity in json.loads(body).get("identities", []) for identity in identities):
+                            raise ValueError("Contact identity belongs to another canonical person")
+                    db.execute("INSERT INTO people(id,body,revision) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision=excluded.revision", (entity_id, json.dumps(data, sort_keys=True), revision))
+            elif row is None:
+                db.execute("DELETE FROM touchpoints WHERE id=?", (entity_id,))
+            else:
+                data = dict(row["data"]); data["id"] = entity_id
+                if not db.execute("SELECT 1 FROM people WHERE id=?", (data.get("person_id"),)).fetchone():
+                    raise ValueError("Touchpoint references a missing canonical person")
+                db.execute("INSERT INTO touchpoints(id,person_id,source,external_id,body) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET person_id=excluded.person_id,source=excluded.source,external_id=excluded.external_id,body=excluded.body", (entity_id, data["person_id"], data["source"], data["external_id"], json.dumps(data, sort_keys=True)))
+    except sqlite3.IntegrityError as error:
+        raise ValueError("Communication record violates canonical identity constraints") from error
+
+
 def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
     if entry_id == "knowledge.items":
         _write_knowledge(home, row, entity_id)
     elif entry_id in CREATIVE_TABLES:
         _write_creative(home, entry_id, row, entity_id)
-    else:
+    elif entry_id in IDENTITY_ENTRIES:
         _write_identity(home, entry_id, row, entity_id)
+    else:
+        _write_communications(home, entry_id, row, entity_id)
 
 
 def _conflict(entry_id: str, entity_id: str, ancestor: str, local: dict, remote: dict, now: str) -> conflicts.ConflictRecord:
@@ -270,7 +329,8 @@ def restore_fields(home: Path, record_id: str, fields: list[str], now: str) -> d
         merged[field] = remote_data[field]
     if "revision" in merged:
         merged["revision"] = int(local_data.get("revision", 0)) + 1
-    merged["updated_at"] = now
+    if "updated_at" in merged:
+        merged["updated_at"] = now
     write_row(home, record.entry_id, {"id": record.entity_id, "data": merged}, record.entity_id)
     record.status = conflicts.STATUS_RESOLVED
     record.resolution = "merge_fields:" + ",".join(fields)

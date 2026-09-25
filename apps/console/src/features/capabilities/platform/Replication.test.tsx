@@ -32,6 +32,7 @@ it('pushes the actual canonical domain through signed self-peer HTTP and reloads
   expect(screen.getByText(/creative.catalog: creative.ingredients/)).toBeVisible()
   expect(screen.getByText(/identity.goals: identity.goals/)).toBeVisible()
   expect(screen.getByText(/identity.profile: identity.progress_profile/)).toBeVisible()
+  expect(screen.getByText('communications.contacts: communications.people, communications.touchpoints')).toBeVisible()
   expect(screen.getByText('No peer batches received.')).toBeVisible()
   fireEvent.change(screen.getByLabelText('Replication peer'), { target: { value: (screen.getByRole('option', { name: 'Local integration peer' }) as HTMLOptionElement).value } })
   fireEvent.click(screen.getByRole('button', { name: 'Push canonical domain' }))

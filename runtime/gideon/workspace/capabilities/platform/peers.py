@@ -29,6 +29,7 @@ CATEGORIES = (
     "creative.catalog",
     "identity.goals",
     "identity.profile",
+    "communications.contacts",
     "music.library",
     "platform.usage",
 )

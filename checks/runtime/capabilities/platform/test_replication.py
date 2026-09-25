@@ -20,6 +20,8 @@ from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
+from gideon.workspace.capabilities.communications.store import PeopleError, PeopleStore
+from gideon.workspace.capabilities.communications import social
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -310,11 +312,12 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
         {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
+        {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -538,3 +541,68 @@ def test_identity_profile_explicit_scope_excludes_private_and_syncs_public_confl
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "identity.profile")
+
+
+def test_contacts_two_home_refs_conflict_restore_tombstones_credentials_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "communications.contacts")
+    people_a = PeopleStore(a_home / "capabilities/communications")
+    person = people_a.save({"name": "Ada", "identities": [{"kind": "email", "value": "ada@example.test"}], "ring": "core", "cadence_days": 14, "notes": "local base"})
+    touchpoint, created = people_a.record(person["id"], {"source": "mail", "external_id": "message-1", "occurred_at": "2026-09-25T10:00:00+00:00", "direction": "mutual", "summary": "Project review"})
+    assert created is True
+    social.save(people_a, {"platform": "github", "handle": "ada", "label": "Ada", "profile_url": "https://github.com/ada", "credential_ref": "CONTACT_SOCIAL_TOKEN", "person_id": person["id"], "status": "active", "notes": "local only", "request_key": "social-create"})
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "communications.contacts")
+    wire = json.dumps(baseline)
+    assert "CONTACT_SOCIAL_TOKEN" not in wire and "credential_ref" not in wire
+    assert [item["entry_id"] for item in baseline["entries"]] == ["communications.people", "communications.touchpoints"]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    people_b = PeopleStore(b_home / "capabilities/communications")
+    assert people_b.get(person["id"])["identities"] == [{"kind": "email", "value": "ada@example.test"}]
+    assert people_b.touchpoints(person["id"])[0]["id"] == touchpoint["id"]
+    assert people_b.touchpoints(person["id"])[0]["person_id"] == person["id"]
+    with people_b.connect() as db:
+        assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='social_accounts'").fetchone()[0] == 0
+
+    people_a.save({"name": "Ada Local", "identities": person["identities"], "ring": "core", "cadence_days": 14, "notes": "preserve this", "revision": 1}, person["id"])
+    people_b.save({"name": "Ada Peer", "identities": person["identities"], "ring": "core", "cadence_days": 30, "notes": "peer notes", "revision": 1}, person["id"])
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "communications.contacts")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "communications.people")
+    ReplicationService(a_home).restore_fields(conflict.id, ["name"])
+    merged = PeopleStore(a_home / "capabilities/communications").get(person["id"])
+    assert merged["name"] == "Ada Peer" and merged["notes"] == "preserve this"
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "communications.contacts")
+    people_c = PeopleStore(c_home / "capabilities/communications")
+    doomed = people_c.save({"name": "Temporary", "identities": [{"kind": "handle", "value": "temporary"}]})
+    people_c.record(doomed["id"], {"source": "chat", "external_id": "temporary-1", "occurred_at": "2026-09-25T11:00:00+00:00", "direction": "inbound", "summary": "Temporary"})
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "communications.contacts")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with people_c.connect() as db:
+        db.execute("DELETE FROM touchpoints WHERE person_id=?", (doomed["id"],))
+        db.execute("DELETE FROM people WHERE id=?", (doomed["id"],))
+    removal = ReplicationService(c_home).export_batch(did["peer_id"], "communications.contacts")
+    receipt = ReplicationService(d_home).apply_batch(cid["peer_id"], removal)
+    assert receipt["entries"][0]["removed"] == 1
+    with pytest.raises(PeopleError): PeopleStore(d_home / "capabilities/communications").get(doomed["id"])
+
+    bad_home, target_home = home / "bad", home / "target"
+    bad_id, target_id = pair_for(bad_home, target_home, "communications.contacts")
+    bad_people = PeopleStore(bad_home / "capabilities/communications")
+    bad_person = bad_people.save({"name": "Broken ref", "identities": []})
+    bad_people.record(bad_person["id"], {"source": "mail", "external_id": "broken", "occurred_at": "2026-09-25T12:00:00+00:00", "direction": "inbound", "summary": "Broken"})
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "communications.contacts")
+    malformed["entries"][1]["rows"][0]["data"]["person_id"] = "missing-person"
+    with pytest.raises(ReplicationError, match="missing canonical person") as rejected:
+        ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422
+    assert PeopleStore(target_home / "capabilities/communications").people() == []
+
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "communications.contacts")
