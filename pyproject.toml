@@ -40,6 +40,7 @@ where = ["runtime"]
 include = ["gideon*"]
 
 [tool.setuptools.package-data]
+"gideon.workspace.capabilities.experience.assets" = ["*.swift"]
 "gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
 "*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.svg", "**/*.png", "**/*.woff2"]
 
