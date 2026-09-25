@@ -17,6 +17,7 @@ from gideon.integrations.llm.anthropic import AnthropicProvider
 from gideon.operations.usage_ledger import record_from_event
 
 _hosts = {}
+RUNTIME_RECIPE = 'openai-compatible-v1'
 
 
 class HostError(ValueError):
@@ -35,18 +36,27 @@ class InferenceHost:
         self.lock = asyncio.Lock()
 
     def state(self):
-        return json.loads(self.path.read_text()) if self.path.exists() else dict(version=1, revision=0, enabled=False, provider='', bind='127.0.0.1', port=0, capacity=1, peers={}, usage=[])
+        state = json.loads(self.path.read_text()) if self.path.exists() else dict(version=1, revision=0, enabled=False, provider='', bind='127.0.0.1', port=0, capacity=1, peers={}, usage=[])
+        state.setdefault('runtime', {'app': '', 'recipe': '', 'status': 'unconfigured', 'evidence': {}})
+        return state
 
     def persist(self, state):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(self.path, json.dumps(state))
 
     def view(self):
+        from gideon.integrations.local_models.sidecar import runners
+
         state = self.state()
-        return {**state, 'listening': self.runner is not None, 'actual_port': self.port, 'active': len(self.active), 'queued': 0, 'runtime_lifecycle': 'Existing configured provider; automatic hardware installation and upstream startup are unavailable', 'credentials': [row.name for row in CredentialStore(self.home).list()], 'providers': [row.name for row in get_default_registry().list_entries()]}
+        runtime = state['runtime']
+        lifecycle = 'Direct provider listener; no supervised runtime selected'
+        if runtime['app']:
+            lifecycle = f"Supervised runtime {runtime['app']}: {runtime['status']}"
+        return {**state, 'listening': self.runner is not None, 'actual_port': self.port, 'active': len(self.active), 'queued': 0, 'runtime_lifecycle': lifecycle, 'runtime_apps': sorted(row.app for row in runners()), 'runtime_recipe': RUNTIME_RECIPE, 'credentials': [row.name for row in CredentialStore(self.home).list()], 'providers': [row.name for row in get_default_registry().list_entries()]}
 
     async def configure(self, body):
-        if not isinstance(body, dict) or set(body) != {'revision', 'provider', 'bind', 'port', 'capacity', 'peers'}:
+        required = {'revision', 'provider', 'bind', 'port', 'capacity', 'peers'}
+        if not isinstance(body, dict) or set(body) not in (required, required | {'runtime'}):
             raise HostError('Exact listener configuration required')
         async with self.lock:
             state = self.state()
@@ -66,8 +76,87 @@ class InferenceHost:
             store = CredentialStore(self.home)
             if any(not store.has(ref) or len(store.resolve(ref).secret or '') < 24 for ref in peers.values()):
                 raise HostError('Peer credentials must resolve to at least 24 characters')
-            self.persist({**state, **body, 'revision': state['revision'] + 1})
+            runtime = body.get('runtime', {key: state['runtime'][key] for key in ('app', 'recipe')})
+            if not isinstance(runtime, dict) or set(runtime) != {'app', 'recipe'} or any(not isinstance(runtime[key], str) or len(runtime[key]) > 100 for key in runtime):
+                raise HostError('Runtime binding requires bounded app and recipe names')
+            if bool(runtime['app']) != bool(runtime['recipe']) or runtime['recipe'] not in ('', RUNTIME_RECIPE):
+                raise HostError('Unknown or incomplete runtime recipe')
+            runtime = {**runtime, 'status': 'configured' if runtime['app'] else 'unconfigured', 'evidence': {}}
+            self.persist({**state, **body, 'runtime': runtime, 'revision': state['revision'] + 1})
             return self.view()
+
+    def _runtime_runner(self):
+        from gideon.integrations.local_models.sidecar import get_runner
+
+        runtime = self.state()['runtime']
+        runner = get_runner(runtime['app']) if runtime['app'] else None
+        if runner is None:
+            raise HostError('Configured inference runtime is not registered', 503)
+        return runner
+
+    def _runtime_state(self, status, evidence=None):
+        state = self.state()
+        state['runtime'] = {**state['runtime'], 'status': status, 'evidence': dict(evidence or {})}
+        self.persist(state)
+        return self.view()
+
+    async def provision(self):
+        async with self.lock:
+            state = self.state()
+            if self.runner or state['enabled']:
+                raise HostError('Stop and disarm before provisioning the runtime', 409)
+            runner = self._runtime_runner()
+            worker = runner.worker.resolve()
+            if not worker.is_file() or not runner.python_executable().is_file():
+                self._runtime_state('unavailable', {'reason': 'runtime_files_missing'})
+                raise HostError('Configured inference runtime files are unavailable', 503)
+            return self._runtime_state('prepared', {'recipe': state['runtime']['recipe']})
+
+    async def readiness(self):
+        async with self.lock:
+            state = self.state()
+            if not state['runtime']['app']:
+                return self._runtime_state('unconfigured')
+            runner = self._runtime_runner()
+            if not runner.is_alive():
+                return self._runtime_state('stopped', {'alive': False})
+            try:
+                result = await runner.acall('call', {'method': 'readiness', 'payload': {}}, timeout=10)
+            except Exception:
+                return self._runtime_state('unavailable', {'alive': runner.is_alive()})
+            if not isinstance(result, dict) or result.get('ready') is not True:
+                evidence = {'alive': True, 'state': str(result.get('state', 'starting'))[:100]} if isinstance(result, dict) else {'alive': True}
+                return self._runtime_state('starting', evidence)
+            evidence = {'alive': True, 'ready': True}
+            for key in ('model', 'endpoint'):
+                if isinstance(result.get(key), str):
+                    evidence[key] = result[key][:200]
+            return self._runtime_state('ready', evidence)
+
+    async def _start_runtime(self):
+        state = self.state()
+        if not state['runtime']['app']:
+            return
+        runner = self._runtime_runner()
+        try:
+            loaded = await runner.acall('load', {'recipe': state['runtime']['recipe']}, timeout=30)
+            if not isinstance(loaded, dict) or loaded.get('loaded') is not True:
+                raise HostError('Configured inference runtime refused its recipe', 503)
+            await runner.acall('call', {'method': 'start', 'payload': {}}, timeout=30)
+            result = await runner.acall('call', {'method': 'readiness', 'payload': {}}, timeout=10)
+            if not isinstance(result, dict) or result.get('ready') is not True:
+                raise HostError('Configured inference runtime is not ready', 503)
+            evidence = {'alive': True, 'ready': True}
+            for key in ('model', 'endpoint'):
+                if isinstance(result.get(key), str):
+                    evidence[key] = result[key][:200]
+            self._runtime_state('ready', evidence)
+        except Exception as exc:
+            runner.stop()
+            self._runtime_state('unavailable', {'reason': getattr(exc, 'reason', 'startup_failed')})
+            if isinstance(exc, HostError):
+                raise
+            raise HostError('Configured inference runtime failed to start', 503) from exc
 
     async def start(self):
         async with self.lock:
@@ -76,6 +165,7 @@ class InferenceHost:
             state = self.state()
             if not state['provider'] or not state['peers']:
                 raise HostError('Configure a provider and peer keys first')
+            await self._start_runtime()
             app = web.Application(client_max_size=65536)
             app.router.add_get('/v1/models', self.models)
             app.router.add_post('/v1/chat/completions', self.complete)
@@ -103,6 +193,21 @@ class InferenceHost:
                 await asyncio.gather(*tasks, return_exceptions=True)
             if runner:
                 await runner.cleanup()
+            runtime = state['runtime']
+            if runtime['app']:
+                try:
+                    sidecar = self._runtime_runner()
+                    if sidecar.is_alive():
+                        try:
+                            await sidecar.acall('call', {'method': 'stop', 'payload': {}}, timeout=15)
+                        finally:
+                            await sidecar.acall('unload', timeout=15)
+                    sidecar.stop()
+                except Exception:
+                    pass
+                current = self.state()
+                current['runtime'] = {**current['runtime'], 'status': 'stopped', 'evidence': {'alive': False}}
+                self.persist(current)
             return self.view()
 
     def peer(self, request):

@@ -13,7 +13,7 @@ async def endpoint(request):
         else:
             body = await request.json()
             action = body.get('action')
-            value = await host.configure(body['config']) if action == 'configure' else await host.start() if action == 'start' else await host.stop() if action == 'stop' else None
+            value = await host.configure(body['config']) if action == 'configure' else await host.provision() if action == 'provision' else await host.start() if action == 'start' else await host.readiness() if action == 'readiness' else await host.stop() if action == 'stop' else None
             if value is None:
                 raise HostError('Unknown inference host action')
         return web.json_response(value, headers={'Cache-Control': 'no-store'})
