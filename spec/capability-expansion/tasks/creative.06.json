@@ -1,7 +1,7 @@
 {
   "id": "creative.06",
   "schema_version": 1,
-  "status": "in_progress",
+  "status": "locally_qualified",
   "base_revision": "53ab9422",
   "requires": [
     "creative.05"
@@ -11,7 +11,7 @@
     "Actual HTTP/UI/native create/edit work and exercise prompt, pinned context and draft manuscript save/read/reopen/restore.",
     "Draft text preserves whitespace in actual canonical readonly artifacts; no duplicate manuscript text in creative DB.",
     "Atomic optimistic metadata/history plus retryable canonical writes: concurrent replay exactly once, recovery after real SQLite abort, collision preserves unrelated artifact.",
-    "Explicit missing sources, foreign runtime references denied, strict schema/text bounds,44 native tools with write approval metadata.",
+    "Explicit missing sources, foreign runtime references denied, strict schema/text bounds, 44 native tools with write approval metadata.",
     "Search/paginate work/context; unsaved text survives metadata edits; stale write retains editor content."
   ],
   "production_files": [
@@ -35,5 +35,23 @@
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Works.test.tsx"
   ],
-  "repair_cycles": 1
+  "repair_cycles": 1,
+  "evidence": {
+    "qualified": "/tmp/gideon-creative.06-checks-__ag1buv/evidence.json"
+  },
+  "qualification": {
+    "source_commit": "bd0ab349",
+    "compile": "passed",
+    "runtime": "31 passed",
+    "ui": "3 passed",
+    "production_lines": 351,
+    "test_lines": 401,
+    "ratio": 1.1424501424501425,
+    "retained_hash_proof": {
+      "checks/runtime/capabilities/creative/test_works.py": "f02e1c4c6ed11caef788d8370a9fb35d211e02239d6f9e7fce39a9fb1169ab82",
+      "checks/runtime/capabilities/creative/work_server.py": "11dc7e7b2e8ea5ff7ee3302301ecea06ce633d2964c2365aed975318d31bcab5",
+      "apps/console/src/features/capabilities/creative/Works.test.tsx": "7e0dcfbee90bad7d7e8286391b35a70b5bae25d1560bb3bdb5c139291e4f2276"
+    },
+    "later_integration": "Subsequent creative waves extend the work runtime and editor; the retained creative.06 runtime and UI test files above remain byte-identical to the qualified evidence."
+  }
 }
