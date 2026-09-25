@@ -7,6 +7,7 @@ from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.recipes import RecipeStore
 from gideon.workspace.capabilities.identity.bundles import BundleService
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
@@ -84,6 +85,8 @@ class IdentityToolProvider(ToolProvider):
 
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
+        if name.startswith("identity_goal_plan_"):
+            return getattr(GoalPlanStore(directory / "goals.sqlite3"), name.removeprefix("identity_goal_plan_"))(**arguments)
         if name.startswith("identity_recipe_"):
             return getattr(RecipeStore(directory / "recipes.sqlite3"), name.removeprefix("identity_recipe_"))(**arguments)
         if name == "identity_bundle_inventory":
