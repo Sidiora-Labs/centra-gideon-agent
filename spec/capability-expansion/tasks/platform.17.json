@@ -17,9 +17,7 @@
     "runtime/gideon/operations/usage_ledger.py",
     "runtime/gideon/workspace/capabilities/platform/accounting.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_accounting.py",
-    "runtime/gideon/workspace/capabilities/platform/tools.py",
-    "apps/console/src/features/capabilities/platform/Accounting.tsx",
-    "apps/console/src/features/capabilities/platform/Page.tsx"
+    "apps/console/src/features/capabilities/platform/Accounting.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_accounting.py",
@@ -32,16 +30,22 @@
   "ui_test_files": [
     "apps/console/src/features/capabilities/platform/Accounting.test.tsx"
   ],
-  "extra_files": [
+  "integration_files": [
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Page.tsx",
     "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
   ],
   "evidence": "/tmp/gideon-platform.17-checks-jq88lf6a/evidence.json",
   "qualification": {
     "runtime_tests": 8,
     "ui_tests": 2,
-    "production_lines": 90,
+    "production_lines": 82,
+    "evidence_production_lines": 90,
     "test_lines": 272,
+    "current_test_ratio": 3.317073170731707,
     "repair_cycles": 0,
+    "evidence_reused_without_rerun": true,
+    "evidence_reconciliation": "Owned writer, projection, HTTP, Console and test hashes remain exact. Shared tool, page and manifest changes are additive later-task integration only.",
     "limitations": [
       "Vendor plan, invoice and live quota authority unavailable; historical third-party CLI import schema not implemented."
     ]
