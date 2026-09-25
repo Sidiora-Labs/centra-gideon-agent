@@ -1,6 +1,6 @@
 {
   "id": "music.10",
-  "status": "locally_qualified_core_breadth_pending",
+  "status": "locally_qualified_core",
   "base_revision": "63dd101f",
   "requires": [
     "music.09",
@@ -34,7 +34,7 @@
   ],
   "limits": [
     "Actual provider artwork generation remains externally unqualified; queued requests are not generated art.",
-    "Authored sample/context references are persisted provenance; automated vision sample analysis, LLM prompt generation and universe casting remain pending.",
+    "Automated vision sample analysis, model prompt generation and canonical universe casting are implemented by music.11; its separate external qualification limits apply.",
     "PDF export uses Latin-1 lettering with explicit unsupported-glyph refusal; one card per page and crop marks, no duplex imposition or physical printer certification.",
     "Negative text is an ordinary Avoid instruction in the composed positive prompt; no unsupported provider negative-conditioning parameter is claimed."
   ],
@@ -48,5 +48,6 @@
     "ui_tests": 2,
     "repairs": 1,
     "repair": "Use canonical binary pdf kind for actual PDF export."
-  }
+  },
+  "breadth_continuation": "music.11"
 }
