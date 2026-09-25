@@ -1,0 +1,37 @@
+{
+  "id": "creative.05",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "a400d15a",
+  "requires": [
+    "creative.04"
+  ],
+  "contract": "Literary author identity and authored voice guidance, pinned canonical text samples, revisioned restore/export and deterministic voice brief with actual bounded sample excerpts. No model/provider/session override fields.",
+  "acceptance": [
+    "Actual HTTP/UI/native author create/edit, voice fields and pin text samples; reload and restore immutable revisions.",
+    "Brief uses exact configured guidance and actual pinned sample text, bounded4000chars per sample with explicit truncation/missing metadata.",
+    "Reject invalid voice/schema/sample types, foreign or missing new sample refs, stale writes and replay conflicts atomically.",
+    "Search/paginate authors and sample sources; revision export and deep-link continuity;33 native tools registered."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/authors.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Authors.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_authors.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "checks/runtime/capabilities/creative/author_server.py",
+    "apps/console/src/features/capabilities/creative/Authors.test.tsx",
+    "apps/console/src/features/capabilities/creative/Universes.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_authors.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Authors.test.tsx"
+  ]
+}

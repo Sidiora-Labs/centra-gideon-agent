@@ -6,6 +6,7 @@ from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, T
 from .moodboards import BoardStore
 from .universes import UniverseStore
 from .graph import UniverseGraph
+from .authors import AuthorStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -36,9 +37,14 @@ UNIVERSE = {"title": STRING, "canon": {"type": "array", "items": obj({"id": STRI
             "board_refs": {"type": "array", "items": obj({"id": STRING, "revision": NUMBER}, ["id", "revision"])}}
 
 
+AUTHOR = {"title": STRING, "biography": STRING, "voice": obj({"perspective": {"enum": ["first", "third", "any"]},
+          "tense": {"enum": ["past", "present", "any"]}, "tone": STRING, "diction": STRING, "rhythm": STRING, "avoid": STRING}),
+          "sample_refs": {"type": "array", "items": obj({"artifact_id": STRING, "artifact_version": NUMBER}, ["artifact_id", "artifact_version"])}}
+
+
 def schemas():
     result = {}
-    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE)):
+    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE), ("author", AUTHOR)):
         result[f"creative_{entity}_list"] = obj({**PAGE, **({"type": {"enum": list(TYPES)}, "tag": STRING} if entity == "ingredient" else {})})
         result[f"creative_{entity}_get"] = obj({"id": STRING}, ["id"])
         result[f"creative_{entity}_create"] = obj({"payload": obj({**fields, "request_id": STRING}, ["title", "request_id", *(["type"] if entity == "ingredient" else [])])}, ["payload"])
@@ -47,6 +53,9 @@ def schemas():
         result[f"creative_{entity}_restore"] = obj({"id": STRING, "payload": obj({"revision": NUMBER, "target_revision": NUMBER}, ["revision", "target_revision"])}, ["id", "payload"])
     result["creative_board_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_universe_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_author_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_author_brief"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_author_sources"] = obj({"q": STRING})
     result["creative_board_sources"] = obj({"q": STRING})
     result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
     result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
@@ -66,6 +75,7 @@ class CreativeToolProvider(ToolProvider):
         self.boards = BoardStore(self.ingredients.home)
         self.universes = UniverseStore(self.ingredients.home)
         self.graphs = UniverseGraph(self.universes)
+        self.authors = AuthorStore(self.ingredients.home)
 
     @property
     def name(self):
@@ -93,7 +103,7 @@ class CreativeToolProvider(ToolProvider):
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
             _, entity, action = tool_name.split("_", 2)
-            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes}[entity]
+            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors}[entity]
             args = dict(arguments)
             if action in ("graph", "merge_preview", "merge"):
                 result = getattr(self.graphs, action)(**args)
