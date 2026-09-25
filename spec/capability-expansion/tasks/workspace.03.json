@@ -1,0 +1,118 @@
+{
+  "id": "workspace.03",
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "schema_version": 1,
+  "base_revision": "1e69dd942d20854f5b1c2b0204b0a75dfdb5ba67",
+  "scope": "Actual loopback port holds, bounded conflict inventory, durable ownership history, HTTP/native/console consumers",
+  "acceptance": [
+    "Bind real sockets to hold reservations and reject competing binds and listeners",
+    "Idempotent reservation/release, stale release refusal, concurrent unique claims and exhaustion",
+    "One home owner, isolated homes, unknown IDs cannot close sockets",
+    "Actual registry process crash releases OS socket and recovered history is interrupted without adoption",
+    "Production auth HTTP and native tools share held sockets; actual Chromium reserve/conflict/release/reload/error flow"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/ports.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Ports.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_ports.py",
+    "checks/runtime/capabilities/workspace/port_worker.py",
+    "checks/runtime/capabilities/workspace/ui_server.py",
+    "checks/runtime/capabilities/workspace/entry.tsx",
+    "apps/console/src/features/capabilities/workspace/Ports.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_ports.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/Ports.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.03",
+  "integration_hooks": {
+    "routes": "Existing capabilities_workspace.register includes /ports and /ports/inventory",
+    "console": "Existing Page includes Ports component",
+    "native": "gideon-workspace adds reservation tools",
+    "durability": "capabilities/workspace/ports.sqlite3",
+    "machine_local_exclude": "capabilities/workspace/ports.lock"
+  },
+  "limits": [
+    "IPv4 TCP loopback only; default OSS allocation6000..6099, no host process names or unrestricted port scanning",
+    "A held reservation prevents service binding; explicitly release before launching a service; no atomic socket handoff promised",
+    "Inventory is a point-in-time bind observation, not a lasting availability guarantee",
+    "Root integrated registration/durability qualification remains separate"
+  ],
+  "evidence": {
+    "task": "workspace.03",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790295096.1101062,
+    "production_lines": 279,
+    "test_lines": 379,
+    "ratio": 1.3584229390681004,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/ports.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/port_worker.py",
+          "checks/runtime/capabilities/workspace/test_ports.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.03-checks-ebamsjek/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_ports.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.03-checks-ebamsjek/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Ports.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.03-checks-ebamsjek/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.03-checks-ebamsjek",
+    "completed_at": 1790295121.6557252,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "6f6ed22c2749fc7a66bcf29159cb877a93dca7c7c572d79168dc665f9bd93346",
+      "apps/console/src/features/capabilities/workspace/Ports.tsx": "0c778a1a570f7f1f58a0d625674e3db70bebf525f57094c1291e93bc884bceb3",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "0b3978a142c9cc3ccf067f6726ca26c893fce3d3bd726f08675ccdfcb8c7eeda",
+      "runtime/gideon/workspace/capabilities/workspace/ports.py": "debab51478af69b56420362a22587763270f929f93bf689d593fed87f7279909",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "f1920cc15f423f069caa6580c0cd6ce13ce1d40f4e40d132953638785f808d9c",
+      "apps/console/src/features/capabilities/workspace/Ports.test.ts": "e8f541cd4ec30ee7c2066eacec3d91b319a91cc69d7f8df0eb1a6fffcb07d12b",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/port_worker.py": "08ab33e86854549b5bed824ed7302e8dbbeead660fee87b2d9205921ff3c8724",
+      "checks/runtime/capabilities/workspace/test_ports.py": "319497f9b3d130361fbda28b8ccdd1274de758fc9b2904a70f1614450be56137",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    }
+  },
+  "exit_code": 0,
+  "repair_cycles": 0
+}

@@ -5,11 +5,18 @@
   "description": "Read saved workspace contexts and operate approved project processes with durable status and bounded logs.",
   "icon": "FolderTerminal",
   "author": "Gideon",
-  "tags": ["tool", "bundled"],
+  "tags": [
+    "tool",
+    "bundled"
+  ],
   "provider": {
     "type": "tool",
     "implementation": "gideon.workspace.capabilities.workspace.tools:create_provider",
-    "capabilities": ["workspace_contexts", "managed_processes"]
+    "capabilities": [
+      "workspace_contexts",
+      "managed_processes",
+      "port_reservations"
+    ]
   },
   "native": true
 }
