@@ -67,6 +67,13 @@ CONTRACTS.update({
 })
 
 
+PROGRESS = {"birth_date": {"type": ["string", "null"]}, "timezone": TEXT, "tracked_task_ids": {"type": "array", "maxItems": 100, "uniqueItems": True, "items": IDENTIFIER}, "expected_revision": {"type": "integer", "minimum": 0}, "request_id": IDENTIFIER}
+CONTRACTS.update({
+    "identity_progress_sheet": ({"as_of": TEXT}, [], "Project human progress from actual current goal, session, story and tracked task sources", False),
+    "identity_progress_configure": (PROGRESS, list(PROGRESS), "Set human birth date, timezone and tracked native task references", True),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},
