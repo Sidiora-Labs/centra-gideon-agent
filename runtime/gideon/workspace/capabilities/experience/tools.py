@@ -9,12 +9,16 @@ from .speech_owner import SpeechOwner
 from .ambient import AmbientDisplay
 from .avatar import AvatarStore
 from .native_calls import get_native_calls
+from .world_engine import WorldEngine
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "world_engine_get": ({}, False, "Read actual managed world engine readiness and version."),
+    "world_engine_start": ({}, True, "Enable the operator-installed world engine through the existing app supervisor."),
+    "world_engine_stop": ({}, True, "Disable the managed world engine through the existing app lifecycle."),
     "native_calls_get": ({}, False, "Read machine-local native call readiness and durable requests; no call is initiated."),
     "avatar_list": ({}, False, "Read published avatar variants and actual source availability."),
     "avatar_bundled": ({}, True, "Install the original authored robot asset and clip mapping."),
@@ -77,6 +81,10 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
+            if operation.startswith("world_engine_"):
+                engine = WorldEngine(self.store)
+                result = await engine.status() if operation == "world_engine_get" else await engine.control(operation.removeprefix("world_engine_"), {})
+                return ToolResult(success=True, output=json.dumps(result))
             if operation == "native_calls_get":
                 if self._native_calls is None:
                     self._native_calls = get_native_calls(self.store)
