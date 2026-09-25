@@ -11,6 +11,7 @@ from .works import WorkStore
 from .polishing import PolishingStore
 from .stories import StoryStore
 from .series import SeriesStore
+from .continuity import ContinuityStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -104,11 +105,19 @@ def schemas():
     result["creative_universe_merge"] = obj({"id": STRING, "payload": obj({"source_id": STRING, "request_id": STRING,
         "target_revision": NUMBER, "source_revision": NUMBER, "canon_choices": {"type": "object", "additionalProperties": {"enum": ["target", "source"]}},
         "identity_choice": {"enum": ["target", "source"]}}, ["source_id", "request_id", "target_revision", "source_revision"])}, ["id", "payload"])
+    anchor = {"start": {"type": "integer", "minimum": 0}, "end": NUMBER, "quote": STRING}
+    result["creative_work_continuity_get"] = obj({"id": STRING}, ["id"])
+    result["creative_work_continuity_export"] = obj({"id": STRING}, ["id"])
+    result["creative_work_continuity_propose"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER,
+        "start": anchor["start"], "end": NUMBER, "mode": {"enum": ["authored", "model"]}, "instruction": STRING,
+        "outline": {"type": "array", "items": obj({**anchor, "summary": STRING}, ["start", "end", "quote", "summary"])},
+        "facts": {"type": "array", "items": obj({**anchor, "subject": STRING, "predicate": STRING, "value": STRING}, ["start", "end", "quote", "subject", "predicate", "value"])}}, ["request_id", "work_revision", "start", "end", "mode"])}, ["id", "payload"])
+    result["creative_work_continuity_accept"] = obj({"id": STRING, "proposal_id": STRING, "payload": obj({"revision": {"type": "integer", "minimum": 0}, "work_revision": NUMBER}, ["revision", "work_revision"])}, ["id", "proposal_id", "payload"])
     return result
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -120,6 +129,7 @@ class CreativeToolProvider(ToolProvider):
         self.authors = AuthorStore(self.ingredients.home)
         self.works = WorkStore(self.ingredients.home)
         self.polishing = PolishingStore(self.works)
+        self.continuity = ContinuityStore(self.works)
         self.stories = StoryStore(self.ingredients.home)
         self.series = SeriesStore(self.ingredients.home)
 
@@ -156,6 +166,9 @@ class CreativeToolProvider(ToolProvider):
                 result = await method(**args) if action == "draft" else method(**args)
             elif entity == "story" and action == "suggest":
                 result = await store.suggest(**args)
+            elif action.startswith("continuity_"):
+                method = getattr(self.continuity, action.removeprefix("continuity_"))
+                result = await method(**args) if action == "continuity_propose" else method(**args)
             elif action.startswith("polish_"):
                 method = getattr(self.polishing, action.removeprefix("polish_"))
                 result = await method(**args) if action == "polish_propose" else method(**args)
