@@ -55,7 +55,7 @@ def test_manifest_loads_real_native_provider(runtime):
 def test_discovery_declares_risk_and_strict_input_shapes(runtime):
     provider = create_provider()
     tools = asyncio.run(provider.list_tools())
-    assert len(tools) == 7
+    assert len(tools) == 10
     assert len({tool.name for tool in tools}) == len(tools)
     by_name = {tool.name: tool for tool in tools}
     for name in ("knowledge_anniversaries", "knowledge_anniversary_source", "knowledge_capture_list", "knowledge_capture_get"):
