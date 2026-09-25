@@ -40,12 +40,6 @@ afterAll(() => {
   rmSync(home, { recursive: true, force: true })
 })
 
-async function post(path: string, body: unknown) {
-  const response = await originalFetch(origin + base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  expect(response.ok).toBe(true)
-  return response.json()
-}
-
 const raw = (id: string) => `From: friend@example.com
 To: owner@example.com
 Message-ID: <${id}@example.com>
