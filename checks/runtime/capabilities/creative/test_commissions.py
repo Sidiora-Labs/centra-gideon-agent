@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
+import io
 import json
+import wave
 from datetime import datetime, timezone
 
 import pytest
@@ -19,6 +21,7 @@ from gideon.workspace.capabilities.creative.commissions import (
     _recurrence_next,
     digest,
 )
+from gideon.workspace.capabilities.creative.commission_dispatch import CommissionDispatcher, normalize_dispatch
 from gideon.workspace.capabilities.creative.direction import DirectionStore
 from gideon.workspace.capabilities.creative.store import CatalogError
 from gideon.workspace.capabilities.creative.works import WorkStore
@@ -705,3 +708,143 @@ def test_exhausted_finite_recurrence_disarms_truthfully_after_restart(tmp_path):
     assert triggers.get(TRIGGER_PREFIX + commission['id']) is None
     reopened = CommissionStore(tmp_path, direction=DirectionStore(tmp_path), triggers=TriggerStore(base_dir=tmp_path))
     assert reopened.get(commission['id'])['schedule_state'] == 'exhausted'
+
+
+@pytest.mark.parametrize(('ability', 'dispatch'), [
+    ('image', {'input': {'prompt': 'A brass key on a quiet platform.', 'size': '', 'controls': {}, 'loras': []}}),
+    ('video', {'input': {'prompt': 'A quiet station at dawn.', 'duration_seconds': 5, 'aspect_ratio': '', 'controls': {}}}),
+])
+async def test_unconfigured_media_dispatch_is_explicit_and_queues_no_job(ability, dispatch, tmp_path):
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.capabilities.media.jobs import MediaJobs
+    from gideon.workspace.capabilities.media.sketches import SketchStore
+    _, work, _ = source(tmp_path)
+    sketches = SketchStore(tmp_path / 'capabilities/media/sketches.sqlite3', NativeArtifactProvider(tmp_path / 'artifacts'))
+    jobs = MediaJobs(tmp_path / 'capabilities/media/jobs.sqlite3', sketches)
+    dispatcher = CommissionDispatcher(tmp_path, media_jobs=jobs)
+    store, _, _ = make_store(tmp_path)
+    store.dispatcher = dispatcher
+    body = payload(work, request='dispatch-' + ability)
+    body.update(target_ability=ability, dispatch=dispatch)
+    commission = store.create(body)
+    run = await store.execute(commission['id'], 'manual:unconfigured', trigger='manual')
+    assert run['status'] == 'failed'
+    assert run['attempts'][0]['error'] == ability + '_provider_unavailable'
+    assert run['dispatch_receipts'] == [{
+        **run['dispatch_receipts'][0], 'backend': 'media_jobs', 'operation': ability + '_generate',
+        'resource_id': '', 'status': 'external_unavailable', 'upstream_status': '',
+        'error_code': ability + '_provider_unavailable', 'artifact_refs': [],
+    }]
+    assert jobs.list() == {'items': []}
+
+
+async def test_unconfigured_music_dispatch_persists_receipts_and_retry_identity(tmp_path):
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.capabilities.music.catalog import MusicCatalog
+    from gideon.workspace.capabilities.music.generation import MusicGeneration
+    _, work, _ = source(tmp_path)
+    catalog = MusicCatalog(tmp_path / 'capabilities/music', NativeArtifactProvider(root=tmp_path / 'artifacts'))
+    track = catalog.create('tracks', {'title': 'Commission score'})
+    music = MusicGeneration(tmp_path, catalog)
+    store, _, _ = make_store(tmp_path)
+    store.dispatcher = CommissionDispatcher(tmp_path, music_generation=music)
+    body = payload(work, request='dispatch-music')
+    body.update(target_ability='music', dispatch={'track_id': track['id'], 'track_revision': track['revision'],
+        'prompt': 'A restrained mystery score.', 'music_length_ms': 3000, 'force_instrumental': True,
+        'license': 'Use is subject to the configured provider terms.'})
+    commission = store.create(body)
+    first = await store.execute(commission['id'], 'manual:music', trigger='manual')
+    assert first['status'] == 'failed'
+    assert first['dispatch_receipts'][0]['status'] == 'external_unavailable'
+    assert first['dispatch_receipts'][0]['error_code'] == 'engine_unavailable'
+    assert music.list() == []
+    second = await store.retry(commission['id'], first['id'])
+    assert second['status'] == 'exhausted'
+    assert [row['attempt'] for row in second['dispatch_receipts']] == [1, 2]
+    assert len({row['request_id'] for row in second['dispatch_receipts']}) == 2
+    assert music.list() == []
+
+
+def _wav_bytes():
+    output = io.BytesIO()
+    with wave.open(output, 'wb') as audio:
+        audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(8000)
+        audio.writeframes(b'\x00\x00' * 16000)
+    return output.getvalue()
+
+
+async def test_music_video_dispatch_uses_real_pinned_ffmpeg_project(tmp_path):
+    from PIL import Image
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.capabilities.music.catalog import MusicCatalog
+    from gideon.workspace.capabilities.music.video import VideoStore
+    _, work, _ = source(tmp_path)
+    catalog = MusicCatalog(tmp_path / 'capabilities/music', NativeArtifactProvider(root=tmp_path / 'artifacts'))
+    track = catalog.create('tracks', {'title': 'Pinned score'})
+    audio = catalog.artifacts.create_binary(name='Pinned score', data=_wav_bytes(), mime='audio/wav', kind='audio', source='manual')
+    track = catalog.attach(track['id'], {'revision': track['revision'], 'artifact_ref': {'slug': audio.slug, 'version': audio.version},
+        'source': {'kind': 'imported', 'label': 'Commission fixture recording', 'license': 'Test-owned recording'}})
+    render = track['renders'][0]
+    picture = io.BytesIO(); Image.new('RGB', (64, 64), 'navy').save(picture, format='PNG')
+    image = catalog.artifacts.create_binary(name='Pinned scene', data=picture.getvalue(), mime='image/png', kind='image', source='manual')
+    video = VideoStore(tmp_path / 'capabilities/music', catalog)
+    project = video.create({'title': 'Commission music video', 'track_id': track['id'], 'render_id': render['id'],
+        'tempo_bpm': 60, 'offset_seconds': 0, 'scenes': [{'id': 'scene', 'image_ref': {'slug': image.slug, 'version': image.version}, 'beats': 1}]})
+    store, _, _ = make_store(tmp_path)
+    store.dispatcher = CommissionDispatcher(tmp_path, music_video=video)
+    body = payload(work, request='dispatch-music-video')
+    body.update(target_ability='music-video', dispatch={'project_id': project['id'], 'revision': project['revision']})
+    commission = store.create(body)
+    run = await store.execute(commission['id'], 'manual:music-video', trigger='manual')
+    assert run['status'] == 'submitted'
+    receipt = run['dispatch_receipts'][0]
+    assert receipt['backend'] == 'music_video'
+    assert receipt['resource_id'] == receipt['request_id']
+    task = video.tasks[receipt['resource_id']]
+    await asyncio.wait_for(task, 30)
+    finished = video.get_job(receipt['resource_id'])
+    assert finished['status'] == 'completed'
+    assert catalog.artifacts.get(finished['artifact_ref']['slug'], version=finished['artifact_ref']['version']) is not None
+
+
+async def test_series_dispatch_enters_real_approval_gated_production(tmp_path):
+    from gideon.workspace.capabilities.creative.production import SeriesProductionStore
+    production = SeriesProductionStore(tmp_path)
+    series = production.series.create({'request_id': 'commission-series', 'title': 'Commission series',
+        'synopsis': 'A key reveals a route.', 'volumes': [{'id': 'volume', 'title': 'Volume', 'chapters': [
+            {'id': 'chapter', 'title': 'Station', 'prompt': 'Open at the station.'}]}],
+        'arcs': [{'id': 'arc', 'title': 'Key arc', 'summary': 'Follow the key.', 'chapter_ids': ['chapter']}]})
+    work = production.series.prepare(series['id'], 'chapter', {'revision': series['revision']})
+    await production.series.draft(series['id'], 'chapter', {'request_id': 'source-draft', 'revision': series['revision'],
+        'work_revision': work['revision'], 'mode': 'authored', 'text': TEXT})
+    direction = DirectionStore(tmp_path)
+    store = CommissionStore(tmp_path, direction=direction, triggers=TriggerStore(base_dir=tmp_path),
+                            dispatcher=CommissionDispatcher(tmp_path, production=production))
+    body = payload(work, request='dispatch-series')
+    body.update(sources=[{'kind': 'series', 'id': series['id'], 'revision': series['revision']}],
+        dispatch={'series_id': series['id'], 'series_revision': series['revision'], 'mode': 'model', 'max_attempts': 2})
+    commission = store.create(body)
+    run = await store.execute(commission['id'], 'manual:series', trigger='manual')
+    assert run['status'] == 'submitted'
+    receipt = run['dispatch_receipts'][0]
+    assert receipt['backend'] == 'series_production'
+    actual = production.get(series['id'], receipt['resource_id'])
+    assert actual['status'] == 'awaiting_approval'
+    assert actual['approval']['kind'] == 'chapter_review'
+
+
+@pytest.mark.parametrize(('ability', 'dispatch'), [
+    ('image', {'input': {'prompt': 'x'}, 'provider': 'override'}),
+    ('video', {'input': {'prompt': 'x'}, 'model': 'override'}),
+    ('music', {'track_id': 'x', 'track_revision': 1, 'prompt': 'x', 'music_length_ms': 3000,
+               'force_instrumental': True, 'license': 'x', 'credential_name': 'secret'}),
+    ('music-video', {'project_id': 'x', 'revision': 1, 'home': '/tmp/other'}),
+])
+def test_dispatch_routing_overrides_fail_before_persistence(ability, dispatch, tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, _ = make_store(tmp_path)
+    body = payload(work, request='override-' + ability)
+    body.update(target_ability=ability, dispatch=dispatch)
+    with pytest.raises(CatalogError, match='provider-neutral'):
+        store.create(body)
+    assert store.list() == {'items': []}

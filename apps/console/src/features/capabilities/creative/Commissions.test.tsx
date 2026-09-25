@@ -107,4 +107,21 @@ describe('recurring creative commissions', () => {
       next_fire_at: '2027-01-29T09:00:00+00:00',
     })
   })
+
+  it('shows an honest unavailable receipt for an unconfigured image provider', async () => {
+    render(<Commissions apiRoot={apiRoot} />)
+    fillSource()
+    fireEvent.change(screen.getByLabelText('Commission name'), { target: { value: 'Image commission' } })
+    fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'image' } })
+    fireEvent.change(screen.getByLabelText('Ability dispatch JSON'), {
+      target: { value: JSON.stringify({ input: { prompt: 'A brass key on a quiet platform.', size: '', controls: {}, loras: [] } }) },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create commission' }))
+    const detail = await screen.findByRole('region', { name: 'Commission detail' })
+    fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
+    await waitFor(() => expect(detail).toHaveTextContent('failed'))
+    expect(detail).toHaveTextContent('Dispatch media_jobs/image_generate: external_unavailable image_provider_unavailable')
+    const state = await fetch(apiRoot).then(response => response.json())
+    expect(state.items).toHaveLength(3)
+  })
 })

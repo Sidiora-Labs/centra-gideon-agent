@@ -15,6 +15,7 @@ from .store import PeopleError, fields, text
 PAYIN = 'id payInState mcost item { id } payerPrivates { payInFailureReason }'
 TERRITORY = 'query($name:String!,$cursor:String){sub(name:$name){name desc status baseCost replyCost} items(sub:$name,sort:"recent",cursor:$cursor,limit:20){cursor items{id title text}}}'
 ACTION_FIELDS = {'kind', 'territory', 'title', 'text', 'item_id', 'sats'}
+GRAPHQL_URL = 'https://stacker.news/api/graphql'
 
 
 def schema(db):
@@ -44,7 +45,7 @@ def credential(row):
 async def _graphql(query, variables, secret=None):
     headers = {'X-API-Key': secret} if secret else {}
     async with ClientSession(timeout=ClientTimeout(total=20), headers=headers) as client:
-        async with client.post('https://stacker.news/api/graphql', json={'query': query, 'variables': variables}, allow_redirects=False) as response:
+        async with client.post(GRAPHQL_URL, json={'query': query, 'variables': variables}, allow_redirects=False) as response:
             if response.status != 200:
                 raise PeopleError(f'Stacker News request failed (HTTP {response.status})', 502)
             raw = bytearray()

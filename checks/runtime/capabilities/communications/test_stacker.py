@@ -6,6 +6,7 @@ from gideon.integrations.tool_providers.base import RiskLevel
 
 import pytest
 from aiohttp import ClientSession, web
+from gideon.core.config.credentials import save_credential
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore
 from gideon.workspace.capabilities.communications import social, stacker
@@ -16,7 +17,9 @@ from gideon.workspace.capabilities.communications.tools import create_provider
 @contextmanager
 def runtime_home(path):
     previous = os.environ.get('GIDEON_HOME')
+    previous_backend = os.environ.get('GIDEON_CREDENTIAL_BACKEND')
     os.environ['GIDEON_HOME'] = str(path)
+    os.environ['GIDEON_CREDENTIAL_BACKEND'] = 'dotenv'
     try:
         yield
     finally:
@@ -24,6 +27,10 @@ def runtime_home(path):
             os.environ.pop('GIDEON_HOME', None)
         else:
             os.environ['GIDEON_HOME'] = previous
+        if previous_backend is None:
+            os.environ.pop('GIDEON_CREDENTIAL_BACKEND', None)
+        else:
+            os.environ['GIDEON_CREDENTIAL_BACKEND'] = previous_backend
 
 
 def registration(store, **extra):
@@ -225,6 +232,59 @@ def test_actual_territory_schema_normalization_fees_cursor_and_page_scope():
         stacker.normalize_territory({**response, 'items': {'items': [{}]}})
     with pytest.raises(PeopleError):
         stacker.normalize_territory({**response, 'items': {'items': [], 'cursor': 4}})
+
+
+def test_loopback_graphql_protocol_covers_authenticated_submit_and_reconcile_without_external_action(tmp_path, monkeypatch):
+    with runtime_home(tmp_path):
+        save_credential('STACKER_LOOPBACK_77F2', 'loopback-api-key')
+        store = PeopleStore()
+        account = registration(store, credential_ref='STACKER_LOOPBACK_77F2')
+        saved = reviewed(store, account)
+        requests = []
+
+        async def provider(request):
+            payload = await request.json()
+            requests.append(payload)
+            query = payload['query']
+            if ' me ' in query:
+                assert request.headers.get('X-API-Key') == 'loopback-api-key'
+                data = {'me': {'id': '7', 'name': 'alice'}}
+            elif 'upsertDiscussion' in query:
+                assert request.headers.get('X-API-Key') == 'loopback-api-key'
+                assert payload['variables'] == {'title': 'A discussion', 'text': 'A useful question', 'subs': ['bitcoin']}
+                data = {'result': {'id': 81, 'payInState': 'PENDING', 'mcost': '21000', 'item': {'id': '456'}, 'payerPrivates': {'payInFailureReason': None}}}
+            elif 'payIn(id:$id)' in query:
+                assert request.headers.get('X-API-Key') == 'loopback-api-key'
+                assert payload['variables'] == {'id': 81}
+                data = {'payIn': {'id': 81, 'payInState': 'PAID', 'mcost': '21000', 'item': {'id': '456'}, 'payerPrivates': {'payInFailureReason': None}}}
+            else:
+                assert request.headers.get('X-API-Key') is None
+                assert payload['variables'] == {'name': 'bitcoin', 'cursor': None}
+                data = {'sub': {'name': 'bitcoin', 'desc': 'Loopback territory', 'status': 'ACTIVE', 'baseCost': 100, 'replyCost': 1}, 'items': {'cursor': None, 'items': [{'id': '456', 'title': 'Local post', 'text': 'Protocol fixture'}]}}
+            return web.json_response({'data': data})
+
+        async def scenario():
+            app = web.Application()
+            app.router.add_post('/api/graphql', provider)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, '127.0.0.1', 0)
+            await site.start()
+            monkeypatch.setattr(stacker, 'GRAPHQL_URL', f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/graphql')
+            try:
+                territory = await stacker.read_territory(store, {'name': 'bitcoin'})
+                assert territory['posts'][0]['url'] == 'https://stacker.news/items/456'
+                submitted = await stacker.submit(store, account['id'], saved['id'], {'revision': 2, 'confirm_execute': True})
+                assert submitted['provider_state'] == 'PENDING'
+                assert submitted['payin_id'] == 81
+                reconciled = await stacker.reconcile(store, account['id'], saved['id'], {})
+                assert reconciled['provider_state'] == 'PAID'
+                assert reconciled['external_item_id'] == '456'
+            finally:
+                await runner.cleanup()
+
+        asyncio.run(scenario())
+        assert len(requests) == 4
 
 
 def test_native_stacker_real_prepare_review_and_missing_credential(tmp_path):
