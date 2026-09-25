@@ -315,6 +315,76 @@ def test_requested_compile_stage_never_claims_full_qualification(tmp_path):
     assert len(saved['files'])==2
 
 
+def test_compile_stage_typechecks_declared_dependency_closure_without_whole_console(tmp_path):
+    root=project(tmp_path)
+    repository=SOURCE.parents[1]
+    (root/'node_modules').symlink_to(repository/'node_modules',target_is_directory=True)
+    source(root,'apps/console/tsconfig.json',(repository/'apps/console/tsconfig.json').read_text())
+    ambient=source(root,'apps/console/src/vite-env.d.ts',"declare module '*.css'\n")
+    source(root,'apps/console/src/feature.css','')
+    feature=source(root,'apps/console/src/feature.ts',"import './feature.css'\nimport type { CSSProperties } from 'react'\nimport { typed } from './dependency'\nexport const style: CSSProperties = {color:'red'}\nexport const result: string = typed\n")
+    dependency=source(root,'apps/console/src/dependency.ts','export const typed = 7\n')
+    test=source(root,'apps/console/src/feature.test.ts',"import { result } from './feature'\nconst actual: string = result\nvoid actual\n")
+    source(root,'apps/console/src/unrelated.ts','const broken: string = 7\nvoid broken\n')
+    runtime=source(root,'checks/runtime/test_feature.py','def test_feature():\n    assert True\n')
+    detail(root,{'production_files':[str(feature.relative_to(root))],
+                 'test_files':[str(test.relative_to(root)),str(runtime.relative_to(root))],
+                 'runtime_test_files':[str(runtime.relative_to(root))]})
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==1
+    assert evidence['error']=='compile_typescript failed'
+    assert [row['name'] for row in evidence['commands']]==['compile','compile_typescript']
+    log=Path(evidence['commands'][-1]['log']).read_text()
+    assert 'Type \'number\' is not assignable to type \'string\'' in log
+    assert 'unrelated.ts' not in log
+    dependency.write_text("export const typed = 'seven'\n")
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==0,evidence
+    assert evidence['status']=='stage_qualified'
+    assert [row['name'] for row in evidence['commands']]==['compile','compile_typescript']
+    config=json.loads((Path(evidence['evidence_dir'])/'tsconfig.capability.json').read_text())
+    assert config['files']==[str(ambient),str(feature),str(test)]
+    assert config['include']==[]
+
+
+def test_compile_stage_skips_historical_typescript_test_for_python_only_task(tmp_path):
+    root=project(tmp_path)
+    baseline=tmp_path/'baseline'
+    production=source(root,'runtime/closure.py','value=1\n')
+    runtime=source(root,'checks/runtime/test_closure.py','def test_value():\n    assert True\n')
+    historical=source(root,'apps/console/src/historical.test.tsx','const broken: string = 7\nvoid broken\n')
+    source(baseline,'apps/console/src/historical.test.tsx',historical.read_text())
+    detail(root,{'production_files':[str(production.relative_to(root))],
+                 'test_files':[str(runtime.relative_to(root)),str(historical.relative_to(root))],
+                 'runtime_test_files':[str(runtime.relative_to(root))],'ui_test_files':[],
+                 'baseline_dir':str(baseline)})
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==0,evidence
+    assert [row['name'] for row in evidence['commands']]==['compile']
+    assert not (Path(evidence['evidence_dir'])/'tsconfig.capability.json').exists()
+
+
+def test_compile_stage_rejects_new_typescript_test_error_without_ts_production(tmp_path):
+    root=project(tmp_path)
+    repository=SOURCE.parents[1]
+    (root/'node_modules').symlink_to(repository/'node_modules',target_is_directory=True)
+    source(root,'apps/console/tsconfig.json',(repository/'apps/console/tsconfig.json').read_text())
+    production=source(root,'runtime/closure.py','value=1\n')
+    runtime=source(root,'checks/runtime/test_closure.py','def test_value():\n    assert True\n')
+    typed=source(root,'apps/console/src/new.test.ts',"import type { CSSProperties } from 'react'\nconst style: CSSProperties = 7\nvoid style\n")
+    detail(root,{'production_files':[str(production.relative_to(root))],
+                 'test_files':[str(runtime.relative_to(root)),str(typed.relative_to(root))],
+                 'runtime_test_files':[str(runtime.relative_to(root))]})
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==1 and evidence['error']=='compile_typescript failed'
+    log=Path(evidence['commands'][-1]['log']).read_text()
+    assert 'new.test.ts(2,7): error TS2559' in log and "Type '7' has no properties" in log
+    typed.write_text("import type { CSSProperties } from 'react'\nconst style: CSSProperties = {color:'red'}\nvoid style\n")
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==0,evidence
+    assert [row['name'] for row in evidence['commands']]==['compile','compile_typescript']
+
+
 def test_requested_runtime_stage_runs_real_pytest_without_other_stages(tmp_path):
     root=project(tmp_path)
     source(root,'runtime/gideon/workspace/capabilities/sample/store.py','value=6\n')

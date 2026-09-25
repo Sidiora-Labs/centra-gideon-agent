@@ -139,6 +139,32 @@ def ui_config_args(root: Path, detail: dict) -> list[str]:
     return ['--config',str(path)]
 
 
+def typescript_compile_command(root: Path, paths: list[str], output: Path) -> list[str]:
+    console = root/'apps/console'
+    base_config = console/'tsconfig.json'
+    if not base_config.is_file():
+        raise ValueError('apps/console/tsconfig.json is required for declared TypeScript files')
+    candidates = (console/'node_modules/typescript/bin/tsc', root/'node_modules/typescript/bin/tsc')
+    compiler = next((path for path in candidates if path.is_file()), None)
+    if compiler is None:
+        raise ValueError('installed TypeScript compiler unavailable; dependencies were not modified')
+    config = output/'tsconfig.capability.json'
+    temporary = output/'tsconfig.capability.json.tmp'
+    ambient = sorted((console/'src').rglob('*.d.ts'))
+    files = [*ambient, *(root/path for path in paths)]
+    document = {
+        'extends': str(base_config),
+        'compilerOptions': {
+            'typeRoots': [str(console/'node_modules/@types'), str(root/'node_modules/@types')],
+        },
+        'files': list(dict.fromkeys(str(path) for path in files)),
+        'include': [],
+    }
+    temporary.write_text(json.dumps(document, indent=2)+'\n')
+    os.replace(temporary, config)
+    return ['node', str(compiler), '--project', str(config), '--pretty', 'false']
+
+
 def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
     if stage not in {"all", "compile", "runtime", "ui"}:
         raise ValueError("invalid verification stage")
@@ -161,6 +187,14 @@ def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
     python_paths=[value for value in info['production_files']+info['test_files'] if value.endswith('.py')]
     compile_cmd=[py,'-c','import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]',*python_paths]
     commands=[('compile',compile_cmd)]
+    typescript_paths=[value for value in info['production_files']+info['test_files']
+                      if value.endswith(('.ts','.tsx')) and changed_lines(root,root/value,info['detail'])>0]
+    if typescript_paths:
+        try: commands.append(('compile_typescript',typescript_compile_command(root,typescript_paths,output)))
+        except ValueError as exc:
+            evidence['error']=str(exc)
+            (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
+            return 1,evidence
     runtime=info['detail'].get('runtime_test_files', [value for value in info['test_files'] if value.endswith('.py') and Path(value).name.startswith('test_')])
     ui=info['detail'].get('ui_test_files', [value for value in info['test_files'] if '.test.' in value and value.endswith(('.ts','.tsx','.js','.jsx'))])
     for value in runtime+ui:
@@ -180,7 +214,7 @@ def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
         command=['node',str(vitest),'run',*ui_config_args(root,info['detail']),*[str(root/value) for value in ui]]
         commands.append(('ui',command))
     if stage != 'all':
-        commands=[row for row in commands if row[0] == stage]
+        commands=[row for row in commands if row[0] == stage or row[0].startswith(stage+'_')]
         if not commands:
             evidence['error']='requested stage has no declared tests'
             (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
