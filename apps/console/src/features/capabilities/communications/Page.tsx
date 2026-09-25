@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
+import { StackerPanel } from './StackerPanel'
 import { XPanel } from './XPanel'
 import { SocialPanel } from './SocialPanel'
 import { CalendarPanel } from './CalendarPanel'
@@ -65,7 +66,7 @@ export default function Page() {
   return <main className="h-full overflow-auto p-4 text-on-surface" aria-label="People and relationships">
     <h1 className="text-xl">People and relationships</h1>
     <ImportPanel onImported={() => setVersion(v => v + 1)} />
-    <XPanel /><SocialPanel /><CalendarPanel /><TelegramPanel /><BeeperPanel /><DesktopPanel /><MirrorPanel /><ThreadsPanel />
+    <StackerPanel /><XPanel /><SocialPanel /><CalendarPanel /><TelegramPanel /><BeeperPanel /><DesktopPanel /><MirrorPanel /><ThreadsPanel />
     <div className="my-3 flex gap-2"><Button onClick={() => open('')}>New person</Button><Button variant="secondary" onClick={() => setVersion(v => v + 1)} disabled={busy}>Reload</Button></div>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {loading ? <p role="status">Loading people…</p> : <div className="grid gap-6 md:grid-cols-2">
