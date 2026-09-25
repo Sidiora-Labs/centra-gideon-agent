@@ -1,0 +1,52 @@
+{
+  "id": "music.10",
+  "status": "locally_qualified_core_breadth_pending",
+  "base_revision": "63dd101f",
+  "requires": [
+    "music.09",
+    "media.06"
+  ],
+  "contract": "Persistent complete 55-slot playing and 79-slot tarot designs with authored style/layout/prompts, physical trim/bleed/safe area, immutable canonical artwork references, revision history/archive, cached canonical PDF and JSON exports. Actual selected image rendering submits existing media jobs; explicit linked-success adoption validates canonical image bytes.",
+  "acceptance": [
+    "Create complete conventional rosters and edit deck/card design through HTTP/UI/native with revision conflict protection.",
+    "Decode real pinned images and export PDF pages at precise physical dimensions, preserving image provenance in manifest and export receipts across restart.",
+    "Submit one or up to16 selected card image jobs through canonical MediaJobs; never adopt queued/failed/unrelated output.",
+    "Run real storage, PDF parser, HTTP and UI journeys with changed executable tests at least1:1."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/decks.py",
+    "runtime/gideon/workspace/capabilities/music/deck_layout.py",
+    "runtime/gideon/workspace/capabilities/music/deck_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_decks.py",
+    "apps/console/src/features/capabilities/music/DeckPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_decks.py",
+    "checks/runtime/capabilities/music/serve_decks.py",
+    "apps/console/src/features/capabilities/music/DeckPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_decks.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-decks/app.json"
+  ],
+  "limits": [
+    "Actual provider artwork generation remains externally unqualified; queued requests are not generated art.",
+    "Authored sample/context references are persisted provenance; automated vision sample analysis, LLM prompt generation and universe casting remain pending.",
+    "PDF export uses Latin-1 lettering with explicit unsupported-glyph refusal; one card per page and crop marks, no duplex imposition or physical printer certification.",
+    "Negative text is an ordinary Avoid instruction in the composed positive prompt; no unsupported provider negative-conditioning parameter is claimed."
+  ],
+  "evidence": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.10",
+    "path": "/tmp/gideon-music.10-checks-o3pi_ceb/evidence.json",
+    "production_lines": 276,
+    "test_lines": 290,
+    "ratio": 1.0507246376811594,
+    "runtime_tests": 21,
+    "ui_tests": 2,
+    "repairs": 1,
+    "repair": "Use canonical binary pdf kind for actual PDF export."
+  }
+}

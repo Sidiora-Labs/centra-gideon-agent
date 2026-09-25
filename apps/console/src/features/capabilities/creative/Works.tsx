@@ -1,4 +1,5 @@
 import Polishing from './Polishing'
+import Continuity from './Continuity'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -101,6 +102,7 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works' }: 
         {selected.draft_missing && <p role="alert">Draft artifact missing</p>}<label className="block">Manuscript<textarea className={`${control} min-h-64`} value={text} onChange={e => setText(e.target.value)} /></label><label className="block">Draft note<input className={control} value={note} onChange={e => setNote(e.target.value)} /></label><Button disabled={busy || !text.trim()} onClick={() => void saveText()}>Save new draft</Button>
         <section aria-label="Manuscript drafts"><h2>Manuscript drafts</h2>{drafts.map((d, index) => <p key={d.id}>{d.note || `Draft ${drafts.length - index}`} · {d.characters} characters{d.id === selected.active_draft_id && ' · Active'}<Button onClick={() => void readDraft(d.id)}>Read draft {drafts.length - index}</Button></p>)}</section>
         {selected.active_draft_id && !selected.draft_missing && <Polishing key={selected.id} id={selected.id} revision={selected.revision} text={selected.text || ''} apiRoot={apiRoot} onPromoted={() => { setReload(v => v + 1); setRefresh(v => v + 1) }} />}
+        <Continuity key={selected.id + "-continuity"} id={selected.id} revision={selected.revision} text={selected.text || ""} apiRoot={apiRoot} />
         <section aria-label="Work history">{history.map(work => <p key={work.revision}>Revision {work.revision}: {work.title}<Button disabled={busy || work.revision === selected.revision} onClick={() => void save(work.revision)}>Restore work revision {work.revision}</Button></p>)}</section>
       </>}
     </section></div></main>

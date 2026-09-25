@@ -11,7 +11,7 @@ SCHEMA = 'gideon.wellbeing-export'
 VERSION = 1
 MAX_BYTES = 64 * 1024 * 1024
 TABLES = {
-    'measurements': [('history', 'revisions', 'data')],
+    'measurements': [('history', 'revisions', 'data'), ('shared_sources', 'shared_health_imports', 'data'), ('shared_links', 'shared_health_links', None), ('shared_identity', 'shared_health_meta', None)],
     'laboratory': [('history', 'lab_revisions', 'data'), ('imports', 'lab_imports', 'receipt'), ('source_identities', 'lab_sources', None)],
     'apple': [('metrics', 'apple_metrics', 'data'), ('imports', 'apple_imports', 'receipt')],
     'substances': [('entries', 'substance_entries', 'data'), ('presets', 'substance_presets', 'data')],
@@ -69,7 +69,7 @@ class ExportStore(MeasurementStore):
         attachments, seen, attachment_bytes = [], set(), 0
         for reference in references(sections):
             slug, version, filename = reference.get('slug'), reference.get('version'), reference.get('filename')
-            if not isinstance(slug, str) or not re.fullmatch(r'(lab-source|apple-source|genome-source|memory-card)-[a-f0-9]{64}', slug) or version != 1:
+            if not isinstance(slug, str) or not re.fullmatch(r'(lab-source|apple-source|genome-source|memory-card|shared-health)-[a-f0-9]{64}', slug) or version != 1:
                 raise MeasurementError('Export source artifact reference is unsupported', 409, 'conflict')
             identity = (slug, version, filename)
             if identity in seen:

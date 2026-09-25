@@ -1,0 +1,21 @@
+{
+  "name": "gideon-music-decks",
+  "version": "1.0.0",
+  "displayName": "Card decks",
+  "description": "Author card decks and export canonical print artwork.",
+  "icon": "Layers",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled",
+    "music"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.music.deck_tools:create_provider",
+    "capabilities": [
+      "music-decks"
+    ]
+  },
+  "native": true
+}

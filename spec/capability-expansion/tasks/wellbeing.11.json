@@ -1,0 +1,69 @@
+{
+  "id": "wellbeing.11",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "08ac806b",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/shared_health.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/shared_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/store.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/exports.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_shared.py",
+    "apps/console/src/features/capabilities/wellbeing/SharedHealth.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_shared_health.py",
+    "checks/runtime/capabilities/wellbeing/test_measurements.py",
+    "checks/runtime/capabilities/wellbeing/test_exports.py",
+    "apps/console/src/features/capabilities/wellbeing/SharedHealth.test.tsx"
+  ],
+  "contract": "Version1 native health shared JSON bodyweight/BP exchange. Canonical measurement ledger owns data; atomic typed batch import preserves history with source IDs/revisions and original artifact. Captured-home file read/status/preview/import and compare-and-swap atomic publish/download, strict corrupt/unavailable overwrite refusal. Signed transport belongs hosted adapter.",
+  "remaining_limits": [
+    "Only bodyweight/BP schema; no automatic cloud/iCloud transport or macOS-native app qualification",
+    "Native file writers must cooperate with advisory lock or use compare-and-swap publish",
+    "No deletion through omission; conflict reconciliation requires explicit user correction",
+    "Root integrates route/navigation/durability"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.11",
+  "exit_code": 0,
+  "initial_evidence_log": "/tmp/gideon-wellbeing.11-checks-9xieuy7k/evidence.json",
+  "evidence_log": "/tmp/gideon-wellbeing.11-checks-vtf1aug0/evidence.json",
+  "runtime_repair": {
+    "argv": [
+      "/tmp/gideon-runtime-venv/bin/python",
+      "-m",
+      "pytest",
+      "checks/runtime/capabilities/wellbeing/test_shared_health.py::test_actual_native_file_round_trip_canonical_corrections_and_normalization",
+      "-q"
+    ],
+    "log": "/tmp/gideon-wellbeing11-repair/runtime.log",
+    "exit_code": 0
+  },
+  "repair_cycles": 1,
+  "production_lines": 345,
+  "test_lines": 424,
+  "test_ratio": 1.228985507246377,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/SharedHealth.tsx": "d8f8bf3de330ca4bd1704047668084441de756f9a35452d458b7d31dbb95e859",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_shared.py": "8f51a17a2488f21f2d8f73ca60d29b0420f7074e9ce7311d95ea534c9e9b882a",
+    "runtime/gideon/workspace/capabilities/wellbeing/exports.py": "d13d646050509c21fbe03f772dce0d842de03d0aa0736aea1203b878538fdd4d",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "b23870af5842efbe7e3c52ce10f2dc88f7da11be1930123c66abde30835ba743",
+    "runtime/gideon/workspace/capabilities/wellbeing/shared_health.py": "9f05016caae7cf389d1e14e0f9032af3cb07f72338827b9b773ec0d5cc3af278",
+    "runtime/gideon/workspace/capabilities/wellbeing/shared_provider.py": "707459ca95920c224920a4f8a3bcb2c4e32eea92224032b3e85791d86c1af663",
+    "runtime/gideon/workspace/capabilities/wellbeing/store.py": "1b4a3c25108e15b0d1c41f12c34317b0198e312b2a67e12c30cc8e8b479adc9e",
+    "apps/console/src/features/capabilities/wellbeing/SharedHealth.test.tsx": "ca5888857a827b3a9bbb2d53203bf72a0a295aaff159d50dc9462e156b552730",
+    "checks/runtime/capabilities/wellbeing/test_exports.py": "969a3bc355dd002c9eaee07d60b0acbcc56987b7dddbbbce7748e85a9e615c2a",
+    "checks/runtime/capabilities/wellbeing/test_measurements.py": "6e503e0527a9efbcad4a0f6e69b4f7298caaf7451d721c05c2baac389e2fa598",
+    "checks/runtime/capabilities/wellbeing/test_shared_health.py": "8c0093f5b0f48889a498ffabea964d3f2f56b55f07ec80e3706f257d27413349"
+  },
+  "acceptance_coverage": [
+    "108runtime total: original measurement writer/export vectors + native shared cases;107 firstpass and1 corrected unit conversion fixture",
+    "2 actual HTTP React journeys canonical native correction/reload and corrupt overwrite refusal",
+    "atomic shared batch revision conflicts and canonical source/history",
+    "exact BOM/CRLF raw source included in versioned export",
+    "real captured-home file status/CAS publication/permissions",
+    "parent/file symlink refusal and isolated homes",
+    "concurrent import receipt replay and source namespaces"
+  ]
+}

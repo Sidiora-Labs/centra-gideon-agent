@@ -97,6 +97,11 @@ class MeasurementStore:
         return self._write(identity, payload)
 
     def _write(self, identity, payload):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return self._write_in(db, identity, payload)
+
+    def _write_in(self, db, identity, payload):
         if not isinstance(payload, dict):
             raise MeasurementError("Measurement must be an object")
         allowed = {"request_id", "revision", "observed_at", "unit", "values", "notes"} if identity else {"request_id", "kind", "observed_at", "unit", "values", "source", "notes"}
@@ -107,32 +112,30 @@ class MeasurementStore:
             fingerprint = json.dumps([identity, payload], sort_keys=True, allow_nan=False)
         except (ValueError, TypeError) as exc:
             raise MeasurementError("Payload must contain finite JSON values") from exc
-        with self.connection() as db:
-            db.execute("BEGIN IMMEDIATE")
-            prior = db.execute("SELECT payload, result FROM requests WHERE id=?", (request_id,)).fetchone()
-            if prior:
-                if prior[0] != fingerprint:
-                    raise MeasurementError("Request ID already used for a different mutation", 409, "conflict")
-                return json.loads(prior[1])
-            if identity:
-                record = self._get(db, identity)
-                if type(payload.get("revision")) is not int or payload["revision"] != record["revision"]:
-                    raise MeasurementError("Measurement changed; reload before correcting", 409, "conflict")
-                if "unit" in payload and "values" not in payload:
-                    raise MeasurementError("Unit changes require values")
-                record.update({key: value for key, value in payload.items() if key not in ("request_id", "revision")})
-                record["revision"] += 1
-            else:
-                record = {key: payload.get(key) for key in ("kind", "observed_at", "unit", "values", "source")}
-                record.update(id=str(uuid4()), notes=payload.get("notes", ""), created_at=datetime.now(timezone.utc).isoformat(), revision=1)
-            observed_utc = instant(record["observed_at"])
-            text(record["source"], "source", 256)
-            text(record["notes"], "notes", 4000, empty=True)
-            record["unit"], record["values"] = normalized(record["kind"], record["unit"], record["values"])
-            encoded = json.dumps(record, allow_nan=False)
-            db.execute("INSERT INTO revisions VALUES(?,?,?,?,?)", (record["id"], record["revision"], observed_utc, record["kind"], encoded))
-            db.execute("INSERT INTO requests VALUES(?,?,?)", (request_id, fingerprint, encoded))
-            return record
+        prior = db.execute("SELECT payload, result FROM requests WHERE id=?", (request_id,)).fetchone()
+        if prior:
+            if prior[0] != fingerprint:
+                raise MeasurementError("Request ID already used for a different mutation", 409, "conflict")
+            return json.loads(prior[1])
+        if identity:
+            record = self._get(db, identity)
+            if type(payload.get("revision")) is not int or payload["revision"] != record["revision"]:
+                raise MeasurementError("Measurement changed; reload before correcting", 409, "conflict")
+            if "unit" in payload and "values" not in payload:
+                raise MeasurementError("Unit changes require values")
+            record.update({key: value for key, value in payload.items() if key not in ("request_id", "revision")})
+            record["revision"] += 1
+        else:
+            record = {key: payload.get(key) for key in ("kind", "observed_at", "unit", "values", "source")}
+            record.update(id=str(uuid4()), notes=payload.get("notes", ""), created_at=datetime.now(timezone.utc).isoformat(), revision=1)
+        observed_utc = instant(record["observed_at"])
+        text(record["source"], "source", 256)
+        text(record["notes"], "notes", 4000, empty=True)
+        record["unit"], record["values"] = normalized(record["kind"], record["unit"], record["values"])
+        encoded = json.dumps(record, allow_nan=False)
+        db.execute("INSERT INTO revisions VALUES(?,?,?,?,?)", (record["id"], record["revision"], observed_utc, record["kind"], encoded))
+        db.execute("INSERT INTO requests VALUES(?,?,?)", (request_id, fingerprint, encoded))
+        return record
 
     def list(self, *, from_date=None, to_date=None, kind=None, limit=100, offset=0):
         if type(limit) is not int or type(offset) is not int or not 1 <= limit <= 500 or not 0 <= offset <= 1000000:

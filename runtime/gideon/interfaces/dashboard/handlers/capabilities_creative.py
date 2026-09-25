@@ -14,6 +14,8 @@ from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.capabilities.creative.polishing import PolishingStore
 from gideon.workspace.capabilities.creative.stories import StoryStore
 from gideon.workspace.capabilities.creative.series import SeriesStore
+from gideon.workspace.capabilities.creative.continuity import ContinuityStore
+CONTINUITY = web.AppKey("creative_continuity", ContinuityStore)
 SERIES = web.AppKey("creative_series", SeriesStore)
 STORIES = web.AppKey("creative_stories", StoryStore)
 POLISHING = web.AppKey("creative_polishing", PolishingStore)
@@ -263,6 +265,23 @@ async def polishing(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def continuity(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        store = request.app[CONTINUITY]
+        id = request.match_info['id']
+        if request.method == 'GET':
+            result = store.export(id) if request.path.endswith('/export') else store.get(id)
+        elif 'proposal_id' in request.match_info:
+            result = store.accept(id, request.match_info['proposal_id'], await request.json())
+        else:
+            result = await store.propose(id, await request.json())
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
@@ -290,6 +309,11 @@ def register(app):
     app.router.add_post("/api/capabilities/creative/stories/{id}/adopt", stories)
     app.router.add_post("/api/capabilities/creative/stories/{id}/work", stories)
     app[WORKS] = WorkStore(app[STORE].home)
+    app[CONTINUITY] = ContinuityStore(app[WORKS])
+    app.router.add_get("/api/capabilities/creative/works/{id}/continuity", continuity)
+    app.router.add_get("/api/capabilities/creative/works/{id}/continuity/export", continuity)
+    app.router.add_post("/api/capabilities/creative/works/{id}/continuity/proposals", continuity)
+    app.router.add_post("/api/capabilities/creative/works/{id}/continuity/proposals/{proposal_id}/accept", continuity)
     app[POLISHING] = PolishingStore(app[WORKS])
     app.router.add_get("/api/capabilities/creative/works/{id}/polishing", polishing)
     app.router.add_post("/api/capabilities/creative/works/{id}/polishing", polishing)

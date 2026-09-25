@@ -9,7 +9,7 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
 from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.recipes import RecipeStore
-from gideon.workspace.capabilities.identity.bundles import BundleService
+from gideon.workspace.capabilities.identity.bundle_extended import ExtendedBundleService as BundleService
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.goals import GoalStore

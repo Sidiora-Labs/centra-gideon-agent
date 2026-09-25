@@ -1,0 +1,11 @@
+import { useEffect, useState } from 'react'
+import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
+import { Button } from '../../../shared/ui/Button'
+interface Row { instance_id: string | null; provider_instance: string | null; credential_ref: string | null; subscription_source: string | null; turns: number; input_tokens: number; output_tokens: number; recorded_cost_usd: number; unpriced_turns: number }
+interface View { rows: Row[]; turns: number; unattributed_turns: number; invalid_rows: number; coverage: string }
+export default function Accounting({ baseUrl = '' }: { baseUrl?: string }) {
+  const [view, setView] = useState<View>(); const [days, setDays] = useState('30'); const [error, setError] = useState('')
+  const load = async () => { setError(''); try { setView(await readJson<View>(await gatewayRequest(`${baseUrl}/api/capabilities/platform/accounting?days=${days}`))) } catch (reason) { setError(String(reason)) } }
+  useEffect(() => { void load() }, [baseUrl, days])
+  return <section aria-label="Instance usage accounting" className="space-y-m"><h2>Instance and subscription binding usage</h2><label>Window<select aria-label="Accounting window" value={days} onChange={event => setDays(event.target.value)}><option value="1">One day</option><option value="30">Thirty days</option><option value="365">One year</option></select></label><Button onClick={() => void load()}>Refresh accounting</Button>{error && <p role="alert">{error}</p>}<p>{view?.coverage}</p><p>{view?.turns ?? 0} recorded turns · {view?.unattributed_turns ?? 0} provider attribution unknown · {view?.invalid_rows ?? 0} invalid rows</p><table><thead><tr><th>Instance</th><th>Provider instance</th><th>Credential binding</th><th>Subscription source</th><th>Turns</th><th>Input / output tokens</th><th>Recorded cost</th><th>Unpriced turns</th></tr></thead><tbody>{view?.rows.map((row, index) => <tr key={index}><td>{row.instance_id || 'Unknown'}</td><td>{row.provider_instance || 'Unknown'}</td><td>{row.credential_ref || 'Unknown'}</td><td>{row.subscription_source || 'Unknown'}</td><td>{row.turns}</td><td>{row.input_tokens} / {row.output_tokens}</td><td>${row.recorded_cost_usd.toFixed(6)}</td><td>{row.unpriced_turns}</td></tr>)}</tbody></table></section>
+}

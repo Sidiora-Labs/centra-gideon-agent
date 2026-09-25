@@ -1,0 +1,62 @@
+{
+  "id": "communications.11",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "b4100053",
+  "requires": [
+    "communications.10"
+  ],
+  "contract": "Actual bounded public territory GraphQL reads and immutable account-bound discussion/comment/zap action review; approved authenticated discussion/comment PayIn submission and read-only reconciliation through canonical credentials. API-key zap prohibition retained with browser handoff.",
+  "acceptance": [
+    "Durable immutable action identity/replay and explicit exact-payload review",
+    "Atomic single submission claim and ambiguous-state no-repeat protection",
+    "Documented GraphQL discussion/comment adapter, provider PayIn normalization/status and credential identity binding",
+    "Native destructive approval metadata and actual HTTP Console review/submission-boundary journeys"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/stacker.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/StackerPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_stacker.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/StackerPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_stacker.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/StackerPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.11",
+  "limits": [
+    "Successful live territory reads and authenticated PayIn submission require external qualification. No external mutation issued during tests.",
+    "API-key zap blocked by provider policy; direct zap remains unsupported and browser action unverified.",
+    "Separate wallet payment execution unavailable; provider PayIn state retained without invented payment receipt.",
+    "Pending/unknown submissions never automatically retried; response lost before PayIn ID requires external account inspection."
+  ],
+  "sources": [
+    "https://github.com/stackernews/stacker.news/blob/master/api/typeDefs/sub.js",
+    "https://github.com/stackernews/stacker.news/blob/master/api/typeDefs/item.js",
+    "https://github.com/stackernews/stacker.news/blob/master/api/typeDefs/payIn.js",
+    "https://github.com/stackernews/stacker.news/blob/master/pages/api/graphql.js",
+    "https://github.com/stackernews/stacker.news/blob/master/api/resolvers/item.js"
+  ],
+  "qualification": {
+    "runtime": "52 passed",
+    "console_http": "4 passed",
+    "external_execution": "not attempted; authorized credential qualification pending",
+    "residuals": [
+      "Direct zap prohibited by API-key provider policy",
+      "Separate wallet payment adapter unavailable",
+      "Live PayIn lifecycle qualification pending authorized connection"
+    ]
+  }
+}

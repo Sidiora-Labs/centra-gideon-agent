@@ -8,12 +8,40 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/platform-assignments' in request.path:
+            assignment_id = request.match_info.get('assignment_id')
+            if request.path.endswith('/agents'):
+                return web.json_response({'agents': lifecycle.agents()})
+            if request.path.endswith('/history'):
+                return web.json_response({'history': lifecycle.history(store, assignment_id)})
+            if request.method == 'GET':
+                return web.json_response({'assignment': lifecycle.get(store, assignment_id)} if assignment_id else {'assignments': lifecycle.records(store)})
+            data = await request.json()
+            return web.json_response({'assignment': lifecycle.change(store, assignment_id, data) if assignment_id else lifecycle.create(store, data)})
+        if '/stacker/' in request.path:
+            account_id = request.match_info.get('stacker_account_id')
+            action_id = request.match_info.get('stacker_action_id')
+            action = request.path.rsplit('/', 1)[-1]
+            if request.method == 'GET':
+                return web.json_response({'actions': stacker.actions(store, account_id)} if account_id else {'territories': stacker.territories(store)})
+            data = await request.json()
+            if action == 'territories':
+                return web.json_response({'territory': await stacker.read_territory(store, data)})
+            if action == 'submit':
+                row = await stacker.submit(store, account_id, action_id, data)
+            elif action == 'reconcile':
+                row = await stacker.reconcile(store, account_id, action_id, data)
+            elif action == 'review':
+                row = stacker.review(store, account_id, action_id, data)
+            else:
+                row = stacker.save(store, account_id, data)
+            return web.json_response({'action': row})
         if '/x/accounts/' in request.path:
             account_id = request.match_info['x_account_id']
             draft_id = request.match_info.get('x_draft_id')
@@ -163,6 +191,21 @@ async def handle(request):
 
 
 def register(app):
+    assignment_base = '/api/capabilities/communications/platform-assignments'
+    app.router.add_get(assignment_base, handle)
+    app.router.add_get(assignment_base + '/agents', handle)
+    app.router.add_post(assignment_base, handle)
+    app.router.add_get(assignment_base + '/{assignment_id}', handle)
+    app.router.add_put(assignment_base + '/{assignment_id}', handle)
+    app.router.add_get(assignment_base + '/{assignment_id}/history', handle)
+    stacker_base = '/api/capabilities/communications/stacker'
+    app.router.add_get(stacker_base + '/territories', handle)
+    app.router.add_post(stacker_base + '/territories', handle)
+    stacker_actions = stacker_base + '/accounts/{stacker_account_id}/actions'
+    app.router.add_get(stacker_actions, handle)
+    app.router.add_post(stacker_actions, handle)
+    for action in ('review', 'submit', 'reconcile'):
+        app.router.add_post(stacker_actions + '/{stacker_action_id}/' + action, handle)
     x_base = '/api/capabilities/communications/x/accounts/{x_account_id}'
     app.router.add_get(x_base + '/snapshot', handle)
     app.router.add_post(x_base + '/sync', handle)

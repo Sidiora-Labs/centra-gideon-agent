@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop, beeper, telegram, calendar, social, xreading
+from . import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle
 
 
 def obj(properties, required=()):
@@ -42,6 +42,19 @@ TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boole
 CAL_SOURCE = {key: STRING for key in calendar.SOURCE_FIELDS}
 SOCIAL = {**{key: STRING for key in social.FIELDS if key != 'person_id'}, 'person_id': {'type': ['string', 'null']}}
 SPECS = {
+    'people_platform_agents': ('List actual configured agent identities eligible for local assignment.', obj({}), False),
+    'people_platform_assignments': ('Read account assignments and current dependency availability.', obj({}), False),
+    'people_platform_assignment_get': ('Read one assignment and usability projection.', obj({'assignment_id': STRING}, ('assignment_id',)), False),
+    'people_platform_assignment_create': ('Request local agent/account assignment with explicit provenance.', obj({'account_id': STRING, 'account_revision': {'type': 'integer'}, 'agent_id': STRING, 'reason': STRING, 'request_key': STRING}, ('account_id', 'account_revision', 'agent_id', 'reason', 'request_key')), True),
+    'people_platform_assignment_change': ('Activate, pause or permanently revoke local assignment; no external account changes.', obj({'assignment_id': STRING, 'revision': {'type': 'integer'}, 'account_revision': {'type': 'integer'}, 'state': STRING, 'reason': STRING}, ('assignment_id', 'revision', 'account_revision', 'state', 'reason')), True),
+    'people_platform_assignment_history': ('Read immutable assignment lifecycle provenance.', obj({'assignment_id': STRING}, ('assignment_id',)), False),
+    'people_stacker_territories': ('Read captured Stacker News territory pages.', obj({}), False),
+    'people_stacker_read': ('Read a real public Stacker News territory page.', obj({'name': STRING, 'cursor': STRING}, ('name',)), True),
+    'people_stacker_actions': ('Read reviewed action and provider PayIn lifecycle.', obj({'account_id': STRING}, ('account_id',)), False),
+    'people_stacker_prepare': ('Prepare a local immutable action for review; no external operation.', obj({'account_id': STRING, 'action': obj({**{key: STRING for key in stacker.ACTION_FIELDS if key != 'sats'}, 'sats': {'type': 'integer'}, 'request_key': STRING}, ('kind', 'territory', 'request_key'))}, ('account_id', 'action')), True),
+    'people_stacker_review': ('Record explicit local action review with disclosed provider fee consequences.', obj({'account_id': STRING, 'action_id': STRING, 'revision': {'type': 'integer'}, 'confirm_review': {'type': 'boolean'}}, ('account_id', 'action_id', 'revision', 'confirm_review')), True),
+    'people_stacker_submit': ('Submit reviewed discussion/comment to Stacker News; may immediately post and charge provider fees. Returns actual PayIn state.', obj({'account_id': STRING, 'action_id': STRING, 'revision': {'type': 'integer'}, 'confirm_execute': {'type': 'boolean'}}, ('account_id', 'action_id', 'revision', 'confirm_execute')), True),
+    'people_stacker_reconcile': ('Read actual provider PayIn state without paying or retrying.', obj({'account_id': STRING, 'action_id': STRING}, ('account_id', 'action_id')), True),
     'people_x_snapshot': ('Read the captured X page and explicit coverage.', obj({'account_id': STRING}, ('account_id',)), False),
     'people_x_sync': ('Read one actual X API page using the registered credential reference.', obj({'account_id': STRING, 'pagination_token': STRING}, ('account_id',)), True),
     'people_x_drafts': ('Read durable X drafts and handoff review state.', obj({'account_id': STRING}, ('account_id',)), False),
@@ -107,7 +120,7 @@ class PeopleTools(ToolProvider):
 
     async def list_tools(self):
         return [ToolDefinition(name=name, description=description, provider=self.name, parameters=schema,
-                               requires_approval=write, risk_level=RiskLevel.DESTRUCTIVE if name in ('people_beeper_send', 'people_telegram_send', 'people_telegram_configure') else RiskLevel.CAUTION if write else RiskLevel.SAFE)
+                               requires_approval=write, risk_level=RiskLevel.DESTRUCTIVE if name in ('people_stacker_submit', 'people_beeper_send', 'people_telegram_send', 'people_telegram_configure') else RiskLevel.CAUTION if write else RiskLevel.SAFE)
                 for name, (description, schema, write) in SPECS.items()]
 
     async def invoke(self, tool_name, arguments):
@@ -128,7 +141,36 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name.startswith('people_x_'):
+            if tool_name.startswith('people_platform_'):
+                action = tool_name.removeprefix('people_platform_')
+                if action == 'agents':
+                    result = {'agents': lifecycle.agents()}
+                elif action == 'assignments':
+                    result = {'assignments': lifecycle.records(store)}
+                elif action == 'assignment_get':
+                    result = {'assignment': lifecycle.get(store, arguments['assignment_id'])}
+                elif action == 'assignment_history':
+                    result = {'history': lifecycle.history(store, arguments['assignment_id'])}
+                elif action == 'assignment_create':
+                    result = {'assignment': lifecycle.create(store, arguments)}
+                else:
+                    result = {'assignment': lifecycle.change(store, arguments['assignment_id'], {k: v for k, v in arguments.items() if k != 'assignment_id'})}
+            elif tool_name.startswith('people_stacker_'):
+                action = tool_name.removeprefix('people_stacker_')
+                data = {k: v for k, v in arguments.items() if k not in ('account_id', 'action_id')}
+                if action == 'territories':
+                    result = {'territories': stacker.territories(store)}
+                elif action == 'read':
+                    result = {'territory': await stacker.read_territory(store, data)}
+                elif action == 'actions':
+                    result = {'actions': stacker.actions(store, arguments['account_id'])}
+                elif action == 'prepare':
+                    result = {'action': stacker.save(store, arguments['account_id'], arguments['action'])}
+                elif action == 'review':
+                    result = {'action': stacker.review(store, arguments['account_id'], arguments['action_id'], data)}
+                else:
+                    result = {'action': await (stacker.submit if action == 'submit' else stacker.reconcile)(store, arguments['account_id'], arguments['action_id'], data)}
+            elif tool_name.startswith('people_x_'):
                 action = tool_name.removeprefix('people_x_')
                 data = {k: v for k, v in arguments.items() if k not in ('account_id', 'draft_id')}
                 if action == 'snapshot':

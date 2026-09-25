@@ -31,7 +31,8 @@
       "platform_task_cadence_set",
       "platform_schedule_forecast",
       "platform_dashboard_compositions",
-      "platform_dashboard_select"
+      "platform_dashboard_select",
+      "platform_usage_accounting"
     ]
   },
   "native": true
