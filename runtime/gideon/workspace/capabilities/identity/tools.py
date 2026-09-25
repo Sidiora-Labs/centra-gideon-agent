@@ -7,6 +7,8 @@ from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
+from gideon.workspace.capabilities.identity.fidelity import FidelityStore
+from gideon.workspace.capabilities.identity.fidelity_generation import run_evaluation
 from gideon.workspace.capabilities.identity.store import ConflictError, StoryStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.identity.twin_enrichment import propose_enrichment
@@ -42,7 +44,11 @@ class IdentityToolProvider(ToolProvider):
             return ToolResult(success=False, error="Invalid identity arguments: " + problem.message,
                               recovery_hints=["Use the tool's declared fields and current revision."])
         try:
-            if tool_name == "identity_twin_enrich":
+            if tool_name == "identity_fidelity_run":
+                store = FidelityStore(self.home / "capabilities/identity/fidelity.sqlite3")
+                result = await run_evaluation(store, **arguments)
+                store._sources(result["case_snapshot"]["source_ids"])
+            elif tool_name == "identity_twin_enrich":
                 store = TwinStore(self.home / "capabilities/identity/twin.sqlite3")
                 doc = self._public_document(store, arguments["document_id"])
                 if not doc["enabled"]:
@@ -70,6 +76,21 @@ class IdentityToolProvider(ToolProvider):
 
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
+        if name.startswith("identity_fidelity_"):
+            store = FidelityStore(directory / "fidelity.sqlite3")
+            operation = name.removeprefix("identity_fidelity_")
+            result = getattr(store, "record_observation" if operation == "observe" else operation)(**arguments)
+            def visible(row):
+                try:
+                    store._sources(row.get("case_snapshot", row)["source_ids"])
+                    return True
+                except ValueError:
+                    return False
+            if isinstance(result, list):
+                return [row for row in result if visible(row)]
+            if not visible(result):
+                raise KeyError("Accessible fidelity record not found")
+            return result
         if name.startswith("identity_story_"):
             store = StoryStore(directory / "stories.sqlite3")
             operation = name.removeprefix("identity_story_")
