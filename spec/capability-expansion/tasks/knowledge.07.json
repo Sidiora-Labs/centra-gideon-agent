@@ -1,0 +1,115 @@
+{
+  "id": "knowledge.07",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "56fdbf81",
+  "contract": "Canonical date-keyed journal records with reviewed source activity drafts, stable date/timezone identity, immutable mutation receipts and transactional canonical editor conflict guards.",
+  "acceptance": [
+    "Date/timezone resolves one canonical journal; edits retain identity and original journal date for anniversary resurfacing.",
+    "Daily drafts cite actual note creation and currently completed task activity, disclose updated_at limitation, require explicit reviewed application and reject changed source snapshot.",
+    "Optimistic canonical fingerprint catches edits outside this feature; transactional expected-values guard preserves actual knowledge FTS/index behavior and default update contract.",
+    "Concurrent writers preserve one canonical destination and immutable request receipts; read/replay remains bound and new writes reject home drift.",
+    "Native session policy and actual HTTP/DOM load/review/save/reopen/conflict flows use real stores."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/journals.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_journals.py",
+    "runtime/gideon/cognition/knowledge/store.py",
+    "apps/console/src/features/capabilities/knowledge/JournalsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_journals.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/journals_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/JournalsPage.test.tsx",
+    "apps/console/src/features/capabilities/knowledge/ReviewsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_journals.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/JournalsPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Activity drafts are deterministic source citations, not model summaries; completed activity uses current done status and updated_at.",
+    "Date-key uniqueness applies to journals created through this date-keyed workflow; existing arbitrary journals remain canonical independent records.",
+    "Root owns central route integration and aggregate qualification."
+  ],
+  "verification": {
+    "task": "knowledge.07",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790299891.6327295,
+    "production_lines": 205,
+    "test_lines": 354,
+    "ratio": 1.726829268292683,
+    "stage": "combined_focused_stages",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/cognition/knowledge/store.py",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_journals.py",
+          "runtime/gideon/workspace/capabilities/knowledge/journals.py",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "checks/runtime/capabilities/knowledge/journals_ui_server.py",
+          "checks/runtime/capabilities/knowledge/test_journals.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.07-checks-qde0pq0n/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_journals.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.07-checks-qde0pq0n/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/knowledge/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/knowledge/apps/console/src/features/capabilities/knowledge/JournalsPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.07-checks-wuy08kis/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.07-checks-wuy08kis",
+    "completed_at": 1790299902.9291081,
+    "files": {
+      "apps/console/src/features/capabilities/knowledge/JournalsPage.tsx": "c7faf7046058a3a16a2891f8126327cb5f843f10975782f8430e32adf9ce0af8",
+      "runtime/gideon/cognition/knowledge/store.py": "39c76bb885bb45a1438e9e278d3641dad35146e9e1e1a42f6c11ba378c3b92b3",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_journals.py": "6889c5ecf0506a00e5eb77a48b553fe88d963eb4b6a582aa6d5a09ee5fa68518",
+      "runtime/gideon/workspace/capabilities/knowledge/journals.py": "8b917ac618ea5e2bfbfc251895a45e4f104f1cdb4c755ff45c2b25665b1117f7",
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "4254882468bd01273533d8efd6d070900d245cca5f7ab229a4b650c59c74cfae",
+      "apps/console/src/features/capabilities/knowledge/JournalsPage.test.tsx": "018880988f5b25662345ba443a10cb482b00ca85b050046828fa684196237e5f",
+      "apps/console/src/features/capabilities/knowledge/ReviewsPage.test.tsx": "b7c083a75d65abafc8765657c5ea96971e1c7fe6e82cb3be470c92f8d2d7e528",
+      "checks/runtime/capabilities/knowledge/journals_ui_server.py": "1ba90cdc260ab1ca54e87a8f813e95ac505a210393602b999c87bbede155a9ca",
+      "checks/runtime/capabilities/knowledge/test_journals.py": "3732f792076f3caf343ca651331a02e7216ad9bef42dc25b69b37ae79beb5e2b",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "8792cbce5cfc921f2ccb4a0537fcfd4bfb3a30f74db55ef9368e18297e78302a"
+    },
+    "stage_evidence": [
+      "/tmp/gideon-knowledge.07-checks-qde0pq0n/evidence.json",
+      "/tmp/gideon-knowledge.07-checks-wuy08kis/evidence.json"
+    ]
+  },
+  "repair_history": [
+    "Firstgate AST and38runtime passed; UI assertion used unsupported asymmetric toHaveValue matcher and second fixture assumed first had saved.",
+    "UI-only repair1 corrected assertions and allowed independent empty-journal conflict fixture;3realHTTPDOM passed. No unchanged runtime rerun."
+  ]
+}

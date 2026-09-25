@@ -1,0 +1,52 @@
+{
+  "id": "music.08",
+  "status": "locally_qualified",
+  "base_revision": "aa13b488",
+  "requires": [
+    "music.07"
+  ],
+  "dependency_refinement": "Uses qualified modelartifact/Three/parser seams only; external image reconstruction success is not required for authored procedural geometry.",
+  "contract": "Authored parts1..64 box/sphere/cylinder, size/position/rotationXYZradians/color/parent/joint, clips0..16 targetpartaxis/from/to/duration. Validate hierarchy and bounds. Generate actual deterministic triangle GLB+joint animation channels and runnable Three module canonical exports. Diagnostics actualtransformedbounds/triangles/analyticvolume/thinparts/approxAABBoverlap/cliplimits; explicit ground/clamp_clips refinement versions preservehistory.",
+  "acceptance": [
+    "Author/update/reopen multi-part procedural geometry with stableIDs and validhierarchy; noAI claim",
+    "Compile real GLB node transforms/materials/animations loadable by Three; sourceexport retains geometryschema",
+    "Inspect geometric findings and apply ground/clamp refinements with optimisticrevision and history",
+    "Real API/native/UI export/version/diagnostic/refinement journeys with canonicaloutputs"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/assembly.py",
+    "runtime/gideon/workspace/capabilities/music/assembly_geometry.py",
+    "runtime/gideon/workspace/capabilities/music/assembly_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_assemblies.py",
+    "apps/console/src/features/capabilities/music/AssemblyPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_assembly.py",
+    "checks/runtime/capabilities/music/serve_assembly.py",
+    "apps/console/src/features/capabilities/music/AssemblyPage.test.tsx",
+    "apps/console/src/features/capabilities/music/assemblyGeometry.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_assembly.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-assemblies/app.json"
+  ],
+  "limits": [
+    "Authored deterministic assemblies, notimage/LLM generation; noautomaticclaim ofphysicalvalidity",
+    "Overlap findings are AABB approximations; volume sum doesnot subtractoverlaps",
+    "Declared rigidpartanimations, notskinbinding/riggedmesh inference; rootbrowserGPU qualification separate"
+  ],
+  "verification": {
+    "initial_command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.08",
+    "ui_repair_command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.08 --stage ui",
+    "repairs": 2,
+    "runtime_evidence": "/tmp/gideon-music.08-checks-yhlgszyu/evidence.json",
+    "ui_evidence": "/tmp/gideon-music.08-checks-zqlu3jei/evidence.json",
+    "production_lines": 341,
+    "test_lines": 362,
+    "ratio": 1.06158357771261,
+    "scope": "Initial Python compile/runtimepassed; unchanged runtime notrerun. Final UIstage passed4tests including realThreeGLB/mixer fullrotation/source execution and2actualHTTPUIjourneys."
+  }
+}

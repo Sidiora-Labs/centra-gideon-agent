@@ -1,0 +1,44 @@
+{
+  "id": "media.09",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "08504037",
+  "contract": "Ordered bounded local Pillow cleanup transforms reuse durable jobs and canonical artifacts. Pinned source/version and EXIF-oriented coordinates support crop/resize/right-angle rotation/flip/brightness/contrast/sharpen and deterministic edge-connected solid-color transparency. Preserve originals and alpha; validate bounds after each transform. Canonical derivative metadata references job/source and cleanup request hash with engine Pillow. API/native tool/console expose same typed pipeline without semantic segmentation or AI-upscale claims.",
+  "acceptance": "Actual pixel assertions for ordering/crop/rotation/resize/alpha/brightness/contrast/sharpen/edge-connected transparency and EXIF handling; unchanged original bytes/version, real worker and canonical result provenance/idempotence, malformed/unsupported pipeline rejection, HTTP/tool requests and discoverable console rendering.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/cleanup.py",
+    "runtime/gideon/workspace/capabilities/media/images.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "apps/console/src/features/capabilities/media/CleanupPage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_cleanup.py",
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/CleanupPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_cleanup.py",
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/CleanupPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Solid-color removal is deterministic edge-connected color cleanup, not semantic subject segmentation",
+    "Resize is conventional Lanczos interpolation, not learned super-resolution",
+    "Live browser pointer/visual journey and aggregate integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.09",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.09-checks-gyzyldpa/evidence.json",
+  "production_lines": 150,
+  "test_lines": 231,
+  "ratio": 1.54,
+  "repair_cycles": 1,
+  "repair_detail": "Runner AST scope parsing found an unclosed schema dictionary; corrected before compile/runtime/UI execution"
+}

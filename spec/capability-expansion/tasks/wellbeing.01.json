@@ -1,0 +1,42 @@
+{
+  "id": "wellbeing.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "store": "capabilities/wellbeing.sqlite3",
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-wellbeing/app.json"
+  ],
+  "acceptance_coverage": [
+    "measurement validation and normalization",
+    "immutable provenance and correction history",
+    "optimistic conflicts and idempotent retries",
+    "UTC instant filtering and bounded pagination",
+    "isolated homes",
+    "exact export",
+    "real HTTP and agent tool operations",
+    "React entry and correction against real local HTTP"
+  ],
+  "remaining_limits": [
+    "Shared server, navigation, tool metadata and durability enrollment require root integration",
+    "Full console build and browser geometry are wave integration gates"
+  ],
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify wellbeing.01",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.01-checks-m3jq8f9t/evidence.json",
+  "production_lines": 317,
+  "test_lines": 369,
+  "test_ratio": 1.16403785488959,
+  "runtime_tests": 58,
+  "ui_tests": 2,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Page.tsx": "955e6a0e9cf06cbb204b54f516b90c59955c56969e08e92a38b5734993af0915",
+    "apps/console/src/features/capabilities/wellbeing/api.ts": "f4e1beb134b6d8f4e839e75e99c8255c898886d7c3510cf4c0cb4ad8111f6c1b",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing.py": "657c60ded22383d943b56b6bc7f8d29e0892c15c000ac36c8deb0279c473462b",
+    "runtime/gideon/workspace/capabilities/wellbeing/__init__.py": "a3eb9c183e11edc6fbccfe6192566cd9443a6d1ac96521d0cd2a277e41b36e48",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "920985b547600b75c1f8162ecdef70861e88cdacb80b8ff718bf39b0ccbd905e",
+    "runtime/gideon/workspace/capabilities/wellbeing/store.py": "752572dfd8f982fdf625c915543129500e37ee50a6f697d5f7b522a5181193ed",
+    "apps/console/src/features/capabilities/wellbeing/Page.test.tsx": "bec7a0c59c4f302a9b3efda41206369dbd73cf9ee8509375f665a63b50ae9a9a",
+    "checks/runtime/capabilities/wellbeing/test_measurements.py": "6e503e0527a9efbcad4a0f6e69b4f7298caaf7451d721c05c2baac389e2fa598"
+  }
+}

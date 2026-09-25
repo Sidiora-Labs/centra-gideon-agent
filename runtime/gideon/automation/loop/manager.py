@@ -146,6 +146,8 @@ async def start(state, svc, loop_id: str) -> Loop:
     loop = store.get(loop_id)
     if loop is None:
         raise KeyError(loop_id)
+    from gideon.workspace.capabilities.identity.lifecycle import require_loop_allowed
+    require_loop_allowed(loop)
     kinds.ensure_loaded()
     strat = kinds.get_or_none(loop.kind)
     if strat is None:

@@ -1,0 +1,51 @@
+{
+  "id": "music.04",
+  "status": "locally_qualified",
+  "base_revision": "b92f20f2",
+  "schema_version": 1,
+  "requires": [
+    "music.01",
+    "music.02"
+  ],
+  "contract": "Musical canon Round id,title,tempo_bpm,meter_beats,notes,parts[{id,name,entry_beats,notation,catalog_ref:null|{track_id,render_id}}],partner_ids,revision,archived. Optional catalog references pin actual same-home imported renders. Practice request_id,round_revision,part_ids,occurred_at offset ISO,grade0..5,notes; immutable idempotent history. Partners require matching tempo/meter. Authored notation is not represented as synthesized audio.",
+  "acceptance": [
+    "Author/edit/reopen musical canon parts with entry-beat timing and compatible partner rounds",
+    "Validate stable unique part IDs, bounded musical timing and same-home actual imported audio references",
+    "Record idempotent graded practice pinned to round revision and exact parts; later edits preserve original practice context",
+    "HTTP/UI/native consumers display notation and play actual attached recordings; missing recordings stay explicit",
+    "Reject stale edits, incompatible partners, wrong parts, invalid dates and unavailable audio without provider calls"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/rounds.py",
+    "runtime/gideon/workspace/capabilities/music/rounds_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_rounds.py",
+    "apps/console/src/features/capabilities/music/RoundsPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_rounds.py",
+    "checks/runtime/capabilities/music/serve_rounds.py",
+    "apps/console/src/features/capabilities/music/RoundsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_rounds.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-rounds/app.json"
+  ],
+  "limits": [
+    "No synthetic notation rendering or AI score generation; playback uses actual imported recordings",
+    "Independent of externally unqualified music.03; root integration/browser audio-device qualification remains separate"
+  ],
+  "verification": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.04",
+    "attempts": 1,
+    "runtime_tests": 45,
+    "ui_tests": 2,
+    "production_lines": 268,
+    "test_lines": 327,
+    "ratio": 1.2201492537313432,
+    "evidence": "/tmp/gideon-music.04-checks-xfsdh3u_/evidence.json",
+    "scope": "Actual SQLite/domain/native/HTTP and UI interactions against actual HTTP service; canonical recording source/control verified, device audio/browser integration separate"
+  }
+}

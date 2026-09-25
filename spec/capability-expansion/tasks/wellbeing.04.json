@@ -1,0 +1,51 @@
+{
+  "id": "wellbeing.04",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "825ee8af",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/substances.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/substances_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_substances.py",
+    "apps/console/src/features/capabilities/wellbeing/Substances.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_substances.py",
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx"
+  ],
+  "contract": "Revisioned alcohol and labeled nicotine entries, reusable product snapshots, idempotent corrections and tombstones, immutable source, timezone calendar summaries retaining unrecorded versus zero. Same wellbeing SQLite ledger, native tool, HTTP and React consumers.",
+  "remaining_limits": [
+    "Local records only; no intoxication or medical inference",
+    "Root registers substances handler, console route and tool metadata"
+  ],
+  "source_revision": "825ee8af",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.04",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.04-checks-de0z909g/evidence.json",
+  "production_lines": 321,
+  "test_lines": 381,
+  "test_ratio": 1.1869158878504673,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Substances.tsx": "5f5edecc1cb1ba31892cff45f86b7e2a9d81bfb955def31ca5d506e4a5209525",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_substances.py": "c02a03c98fd9fc54991f236299b41c77e0b18531b0e1cb67ab9c3e2eefe681c0",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "971db3194e4ede3a29bfad4168d070c68d7322f7bafada2817f28b6196686323",
+    "runtime/gideon/workspace/capabilities/wellbeing/substances.py": "0d75c2cc346b969ce3719003f45a42135e182c6a5f0f08ac4f846ccecf4506b8",
+    "runtime/gideon/workspace/capabilities/wellbeing/substances_provider.py": "30c46a75010a795ffd17fb4c759f7d794a8dec172c73329393cc6806cd21340f",
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx": "1ba59f3135a1aa3e115a9627a17a348668888076b3bf4002c79625ba5f77e215",
+    "checks/runtime/capabilities/wellbeing/test_substances.py": "735e9b018b9198ab087511b826c20785056cada1ef92ff6a406047699b7e6853"
+  },
+  "repair_cycles": 0,
+  "acceptance_coverage": [
+    "immutable entry provenance",
+    "finite bounded quantity math",
+    "preset snapshot revisions",
+    "idempotent mutations and concurrency conflicts",
+    "tombstone history",
+    "timezone and DST summaries",
+    "missing versus explicit zero",
+    "reopen and isolated homes",
+    "real native tool and HTTP mutations",
+    "real-network React create correct delete and presets"
+  ]
+}

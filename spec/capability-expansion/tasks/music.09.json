@@ -1,0 +1,60 @@
+{
+  "id": "music.09",
+  "status": "locally_qualified_external_unqualified",
+  "base_revision": "af11a480",
+  "requires": [
+    "music.08"
+  ],
+  "contract": "CanonicalJSONprivacy imports extended/legacy/playlist with pinnedprovenance, transaction/idempotency/eventdedup, orderedimmutableplaylistsnapshots, search/pagination/statistics. Actual fixedSpotifyWebAPI sync throughnamedOAuthaccess token: GET/me identity, paginatedrecently-played andplaylistitems, snapshotbeforeimport, cursorcommit onlyafterpersistence. APIplayed_at distinctfromprivacyended_at; APIms_played remainsnull.",
+  "references": [
+    "https://support.spotify.com/in-en/article/understanding-your-data/",
+    "https://developer.spotify.com/documentation/web-api/reference/get-playlists-items",
+    "https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow",
+    "https://developer.spotify.com/documentation/web-api/tutorials/refreshing-tokens"
+  ],
+  "acceptance": [
+    "Import realformats with preciseUTC/durations/sourceartifact; retry safely without fabricatedhistory",
+    "Search listeningfacts and inspect orderedplaylists/snapshots throughAPI/UI/native",
+    "Configure existingnamedOAuthconnection and implement actualSpotify reads with truthfulunavailable state; nofake remote success",
+    "Persist actualapiaccount binding and cursor only after importedcanonical snapshot succeeds",
+    "Acquire Spotify tokens with actual PKCE state/verifier validation, canonical private storage, refresh and atomic named credential updates preserving unrelated names."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/listening.py",
+    "runtime/gideon/workspace/capabilities/music/spotify.py",
+    "runtime/gideon/workspace/capabilities/music/listening_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_listening.py",
+    "apps/console/src/features/capabilities/music/ListeningPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx",
+    "runtime/gideon/workspace/capabilities/music/spotify_oauth.py",
+    "runtime/gideon/integrations/llm/credentials.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_listening.py",
+    "checks/runtime/capabilities/music/serve_listening.py",
+    "apps/console/src/features/capabilities/music/ListeningPage.test.tsx",
+    "checks/runtime/capabilities/music/test_spotify.py",
+    "checks/runtime/capabilities/music/test_spotify_oauth.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_listening.py",
+    "checks/runtime/capabilities/music/test_spotify.py",
+    "checks/runtime/capabilities/music/test_spotify_oauth.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-listening/app.json"
+  ],
+  "limits": [
+    "CanonicalJSON imports limited1MiB; larger privacyexports require splitfiles; nonmusic missingmetadata skippedwithcounts",
+    "Live Spotify consent, token exchange, refresh, identity and sync remain externally unqualified without a registered app/account. OSS implements actual PKCE acquisition and refresh; hosted existing Connections owns authorization.",
+    "No playbackcontrol or Spotifyplaylist mutation; importedmetadata notfabricatedlocalaudio"
+  ],
+  "evidence": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.09",
+    "path": "/tmp/gideon-music.09-checks-ozopuc68/evidence.json",
+    "production_lines": 453,
+    "test_lines": 466,
+    "ratio": 1.0286975717439293,
+    "repairs": 0
+  }
+}

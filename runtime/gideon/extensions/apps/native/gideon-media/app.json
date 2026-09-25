@@ -1,0 +1,16 @@
+{
+  "name": "gideon-media",
+  "version": "1.0.0",
+  "displayName": "Media Tools",
+  "description": "Browse canonical media artifacts and create, edit and export original-preserving image sketches.",
+  "icon": "Image",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "permissions": {"backgroundTasks": true, "storage": true},
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.media.tools:create_provider",
+    "capabilities": ["media"]
+  },
+  "native": true
+}

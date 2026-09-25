@@ -1,0 +1,54 @@
+{
+  "id": "communications.10",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "eeabfdb0",
+  "requires": [
+    "communications.09"
+  ],
+  "contract": "Registered active X identities support real read-only API user and post-page lookup via canonical credential references, captured coverage, and durable local drafts with explicit revision-bound browser compose review. No API posting.",
+  "acceptance": [
+    "Real bounded provider adapter and normalized paginated post data with explicit unknown failures",
+    "Persistent idempotent draft/edit/review and revision-bound account change invalidation",
+    "Native tools plus real HTTP Console reading failure and compose handoff journey",
+    "No external posted claim and browser account selection limitation visible"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/xreading.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/XPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_xreading.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/XPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_xreading.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/XPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.10",
+  "limits": [
+    "Live successful X read pending authorized credential and API access.",
+    "Browser compose handoff does not select the signed-in account or prove posting.",
+    "Local draft limit280characters; browser applies final X validation."
+  ],
+  "sources": [
+    "https://docs.x.com/x-api/users/get-user-by-username",
+    "https://docs.x.com/x-api/users/get-posts"
+  ],
+  "qualification": {
+    "runtime": "41 passed",
+    "console_http": "4 passed",
+    "live_x_reads": "pending authorized API access",
+    "external_posts": "none; browser handoff only"
+  }
+}

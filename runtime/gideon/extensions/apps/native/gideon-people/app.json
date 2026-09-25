@@ -1,0 +1,29 @@
+{
+  "name": "gideon-people",
+  "version": "1.0.0",
+  "displayName": "People and Relationships",
+  "description": "Manage people, relationship evidence, desktop imports and Beeper conversations with an approval-gated outbox.",
+  "icon": "Users",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.communications.tools:create_provider",
+    "capabilities": [
+      "people",
+      "contact-import",
+      "relationship-care",
+      "mail-mirror",
+      "desktop-message-import",
+      "beeper-outbox",
+      "telegram-operations",
+      "calendar-mirror",
+      "social-account-registry",
+      "x-read-compose-handoff"
+    ]
+  },
+  "native": true
+}

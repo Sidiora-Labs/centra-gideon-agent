@@ -1,0 +1,47 @@
+{
+  "id": "music.06",
+  "status": "locally_qualified",
+  "base_revision": "b428bd50",
+  "requires": [
+    "music.05"
+  ],
+  "contract": "Authored beat grid video project: title,track_id,render_id,tempo_bpm20..300,offset_seconds audio seek, scenes1..16[{id,image_ref:{slug,version},beats1..64}]. Validate canonical actual images/audio and offset+beatduration<=source, <=60sec. Fixed640x36030fps H264/AAC local FFmpeg jobs; idempotent request_ids; pinned revision snapshots; cancel kills owned process; recover interrupts oldjobs, noautomaticrerender.",
+  "acceptance": [
+    "Author/edit/reopen beat-grid projects with actual canonical audio and images",
+    "Render actual MP4 with source audio and scene cuts on authored beat intervals; measure frame content/streams/duration",
+    "Job snapshot, cancellation, retry/conflict, failure and restart semantics persist; no invented generation outputs",
+    "Real API/native/UI consumers create projects, render and open canonical output"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/video.py",
+    "runtime/gideon/workspace/capabilities/music/video_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_video.py",
+    "apps/console/src/features/capabilities/music/VideoPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_video.py",
+    "checks/runtime/capabilities/music/serve_video.py",
+    "apps/console/src/features/capabilities/music/VideoPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_video.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-video/app.json"
+  ],
+  "limits": [
+    "Authored BPM/grid, not automatic beat detection; still-image cuts, not generative clips",
+    "FFmpeg and Pillow already available; no dependency installation or external generation",
+    "Device video playback/root browser integration separate"
+  ],
+  "verification": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.06",
+    "attempts": 1,
+    "evidence": "/tmp/gideon-music.06-checks-xw11yb_n/evidence.json",
+    "production_lines": 314,
+    "test_lines": 346,
+    "ratio": 1.1019108280254777,
+    "scope": "Actual FFmpeg/H264/AAC outputs, ffprobe streams duration, decoded scene frame colors/audio samples; SQLite/native/HTTP lifecycle and two real HTTP UI journeys. Authored grid only."
+  }
+}

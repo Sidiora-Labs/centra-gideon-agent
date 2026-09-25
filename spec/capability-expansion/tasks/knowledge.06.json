@@ -1,0 +1,46 @@
+{
+  "id": "knowledge.06",
+  "status": "implemented",
+  "schema_version": 1,
+  "base_revision": "d6df3896",
+  "contract": "Daily and weekly source-grounded obligation reviews and user reflections materialize as canonical knowledge notes. Recurring reviews use existing clock triggers, bounded knowledge-write action policy, actual dispatch and ExecutionJournal.",
+  "acceptance": [
+    "Exact task/contact/note/capture citations with timezone windows, explicit scan limits and honest updated_at completion limitation.",
+    "Reviewed immutable source snapshots, source-change conflicts, idempotent concurrent saves and original reflection.",
+    "Daily/weekly optimistic revision schedules and disable through canonical TriggerStore, pending retry recovery, bounded home, existing action policy.",
+    "Real clock tick and dispatch create actual canonical note and successful execution journal; no generated summaries or external delivery.",
+    "Native session/approval boundaries and actual HTTP plus DOM preview/save/schedule consumers."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/reviews.py",
+    "runtime/gideon/workspace/capabilities/knowledge/review_schedule.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_reviews.py",
+    "runtime/gideon/security/guardrails/rungs.py",
+    "apps/console/src/features/capabilities/knowledge/ReviewsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_reviews.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/reviews_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/ReviewsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_reviews.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/ReviewsPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Completed activity reflects current done status and updated_at; no immutable completion chronology exists in this projection.",
+    "At most1000 records per canonical source are scanned; overflow is explicit.",
+    "Scheduled reviews are deterministic source snapshots without generated prose; reflections are user authored.",
+    "Root owns integrated navigation and aggregate qualification."
+  ],
+  "repair_history": [
+    "First gate41runtime passed; fixed three fixture assumptions: metadata is decoded and clock tick is async.",
+    "Repair1 actual dispatch succeeded; fixed journal association fixture and paired concurrency race by excluding generated review GUIDs before source scan.",
+    "Repair2 passed44runtime and3realHTTPDOM; exact source/runtime/clock/journal evidence retained."
+  ]
+}

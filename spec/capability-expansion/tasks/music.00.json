@@ -1,0 +1,81 @@
+{
+  "id": "music.00",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "contract": "Eleven discoverable native tools route repertoire and catalog operations through existing scoped stores; no caller home override; read-safe and bounded-write approval metadata.",
+  "acceptance": [
+    "Resolve bundled manifest and actual ToolProvider factory",
+    "Invoke real author/practice/replay/metadata/render/archive flows",
+    "Reject unknown arguments, cross-home IDs and preserve conflicts/unavailable provenance"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/tools.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_tools.py"
+  ],
+  "dependencies": [
+    "Canonical audio artifact kind/MIME support",
+    "NativeArtifactProvider scoped to current home",
+    "Actual generation job resolver required only for generated-source registration"
+  ],
+  "limits": [
+    "Generated provenance adapter remains unavailable as recorded in music.02",
+    "Gate began under music.02 before music.00 task ID was dispatched; exact tool-only evidence retained without unchanged rerun"
+  ],
+  "base_revision": "6ff3929d",
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_tools.py"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.02",
+  "checkpoints": [],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-tools/app.json"
+  ],
+  "evidence": {
+    "task": "music.02",
+    "root": "/tmp/gideon-expansion-worktrees/music",
+    "started_at": 1790294385.61542,
+    "production_lines": 74,
+    "test_lines": 116,
+    "ratio": 1.5675675675675675,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/music/tools.py",
+          "checks/runtime/capabilities/music/test_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.02-checks-ga4wkb5e/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/music/checks/runtime/capabilities/music/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.02-checks-ga4wkb5e/runtime.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-music.02-checks-ga4wkb5e",
+    "completed_at": 1790294395.287193,
+    "files": {
+      "runtime/gideon/workspace/capabilities/music/tools.py": "9936af5e0894e57e34807d562808178d96d66c95c056b097f716d4cbae8ac767",
+      "checks/runtime/capabilities/music/test_tools.py": "ea5021183c1c9cae634c53b9d2fa1dc17c0e30ba9daf20dc33b8ad2baa3f657a"
+    }
+  },
+  "executed_task_mapping": {
+    "executed_task": "music.02",
+    "assigned_task": "music.00",
+    "reason": "Childtask ID arrived after focused native-only gate started; root accepted unchanged evidence without rerun."
+  }
+}

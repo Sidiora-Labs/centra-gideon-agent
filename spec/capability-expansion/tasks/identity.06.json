@@ -1,0 +1,105 @@
+{
+  "id": "identity.06",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Pause and resume actual scheduled heartbeat turns using persisted policy while preserving maintenance and pending work",
+    "Recheck pause immediately before actual task callback; never claim live provider readiness",
+    "Bounded existing persona/self_notes slots preserve continuity through restart and existing PromptAssembler consumer",
+    "Explicit human deletion uses existing tombstones and agent append cannot resurrect them",
+    "Existing memory WAL plus ordered pause policy audit record actions without a competing memory store",
+    "Actual HTTP console native operations and real heartbeat/memory integration tests"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/continuity.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/engine/heartbeat.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_continuity.py",
+    "apps/console/src/features/capabilities/identity/ContinuityPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_continuity.py",
+    "checks/runtime/capabilities/identity/continuity_ui_server.py",
+    "apps/console/src/features/capabilities/identity/ContinuityPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_continuity.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/ContinuityPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity06-baseline",
+  "remaining_limits": [
+    "Pause affects scheduled heartbeat turns only, not active turns or independent workflow/cron engines",
+    "Complete agent enable/start/wake/stop lifecycle and bounded self-thinking route grants/quotas remain pending original requirements",
+    "Existing slots survive normal fact cleanup but explicit administrative memory reset is outside protection scope",
+    "No external provider execution/readiness established"
+  ],
+  "evidence": {
+    "task": "identity.06",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790296830.3758032,
+    "production_lines": 168,
+    "test_lines": 304,
+    "ratio": 1.8095238095238095,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/engine/heartbeat.py",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_continuity.py",
+          "runtime/gideon/workspace/capabilities/identity/continuity.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/continuity_ui_server.py",
+          "checks/runtime/capabilities/identity/test_continuity.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.06-checks-bc1koxh8/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_continuity.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.06-checks-bc1koxh8/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/ContinuityPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.06-checks-bc1koxh8/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.06-checks-bc1koxh8",
+    "completed_at": 1790296851.0047598,
+    "files": {
+      "apps/console/src/features/capabilities/identity/ContinuityPage.tsx": "3b4d416cf42309522675ef3d2f1433d0789de0fb96dfe64fa87a7d23a9eb6c90",
+      "runtime/gideon/engine/heartbeat.py": "e892e6349016ee8462e9527620cec672d3a8dd470b612011f46d845bd6ff8fab",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_continuity.py": "8ee3f5b9e2d4a3d35eeff85e4c785455a5576e18f777b5b075500464a1a747e1",
+      "runtime/gideon/workspace/capabilities/identity/continuity.py": "cfc2fa9c2bc041ccb43204ab937fa54fafe3e161f20a2d849ea7b95c2175bbb8",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "575eced20ea25493a458e89fd4877f7a23388b014b87bcb995bcd971ee14a9f5",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "41c24ca0f274560d4f66c0310b4381e5e8217e5a4f26583e6b2544eddfcae8eb",
+      "apps/console/src/features/capabilities/identity/ContinuityPage.test.tsx": "e7a20a40c7cb7f3407093cd8090a8c47c12dde873d01e2baff9cb51e0d3dc3c5",
+      "checks/runtime/capabilities/identity/continuity_ui_server.py": "4c41c585e77958aa59968cfc7139daaa68c7b8a32632346584ed37ac5240865a",
+      "checks/runtime/capabilities/identity/test_continuity.py": "eeb4f6e9f07db5e4f4b56e7a6383a1efbdab5ab99427d004ca95a076743e103b"
+    }
+  },
+  "repair_cycles": 1,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.06"
+}

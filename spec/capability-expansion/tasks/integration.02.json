@@ -1,0 +1,47 @@
+{
+  "id": "integration.02",
+  "status": "locally_qualified_scoped_paths",
+  "production_files": [
+    "apps/console/src/app/shell/App.tsx",
+    "apps/console/src/app/shell/VoiceControls.tsx",
+    "apps/console/src/features/capabilities/CapabilitiesSection.tsx",
+    "apps/console/src/features/capabilities/capabilities.css"
+  ],
+  "test_files": [
+    "checks/capabilities/browser.mjs",
+    "checks/capabilities/full_browser.mjs"
+  ],
+  "evidence": {
+    "typecheck": {
+      "command": "npm run typecheck",
+      "cwd": "apps/console",
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-integration-types-next-fixed.log"
+    },
+    "browser": {
+      "command": "node checks/capabilities/browser.mjs",
+      "exit_code": 0,
+      "evidence": "/tmp/gideon-capability-browser-cq8rBz/evidence.json"
+    },
+    "full_application": {
+      "command": "node checks/capabilities/full_browser.mjs",
+      "exit_code": 0,
+      "evidence": "/tmp/gideon-full-console-browser-iic3Qo/evidence.json",
+      "log": "/tmp/gideon-expansion-20260925/oss-full-app-browser-layout-fixed.log"
+    }
+  },
+  "acceptance_coverage": [
+    "Actual hash navigation through all ten assembled capability sections with successful runtime HTTP reads",
+    "Real voice dialog navigation request and applied receipt after route change",
+    "Real canvas pointer drawing, saved state, export and reload",
+    "Desktop/mobile screenshots and viewport overflow check",
+    "Shared console TypeScript check",
+    "Actual full dashboard bootstrap and App with signed-in local owner, command palette and native voice dialog",
+    "PNG export bytes have actual PNG signature; full-shell navigation is unobscured by corner controls"
+  ],
+  "remaining_limits": [
+    "Later lane features require incremental qualification",
+    "External engines, model services and native device paths retain per-task pending evidence",
+    "Hosted version remains unpublished"
+  ]
+}

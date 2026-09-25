@@ -1,0 +1,15 @@
+{
+  "name": "gideon-personal-knowledge",
+  "version": "1.0.0",
+  "displayName": "Personal Knowledge",
+  "description": "Revisit anniversaries and preserve, review and organize original text and voice captures.",
+  "icon": "NotebookPen",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "knowledge"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.knowledge.tools:create_provider",
+    "capabilities": ["personal-knowledge"]
+  },
+  "native": true
+}

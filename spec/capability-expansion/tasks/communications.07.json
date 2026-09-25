@@ -1,0 +1,56 @@
+{
+  "id": "communications.07",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "eee87836",
+  "requires": [
+    "communications.06"
+  ],
+  "contract": "Telegram /people,/care,/status project actual local people/evidence. Strict configured webhook secret and chat+sender allowlists protect command ingress. Atomic updateID receipt+reply queue and durable single-attempt notification delivery use canonical credential references. Existing NotificationDeliveryProvider registry integrates an explicitly enabled Telegram provider; native tools and Console cover operations/settings/queue/manual send.",
+  "acceptance": [
+    "Actual command projection and authorized webhook HTTP with receipt replay/conflict/allowlist denial",
+    "Durable notification queue with idempotency, unavailable credentials, no automatic uncertain retry",
+    "Actual NotificationDeliveryProvider factory/registry and native policy metadata",
+    "Actual HTTP-backed Console command/settings/queue/errors",
+    "Telegram accepted message IDs distinct from recipient reading; live delivery unqualified without customer bot"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/telegram.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/TelegramPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_telegram.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/TelegramPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_telegram.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/TelegramPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json",
+    "runtime/gideon/extensions/apps/native/gideon-telegram-ops/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.07",
+  "sources": [
+    "https://core.telegram.org/bots/api"
+  ],
+  "limits": [
+    "No external Telegram sends during qualification; actual API acceptance/recipient delivery pending real bot access.",
+    "Operational commands bounded to /people,/care,/status; this does not replace a general Telegram channel transport.",
+    "Public webhook registration and edge exposure require root integration; endpoint itself checks independent secret and allowlists.",
+    "Interrupted sending attempts remain explicitly unconfirmed and cannot automatically resend."
+  ],
+  "qualification": {
+    "runtime": "49 passed including real NotificationDeliveryProvider registry and webhook auth",
+    "console_http": "3 passed",
+    "external_telegram": "pending real bot; no external messages sent",
+    "public_webhook_and_native_registration": "pending root integration"
+  }
+}

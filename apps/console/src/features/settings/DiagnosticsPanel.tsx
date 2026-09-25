@@ -100,7 +100,7 @@ export function DiagnosticsPanel() {
       {
 }
       <Section title="Backend log level" hint="Change how verbose the gateway logs are, live. Persists across restarts.">
-        {levelErr && <LoadError what="backend log level" error={levelErr} onRetry={loadLevel} />}
+        {Boolean(levelErr) && <LoadError what="backend log level" error={levelErr} onRetry={loadLevel} />}
         <Surface tone="container" radius="lg" className="px-l py-m">
           <div className="flex items-center gap-s">
             <div className="inline-flex rounded-pill bg-surface-container p-1">

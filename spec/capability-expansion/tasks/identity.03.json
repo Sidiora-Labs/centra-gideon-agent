@@ -1,0 +1,105 @@
+{
+  "id": "identity.03",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Persist source-linked literal expectation cases with optimistic revisions and retry-safe creation",
+    "Record immutable source/case snapshots and distinct supplied-observation provenance",
+    "Real existing assertion engine evaluates equals/contains/not_contains; no semantic judge claims",
+    "Provider runs have durable running/unavailable states and replay protection without fabricated outputs",
+    "Real HTTP, console, and native tools author and run observations; native current privacy revocation enforced"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/fidelity.py",
+    "runtime/gideon/workspace/capabilities/identity/fidelity_generation.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_fidelity.py",
+    "apps/console/src/features/capabilities/identity/FidelityPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_fidelity.py",
+    "checks/runtime/capabilities/identity/fidelity_ui_server.py",
+    "apps/console/src/features/capabilities/identity/FidelityPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_fidelity.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/FidelityPage.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-identity/app.json"
+  ],
+  "baseline_dir": "/tmp/gideon-identity03-baseline",
+  "remaining_limits": [
+    "External provider generation not exercised; no semantic fidelity qualification",
+    "Root-owned integration registration pending"
+  ],
+  "evidence": {
+    "task": "identity.03",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790295247.5110915,
+    "production_lines": 295,
+    "test_lines": 322,
+    "ratio": 1.0915254237288134,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_fidelity.py",
+          "runtime/gideon/workspace/capabilities/identity/fidelity.py",
+          "runtime/gideon/workspace/capabilities/identity/fidelity_generation.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/fidelity_ui_server.py",
+          "checks/runtime/capabilities/identity/test_fidelity.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.03-checks-kbt_mzy1/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_fidelity.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.03-checks-kbt_mzy1/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/FidelityPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.03-checks-kbt_mzy1/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.03-checks-kbt_mzy1",
+    "completed_at": 1790295276.125511,
+    "files": {
+      "apps/console/src/features/capabilities/identity/FidelityPage.tsx": "a2d35a414e6bedbc0ddb54c9a417bf5e2bb6305474307acdb4d7c3174f029f7e",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_fidelity.py": "0b61df7374f35cf345ef086cbff21240a7ee45723279ae24ab45a9115a51ab43",
+      "runtime/gideon/workspace/capabilities/identity/fidelity.py": "5849ad26a181587ce74ef162d671b539d916bf310648f629f84706ac58eed58e",
+      "runtime/gideon/workspace/capabilities/identity/fidelity_generation.py": "c0bfaf6a9ff66fb30e2b03ea708c16935f11ac1672caddefd65fadb348903162",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "887e5645595452e5932bfb93a84a68643603ce60be8e2a729698c92561c15f37",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "3cff729e7466a2bb06d16dce67d523fcdef23b0598745a9f331a0f2158743807",
+      "apps/console/src/features/capabilities/identity/FidelityPage.test.tsx": "a4756fdf66ef135c0f2a54cc04dacc0e5247214186975e50224de9d4682cd3a1",
+      "checks/runtime/capabilities/identity/fidelity_ui_server.py": "7c2a75b7a04ab9b6e4239aca768bcd9957436b887e3881051b1fbc904a726cfe",
+      "checks/runtime/capabilities/identity/test_fidelity.py": "5b07c6f150f9b5c83990d1976915218f6ed56b7ba61432f67f03aaf6e8a17c6b"
+    }
+  },
+  "repair_cycles": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.03"
+}

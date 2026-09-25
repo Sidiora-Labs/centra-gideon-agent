@@ -1,0 +1,47 @@
+{
+  "id": "creative.08",
+  "schema_version": 1,
+  "status": "implemented_inference_unqualified",
+  "base_revision": "0914e460",
+  "requires": [
+    "creative.07"
+  ],
+  "contract": "Guided premise/development/outline/ready story stages with explicit readiness validation, ordered beats, pinned author/universe, revision restore. Actual configured reasoning guidance offers stage-restricted suggestions requiring review/adoption; authored suggestions are additional legitimate mode. Ready story creates canonical WorkStore work atomically with idempotent link.",
+  "acceptance": [
+    "Actual HTTP/UI/native stage progression, readiness errors, beat order/history/restore and pinned context.",
+    "Reviewed authored suggestion adoption changes only selected stage fields and checks revision; actual model invocation recorded separately without fake output.",
+    "Ready story creates exactly one canonical work for replay/concurrent request and rolls back work+link after actual SQLite failure.",
+    "Strict schema/stage boundaries, foreign source rejection and explicit missing statuses, search/page/deep-link continuity.",
+    "Model inference qualification requires actual configured provider success, remains pending if credentials unavailable."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/stories.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Stories.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_stories.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Stories.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_stories.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Stories.test.tsx"
+  ],
+  "inference_evidence": "/tmp/gideon-creative-08-inference-oss.json",
+  "inference": {
+    "task": "creative.08",
+    "actual_provider_attempt": true,
+    "inference_qualified": false,
+    "error": "Configured story model failed: RuntimeError"
+  },
+  "pending_acceptance": [
+    "Successful actual configured model guidance and adoption; local real provider attempt unavailable."
+  ],
+  "qualification_note": "Guided authored stages, review/adoption, canonical work handoff and focused checks passed. Model-inference success remains unqualified."
+}

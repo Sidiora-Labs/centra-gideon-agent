@@ -1,0 +1,29 @@
+import { useEffect, useState } from 'react'
+import { requestJson } from '../../../shared/data/gatewayRequest'
+const base = '/api/capabilities/communications/x/accounts/'
+type Account = { id: string; handle: string; platform: string; status: string }
+type Draft = { id: string; text: string; revision: number; state: string; handoff_url?: string; browser_account_warning?: string }
+type Snapshot = { state: string; coverage: string; error?: string; next_token?: string; captured_at?: string; posts: { id: string; text: string; url: string }[] }
+export function XPanel() {
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [id, setId] = useState(() => new URLSearchParams(location.hash.split('?')[1] || '').get('x_account') || '')
+  const [drafts, setDrafts] = useState<Draft[]>([])
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
+  const [content, setContent] = useState('')
+  const [editing, setEditing] = useState<Draft | null>(null)
+  const [key, setKey] = useState(() => crypto.randomUUID())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const run = async (operation: () => Promise<void>) => { setBusy(true); setError(''); try { await operation() } catch (e) { setError(String(e)) } finally { setBusy(false) } }
+  const reload = async (accountId = id) => { const [captured, saved] = await Promise.all([requestJson<{ snapshot: Snapshot }>(base + accountId + '/snapshot'), requestJson<{ drafts: Draft[] }>(base + accountId + '/drafts')]); setSnapshot(captured.snapshot); setDrafts(saved.drafts) }
+  const select = async (value: string) => { setId(value); setSnapshot(null); setDrafts([]); setEditing(null); setContent(''); const params = new URLSearchParams(location.hash.split('?')[1] || ''); params.set('x_account', value); location.hash = '#/capabilities/communications?' + params.toString(); if (value) await reload(value) }
+  useEffect(() => { let active = true; requestJson<{ accounts: Account[] }>('/api/capabilities/communications/social/accounts').then(result => { if (active) setAccounts(result.accounts.filter(row => row.platform === 'x' && row.status === 'active')) }).catch(e => { if (active) setError(String(e)) }); return () => { active = false } }, [])
+  useEffect(() => { if (id) void run(() => reload(id)) }, [])
+  return <section aria-label="X reading and compose" className="space-y-3 rounded border p-4"><h2>X reading and compose</h2><p>Read one available API page. Reviewed links open browser composition; no post is sent or verified here. Confirm the signed-in browser account before posting.</p>{error && <p role="alert">{error}</p>}
+    <button disabled={busy} onClick={() => void run(async () => setAccounts((await requestJson<{ accounts: Account[] }>('/api/capabilities/communications/social/accounts')).accounts.filter(row => row.platform === 'x' && row.status === 'active')))}>Refresh X registrations</button><label>X registration<select disabled={busy} value={id} onChange={e => void run(() => select(e.target.value))}><option value="">Select active X registration</option>{accounts.map(row => <option value={row.id} key={row.id}>@{row.handle}</option>)}</select></label>
+    {id && <><button disabled={busy} onClick={() => void run(() => reload())}>Reload X workspace</button><button disabled={busy} onClick={() => void run(async () => setSnapshot((await requestJson<{ snapshot: Snapshot }>(base + id + '/sync', 'POST', {})).snapshot))}>Read recent X posts</button>{snapshot && <div><p>X read: {snapshot.state}; {snapshot.coverage}</p>{snapshot.error && <p>{snapshot.error}</p>}{snapshot.captured_at && <p>Captured: {snapshot.captured_at}</p>}{snapshot.posts.map(post => <article key={post.id}><p>{post.text}</p><a href={post.url} target="_blank" rel="noopener noreferrer">Open X post</a></article>)}{snapshot.next_token && <button disabled={busy} onClick={() => void run(async () => setSnapshot((await requestJson<{ snapshot: Snapshot }>(base + id + '/sync', 'POST', { pagination_token: snapshot.next_token })).snapshot))}>Read next X page</button>}</div>}
+      <form onSubmit={e => { e.preventDefault(); void run(async () => { await requestJson(base + id + '/drafts' + (editing ? '/' + editing.id : ''), editing ? 'PUT' : 'POST', { text: content, ...(editing ? { revision: editing.revision } : { request_key: key }) }); setContent(''); setEditing(null); setKey(crypto.randomUUID()); await reload() }) }}><label>X draft text<textarea required maxLength={280} value={content} onChange={e => setContent(e.target.value)} /></label><p>Local draft limit: 280 characters; X applies its own validation in the browser.</p><button disabled={busy}>{editing ? 'Save X draft changes' : 'Save X draft'}</button>{editing && <button type="button" onClick={() => { setEditing(null); setContent('') }}>Cancel X draft edit</button>}</form>
+      {drafts.map(draft => <article key={draft.id}><p>{draft.text}</p><p>X draft: {draft.state}; revision {draft.revision}</p><button disabled={busy} onClick={() => { setEditing(draft); setContent(draft.text) }}>Edit X draft</button><button disabled={busy} onClick={() => void run(async () => { await requestJson(base + id + '/drafts/' + draft.id + '/review', 'POST', { revision: draft.revision, confirm_review: true }); await reload() })}>Confirm review for browser handoff</button>{draft.handoff_url && <><p>{draft.browser_account_warning}</p><a href={draft.handoff_url} target="_blank" rel="noopener noreferrer">Open reviewed X composer</a></>}</article>)}
+    </>}
+  </section>
+}

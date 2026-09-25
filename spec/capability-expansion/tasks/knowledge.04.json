@@ -1,0 +1,106 @@
+{
+  "id": "knowledge.04",
+  "status": "locally_qualified",
+  "base_revision": "8240c8fe",
+  "schema_version": 1,
+  "contract": "Bounded reviewed ChatGPT conversations.json archive import into existing canonical Knowledge document and notes. Preserve exact raw source bytes, full branch mapping, source dates and unsupported parts. No conversation execution or model calls.",
+  "acceptance": [
+    "Preview1..500 conversations from up to512KiB UTF-8JSON, validate stable IDs and acyclic present parent chains, report invalid records and unsupported attachment parts.",
+    "Commit explicit reviewed selection only with matching original digest; same request exact replay, conflicting request409; normalized complete-record hash deduplicates exports while preserving changed versions.",
+    "Store original bytes in pinned existing knowledge files directory, actual document source and searchable notes with roles/timestamps/parent references and original dates. Download exact original through allocation-bound hash-checked endpoint.",
+    "Real native tool invocation preserves temporary/incognito policies; HTTP boundaries reject unknown scope/model selectors and prevent cross-store source reads.",
+    "Real HTTP DOM selection/import/error behavior plus real store, FTS, replay, canonical provenance and size/shape validation."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/archive.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_archives.py",
+    "apps/console/src/features/capabilities/knowledge/ArchivePage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_archive.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "apps/console/src/features/capabilities/knowledge/ArchivePage.test.tsx",
+    "checks/runtime/capabilities/knowledge/archive_ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_archive.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/ArchivePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Only bounded ChatGPT JSON exports are supported; ZIP archives, media extraction, and executable conversation replay are not included.",
+    "Full branch mapping and nontext attachment references remain in the original JSON source; notes contain text plus branch provenance.",
+    "Root owns central route/native metadata integration and integrated browser journeys.",
+    "New archive writes fail closed on process runtime home drift because existing Knowledge maintenance helpers resolve process configuration; completed receipts and original source reads remain bound."
+  ],
+  "verification": {
+    "task": "knowledge.04",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790296540.0891738,
+    "production_lines": 289,
+    "test_lines": 378,
+    "ratio": 1.3079584775086506,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_archives.py",
+          "runtime/gideon/workspace/capabilities/knowledge/archive.py",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "checks/runtime/capabilities/knowledge/archive_ui_server.py",
+          "checks/runtime/capabilities/knowledge/test_archive.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.04-checks-zxp9nqar/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_archive.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.04-checks-zxp9nqar/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/knowledge/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/knowledge/apps/console/src/features/capabilities/knowledge/ArchivePage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.04-checks-zxp9nqar/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.04-checks-zxp9nqar",
+    "completed_at": 1790296584.009532,
+    "files": {
+      "apps/console/src/features/capabilities/knowledge/ArchivePage.tsx": "14c02de1e0df6a24d108086e4627d42f2ffc61f582501201cfa2758e882f59f2",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_archives.py": "e764ca8fffedab6e7463d2cc4f24b00496a36a4114e9be304468433c51b382b6",
+      "runtime/gideon/workspace/capabilities/knowledge/archive.py": "8fd006adf75886a86db2cfb470fdb5f8f34ac05a280edc1026543a866b9298d1",
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "1b504025e39477de63814771901389ee077939db52ca29ebd273982e6afb51b4",
+      "apps/console/src/features/capabilities/knowledge/ArchivePage.test.tsx": "22b04c3dd61d78b091f4c7e597386c437c733a0d6ff9c95d2a69b5e4c6072b37",
+      "checks/runtime/capabilities/knowledge/archive_ui_server.py": "8790314074236a19236ad33d6ae68d9137744e797b4b0442d4b46fb91acfed39",
+      "checks/runtime/capabilities/knowledge/test_archive.py": "c80c500d57e0ff1be67b0c66ff2187f472d5a34cafea5d991dca6f899f18052d",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "5482e68ec7c009bd8c2cd013687dd2910f5667396c7505535a55fc26c6eeba3b"
+    }
+  },
+  "repair_history": [
+    "Initial gate41/42runtime: actual Knowledge maintenance helper created switched-home artifacts.",
+    "Repair1 snapshots pure configuration home and fails closed on new/pending archive writes before artifacts;42runtime+2realHTTPDOMpassed."
+  ]
+}

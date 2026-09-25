@@ -1,0 +1,101 @@
+{
+  "id": "identity.07",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Export only explicitly selected live persona/self_notes canonical slots into authenticated encrypted envelope using existing archive cryptography",
+    "Reject wrong passphrase, tampering, unsupported or oversized payloads before any destination memory mutation",
+    "Preview exact new/duplicate/tombstoned lines and capacity; recheck destination digest before import",
+    "Append without overwrite or human tombstone resurrection; preserve destination heartbeat policy and provider configuration",
+    "Durable retry receipts record actual applied/skipped/partial states without persisting passphrases or plaintext notes",
+    "Actual two-home transfer through core/HTTP and console file workflow; agent tool exposes inventory only"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/bundles.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_bundles.py",
+    "apps/console/src/features/capabilities/identity/BundlesPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_bundles.py",
+    "checks/runtime/capabilities/identity/bundles_ui_server.py",
+    "apps/console/src/features/capabilities/identity/BundlesPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_bundles.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/BundlesPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity07-baseline",
+  "remaining_limits": [
+    "This checkpoint transfers existing persona/self_notes slots only; agent definitions/model policy/avatar/human identity groups remain pending original breadth",
+    "No provider credentials/account configuration/runtime enablement in export/import",
+    "Per-line canonical memory operations cannot promise cross-record atomicity; failures return honest partial and interrupted receipts are not retried automatically"
+  ],
+  "evidence": {
+    "task": "identity.07",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790297217.2212627,
+    "production_lines": 176,
+    "test_lines": 300,
+    "ratio": 1.7045454545454546,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_bundles.py",
+          "runtime/gideon/workspace/capabilities/identity/bundles.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/bundles_ui_server.py",
+          "checks/runtime/capabilities/identity/test_bundles.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.07-checks-h_c91e2u/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_bundles.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.07-checks-h_c91e2u/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/BundlesPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.07-checks-h_c91e2u/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.07-checks-h_c91e2u",
+    "completed_at": 1790297306.747704,
+    "files": {
+      "apps/console/src/features/capabilities/identity/BundlesPage.tsx": "541563f8f6c5884cf0e40edbac89709475f90f4a6f211f07e710b43040e86ade",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_bundles.py": "4bd04e4e4525d266420ad8cd2512896fb97cb13859cb12c98b8accff091bdd34",
+      "runtime/gideon/workspace/capabilities/identity/bundles.py": "0b0cd380d9f201879697d84efd7999b76bf6bf85936db0384ac86a142e689918",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "b97972ee12ad0513bdbf0c2a52ea39ec33ad3956cc91839fb9ddd4f6c8a38e25",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "157c2b4da9ce31c7d8eb9b37e8e2fe74f8c7f0f257a6d193162e2b3812779c9b",
+      "apps/console/src/features/capabilities/identity/BundlesPage.test.tsx": "4bc156d64b96125b403b799031f419974ac403b71416913c9e86f617e2f9db13",
+      "checks/runtime/capabilities/identity/bundles_ui_server.py": "0cafd95ddfa4f504c1b0cb27a4b806d0fc05e8b3a932b4b9cc9f5749f16d0b8b",
+      "checks/runtime/capabilities/identity/test_bundles.py": "064cf78b461b64c3af828af1482144d7d97104baa02064015d44c1e3133035f8"
+    }
+  },
+  "repair_cycles": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.07"
+}

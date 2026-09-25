@@ -1,0 +1,97 @@
+{
+  "id": "knowledge.13",
+  "status": "locally_qualified",
+  "base_revision": "82dd8d34",
+  "schema_version": 1,
+  "contract": "Reject capture, audio, transcription, canonical routing and typed imports before mutation when ambient runtime home differs from trusted captured home; native lazy consumers preserve original factory home. Existing read/replay receipts stay accessible.",
+  "acceptance": [
+    "Real stores and audio bytes prove no foreign-home files, destination records, pending writes or source revision changes for refused mutations.",
+    "Restoring original allocation permits same request retry into original canonical store.",
+    "Completed idempotent replay succeeds under home drift without new writes.",
+    "Native first-write-after-drift cannot initialize capture, typed or archive services against changed ambient home; existing session policy retained."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/capture.py",
+    "runtime/gideon/workspace/capabilities/knowledge/typed.py",
+    "runtime/gideon/workspace/capabilities/knowledge/archive.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_bound_writes.py",
+    "checks/runtime/capabilities/knowledge/test_capture.py",
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_archive.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_bound_writes.py",
+    "checks/runtime/capabilities/knowledge/test_capture.py",
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_archive.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [],
+  "remaining_limits": [
+    "This scoped correction fails closed on process-home changes rather than changing canonical Knowledge maintenance helpers.",
+    "Production deployment and aggregate integration remain parent-owned."
+  ],
+  "verification": {
+    "task": "knowledge.13",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790296832.956551,
+    "production_lines": 22,
+    "test_lines": 144,
+    "ratio": 6.545454545454546,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/knowledge/archive.py",
+          "runtime/gideon/workspace/capabilities/knowledge/capture.py",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "runtime/gideon/workspace/capabilities/knowledge/typed.py",
+          "checks/runtime/capabilities/knowledge/test_archive.py",
+          "checks/runtime/capabilities/knowledge/test_bound_writes.py",
+          "checks/runtime/capabilities/knowledge/test_capture.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py",
+          "checks/runtime/capabilities/knowledge/test_typed.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.13-checks-ye54l72b/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_bound_writes.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_capture.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_typed.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_archive.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.13-checks-ye54l72b/runtime.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.13-checks-ye54l72b",
+    "completed_at": 1790296900.3296516,
+    "files": {
+      "runtime/gideon/workspace/capabilities/knowledge/archive.py": "6e8bde2ff2bc5e435fe30872256b465bd742a8ffdef7bafa691e758c0df2af38",
+      "runtime/gideon/workspace/capabilities/knowledge/capture.py": "962bcb49525b36da25c4115d9ba1fee44aed3313f0b728a8475b98349ace5d25",
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "747c46526d24c742d440ea3b2d621ea63c282e74ac0f2257c1301289db7b77d6",
+      "runtime/gideon/workspace/capabilities/knowledge/typed.py": "99ec888e55d254585d5efb8dc90e28d83e611dab0edb37cfec23b41227aca661",
+      "checks/runtime/capabilities/knowledge/test_archive.py": "c80c500d57e0ff1be67b0c66ff2187f472d5a34cafea5d991dca6f899f18052d",
+      "checks/runtime/capabilities/knowledge/test_bound_writes.py": "68145dc28a6fe0783d6771f92a763de5a616df46a436112263b9ba9ba024b2e3",
+      "checks/runtime/capabilities/knowledge/test_capture.py": "4ad1723f3389371022eff4049bf5ce1672967336b9389d877a05f5f37b1291cb",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "75a251b2271bd7a289b604effb0f2c1185bb0c1d6d17ffed22cb28428843ac72",
+      "checks/runtime/capabilities/knowledge/test_typed.py": "368071e256020ab26b60cf565a5f1287bdf4b834fe677da1bbd2e577f478a942"
+    }
+  }
+}

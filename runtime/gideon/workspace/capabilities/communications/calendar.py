@@ -1,0 +1,331 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import re
+from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote, urlencode, urlsplit
+from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from aiohttp import ClientError, ClientSession, ClientTimeout
+from gideon.core.config.credentials import get_credential
+from .store import PeopleError, fields, instant, text
+
+SOURCE_FIELDS = {'name', 'kind', 'calendar_id', 'credential_ref', 'timezone'}
+
+
+def zone(name):
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise PeopleError('Unknown calendar timezone') from None
+
+
+def schema(db):
+    db.execute('CREATE TABLE IF NOT EXISTS calendar_sources (id TEXT PRIMARY KEY,body TEXT NOT NULL,revision INTEGER NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS calendar_events (source_id TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(source_id,id))')
+    db.execute('CREATE TABLE IF NOT EXISTS calendar_imports (source_id TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,raw TEXT NOT NULL,UNIQUE(source_id,digest))')
+
+
+def sources(store):
+    with closing(store.connect()) as db, db:
+        schema(db)
+        return [{**json.loads(row[0]), 'revision': row[1]} for row in db.execute('SELECT body,revision FROM calendar_sources ORDER BY rowid')]
+
+
+def source(store, source_id):
+    row = next((item for item in sources(store) if item['id'] == source_id), None)
+    if not row:
+        raise PeopleError('Calendar source not found', 404)
+    return row
+
+
+def save_source(store, data, source_id=None):
+    fields(data, SOURCE_FIELDS | ({'revision'} if source_id else set()))
+    body = {key: text(data.get(key, default), key, limit, required) for key, default, limit, required in [('name', '', 200, True), ('calendar_id', 'primary', 500, True), ('credential_ref', '', 120, False), ('timezone', 'UTC', 100, True)]}
+    zone(body['timezone'])
+    body['kind'] = data.get('kind')
+    if body['kind'] not in ('ics', 'google', 'outlook'):
+        raise PeopleError('Choose ICS, Google Calendar or Outlook')
+    if body['kind'] != 'ics' and not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', body['credential_ref']):
+        raise PeopleError('Remote calendar requires an existing credential reference')
+    revision = data.get('revision')
+    if source_id and (type(revision) is not int or revision < 1):
+        raise PeopleError('Calendar source revision is required')
+    source_id = source_id or uuid4().hex
+    with closing(store.connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        schema(db)
+        old = db.execute('SELECT body,revision FROM calendar_sources WHERE id=?', (source_id,)).fetchone()
+        if revision is not None and not old:
+            raise PeopleError('Calendar source not found', 404)
+        if old and old[1] != revision:
+            raise PeopleError('Calendar source changed; reload', 409)
+        if old and json.loads(old[0])['kind'] != body['kind']:
+            raise PeopleError('Calendar source kind is immutable', 409)
+        body.update(id=source_id, sync={'state': 'not_synced', 'coverage': 'unknown'})
+        next_revision = old[1] + 1 if old else 1
+        db.execute('INSERT INTO calendar_sources VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision=excluded.revision', (source_id, json.dumps(body), next_revision))
+        if old:
+            db.execute('DELETE FROM calendar_events WHERE source_id=?', (source_id,))
+    return {**body, 'revision': next_revision}
+
+
+def local_instant(value, tz):
+    observed = datetime.strptime(value, '%Y%m%dT%H%M%S')
+    aware = observed.replace(tzinfo=zone(tz))
+    if aware.astimezone(timezone.utc).astimezone(aware.tzinfo).replace(tzinfo=None) != observed or aware.utcoffset() != observed.replace(tzinfo=aware.tzinfo, fold=1).utcoffset():
+        raise PeopleError('Ambiguous or nonexistent local calendar time; export UTC instants')
+    return aware.astimezone(timezone.utc).isoformat()
+
+
+def ics_time(value, params, default_zone):
+    if params.get('VALUE') == 'DATE' or re.fullmatch(r'\d{8}', value):
+        day = datetime.strptime(value, '%Y%m%d').date().isoformat()
+        return day, True
+    if value.endswith('Z'):
+        return datetime.strptime(value, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).isoformat(), False
+    return local_instant(value, params.get('TZID', default_zone)), False
+
+
+def parse_ics(content, default_zone):
+    content = text(content, 'ICS content', 1048576, True)
+    if len(content.encode()) > 1048576:
+        raise PeopleError('Calendar export exceeds 1 MiB')
+    lines = re.sub(r'\r?\n[ \t]', '', content).splitlines()
+    if not lines or lines[0] != 'BEGIN:VCALENDAR' or lines[-1] != 'END:VCALENDAR':
+        raise PeopleError('A complete VCALENDAR export is required')
+    if 'VERSION:2.0' not in lines:
+        raise PeopleError('Calendar VERSION:2.0 is required')
+    rows, current, nested = [], None, 0
+    for line in lines[1:-1]:
+        if line == 'BEGIN:VEVENT':
+            if current is not None:
+                raise PeopleError('Nested VEVENT is invalid')
+            current, nested = {}, 0
+        elif line == 'END:VEVENT':
+            if current is None or nested:
+                raise PeopleError('Malformed VEVENT structure')
+            rows.append(current)
+            current = None
+        elif current is not None:
+            if line.startswith('BEGIN:'):
+                nested += 1
+                continue
+            if line.startswith('END:'):
+                nested -= 1
+                continue
+            if nested:
+                continue
+            if ':' not in line:
+                raise PeopleError('Malformed calendar property')
+            key, value = line.split(':', 1)
+            tokens = key.split(';')
+            name = tokens[0].upper()
+            params = dict(token.split('=', 1) for token in tokens[1:] if '=' in token)
+            if name in current and name in ('UID', 'DTSTART', 'DTEND', 'SUMMARY', 'RECURRENCE-ID'):
+                raise PeopleError('Duplicate calendar identity or time property')
+            current[name] = (value, params)
+    if current is not None or len(rows) > 1000:
+        raise PeopleError('Incomplete calendar event or more than 1000 events')
+    events, seen, warnings = [], set(), []
+    try:
+        for raw in rows:
+            uid = text(raw.get('UID', ('', {}))[0], 'UID', 500, True)
+            if 'DTSTART' not in raw:
+                raise PeopleError('Event DTSTART is required')
+            start, all_day = ics_time(*raw['DTSTART'], default_zone)
+            if 'DTEND' in raw:
+                end, end_all_day = ics_time(*raw['DTEND'], default_zone)
+                if end_all_day != all_day:
+                    raise PeopleError('Event start and end value types differ')
+            else:
+                end = (date.fromisoformat(start) + timedelta(days=1)).isoformat() if all_day else start
+            if end < start:
+                raise PeopleError('Calendar event ends before it starts')
+            recurrence = raw.get('RECURRENCE-ID', ('', {}))[0]
+            identity = uid + ('#' + recurrence if recurrence else '')
+            if identity in seen:
+                raise PeopleError('Duplicate calendar event identity')
+            seen.add(identity)
+            unsupported = [key for key in ('RRULE', 'RDATE', 'EXDATE', 'DURATION') if key in raw]
+            if unsupported:
+                warnings.append({'uid': uid, 'unsupported': unsupported})
+            unescape = lambda value: value.replace('\\n', '\n').replace('\\N', '\n').replace('\\,', ',').replace('\\;', ';').replace('\\\\', '\\')
+            events.append({'id': identity, 'uid': uid, 'title': unescape(raw.get('SUMMARY', ('', {}))[0])[:1000], 'location': unescape(raw.get('LOCATION', ('', {}))[0])[:2000], 'start': start, 'end': end, 'all_day': all_day, 'status': raw.get('STATUS', ('CONFIRMED', {}))[0].lower(), 'recurrence_unexpanded': bool(unsupported)})
+    except PeopleError:
+        raise
+    except (ValueError, TypeError):
+        raise PeopleError('Invalid calendar date or property') from None
+    return events, warnings
+
+
+def persist(store, source_row, events, sync, raw=''):
+    if len(events) > 5000:
+        raise PeopleError('Calendar sync exceeds 5000 events')
+    if len({event['id'] for event in events}) != len(events):
+        raise PeopleError('Duplicate provider calendar event identity')
+    with closing(store.connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        schema(db)
+        current = db.execute('SELECT revision FROM calendar_sources WHERE id=?', (source_row['id'],)).fetchone()
+        if not current or current[0] != source_row['revision']:
+            raise PeopleError('Calendar source changed during sync', 409)
+        if sync['coverage'] != 'partial':
+            db.execute('DELETE FROM calendar_events WHERE source_id=?', (source_row['id'],))
+        for event in events:
+            db.execute('INSERT INTO calendar_events VALUES (?,?,?) ON CONFLICT(source_id,id) DO UPDATE SET body=excluded.body', (source_row['id'], event['id'], json.dumps(event)))
+        body = {k: v for k, v in source_row.items() if k != 'revision'}
+        body['sync'] = sync
+        db.execute('UPDATE calendar_sources SET body=? WHERE id=?', (json.dumps(body), source_row['id']))
+        if raw:
+            digest = hashlib.sha256((str(source_row['revision']) + ':' + raw).encode()).hexdigest()
+            db.execute('INSERT INTO calendar_imports VALUES (?,?,?,?) ON CONFLICT(source_id,digest) DO NOTHING', (source_row['id'], digest, json.dumps(sync), raw))
+    return sync
+
+
+def upload(store, source_id, data):
+    fields(data, {'content', 'revision'})
+    row = source(store, source_id)
+    if row['kind'] != 'ics' or data.get('revision') != row['revision']:
+        raise PeopleError('ICS import requires the current ICS source revision', 409)
+    content = data.get('content')
+    text(content, 'ICS content', 1048576, True)
+    digest = hashlib.sha256((str(row['revision']) + ':' + content).encode()).hexdigest()
+    with closing(store.connect()) as db:
+        previous = db.execute('SELECT body FROM calendar_imports WHERE source_id=? AND digest=?', (source_id, digest)).fetchone()
+        if previous:
+            return json.loads(previous[0])
+    events, warnings = parse_ics(content, row['timezone'])
+    sync = {'state': 'synced', 'coverage': 'partial' if warnings else 'available_snapshot', 'scope': 'uploaded_ics', 'captured_at': datetime.now(timezone.utc).isoformat(), 'warnings': warnings, 'events': len(events), 'source_digest': hashlib.sha256(content.encode()).hexdigest(), 'source_revision': row['revision']}
+    return persist(store, row, events, sync, content)
+
+
+def provider_event(raw, kind):
+    if not isinstance(raw, dict):
+        raise PeopleError('Invalid calendar provider event')
+    identity = text(raw.get('id'), 'event identity', 500, True)
+    google = kind == 'google'
+    start, end = raw.get('start'), raw.get('end')
+    if not isinstance(start, dict) or not isinstance(end, dict):
+        raise PeopleError('Calendar provider event has no start/end')
+    all_day = bool(start.get('date')) if google else raw.get('isAllDay') is True
+    def value(field):
+        if all_day:
+            return date.fromisoformat((field.get('date') or field.get('dateTime', '')[:10])).isoformat()
+        raw_time = field.get('dateTime')
+        if not google and field.get('timeZone') == 'UTC' and isinstance(raw_time, str) and not re.search(r'(Z|[+-]\d\d:\d\d)$', raw_time):
+            raw_time += 'Z'
+        return instant(raw_time)
+    try:
+        beginning, ending = value(start), value(end)
+    except (ValueError, TypeError):
+        raise PeopleError('Invalid provider calendar time') from None
+    if ending < beginning:
+        raise PeopleError('Calendar event ends before it starts')
+    location = raw.get('location', '')
+    if not google:
+        if location and not isinstance(location, dict):
+            raise PeopleError('Invalid Outlook location')
+        location = (location or {}).get('displayName', '')
+    return {'id': identity, 'uid': str(raw.get('iCalUID') or raw.get('iCalUId') or identity), 'title': text(raw.get('summary' if google else 'subject', ''), 'title', 1000), 'location': text(location, 'location', 2000), 'start': beginning, 'end': ending, 'all_day': all_day, 'status': 'cancelled' if raw.get('isCancelled') or raw.get('status') == 'cancelled' else 'confirmed', 'recurrence_unexpanded': False}
+
+
+async def sync_remote(store, source_id, data):
+    row = source(store, source_id)
+    try:
+        return await _sync_remote(store, source_id, data)
+    except PeopleError as exc:
+        with closing(store.connect()) as db, db:
+            body = {k: v for k, v in row.items() if k != 'revision'}
+            body['sync'] = {**row['sync'], 'state': 'failed', 'coverage': 'unknown', 'error': str(exc)}
+            db.execute('UPDATE calendar_sources SET body=? WHERE id=? AND revision=?', (json.dumps(body), source_id, row['revision']))
+        raise
+
+
+async def _sync_remote(store, source_id, data):
+    fields(data, {'start', 'end'})
+    row = source(store, source_id)
+    beginning, ending = instant(data.get('start')), instant(data.get('end'))
+    if not beginning < ending or (datetime.fromisoformat(ending) - datetime.fromisoformat(beginning)) > timedelta(days=366):
+        raise PeopleError('Calendar window must be positive and at most 366 days')
+    if row['kind'] not in ('google', 'outlook'):
+        raise PeopleError('Upload an ICS export for this source')
+    token = get_credential(row['credential_ref'])
+    if not token:
+        raise PeopleError('Calendar credential is unavailable', 503)
+    google = row['kind'] == 'google'
+    base = 'https://www.googleapis.com/calendar/v3/calendars/' + quote(row['calendar_id'], safe='') + '/events' if google else 'https://graph.microsoft.com/v1.0/me/' + ('calendar/calendarView' if row['calendar_id'] == 'primary' else 'calendars/' + quote(row['calendar_id'], safe='') + '/calendarView')
+    params = {'timeMin': beginning, 'timeMax': ending, 'singleEvents': 'true', 'maxResults': '500'} if google else {'startDateTime': beginning, 'endDateTime': ending, '$top': '500'}
+    url = base + '?' + urlencode(params)
+    events, visited = [], set()
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=20), headers={'Authorization': 'Bearer ' + token, 'Prefer': 'outlook.timezone="UTC"'}) as client:
+            while url:
+                if url in visited or len(visited) >= 10:
+                    raise PeopleError('Calendar pagination exceeded its bound', 502)
+                if urlsplit(url).scheme != 'https' or urlsplit(url).netloc != urlsplit(base).netloc:
+                    raise PeopleError('Calendar pagination escaped its provider', 502)
+                visited.add(url)
+                async with client.get(url, allow_redirects=False) as response:
+                    if response.status != 200:
+                        raise PeopleError('Calendar provider refused the request', 502)
+                    chunks, size = [], 0
+                    async for chunk in response.content.iter_chunked(65536):
+                        size += len(chunk)
+                        if size > 2 * 1024 * 1024:
+                            raise PeopleError('Calendar provider page is too large', 502)
+                        chunks.append(chunk)
+                    page = json.loads(b''.join(chunks))
+                if not isinstance(page, dict):
+                    raise PeopleError('Invalid calendar provider page', 502)
+                items = page.get('items' if google else 'value')
+                if not isinstance(items, list):
+                    raise PeopleError('Calendar provider returned no event list', 502)
+                events.extend(provider_event(event, row['kind']) for event in items)
+                if len(events) > 5000:
+                    raise PeopleError('Calendar sync exceeds 5000 events')
+                cursor = page.get('nextPageToken') if google else page.get('@odata.nextLink')
+                if cursor is not None and (not isinstance(cursor, str) or len(cursor) > 8000):
+                    raise PeopleError('Invalid calendar pagination cursor', 502)
+                url = base + '?' + urlencode({**params, 'pageToken': cursor}) if google and cursor else cursor
+        state = {'state': 'synced', 'coverage': 'available_snapshot', 'scope': 'provider_window', 'start': beginning, 'end': ending, 'captured_at': datetime.now(timezone.utc).isoformat(), 'events': len(events), 'warnings': []}
+        return persist(store, row, events, state)
+    except (ClientError, asyncio.TimeoutError, ValueError, TypeError):
+        raise PeopleError('Calendar connection failed or returned invalid data', 503) from None
+
+
+def daily(store, day, timezone_name='UTC'):
+    tz = zone(timezone_name)
+    try:
+        if not isinstance(day, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+            raise ValueError()
+        day_value = date.fromisoformat(day)
+    except (ValueError, TypeError):
+        raise PeopleError('Calendar review date must be YYYY-MM-DD') from None
+    lower = datetime.combine(day_value, datetime.min.time(), tz).astimezone(timezone.utc).isoformat()
+    upper = datetime.combine(day_value + timedelta(days=1), datetime.min.time(), tz).astimezone(timezone.utc).isoformat()
+    source_rows = sources(store)
+    by_id = {row['id']: row for row in source_rows}
+    events = []
+    with closing(store.connect()) as db:
+        for source_id, body in db.execute('SELECT source_id,body FROM calendar_events'):
+            row = json.loads(body)
+            start, end = row['start'], row['end']
+            present = (start <= day < end) if row['all_day'] else (start < upper and end > lower) or (start == end and lower <= start < upper)
+            if present and row['status'] != 'cancelled':
+                events.append({**row, 'source_id': source_id, 'source_kind': by_id[source_id]['kind']})
+    now = datetime.now(timezone.utc)
+    for row in source_rows:
+        sync = row['sync']
+        captured = sync.get('captured_at')
+        row['review_coverage'] = sync['coverage']
+        if not captured or now - datetime.fromisoformat(captured) > timedelta(hours=24):
+            row['review_coverage'] = 'unknown'
+        elif sync.get('scope') == 'provider_window' and not (sync['start'] <= lower and upper <= sync['end']):
+            row['review_coverage'] = 'unknown'
+    coverage = 'unknown' if not source_rows else 'available_snapshot' if all(row['review_coverage'] == 'available_snapshot' for row in source_rows) else 'partial'
+    return {'date': day, 'timezone': timezone_name, 'events': sorted(events, key=lambda row: (row['start'], row['id'])), 'sources': source_rows, 'coverage': coverage}

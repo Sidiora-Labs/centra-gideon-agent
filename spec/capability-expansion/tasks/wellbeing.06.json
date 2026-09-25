@@ -1,0 +1,48 @@
+{
+  "id": "wellbeing.06",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "84930c40",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/intervention.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/intervention_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_intervention.py",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_intervention.py",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.test.tsx"
+  ],
+  "extra_files": [
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx"
+  ],
+  "contract": "User supplied intervention plans with immutable timezone/date/weekday schedules and source, editable instructions/name/archive state; one completed/skipped observation per scheduled date, revisioned corrections, explicit unknown days and recorded-day completion versus schedule coverage rates. Home-scoped ledger, native tool and HTTP/console workflows.",
+  "remaining_limits": [
+    "Plans catalog500; records10000 per plan; summary1..366 local dates",
+    "Schedule changes require a new plan to preserve historical meaning; archive blocks new observations but allows historical corrections",
+    "No recommendations or dose inference; root registers intervention handler/route/tool metadata",
+    "Integration defect discovered by root: ReactRouter wrapper in lane tests differs from real hash shell. Dedicated hash-routing repair is next; integrated UI qualification pending."
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/wellbeing/Interventions.test.tsx"
+  ],
+  "source_revision": "84930c40",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.06",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.06-checks-fsf5fjmc/evidence.json",
+  "production_lines": 285,
+  "test_lines": 365,
+  "test_ratio": 1.280701754385965,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Interventions.tsx": "296c2075b7aaf1494410077afb97e4ee9550925f5be6c96cf0f3173bf1824105",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_intervention.py": "2e46791a00cec221027fc22fb2be1cf42dbc0359f3d051da59badf55bfdc1b42",
+    "runtime/gideon/workspace/capabilities/wellbeing/intervention.py": "fa8c881f25dd6d64d330d0667525d81ea11e4fc50e9f2123c7b323477c9c4363",
+    "runtime/gideon/workspace/capabilities/wellbeing/intervention_provider.py": "af94f809493b79d7d0a18fe6fb560bd390007b9abcb885cc762bc6c8fece325b",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "c43e818325e0dbd56ec4f77bb47275c863d83f259e3981976b2b6b6cda53f99d",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.test.tsx": "576683af730fd2be82568b31515a077a64579df96b864710444d0884bdbafc4d",
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx": "936517935e6b4d1edb154a7b1116641d30903091cb7e0fd3e8c9beb2716cbb20",
+    "checks/runtime/capabilities/wellbeing/test_intervention.py": "c89e61e5c51397ee94c291d9e5a4fdc26eb87a8aad34ce1012ca282b622258c8"
+  },
+  "repair_cycles": 0
+}

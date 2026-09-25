@@ -24,7 +24,7 @@ export function TaskCreatePage({ onBack, onCreated }: { onBack: () => void; onCr
     <TopBar left={<div className="flex items-center gap-s"><IconButton icon={ArrowLeft} label="Back" size={40} onClick={onBack} /><PageTitle>New task</PageTitle></div>} />
     <div role="region" aria-label="Task editor" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
       <div className="mx-auto px-l py-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
-        {tasksErr && <LoadError what="task dependencies" error={tasksErr} onRetry={refreshTasks} />}
+        {Boolean(tasksErr) && <LoadError what="task dependencies" error={tasksErr} onRetry={refreshTasks} />}
         <TaskForm draft={draft} onChange={setDraft} allTasks={allTasks} />
         {err && <p ref={errRef} role="alert" data-type="body-s" className="mt-l rounded-md border-l-2 border-danger bg-danger/10 p-m text-danger">{err}</p>}
       </div>

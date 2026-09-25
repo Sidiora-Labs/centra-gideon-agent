@@ -15,6 +15,13 @@ from typing import Any
 from gideon.integrations.generation_catalog import provider_identity
 
 
+@dataclass(frozen=True)
+class ImageControl:
+    minimum: float
+    maximum: float
+    integer: bool = False
+
+
 @dataclass
 class ImageGenModel:
     """A model an image-gen provider offers.
@@ -30,6 +37,10 @@ class ImageGenModel:
     supports_edit: bool = False
     downloaded: bool = True
     active: bool = False
+    supported_controls: dict[str, ImageControl] = field(default_factory=dict)
+    supports_mask: bool = False
+    supports_lora: bool = False
+    lora_base_model: str = ""
 
 
 @dataclass

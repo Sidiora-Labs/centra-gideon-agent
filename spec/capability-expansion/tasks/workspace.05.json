@@ -1,0 +1,122 @@
+{
+  "id": "workspace.05",
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "schema_version": 1,
+  "base_revision": "38cf66947db2c32eb5a981716af8d1d84d3c0fed",
+  "scope": "Canonical project Git inspection, clean local branch operations and cached initialized submodule restoration",
+  "acceptance": [
+    "Canonical project roots and Git metadata remain inside allowed roots",
+    "Create/switch clean local branches with expected revision guard and durable replay receipts",
+    "Restore initialized submodule to cached superproject gitlink; dirty, unknown and uninitialized modules refused without writes",
+    "Sandboxed bounded Git subprocesses disable hooks/fsmonitor/network and reject filters/config includes",
+    "Actual native invocation, owner HTTP and Chromium branch/reload/error journeys; >=1:1 changed executable test LOC"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/git_ops.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Git.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_git_ops.py",
+    "checks/runtime/capabilities/workspace/ui_server.py",
+    "checks/runtime/capabilities/workspace/entry.tsx",
+    "apps/console/src/features/capabilities/workspace/Git.test.ts",
+    "apps/console/src/features/capabilities/workspace/Ports.test.ts",
+    "apps/console/src/features/capabilities/workspace/Processes.test.ts",
+    "apps/console/src/features/capabilities/workspace/Projects.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_git_ops.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/Git.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.05",
+  "integration_hooks": {
+    "routes": "Existing register adds /workspace/git/{project_id}, /{project_id}/operations and POST /workspace/git/operations",
+    "console": "Page includes Git",
+    "native": "gideon-workspace Git tools",
+    "durability": "capabilities/workspace/git-operations.sqlite3",
+    "machine_local_exclude": "capabilities/workspace/git-operations.lock"
+  },
+  "limits": [
+    "No fetch/pull/push/clone, submodule initialization or recursive remote updates",
+    "No pointer staging/commit, merge/rebase/reset, repository configuration or credential mutation",
+    "Submodule restoration uses already cached commit objects and refuses uninitialized modules",
+    "Uncertain or failed receipt replay requires inspecting state and a fresh request, never blindly repeats",
+    "Root integration qualification remains separate"
+  ],
+  "repair_cycles": 2,
+  "exit_code": 0,
+  "evidence": {
+    "task": "workspace.05",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790297128.481599,
+    "production_lines": 242,
+    "test_lines": 308,
+    "ratio": 1.2727272727272727,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/git_ops.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/test_git_ops.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.05-checks-ibe193x7/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_git_ops.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.05-checks-ibe193x7/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Git.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.05-checks-ibe193x7/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.05-checks-ibe193x7",
+    "completed_at": 1790297382.249973,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Git.tsx": "e988fdb80b1e5bbf16c7ab348cf7bfbf39882a386311f28c84572289ac82fcd8",
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "225e46b7c707a4b826f07a2d3e97d193014f29f2bdaadcab76519cc5c6159f25",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "2c0ffa0585cf671506ef4d96a2d8a2a6690f25790ee466c293d6291d9d0c3545",
+      "runtime/gideon/workspace/capabilities/workspace/git_ops.py": "51c675f5f29b7ad0f9cec49ce42685602876a9aee0cad745aa9c1a7937cd1414",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "55bdaac8a6908eddb662a73f63c22036c29e042384bb98ed25e8847d9ef6e447",
+      "apps/console/src/features/capabilities/workspace/Git.test.ts": "785cebaac613d1f39b9a421686ec385745c51a2fd6d56be99a2abf9f4eb51bf3",
+      "apps/console/src/features/capabilities/workspace/Ports.test.ts": "94a42cac0e9ba0e3737d1de961179b411e4e75a437e62a8b427438bbdb4f6600",
+      "apps/console/src/features/capabilities/workspace/Processes.test.ts": "48511203fe0bfa70a90900d25654dbc98d2405a43b4883e9b2b454261c11b733",
+      "apps/console/src/features/capabilities/workspace/Projects.test.ts": "3036ea28fe6bf0995f383c2588115744d3cf2ae94f3cb82109758f1b59ae16eb",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/test_git_ops.py": "61fe26be1209547d9c3c1fe6da784127a5a0d20473f0baca98787d0650c7cdbf",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    }
+  }
+}

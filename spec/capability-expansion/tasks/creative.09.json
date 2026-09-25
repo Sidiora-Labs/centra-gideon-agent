@@ -1,0 +1,58 @@
+{
+  "id": "creative.09",
+  "schema_version": 1,
+  "status": "implemented_inference_unqualified",
+  "base_revision": "501b1f23",
+  "requires": [
+    "creative.08"
+  ],
+  "contract": "Ordered volumes/chapters and arc links, pinned author/universe context. Atomic prepare creates canonical works. Staged drafting requires preceding reviewed chapters and checks series/work revisions plus prior draft vector. Authored or actual configured model drafting delegates authoritative WorkStore transaction; persisted request receipts avoid repeated generation. Review pins active draft and dependencies so upstream changes/missing artifacts invalidate downstream readiness.",
+  "acceptance": [
+    "Actual HTTP/UI/native create/edit/order/restore volume/chapter/arc plans with source pins and strict references.",
+    "Prepare chapter work atomically, save immutable canonical authored/model draft, explicit review unlocks next, upstream revision invalidates downstream review.",
+    "Model drafting consumes actual bounded reviewed prior excerpts and relevant arcs; actual inference result recorded separately.",
+    "Concurrent replay exactly once, real SQLite rollback recovery, missing sources/drafts explicit, no foreign source/model override.",
+    "UI preserves unsaved text across metadata save/review and discards stale chapter selection reads; search/page/deep links."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/series.py",
+    "runtime/gideon/workspace/capabilities/creative/works.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Series.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_series.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Series.test.tsx",
+    "checks/runtime/capabilities/creative/test_works.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_series.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "checks/runtime/capabilities/creative/test_works.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Series.test.tsx"
+  ],
+  "inference_evidence": "/tmp/gideon-creative-09-inference-oss.json",
+  "evidence": "/tmp/gideon-creative.09-checks-56ay45nc/evidence.json",
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 51,
+    "ui_tests": 3,
+    "production_lines": 476,
+    "test_lines": 485,
+    "ratio": 1.01890756302521
+  },
+  "inference_observation": {
+    "task": "creative.09",
+    "actual_provider_attempt": true,
+    "inference_qualified": false,
+    "error": "Configured drafting model failed: RuntimeError"
+  },
+  "pending_acceptance": [
+    "Successful actual configured model drafting and canonical output review with an available provider."
+  ]
+}

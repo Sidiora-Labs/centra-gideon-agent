@@ -1,0 +1,47 @@
+{
+  "id": "communications.09",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "3b2c6f2d",
+  "requires": [
+    "communications.08"
+  ],
+  "contract": "Local social account registry with normalized stable platform identity, person linkage, credential references, optimistic revisions, idempotency and durable history; native tools and actual Console review.",
+  "acceptance": [
+    "Persistent normalized identity uniqueness and replay across restart",
+    "Person references, unknown fields and malformed profile links rejected",
+    "Revision guarded edit, archive and local removal with retained provenance",
+    "Actual native tools and HTTP Console create/edit/history/remove workflow"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/social.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/SocialPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_social.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/SocialPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_social.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/SocialPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.09",
+  "limits": [
+    "Registry metadata only; no external ownership, account creation, verification or connectivity claims."
+  ],
+  "qualification": {
+    "runtime": "43 passed",
+    "console_http": "4 passed",
+    "external_accounts": "not verified; registry only"
+  }
+}

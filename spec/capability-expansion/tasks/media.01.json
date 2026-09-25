@@ -1,0 +1,42 @@
+{
+  "id": "media.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.01",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.01-checks-btayg223/evidence.json",
+  "production_lines": 306,
+  "test_lines": 318,
+  "ratio": 1.0392156862745099,
+  "coverage": [
+    "Real canonical image artifacts, version pinning, unchanged original bytes, derivative event metadata",
+    "Persistent editable strokes, optimistic conflicts, concurrent writers, idempotent create/export",
+    "PNG dimensions, blank canvas, transparency, EXIF orientation, draw/erase/undo semantics",
+    "Actual aiohttp create/update/reload/source/export routes and invalid/oversized requests",
+    "Independent homes cannot resolve each other's artifacts or sketches",
+    "Console entry, bounded controls and empty-state SSR rendering"
+  ],
+  "integration_hooks": {
+    "http": "gideon.interfaces.dashboard.handlers.capabilities_media.register(app)",
+    "ui": "apps/console/src/features/capabilities/media/Page.tsx default export",
+    "durability": "capabilities/media/sketches.sqlite3",
+    "agent": "SketchStore create/get/list/update/export/source via registered authenticated HTTP operations"
+  },
+  "remaining_limits": [
+    "Root-owned dashboard/nav/tool/durability registration is pending",
+    "Actual browser draw/erase/undo/save/export journey and integrated console typecheck/build remain pending",
+    "Current console checks render SSR entry controls; they do not qualify browser canvas interactions",
+    "The list returns the latest 100 sketches; older sketches remain accessible by ID",
+    "Hosted auth qualification is recorded separately by its owner"
+  ],
+  "changed_paths": [
+    "runtime/gideon/workspace/capabilities/media/__init__.py",
+    "runtime/gideon/workspace/capabilities/media/sketches.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/Page.tsx",
+    "apps/console/src/features/capabilities/media/Page.test.tsx",
+    "checks/runtime/capabilities/media/test_sketches.py",
+    "spec/capability-expansion/tasks/media.01.json"
+  ]
+}
