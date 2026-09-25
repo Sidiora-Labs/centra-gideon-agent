@@ -102,6 +102,7 @@ INVENTORY: tuple[StateEntry, ...] = (
     StateEntry(id="capability_platform_migration_journals", kind=KIND_TREE, path="capabilities/platform/migration-journals", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_platform_quotas", kind=KIND_SQLITE, path="capabilities/platform_quotas.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_platform_replication", kind=KIND_SQLITE, path="capabilities/platform/replication.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
+    StateEntry(id="capability_creative_peer_feedback", kind=KIND_SQLITE, path="capabilities/creative/peer_feedback.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
     StateEntry(id="capability_platform_media_shares", kind=KIND_SQLITE, path="capabilities/platform/media_shares.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
     StateEntry(id="capability_creative_export_records", kind=KIND_SQLITE, path="capabilities/creative/exports.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_creative_export_assets", kind=KIND_TREE, path="capabilities/creative/exports", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
