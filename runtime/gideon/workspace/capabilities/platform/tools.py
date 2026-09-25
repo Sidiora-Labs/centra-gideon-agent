@@ -14,6 +14,8 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect, request_phase
 
 _SCHEMAS = {
+    "platform_pr_screening": {"type": "object", "properties": {}, "additionalProperties": False},
+    "platform_pr_capture": {"type": "object", "properties": {key: {"type": "integer" if key == "number" else "string"} for key in ("repo", "number", "credential", "screen_provider", "review_provider")}, "required": ["repo", "number", "credential", "screen_provider", "review_provider"], "additionalProperties": False},
     "platform_maintenance": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_maintenance_control": {"type": "object", "properties": {"id": {"type": "string"}, "action": {"enum": ["cancel", "resume"]}}, "required": ["id", "action"], "additionalProperties": False},
     "platform_gsd_project": {"type": "object", "properties": {"project_id": {"type": "string"}, "document": {"type": "string"}}, "required": ["project_id"], "additionalProperties": False},
@@ -28,6 +30,8 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_pr_screening": "Read pinned external PR screening and authorized disposition state.",
+    "platform_pr_capture": "Capture bounded GitHub PR content with a named credential; never submit a review.",
     "platform_maintenance": "Read actual project maintenance stages and child workflow status.",
     "platform_maintenance_control": "Cancel or resume an explicitly requested maintenance sequence.",
     "platform_gsd_project": "Read original project planning documents and phase artifact inventory.",
@@ -48,14 +52,23 @@ class PlatformTools(ToolProvider):
     display_name = "Platform tools"
 
     async def list_tools(self):
-        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
+        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
 
     async def invoke(self, tool_name, arguments):
         if tool_name not in _SCHEMAS:
             return ToolResult(success=False, error="Unknown platform tool")
         try:
             validate(arguments, _SCHEMAS[tool_name])
-            if tool_name == "platform_maintenance":
+            if tool_name == "platform_pr_screening":
+                from gideon.workspace.capabilities.platform.pr_screening import view
+                result = view()
+            elif tool_name == "platform_pr_capture":
+                from gideon.workspace.capabilities.platform.pr_screening import capture
+                session = get_current_session_key()
+                if not session:
+                    raise ValueError("Authenticated PR requester required")
+                result = await capture(arguments, "session:" + session)
+            elif tool_name == "platform_maintenance":
                 from gideon.workspace.capabilities.platform.maintenance import view
                 result = view()
             elif tool_name == "platform_maintenance_control":

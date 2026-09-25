@@ -24,7 +24,9 @@
       "platform_gsd_project",
       "platform_gsd_phase_task",
       "platform_maintenance",
-      "platform_maintenance_control"
+      "platform_maintenance_control",
+      "platform_pr_screening",
+      "platform_pr_capture"
     ]
   },
   "native": true
