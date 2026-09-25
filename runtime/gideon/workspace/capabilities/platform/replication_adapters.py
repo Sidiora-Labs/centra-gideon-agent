@@ -20,6 +20,10 @@ from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.communications.store import PeopleStore
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.capabilities.music.catalog import MusicCatalog
+from gideon.workspace.capabilities.music.listening import ListeningStore
+from gideon.workspace.capabilities.music.store import RepertoireStore
 
 
 @dataclass(frozen=True)
@@ -52,7 +56,8 @@ IDENTITY_TABLES = {
 }
 IDENTITY_ENTRIES = frozenset({*IDENTITY_TABLES, "identity.progress_profile", "identity.twin_profile", "identity.twin_documents"})
 COMMUNICATION_TABLES = {"communications.people": "people", "communications.touchpoints": "touchpoints"}
-SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES})
+MUSIC_ENTRIES = ("music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks")
+SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES})
 
 
 def _knowledge(home: Path) -> KnowledgeStore:
@@ -76,6 +81,31 @@ def _people(home: Path) -> PeopleStore:
     return PeopleStore(home / "capabilities/communications")
 
 
+def _music_paths(home: Path) -> tuple[Path, Path, Path, Path]:
+    root = home / "capabilities/music"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    catalog = MusicCatalog(root, artifacts).path
+    songs = RepertoireStore(root, artifacts).path
+    playlists = ListeningStore(home, artifacts).path
+    decks = root / "decks.sqlite3"
+    with sqlite3.connect(decks) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,payload TEXT)")
+    return catalog, songs, playlists, decks
+
+
+def _pinned(ref: object) -> bool:
+    return isinstance(ref, dict) and set(ref) == {"slug", "version"} and isinstance(ref["slug"], str) and bool(ref["slug"]) and type(ref["version"]) is int and ref["version"] > 0
+
+
+def _contains_private_music_key(value: object) -> bool:
+    forbidden = {"credential_ref", "credential_name", "access_token", "refresh_token", "client_secret"}
+    if isinstance(value, dict):
+        return bool(forbidden & set(value)) or any(_contains_private_music_key(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_private_music_key(item) for item in value)
+    return False
+
+
 def validate_entries(scope: str, entries: list[dict]) -> None:
     if scope != "communications.contacts":
         return
@@ -93,6 +123,51 @@ def validate_entries(scope: str, entries: list[dict]) -> None:
         raise ValueError("Touchpoint coverage references a missing canonical person")
 
 
+def validate_music_entries(entries: list[dict]) -> None:
+    rows = {item["entry_id"]: item["rows"] for item in entries}
+    artist_ids = [row.get("id") for row in rows["music.artists"]]
+    track_ids = [row.get("id") for row in rows["music.tracks"]]
+    album_ids = [row.get("id") for row in rows["music.albums"]]
+    all_catalog = artist_ids + track_ids + album_ids
+    if None in all_catalog or len(all_catalog) != len(set(all_catalog)):
+        raise ValueError("Music catalog identities must be unique across kinds")
+    artists, tracks = set(artist_ids), set(track_ids)
+    for item in entries:
+        for row in item["rows"]:
+            data = row.get("data")
+            if not isinstance(row.get("id"), str) or not isinstance(data, dict) or data.get("id") != row["id"] or _contains_private_music_key(data):
+                raise ValueError("Invalid or private music metadata")
+    for row in rows["music.tracks"]:
+        data = row["data"]
+        if data.get("artist_id") and data["artist_id"] not in artists:
+            raise ValueError("Track references a missing artist")
+        renders = data.get("renders", [])
+        if not isinstance(renders, list) or any(not isinstance(render, dict) or not _pinned(render.get("artifact_ref")) for render in renders):
+            raise ValueError("Track render references must pin artifact versions")
+        if data.get("selected_render_id") is not None and data["selected_render_id"] not in {render.get("id") for render in renders}:
+            raise ValueError("Selected track render is missing")
+    for row in rows["music.albums"]:
+        data = row["data"]
+        if data.get("artist_id") and data["artist_id"] not in artists:
+            raise ValueError("Album references a missing artist")
+        if not isinstance(data.get("track_ids"), list) or len(set(data["track_ids"])) != len(data["track_ids"]) or any(track not in tracks for track in data["track_ids"]):
+            raise ValueError("Album references missing or repeated tracks")
+    for row in rows["music.songs"]:
+        if any(not _pinned(ref) for ref in row["data"].get("attachment_refs", [])):
+            raise ValueError("Song attachments must pin artifact versions")
+    for row in rows["music.playlists"]:
+        if row["data"].get("artifact_ref") is not None and not _pinned(row["data"]["artifact_ref"]):
+            raise ValueError("Playlist provenance must pin an artifact version")
+    for row in rows["music.decks"]:
+        data = row["data"]
+        cards = data.get("cards", [])
+        if not isinstance(cards, list) or any(not isinstance(card, dict) for card in cards) or data.get("exports") not in (None, []):
+            raise ValueError("Deck replication contains non-current or invalid metadata")
+        refs = list(data.get("sample_refs", [])) + ([data["context_ref"]] if data.get("context_ref") else []) + [card["artifact_ref"] for card in cards if card.get("artifact_ref")]
+        if any(not _pinned(ref) for ref in refs):
+            raise ValueError("Deck media references must pin artifact versions")
+
+
 def read_rows(home: Path, entry_id: str) -> list[dict]:
     if entry_id == "knowledge.items":
         store = _knowledge(home)
@@ -101,6 +176,23 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
             return [{"id": row["id"], "data": store.get_item(row["id"])} for row in rows]
         finally:
             store.db.close()
+    if entry_id in MUSIC_ENTRIES:
+        catalog, songs, playlists, decks = _music_paths(home)
+        if entry_id in {"music.artists", "music.tracks", "music.albums"}:
+            kind = entry_id.removeprefix("music.")
+            with sqlite3.connect(catalog) as db:
+                return [{"id": row[0], "data": json.loads(row[1])} for row in db.execute("SELECT id,payload FROM catalog WHERE kind=? ORDER BY id", (kind,))]
+        path, table = (songs, "items") if entry_id == "music.songs" else (playlists, "snapshots") if entry_id == "music.playlists" else (decks, "decks")
+        with sqlite3.connect(path) as db:
+            if entry_id == "music.playlists":
+                query = "SELECT id,payload FROM snapshots WHERE rowid IN (SELECT max(rowid) FROM snapshots GROUP BY playlist_id) ORDER BY id"
+            else:
+                query = f"SELECT id,payload FROM {table} ORDER BY id"
+            rows = [{"id": row[0], "data": json.loads(row[1])} for row in db.execute(query)]
+            if entry_id == "music.decks":
+                for row in rows:
+                    row["data"]["exports"] = []
+            return rows
     if entry_id in COMMUNICATION_TABLES:
         store, table = _people(home), COMMUNICATION_TABLES[entry_id]
         with store.connect() as db:
@@ -240,6 +332,27 @@ def _write_communications(home: Path, entry_id: str, row: dict | None, entity_id
         raise ValueError("Communication record violates canonical identity constraints") from error
 
 
+def _write_music(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
+    catalog, songs, playlists, decks = _music_paths(home)
+    if entry_id in {"music.artists", "music.tracks", "music.albums"}:
+        kind = entry_id.removeprefix("music.")
+        with sqlite3.connect(catalog) as db:
+            if row is None: db.execute("DELETE FROM catalog WHERE kind=? AND id=?", (kind, entity_id))
+            else: db.execute("INSERT INTO catalog(kind,id,payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,payload=excluded.payload", (kind, entity_id, json.dumps(row["data"], sort_keys=True)))
+        return
+    path, table = (songs, "items") if entry_id == "music.songs" else (playlists, "snapshots") if entry_id == "music.playlists" else (decks, "decks")
+    with sqlite3.connect(path) as db:
+        if row is None:
+            db.execute(f"DELETE FROM {table} WHERE id=?", (entity_id,))
+        elif entry_id == "music.playlists":
+            data = row["data"]
+            db.execute("INSERT INTO snapshots(id,playlist_id,payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET playlist_id=excluded.playlist_id,payload=excluded.payload", (entity_id, data["playlist_id"], json.dumps(data, sort_keys=True)))
+        else:
+            data = dict(row["data"])
+            if entry_id == "music.decks": data["exports"] = []
+            db.execute(f"INSERT INTO {table}(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", (entity_id, json.dumps(data, sort_keys=True)))
+
+
 def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
     if entry_id == "knowledge.items":
         _write_knowledge(home, row, entity_id)
@@ -247,8 +360,10 @@ def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> No
         _write_creative(home, entry_id, row, entity_id)
     elif entry_id in IDENTITY_ENTRIES:
         _write_identity(home, entry_id, row, entity_id)
-    else:
+    elif entry_id in COMMUNICATION_TABLES:
         _write_communications(home, entry_id, row, entity_id)
+    else:
+        _write_music(home, entry_id, row, entity_id)
 
 
 def _conflict(entry_id: str, entity_id: str, ancestor: str, local: dict, remote: dict, now: str) -> conflicts.ConflictRecord:

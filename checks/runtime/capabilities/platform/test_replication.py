@@ -22,6 +22,12 @@ from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.communications.store import PeopleError, PeopleStore
 from gideon.workspace.capabilities.communications import social
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.capabilities.music.catalog import MusicCatalog
+from gideon.workspace.capabilities.music.decks import DeckStore
+from gideon.workspace.capabilities.music.listening import ListeningStore
+from gideon.workspace.capabilities.music.spotify import SpotifyBridge
+from gideon.workspace.capabilities.music.store import RepertoireStore
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -313,11 +319,12 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
+        {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -606,3 +613,85 @@ def test_contacts_two_home_refs_conflict_restore_tombstones_credentials_and_poli
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "communications.contacts")
+
+
+def seed_music(home):
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    root = home / "capabilities/music"
+    catalog = MusicCatalog(root, artifacts)
+    artist = catalog.create("artists", {"name": "Signal Artist", "bio": "base"})
+    track = catalog.create("tracks", {"title": "Signal Song", "artist_id": artist["id"], "notes": "metadata only"})
+    album = catalog.create("albums", {"title": "Signal Album", "artist_id": artist["id"], "track_ids": [track["id"]]})
+    score = artifacts.create(name="Pinned score", content="C G Am F", kind="markdown")
+    song = RepertoireStore(root, artifacts).create({"title": "Practice Song", "instrument": "guitar", "body": "C G Am F", "attachment_refs": [{"slug": score.slug, "version": score.version}]})
+    source = artifacts.create(name="Playlist source", content=json.dumps({"playlists": [{"name": "Focus", "lastModifiedDate": "2026-09-25", "items": [{"track": {"trackName": "Signal Song", "artistName": "Signal Artist", "albumName": "Signal Album", "trackUri": "spotify:track:signal"}}]}]}), kind="json")
+    listening = ListeningStore(home, artifacts)
+    listening.import_data({"request_id": "playlist-import", "account_label": "library", "format": "spotify_playlists", "artifact_ref": {"slug": source.slug, "version": source.version}})
+    deck = DeckStore(home, artifacts).create({"name": "Reference Deck", "kind": "playing"})
+    bridge = SpotifyBridge(home, listening, credential_resolver=lambda _: "never-export-token")
+    bridge.configure({"enabled": True, "credential_name": "SPOTIFY_PRIVATE", "account_label": "private account", "revision": 0})
+    return {"artist": artist, "track": track, "album": album, "song": song, "playlist": listening.playlists()[0], "deck": deck}
+
+
+def test_music_library_two_home_refs_conflict_restore_tombstones_credentials_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "music.library")
+    records = seed_music(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "music.library")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]
+    assert [len(item["rows"]) for item in baseline["entries"]] == [1, 1, 1, 1, 1, 1]
+    assert baseline["entries"][-1]["rows"][0]["data"]["exports"] == []
+    wire = json.dumps(baseline)
+    assert "SPOTIFY_PRIVATE" not in wire and "never-export-token" not in wire and "credential_name" not in wire
+    assert "private account" not in wire and "playlist-import" not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    artifacts_b = NativeArtifactProvider(b_home / "artifacts")
+    catalog_b = MusicCatalog(b_home / "capabilities/music", artifacts_b)
+    assert catalog_b.get("albums", records["album"]["id"])["track_ids"] == [records["track"]["id"]]
+    assert catalog_b.get("tracks", records["track"]["id"])["artist_id"] == records["artist"]["id"]
+    assert RepertoireStore(b_home / "capabilities/music", artifacts_b).get(records["song"]["id"])["attachment_refs"][0]["version"] == 1
+    assert ListeningStore(b_home, artifacts_b).playlists()[0]["playlist_id"] == records["playlist"]["playlist_id"]
+    assert DeckStore(b_home, artifacts_b).get(records["deck"]["id"])["name"] == "Reference Deck"
+    assert artifacts_b.get(records["song"]["attachment_refs"][0]["slug"], version=1) is None
+
+    catalog_a = MusicCatalog(a_home / "capabilities/music", NativeArtifactProvider(a_home / "artifacts"))
+    catalog_a.update("artists", records["artist"]["id"], {"revision": 1, "name": "Local Artist", "bio": "preserve local"})
+    catalog_b.update("artists", records["artist"]["id"], {"revision": 1, "name": "Peer Artist", "bio": "peer bio"})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "music.library")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "music.artists")
+    ReplicationService(a_home).restore_fields(conflict.id, ["name"])
+    merged = catalog_a.get("artists", records["artist"]["id"])
+    assert merged["name"] == "Peer Artist" and merged["bio"] == "preserve local" and merged["revision"] == 3
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "music.library")
+    doomed = seed_music(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "music.library")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    root = c_home / "capabilities/music"
+    with sqlite3.connect(root / "music_catalog.sqlite3") as db: db.execute("DELETE FROM catalog")
+    with sqlite3.connect(root / "repertoire.sqlite3") as db: db.execute("DELETE FROM items")
+    with sqlite3.connect(root / "listening.sqlite3") as db: db.execute("DELETE FROM snapshots")
+    with sqlite3.connect(root / "decks.sqlite3") as db: db.execute("DELETE FROM decks")
+    deletion = ReplicationService(c_home).export_batch(did["peer_id"], "music.library")
+    removed = ReplicationService(d_home).apply_batch(cid["peer_id"], deletion)
+    assert sum(item["removed"] for item in removed["entries"]) == 6
+    assert all(not item["rows"] for item in ReplicationService(d_home).export_batch(cid["peer_id"], "music.library")["entries"])
+
+    bad_home, target_home = home / "bad", home / "target"
+    bad_id, target_id = pair_for(bad_home, target_home, "music.library")
+    seed_music(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "music.library")
+    malformed["entries"][2]["rows"][0]["data"]["track_ids"] = ["missing-track"]
+    with pytest.raises(ReplicationError, match="missing or repeated tracks") as rejected:
+        ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422
+    assert MusicCatalog(target_home / "capabilities/music", NativeArtifactProvider(target_home / "artifacts")).list("artists") == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "music.library")
