@@ -1,0 +1,51 @@
+{
+  "id": "wellbeing.10",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "b4502472",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/exports.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/exports_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_exports.py",
+    "apps/console/src/features/capabilities/wellbeing/Exports.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_exports.py",
+    "apps/console/src/features/capabilities/wellbeing/Exports.test.tsx"
+  ],
+  "contract": "Version1 immutable point-in-time export of all durable wellbeing history and referenced original canonical artifacts. Captured-home HTTP/native/UI preview create history download, receipt replay and SHA verification;64MiB all-or-nothing limit.",
+  "remaining_limits": [
+    "Export only; no restore/import",
+    "No external calendar triggers, inbox items, retry receipts or private exercise answers",
+    "Source/provider-root integration remains root-owned"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.10",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.10-checks-jq11b5tc/evidence.json",
+  "initial_evidence_log": "/tmp/gideon-wellbeing.10-checks-1595g15j/evidence.json",
+  "repair_cycles": 1,
+  "production_lines": 249,
+  "test_lines": 340,
+  "test_ratio": 1.3654618473895583,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Exports.tsx": "a23f256247a91c1ef1d923ef918d8f9ee86ff6725c4fc86848de273b00962788",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_exports.py": "624405569dc0d4c44158be15f8ce808479abe59dcd8090b40e2ddb389f87af32",
+    "runtime/gideon/workspace/capabilities/wellbeing/exports.py": "bd071a1643fdfca5efad1dd449d47221e83e44fdce5667c8e331d38c2502cd75",
+    "runtime/gideon/workspace/capabilities/wellbeing/exports_provider.py": "8e7096cb859d5255e0b535e3bd9e544ff3e20cfd7ac190407d1a7a5247d75df0",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "91450db2b13d4e0e8b1e885b26697f2314f5eea49bd6011dd8d1eee2cc7b2a2c",
+    "apps/console/src/features/capabilities/wellbeing/Exports.test.tsx": "8037250c0b8182166b3430da4440c8aec334aad509f202e4bfb24af45261ebdb",
+    "checks/runtime/capabilities/wellbeing/test_exports.py": "969a3bc355dd002c9eaee07d60b0acbcc56987b7dddbbbce7748e85a9e615c2a"
+  },
+  "acceptance_coverage": [
+    "all nine domains with original revisions and tombstones",
+    "canonical original source bytes and descriptor hashes",
+    "readonly durable archive survives reopen and later records",
+    "preview no archive mutation",
+    "idempotent concurrent retry",
+    "pagination-independent large archive companion",
+    "explicit missing/hash-corruption and unsafe symlink failures",
+    "native and captured-home HTTP isolation",
+    "actual hash-shell UI create download and prior-version reload"
+  ]
+}

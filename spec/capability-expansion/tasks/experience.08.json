@@ -1,0 +1,50 @@
+{
+  "id": "experience.08",
+  "status": "locally_checked_browser_pending",
+  "base_revision": "33083252",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/world_engine.py",
+    "runtime/gideon/workspace/capabilities/experience/world_engine_http.py",
+    "runtime/gideon/workspace/capabilities/experience/assets/world-engine/launch.js",
+    "runtime/gideon/extensions/apps/backend_runtime.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/WorldEngine.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_world_engine.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/WorldEngine.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/workspace/capabilities/experience/assets/world-engine/app.json"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_world_engine.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/WorldEngine.test.tsx"
+  ],
+  "contract": "Separately installed pinned AGPL engine, actual Bun backend under existing app supervisor, captured-home fixed target HTTP/WebSocket bridge and signed app admission; app storage owns world logs, assets and relay state. Console lifecycle and renderer entry; native tools use same lifecycle.",
+  "dependencies": {
+    "bun": "1.4.2",
+    "eidoverse-worlds": "bf9e0231795d55297f976948e2a79de3e1320e9d",
+    "eidoverse-video": "2d152b9ae4e12e9ec152ea088850e377c319d4d4"
+  },
+  "remaining_limits": [
+    "WebGPU browser rendering/geometry and full media devices require separate browser qualification",
+    "Projection/editing, guest travel and controllers are subsequent tasks; current engine owner boundary does not grant guest admission"
+  ],
+  "evidence": "/tmp/gideon-experience.08-checks-0ph9cxbf/evidence.json",
+  "qualification": {
+    "runtime_passed": 12,
+    "ui_passed": 3,
+    "production_lines": 243,
+    "test_lines": 247,
+    "ratio": 1.0164609053497942,
+    "real_engine": "Actual pinned engine app installation/start/HTTP/WS join, first owner grant, message log persistence, supervisor stop/restart and replay passed. No generated content/provider calls."
+  },
+  "dependency_location": "/tmp/gideon-world-engine-deps"
+}

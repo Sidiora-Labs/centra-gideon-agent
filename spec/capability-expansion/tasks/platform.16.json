@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "task": "platform.16",
+  "status": "locally_qualified",
+  "base_revision": "5676a4fc",
+  "contract": "Canonical dashboard_views.json owns user core tile membership/order/size and selected_view. Immutable presets retain existing overview layout; actual DashboardPage renders allowlisted original widget components for selected user views. PinnedTiles selection flows through reads, resolve, refresh, ledger and GenUI context. No parallel layout store.",
+  "acceptance": [
+    "Persist selected user view and ordered supported core widget sizes in existing canonical view document with optimistic composition revision.",
+    "Presets immutable; stale writes/invalid refs reject; deleted selected view falls back to overview.",
+    "Original dashboard consumes user composition and original PinnedTiles targets selected view while preserving artifact overlays.",
+    "Actual HTTP/native and real DashboardPage component journey verify selection, reordering, size, refresh/remount and artifact isolation."
+  ],
+  "production_files": [
+    "runtime/gideon/interfaces/dashboard/views_store.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_compositions.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Composition.tsx",
+    "apps/console/src/features/capabilities/platform/CoreWidgets.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx",
+    "apps/console/src/features/dashboard/DashboardPage.tsx",
+    "apps/console/src/features/dashboard/PinnedTiles.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_compositions.py",
+    "checks/runtime/capabilities/platform/composition_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Composition.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_compositions.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Composition.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json",
+    "apps/console/src/features/capabilities/platform/Cadence.test.tsx"
+  ],
+  "evidence": "/tmp/gideon-platform.16-checks-snhv6q86/evidence.json",
+  "qualification": {
+    "runtime_tests": 10,
+    "ui_tests": 3,
+    "production_lines": 155,
+    "test_lines": 262,
+    "repair_cycles": 0,
+    "consumer_evidence": "Actual ConsoleProviders, DashboardPage, useHashRoute and PinnedTiles against real HTTP verify selected core layout and selected-view-only artifact unpin."
+  }
+}

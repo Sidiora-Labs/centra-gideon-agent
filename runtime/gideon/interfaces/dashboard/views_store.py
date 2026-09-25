@@ -326,6 +326,9 @@ def load_views() -> list[DashboardView]:
         for v in data["views"]
         if isinstance(v, dict) and v.get("id")
     ]
+    for view in user:
+        existing = {tile.ref for tile in view.tiles}
+        view.tiles.extend(tile for tile in _overlay_tiles(data, view.id) if tile.ref not in existing)
     return [*_presets(data), *user]
 
 
@@ -509,3 +512,48 @@ def resolve_tile(view_id: str, ref: str, keep: bool) -> DashboardView:
                 t["order"] = i
     _write_disk(data)
     return get_view(view_id)  # type: ignore[return-value]
+
+
+CORE_COMPOSITION_REFS = (*_OVERVIEW_CORE_REFS, "core:agent-world", "core:pinned-artifacts", "core:on-this-machine", "core:desktop-live")
+
+
+def composition_state() -> dict:
+    data = _read_disk()
+    views = [view for view in list_views() if view["id"] != PRESET_MISSION_CONTROL_ID]
+    selected = data.get("selected_view", PRESET_OVERVIEW_ID)
+    if selected not in {view["id"] for view in views}:
+        selected = PRESET_OVERVIEW_ID
+    return {"version": 1, "revision": data.get("composition_revision", 0), "selected_view": selected, "views": views, "core_refs": list(CORE_COMPOSITION_REFS)}
+
+
+def set_composition(view_id: str, patch: dict) -> dict:
+    if not isinstance(patch, dict) or set(patch) not in ({"revision", "select"}, {"revision", "tiles"}):
+        raise ValueError("Observed revision and select or tiles are required")
+    data = _read_disk()
+    if type(patch["revision"]) is not int or patch["revision"] != data.get("composition_revision", 0):
+        raise ValueError("Dashboard composition changed; reload before saving")
+    view = get_view(view_id)
+    if view is None or view_id == PRESET_MISSION_CONTROL_ID:
+        raise ViewNotFoundError(view_id)
+    if "select" in patch:
+        if patch["select"] is not True:
+            raise ValueError("select must be true")
+        data["selected_view"] = view_id
+    else:
+        if view.preset:
+            raise PresetLockedError("Preset core composition is immutable")
+        tiles = patch["tiles"]
+        if not isinstance(tiles, list) or len(tiles) > len(CORE_COMPOSITION_REFS):
+            raise ValueError("Invalid core widget list")
+        seen = set()
+        for tile in tiles:
+            if not isinstance(tile, dict) or set(tile) != {"ref", "size"} or tile["ref"] not in CORE_COMPOSITION_REFS or tile["size"] not in _SIZES or tile["ref"] in seen:
+                raise ValueError("Core widget references must be supported and unique with a valid size")
+            seen.add(tile["ref"])
+        for record in data["views"]:
+            if record.get("id") == view_id:
+                retained = [tile for tile in record.get("tiles", []) if not str(tile.get("ref", "")).startswith("core:")]
+                record["tiles"] = [{**tile, "order": index, "added_by": "user"} for index, tile in enumerate(tiles)] + retained
+    data["composition_revision"] = data.get("composition_revision", 0) + 1
+    _write_disk(data)
+    return composition_state()

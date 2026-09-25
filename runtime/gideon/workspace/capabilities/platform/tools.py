@@ -1,6 +1,7 @@
 """Native read tools for the live platform capability contracts."""
 import json
 import sqlite3
+from gideon.interfaces.dashboard.views_store import PresetLockedError, ViewNotFoundError
 from jsonschema import validate, ValidationError
 from gideon.sdk.tool import ToolProvider, ToolDefinition, ToolResult, RiskLevel
 from gideon.workspace.capabilities.platform.catalog import current_catalog
@@ -14,6 +15,8 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect, request_phase
 
 _SCHEMAS = {
+    "platform_dashboard_compositions": {"type": "object", "properties": {}, "additionalProperties": False},
+    "platform_dashboard_select": {"type": "object", "properties": {"view_id": {"type": "string"}, "revision": {"type": "integer"}}, "required": ["view_id", "revision"], "additionalProperties": False},
     "platform_schedule_forecast": {"type": "object", "properties": {"horizon": {"type": "integer", "minimum": 60, "maximum": 86400}}, "additionalProperties": False},
     "platform_task_cadence": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_task_cadence_set": {"type": "object", "properties": {"trigger_id": {"type": "string"}, "revision": {"type": "integer"}, "enabled": {"type": "boolean"}, "task_class": {"type": "string"}}, "required": ["trigger_id", "revision", "enabled", "task_class"], "additionalProperties": False},
@@ -33,6 +36,8 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_dashboard_compositions": "Read canonical dashboard core compositions and selected view.",
+    "platform_dashboard_select": "Select an existing dashboard composition in the canonical view store.",
     "platform_schedule_forecast": "Preview real trigger clocks and current admission without firing or changing schedules.",
     "platform_task_cadence": "Read opt-in interval cadence decisions and typed execution evidence.",
     "platform_task_cadence_set": "Opt a native interval trigger into or out of task-class cadence adaptation.",
@@ -58,14 +63,22 @@ class PlatformTools(ToolProvider):
     display_name = "Platform tools"
 
     async def list_tools(self):
-        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
+        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set", "platform_dashboard_select"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set", "platform_dashboard_select"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
 
     async def invoke(self, tool_name, arguments):
         if tool_name not in _SCHEMAS:
             return ToolResult(success=False, error="Unknown platform tool")
         try:
             validate(arguments, _SCHEMAS[tool_name])
-            if tool_name == "platform_schedule_forecast":
+            if tool_name == "platform_dashboard_compositions":
+                from gideon.interfaces.dashboard.views_store import composition_state
+                result = composition_state()
+            elif tool_name == "platform_dashboard_select":
+                if not get_current_session_key():
+                    raise ValueError("Authenticated dashboard selector required")
+                from gideon.interfaces.dashboard.views_store import set_composition
+                result = set_composition(arguments["view_id"], {"revision": arguments["revision"], "select": True})
+            elif tool_name == "platform_schedule_forecast":
                 from gideon.workspace.capabilities.platform.forecast import view
                 result = await view(**arguments)
             elif tool_name == "platform_task_cadence":
@@ -119,7 +132,7 @@ class PlatformTools(ToolProvider):
             return ToolResult(success=True, output=json.dumps(result))
         except ValidationError:
             return ToolResult(success=False, error="Invalid platform tool arguments")
-        except (ValueError, RuntimeError, sqlite3.Error, OSError):
+        except (ValueError, RuntimeError, sqlite3.Error, OSError, PresetLockedError, ViewNotFoundError):
             return ToolResult(success=False, error="Platform information is unavailable; check the configuration or dashboard")
 
 

@@ -17,26 +17,26 @@ import { costLabel, isLive, lastRefreshFailed, sourceChips } from './tileFreshne
 
 const VIEWS_CACHE_KEY = 'dashboard:views'
 
-export function artifactTiles(views: DashboardView[] | undefined): DashboardTile[] {
-  const overview = views?.find((v) => v.id === 'overview')
+export function artifactTiles(views: DashboardView[] | undefined, viewId = 'overview'): DashboardTile[] {
+  const overview = views?.find((v) => v.id === viewId)
   if (!overview) return []
   return overview.tiles
     .filter((t) => t.ref.startsWith('artifact:'))
     .sort((a, b) => a.order - b.order)
 }
 
-export function PinnedTiles() {
+export function PinnedTiles({ viewId = 'overview' }: { viewId?: string }) {
   const { data: views, refresh } = useQuery<DashboardView[]>(
     VIEWS_CACHE_KEY, () => api.dashboardViews().catch(() => [] as DashboardView[]), { persist: true },
   )
-  const tiles = useMemo(() => artifactTiles(views), [views])
+  const tiles = useMemo(() => artifactTiles(views, viewId), [views, viewId])
 
   const resolve = useCallback((ref: string, keep: boolean) => {
-    api.resolveTile('overview', { ref, keep }).then(() => {
+    api.resolveTile(viewId, { ref, keep }).then(() => {
       invalidateKeys(VIEWS_CACHE_KEY)
       refresh()
     }).catch(() => {})
-  }, [refresh])
+  }, [refresh, viewId])
 
   if (tiles.length === 0) return null
 
@@ -67,7 +67,7 @@ export function PinnedTiles() {
       ) : (
         <div className="grid grid-cols-1 gap-l lg:grid-cols-2">
           {tiles.map((t) => (
-            <PinnedTile key={t.ref} tile={t} onResolve={resolve} />
+            <PinnedTile key={viewId + t.ref} viewId={viewId} tile={t} onResolve={resolve} />
           ))}
         </div>
       )}
@@ -97,14 +97,14 @@ const TONE_CLASS = {
   pending: 'bg-outline',
 } as const
 
-function FreshnessBar({ tile, row }: { tile: DashboardTile; row: TileRefreshRow | undefined }) {
+function FreshnessBar({ tile, row, viewId }: { viewId: string; tile: DashboardTile; row: TileRefreshRow | undefined }) {
   const chips = sourceChips(tile, row)
   const failed = lastRefreshFailed(row)
   const cost = costLabel(row)
   return (
     <div className="flex min-w-0 items-center gap-xs" data-testid="tile-freshness">
       <a
-        href={api.tileLedgerHref('overview', tile.ref)}
+        href={api.tileLedgerHref(viewId, tile.ref)}
         target="_blank"
         rel="noreferrer"
         data-type="label-s"
@@ -134,7 +134,7 @@ function FreshnessBar({ tile, row }: { tile: DashboardTile; row: TileRefreshRow 
 
 export const TILE_COMPOSURE_INTENSITY = 0.5
 
-function PinnedTile({ tile, onResolve }: { tile: DashboardTile; onResolve: (ref: string, keep: boolean) => void }) {
+function PinnedTile({ tile, onResolve, viewId }: { viewId: string; tile: DashboardTile; onResolve: (ref: string, keep: boolean) => void }) {
   const slug = tile.ref.slice('artifact:'.length)
   const isProposal = tile.added_by === 'agent'
   const live = isLive(tile)
@@ -148,18 +148,18 @@ function PinnedTile({ tile, onResolve }: { tile: DashboardTile; onResolve: (ref:
   const [row, setRow] = useState<TileRefreshRow | undefined>(undefined)
 
   const tick = useCallback(() => {
-    api.refreshTile('overview', { ref: tile.ref })
+    api.refreshTile(viewId, { ref: tile.ref })
       .then((r) => { if (r.row?.ts) setRow(r.row); if (r.refreshed) refresh() })
       .catch(() => {})
-  }, [tile.ref, refresh])
+  }, [tile.ref, refresh, viewId])
   useVisiblePoll(tick, live ? 60_000 : null)
 
   const onRefreshClick = useCallback(() => {
     if (!live) { setReloadKey((k) => k + 1); return }
-    api.refreshTile('overview', { ref: tile.ref, force: true })
+    api.refreshTile(viewId, { ref: tile.ref, force: true })
       .then((r) => { if (r.row?.ts) setRow(r.row); refresh() })
       .catch(reportActionFailure('refresh this tile'))
-  }, [live, tile.ref, refresh])
+  }, [live, tile.ref, refresh, viewId])
 
   const body = artifact?.content
   const genuiBody = findGenUiBlock(body || '')
@@ -179,7 +179,7 @@ function PinnedTile({ tile, onResolve }: { tile: DashboardTile; onResolve: (ref:
         <span data-type="label-m" className="min-w-0 flex-1 truncate text-on-surface-var">
           {artifact?.name || slug}
         </span>
-        {live && <FreshnessBar tile={tile} row={row} />}
+        {live && <FreshnessBar viewId={viewId} tile={tile} row={row} />}
         {isProposal && (
           <span data-type="label-s" className="inline-flex items-center gap-xs rounded-pill bg-primary-container px-2 py-0.5 text-on-primary-container">
             <Sparkles size={11} /> Proposed
@@ -207,7 +207,7 @@ function PinnedTile({ tile, onResolve }: { tile: DashboardTile; onResolve: (ref:
         ? (genuiBody
           ? (
             <GenUiHostCtx.Provider
-              value={{ producer: { kind: 'tile', viewId: 'overview', ref: tile.ref }, onResolved: refresh }}
+              value={{ producer: { kind: 'tile', viewId, ref: tile.ref }, onResolved: refresh }}
             >
               <GenUiWidget content={genuiBody.html} title={artifact?.name || slug} slug={slug} />
             </GenUiHostCtx.Provider>
