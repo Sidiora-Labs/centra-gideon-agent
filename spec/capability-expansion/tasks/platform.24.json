@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "task": "platform.24",
+  "status": "locally_qualified",
+  "base_revision": "254eb68a",
+  "contract": "Selective sharing sends one explicitly named canonical image or video artifact at one immutable version to one explicitly named direct peer under the media.assets category. Both peers independently opt in through directional policy. The existing platform.21 proof signs the exact recipient, scope, expiry and one-time nonce; the guarded pinned-origin transport carries an offer containing only bounded artifact metadata and bytes. The receiver validates the MIME/kind pair, 16 MiB limit, exact byte count and SHA-256 before creating one canonical imported artifact. Durable sender/share identity and fingerprints make unchanged offers idempotent, reject changed replay, and make revocation delete only the imported artifact created by that share. No library index, folder, annotation or broad datastore record is replicated.",
+  "acceptance": [
+    "Require an explicit peer ID, canonical artifact ID and exact positive artifact version; refuse disabled or absent media.assets send policy, unsupported kinds/MIME, missing versions, empty media and payloads over 16 MiB.",
+    "Transfer real image/video bytes through platform.21 signed guarded transport and validate the receiver's exact peer policy, MIME/kind pair, size and SHA-256 before writing a canonical imported artifact.",
+    "Persist minimal sender and receiver receipts, make exact request/offer replay idempotent, reject request-ID or share-ID content changes, and never project payload bytes, signatures, nonces, keys or unrelated artifact records.",
+    "Revoke at the sender's exact optimistic revision through a newly signed operation, delete only the receiver artifact created by the share, retain a durable revoked receipt and reject later offer replay.",
+    "Expose authenticated dashboard and approval-gated native operations plus a console that explains narrow media.assets policy and requires explicit peer, artifact and version selection."
+  ],
+  "limitations": [
+    "Local qualification proves a two-real-runtime loopback journey using real Ed25519 proofs, guarded HTTP, SQLite receipts and canonical artifact stores; it does not claim an externally provisioned peer, public certificate or deployed model-driven approval journey.",
+    "Revocation removes the receiver's imported canonical artifact and leaves a receipt; it cannot erase copies a remote operator exported outside Gideon's canonical artifact store."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/media_shares.py",
+    "runtime/gideon/workspace/capabilities/platform/media_shares_http.py",
+    "runtime/gideon/workspace/capabilities/platform/media_share_tools.py",
+    "apps/console/src/features/capabilities/platform/MediaSharing.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_media_shares.py",
+    "apps/console/src/features/capabilities/platform/MediaSharing.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_media_shares.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/MediaSharing.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-media-sharing/app.json"
+  ],
+  "integration_hooks": [
+    "Register gideon.workspace.capabilities.platform.media_shares_http.register_media_shares with the shared dashboard application.",
+    "Add /api/capabilities/platform/media-shares/receive to the shared token middleware exact bypass list; the handler itself accepts only a registered one-time platform.21 proof.",
+    "Render apps/console/src/features/capabilities/platform/MediaSharing.tsx from the shared platform Page.",
+    "Retain capabilities/platform/media_shares.sqlite3 as machine-local operational durability; canonical received media remains in the existing artifact provider and no parallel media store is introduced."
+  ],
+  "evidence": [
+    "/tmp/gideon-platform.24-checks-v_w8yii2/evidence.json",
+    "/tmp/gideon-platform.24-checks-la6jk32d/evidence.json"
+  ],
+  "qualification": {
+    "runtime_tests": 27,
+    "ui_tests": 3,
+    "production_lines": 229,
+    "test_lines": 244,
+    "repair_cycles": 1,
+    "stages": "Compile, runtime and UI passed in repair cycle 1 after normalizing an absent outbound peer to the same non-disclosing 403 policy denial as a peer without media.assets opt-in."
+  }
+}
