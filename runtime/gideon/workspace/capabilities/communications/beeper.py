@@ -26,7 +26,8 @@ def settings(store):
     with closing(store.connect()) as db, db:
         schema(db)
         row = db.execute('SELECT body,revision FROM beeper_settings WHERE id=1').fetchone()
-        return {**json.loads(row[0]), 'revision': row[1]} if row else {'base_url': 'http://127.0.0.1:23373', 'credential_ref': '', 'revision': 0}
+        body, revision = (json.loads(row[0]), row[1]) if row else ({'base_url': 'http://127.0.0.1:23373', 'credential_ref': ''}, 0)
+        return {**body, 'revision': revision, 'connected': bool(body['credential_ref']), 'transport_mode': 'manual_refresh_only'}
 
 
 def endpoint(value):
@@ -42,7 +43,7 @@ def endpoint(value):
 
 
 def configure(store, data):
-    fields(data, {'base_url', 'credential_ref', 'revision'})
+    fields(data, {'base_url', 'credential_ref', 'revision', 'connected', 'transport_mode'})
     url = endpoint(data.get('base_url'))
     key = text(data.get('credential_ref'), 'credential_ref', 120, True)
     if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
@@ -60,7 +61,28 @@ def configure(store, data):
         db.execute('INSERT INTO beeper_settings VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision=excluded.revision', (json.dumps(body), revision + 1))
         db.execute('DELETE FROM beeper_pages')
         db.execute('DELETE FROM beeper_assets')
-    return {**body, 'revision': revision + 1}
+    return {**body, 'revision': revision + 1, 'connected': True, 'transport_mode': 'manual_refresh_only'}
+
+
+def disconnect(store, data):
+    fields(data, {'revision'})
+    revision = data.get('revision')
+    if type(revision) is not int or revision < 0:
+        raise PeopleError('Current settings revision is required')
+    with closing(store.connect()) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        schema(db)
+        old = db.execute('SELECT body,revision FROM beeper_settings WHERE id=1').fetchone()
+        current = old[1] if old else 0
+        if current != revision:
+            raise PeopleError('Beeper settings changed; reload', 409)
+        base_url = json.loads(old[0])['base_url'] if old else 'http://127.0.0.1:23373'
+        body = {'base_url': base_url, 'credential_ref': ''}
+        db.execute('INSERT INTO beeper_settings VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision=excluded.revision',
+                   (json.dumps(body), revision + 1))
+        db.execute('DELETE FROM beeper_pages')
+        db.execute('DELETE FROM beeper_assets')
+    return {**body, 'revision': revision + 1, 'connected': False, 'transport_mode': 'manual_refresh_only'}
 
 
 class Client:

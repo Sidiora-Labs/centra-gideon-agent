@@ -53,7 +53,7 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     reads |= {'people_desktop_preview', 'people_desktop_imports', 'people_desktop_history', 'people_desktop_exclusions'}
     writes |= {'people_desktop_commit', 'people_desktop_exclude'}
     reads |= {'people_beeper_settings', 'people_beeper_page', 'people_beeper_asset', 'people_beeper_outbox'}
-    writes |= {'people_beeper_configure', 'people_beeper_refresh', 'people_beeper_asset_fetch', 'people_beeper_draft', 'people_beeper_send', 'people_beeper_reconcile', 'people_beeper_discard', 'people_beeper_recover'}
+    writes |= {'people_beeper_configure', 'people_beeper_disconnect', 'people_beeper_refresh', 'people_beeper_asset_fetch', 'people_beeper_draft', 'people_beeper_send', 'people_beeper_reconcile', 'people_beeper_discard', 'people_beeper_recover'}
     reads |= {'people_telegram_config', 'people_telegram_command', 'people_telegram_deliveries'}
     writes |= {'people_telegram_configure', 'people_telegram_queue', 'people_telegram_send'}
     reads |= {'people_calendar_sources', 'people_calendar_daily'}

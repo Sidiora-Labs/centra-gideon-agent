@@ -116,3 +116,22 @@ it('rejects a nonlocal endpoint without overwriting the saved connection', async
   expect(settings.revision).toBe(1)
   cleanup()
 })
+
+it('disconnects explicitly, clears provider cache, and preserves the outbox audit record', async () => {
+  render(<BeeperPanel />)
+  await screen.findByText('Reviewed UI draft')
+  expect(screen.getByText(/Connection: configured; mode: manual_refresh_only/)).toBeInTheDocument()
+  expect(screen.getByText(/no background socket or poller is running/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Disconnect Beeper' }))
+  await screen.findByText(/Beeper disconnected; cached provider data cleared/)
+  expect(screen.getByText(/Connection: disconnected; mode: manual_refresh_only/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Disconnect Beeper' })).not.toBeInTheDocument()
+  expect(screen.getByText('Reviewed UI draft')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Send queued message' })).not.toBeInTheDocument()
+  const response = await originalFetch(origin + base + '/beeper/settings')
+  const settings = (await response.json()).settings
+  expect(settings.credential_ref).toBe('')
+  expect(settings.connected).toBe(false)
+  expect(settings.revision).toBe(2)
+  cleanup()
+})

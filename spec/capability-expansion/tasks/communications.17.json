@@ -1,0 +1,49 @@
+{
+  "id": "communications.17",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "e62eb58c",
+  "requires": ["communications.04"],
+  "contract": "Persist an account-bound email draft in the canonical communications database, bind approval to the exact rendered sender, recipients, body and pinned artifact revisions, and dispatch only through the account's stored credential reference. Preserve SMTP acceptance separately from uncertain delivery and correlate only canonical ingested replies without opening links.",
+  "acceptance": [
+    "Caller-supplied sender, credentials and transport settings are refused; a credential-bound IMAP account supplies immutable identity",
+    "Exact content digest approval and a separate dispatch confirmation precede any SMTP network transaction",
+    "A real local SMTP protocol server observes the exact envelope and MIME content while accepted remains delivery uncertain",
+    "Pinned canonical artifact and source-message ownership, size/count bounds, idempotent request keys and restart duplicate prevention are asserted",
+    "A canonical ingested In-Reply-To response correlates by message identity and exposes URL candidates only as unopened data",
+    "HTTP, native tool and Console consumers preserve the same approval and receipt states"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/outbound_email.py",
+    "runtime/gideon/workspace/capabilities/communications/outbound_email_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications_outbound.py",
+    "apps/console/src/features/capabilities/communications/OutboundEmailPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_outbound_email.py",
+    "checks/runtime/capabilities/communications/outbound_email_ui_server.py",
+    "apps/console/src/features/capabilities/communications/OutboundEmailPanel.test.tsx"
+  ],
+  "runtime_test_files": ["checks/runtime/capabilities/communications/test_outbound_email.py"],
+  "ui_test_files": ["apps/console/src/features/capabilities/communications/OutboundEmailPanel.test.tsx"],
+  "extra_files": ["runtime/gideon/extensions/apps/native/gideon-outbound-email/app.json"],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.17",
+  "limits": [
+    "Local qualification uses a real loopback SMTP protocol server and sends no third-party email; customer transport and mailbox proof remain pending.",
+    "SMTP acceptance is retained as provider acceptance with delivery uncertain; Gideon does not synthesize a delivered receipt.",
+    "Reply correlation requires an already-ingested canonical message whose thread identity matches the stable outbound Message-ID.",
+    "URL candidates in verification replies are stored and displayed as unopened text; this capability never follows them.",
+    "Root must register capabilities_communications_outbound.register on the dashboard application; the unique handler remains isolated until that shared hook lands."
+  ],
+  "qualification": {
+    "status": "locally_qualified",
+    "runtime_evidence": "/tmp/gideon-communications.17-checks-nh6xln0n",
+    "ui_evidence": "/tmp/gideon-communications.17-checks-3xt72nv1",
+    "compile": "scoped TypeScript compile passed for panel, setup and UI regression",
+    "runtime": "9 passed against a real loopback SMTP protocol server; runtime hashes unchanged after the passing run",
+    "console": "3 passed through the production HTTP handler and real loopback SMTP protocol server",
+    "external_transport": "not exercised; no third-party email sent",
+    "shared_hook": "Root must register the unique outbound handler; Page and native app consumer are included in this increment."
+  }
+}

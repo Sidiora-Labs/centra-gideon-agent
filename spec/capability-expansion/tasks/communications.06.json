@@ -1,31 +1,28 @@
 {
   "id": "communications.06",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "5c289223",
   "requires": [
     "communications.05"
   ],
-  "contract": "Real Beeper Desktop API client uses existing credential references, bounded cached conversation/message pages and media identities. Durable outbox stores drafts before approval-gated send, binds to connection revision, atomically claims once, distinguishes pending/bridge confirmation/unknown and never automatically resends. HTTP/native/Console operations include recovery and discard. Local checks never send external messages.",
+  "contract": "Real Beeper Desktop API client uses existing credential references, bounded cached conversation/message pages and media identities. Revision-guarded disconnect clears the credential reference and provider cache while preserving audit outbox rows and invalidating their connection revision. Durable outbox stores drafts before approval-gated send, binds to connection revision, atomically claims once, distinguishes pending/bridge confirmation/unknown and never automatically resends. HTTP/native/Console operations include recovery and discard. Local checks never send external messages.",
   "acceptance": [
     "Persistent connection revisions, cache isolation, bounded documented Beeper page metadata",
     "Durable idempotent draft/CAS/restart/interrupted-send recovery without automatic retry",
     "Actual HTTP/native/Console draft and unavailable-credential journeys",
     "Real documented Beeper read/send/reconcile/asset client source with outbound approval metadata",
-    "Explicit external successful fetch/send/attachment qualifications remain pending actual Beeper connection"
+    "Explicit external successful fetch/send/attachment qualifications remain pending actual Beeper connection",
+    "Explicit disconnect clears cached provider state and prevents old drafts from sending"
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/beeper.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/BeeperPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/BeeperPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_beeper.py",
     "checks/runtime/capabilities/communications/test_tools.py",
-    "apps/console/src/features/capabilities/communications/BeeperPanel.test.tsx",
-    "apps/console/src/features/capabilities/communications/MirrorPanel.test.tsx"
+    "apps/console/src/features/capabilities/communications/BeeperPanel.test.tsx"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/communications/test_beeper.py",
@@ -37,7 +34,24 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-people/app.json"
   ],
+  "integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.06",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.06-checks-0zu_axzg",
+  "production_lines": 292,
+  "test_lines": 507,
+  "ratio": 1.7363013698630136,
+  "files": {
+    "apps/console/src/features/capabilities/communications/BeeperPanel.tsx": "7e16c971b429cd7712f3b11936b46c1db243c2e297c88a394f3697812fa5f126",
+    "runtime/gideon/workspace/capabilities/communications/beeper.py": "1fef5d48c3bf35aadd7d4c5c8e6a5a524939efcf9218ca9527bacd3861126a1b",
+    "apps/console/src/features/capabilities/communications/BeeperPanel.test.tsx": "7aea4f6c98905cee6e93f9ce1256a38333e85f7beb1b2e7093fee358481d6e4c",
+    "checks/runtime/capabilities/communications/test_beeper.py": "f77b253eb7c86a00e54674447a0c05d12f77b82ac8b2c3c5459a125e09eb4249",
+    "checks/runtime/capabilities/communications/test_tools.py": "c281a68ffb2c54aa5c947a1a20911bcc5a99c7c0d1e464742f4392ef71024ecc"
+  },
   "sources": [
     "https://developers.beeper.com/desktop-api-reference/resources/messages/methods/retrieve/",
     "https://developers.beeper.com/desktop-api-reference/resources/assets/methods/serve/"
@@ -47,11 +61,14 @@
     "No outbound external messages sent by qualification.",
     "Cached pages represent available pages only, not complete network history.",
     "Attachments bounded to8MiB; text-only outbox.",
-    "Local mirror helper dead test helper removed per root compile finding; no unchanged .04 rerun."
+    "Local mirror helper dead test helper removed per root compile finding; no unchanged .04 rerun.",
+    "The native source uses explicit manual refresh; no background Beeper socket or poller is claimed."
   ],
   "qualification": {
-    "runtime": "60 passed",
-    "console_http": "4 passed",
+    "compile": "passed",
+    "runtime": "61 passed including revision-guarded disconnect, cache clearing, restart and outbox invalidation",
+    "console_http": "5 passed including explicit disconnect UI journey",
+    "disconnect": "qualified for manual-refresh native source; credential reference and provider cache cleared atomically",
     "external_beeper": "pending live credentialed Desktop; no external sends performed",
     "integrated_browser": "pending root integration"
   }
