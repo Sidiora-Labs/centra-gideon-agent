@@ -14,6 +14,7 @@ from gideon.operations.durability.shards import canonical_json
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 from gideon.workspace.capabilities.platform import replication_adapters
 from gideon.workspace.capabilities.platform import replication_commissions
+from gideon.workspace.capabilities.platform import replication_clinical
 from gideon.workspace.capabilities.platform import replication_creative_direction
 from gideon.workspace.capabilities.platform import replication_experience_stories
 from gideon.workspace.capabilities.platform import replication_identity_stories
@@ -49,6 +50,7 @@ DOMAINS = {
     "media.assets": Domain("media.assets", replication_adapters.MEDIA_ENTRIES),
     replication_video.SCOPE: Domain(replication_video.SCOPE, replication_video.ENTRIES),
     replication_music_video.SCOPE: Domain(replication_music_video.SCOPE, replication_music_video.ENTRIES),
+    replication_clinical.SCOPE: Domain(replication_clinical.SCOPE, replication_clinical.ENTRIES),
     "wellbeing.health": Domain("wellbeing.health", replication_adapters.WELLBEING_HEALTH_ENTRIES),
     "wellbeing.routines": Domain("wellbeing.routines", replication_adapters.WELLBEING_ROUTINE_ENTRIES),
     "wellbeing.genome": Domain("wellbeing.genome", replication_adapters.WELLBEING_GENOME_ENTRIES),
@@ -114,6 +116,8 @@ class ReplicationService:
             return replication_video.read_rows(self.home, entry_id)
         if entry_id in replication_music_video.ENTRIES:
             return replication_music_video.read_rows(self.home, entry_id)
+        if entry_id in replication_clinical.ENTRIES:
+            return replication_clinical.read_rows(self.home, entry_id)
         if entry_id in replication_adapters.SQLITE_ENTRIES:
             return replication_adapters.read_rows(self.home, entry_id)
         entry = self._entry(entry_id)
@@ -184,6 +188,8 @@ class ReplicationService:
                 replication_video.validate_entries(entries)
             if scope == replication_music_video.SCOPE:
                 replication_music_video.validate_entries(entries)
+            if scope == replication_clinical.SCOPE:
+                replication_clinical.validate_entries(entries)
             if scope == "music.library":
                 replication_adapters.validate_music_entries(entries)
             if scope.startswith("wellbeing."):
@@ -254,6 +260,11 @@ class ReplicationService:
                         result = replication_music_video.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
                     except ValueError as error:
                         raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_clinical.ENTRIES:
+                    try:
+                        result = replication_clinical.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
                 elif entry_id in replication_adapters.SQLITE_ENTRIES:
                     try:
                         result = replication_adapters.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
@@ -311,6 +322,8 @@ class ReplicationService:
                 return replication_video.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_music_video.ENTRIES:
                 return replication_music_video.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+            if record is not None and record.entry_id in replication_clinical.ENTRIES:
+                return replication_clinical.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             return replication_adapters.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
         except ValueError as error:
             raise ReplicationError(str(error), 409) from error

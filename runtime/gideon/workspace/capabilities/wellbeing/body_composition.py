@@ -2,7 +2,7 @@
 import json
 import math
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .store import MeasurementError, MeasurementStore, instant, text
 
@@ -139,3 +139,29 @@ class BodyCompositionStore(MeasurementStore):
             history = [json.loads(row[0]) for row in database.execute("SELECT data FROM body_composition_revisions ORDER BY id,revision")]
         current = {record["id"]: record for record in history}
         return {"schema_version": 1, "body_composition": list(current.values()), "history": history}
+
+    def import_current(self, record):
+        fields = {"id", "revision", "observed_at", "source", "notes", "created_at", "original_values", "normalized_values"}
+        if not isinstance(record, dict) or set(record) != fields:
+            raise MeasurementError("Invalid canonical body-composition import")
+        try:
+            if str(UUID(record["id"])) != record["id"]:
+                raise ValueError
+            created = datetime.fromisoformat(record["created_at"])
+        except (TypeError, ValueError) as exc:
+            raise MeasurementError("Invalid canonical body-composition identity or timestamp") from exc
+        if created.utcoffset() is None or type(record["revision"]) is not int or record["revision"] < 1:
+            raise MeasurementError("Invalid canonical body-composition revision or timestamp")
+        observed = instant(record["observed_at"]); text(record["source"], "source", 256); text(record["notes"], "notes", 4000, empty=True)
+        original, normalized = normalize(record["original_values"])
+        if original != record["original_values"] or normalized != record["normalized_values"]:
+            raise MeasurementError("Canonical body-composition values are not exact")
+        with self.connection() as database:
+            database.execute("BEGIN IMMEDIATE")
+            row = database.execute("SELECT revision,data FROM body_composition_revisions WHERE id=? ORDER BY revision DESC LIMIT 1", (record["id"],)).fetchone()
+            if row and json.loads(row[1]) == record:
+                return "unchanged"
+            if row and row[0] >= record["revision"]:
+                raise MeasurementError("Canonical body-composition import conflicts with local history", 409, "conflict")
+            database.execute("INSERT INTO body_composition_revisions VALUES(?,?,?,?)", (record["id"], record["revision"], observed, json.dumps(record, sort_keys=True, allow_nan=False)))
+        return "imported"

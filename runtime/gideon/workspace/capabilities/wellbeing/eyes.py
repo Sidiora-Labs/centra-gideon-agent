@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -174,3 +175,26 @@ class EyePrescriptionStore(MeasurementStore):
         for record in history:
             current[record["id"]] = record
         return {"schema": SCHEMA, "version": 1, "prescriptions": list(current.values()), "history": history}
+
+    def import_current(self, record):
+        fields = {"id", "revision", "observed_date", "source", "notes", "left", "right", "created_at", "updated_at"}
+        if not isinstance(record, dict) or set(record) != fields or not re.fullmatch(r"[0-9a-f]{32}", record.get("id", "")):
+            raise MeasurementError("Invalid canonical eye prescription import")
+        try:
+            created, updated = datetime.fromisoformat(record["created_at"]), datetime.fromisoformat(record["updated_at"])
+        except (TypeError, ValueError) as exc:
+            raise MeasurementError("Invalid canonical eye prescription timestamp") from exc
+        if created.utcoffset() is None or updated.utcoffset() is None or updated < created or type(record["revision"]) is not int or record["revision"] < 1:
+            raise MeasurementError("Invalid canonical eye prescription revision or timestamp")
+        authored = _validated({"request_id":"peer-import", **{key:record[key] for key in ("observed_date","source","notes","left","right")}})
+        if {**authored, "id":record["id"], "revision":record["revision"], "created_at":record["created_at"], "updated_at":record["updated_at"]} != record:
+            raise MeasurementError("Canonical eye prescription import is not exact")
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT revision,data FROM eye_prescription_revisions WHERE id=? ORDER BY revision DESC LIMIT 1", (record["id"],)).fetchone()
+            if row and json.loads(row[1]) == record:
+                return "unchanged"
+            if row and row[0] >= record["revision"]:
+                raise MeasurementError("Canonical eye prescription import conflicts with local history", 409, "conflict")
+            db.execute("INSERT INTO eye_prescription_revisions VALUES(?,?,?,?)", (record["id"], record["revision"], record["observed_date"], json.dumps(record, sort_keys=True, allow_nan=False)))
+        return "imported"

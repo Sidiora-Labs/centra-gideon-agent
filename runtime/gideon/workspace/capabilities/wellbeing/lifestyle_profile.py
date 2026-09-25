@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .store import MeasurementError, MeasurementStore, instant, text
 
@@ -152,3 +152,28 @@ class LifestyleProfileStore(MeasurementStore):
         with self.connection() as db:
             history = [json.loads(row[0]) for row in db.execute("SELECT data FROM lifestyle_profile_revisions ORDER BY id,revision")]
         return {"schema": SCHEMA, "schema_version": 1, "records": records, "history": history}
+
+    def import_current(self, record):
+        fields = FIELDS | {"id", "revision", "created_at", "updated_at"}
+        if not isinstance(record, dict) or set(record) != fields:
+            raise MeasurementError("Invalid canonical lifestyle import")
+        try:
+            if str(UUID(record["id"])) != record["id"]:
+                raise ValueError
+            created = datetime.fromisoformat(record["created_at"]); updated = datetime.fromisoformat(record["updated_at"])
+        except (TypeError, ValueError) as exc:
+            raise MeasurementError("Invalid canonical lifestyle identity or timestamp") from exc
+        if created.utcoffset() is None or updated.utcoffset() is None or updated < created or type(record["revision"]) is not int or record["revision"] < 1:
+            raise MeasurementError("Invalid canonical lifestyle revision or timestamp")
+        authored = validate({key: record[key] for key in FIELDS})
+        if {**authored, "id":record["id"], "revision":record["revision"], "created_at":record["created_at"], "updated_at":record["updated_at"]} != record:
+            raise MeasurementError("Canonical lifestyle import is not exact")
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT revision,data FROM lifestyle_profile_revisions WHERE id=? ORDER BY revision DESC LIMIT 1", (record["id"],)).fetchone()
+            if row and json.loads(row[1]) == record:
+                return "unchanged"
+            if row and row[0] >= record["revision"]:
+                raise MeasurementError("Canonical lifestyle import conflicts with local history", 409, "conflict")
+            self._append(db, record)
+        return "imported"
