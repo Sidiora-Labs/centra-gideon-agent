@@ -69,8 +69,8 @@ def error(exc):
     return web.json_response({'error': str(exc), 'code': 'creative_commission_invalid'}, status=getattr(exc, 'status', 400))
 
 
-def register(app, home=None, direction=None, triggers=None):
-    app[COMMISSIONS] = CommissionStore(home, direction=direction, triggers=triggers)
+def register(app, home=None, direction=None, triggers=None, dispatcher=None):
+    app[COMMISSIONS] = CommissionStore(home, direction=direction, triggers=triggers, dispatcher=dispatcher)
     root = '/api/capabilities/creative/commissions'
     app.router.add_get(root, collection); app.router.add_post(root, collection)
     app.router.add_get(root + '/{id}', item); app.router.add_patch(root + '/{id}', item)

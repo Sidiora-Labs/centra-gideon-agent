@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 
 type Output = { artifact_id: string; artifact_version: number; content_hash: string; path?: string }
-type Run = { id: string; status: string; project_id?: string; outputs: Output[]; attempts: Array<{ number: number; status: string; error: string }> }
+type Receipt = { backend: string; operation: string; request_id: string; resource_id: string; status: string; upstream_status: string; error_code: string }
+type Run = { id: string; status: string; project_id?: string; outputs: Output[]; dispatch_receipts?: Receipt[]; attempts: Array<{ number: number; status: string; error: string }> }
 type Reaction = { id: string; revision: number; author: string; rating: string; deleted: boolean }
 type Commission = { id: string; revision: number; name: string; target_ability: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
 
@@ -18,6 +19,7 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   const [cadenceKind, setCadenceKind] = useState('interval')
   const [recurrenceStart, setRecurrenceStart] = useState('2026-10-01T09:00:00')
   const [recurrenceRule, setRecurrenceRule] = useState('FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1')
+  const [dispatchText, setDispatchText] = useState('')
   const [error, setError] = useState('')
 
   async function list() {
@@ -30,12 +32,16 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   }
   async function create() {
     setError('')
+    let dispatch: Record<string, unknown> | undefined
+    try { dispatch = dispatchText.trim() ? JSON.parse(dispatchText) : undefined }
+    catch { return setError('Ability dispatch must be valid JSON') }
     const response = await fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       request_id: `commission-${Date.now()}`, name, target_ability: ability,
       brief: { intent, genre: '', category: '', style: '', constraints: {}, seed_refs: [] },
       cadence: cadenceKind === 'recurrence'
         ? { kind: 'recurrence', dtstart: recurrenceStart, rrule: recurrenceRule, timezone: 'UTC', exdates: [] }
         : { kind: 'interval', seconds: 900, timezone: 'UTC' },
+      ...(dispatch ? { dispatch } : {}),
       sources: [{ kind: 'work', id: sourceId, revision: sourceRevision }], enabled: true, max_attempts: 2,
       steps: [
         { id: 'verify', title: 'Verify canonical source', operation: 'source.verify', depends_on: [] },
@@ -91,6 +97,7 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
         <label>First local occurrence<input aria-label="Recurrence start" value={recurrenceStart} onChange={event => setRecurrenceStart(event.target.value)} /></label>
         <label>Recurrence rule<input aria-label="Recurrence rule" value={recurrenceRule} onChange={event => setRecurrenceRule(event.target.value)} /></label>
       </>}
+      <label>Ability dispatch JSON<textarea aria-label="Ability dispatch JSON" value={dispatchText} onChange={event => setDispatchText(event.target.value)} placeholder="Optional canonical job input" /></label>
       <button onClick={() => void create()}>Create commission</button>
     </section>
     {error && <p role="alert">{error}</p>}
@@ -109,6 +116,7 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
           <button onClick={() => void react(run, output, 'liked')}>Like</button>
           <button onClick={() => void react(run, output, 'disliked')}>Dislike</button>
         </div>)}
+        {(run.dispatch_receipts || []).map(receipt => <div key={receipt.request_id}>Dispatch {receipt.backend}/{receipt.operation}: {receipt.status} {receipt.resource_id || receipt.error_code}</div>)}
       </li>)}</ul>
       <h3>Feedback</h3><ul>{(selected.feedback || []).map(row => <li key={row.id}>{row.author}: {row.rating}{row.deleted ? ' (removed)' : ''}</li>)}</ul>
     </section>}

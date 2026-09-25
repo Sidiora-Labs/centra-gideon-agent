@@ -19,6 +19,7 @@ from gideon.core.timezones import UnknownTimeZone, resolve_zone_name
 from gideon.integrations.action_providers.base import ActionContext, ActionProvider, ActionResult
 
 from .store import CatalogError, identifier, integer, keys, text
+from .commission_dispatch import CommissionDispatcher, normalize_dispatch
 
 
 ABILITIES = {'video', 'image', 'music', 'music-video', 'series'}
@@ -192,12 +193,13 @@ def _plan(value):
 
 
 class CommissionStore:
-    def __init__(self, home=None, direction=None, triggers=None):
+    def __init__(self, home=None, direction=None, triggers=None, dispatcher=None):
         self.home = Path(home) if home is not None else config_dir()
         self.path = self.home / 'capabilities' / 'creative' / 'commissions.sqlite3'
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.direction = direction
         self.triggers = triggers or TriggerStore(base_dir=self.home)
+        self.dispatcher = dispatcher or CommissionDispatcher(self.home)
         with self.db() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS creative_commissions(id TEXT PRIMARY KEY, record TEXT NOT NULL);
@@ -241,7 +243,7 @@ class CommissionStore:
         return self.direction
 
     def create(self, payload):
-        keys(payload, {'request_id', 'name', 'target_ability', 'brief', 'cadence', 'sources', 'steps', 'enabled', 'max_attempts'})
+        keys(payload, {'request_id', 'name', 'target_ability', 'brief', 'cadence', 'sources', 'steps', 'enabled', 'max_attempts', 'dispatch'})
         request = identifier(payload.get('request_id'))
         ability = payload.get('target_ability')
         if ability not in ABILITIES:
@@ -261,6 +263,8 @@ class CommissionStore:
                       'brief': _brief(payload.get('brief')), 'cadence': _cadence(payload.get('cadence')),
                       'sources': sources, 'steps': _plan(payload.get('steps')), 'enabled': payload.get('enabled', True),
                       'max_attempts': integer(payload.get('max_attempts', 2), 1, 3)}
+        if 'dispatch' in payload:
+            normalized['dispatch'] = normalize_dispatch(ability, payload.get('dispatch'), sources)
         if type(normalized['enabled']) is not bool:
             raise CatalogError('Commission enabled must be boolean')
         fingerprint = digest(normalized)
@@ -286,7 +290,7 @@ class CommissionStore:
             return {'items': [json.loads(row[0]) for row in db.execute('SELECT record FROM creative_commissions ORDER BY rowid DESC')]}
 
     def update(self, identity, payload):
-        keys(payload, {'revision', 'name', 'brief', 'cadence', 'enabled', 'max_attempts'})
+        keys(payload, {'revision', 'name', 'brief', 'cadence', 'enabled', 'max_attempts', 'dispatch'})
         with self.db() as db:
             record = self._load(db, identity)
             if integer(payload.get('revision')) != record['revision']:
@@ -294,6 +298,7 @@ class CommissionStore:
             changed_schedule = 'cadence' in payload or 'enabled' in payload
             if 'name' in payload: record['name'] = text(payload['name'], 200, True)
             if 'brief' in payload: record['brief'] = _brief(payload['brief'])
+            if 'dispatch' in payload: record['dispatch'] = normalize_dispatch(record['target_ability'], payload['dispatch'], record['sources'])
             if 'cadence' in payload: record['cadence'] = _cadence(payload['cadence'])
             if 'enabled' in payload:
                 if type(payload['enabled']) is not bool: raise CatalogError('Commission enabled must be boolean')
@@ -386,7 +391,7 @@ class CommissionStore:
             row = db.execute('SELECT record FROM creative_commission_runs WHERE commission_id=? AND occurrence=?',
                              (commission_id, occurrence)).fetchone()
             run = json.loads(row[0]) if row else None
-            if run and run['status'] == 'completed': return run
+            if run and run['status'] in ('completed', 'submitted'): return run
             attempts = run['attempts'] if run else []
             if len(attempts) >= commission['max_attempts']:
                 return {**run, 'status': 'exhausted'}
@@ -394,24 +399,29 @@ class CommissionStore:
             run_id = run['id'] if run else digest(commission_id + ':' + occurrence)
             if run is None:
                 run = {'id': run_id, 'commission_id': commission_id, 'occurrence': occurrence, 'trigger': trigger,
-                       'status': 'running', 'project_id': None, 'outputs': [], 'feedback_refs': [], 'attempts': [],
+                       'status': 'running', 'project_id': None, 'outputs': [], 'dispatch_receipts': [],
+                       'feedback_refs': [], 'attempts': [],
                        'created_at': now_iso(), 'updated_at': now_iso()}
                 db.execute('INSERT INTO creative_commission_runs VALUES(?,?,?,?)',
                            (run_id, commission_id, occurrence, json.dumps(run, sort_keys=True)))
             attempt = len(attempts) + 1
         project_id = run.get('project_id')
         started = now_iso()
+        receipt = None
         try:
             direction = self._direction()
             treatment = json.dumps({'ability': commission['target_ability'], 'brief': commission['brief'],
                                     'feedback': feedback}, ensure_ascii=False, sort_keys=True)
-            project = direction.create({'request_id': 'commission-' + run['id'][:48], 'name': commission['name'],
-                'treatment': treatment, 'sources': commission['sources'], 'steps': commission['steps']})
-            project_id = project['id']
-            with self.db() as db:
-                current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
-                current['project_id'] = project_id; current['updated_at'] = now_iso()
-                db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current, sort_keys=True), run['id']))
+            if project_id:
+                project = direction.get(project_id)
+            else:
+                project = direction.create({'request_id': 'commission-' + run['id'][:48], 'name': commission['name'],
+                    'treatment': treatment, 'sources': commission['sources'], 'steps': commission['steps']})
+                project_id = project['id']
+                with self.db() as db:
+                    current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
+                    current['project_id'] = project_id; current['updated_at'] = now_iso()
+                    db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current, sort_keys=True), run['id']))
             if project['status'] == 'draft':
                 project = direction.control(project_id, {'revision': project['revision'], 'action': 'start'})
             for _ in range(len(commission['steps'])):
@@ -419,17 +429,26 @@ class CommissionStore:
                 project = direction.advance(project_id, {'revision': project['revision']})
             if project['status'] != 'completed': raise CatalogError('Direction project did not complete its bounded plan', 409)
             outputs = [step['result'] for step in project['steps'] if step.get('result', {}).get('artifact_id')]
-            entry = {'number': attempt, 'status': 'completed', 'started_at': started, 'finished_at': now_iso(), 'error': ''}
-            status, error = 'completed', ''
+            receipt = None
+            if commission.get('dispatch'):
+                receipt = await self.dispatcher.submit(commission['target_ability'], commission['dispatch'], run['id'], attempt)
+                if receipt['status'] in ('failed', 'external_unavailable'):
+                    raise CatalogError('Ability dispatch ' + receipt['status'], 503 if receipt['status'] == 'external_unavailable' else 409)
+                outputs.extend(row for row in receipt['artifact_refs'] if row.get('content_hash'))
+            status = receipt['status'] if receipt else 'completed'
+            entry = {'number': attempt, 'status': status, 'started_at': started, 'finished_at': now_iso(), 'error': ''}
+            error = ''
         except Exception as exc:
             outputs = run.get('outputs', [])
-            error = 'execution-failed:' + type(exc).__name__
+            error = (receipt or {}).get('error_code') or 'execution-failed:' + type(exc).__name__
             status = 'exhausted' if attempt >= commission['max_attempts'] else 'failed'
             entry = {'number': attempt, 'status': status, 'started_at': started, 'finished_at': now_iso(), 'error': error}
         with self.db() as db:
             current = json.loads(db.execute('SELECT record FROM creative_commission_runs WHERE id=?', (run['id'],)).fetchone()[0])
             current.update(status=status, project_id=project_id, outputs=outputs,
                            feedback_refs=[{'id': item['id'], 'revision': item['revision']} for item in feedback], updated_at=now_iso())
+            if receipt and not any(row['request_id'] == receipt['request_id'] for row in current.get('dispatch_receipts', [])):
+                current.setdefault('dispatch_receipts', []).append(receipt)
             current['attempts'].append(entry)
             db.execute('UPDATE creative_commission_runs SET record=? WHERE id=?', (json.dumps(current, sort_keys=True), run['id']))
             return current
@@ -517,7 +536,7 @@ class CommissionActionProvider(ActionProvider):
             if result.get('reason') not in ('disabled', 'stale_schedule'):
                 self.store.rearm_recurrence(action_config['commission_id'], occurrence,
                     action_config['schedule_revision'], action_config['cadence_hash'])
-            success = result.get('status') in ('completed', 'skipped')
+            success = result.get('status') in ('completed', 'submitted', 'skipped')
             return ActionResult(success=success, stdout=json.dumps(result), error='' if success else result['attempts'][-1]['error'],
                                 outcome='ran' if result.get('status') == 'completed' else 'skipped_noop' if success else 'failed')
         except CatalogError as exc:
