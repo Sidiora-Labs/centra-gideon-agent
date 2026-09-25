@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from datetime import datetime, timezone
 
 import pytest
 from aiohttp import web
@@ -15,6 +16,7 @@ from gideon.workspace.capabilities.creative.commissions import (
     CommissionActionProvider,
     CommissionStore,
     TRIGGER_PREFIX,
+    _recurrence_next,
     digest,
 )
 from gideon.workspace.capabilities.creative.direction import DirectionStore
@@ -581,3 +583,125 @@ async def test_http_rejects_query_fields_and_foreign_feedback_output(tmp_path):
             'run_id': run['id'], 'author': 'owner', 'output': foreign, 'rating': 'liked', 'note': '', 'tags': []})
         assert response.status == 409
         assert (await response.json())['code'] == 'creative_commission_invalid'
+
+
+def recurrence(rule='FREQ=DAILY;COUNT=4', start='2027-03-13T09:00:00', exdates=None):
+    return {'kind': 'recurrence', 'dtstart': start, 'rrule': rule,
+            'timezone': 'America/New_York', 'exdates': exdates or []}
+
+
+def test_recurrence_create_arms_one_shared_at_trigger_and_persists_next_fire(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, triggers = make_store(tmp_path)
+    commission = store.create(payload(work, cadence=recurrence()))
+    trigger = triggers.get(TRIGGER_PREFIX + commission['id']).trigger
+    assert commission['cadence']['spec'] == {'kind': 'recurrence'}
+    assert commission['schedule_state'] == 'active'
+    assert commission['next_fire_at'] == trigger.next_fire_at
+    assert trigger.spec['kind'] == 'at'
+    assert trigger.spec['strict'] is True
+    assert trigger.spec['timezone'] == 'America/New_York'
+    assert trigger.workflow['inline']['config']['cadence_hash'] == digest({
+        key: value for key, value in commission['cadence'].items() if key != 'spec'})
+
+
+def test_daily_recurrence_preserves_local_wall_time_across_dst():
+    cadence = recurrence(start='2026-03-07T09:00:00')
+    before = datetime(2026, 3, 6, 12, tzinfo=timezone.utc).timestamp()
+    first = _recurrence_next({**cadence, 'spec': {'kind': 'recurrence'}}, before)
+    second = _recurrence_next({**cadence, 'spec': {'kind': 'recurrence'}}, first)
+    third = _recurrence_next({**cadence, 'spec': {'kind': 'recurrence'}}, second)
+    assert datetime.fromtimestamp(first, timezone.utc).isoformat() == '2026-03-07T14:00:00+00:00'
+    assert datetime.fromtimestamp(second, timezone.utc).isoformat() == '2026-03-08T13:00:00+00:00'
+    assert datetime.fromtimestamp(third, timezone.utc).isoformat() == '2026-03-09T13:00:00+00:00'
+
+
+def test_monthly_last_weekday_and_exclusions_use_dateutil_calendar_semantics():
+    cadence = recurrence(rule='FREQ=MONTHLY;COUNT=4;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+        start='2026-01-30T09:00:00', exdates=['2026-02-27'])
+    normalized = {**cadence, 'spec': {'kind': 'recurrence'}}
+    before = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    first = _recurrence_next(normalized, before)
+    second = _recurrence_next(normalized, first)
+    third = _recurrence_next(normalized, second)
+    assert datetime.fromtimestamp(first, timezone.utc).isoformat() == '2026-01-30T14:00:00+00:00'
+    assert datetime.fromtimestamp(second, timezone.utc).isoformat() == '2026-03-31T13:00:00+00:00'
+    assert datetime.fromtimestamp(third, timezone.utc).isoformat() == '2026-04-30T13:00:00+00:00'
+
+
+@pytest.mark.parametrize('cadence', [
+    {'kind': 'recurrence', 'dtstart': 'bad', 'rrule': 'FREQ=DAILY', 'timezone': 'UTC', 'exdates': []},
+    {'kind': 'recurrence', 'dtstart': '2027-01-01T09:00:00', 'rrule': 'FREQ=HOURLY', 'timezone': 'UTC', 'exdates': []},
+    {'kind': 'recurrence', 'dtstart': '2027-01-01T09:00:00', 'rrule': 'FREQ=DAILY;COUNT=0', 'timezone': 'UTC', 'exdates': []},
+    {'kind': 'recurrence', 'dtstart': '2027-01-01T09:00:00', 'rrule': 'FREQ=DAILY;BYEASTER=1', 'timezone': 'UTC', 'exdates': []},
+    {'kind': 'recurrence', 'dtstart': '2027-01-01T09:00:00', 'rrule': 'FREQ=DAILY', 'timezone': 'Mars/Olympus', 'exdates': []},
+    {'kind': 'recurrence', 'dtstart': '2027-01-01T09:00:00', 'rrule': 'FREQ=DAILY', 'timezone': 'UTC', 'exdates': ['x'] * 101},
+])
+def test_invalid_recurrence_rules_fail_before_record_or_trigger(cadence, tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, triggers = make_store(tmp_path)
+    with pytest.raises(CatalogError):
+        store.create(payload(work, cadence=cadence))
+    assert store.list() == {'items': []}
+    assert triggers.list_triggers() == []
+
+
+async def test_real_recurrence_due_fire_rearms_next_occurrence_after_dispatch(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, direction, triggers = make_store(tmp_path)
+    commission = store.create(payload(work, cadence=recurrence(rule='FREQ=DAILY;COUNT=4')))
+    record = store.get(commission['id'])
+    before = datetime(2027, 3, 12, 12, tzinfo=timezone.utc).timestamp()
+    trigger = store._trigger(record, at=before)
+    first = datetime.fromisoformat(trigger.next_fire_at).timestamp()
+    triggers.upsert(trigger)
+    due = await tick(triggers, now=first + 1, persist=True, base_dir=tmp_path)
+    assert len(due.fires) == 1
+    result = await CommissionActionProvider(store).execute(trigger.workflow['inline']['config'],
+        ActionContext(event='trigger.fired', payload=due.fires[0].to_dict()))
+    assert result.success
+    run = json.loads(result.stdout)
+    assert run['status'] == 'completed'
+    assert len(direction.list()) == 1
+    rearmed = triggers.get(TRIGGER_PREFIX + commission['id']).trigger
+    assert rearmed.enabled is True
+    assert rearmed.spec['kind'] == 'at'
+    assert datetime.fromisoformat(rearmed.next_fire_at).timestamp() > first
+    state = store.get(commission['id'])
+    assert state['schedule_state'] == 'active'
+    assert state['next_fire_at'] == rearmed.next_fire_at
+
+
+async def test_failed_recurrence_fire_records_attempt_rearms_and_can_retry(tmp_path):
+    works, work, draft = source(tmp_path)
+    store, _, triggers = make_store(tmp_path)
+    commission = store.create(payload(work, cadence=recurrence(), attempts=2))
+    record = store.get(commission['id'])
+    before = datetime(2027, 3, 12, 12, tzinfo=timezone.utc).timestamp()
+    trigger = store._trigger(record, at=before)
+    occurrence = datetime.fromisoformat(trigger.next_fire_at).timestamp()
+    works.artifacts.delete(draft['artifact_id'])
+    result = await CommissionActionProvider(store).execute(trigger.workflow['inline']['config'],
+        ActionContext(event='trigger.fired', payload={'scheduled_for': occurrence}))
+    assert not result.success
+    failed = json.loads(result.stdout)
+    assert failed['status'] == 'failed'
+    assert len(failed['attempts']) == 1
+    assert triggers.get(TRIGGER_PREFIX + commission['id']).trigger.enabled is True
+    works.artifacts.create(name='Restored source', slug=draft['artifact_id'], kind='markdown', content=TEXT,
+                           description='restored', readonly=True)
+    retried = await store.retry(commission['id'], failed['id'])
+    assert retried['status'] == 'completed'
+    assert [attempt['status'] for attempt in retried['attempts']] == ['failed', 'completed']
+
+
+def test_exhausted_finite_recurrence_disarms_truthfully_after_restart(tmp_path):
+    _, work, _ = source(tmp_path)
+    store, _, triggers = make_store(tmp_path)
+    old = recurrence(rule='FREQ=DAILY;COUNT=2', start='2020-01-01T09:00:00')
+    commission = store.create(payload(work, cadence=old))
+    assert commission['schedule_state'] == 'exhausted'
+    assert commission['next_fire_at'] == ''
+    assert triggers.get(TRIGGER_PREFIX + commission['id']) is None
+    reopened = CommissionStore(tmp_path, direction=DirectionStore(tmp_path), triggers=TriggerStore(base_dir=tmp_path))
+    assert reopened.get(commission['id'])['schedule_state'] == 'exhausted'

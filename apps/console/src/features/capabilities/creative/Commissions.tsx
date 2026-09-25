@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 type Output = { artifact_id: string; artifact_version: number; content_hash: string; path?: string }
 type Run = { id: string; status: string; project_id?: string; outputs: Output[]; attempts: Array<{ number: number; status: string; error: string }> }
 type Reaction = { id: string; revision: number; author: string; rating: string; deleted: boolean }
-type Commission = { id: string; revision: number; name: string; target_ability: string; enabled: boolean; schedule_error: string; runs?: Run[]; feedback?: Reaction[] }
+type Commission = { id: string; revision: number; name: string; target_ability: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
 
 const api = '/api/capabilities/creative/commissions'
 
@@ -15,6 +15,9 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
   const [ability, setAbility] = useState('series')
   const [sourceId, setSourceId] = useState('')
   const [sourceRevision, setSourceRevision] = useState(1)
+  const [cadenceKind, setCadenceKind] = useState('interval')
+  const [recurrenceStart, setRecurrenceStart] = useState('2026-10-01T09:00:00')
+  const [recurrenceRule, setRecurrenceRule] = useState('FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1')
   const [error, setError] = useState('')
 
   async function list() {
@@ -30,7 +33,9 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
     const response = await fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       request_id: `commission-${Date.now()}`, name, target_ability: ability,
       brief: { intent, genre: '', category: '', style: '', constraints: {}, seed_refs: [] },
-      cadence: { kind: 'interval', seconds: 900, timezone: 'UTC' },
+      cadence: cadenceKind === 'recurrence'
+        ? { kind: 'recurrence', dtstart: recurrenceStart, rrule: recurrenceRule, timezone: 'UTC', exdates: [] }
+        : { kind: 'interval', seconds: 900, timezone: 'UTC' },
       sources: [{ kind: 'work', id: sourceId, revision: sourceRevision }], enabled: true, max_attempts: 2,
       steps: [
         { id: 'verify', title: 'Verify canonical source', operation: 'source.verify', depends_on: [] },
@@ -79,6 +84,13 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
       </select></label>
       <label>Source work ID<input aria-label="Source work ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
       <label>Source revision<input aria-label="Source revision" type="number" value={sourceRevision} onChange={event => setSourceRevision(Number(event.target.value))} /></label>
+      <label>Cadence<select aria-label="Cadence kind" value={cadenceKind} onChange={event => setCadenceKind(event.target.value)}>
+        <option value="interval">Every 15 minutes</option><option value="recurrence">Calendar recurrence</option>
+      </select></label>
+      {cadenceKind === 'recurrence' && <>
+        <label>First local occurrence<input aria-label="Recurrence start" value={recurrenceStart} onChange={event => setRecurrenceStart(event.target.value)} /></label>
+        <label>Recurrence rule<input aria-label="Recurrence rule" value={recurrenceRule} onChange={event => setRecurrenceRule(event.target.value)} /></label>
+      </>}
       <button onClick={() => void create()}>Create commission</button>
     </section>
     {error && <p role="alert">{error}</p>}
@@ -87,7 +99,7 @@ export function Commissions({ apiRoot = api }: { apiRoot?: string }) {
     </li>)}</ul>
     {selected && <section aria-label="Commission detail">
       <h2>{selected.name}</h2>
-      <p>{selected.target_ability} · {selected.enabled ? 'scheduled' : 'disabled'} {selected.schedule_error && `· ${selected.schedule_error}`}</p>
+      <p>{selected.target_ability} · {selected.schedule_state || (selected.enabled ? 'scheduled' : 'disabled')} {selected.next_fire_at && `· next ${selected.next_fire_at}`} {selected.schedule_error && `· ${selected.schedule_error}`}</p>
       <button onClick={() => void update(!selected.enabled)}>{selected.enabled ? 'Disable' : 'Enable'}</button>
       <button onClick={() => void runNow()}>Run now</button>
       <h3>Run history</h3>

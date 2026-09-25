@@ -38,6 +38,60 @@ def digest(value):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _recurrence_rule(value, anchor):
+    allowed = {'FREQ', 'UNTIL', 'COUNT', 'INTERVAL', 'BYDAY', 'BYMONTHDAY', 'BYYEARDAY',
+               'BYWEEKNO', 'BYMONTH', 'BYSETPOS', 'BYHOUR', 'BYMINUTE', 'BYSECOND', 'WKST'}
+    components = {}
+    for item in value.split(';'):
+        if '=' not in item:
+            raise CatalogError('Invalid recurrence rule')
+        key, raw = item.split('=', 1)
+        if key not in allowed or key in components:
+            raise CatalogError('Unsupported or duplicate recurrence component: ' + key)
+        components[key] = raw
+    if components.get('FREQ') not in {'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'}:
+        raise CatalogError('Recurrence frequency must be daily, weekly, monthly or yearly')
+    try:
+        interval = int(components.get('INTERVAL', '1'))
+        count = int(components['COUNT']) if 'COUNT' in components else 1
+    except (TypeError, ValueError):
+        raise CatalogError('Recurrence interval and count must be positive integers') from None
+    if interval < 1 or count < 1:
+        raise CatalogError('Recurrence interval or count is outside supported bounds')
+    try:
+        from dateutil.rrule import rrulestr
+        return rrulestr(value, dtstart=anchor, forceset=False)
+    except ImportError as exc:
+        raise CatalogError('Calendar recurrence support is unavailable', 503) from exc
+    except (TypeError, ValueError, OverflowError):
+        raise CatalogError('Invalid recurrence rule') from None
+
+
+def _recurrence_next(cadence, after):
+    from gideon.core.timezones import resolve_zone
+    zone = resolve_zone(cadence['timezone'])
+    anchor = datetime.fromisoformat(cadence['dtstart'])
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=zone)
+    else:
+        anchor = anchor.astimezone(zone)
+    cursor = datetime.fromtimestamp(after, tz=zone)
+    rule = _recurrence_rule(cadence['rrule'], anchor)
+    excluded = set(cadence['exdates'])
+    for _ in range(101):
+        candidate = rule.after(cursor, inc=False)
+        if candidate is None:
+            return 0.0
+        if candidate.isoformat() not in excluded and candidate.date().isoformat() not in excluded:
+            return candidate.timestamp()
+        cursor = candidate
+    raise CatalogError('Recurrence exclusions exceed the bounded search window')
+
+
+def _cadence_hash(cadence):
+    return digest({key: value for key, value in cadence.items() if key != 'spec'}) if cadence['kind'] == 'recurrence' else digest(cadence['spec'])
+
+
 def _cadence(value):
     if not isinstance(value, dict):
         raise CatalogError('Cadence must be an object')
@@ -72,8 +126,27 @@ def _cadence(value):
     elif kind == 'interval':
         keys(value, {'kind', 'seconds', 'timezone'})
         spec = {'kind': 'interval', 'interval_secs': integer(value.get('seconds'), 900, 31536000)}
+    elif kind == 'recurrence':
+        keys(value, {'kind', 'dtstart', 'rrule', 'timezone', 'exdates'})
+        zone_name = text(value.get('timezone'), 64, True)
+        try:
+            zone_name = resolve_zone_name(zone_name)[0]
+            anchor = datetime.fromisoformat(text(value.get('dtstart'), 64, True))
+        except (UnknownTimeZone, ValueError) as exc:
+            raise CatalogError('Recurrence start or timezone is invalid') from exc
+        if anchor.tzinfo is not None:
+            from gideon.core.timezones import resolve_zone
+            anchor = anchor.astimezone(resolve_zone(zone_name)).replace(tzinfo=None)
+        rule = text(value.get('rrule'), 500, True).upper()
+        _recurrence_rule(rule, anchor.replace(tzinfo=timezone.utc))
+        exclusions = value.get('exdates', [])
+        if not isinstance(exclusions, list) or len(exclusions) > 100:
+            raise CatalogError('Recurrence exclusions are invalid')
+        exclusions = [text(item, 64, True) for item in exclusions]
+        return {'kind': kind, 'dtstart': anchor.isoformat(), 'rrule': rule, 'timezone': zone_name,
+                'exdates': list(dict.fromkeys(exclusions)), 'spec': {'kind': 'recurrence'}}
     else:
-        raise CatalogError('Choose daily, weekly, custom or interval cadence')
+        raise CatalogError('Choose daily, weekly, custom, interval or recurrence cadence')
     zone = value.get('timezone')
     if zone:
         try:
@@ -234,9 +307,15 @@ class CommissionStore:
     def _trigger(self, record, at=0.0):
         if not record['enabled']:
             return None
-        cadence_hash = digest(record['cadence']['spec'])
+        cadence_hash = _cadence_hash(record['cadence'])
+        specification = dict(record['cadence']['spec'])
+        if record['cadence']['kind'] == 'recurrence':
+            occurrence = _recurrence_next(record['cadence'], at or time.time())
+            if occurrence <= 0:
+                return None
+            specification = {'kind': 'at', 'at': occurrence, 'timezone': record['cadence']['timezone'], 'strict': True}
         trigger = Trigger(id=TRIGGER_PREFIX + record['id'], name='Creative commission: ' + record['name'], kind='clock',
-            enabled=True, created_by='creative-commission', spec=dict(record['cadence']['spec']),
+            enabled=True, created_by='creative-commission', spec=specification,
             workflow={'inline': {'provider': ACTION_PROVIDER, 'config': {'commission_id': record['id'],
                 'schedule_revision': record['schedule_revision'], 'cadence_hash': cadence_hash}}},
             overlap='skip', session='fresh', model_tier='background', delivery='none', failure_delivery='inbox',
@@ -246,20 +325,38 @@ class CommissionStore:
         trigger.next_fire_at = arm(trigger, now=at or time.time())
         return trigger
 
-    def _sync(self, record):
+    def _sync(self, record, after=0.0):
         error = ''
+        state = 'active'
+        next_fire = ''
         try:
-            trigger = self._trigger(record)
+            trigger = self._trigger(record, at=after)
             if trigger is None:
                 self.triggers.delete(TRIGGER_PREFIX + record['id'])
+                state = 'disabled' if not record['enabled'] else 'exhausted'
             else:
                 self.triggers.upsert(trigger)
+                next_fire = trigger.next_fire_at
         except Exception as exc:
             error = 'schedule-write:' + type(exc).__name__
+            state = 'error'
         with self.db() as db:
             latest = self._load(db, record['id'])
-            latest['schedule_error'] = error
+            latest.update(schedule_error=error, schedule_state=state, next_fire_at=next_fire)
             return self._save(db, latest)
+
+    def rearm_recurrence(self, commission_id, occurrence, schedule_revision, cadence_hash):
+        with self.db() as db:
+            record = self._load(db, commission_id)
+        if record['cadence']['kind'] != 'recurrence' or not record['enabled']:
+            return record
+        if record['schedule_revision'] != schedule_revision or _cadence_hash(record['cadence']) != cadence_hash:
+            return record
+        try:
+            after = float(occurrence)
+        except (TypeError, ValueError):
+            raise CatalogError('Scheduled recurrence occurrence is invalid') from None
+        return self._sync(record, after=after)
 
     def runs(self, commission_id):
         self.get(commission_id)
@@ -284,7 +381,7 @@ class CommissionStore:
                 return {'status': 'skipped', 'reason': 'disabled', 'commission_id': commission_id}
             if schedule_revision is not None and schedule_revision != commission['schedule_revision']:
                 return {'status': 'skipped', 'reason': 'stale_schedule', 'commission_id': commission_id}
-            if cadence_hash is not None and cadence_hash != digest(commission['cadence']['spec']):
+            if cadence_hash is not None and cadence_hash != _cadence_hash(commission['cadence']):
                 return {'status': 'skipped', 'reason': 'stale_schedule', 'commission_id': commission_id}
             row = db.execute('SELECT record FROM creative_commission_runs WHERE commission_id=? AND occurrence=?',
                              (commission_id, occurrence)).fetchone()
@@ -417,6 +514,9 @@ class CommissionActionProvider(ActionProvider):
             result = await self.store.execute(identifier(action_config.get('commission_id')), occurrence,
                 schedule_revision=integer(action_config.get('schedule_revision')),
                 cadence_hash=text(action_config.get('cadence_hash'), 64, True), trigger='schedule')
+            if result.get('reason') not in ('disabled', 'stale_schedule'):
+                self.store.rearm_recurrence(action_config['commission_id'], occurrence,
+                    action_config['schedule_revision'], action_config['cadence_hash'])
             success = result.get('status') in ('completed', 'skipped')
             return ActionResult(success=success, stdout=json.dumps(result), error='' if success else result['attempts'][-1]['error'],
                                 outcome='ran' if result.get('status') == 'completed' else 'skipped_noop' if success else 'failed')

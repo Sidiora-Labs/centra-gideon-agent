@@ -52,7 +52,7 @@ describe('recurring creative commissions', () => {
     fireEvent.change(screen.getByLabelText('Commission name'), { target: { value: 'UI standing treatment' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create commission' }))
     const detail = await screen.findByRole('region', { name: 'Commission detail' })
-    expect(detail).toHaveTextContent('scheduled')
+    expect(detail).toHaveTextContent('active')
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }))
     await waitFor(() => expect(detail).toHaveTextContent('completed'))
     expect(detail).toHaveTextContent('1 attempt')
@@ -85,5 +85,26 @@ describe('recurring creative commissions', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Work not found')
     const state = await fetch(apiRoot).then(response => response.json())
     expect(state.items).toHaveLength(1)
+  })
+
+  it('creates a guarded calendar recurrence and shows its next shared-clock fire', async () => {
+    render(<Commissions apiRoot={apiRoot} />)
+    fillSource()
+    fireEvent.change(screen.getByLabelText('Commission name'), { target: { value: 'Monthly calendar treatment' } })
+    fireEvent.change(screen.getByLabelText('Cadence kind'), { target: { value: 'recurrence' } })
+    fireEvent.change(screen.getByLabelText('Recurrence start'), { target: { value: '2027-01-29T09:00:00' } })
+    fireEvent.change(screen.getByLabelText('Recurrence rule'), {
+      target: { value: 'FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create commission' }))
+    const detail = await screen.findByRole('region', { name: 'Commission detail' })
+    expect(detail).toHaveTextContent('active')
+    expect(detail).toHaveTextContent('next 2027-01-29T09:00:00')
+    const state = await fetch(apiRoot).then(response => response.json())
+    expect(state.items).toHaveLength(2)
+    expect(state.items.find((item: { name: string }) => item.name === 'Monthly calendar treatment')).toMatchObject({
+      schedule_state: 'active',
+      next_fire_at: '2027-01-29T09:00:00+00:00',
+    })
   })
 })
