@@ -135,10 +135,10 @@ def test_knowledge_edit_is_drift_and_freezes_incomplete_plan(tmp_path):
     knowledge.close()
 
 
-def test_mixed_inbox_is_rejected_before_any_canonical_mutation(tmp_path):
+def test_mixed_inbox_preview_defers_writes_to_independent_groups(tmp_path):
     _, _, knowledge, _, tasks = opened(tmp_path)
-    with pytest.raises(MigrationError, match="capture history is immutable"):
-        preview(mixed_source(inbox=True))
+    inspected = preview(mixed_source(inbox=True))
+    assert [group["id"] for group in inspected["commit_groups"]] == ["canonical", "inbox"]
     assert knowledge.db.execute("SELECT count(*) FROM items").fetchone()[0] == 0
     assert knowledge.db.execute("SELECT count(*) FROM collections").fetchone()[0] == 0
     assert list(migration._canonical_coordinator_root(tasks).glob("*.json")) == []
