@@ -132,6 +132,8 @@ async def handle(request):
             route = request.path.rsplit('/', 1)[-1]
             if route == 'settings':
                 return web.json_response({'settings': beeper.settings(store) if request.method == 'GET' else beeper.configure(store, await request.json())})
+            if route == 'disconnect':
+                return web.json_response({'settings': beeper.disconnect(store, await request.json())})
             if route in ('chats', 'messages'):
                 return web.json_response(beeper.stored_page(store, request.query.get('chat_id') if route == 'messages' else None))
             if route == 'refresh':
@@ -285,6 +287,7 @@ def register(app):
     for route in ("settings", "chats", "messages", "assets", "outbox"):
         app.router.add_get(beeper_base + "/" + route, handle)
     app.router.add_put(beeper_base + "/settings", handle)
+    app.router.add_post(beeper_base + "/disconnect", handle)
     for route in ("refresh", "assets", "outbox"):
         app.router.add_post(beeper_base + "/" + route, handle)
     for route in ("send", "reconcile", "discard", "recover"):

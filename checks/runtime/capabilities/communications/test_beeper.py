@@ -125,6 +125,36 @@ def test_connection_change_invalidates_cached_pages_and_stale_fetch(tmp_path):
     assert beeper.get_outbox(store, queued['id'])['state'] == 'draft'
 
 
+def test_disconnect_clears_provider_cache_and_invalidates_preserved_drafts(tmp_path):
+    store = PeopleStore(tmp_path)
+    configured = configure(store)
+    beeper.persist_page(store, chats(), expected_revision=configured['revision'])
+    beeper.persist_page(store, messages(), 'chat-one', expected_revision=configured['revision'])
+    with store.connect() as db, db:
+        beeper.schema(db)
+        db.execute('INSERT INTO beeper_assets VALUES (?,?,?)', ('mxc://example.com/asset-one', b'cached bytes', 'digest'))
+    queued = draft(store)
+    disconnected = beeper.disconnect(store, {'revision': configured['revision']})
+    assert disconnected == {'base_url': 'http://127.0.0.1:23373', 'credential_ref': '', 'revision': 2,
+                            'connected': False, 'transport_mode': 'manual_refresh_only'}
+    assert beeper.settings(PeopleStore(tmp_path)) == disconnected
+    assert beeper.stored_page(store)['coverage'] == 'unknown'
+    assert beeper.stored_page(store, 'chat-one')['items'] == []
+    with pytest.raises(PeopleError) as error:
+        beeper.asset(store, 'mxc://example.com/asset-one')
+    assert error.value.status == 404
+    assert beeper.get_outbox(store, queued['id']) == queued
+    with pytest.raises(PeopleError) as error:
+        asyncio.run(beeper.send(store, queued['id'], {'revision': queued['revision'], 'confirm_send': True}))
+    assert error.value.status == 409
+    with pytest.raises(PeopleError) as error:
+        beeper.disconnect(store, {'revision': configured['revision']})
+    assert error.value.status == 409
+    with pytest.raises(PeopleError) as error:
+        asyncio.run(beeper.refresh(store))
+    assert error.value.status == 503
+
+
 def test_draft_persists_idempotently_without_external_effect(tmp_path):
     store = PeopleStore(tmp_path)
     row = draft(store)
@@ -299,7 +329,11 @@ def test_native_beeper_operations_and_send_policy(tmp_path):
         assert definitions['people_beeper_send'].risk_level.value == 'destructive'
         assert definitions['people_beeper_send'].requires_approval is True
         assert definitions['people_beeper_draft'].requires_approval is True
+        assert definitions['people_beeper_disconnect'].requires_approval is True
         assert definitions['people_beeper_page'].requires_approval is False
+        result = await provider.invoke('people_beeper_disconnect', {'revision': 1})
+        assert result.success, result.error
+        assert json.loads(result.output)['settings']['connected'] is False
     try:
         asyncio.run(scenario())
     finally:
@@ -351,6 +385,13 @@ def test_real_http_beeper_draft_configuration_and_errors(tmp_path):
                     assert (await response.json())['item']['state'] == 'discarded'
                 async with client.get(base + '/outbox') as response:
                     assert len((await response.json())['outbox']) == 1
+                async with client.post(base + '/disconnect', json={'revision': 1}) as response:
+                    assert response.status == 200
+                    disconnected = (await response.json())['settings']
+                    assert disconnected['connected'] is False
+                    assert disconnected['credential_ref'] == ''
+                async with client.get(base + '/settings') as response:
+                    assert (await response.json())['settings'] == disconnected
         finally:
             await runner.cleanup()
     try:

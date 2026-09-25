@@ -83,6 +83,7 @@ SPECS = {
     'people_telegram_send': ('Send one explicitly approved queued Telegram notification; unknown attempts never automatically retry.', obj({'delivery_id': STRING, 'confirm_send': {'const': True}}, ('delivery_id', 'confirm_send')), True),
     'people_beeper_settings': ('Read Beeper connection references.', obj({}), False),
     'people_beeper_configure': ('Configure an existing Beeper Desktop connection.', obj({'base_url': STRING, 'credential_ref': STRING, 'revision': {'type': 'integer', 'minimum': 0}}, ('base_url', 'credential_ref', 'revision')), True),
+    'people_beeper_disconnect': ('Disconnect Beeper, clear its credential reference and cached provider data, and invalidate old drafts.', obj({'revision': {'type': 'integer', 'minimum': 0}}, ('revision',)), True),
     'people_beeper_page': ('Read cached conversations or a chat message page.', obj({'chat_id': STRING}), False),
     'people_beeper_refresh': ('Fetch a real Beeper chat or message page; history may be incomplete.', obj({'chat_id': STRING, 'cursor': STRING}), True),
     'people_beeper_asset_fetch': ('Fetch a mirrored attachment by its Beeper media identity.', obj({'chat_id': STRING, 'asset_id': STRING}, ('chat_id', 'asset_id')), True),
@@ -235,6 +236,8 @@ class PeopleTools(ToolProvider):
                     result = {'settings': beeper.settings(store)}
                 elif action == 'configure':
                     result = {'settings': beeper.configure(store, arguments)}
+                elif action == 'disconnect':
+                    result = {'settings': beeper.disconnect(store, arguments)}
                 elif action == 'page':
                     result = beeper.stored_page(store, arguments.get('chat_id'))
                 elif action == 'refresh':
