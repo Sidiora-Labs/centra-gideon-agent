@@ -2893,7 +2893,9 @@ class KnowledgeStore:
         "is_archived",
     }
 
-    def update_item(self, item_id, *, touch: bool = True, **fields):
+    def update_item(self, item_id, *, touch: bool = True, expected: dict | None = None, **fields):
+        if expected is not None and (not isinstance(expected, dict) or set(expected) - self._ITEM_COLUMNS):
+            raise ValueError("Expected item fields must be canonical columns")
         if not fields:
             return
         if touch:
@@ -2922,8 +2924,16 @@ class KnowledgeStore:
         vals = [
             json.dumps(v) if isinstance(v, (list, dict)) else v for v in safe.values()
         ]
-        self.db.execute("BEGIN")
+        self.db.execute("BEGIN IMMEDIATE" if expected is not None else "BEGIN")
         try:
+            if expected is not None:
+                current = self.db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+                if current is None or any(current[key] != value for key, value in expected.items()):
+                    self.db.execute("ROLLBACK")
+                    return False
+                if fts_fields:
+                    old_row = self.db.execute("SELECT rowid,title,content FROM items WHERE id=?", (item_id,)).fetchone()
+                    old_fts_tags = _fts_tags(self._tags_for_item(item_id))
             if safe:
                 self.db.execute(
                     f"UPDATE items SET {cols} WHERE id = ?",  # noqa: S608
@@ -2961,6 +2971,7 @@ class KnowledgeStore:
             from gideon.cognition.knowledge import maintenance
 
             maintenance.mark_dirty(reason="update " + ",".join(sorted(index_changes)))
+        return True if expected is not None else None
 
     def _delete_item_cascade(self, item_id):
         """Delete item and its dependents without commit/graph reload (for batch use)."""

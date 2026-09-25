@@ -8,6 +8,7 @@ from gideon.core.config.loader import config_dir
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.workspace.capabilities.knowledge.archive import ConversationArchive
 from gideon.workspace.capabilities.knowledge.topics import TrackedTopics, SOURCE_TYPES
+from gideon.workspace.capabilities.knowledge.journals import DateJournals
 from gideon.workspace.capabilities.knowledge.reviews import ReviewService
 from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
 from gideon.integrations.action_providers.registry import register_action_provider
@@ -26,7 +27,11 @@ _PAGING = {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "offset":
 _TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea", "admin", "memory"]}, "fields": {"type": "object"}}
 _ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string", "minLength": 1, "maxLength": 524288}}
 _REVIEW_FIELDS = {"period": {"enum": ["daily", "weekly"]}, "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "timezone": {"type": "string", "maxLength": 100}}
+_JOURNAL_FIELDS = {key: value for key, value in _REVIEW_FIELDS.items() if key != "period"}
 _TOOLS = {
+    "knowledge_journal_get": ("Open the canonical date-keyed journal and current revision/fingerprint.", False, _JOURNAL_FIELDS, list(_JOURNAL_FIELDS)),
+    "knowledge_journal_draft": ("Draft actual daily note and current completed-task activity with exact citations; review before saving.", False, _JOURNAL_FIELDS, list(_JOURNAL_FIELDS)),
+    "knowledge_journal_save": ("Save reviewed journal text using the current canonical revision and fingerprint. Use empty preview_id for user-only text; no generated prose.", True, {**_JOURNAL_FIELDS, "request_id": _REQUEST, "revision": {"type": "integer", "minimum": 0}, "fingerprint": {"type": "string", "maxLength": 128}, "preview_id": {"type": "string", "maxLength": 128}, "title": {"type": "string", "minLength": 1, "maxLength": 300}, "content": {"type": "string", "minLength": 1, "maxLength": 100000}}, [*_JOURNAL_FIELDS, "request_id", "revision", "fingerprint", "preview_id", "title", "content"]),
     "knowledge_review_preview": ("Preview actual daily or weekly obligations and recent activity with exact source links; completed activity uses updated_at rather than immutable completion events.", False, _REVIEW_FIELDS, list(_REVIEW_FIELDS)),
     "knowledge_review_save": ("Save a reviewed source snapshot and user reflection as a canonical knowledge note, rejecting changed sources.", True, {**_REVIEW_FIELDS, "request_id": _REQUEST, "preview_id": _ID, "reflection": {"type": "string", "maxLength": 100000}}, [*_REVIEW_FIELDS, "request_id", "preview_id", "reflection"]),
     "knowledge_review_list": ("List immutable saved review receipts and canonical note links.", False, _PAGING, []),
@@ -82,6 +87,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._typed = None
         self._archive = None
         self._topics = None
+        self._journals = None
         self._reviews = None
         self._review_schedules = None
         self._home = config_dir()
@@ -130,7 +136,16 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_review_"):
+            if tool_name.startswith("knowledge_journal_"):
+                if self._journals is None:
+                    self._journals = DateJournals(self._store, self._home)
+                if tool_name == "knowledge_journal_get":
+                    result = self._journals.get(**arguments)
+                elif tool_name == "knowledge_journal_draft":
+                    result = self._journals.draft(**arguments)
+                else:
+                    result = self._journals.save(arguments)
+            elif tool_name.startswith("knowledge_review_"):
                 if self._reviews is None:
                     self._reviews = ReviewService(self._store, self._home)
                     self._review_schedules = ReviewSchedules(self._reviews)
