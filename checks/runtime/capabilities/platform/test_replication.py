@@ -364,10 +364,14 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["domains"] == [
         {"scope": SCOPE, "entries": ["projects", "tasks"]},
         {"scope": "knowledge.records", "entries": ["knowledge.items"]},
+        {"scope": "knowledge.collections", "entries": ["knowledge.collections", "knowledge.collection_items"]},
         {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
+        {"scope": "creative.commissions", "entries": ["creative.commission_records"]},
         {"scope": "creative.direction", "entries": ["creative.direction_projects"]},
         {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
+        {"scope": "identity.stories", "entries": ["identity.life_stories"]},
+        {"scope": "experience.stories", "entries": ["experience.story_graphs"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
         {"scope": "media.assets", "entries": ["media.library_metadata"]},
@@ -382,7 +386,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "creative.direction", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "media.video_projects", "music.video", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "knowledge.collections", "creative.catalog", "creative.commissions", "creative.direction", "identity.goals", "identity.profile", "identity.stories", "experience.stories", "communications.contacts", "music.library", "media.assets", "media.video_projects", "music.video", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
