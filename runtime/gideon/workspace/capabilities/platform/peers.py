@@ -25,6 +25,7 @@ CATEGORIES = (
     "experience.world_presence",
     "knowledge.records",
     "media.assets",
+    "media.remote_execution",
     "creative.catalog",
     "music.library",
     "platform.usage",

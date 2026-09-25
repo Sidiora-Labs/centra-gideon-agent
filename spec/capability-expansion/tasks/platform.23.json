@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "task": "platform.23",
+  "status": "locally_qualified",
+  "base_revision": "26f27395",
+  "contract": "The media.remote_execution scope authorizes a direct peer to submit, inspect and cancel bounded self-contained image generation jobs through signed one-time PeerStore envelopes. The receiving runtime admits work only to its canonical durable MediaJobs queue and returns bounded job state and artifact references; it never reports provider or model success at admission. The requesting runtime retains idempotent peer/job provenance in a remote_media_executions table inside the canonical jobs.sqlite3 database. Request IDs replay consistently, incompatible reuse conflicts, state revisions guard cancellation, and private peer identity or artifact bytes never enter the protocol.",
+  "acceptance": [
+    "Use two real PeerStore homes and an actual loopback HTTP server to prove signed cross-runtime queue admission into the receiver's canonical MediaJobs database, durable requester provenance, replay and status/cancel operations.",
+    "Deny outbound and inbound media.remote_execution independently, reject wrong or replayed proofs, and prove rejected requests create no canonical media job.",
+    "Restrict this pre-asset-sharing slice to image_generate inputs containing prompt, size and numeric controls, with bounded request IDs, 16 KiB inputs and 32 KiB envelopes.",
+    "Project only bounded canonical job state and result artifact references. Queue admission remains distinct from real external inference and does not claim GPU, provider, model or artifact completion.",
+    "Expose authenticated owner HTTP, cryptographically authenticated federation HTTP, approval-gated native mutation tools and a console workflow over the same durable service."
+  ],
+  "limitations": [
+    "Local qualification proves two loopback Gideon runtimes, signed policy and canonical queue admission. External inference, remote GPU availability and completed artifact production require separate provider-backed evidence.",
+    "Conditioning images, masks, LoRAs, video and dataset-backed operations require selective media transfer in platform.24 and are intentionally refused here.",
+    "Shared dashboard handler registration, exact federation auth middleware bypass, platform Page rendering and durability inventory enrollment remain root-owned integration hooks."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/peers.py",
+    "runtime/gideon/workspace/capabilities/platform/remote_media.py",
+    "runtime/gideon/workspace/capabilities/platform/remote_media_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_remote_media.py",
+    "apps/console/src/features/capabilities/platform/RemoteMedia.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_remote_media.py",
+    "apps/console/src/features/capabilities/platform/RemoteMedia.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_remote_media.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/RemoteMedia.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-remote-media/app.json"
+  ],
+  "durability_path": "capabilities/media/jobs.sqlite3",
+  "integration_hooks": [
+    "Register capabilities_remote_media.register with one app-bound RemoteMedia created from the same canonical MediaJobs and bound PeerStore used by that dashboard application.",
+    "Add only POST /api/capabilities/platform/remote-media/federation/{action} to the shared dashboard token middleware exact bypass boundary; the handler still requires and consumes a valid PeerStore proof for media.remote_execution.",
+    "Render RemoteMedia.tsx from the shared platform Page and navigation.",
+    "Enroll the new remote_media_executions table with the existing capabilities/media/jobs.sqlite3 durability inventory; there is no second media job store."
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify platform.23",
+  "evidence": [
+    "/tmp/gideon-platform.23-checks-j0sip94o/evidence.json"
+  ],
+  "qualification": {
+    "status": "locally_qualified",
+    "runtime_tests": 22,
+    "ui_tests": 2,
+    "production_lines": 336,
+    "test_lines": 363,
+    "ratio": 1.0803571428571428,
+    "repair_cycles": 0,
+    "stages": "Compile, runtime and UI passed in the first continuation qualification gate."
+  }
+}

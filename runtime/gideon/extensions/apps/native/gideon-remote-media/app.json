@@ -1,0 +1,15 @@
+{
+  "name": "gideon-remote-media",
+  "version": "1.0.0",
+  "displayName": "Remote Media Execution",
+  "description": "Dispatch and track bounded media jobs on authorized direct peers.",
+  "icon": "Image",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.remote_media_tools:create_provider",
+    "capabilities": ["remote_media_list", "remote_media_dispatch", "remote_media_cancel"]
+  },
+  "native": true
+}
