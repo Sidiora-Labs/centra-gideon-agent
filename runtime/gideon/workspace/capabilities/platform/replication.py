@@ -28,6 +28,10 @@ DOMAINS = {
     "workspace.records": Domain("workspace.records", ("projects", "tasks")),
     "knowledge.records": Domain("knowledge.records", ("knowledge.items",)),
     "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
+    "identity.goals": Domain("identity.goals", tuple(replication_adapters.IDENTITY_TABLES)),
+    "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
+    "communications.contacts": Domain("communications.contacts", tuple(replication_adapters.COMMUNICATION_TABLES)),
+    "music.library": Domain("music.library", replication_adapters.MUSIC_ENTRIES),
 }
 _INVENTORY = {entry.id: entry for entry in inventory.INVENTORY}
 _DOMAIN_MERGES = {"projects": inventory.MERGE_LWW, "tasks": inventory.MERGE_LWW}
@@ -124,6 +128,12 @@ class ReplicationService:
             raise ReplicationError("Replication coverage does not match the declared domain")
         if any(set(item) != {"entry_id", "rows"} or not isinstance(item["rows"], list) or any(not isinstance(row, dict) for row in item["rows"]) for item in entries):
             raise ReplicationError("Invalid replication rows")
+        try:
+            replication_adapters.validate_entries(scope, entries)
+            if scope == "music.library":
+                replication_adapters.validate_music_entries(entries)
+        except ValueError as error:
+            raise ReplicationError(str(error), 422) from error
         fingerprint = self._fingerprint(batch)
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as connection:

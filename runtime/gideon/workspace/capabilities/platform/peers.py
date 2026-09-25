@@ -28,6 +28,9 @@ CATEGORIES = (
     "media.assets",
     "media.remote_execution",
     "creative.catalog",
+    "identity.goals",
+    "identity.profile",
+    "communications.contacts",
     "music.library",
     "platform.usage",
 )

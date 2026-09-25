@@ -16,6 +16,18 @@ from gideon.workspace.capabilities.platform.replication import DOMAINS, Replicat
 from gideon.workspace.capabilities.platform.replication_tools import create_provider
 from gideon.workspace.capabilities.platform.replication_adapters import CREATIVE_TABLES
 from gideon.workspace.capabilities.creative.store import IngredientStore
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
+from gideon.workspace.capabilities.identity.goals import GoalStore
+from gideon.workspace.capabilities.identity.progress import ProgressStore
+from gideon.workspace.capabilities.identity.twin import TwinStore
+from gideon.workspace.capabilities.communications.store import PeopleError, PeopleStore
+from gideon.workspace.capabilities.communications import social
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.capabilities.music.catalog import MusicCatalog
+from gideon.workspace.capabilities.music.decks import DeckStore
+from gideon.workspace.capabilities.music.listening import ListeningStore
+from gideon.workspace.capabilities.music.spotify import SpotifyBridge
+from gideon.workspace.capabilities.music.store import RepertoireStore
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -304,11 +316,15 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": SCOPE, "entries": ["projects", "tasks"]},
         {"scope": "knowledge.records", "entries": ["knowledge.items"]},
         {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
+        {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
+        {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
+        {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
+        {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -436,3 +452,246 @@ async def test_field_restore_http_requires_dashboard_auth_and_refuses_unsafe_fie
     merged = get_domain_record(a_home, "creative.catalog", identity)
     assert merged["title"] == "remote"
     assert merged["body"] == "keep"
+
+
+def test_identity_goals_two_home_full_rows_conflict_restore_delete_restart_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "identity.goals")
+    path_a = a_home / "capabilities/identity/goals.sqlite3"
+    goals_a = GoalStore(path_a)
+    goal = goals_a.save_goal(title="Shared goal", description="base", request_id="goal-create")
+    session = goals_a.save_session(goal_id=goal["id"], title="Focus", start_at="2026-10-01T10:00:00+00:00", end_at="2026-10-01T11:00:00+00:00", request_id="session-create")
+    plans_a = GoalPlanStore(path_a)
+    plans_a.configure(goal_id=goal["id"], parent_id=None, horizon="long_term", milestones=[], links=[{"kind": "session", "id": session["id"]}], unit="pages", target_value=100, expected_revision=0, request_id="plan-create")
+    checkin = plans_a.checkin(goal_id=goal["id"], value=10, observed_at="2026-10-01T12:00:00+00:00", notes="Started", request_id="checkin-create")
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "identity.goals")
+    assert [len(item["rows"]) for item in baseline["entries"]] == [1, 1, 1, 1]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    remote = GoalPlanStore(b_home / "capabilities/identity/goals.sqlite3").get(goal["id"])
+    assert remote["goal"]["title"] == "Shared goal"
+    assert remote["checkins"][0]["id"] == checkin["id"]
+
+    goals_b = GoalStore(b_home / "capabilities/identity/goals.sqlite3")
+    goals_a.save_goal(id=goal["id"], title="Local title", description="keep local", status="active", target_date=None, expected_revision=1, request_id="local-edit")
+    goals_b.save_goal(id=goal["id"], title="Peer title", description="peer body", status="active", target_date=None, expected_revision=1, request_id="peer-edit")
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "identity.goals")
+    result = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert result["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "identity.goals")
+    ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    merged = GoalStore(path_a).get_goal(goal["id"])
+    assert merged["title"] == "Peer title"
+    assert merged["description"] == "keep local"
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "identity.goals")
+    c_path = c_home / "capabilities/identity/goals.sqlite3"
+    doomed = GoalStore(c_path).save_goal(title="Delete me", request_id="delete-create")
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "identity.goals")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with sqlite3.connect(c_path) as db: db.execute("DELETE FROM goals WHERE id=?", (doomed["id"],))
+    removal = ReplicationService(c_home).export_batch(did["peer_id"], "identity.goals")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], removal)["entries"][0]["removed"] == 1
+    with pytest.raises(KeyError): GoalStore(d_home / "capabilities/identity/goals.sqlite3").get_goal(doomed["id"])
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "identity.goals")
+
+
+def test_identity_profile_explicit_scope_excludes_private_and_syncs_public_conflicts_and_delete(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "identity.profile")
+    twin_a = TwinStore(a_home / "capabilities/identity/twin.sqlite3")
+    public = twin_a.save_document(title="Public identity", text="shareable", expected_revision=0)
+    public_id = public["documents"][0]["id"]
+    private = twin_a.save_document(title="Private identity", text="never-export-this", private=True, expected_revision=1)
+    twin_a.configure(expected_revision=2, enabled=True, traits={"openness": 0.8}, personas=[], active_persona_id=None)
+    ProgressStore(a_home / "capabilities/identity/progress.sqlite3").configure(birth_date="1990-01-01", timezone="UTC", tracked_task_ids=[], expected_revision=0, request_id="profile-create")
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "identity.profile")
+    wire = json.dumps(baseline)
+    assert "never-export-this" not in wire
+    assert [item["entry_id"] for item in baseline["entries"]] == ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    twin_b = TwinStore(b_home / "capabilities/identity/twin.sqlite3")
+    assert [item["title"] for item in twin_b.snapshot()["documents"]] == ["Public identity"]
+    assert ProgressStore(b_home / "capabilities/identity/progress.sqlite3").profile()["birth_date"] == "1990-01-01"
+
+    twin_a.save_document(id=public_id, title="Local identity", text="local kept", expected_revision=3)
+    twin_b.save_document(id=public_id, title="Peer identity", text="peer text", expected_revision=twin_b.snapshot()["revision"])
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "identity.profile")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][2]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "identity.twin_documents")
+    ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    state = TwinStore(a_home / "capabilities/identity/twin.sqlite3").snapshot()
+    restored = next(item for item in state["documents"] if item["id"] == public_id)
+    assert restored["title"] == "Peer identity" and restored["text"] == "local kept"
+    assert any(item["private"] and item["text"] == "never-export-this" for item in state["documents"])
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "identity.profile")
+    twin_c = TwinStore(c_home / "capabilities/identity/twin.sqlite3")
+    created = twin_c.save_document(title="Temporary", text="delete", expected_revision=0)
+    doomed = created["documents"][0]["id"]
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "identity.profile")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    twin_c.delete_document(doomed, expected_revision=1)
+    deletion = ReplicationService(c_home).export_batch(did["peer_id"], "identity.profile")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], deletion)["entries"][2]["removed"] == 1
+    assert TwinStore(d_home / "capabilities/identity/twin.sqlite3").snapshot()["documents"] == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "identity.profile")
+
+
+def test_contacts_two_home_refs_conflict_restore_tombstones_credentials_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "communications.contacts")
+    people_a = PeopleStore(a_home / "capabilities/communications")
+    person = people_a.save({"name": "Ada", "identities": [{"kind": "email", "value": "ada@example.test"}], "ring": "core", "cadence_days": 14, "notes": "local base"})
+    touchpoint, created = people_a.record(person["id"], {"source": "mail", "external_id": "message-1", "occurred_at": "2026-09-25T10:00:00+00:00", "direction": "mutual", "summary": "Project review"})
+    assert created is True
+    social.save(people_a, {"platform": "github", "handle": "ada", "label": "Ada", "profile_url": "https://github.com/ada", "credential_ref": "CONTACT_SOCIAL_TOKEN", "person_id": person["id"], "status": "active", "notes": "local only", "request_key": "social-create"})
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "communications.contacts")
+    wire = json.dumps(baseline)
+    assert "CONTACT_SOCIAL_TOKEN" not in wire and "credential_ref" not in wire
+    assert [item["entry_id"] for item in baseline["entries"]] == ["communications.people", "communications.touchpoints"]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    people_b = PeopleStore(b_home / "capabilities/communications")
+    assert people_b.get(person["id"])["identities"] == [{"kind": "email", "value": "ada@example.test"}]
+    assert people_b.touchpoints(person["id"])[0]["id"] == touchpoint["id"]
+    assert people_b.touchpoints(person["id"])[0]["person_id"] == person["id"]
+    with people_b.connect() as db:
+        assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='social_accounts'").fetchone()[0] == 0
+
+    people_a.save({"name": "Ada Local", "identities": person["identities"], "ring": "core", "cadence_days": 14, "notes": "preserve this", "revision": 1}, person["id"])
+    people_b.save({"name": "Ada Peer", "identities": person["identities"], "ring": "core", "cadence_days": 30, "notes": "peer notes", "revision": 1}, person["id"])
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "communications.contacts")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "communications.people")
+    ReplicationService(a_home).restore_fields(conflict.id, ["name"])
+    merged = PeopleStore(a_home / "capabilities/communications").get(person["id"])
+    assert merged["name"] == "Ada Peer" and merged["notes"] == "preserve this"
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "communications.contacts")
+    people_c = PeopleStore(c_home / "capabilities/communications")
+    doomed = people_c.save({"name": "Temporary", "identities": [{"kind": "handle", "value": "temporary"}]})
+    people_c.record(doomed["id"], {"source": "chat", "external_id": "temporary-1", "occurred_at": "2026-09-25T11:00:00+00:00", "direction": "inbound", "summary": "Temporary"})
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "communications.contacts")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with people_c.connect() as db:
+        db.execute("DELETE FROM touchpoints WHERE person_id=?", (doomed["id"],))
+        db.execute("DELETE FROM people WHERE id=?", (doomed["id"],))
+    removal = ReplicationService(c_home).export_batch(did["peer_id"], "communications.contacts")
+    receipt = ReplicationService(d_home).apply_batch(cid["peer_id"], removal)
+    assert receipt["entries"][0]["removed"] == 1
+    with pytest.raises(PeopleError): PeopleStore(d_home / "capabilities/communications").get(doomed["id"])
+
+    bad_home, target_home = home / "bad", home / "target"
+    bad_id, target_id = pair_for(bad_home, target_home, "communications.contacts")
+    bad_people = PeopleStore(bad_home / "capabilities/communications")
+    bad_person = bad_people.save({"name": "Broken ref", "identities": []})
+    bad_people.record(bad_person["id"], {"source": "mail", "external_id": "broken", "occurred_at": "2026-09-25T12:00:00+00:00", "direction": "inbound", "summary": "Broken"})
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "communications.contacts")
+    malformed["entries"][1]["rows"][0]["data"]["person_id"] = "missing-person"
+    with pytest.raises(ReplicationError, match="missing canonical person") as rejected:
+        ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422
+    assert PeopleStore(target_home / "capabilities/communications").people() == []
+
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "communications.contacts")
+
+
+def seed_music(home):
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    root = home / "capabilities/music"
+    catalog = MusicCatalog(root, artifacts)
+    artist = catalog.create("artists", {"name": "Signal Artist", "bio": "base"})
+    track = catalog.create("tracks", {"title": "Signal Song", "artist_id": artist["id"], "notes": "metadata only"})
+    album = catalog.create("albums", {"title": "Signal Album", "artist_id": artist["id"], "track_ids": [track["id"]]})
+    score = artifacts.create(name="Pinned score", content="C G Am F", kind="markdown")
+    song = RepertoireStore(root, artifacts).create({"title": "Practice Song", "instrument": "guitar", "body": "C G Am F", "attachment_refs": [{"slug": score.slug, "version": score.version}]})
+    source = artifacts.create(name="Playlist source", content=json.dumps({"playlists": [{"name": "Focus", "lastModifiedDate": "2026-09-25", "items": [{"track": {"trackName": "Signal Song", "artistName": "Signal Artist", "albumName": "Signal Album", "trackUri": "spotify:track:signal"}}]}]}), kind="json")
+    listening = ListeningStore(home, artifacts)
+    listening.import_data({"request_id": "playlist-import", "account_label": "library", "format": "spotify_playlists", "artifact_ref": {"slug": source.slug, "version": source.version}})
+    deck = DeckStore(home, artifacts).create({"name": "Reference Deck", "kind": "playing"})
+    bridge = SpotifyBridge(home, listening, credential_resolver=lambda _: "never-export-token")
+    bridge.configure({"enabled": True, "credential_name": "SPOTIFY_PRIVATE", "account_label": "private account", "revision": 0})
+    return {"artist": artist, "track": track, "album": album, "song": song, "playlist": listening.playlists()[0], "deck": deck}
+
+
+def test_music_library_two_home_refs_conflict_restore_tombstones_credentials_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "music.library")
+    records = seed_music(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "music.library")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]
+    assert [len(item["rows"]) for item in baseline["entries"]] == [1, 1, 1, 1, 1, 1]
+    assert baseline["entries"][-1]["rows"][0]["data"]["exports"] == []
+    wire = json.dumps(baseline)
+    assert "SPOTIFY_PRIVATE" not in wire and "never-export-token" not in wire and "credential_name" not in wire
+    assert "private account" not in wire and "playlist-import" not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    artifacts_b = NativeArtifactProvider(b_home / "artifacts")
+    catalog_b = MusicCatalog(b_home / "capabilities/music", artifacts_b)
+    assert catalog_b.get("albums", records["album"]["id"])["track_ids"] == [records["track"]["id"]]
+    assert catalog_b.get("tracks", records["track"]["id"])["artist_id"] == records["artist"]["id"]
+    assert RepertoireStore(b_home / "capabilities/music", artifacts_b).get(records["song"]["id"])["attachment_refs"][0]["version"] == 1
+    assert ListeningStore(b_home, artifacts_b).playlists()[0]["playlist_id"] == records["playlist"]["playlist_id"]
+    assert DeckStore(b_home, artifacts_b).get(records["deck"]["id"])["name"] == "Reference Deck"
+    assert artifacts_b.get(records["song"]["attachment_refs"][0]["slug"], version=1) is None
+
+    catalog_a = MusicCatalog(a_home / "capabilities/music", NativeArtifactProvider(a_home / "artifacts"))
+    catalog_a.update("artists", records["artist"]["id"], {"revision": 1, "name": "Local Artist", "bio": "preserve local"})
+    catalog_b.update("artists", records["artist"]["id"], {"revision": 1, "name": "Peer Artist", "bio": "peer bio"})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "music.library")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "music.artists")
+    ReplicationService(a_home).restore_fields(conflict.id, ["name"])
+    merged = catalog_a.get("artists", records["artist"]["id"])
+    assert merged["name"] == "Peer Artist" and merged["bio"] == "preserve local" and merged["revision"] == 3
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "music.library")
+    doomed = seed_music(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "music.library")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    root = c_home / "capabilities/music"
+    with sqlite3.connect(root / "music_catalog.sqlite3") as db: db.execute("DELETE FROM catalog")
+    with sqlite3.connect(root / "repertoire.sqlite3") as db: db.execute("DELETE FROM items")
+    with sqlite3.connect(root / "listening.sqlite3") as db: db.execute("DELETE FROM snapshots")
+    with sqlite3.connect(root / "decks.sqlite3") as db: db.execute("DELETE FROM decks")
+    deletion = ReplicationService(c_home).export_batch(did["peer_id"], "music.library")
+    removed = ReplicationService(d_home).apply_batch(cid["peer_id"], deletion)
+    assert sum(item["removed"] for item in removed["entries"]) == 6
+    assert all(not item["rows"] for item in ReplicationService(d_home).export_batch(cid["peer_id"], "music.library")["entries"])
+
+    bad_home, target_home = home / "bad", home / "target"
+    bad_id, target_id = pair_for(bad_home, target_home, "music.library")
+    seed_music(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "music.library")
+    malformed["entries"][2]["rows"][0]["data"]["track_ids"] = ["missing-track"]
+    with pytest.raises(ReplicationError, match="missing or repeated tracks") as rejected:
+        ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422
+    assert MusicCatalog(target_home / "capabilities/music", NativeArtifactProvider(target_home / "artifacts")).list("artists") == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "music.library")
