@@ -1,3 +1,4 @@
+import ExternalTerminals from './ExternalTerminals'
 import Desktops from './Desktops'
 import Git from './Git'
 import { useEffect, useState } from 'react'
@@ -71,6 +72,6 @@ export default function Page() {
     </article>}
     <Processes />
     <Ports />
-    <Projects /><Git /><Desktops />
+    <Projects /><Git /><Desktops /><ExternalTerminals />
   </section>
 }
