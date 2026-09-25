@@ -2,52 +2,49 @@
   "id": "wellbeing.14",
   "schema_version": 1,
   "status": "locally_qualified",
-  "base_revision": "883d134e",
+  "base_revision": "d1a2ffe6c08191b2492819e73c4534b791f71b72",
   "production_files": [
     "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_brokers.py",
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx"
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_spokeo.py"
   ],
   "test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py",
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py"
   ],
-  "ui_test_files": [
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
-  ],
-  "contract": "A durable local broker catalog and subject-scoped revisioned case/event ledger in the existing secret privacy.sqlite3. Owner observations and manual lifecycle steps remain explicitly user_attested. Confirmed removal and reappearance require an internal typed scanner observation and are absent from owner HTTP controls. broker_scan and broker_submit consent gates are enforced independently; API and UI never scan, submit, send, or represent an owner report as provider verification.",
+  "ui_test_files": [],
+  "contract": "The existing durable subject-scoped privacy case ledger gains one concrete Spokeo HTML protocol adapter. It performs read-only exposure GETs against the documented /{first}-{last}/{state} search shape, discovers and validates the same-origin POST opt-out form, submits only listing_url and email after exact per-request approval plus the disabled-by-default live-submit environment gate, and confirms removal only through a later read-only negative rescan. broker_scan and broker_submit consent are checked before network access. Provider evidence is content-addressed without persisting submitted identity values.",
   "remaining_limits": [
-    "No external broker discovery, scan, opt-out submission, verification request or message send",
-    "Confirmed removal requires a future read-only scanner adapter to supply a real VerifiedBrokerObservation; local qualification covers the trusted adapter boundary and ledger semantics, not a live broker result",
+    "Local qualification uses a real HTTP contract server implementing the supported Spokeo request and response protocol; it is protocol evidence, not proof that the live broker currently accepts the flow",
+    "No live Spokeo opt-out was submitted during development; live submission requires both exact owner approval text and GIDEON_ALLOW_LIVE_SPOKEO_SUBMIT=1",
+    "Spokeo CAPTCHA, changed forms, cross-origin actions, redirects and inconclusive verification fail closed or require a human",
+    "Other data brokers remain catalog/manual-case entries without provider adapters; this slice does not claim full broker parity",
     "Broker catalog and case metadata are owner-visible inside the secret local privacy database",
     "No private database export or replication; central secret durability inventory remains root-owned",
-    "Dashboard registration, Privacy page composition and metadata-only native tool registration remain root-owned integration hooks"
+    "Dashboard registration and Privacy page composition remain root-owned integration hooks"
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
   "exit_code": 0,
-  "evidence_log": "/tmp/gideon-wellbeing.14-checks-p3y5yxw3/evidence.json",
-  "repair_cycles": 0,
-  "production_lines": 351,
-  "test_lines": 415,
-  "test_ratio": 1.1823361823361824,
+  "evidence_log": "/tmp/gideon-wellbeing.14-checks-yjgwy1l9/evidence.json",
+  "repair_cycles": 1,
+  "production_lines": 255,
+  "test_lines": 291,
+  "test_ratio": 1.1411764705882352,
   "file_hashes": {
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx": "b12f243668f8b93c1e97e22d05566ddcaf569e9518305e409a2a75c2f6e63535",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_brokers.py": "7e38a0f35ad8ad9f352d2fa1df1fd488652e7754f67c1f958b6136e86c850bbf",
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py": "0afd04d66f65361a8823bd764ae0b49376d81d735e5b6dbf4a696c9bc42f63d7",
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "91ba6ab7bccf37ba8caf38baf49f0aa99c9324af10ecb024b06486762a37e4bf",
-    "checks/runtime/capabilities/wellbeing/test_privacy_brokers.py": "10475cba3b4e03cf95d149bab792c54ee1ff5827446a4f0ba2d26229f265e0dc"
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_spokeo.py": "64997d6dd7340c7c4c1e2202216fddf5b04c02fd3146c341a364c9b7f9086f0a",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py": "5ba577efca628db7d011b36a6bc8bf36645e7473da8152cd560900434e55e930",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_brokers.py": "fbf83695fdbbd1944116af452d87dd70da8aba71882fce5be4a4680617889e3a",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py": "51e0b8f49ed59428d45a463b5125967b1ed21c7de4da378d5c824f97c4fb046b"
   },
   "acceptance_coverage": [
-    "durable broker catalog and one revisioned case per subject and broker",
-    "explicit broker_scan and broker_submit consent boundaries",
-    "owner observations and legal manual transitions retain user_attested provenance",
-    "confirmed removal and reappearance are unreachable through owner HTTP and require a typed internal verifier result",
-    "revision conflicts, idempotent request receipts, concurrent retry safety and state-dependent recheck cadence",
-    "subject isolation, complete revision/event history, no-store HTTP responses and durable reopen",
-    "real HTTP React catalog, case, observation, lifecycle, recheck, history, error and URL-selection workflow",
-    "no external sends and no UI or route that promotes owner observation to verified removal"
+    "Spokeo positive and negative search pages become typed provider_protocol case observations",
+    "opt-out preparation validates a same-origin POST form and performs no submission",
+    "submission refuses missing approval and live mode remains disabled by default",
+    "approved contract submission discloses only profile URL and email and records no plaintext identity in case events",
+    "verification confirms removal only after a negative provider rescan and keeps a still-listed case awaiting processing",
+    "consent, revision, provider identity, CAPTCHA, protocol drift, origin and response-size boundaries fail closed",
+    "real no-store HTTP provider routes exercise the same adapter and durable lifecycle"
   ]
 }
