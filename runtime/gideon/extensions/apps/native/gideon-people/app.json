@@ -23,7 +23,8 @@
       "calendar-mirror",
       "social-account-registry",
       "x-read-compose-handoff",
-      "stacker-territory-actions"
+      "stacker-territory-actions",
+      "agent-platform-assignments"
     ]
   },
   "native": true

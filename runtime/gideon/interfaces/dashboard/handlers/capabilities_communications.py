@@ -8,12 +8,22 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/platform-assignments' in request.path:
+            assignment_id = request.match_info.get('assignment_id')
+            if request.path.endswith('/agents'):
+                return web.json_response({'agents': lifecycle.agents()})
+            if request.path.endswith('/history'):
+                return web.json_response({'history': lifecycle.history(store, assignment_id)})
+            if request.method == 'GET':
+                return web.json_response({'assignment': lifecycle.get(store, assignment_id)} if assignment_id else {'assignments': lifecycle.records(store)})
+            data = await request.json()
+            return web.json_response({'assignment': lifecycle.change(store, assignment_id, data) if assignment_id else lifecycle.create(store, data)})
         if '/stacker/' in request.path:
             account_id = request.match_info.get('stacker_account_id')
             action_id = request.match_info.get('stacker_action_id')
@@ -181,6 +191,13 @@ async def handle(request):
 
 
 def register(app):
+    assignment_base = '/api/capabilities/communications/platform-assignments'
+    app.router.add_get(assignment_base, handle)
+    app.router.add_get(assignment_base + '/agents', handle)
+    app.router.add_post(assignment_base, handle)
+    app.router.add_get(assignment_base + '/{assignment_id}', handle)
+    app.router.add_put(assignment_base + '/{assignment_id}', handle)
+    app.router.add_get(assignment_base + '/{assignment_id}/history', handle)
     stacker_base = '/api/capabilities/communications/stacker'
     app.router.add_get(stacker_base + '/territories', handle)
     app.router.add_post(stacker_base + '/territories', handle)
