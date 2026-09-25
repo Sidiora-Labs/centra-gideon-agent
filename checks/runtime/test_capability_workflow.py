@@ -343,3 +343,32 @@ def test_invalid_stage_is_rejected_before_creating_evidence(tmp_path):
     root=project(tmp_path)
     with pytest.raises(ValueError,match='invalid verification stage'):
         workflow.verify(root,'sample.01','unknown')
+
+
+def test_ui_config_uses_exact_real_repository_file(tmp_path):
+    root=project(tmp_path)
+    config=source(root,'apps/console/vitest.feature.ts','export default {}\n')
+    assert workflow.ui_config_args(root,{})==[]
+    assert workflow.ui_config_args(root,{'ui_config':'apps/console/vitest.feature.ts'})==['--config',str(config)]
+    assert config.read_text()=='export default {}\n'
+
+
+@pytest.mark.parametrize('value',['../outside.ts','/tmp/outside.ts','missing.ts',{},4])
+def test_ui_config_rejects_invalid_or_missing_paths(tmp_path,value):
+    root=project(tmp_path)
+    with pytest.raises(ValueError,match='repository-relative'):
+        workflow.ui_config_args(root,{'ui_config':value})
+
+
+def test_ui_config_rejects_symlinks_and_escaping_parent_links(tmp_path):
+    root=project(tmp_path)
+    outside=tmp_path/'outside'
+    outside.mkdir()
+    config=outside/'config.ts'
+    config.write_text('export default {}\n')
+    (root/'direct.ts').symlink_to(config)
+    (root/'parent').symlink_to(outside,target_is_directory=True)
+    for relative in ['direct.ts','parent/config.ts']:
+        with pytest.raises(ValueError,match='repository-relative'):
+            workflow.ui_config_args(root,{'ui_config':relative})
+    assert config.read_text()=='export default {}\n'

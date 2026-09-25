@@ -128,6 +128,17 @@ def run_command(command: list[str], root: Path, env: dict, log: Path) -> int:
     return result.returncode
 
 
+def ui_config_args(root: Path, detail: dict) -> list[str]:
+    value=detail.get('ui_config')
+    if value is None: return []
+    if not isinstance(value,str): raise ValueError('ui_config must be a repository-relative file')
+    relative=Path(value)
+    path=root/relative
+    if relative.is_absolute() or '..' in relative.parts or not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError('ui_config must be a repository-relative file')
+    return ['--config',str(path)]
+
+
 def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
     if stage not in {"all", "compile", "runtime", "ui"}:
         raise ValueError("invalid verification stage")
@@ -166,7 +177,7 @@ def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
         vitest=root/'node_modules/vitest/vitest.mjs'
         if not vitest.exists():
             evidence['error']='installed vitest unavailable; dependencies were not modified';return 1,evidence
-        command=['node',str(vitest),'run',*[str(root/value) for value in ui]]
+        command=['node',str(vitest),'run',*ui_config_args(root,info['detail']),*[str(root/value) for value in ui]]
         commands.append(('ui',command))
     if stage != 'all':
         commands=[row for row in commands if row[0] == stage]
