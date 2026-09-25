@@ -1,0 +1,53 @@
+{
+  "task": "platform.10",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "42c34890",
+  "dependency_refinement": "Durable ownership depends on actual projects and actor context; subscription quota authority is not an input.",
+  "contract": "Persistent project+feature claims with authenticated actor ownership, optimistic revisions, idempotent request IDs, atomic SQLite claim/release and immutable history. Native mutations derive actual session context and require approval.",
+  "acceptance": [
+    "Claim a feature under an actual HierarchyStore project, reject competing owner and stale revision, release owner-only and hand over.",
+    "Concurrent real authenticated HTTP claims yield exactly one winner; restart and immutable event history preserve ownership.",
+    "Request replay preserves original result; changed input/actor replay rejected.",
+    "Real console claim/reload/release history and native session claim/release use production store with no caller owner override."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/ownership.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_ownership.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Ownership.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_ownership.py",
+    "checks/runtime/capabilities/platform/ownership_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Ownership.test.tsx",
+    "checks/runtime/capabilities/platform/ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_ownership.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Ownership.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "durability_root": "capabilities/platform/feature_ownership.sqlite3",
+  "evidence": {
+    "path": "/tmp/gideon-platform.10-checks-s85w_61x/evidence.json",
+    "runtime_tests": 14,
+    "ui_tests": 2,
+    "production_lines": 147,
+    "test_lines": 242,
+    "gate_runs": 1,
+    "canonical_storage_correction": {
+      "command": "GIDEON_HOME=/tmp/gideon-ownership-canonical-check PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/platform/test_ownership.py -q",
+      "exit_code": 0,
+      "tests": 14,
+      "log": "/tmp/gideon-platform-ownership-canonical.log",
+      "source_sha256": "aa47e2750dafe62baa5d06cf1f69afe3a516684670cac21b0811d6d7dad25a9c",
+      "reason": "Root required shared new undeployed SQLite path; only affected runtime behavior rerun, original passing UI/compile preserved."
+    }
+  }
+}

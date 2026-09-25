@@ -18,7 +18,9 @@
       "provider_connections_get",
       "platform_harness_inventory",
       "platform_model_comparisons",
-      "platform_reference_repositories"
+      "platform_reference_repositories",
+      "platform_feature_ownership",
+      "platform_feature_claim"
     ]
   },
   "native": true

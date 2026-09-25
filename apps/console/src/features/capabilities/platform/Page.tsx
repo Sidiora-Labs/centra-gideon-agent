@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Harnesses from './Harnesses'
 import Comparisons from './Comparisons'
 import References from './References'
+import Ownership from './Ownership'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -62,6 +63,7 @@ export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
     <Harnesses baseUrl={baseUrl} />
     <Comparisons baseUrl={baseUrl} />
     <References baseUrl={baseUrl} />
+    <Ownership baseUrl={baseUrl} />
     <p>Live registered HTTP routes and declared app events. Unspecified schemas remain unknown.</p>
     <div className="flex flex-wrap gap-m">
       <label>Filter this page <input aria-label="Filter this page" className="bg-surface-high rounded p-s" value={query} onChange={event => update('q', event.target.value)} /></label>
