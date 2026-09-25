@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "task": "creative.14",
+  "status": "locally_qualified",
+  "base_revision": "7fd9210bbfcfeb419256f27a6567febe6274ba6e",
+  "requires": ["creative.06"],
+  "contract": "Export an explicitly selected canonical Work or ordered Series revision. Every section pins exact work revision, active draft ID, immutable artifact ID/version and SHA-256. Produce durable EPUB 3 container/package metadata/navigation/spine/XHTML/CSS bytes and a print PDF through the registered document renderer. Persist checksummed owner-only download paths and idempotent receipts; missing sources, renderer absence, invalid output or changed bytes fail without placeholder success.",
+  "acceptance": [
+    "EPUB bytes have stored first mimetype, valid container rootfile, OPF identifier/title/creator/language/modified metadata, complete manifest/spine/navigation, contained XHTML chapters and CSS asset.",
+    "Print bytes are produced through the actual registered PDF writer and read by pdfplumber/file; renderer absence returns explicit HTTP 503.",
+    "Standalone and ordered-series exports retain exact immutable source identities and content hashes across later draft changes and store reopen.",
+    "Owner HTTP, console and approval-gated native tool paths create, list and download real checked artifacts without leaking filesystem paths or manuscript text in receipts."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/exports.py",
+    "runtime/gideon/workspace/capabilities/creative/export_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_exports.py",
+    "apps/console/src/features/capabilities/creative/ManuscriptExports.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_exports.py",
+    "checks/runtime/capabilities/creative/export_ui_server.py",
+    "apps/console/src/features/capabilities/creative/ManuscriptExports.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_exports.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/ManuscriptExports.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-creative-exports/app.json"
+  ],
+  "evidence": "/tmp/gideon-creative.14-checks-uzju3rdk/evidence.json",
+  "qualification": {
+    "runtime_tests": 10,
+    "ui_tests": 2,
+    "production_lines": 216,
+    "test_lines": 287,
+    "repair_cycles": 2,
+    "limitations": [
+      "Shared creative route registration, page mounting and durability inventory enrollment remain root integration hooks."
+    ]
+  }
+}
