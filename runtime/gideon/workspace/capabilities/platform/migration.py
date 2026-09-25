@@ -150,9 +150,11 @@ def _inspect(data):
         raise MigrationError("Archive contains no supported collection index")
     coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
     coordinated_records = len(domains) > 1 and set(domains) <= coordinated_families
+    mixed_song = ("songs" in domains and len(domains) > 1
+                  and set(domains) - {"songs"} <= coordinated_families)
     if "inbox" in domains and len(domains) > 1:
         raise MigrationError("Inbox capture history is immutable and requires a separate atomic import")
-    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not coordinated_records:
+    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not (coordinated_records or mixed_song):
         raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
@@ -483,8 +485,10 @@ def _inspect(data):
             raise MigrationError("Migration is limited to 500 knowledge records")
     if not records:
         raise MigrationError("Archive contains no supported records")
-    if coordinated_records:
-        _ordered_canonical_records(records)
+    if coordinated_records or mixed_song:
+        _ordered_canonical_records([row for row in records if row["domain"] != "songs"])
+        if mixed_song and sum(row["domain"] == "songs" for row in records) != 1:
+            raise MigrationError("Mixed archives require exactly one song group")
     referenced_assets = {attachment["filename"] for row in records if row["domain"] == "songs" for attachment in row["values"]["attachments"]}
     if set(assets) != referenced_assets:
         raise MigrationError("Snapshot contains unreferenced songbook attachment bytes")
@@ -496,10 +500,18 @@ def _inspect(data):
 
 def preview(data):
     digest, token, records, generated, domains = _inspect(data)
-    return {"format": FORMAT, "archive_digest": digest, "review_token": token, "generated_at": generated,
-            "coverage": {"supported": domains, "unsupported": "all other snapshot domains"},
-            "records": [{"source_id": row["source_id"], "domain": row["domain"],
-                         "name": row["values"].get("name") or row["values"]["title"]} for row in records]}
+    result = {"format": FORMAT, "archive_digest": digest, "review_token": token, "generated_at": generated,
+              "coverage": {"supported": domains, "unsupported": "all other snapshot domains"},
+              "records": [{"source_id": row["source_id"], "domain": row["domain"],
+                           "name": row["values"].get("name") or row["values"]["title"]} for row in records]}
+    if "songs" in domains and len(domains) > 1:
+        result["commit_groups"] = [
+            {"id": "canonical", "domains": [domain for domain in domains if domain != "songs"]},
+            {"id": "song", "domains": ["songs"]},
+        ]
+        result["completion_policy"] = ("Groups commit independently. Completed groups are retained; "
+                                       "an exact reviewed retry resumes unfinished groups.")
+    return result
 
 
 def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
@@ -511,6 +523,13 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
     coordinated_families = {"people", "projects", "admin", "threads", "ideas", "journals", "memories", "links", "buckets"}
+    if "songs" in domains and len(domains) > 1 and set(domains) - {"songs"} <= coordinated_families:
+        if projects is None or tasks is None or repertoire is None or artifacts is None:
+            raise MigrationError("Canonical grouped migration stores are unavailable", 503)
+        if any(domain in domains for domain in ("ideas", "journals", "memories", "links", "buckets")) and knowledge is None:
+            raise MigrationError("Canonical knowledge store is unavailable", 503)
+        return _commit_grouped_records(tasks, store, knowledge, projects, repertoire, artifacts,
+                                       digest, token, records, generated)
     if len(domains) > 1 and set(domains) <= coordinated_families:
         if projects is None or tasks is None:
             raise MigrationError("Canonical project and task stores are unavailable", 503)
@@ -1470,6 +1489,150 @@ def _commit_song(repertoire, artifacts, digest, token, records, generated):
         raise
 
 
+def _grouped_root(repertoire):
+    root = _journal_root(repertoire) / "grouped"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _read_grouped_journal(path):
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            raise MigrationError("A grouped migration journal exceeds 2 MiB", 409)
+        journal = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise MigrationError("A grouped migration journal is unreadable", 409) from None
+    if (not isinstance(journal, dict) or set(journal) != {"schema", "kind", "archive_digest", "review_token",
+            "generated_at", "plan_hash", "groups", "receipt", "receipt_hash"} or journal.get("schema") != 1
+            or journal.get("kind") != "independent_groups" or not SHA256.fullmatch(str(journal.get("archive_digest", "")))
+            or not SHA256.fullmatch(str(journal.get("review_token", ""))) or not SHA256.fullmatch(str(journal.get("plan_hash", "")))
+            or not isinstance(journal.get("groups"), list) or [group.get("id") for group in journal["groups"]] != ["canonical", "song"]
+            or (journal["receipt"] is None) != (journal["receipt_hash"] is None)
+            or journal["receipt"] is not None and (not isinstance(journal["receipt"], dict)
+                or not SHA256.fullmatch(str(journal["receipt_hash"]))
+                or hashlib.sha256(json.dumps(journal["receipt"], sort_keys=True).encode()).hexdigest() != journal["receipt_hash"]):
+        raise MigrationError("A grouped migration journal has an unsupported shape", 409)
+    for group in journal["groups"]:
+        if (set(group) != {"id", "state", "receipt", "error"} or group["state"] not in ("pending", "complete")
+                or group["receipt"] is not None and not isinstance(group["receipt"], dict)
+                or group["error"] is not None and not isinstance(group["error"], str)):
+            raise MigrationError("A grouped migration journal has an unsupported group", 409)
+    return journal
+
+
+def _grouped_receipt(journal):
+    completed = [group for group in journal["groups"] if group["state"] == "complete"]
+    domains, records = {}, []
+    for group in completed:
+        receipt = group["receipt"]
+        for domain, count in receipt["domains"].items():
+            domains[domain] = domains.get(domain, 0) + count
+        records.extend(receipt["records"])
+    return {"archive_digest": journal["archive_digest"], "format": FORMAT,
+            "generated_at": journal["generated_at"], "committed_at": datetime.now(timezone.utc).isoformat(),
+            "status": "complete" if len(completed) == len(journal["groups"]) else "partial",
+            "domains": domains, "records": records,
+            "groups": [{"id": group["id"], "status": group["state"], "error": group["error"]}
+                       for group in journal["groups"]]}
+
+
+def _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts, digest, records):
+    canonical = _ordered_canonical_records([row for row in records if row["domain"] != "songs"])
+    names = set()
+    for row in canonical:
+        if row["domain"] == "people":
+            identity = _coordinated_person_id({"archive_digest": digest}, _canonical_step(row))
+            with closing(people.connect()) as db:
+                occupied = db.execute("SELECT 1 FROM people WHERE id=?", (identity,)).fetchone()
+            if occupied:
+                raise MigrationError("Migration target identity already exists", 409)
+        elif row["domain"] == "projects":
+            name = row["values"]["name"].casefold()
+            if (name in names or (projects._projects_dir() / row["values"]["id"]).exists()
+                    or projects.get_project_by_name(row["values"]["name"])):
+                raise MigrationError("Migration target identity already exists", 409)
+            names.add(name)
+        elif row["domain"] in ("admin", "threads") and tasks._task_path(row["values"]["id"]).exists():
+            raise MigrationError("Migration target identity already exists", 409)
+        elif row["domain"] == "buckets" and knowledge.db.execute(
+                "SELECT 1 FROM collections WHERE id=?", (row["values"]["id"],)).fetchone():
+            raise MigrationError("Migration target identity already exists", 409)
+        elif row["domain"] in ("ideas", "journals", "memories", "links") and knowledge.db.execute(
+                "SELECT 1 FROM items WHERE id=?", (row["values"]["id"],)).fetchone():
+            raise MigrationError("Migration target identity already exists", 409)
+    song = next(row for row in records if row["domain"] == "songs")
+    with repertoire._db() as db:
+        if db.execute("SELECT 1 FROM items WHERE id=?", (song["values"]["id"],)).fetchone():
+            raise MigrationError("Migration target identity already exists", 409)
+    with artifacts.mutation_lock:
+        for attachment in song["values"]["attachments"]:
+            try:
+                observed = artifacts.state_fingerprint(attachment["slug"])
+            except (OSError, ValueError) as exc:
+                raise MigrationError("Canonical attachment target has ambiguous filesystem state", 409) from exc
+            existing = artifacts.get(attachment["slug"], version=1)
+            if observed is None:
+                if existing is not None:
+                    raise MigrationError("Canonical attachment target has ambiguous filesystem state", 409)
+                continue
+            if existing is None or _artifact_digest(artifacts, attachment) != attachment["sha256"]:
+                raise MigrationError("Canonical attachment slug already contains different bytes", 409)
+
+
+def _commit_grouped_records(tasks, people, knowledge, projects, repertoire, artifacts,
+                            digest, token, records, generated):
+    canonical = [row for row in records if row["domain"] != "songs"]
+    songs = [row for row in records if row["domain"] == "songs"]
+    plan = [{**row, "values": {**row["values"], "attachments": [
+        {key: value for key, value in attachment.items() if key != "bytes"}
+        for attachment in row["values"].get("attachments", [])]}} for row in records]
+    plan_hash = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
+    path = _grouped_root(repertoire) / (digest + ".json")
+    created = False
+    if path.exists():
+        journal = _read_grouped_journal(path)
+        if journal["review_token"] != token or journal["plan_hash"] != plan_hash:
+            raise MigrationError("Archive was already grouped with different reviewed content", 409)
+        if all(group["state"] == "complete" for group in journal["groups"]):
+            _recover_canonical_journals(tasks, people, knowledge, projects)
+            _recover_song_journals(repertoire, artifacts)
+            return journal["receipt"], False
+    else:
+        _preflight_grouped(tasks, people, knowledge, projects, repertoire, artifacts, digest, records)
+        journal = {"schema": 1, "kind": "independent_groups", "archive_digest": digest, "review_token": token,
+                   "generated_at": generated, "plan_hash": plan_hash,
+                   "groups": [{"id": "canonical", "state": "pending", "receipt": None, "error": None},
+                              {"id": "song", "state": "pending", "receipt": None, "error": None}],
+                   "receipt": None, "receipt_hash": None}
+        _write_journal(path, journal)
+    for group in journal["groups"]:
+        if group["state"] == "complete":
+            if group["id"] == "canonical":
+                _recover_canonical_journals(tasks, people, knowledge, projects)
+            else:
+                _recover_song_journals(repertoire, artifacts)
+            continue
+        try:
+            receipt, group_created = (_commit_canonical_records(
+                tasks, people, knowledge, projects, digest, token, canonical, generated)
+                if group["id"] == "canonical"
+                else _commit_song(repertoire, artifacts, digest, token, songs, generated))
+        except MigrationError as error:
+            group["error"] = str(error)
+            journal["receipt"] = _grouped_receipt(journal)
+            journal["receipt_hash"] = hashlib.sha256(json.dumps(journal["receipt"], sort_keys=True).encode()).hexdigest()
+            _write_journal(path, journal)
+            if any(candidate["state"] == "complete" for candidate in journal["groups"]):
+                return journal["receipt"], created
+            raise
+        group.update(state="complete", receipt=receipt, error=None)
+        created = created or group_created
+        journal["receipt"] = _grouped_receipt(journal)
+        journal["receipt_hash"] = hashlib.sha256(json.dumps(journal["receipt"], sort_keys=True).encode()).hexdigest()
+        _write_journal(path, journal)
+    return journal["receipt"], created
+
+
 def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
              tasks: BoundTasks | None = None, repertoire: RepertoireStore | None = None,
              artifacts: NativeArtifactProvider | None = None):
@@ -1499,6 +1662,10 @@ def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projec
                     result.append(journal["receipt"])
             except KeyError:
                 raise MigrationError("A song migration recovery journal has an unsupported shape", 409) from None
+        for path in _grouped_root(repertoire).glob("*.json"):
+            journal = _read_grouped_journal(path)
+            if journal["receipt"] is not None:
+                result.append(journal["receipt"])
     ordered = sorted(result, key=lambda row: row["committed_at"], reverse=True)
     unique = {}
     for row in ordered:
