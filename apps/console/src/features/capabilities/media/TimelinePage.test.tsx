@@ -79,7 +79,7 @@ describe('video timeline editor', () => {
     const nav = doc.querySelector('nav[aria-label="Media workspaces"]')
     expect(nav?.classList.contains('flex-wrap')).toBe(true)
     expect(nav?.classList.contains('gap-3')).toBe(true)
-    expect(nav?.querySelectorAll('a')).toHaveLength(8)
+    expect(nav?.querySelectorAll('a')).toHaveLength(9)
     expect(nav?.querySelector('a[href="#/capabilities/media?view=timelines"]')?.textContent).toBe('Video timeline')
     expect(doc.querySelector('canvas')).toBeNull()
   })

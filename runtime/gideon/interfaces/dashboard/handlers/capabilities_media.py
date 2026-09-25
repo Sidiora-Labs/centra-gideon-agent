@@ -65,3 +65,6 @@ def register(app):
 
     from gideon.workspace.capabilities.media.timelines_http import register_timelines
     register_timelines(app)
+
+    from gideon.workspace.capabilities.media.episodes_http import register_episodes
+    register_episodes(app)

@@ -1,3 +1,4 @@
+import { EpisodeScenes } from './EpisodePage'
 import { useEffect, useState } from 'react'
 
 export type MediaJob = { progress?: number; id: string; operation?: string; input?: { prompt: string } | null; sketch_id: string; revision: number; status: string; state_revision: number; attempt: number; error: string | null; result: { artifact_id?: string; version?: number; adapter_id?: string } | null; events: { status: string; at: string; detail: string; attempt?: number; result?: { artifact_id?: string; version?: number; adapter_id?: string } | null }[] }
@@ -8,7 +9,7 @@ async function api(path: string, body?: object) {
 }
 export function JobCard({ job, act, busy }: { job: MediaJob; act: (job: MediaJob, action: string) => void; busy: boolean }) {
   return <article className="rounded border p-3 space-y-2">
-    {job.progress !== undefined && <progress aria-label="Render progress" value={job.progress} max={1} />}<h2>{job.operation === 'timeline_render' ? 'Timeline render' : job.operation === 'video_generate' ? 'Video generation' : job.operation === 'image_cleanup' ? 'Image cleanup' : job.operation === 'lora_train' ? 'LoRA training' : job.operation === 'image_generate' ? 'Image generation: ' + job.input?.prompt : <>Sketch {job.sketch_id} · revision {job.revision}</>}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
+    {job.progress !== undefined && <progress aria-label="Render progress" value={job.progress} max={1} />}{job.operation === 'episode_render' && <EpisodeScenes jobId={job.id} />}<h2>{job.operation === 'episode_render' ? 'Episode render' : job.operation === 'timeline_render' ? 'Timeline render' : job.operation === 'video_generate' ? 'Video generation' : job.operation === 'image_cleanup' ? 'Image cleanup' : job.operation === 'lora_train' ? 'LoRA training' : job.operation === 'image_generate' ? 'Image generation: ' + job.input?.prompt : <>Sketch {job.sketch_id} · revision {job.revision}</>}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
     {job.error && <p role="alert">{job.error}</p>}
     {job.result?.artifact_id && <a href={'/api/artifacts/' + job.result.artifact_id + '/raw?version=' + job.result.version}>Open media artifact</a>}
     {job.result?.adapter_id && <p>Trained adapter: {job.result.adapter_id}</p>}
