@@ -56,6 +56,8 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     writes |= {'people_beeper_configure', 'people_beeper_refresh', 'people_beeper_asset_fetch', 'people_beeper_draft', 'people_beeper_send', 'people_beeper_reconcile', 'people_beeper_discard', 'people_beeper_recover'}
     reads |= {'people_telegram_config', 'people_telegram_command', 'people_telegram_deliveries'}
     writes |= {'people_telegram_configure', 'people_telegram_queue', 'people_telegram_send'}
+    reads |= {'people_calendar_sources', 'people_calendar_daily'}
+    writes |= {'people_calendar_create', 'people_calendar_update', 'people_calendar_upload', 'people_calendar_sync'}
     assert set(by_name) == reads | writes
     for name, tool in by_name.items():
         assert tool.provider == 'gideon-people'

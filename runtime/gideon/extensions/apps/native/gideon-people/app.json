@@ -19,7 +19,8 @@
       "mail-mirror",
       "desktop-message-import",
       "beeper-outbox",
-      "telegram-operations"
+      "telegram-operations",
+      "calendar-mirror"
     ]
   },
   "native": true
