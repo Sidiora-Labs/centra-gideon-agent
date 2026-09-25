@@ -48,11 +48,12 @@ ALLOWED_KINDS = {
     "csv",
     "video",
     "audio",
+    "model",
 }
 ALLOWED_SOURCES = {"chat", "cron", "subagent", "manual", "import"}
 ALLOWED_EVENT_TYPES = {"created", "edited", "iterated", "referenced", "reverted"}
 
-BINARY_KINDS = {"image", "video", "audio", "docx", "xlsx", "pptx", "pdf"}
+BINARY_KINDS = {"model", "image", "video", "audio", "docx", "xlsx", "pptx", "pdf"}
 
 _MIME_TO_EXT = {
     "image/png": "png",
@@ -71,6 +72,7 @@ _MIME_TO_EXT = {
     "video/quicktime": "mov",
     "audio/wav": "wav",
     "audio/midi": "mid",
+    "model/gltf-binary": "glb",
     "audio/mpeg": "mp3",
     "audio/ogg": "ogg",
     "audio/flac": "flac",
