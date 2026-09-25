@@ -8,12 +8,35 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/telegram/' in request.path:
+            route = request.path.rsplit('/', 1)[-1]
+            if route == 'config':
+                return web.json_response({'config': telegram.config(store) if request.method == 'GET' else telegram.configure(store, await request.json())})
+            if route == 'command':
+                data = await request.json()
+                telegram.fields(data, {'command'})
+                return web.json_response(telegram.command(store, data.get('command')))
+            if route == 'deliveries':
+                if request.method == 'GET':
+                    return web.json_response({'deliveries': telegram.deliveries(store)})
+                row, created = telegram.queue(store, await request.json())
+                return web.json_response({'delivery': row, 'created': created}, status=201 if created else 200)
+            if route == 'webhook':
+                receipt, created = telegram.receive(store, await request.json(), request.headers.get('X-Telegram-Bot-Api-Secret-Token'))
+                if receipt['automatic_replies']:
+                    await asyncio.to_thread(telegram.deliver, store, receipt['delivery_id'])
+                return web.json_response({'receipt': receipt, 'created': created})
+            data = await request.json()
+            telegram.fields(data, {'confirm_send'})
+            if data.get('confirm_send') is not True:
+                raise PeopleError('Explicit Telegram send confirmation is required')
+            return web.json_response({'delivery': await asyncio.to_thread(telegram.deliver, store, request.match_info['delivery_id'])})
         if '/beeper/' in request.path:
             route = request.path.rsplit('/', 1)[-1]
             if route == 'settings':
@@ -105,6 +128,13 @@ async def handle(request):
 
 
 def register(app):
+    telegram_base = "/api/capabilities/communications/telegram"
+    app.router.add_get(telegram_base + "/config", handle)
+    app.router.add_put(telegram_base + "/config", handle)
+    app.router.add_get(telegram_base + "/deliveries", handle)
+    for route in ("command", "deliveries", "webhook"):
+        app.router.add_post(telegram_base + "/" + route, handle)
+    app.router.add_post(telegram_base + "/deliveries/{delivery_id}/send", handle)
     beeper_base = "/api/capabilities/communications/beeper"
     for route in ("settings", "chats", "messages", "assets", "outbox"):
         app.router.add_get(beeper_base + "/" + route, handle)

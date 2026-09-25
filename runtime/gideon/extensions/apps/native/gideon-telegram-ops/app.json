@@ -1,0 +1,11 @@
+{
+  "name": "gideon-telegram-ops",
+  "version": "1.0.0",
+  "displayName": "Telegram Operations",
+  "description": "Deliver explicitly enabled notifications to allowlisted Telegram chats through the notification provider contract.",
+  "icon": "MessageCircle",
+  "author": "Gideon",
+  "tags": ["notification", "bundled"],
+  "provider": {"type": "notification", "implementation": "gideon.workspace.capabilities.communications.telegram:create_notification_provider", "capabilities": ["telegram-notifications"]},
+  "native": true
+}

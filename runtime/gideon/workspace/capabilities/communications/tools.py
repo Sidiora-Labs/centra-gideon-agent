@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop, beeper
+from . import mirrors, desktop, beeper, telegram
 
 
 def obj(properties, required=()):
@@ -38,7 +38,14 @@ BATCH = obj({'source': STRING, 'source_account_id': STRING, 'captured_at': STRIN
 ACCOUNT = obj({key: STRING for key in mirrors.ACCOUNT_FIELDS}, ('name', 'kind', 'owner_email'))
 DESKTOP = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING, 'content_base64': {'type': 'string', 'maxLength': 11184812}}
 OUTBOX_ACTION = {'outbox_id': STRING, 'revision': {'type': 'integer', 'minimum': 1}}
+TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boolean'}, 'bot_credential_ref': STRING, 'webhook_credential_ref': STRING, 'allowed_chat_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'allowed_user_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'revision': {'type': 'integer', 'minimum': 0}}
 SPECS = {
+    'people_telegram_config': ('Read Telegram operational settings without credentials.', obj({}), False),
+    'people_telegram_configure': ('Configure allowlisted Telegram operations and optional automatic replies.', obj(TGCONFIG, TGCONFIG), True),
+    'people_telegram_command': ('Project /people, /care or /status from the real local people store without sending.', obj({'command': {'enum': ['/people', '/care', '/status']}}, ('command',)), False),
+    'people_telegram_queue': ('Queue a notification to an explicitly allowed chat without sending.', obj({'request_key': STRING, 'chat_id': {'type': 'integer'}, 'text': STRING}, ('request_key', 'chat_id', 'text')), True),
+    'people_telegram_deliveries': ('Read durable Telegram attempt states.', obj({}), False),
+    'people_telegram_send': ('Send one explicitly approved queued Telegram notification; unknown attempts never automatically retry.', obj({'delivery_id': STRING, 'confirm_send': {'const': True}}, ('delivery_id', 'confirm_send')), True),
     'people_beeper_settings': ('Read Beeper connection references.', obj({}), False),
     'people_beeper_configure': ('Configure an existing Beeper Desktop connection.', obj({'base_url': STRING, 'credential_ref': STRING, 'revision': {'type': 'integer', 'minimum': 0}}, ('base_url', 'credential_ref', 'revision')), True),
     'people_beeper_page': ('Read cached conversations or a chat message page.', obj({'chat_id': STRING}), False),
@@ -80,7 +87,7 @@ class PeopleTools(ToolProvider):
 
     async def list_tools(self):
         return [ToolDefinition(name=name, description=description, provider=self.name, parameters=schema,
-                               requires_approval=write, risk_level=RiskLevel.DESTRUCTIVE if name == 'people_beeper_send' else RiskLevel.CAUTION if write else RiskLevel.SAFE)
+                               requires_approval=write, risk_level=RiskLevel.DESTRUCTIVE if name in ('people_beeper_send', 'people_telegram_send', 'people_telegram_configure') else RiskLevel.CAUTION if write else RiskLevel.SAFE)
                 for name, (description, schema, write) in SPECS.items()]
 
     async def invoke(self, tool_name, arguments):
@@ -101,7 +108,22 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name.startswith('people_beeper_'):
+            if tool_name.startswith('people_telegram_'):
+                action = tool_name.removeprefix('people_telegram_')
+                if action == 'config':
+                    result = {'config': telegram.config(store)}
+                elif action == 'configure':
+                    result = {'config': telegram.configure(store, arguments)}
+                elif action == 'command':
+                    result = telegram.command(store, arguments['command'])
+                elif action == 'queue':
+                    row, created = telegram.queue(store, arguments)
+                    result = {'delivery': row, 'created': created}
+                elif action == 'deliveries':
+                    result = {'deliveries': telegram.deliveries(store)}
+                else:
+                    result = {'delivery': await asyncio.to_thread(telegram.deliver, store, arguments['delivery_id'])}
+            elif tool_name.startswith('people_beeper_'):
                 action = tool_name.removeprefix('people_beeper_')
                 if action == 'settings':
                     result = {'settings': beeper.settings(store)}

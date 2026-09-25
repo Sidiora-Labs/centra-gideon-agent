@@ -18,7 +18,8 @@
       "relationship-care",
       "mail-mirror",
       "desktop-message-import",
-      "beeper-outbox"
+      "beeper-outbox",
+      "telegram-operations"
     ]
   },
   "native": true
