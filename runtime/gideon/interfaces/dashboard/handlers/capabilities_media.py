@@ -52,3 +52,7 @@ def register(app):
     from gideon.workspace.capabilities.media.jobs import MediaJobs
     from gideon.workspace.capabilities.media.jobs_http import register_jobs
     register_jobs(app, MediaJobs(app[STORE_KEY].path.parent / 'jobs.sqlite3', app[STORE_KEY]))
+
+    from gideon.workspace.capabilities.media.readiness import MediaReadiness
+    from gideon.workspace.capabilities.media.readiness_http import register_readiness
+    register_readiness(app, MediaReadiness(app[STORE_KEY].path.parent / "readiness.sqlite3"))
