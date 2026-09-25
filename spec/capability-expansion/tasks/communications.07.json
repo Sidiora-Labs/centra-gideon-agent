@@ -1,6 +1,7 @@
 {
   "id": "communications.07",
-  "status": "in_progress",
+  "status": "locally_qualified",
+  "implementation_status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "eee87836",
   "requires": [
@@ -17,6 +18,7 @@
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/telegram.py",
     "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/token_auth.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
     "apps/console/src/features/capabilities/communications/TelegramPanel.tsx",
     "apps/console/src/features/capabilities/communications/Page.tsx"
@@ -44,13 +46,19 @@
   "limits": [
     "No external Telegram sends during qualification; actual API acceptance/recipient delivery pending real bot access.",
     "Operational commands bounded to /people,/care,/status; this does not replace a general Telegram channel transport.",
-    "Public webhook registration and edge exposure require root integration; endpoint itself checks independent secret and allowlists.",
+    "Public edge exposure and Telegram webhook registration remain deployment operations; the exact POST ingress delegates dashboard authentication to the handler's independent secret and allowlists.",
     "Interrupted sending attempts remain explicitly unconfirmed and cannot automatically resend."
   ],
   "qualification": {
     "runtime": "49 passed including real NotificationDeliveryProvider registry and webhook auth",
     "console_http": "3 passed",
+    "full_auth_ingress": "1 focused test passed: exact POST webhook accepts only valid Telegram secret plus authorized chat/sender; missing or wrong secret, wrong chat/sender, other methods and owner operations remain denied",
     "external_telegram": "pending real bot; no external messages sent",
-    "public_webhook_and_native_registration": "pending root integration"
+    "public_webhook_and_native_registration": "source-integrated; public edge exposure and Telegram webhook registration remain deployment operations"
+  },
+  "evidence": {
+    "qualified_runtime_ui": "/tmp/gideon-communications.07-checks-yhsd9776/evidence.json",
+    "focused_auth_command": "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/communications/test_telegram.py::test_full_auth_middleware_delegates_only_post_webhook_to_telegram_policy -q",
+    "focused_auth_result": "1 passed"
   }
 }

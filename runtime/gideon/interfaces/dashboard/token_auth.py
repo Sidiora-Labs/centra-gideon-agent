@@ -300,6 +300,7 @@ _BYPASS_EXACT.add("/pair")
 
 _HANDLER_AUTH_ROUTES = frozenset(
     {
+        ("POST", "/api/capabilities/communications/telegram/webhook"),
         ("POST", "/api/capabilities/platform/peers/proofs/verify"),
         ("POST", "/api/capabilities/platform/replication/receive"),
         ("POST", "/api/capabilities/platform/media-shares/receive"),
@@ -315,7 +316,7 @@ _HANDLER_AUTH_ROUTES = frozenset(
 
 
 def _uses_handler_auth(request: web.Request) -> bool:
-    """Whether the resolved route authenticates a peer proof or guest ticket itself."""
+    """Whether the resolved route authenticates request credentials itself."""
     resource = request.match_info.route.resource
     return resource is not None and (
         request.method,
