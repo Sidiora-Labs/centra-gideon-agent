@@ -24,6 +24,7 @@ from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.communications.store import PeopleError, PeopleStore
 from gideon.workspace.capabilities.communications import social
 from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.capabilities.media.library import MediaLibrary
 from gideon.workspace.capabilities.music.catalog import MusicCatalog
 from gideon.workspace.capabilities.music.decks import DeckStore
 from gideon.workspace.capabilities.music.listening import ListeningStore
@@ -330,6 +331,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
+        {"scope": "media.assets", "entries": ["media.library_metadata"]},
         {"scope": "wellbeing.health", "entries": ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]},
         {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
         {"scope": "wellbeing.genome", "entries": ["wellbeing.genome_sources", "wellbeing.genome_variants"]},
@@ -339,7 +341,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -710,6 +712,78 @@ def test_music_library_two_home_refs_conflict_restore_tombstones_credentials_and
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "music.library")
+
+
+def seed_media(home):
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    image = artifacts.create_binary(name="Reference image", slug="reference-image", data=b"private-image-bytes", mime="image/png", kind="image", source="import", tags=["reference"], event_metadata={"original_filename": "reference.png", "sha256": "a" * 64})
+    video = artifacts.create_binary(name="Reference video", slug="reference-video", data=b"private-video-bytes", mime="video/mp4", kind="video", source="chat", tags=["motion"], event_metadata={"source_artifact_id": image.slug, "source_version": image.version})
+    artifacts.update(image.slug, collection="Campaign", expect_updated_at=image.updated_at)
+    artifacts.create(name="Private request note", content="credential_ref=MEDIA_PRIVATE", kind="markdown")
+    return MediaLibrary(artifacts), image.slug, video.slug
+
+
+def test_media_assets_current_metadata_conflict_tombstone_bytes_and_policy(home):
+    none_a, none_b = home / "media-none-a", home / "media-none-b"
+    _, none_peer = pair(none_a, none_b)
+    seed_media(none_a)
+    with pytest.raises(ReplicationError, match="policy denies"):
+        ReplicationService(none_a).export_batch(none_peer["peer_id"], "media.assets")
+
+    a_home, b_home = home / "media-a", home / "media-b"
+    aid, bid = pair_for(a_home, b_home, "media.assets")
+    library_a, image_id, video_id = seed_media(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "media.assets")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["media.library_metadata"]
+    assert [row["id"] for row in baseline["entries"][0]["rows"]] == [image_id, video_id]
+    wire = json.dumps(baseline)
+    assert "private-image-bytes" not in wire and "private-video-bytes" not in wire and "MEDIA_PRIVATE" not in wire
+    assert "raw_url" not in wire and "source_path" not in wire and '"events"' not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    artifacts_b = NativeArtifactProvider(b_home / "artifacts")
+    library_b = MediaLibrary(artifacts_b)
+    assert library_b.get(image_id)["collection"] == "Campaign"
+    assert library_b.get(video_id)["provenance"] == {"source_artifact_id": image_id, "source_version": 1}
+    assert artifacts_b.raw_bytes(image_id) is None and artifacts_b.raw_bytes(video_id) is None
+
+    local = library_a.get(image_id)
+    peer = library_b.get(image_id)
+    library_a.update(image_id, {"expected_updated_at": local["updated_at"], "name": "Local image", "tags": ["keep-local"]})
+    library_b.update(image_id, {"expected_updated_at": peer["updated_at"], "name": "Peer image", "tags": ["peer-tag"]})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "media.assets")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "media.library_metadata")
+    ReplicationService(a_home).restore_fields(conflict.id, ["name"])
+    merged = library_a.get(image_id)
+    assert merged["name"] == "Peer image" and merged["tags"] == ["keep-local"]
+    assert NativeArtifactProvider(a_home / "artifacts").raw_bytes(image_id)[0] == b"private-image-bytes"
+
+    c_home, d_home = home / "media-c", home / "media-d"
+    cid, did = pair_for(c_home, d_home, "media.assets")
+    _, doomed, _ = seed_media(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "media.assets")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    assert NativeArtifactProvider(c_home / "artifacts").delete(doomed)
+    deletion = ReplicationService(c_home).export_batch(did["peer_id"], "media.assets")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], deletion)["entries"][0]["removed"] == 1
+    assert NativeArtifactProvider(d_home / "artifacts").get(doomed) is None
+
+    bad_home, target_home = home / "media-bad", home / "media-target"
+    bad_id, target_id = pair_for(bad_home, target_home, "media.assets")
+    seed_media(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "media.assets")
+    malformed["entries"][0]["rows"][0]["data"]["raw_url"] = "/private/raw"
+    with pytest.raises(ReplicationError, match="exact non-binary") as rejected:
+        ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422 and NativeArtifactProvider(target_home / "artifacts").list() == []
+    configured = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, configured["endpoint"], revision=configured["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"):
+        ReplicationService(a_home).export_batch(bid["peer_id"], "media.assets")
 
 
 def seed_wellbeing(home):

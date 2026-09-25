@@ -34,6 +34,7 @@ it('pushes the actual canonical domain through signed self-peer HTTP and reloads
   expect(screen.getByText(/identity.profile: identity.progress_profile/)).toBeVisible()
   expect(screen.getByText('communications.contacts: communications.people, communications.touchpoints')).toBeVisible()
   expect(screen.getByText(/music.library: music.artists, music.tracks, music.albums/)).toBeVisible()
+  expect(screen.getByText('media.assets: media.library_metadata')).toBeVisible()
   expect(screen.getByText(/wellbeing.health: wellbeing.measurements, wellbeing.labs, wellbeing.metrics/)).toBeVisible()
   expect(screen.getByText(/wellbeing.routines: wellbeing.substance_entries/)).toBeVisible()
   expect(screen.getByText('wellbeing.genome: wellbeing.genome_sources, wellbeing.genome_variants')).toBeVisible()
