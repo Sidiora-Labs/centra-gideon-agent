@@ -122,7 +122,8 @@ def deterministic(check_id, source, context):
 async def model(check, source, coverage, context):
     """Invoke the configured provider and accept only exact source-grounded findings."""
     from gideon.integrations.llm_helpers import one_shot_completion
-    body = {'check': {'id': check['id'], 'label': check['label'], 'severity': check['severity']},
+    body = {'check': {'id': check['id'], 'label': check['label'], 'severity': check['severity'],
+                      'instruction': check.get('prompt')},
             'coverage_start': coverage['start'], 'manuscript': source[coverage['start']:coverage['end']],
             'canonical_context': context.get('data') if context.get('status') == 'available' else None}
     prompt = ('Perform the named editorial check. Return JSON with exactly a findings array, maximum 100. '

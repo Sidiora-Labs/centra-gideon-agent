@@ -56,6 +56,9 @@ def register(app):
     from gideon.workspace.capabilities.media.animations_http import register_animations
     register_animations(app)
 
+    from gideon.workspace.capabilities.media.downloads_http import register_downloads
+    register_downloads(app)
+
     from gideon.workspace.capabilities.media.readiness import MediaReadiness
     from gideon.workspace.capabilities.media.readiness_http import register_readiness
     register_readiness(app, MediaReadiness(app[STORE_KEY].path.parent / "readiness.sqlite3"))

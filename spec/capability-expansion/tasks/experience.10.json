@@ -1,0 +1,69 @@
+{
+  "id": "experience.10",
+  "status": "locally_qualified",
+  "base_revision": "1cab1cb4",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/world_travel.py",
+    "runtime/gideon/workspace/capabilities/experience/world_travel_http.py",
+    "runtime/gideon/workspace/capabilities/experience/world_engine_http.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/WorldTravel.tsx",
+    "apps/console/src/features/capabilities/experience/Worlds.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_world_travel.py",
+    "checks/runtime/capabilities/experience/serve_world_travel_ui.py",
+    "apps/console/src/features/capabilities/experience/WorldTravel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_world_travel.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/WorldTravel.test.tsx"
+  ],
+  "contract": "Canonical platform peer identity and directional category policy for exact scope experience.world_guest; Ed25519 signed admission envelope with consumed nonce; durable bounded invitations, ticket-scoped HTTP/WebSocket world bridge, idempotent admission and leave receipts, and Console destination/guest flows. The experience lane owns no peer identity, peer policy, proof nonce or replication store.",
+  "dependencies": {
+    "experience.09": "1cab1cb4 locally checked world projection and editing foundation; canonical peer projection remains an explicit limitation of that record",
+    "platform.21": "PeerStore snapshot/allows/create_proof/verify_proof/post_signed canonical contract from the peer-sharing lane"
+  },
+  "shared_hooks": [
+    "Root auth boundary must exempt only POST /api/capabilities/experience/world-travel/federation/admit for handler-level Ed25519 proof verification",
+    "Root auth boundary must exempt only ticket-bearing GET/POST /api/capabilities/experience/world-travel/guest/{ticket} and /guest/{ticket}/leave plus the ticket-scoped /guest/{ticket}/host/{tail} bridge; every handler path validates the expiring ticket",
+    "Root durability inventory already owns canonical platform identity.key and peers.sqlite3 enrollment; experience adds tables to the existing experience.sqlite3 store"
+  ],
+  "remaining_limits": [
+    "Public cross-instance browser travel requires the exact narrow root auth boundary hooks above before integrated qualification",
+    "External peer reachability and browser WebGPU rendering remain deployment/browser qualification"
+  ],
+  "evidence": {
+    "attempt_1": "/tmp/gideon-experience.10-checks-pyi1j7mq/evidence.json",
+    "repair_1": "/tmp/gideon-experience.10-checks-vgb4xbm5/evidence.json",
+    "repair_2": "/tmp/gideon-experience.10-checks-4d0rig6f/evidence.json",
+    "fresh_runtime_1": "/tmp/gideon-experience.10-checks-s8uwzus9/evidence.json",
+    "fresh_runtime_2": "/tmp/gideon-experience.10-checks-y91jbog9/evidence.json",
+    "qualified_runtime": "/tmp/gideon-experience.10-checks-p3kprfpm/evidence.json",
+    "qualified_ui": "/tmp/gideon-experience.10-checks-w2kfkuas/evidence.json"
+  },
+  "qualification": {
+    "compile_exit": 0,
+    "runtime_passed": 5,
+    "runtime_failed": 0,
+    "ui_passed": 3,
+    "repair_cycles": 1,
+    "production_lines": 311,
+    "test_lines": 323,
+    "ratio": 1.0385852090032155,
+    "protocol_evidence": "The engine installs the rewritten join identity before snapshot creation. snapshot.you identifies the joining guest while snapshot.present intentionally excludes self; the simultaneous canonical world projection contains the ticket-derived guest identity with agent false and excludes the forged identity.",
+    "file_hashes": {
+      "apps/console/src/features/capabilities/experience/WorldTravel.tsx": "715e0e6541def3085edc277088bcd45ca32c0b6ce85e1d29a3d728bf771521b1",
+      "apps/console/src/features/capabilities/experience/Worlds.tsx": "c75fdde4d8fc1a7614dedd08acd6d71fb3649aa2d23b05f68e23bbc7c2fdd4e7",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py": "b0eb71f6ae5f90d11fd06e35b830356c93f1a56100f64f7d983d6f0c708d949f",
+      "runtime/gideon/workspace/capabilities/experience/world_engine_http.py": "86e7e48ac8aa41a2901f39552e706c80432bc10a3b95b430218c266bd3f6fbe5",
+      "runtime/gideon/workspace/capabilities/experience/world_travel.py": "8e856a820a534bba4d8b314e7b3f3d8c79076cfcc510d078574bb8b03f5634cd",
+      "runtime/gideon/workspace/capabilities/experience/world_travel_http.py": "7599d751ef366119c7a8272590851505b4c39071d929bd41b775285e4e508108",
+      "apps/console/src/features/capabilities/experience/WorldTravel.test.tsx": "4952f7d0b47a89aaee7145ab165b70ed673af80faf0bb266c4bebb9b6f075a9a",
+      "checks/runtime/capabilities/experience/serve_world_travel_ui.py": "665001df7b2a573dc23d4d28b540fa9d49b1c5ad2fac733a3514c97eddf2cbfe",
+      "checks/runtime/capabilities/experience/test_world_travel.py": "0fa09732337d941f2e9202dbee1e698ea43ac1df8d9ff0d0a8761d72eacc2172"
+    }
+  }
+}

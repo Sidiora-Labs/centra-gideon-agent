@@ -1,0 +1,42 @@
+{
+  "id": "media.15",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "6dfc355f",
+  "contract": "A source download is a supervised durable media job for exactly one HTTPS YouTube video. It reuses the knowledge VideoReader transport so yt-dlp metadata and selected single-file audio/video bytes pass through canonical pinned egress enforcement, fixed public video endpoints, per-hop URL validation, session policy, redirect limits, cooperative cancellation and byte caps. A successful job publishes one immutable canonical audio or video artifact with source URL, external ID, duration, byte count, content hash, request hash and job identity. HTTP, native tools, jobs and console all consume the same operation and artifact.",
+  "acceptance": "Bounded URL/kind validation, private and unsupported source refusal, durable request replay/conflicts/reopen, worker completion/failure/cancellation state, real binary artifact storage and versioned raw bytes, provenance, idempotent publication, HTTP/native consumers, honest capabilities, console navigation/inputs/record links and no fabricated success are independently asserted. External network acquisition is not claimed without installed yt-dlp, reachable upstream endpoints and the shared knowledge guarded transport.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/downloads.py",
+    "runtime/gideon/workspace/capabilities/media/downloads_http.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/DownloadPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_downloads.py",
+    "apps/console/src/features/capabilities/media/DownloadPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_downloads.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/DownloadPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "External YouTube acquisition remains unqualified without installed yt-dlp, reachable upstream endpoints and the shared guarded transport",
+    "The downloader accepts YouTube sources only; X and generic web video sources are not supported by the fixed shared transport",
+    "Only bounded single-file streams are retained; split audio/video muxing and sources above 32 MiB are refused",
+    "Downloaded artifacts are retained through the canonical library; destructive source-download deletion is not added",
+    "Live browser and aggregate application integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.15",
+  "evidence": "/tmp/gideon-media.15-checks-38kvugmt/evidence.json",
+  "production_lines": 128,
+  "test_lines": 268,
+  "ratio": 2.09375,
+  "repair_cycles": 1,
+  "exit_code": 0
+}

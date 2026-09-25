@@ -44,6 +44,8 @@ ANIMATION_INPUT = {"type": "object", "additionalProperties": False, "required": 
     "fps": {"type": "integer", "minimum": 1, "maximum": 60}, "interactive": {"type": "boolean"},
 }}
 CATALOG["media_code_animation_submit"] = ("Queue genuine reasoning-provider generation of a self-contained HTML animation and publish the validated response as a canonical artifact.", ("request_id", "input"), {"request_id": STRING, "input": ANIMATION_INPUT}, True)
+SOURCE_DOWNLOAD_INPUT = {"type": "object", "additionalProperties": False, "required": ["url", "kind"], "properties": {"url": {"type": "string", "minLength": 1, "maxLength": 2000}, "kind": {"enum": ["video", "audio"]}}}
+CATALOG["media_source_download_submit"] = ("Queue guarded acquisition of one bounded public YouTube video or audio stream as a canonical media artifact.", ("request_id", "input"), {"request_id": STRING, "input": SOURCE_DOWNLOAD_INPUT}, True)
 
 CLEANUP_INPUT = {"type": "object", "additionalProperties": False, "required": ["source_artifact_id", "source_version", "operations"], "properties": {"source_artifact_id": STRING, "source_version": INTEGER, "operations": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object", "required": ["op"], "properties": {"op": {"enum": ["crop", "resize", "rotate", "flip", "brightness", "contrast", "sharpen", "solid_background"]}}}}}}
 CATALOG["media_cleanup_submit"] = ("Queue ordered local image transforms preserving the pinned original; solid-background cleanup is deterministic edge color removal, not semantic segmentation.", ("request_id", "input"), {"request_id": STRING, "input": CLEANUP_INPUT}, True)
@@ -157,6 +159,8 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_source_download_submit':
+            return self.jobs.submit(dict(operation='source_download', **args))
         if name == 'media_code_animation_submit':
             return self.jobs.submit(dict(operation='code_animation_generate', **args))
         if name == 'media_sprite_inspect':

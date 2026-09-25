@@ -1,0 +1,15 @@
+{
+  "name": "gideon-replication",
+  "version": "1.0.0",
+  "displayName": "Domain Replication",
+  "description": "Inspect direct-peer domain coverage, cursors, and conflicts.",
+  "icon": "RefreshCw",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.replication_tools:create_provider",
+    "capabilities": ["platform_replication_status"]
+  },
+  "native": true
+}

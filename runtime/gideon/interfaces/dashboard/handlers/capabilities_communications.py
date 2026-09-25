@@ -8,12 +8,22 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline, teams
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline, teams, signal_archive
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/signal-archive/' in request.path:
+            if request.path.endswith('/imports'):
+                return web.json_response({'imports': signal_archive.imports(store)})
+            if request.path.endswith('/history'):
+                return web.json_response({'messages': signal_archive.history(store, request.query.get('source_account_id', ''))})
+            data = await request.json()
+            if request.path.endswith('/preview'):
+                return web.json_response(signal_archive.preview(store, data))
+            receipt, created = signal_archive.commit(store, data)
+            return web.json_response({'receipt': receipt, 'created': created}, status=201 if created else 200)
         if '/teams/' in request.path:
             source_id = request.match_info.get('teams_source_id')
             if request.path.endswith('/messages'):
@@ -209,6 +219,11 @@ async def handle(request):
 
 
 def register(app):
+    signal_base = '/api/capabilities/communications/signal-archive'
+    app.router.add_get(signal_base + '/imports', handle)
+    app.router.add_get(signal_base + '/history', handle)
+    app.router.add_post(signal_base + '/preview', handle)
+    app.router.add_post(signal_base + '/commit', handle)
     teams_base = '/api/capabilities/communications/teams/sources'
     app.router.add_get(teams_base, handle)
     app.router.add_post(teams_base, handle)

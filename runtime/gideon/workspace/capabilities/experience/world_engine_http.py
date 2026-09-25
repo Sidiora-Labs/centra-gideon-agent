@@ -10,8 +10,7 @@ from .world_engine import WorldEngine, PREFIX
 from .store import Conflict
 
 
-def rewrite_text(text, content_type):
-    base = PREFIX + '/host'
+def rewrite_text(text, content_type, base=PREFIX + '/host'):
     text = re.sub(r'''(["'`])/(?!/)([^"'`\s<>]*)''', lambda match: match[1] + base + '/' + match[2], text)
     if 'html' in content_type:
         script = '<base href="' + base + '/"><script>const bridgeBase=' + repr(base) + ';const bridgeURL=u=>{const v=new URL(u,location.href);if(v.host===location.host&&!v.pathname.startsWith(bridgeBase+"/"))v.pathname=bridgeBase+v.pathname;return v.href};const nativeFetch=window.fetch;window.fetch=(u,o)=>nativeFetch(u instanceof Request?new Request(bridgeURL(u.url),u):bridgeURL(u),o);const NativeSocket=window.WebSocket;window.WebSocket=class extends NativeSocket{constructor(u,p){super(bridgeURL(u),p)}};</script>'

@@ -8,6 +8,7 @@ from .polishing import PolishingStore
 from .prose_checks import CATALOG, SUPPORTED, scan
 from .editorial_context import EditorialContextStore, family_for
 from .context_checks import deterministic, model
+from .editorial_controls import EditorialControlsStore
 
 
 class EditorialStore:
@@ -15,6 +16,7 @@ class EditorialStore:
         self.works = works
         self.polishing = PolishingStore(works)
         self.context = EditorialContextStore(works)
+        self.controls = EditorialControlsStore(works)
         with works.connection() as db:
             db.execute('CREATE TABLE IF NOT EXISTS editorial_repairs(id TEXT PRIMARY KEY, payload_hash TEXT, record TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS editorial_runs(id TEXT PRIMARY KEY, work_id TEXT, payload_hash TEXT, record TEXT)')
@@ -33,6 +35,8 @@ class EditorialStore:
                 availability = 'configured_model_required'
             result.append({**check, 'availability': availability, 'context_family': family,
                            'language': 'English heuristics or configured model; Unicode source offsets'})
+        if work_id:
+            result, _ = self.controls.resolved(work_id, result)
         return result
 
     def _run(self, db, id, run_id):
@@ -55,7 +59,9 @@ class EditorialStore:
                     context_stale.append(binding['family'])
             run.update(missing=artifact is None, stale=work['active_draft_id'] != run['draft_id'] or work['revision'] != run['work_revision'] or bool(context_stale),
                        stale_context_families=context_stale)
+        controls = self.controls.state(id)
         return {'work_id': id, 'catalog': self.catalog(id), 'contexts': self.context.list(id)['families'],
+                'controls': controls,
                 'runs': records, 'formula_version': 'editorial-context-v1'}
 
     def run(self, id, payload):
@@ -88,13 +94,17 @@ class EditorialStore:
         if end - start > 20000:
             raise CatalogError('Select at most 20000 characters')
         selected = payload.get('check_ids', sorted(SUPPORTED))
-        known = {c['id'] for c in CATALOG['checks']}
-        if not isinstance(selected, list) or not 1 <= len(selected) <= 80 or any(not isinstance(c, str) or c not in known for c in selected) or len(selected) != len(set(selected)):
+        resolved = self.catalog(id)
+        known = {c['id'] for c in resolved}
+        if not isinstance(selected, list) or not 1 <= len(selected) <= 200 or any(not isinstance(c, str) or c not in known for c in selected) or len(selected) != len(set(selected)):
             raise CatalogError('Choose unique known editorial check IDs')
         results, findings, bindings = [], [], []
-        catalog = {item['id']: item for item in CATALOG['checks']}
+        catalog = {item['id']: item for item in resolved}
         for check in selected:
             definition = catalog[check]
+            if not definition.get('enabled', True):
+                results.append({'check_id': check, 'status': 'skipped', 'reason': 'disabled_by_editorial_policy'})
+                continue
             family = family_for(check)
             context = self.context.current(id, family) if family else {'status': 'not_required'}
             if family and context['status'] != 'available':
@@ -124,7 +134,7 @@ class EditorialStore:
         record = {'id': run_id, 'work_id': id, 'work_revision': revision, 'draft_id': draft['id'], 'artifact_id': draft['artifact_id'],
                   'artifact_version': draft['artifact_version'], 'coverage': {'start': start, 'end': end, 'total_characters': len(source)},
                   'context_bindings': bindings, 'created_at': datetime.now(timezone.utc).isoformat(), 'kind': 'mixed', 'results': results, 'findings': findings,
-                  'readiness': 'review_required' if findings else 'incomplete' if any(r['status'] != 'completed' for r in results) or start != 0 or end != len(source) else 'selected_checks_clear'}
+                  'readiness': self.controls.readiness(findings, self.controls.state(id)['policy']['readiness_gate']) if findings else 'incomplete' if any(r['status'] != 'completed' for r in results) or start != 0 or end != len(source) else 'selected_checks_clear'}
         with self.works.connection() as db:
             current = self.works._work(db, id)
             if current['revision'] != revision:

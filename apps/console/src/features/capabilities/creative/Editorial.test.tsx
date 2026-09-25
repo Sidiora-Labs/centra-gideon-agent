@@ -52,6 +52,46 @@ async function seed(text = original) {
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }) }
 
 describe('Editorial checks and explicit canonical repair review', () => {
+  it('persists editorial policy and a custom check through real HTTP controls', async () => {
+    const work = await seed()
+    render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => {}} />)
+    await screen.findByText(new RegExp(`Scope: work:${work.id}`))
+    change('Readiness gate', 'block_high')
+    change('Override check', 'prose.cliches')
+    change('Override severity', 'high')
+    fireEvent.click(screen.getByRole('button', { name: 'Save editorial policy' }))
+    await screen.findByText('Editorial policy saved for the canonical series scope.')
+    let state = await (await fetch(`${apiRoot}/${work.id}/editorial`)).json()
+    expect(state.controls.policy.revision).toBe(1)
+    expect(state.controls.policy.readiness_gate).toBe('block_high')
+    expect(state.controls.policy.checks['prose.cliches']).toEqual({ enabled: true, severity: 'high' })
+    change('Custom check label', 'Promise audit')
+    change('Custom check instruction', 'Find a broken promise and quote exact prose.')
+    change('Override severity', 'medium')
+    fireEvent.click(screen.getByRole('button', { name: 'Create custom check' }))
+    await screen.findByText('Custom editorial check saved.')
+    state = await (await fetch(`${apiRoot}/${work.id}/editorial`)).json()
+    expect(state.controls.custom_checks).toHaveLength(1)
+    expect(state.controls.custom_checks[0].label).toBe('Promise audit')
+    expect(state.controls.custom_checks[0].prompt).toBe('Find a broken promise and quote exact prose.')
+    expect(state.catalog.find((item: { id: string }) => item.id === state.controls.custom_checks[0].id).enabled).toBe(true)
+    const catalog = screen.getByText('Editorial check catalog').parentElement!
+    const customRow = Array.from(catalog.querySelectorAll('label')).find(row => row.textContent?.includes('Promise audit'))
+    expect(customRow?.querySelector('input')).toBeDisabled()
+  })
+
+  it('makes rank insufficiency explicit without creating review evidence', async () => {
+    const work = await seed()
+    render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => {}} />)
+    await screen.findByText(new RegExp(`Scope: work:${work.id}`))
+    change('Review mode', 'rank')
+    fireEvent.click(screen.getByRole('button', { name: 'Run explicit review' }))
+    await screen.findByRole('alert')
+    const state = await (await fetch(`${apiRoot}/${work.id}/editorial`)).json()
+    expect(state.controls.reviews).toEqual([])
+    expect(screen.queryByText(/rank: completed/)).not.toBeInTheDocument()
+  })
+
   it('binds typed canonical context and enables its checks through real HTTP', async () => {
     const work = await seed()
     render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => {}} />)
@@ -67,7 +107,8 @@ describe('Editorial checks and explicit canonical repair review', () => {
     const canon = state.contexts.find((item: { family: string }) => item.family === 'canon')
     expect(canon.artifact_version).toBe(1)
     expect(canon.data.characters[0].name).toBe('Hero')
-    const naming = screen.getByText(/Character name dissimilarity/).parentElement?.querySelector('input')
+    const catalog = screen.getByText('Editorial check catalog').parentElement!
+    const naming = Array.from(catalog.querySelectorAll('label')).find(row => row.textContent?.includes('Character name dissimilarity'))?.querySelector('input')
     expect(naming).toBeEnabled()
   })
 

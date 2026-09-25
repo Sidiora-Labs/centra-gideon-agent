@@ -1,0 +1,46 @@
+{
+  "id": "knowledge.10",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "13ffcfb4",
+  "contract": "Canonical Knowledge bookmarks and manual collections provide ordered link buckets. Guarded public GitHub or GitLab archive snapshots land under the captured runtime home and produce durable revision-bound repository study notes without a second knowledge store.",
+  "acceptance": [
+    "Create, rename, order and delete link buckets through canonical manual collections; persist exact link order and preserve bookmark items when a bucket is deleted.",
+    "Canonicalize and deduplicate credential-free HTTP(S) links; reorder operations validate the exact current identity set atomically and reject caller-selected homes or paths.",
+    "Accept only credential-free HTTPS GitHub or GitLab repository identities and acquire metadata plus archive bytes through the pinned-IP egress client with fixed-host validation before the initial request and every redirect.",
+    "Safely extract bounded snapshots under the captured runtime home, reject traversal, links, oversized entries and ambiguous roots, and report the actual immutable revision and checkout handle.",
+    "Persist durable ordered repository stages and honest failed or interrupted state; request replay is immutable and never fabricates external success.",
+    "Study actual landed files into a structured revision, file count, bytes, languages, top-level entries, README excerpt and risk notes plus one readable canonical Knowledge report note.",
+    "Actual HTTP and DOM consumers exercise bucket organization, persistent order, preservation receipts and guarded repository refusal."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/repository_intake.py",
+    "runtime/gideon/workspace/capabilities/knowledge/links.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_links.py",
+    "apps/console/src/features/capabilities/knowledge/LinksPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_links.py",
+    "checks/runtime/capabilities/knowledge/links_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/LinksPage.test.tsx"
+  ],
+  "runtime_test_files": ["checks/runtime/capabilities/knowledge/test_links.py"],
+  "ui_test_files": ["apps/console/src/features/capabilities/knowledge/LinksPage.test.tsx"],
+  "remaining_limits": [
+    "External success depends on public GitHub or GitLab availability and session egress; local qualification proves the real archive extraction, checkout study, canonical persistence, HTTP and DOM paths without claiming a live external repository transfer.",
+    "Repository snapshots are bounded read-only source archives, not mutable Git working copies; branch selection, credentials, pushes and arbitrary forge hosts are outside this task.",
+    "Study output is deterministic source inventory and README evidence, not model-authored architectural judgment.",
+    "Central handler registration and shared Knowledge navigation are integrated by the root lane."
+  ],
+  "verification": {
+    "task": "knowledge.10",
+    "command": "python3 tooling/capability_workflow.py verify knowledge.10",
+    "exit_code": 0,
+    "log": "/tmp/gideon-knowledge.10-checks-1vrbgok4/evidence.json",
+    "status": "locally_qualified",
+    "production_lines": 390,
+    "test_lines": 413,
+    "runtime_tests": 54,
+    "ui_tests": 4
+  }
+}

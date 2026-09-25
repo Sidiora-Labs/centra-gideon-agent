@@ -1,0 +1,53 @@
+{
+  "id": "communications.15",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "de63d554",
+  "requires": [
+    "communications.05"
+  ],
+  "contract": "Import an explicitly supplied, owned Signal Desktop SQLCipher-4 database using its transient 64-hex database key. Authenticate every page before in-memory AES-256-CBC decryption, validate the supported Signal schema, preserve conversation-scoped message provenance and attachment references, and ingest unambiguous existing-person observations into the canonical communications database. Never inspect an operator desktop, persist the key or persist decrypted database bytes.",
+  "acceptance": [
+    "A database produced by the actual SQLCipher 4 CLI decrypts, validates and yields the expected Signal message and attachment metadata",
+    "Wrong keys, tampered pages, plaintext SQLite, malformed keys, unsupported sizes and unsupported schemas fail without imports",
+    "Transient key and decrypted database bytes are absent from durable state and the plaintext buffer is overwritten after every attempt",
+    "Conversation-scoped provenance, exact review binding, idempotent retry and ambiguous-person non-linking are independently asserted",
+    "Real HTTP and console upload, preview, commit, history and authentication-error journeys use the production handler"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/signal_archive.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/SignalArchivePanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_signal_archive.py",
+    "apps/console/src/features/capabilities/communications/SignalArchivePanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_signal_archive.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/SignalArchivePanel.test.tsx"
+  ],
+  "extra_files": [
+    "checks/runtime/capabilities/communications/fixtures/signal_sqlcipher4.sqlite"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.15",
+  "limits": [
+    "The supported format is Signal Desktop's SQLCipher-4 layout with 4096-byte pages, 80 reserved bytes, AES-256-CBC and HMAC-SHA512.",
+    "The importer accepts the current Signal raw 64-hex database key; Electron safeStorage or operating-system keychain extraction is deliberately outside this owned-archive boundary.",
+    "At most 32 MiB and 1000 normalized messages are accepted per import; imported archive coverage is not a claim of complete Signal history.",
+    "Attachment metadata is preserved as a reference only; the importer never follows Signal Desktop attachment paths."
+  ],
+  "qualification": {
+    "revision": "worktree pre-commit",
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.15",
+    "exit_code": 0,
+    "log": "/tmp/gideon-communications.15-checks-2anp6dhi",
+    "runtime": "8 passed",
+    "console": "3 passed",
+    "fixture": "SQLCipher 4.5.6 CLI output, SHA256 6f90ef667a6b4bd35338633bb23d4b9b673c3a9723cf849ad287f14bdc0c45a8",
+    "live_operator_desktop": "not accessed; explicitly supplied owned encrypted archive only"
+  }
+}

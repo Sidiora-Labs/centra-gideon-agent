@@ -1,0 +1,55 @@
+{
+  "id": "platform.08",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "mode": "QUALIFY",
+  "scope": "Credential-referenced OpenClaw-compatible remote agent session bridge with retained provenance",
+  "base_revision": "9ec495a0e50b0be3d871d1e4939b71f9e1318449",
+  "acceptance": [
+    "Store remote connection metadata and CredentialStore references without persisting or returning secret values",
+    "Use actual tools/invoke sessions_list and sessions_history HTTP exchanges and retain remote session identity and provenance across reload",
+    "Send message and bounded base64 attachments through the Responses API and relay actual SSE with consumer backpressure and disconnect closure",
+    "Owner HTTP, approval-aware native tools and console use the same bridge and report missing credentials, unauthorized and unavailable runtimes truthfully"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/remote_sessions.py",
+    "runtime/gideon/workspace/capabilities/platform/remote_sessions_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform_remote_sessions.py",
+    "apps/console/src/features/capabilities/platform/RemoteSessions.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_remote_sessions.py",
+    "checks/runtime/capabilities/platform/remote_sessions_ui_server.py",
+    "apps/console/src/features/capabilities/platform/RemoteSessions.test.tsx"
+  ],
+  "runtime_test_files": ["checks/runtime/capabilities/platform/test_remote_sessions.py"],
+  "ui_test_files": ["apps/console/src/features/capabilities/platform/RemoteSessions.test.tsx"],
+  "extra_files": ["runtime/gideon/extensions/apps/native/remote-agent-sessions/app.json"],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify platform.08",
+  "integration_hooks": {
+    "handler": "Root must call capabilities_platform_remote_sessions.register(app) from the shared platform handler",
+    "console": "Root must mount RemoteSessions from the shared platform Page",
+    "native": "Bundled remote-agent-sessions app discovers remote_sessions_tools:create_provider",
+    "durability": "capabilities/platform/remote-agent-sessions.sqlite3"
+  },
+  "limitations": [
+    "No admitted external OpenClaw endpoint or credential was available, so live vendor qualification remains pending",
+    "Local qualification uses an actual loopback HTTP/SSE protocol peer and real sockets, not a mocked provider result",
+    "Remote transcripts remain authoritative upstream; Gideon retains session identity/provenance and fetches history on demand",
+    "Root shared handler and Page registration remain separate integration work"
+  ],
+  "repair_cycles": 1,
+  "exit_code": 0,
+  "evidence": {
+    "evidence_dir": "/tmp/gideon-platform.08-checks-nxunrq6r",
+    "production_lines": 340,
+    "test_lines": 342,
+    "ratio": 1.0058823529411764,
+    "compile_exit_code": 0,
+    "runtime_exit_code": 0,
+    "runtime_result": "11 passed, 11 subtests passed",
+    "ui_exit_code": 0,
+    "ui_result": "2 actual HTTP and SSE UI journeys passed",
+    "status": "locally_qualified"
+  }
+}

@@ -128,11 +128,27 @@ def schemas():
     result["creative_work_editorial_run"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "start": {"type": "integer", "minimum": 0}, "end": NUMBER,
         "check_ids": {"type": "array", "items": STRING}}, ["request_id", "work_revision", "start", "end"])}, ["id", "payload"])
     result["creative_work_editorial_repair"] = obj({"id": STRING, "run_id": STRING, "finding_id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "replacement": STRING}, ["request_id", "work_revision", "replacement"])}, ["id", "run_id", "finding_id", "payload"])
+    override = obj({"enabled": {"type": "boolean"}, "severity": {"enum": ["high", "medium", "low"]}}, ["enabled", "severity"])
+    result["creative_work_editorial_policy_configure"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER,
+        "policy_revision": {"type": "integer", "minimum": 0}, "readiness_gate": {"enum": ["block_high", "block_medium", "block_any"]},
+        "checks": {"type": "object", "additionalProperties": override}}, ["request_id", "work_revision", "policy_revision", "readiness_gate", "checks"])}, ["id", "payload"])
+    custom = {"request_id": STRING, "work_revision": NUMBER, "label": STRING, "prompt": STRING,
+              "scope": {"enum": ["work", "series"]}, "severity": {"enum": ["high", "medium", "low"]}}
+    result["creative_work_editorial_custom_create"] = obj({"id": STRING, "payload": obj(custom, list(custom))}, ["id", "payload"])
+    result["creative_work_editorial_custom_update"] = obj({"id": STRING, "custom_id": STRING, "payload": obj({**custom, "revision": NUMBER}, [*custom, "revision"])}, ["id", "custom_id", "payload"])
+    result["creative_work_editorial_custom_delete"] = obj({"id": STRING, "custom_id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "revision": NUMBER}, ["request_id", "work_revision", "revision"])}, ["id", "custom_id", "payload"])
+    result["creative_work_editorial_review"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER,
+        "mode": {"enum": ["judge", "panel", "rank"]}}, ["request_id", "work_revision", "mode"])}, ["id", "payload"])
+    result["creative_work_editorial_cut_preview"] = obj({"id": STRING, "run_id": STRING, "finding_id": STRING,
+        "payload": obj({"request_id": STRING, "work_revision": NUMBER}, ["request_id", "work_revision"])}, ["id", "run_id", "finding_id", "payload"])
+    for action in ("apply", "undo"):
+        result[f"creative_work_editorial_cut_{action}"] = obj({"id": STRING, "cut_id": STRING,
+            "payload": obj({"revision": NUMBER}, ["revision"])}, ["id", "cut_id", "payload"])
     return result
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair", "editorial_context_bind"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair", "editorial_context_bind", "editorial_policy_configure", "editorial_custom_create", "editorial_custom_update", "editorial_custom_delete", "editorial_review", "editorial_cut_preview", "editorial_cut_apply", "editorial_cut_undo"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -188,6 +204,19 @@ class CreativeToolProvider(ToolProvider):
                     result = self.editorial.context.bind(args["id"], args["payload"])
                 elif action == "editorial_run":
                     result = await self.editorial.run_async(**args)
+                elif action == "editorial_policy_configure":
+                    result = self.editorial.controls.configure(args["id"], args["payload"], {row["id"] for row in self.editorial.catalog(args["id"])})
+                elif action.startswith("editorial_custom_"):
+                    operation = action.removeprefix("editorial_custom_")
+                    result = self.editorial.controls.custom(args["id"], {**args["payload"], "operation": operation, "id": args.get("custom_id")})
+                elif action == "editorial_review":
+                    result = await self.editorial.controls.review(**args)
+                elif action == "editorial_cut_preview":
+                    result = await self.editorial.controls.cut(self.editorial, args["id"], args["run_id"], args["finding_id"], args["payload"])
+                elif action == "editorial_cut_apply":
+                    result = self.editorial.controls.apply_cut(args["id"], args["cut_id"], args["payload"])
+                elif action == "editorial_cut_undo":
+                    result = self.editorial.controls.undo_cut(args["id"], args["cut_id"], args["payload"])
                 else:
                     method = getattr(self.editorial, action.removeprefix("editorial_"))
                     result = await method(**args) if action == "editorial_repair" else method(**args)

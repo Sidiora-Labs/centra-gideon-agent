@@ -1,0 +1,15 @@
+{
+  "name": "remote-agent-sessions",
+  "version": "1.0.0",
+  "displayName": "Remote Agent Sessions",
+  "description": "Inspect retained remote session provenance and exchange approved messages through configured external agent runtimes.",
+  "icon": "Radio",
+  "author": "Gideon",
+  "tags": ["tool", "remote", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.remote_sessions_tools:create_provider",
+    "capabilities": ["remote-sessions", "history", "streaming"]
+  },
+  "native": true
+}
