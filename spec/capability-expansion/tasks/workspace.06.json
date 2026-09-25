@@ -1,0 +1,145 @@
+{
+  "id": "workspace.06",
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "schema_version": 1,
+  "base_revision": "be5a05ca0ce9242092a0da92b68f9b647976ae3f",
+  "scope": "Owned isolated Linux desktop lifecycle, actual PNG polling and owner human keyboard/mouse input",
+  "acceptance": [
+    "Actual isolated Xvfb desktop with private Xauthority, window manager and shell; no host DISPLAY attachment",
+    "Capture true PNG dimensions and content, send real text/keys/click and observe file created by actual terminal command",
+    "Idempotent start, revision guard stop, isolated simultaneous sessions, capacity and malformed input refusal",
+    "Actual registry crash terminates owned display children; reopen records interrupted without saved PID adoption",
+    "Owner HTTP frame/input auth and native lifecycle share registry; Chromium starts, controls, reloads and stops actual desktop"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/desktop.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Desktops.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx",
+    "runtime/gideon/workspace/capabilities/workspace/desktop_child.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_desktops.py",
+    "checks/runtime/capabilities/workspace/desktop_worker.py",
+    "checks/runtime/capabilities/workspace/ui_server.py",
+    "checks/runtime/capabilities/workspace/entry.tsx",
+    "apps/console/src/features/capabilities/workspace/Desktops.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_desktops.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/Desktops.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.06",
+  "integration_hooks": {
+    "routes": "Existing register adds /workspace/desktops and /availability, /{id}, /{id}/frame,input,stop",
+    "console": "Page includes Desktops",
+    "native": "gideon-workspace lifecycle tools; input is human HTTP only",
+    "durability": "capabilities/workspace/desktop-sessions.sqlite3",
+    "machine_local_exclude": "capabilities/workspace/desktops.lock and capabilities/workspace/desktop-private/**"
+  },
+  "limits": [
+    "Linux only; explicit availability requires Xvfb/xauth/openbox/xterm/xdpyinfo/xdotool/ImageMagick import",
+    "PNG polling up to one frame per second, no audio/clipboard/VNC/WebRTC streaming",
+    "Fixed isolated terminal desktop, no existing host desktop attachment or arbitrary remote endpoint",
+    "No hosted deployment qualification claimed",
+    "Private desktop home and credentials are machine-local ephemeral session data"
+  ],
+  "repair_cycles": 2,
+  "qualification_notes": [
+    "10 runtime tests and 16 subtests passed;2 actual Chromium journeys passed",
+    "Real Xvfb PNG, typed terminal file, native/HTTP scope, cross-session cookie refusal and registry crash cleanup exercised",
+    "Focused compile/runtime/UI stage evidence has identical source hashes; previous failed runs retained",
+    "Hosted deployment and root integration qualification remain separate"
+  ],
+  "prior_failure_evidence": [
+    "/tmp/gideon-workspace.06-checks-0i68lqf5/evidence.json",
+    "/tmp/gideon-workspace.06-checks-pfog_bd6/evidence.json",
+    "/tmp/gideon-workspace.06-checks-41aez2c3/evidence.json",
+    "/tmp/gideon-workspace.06-checks-h2ulz9n_/evidence.json"
+  ],
+  "continuation": {
+    "authorization": "Fresh bounded parent dispatch after previous repair limit",
+    "scope": "PTY erase, owned window focus readiness, cleanup completion",
+    "repair_cycles": 1
+  },
+  "exit_code": 0,
+  "evidence": {
+    "task": "workspace.06",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790299138.3520472,
+    "production_lines": 384,
+    "test_lines": 401,
+    "ratio": 1.0442708333333333,
+    "stage": "combined_focused_stages",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/desktop.py",
+          "runtime/gideon/workspace/capabilities/workspace/desktop_child.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/desktop_worker.py",
+          "checks/runtime/capabilities/workspace/test_desktops.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.06-checks-y2l5bpwy/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_desktops.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.06-checks-io_o8g12/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Desktops.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.06-checks-i8o9cdhq/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.06-checks-i8o9cdhq",
+    "completed_at": 1790299188.5664563,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Desktops.tsx": "a758708c9547d086d4a90de1d7f0293b382079548a71fe9d7c5c39ae7820f38e",
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "0ba48f4f91228f95b349d656f6ef742a770d156d502bd5a861e7dbaca43c3e68",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "ea7d1a769e22ae3751afc33e452f48a4ab986f9de299c8067ebcc9296a5ae166",
+      "runtime/gideon/workspace/capabilities/workspace/desktop.py": "c9130c1796af1fb2f081712777d70f2265a1c8849809d238d25826c5803dd65b",
+      "runtime/gideon/workspace/capabilities/workspace/desktop_child.py": "aae4471a958b0186c4f19f30622d6e3bf5460ee10aac6575b3273715b6dc6453",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "dddd3319d8e669792d26419bd3c2f04a47b3632fe59e26f9e3d26f8479e92668",
+      "apps/console/src/features/capabilities/workspace/Desktops.test.ts": "7d0dfb7c86d0e0c398277ed4402e20b7f689be1e040ec59c0b40edaa2324d15d",
+      "checks/runtime/capabilities/workspace/desktop_worker.py": "3263088b0a07e88055830ff22cd889e240ab9ea249fdd14c81f584fe6b97cba1",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/test_desktops.py": "aa69fdc32cd1ccfaa0e0f70bad533b6b4b9e4518f6577099a3e7fac937cb2fce",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    },
+    "stage_evidence_paths": [
+      "/tmp/gideon-workspace.06-checks-y2l5bpwy/evidence.json",
+      "/tmp/gideon-workspace.06-checks-io_o8g12/evidence.json",
+      "/tmp/gideon-workspace.06-checks-i8o9cdhq/evidence.json"
+    ]
+  }
+}
