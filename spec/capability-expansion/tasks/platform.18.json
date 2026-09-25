@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "task": "platform.18",
+  "status": "locally_qualified",
+  "base_revision": "004aa526",
+  "contract": "Descriptive personal scorecards project canonical human goal plans, measurement corrections, unit-separated laboratory series and actual intervention observations. No composite health score, causal inference or private twin fields. User-authored narratives carry immutable source snapshots in canonical artifact versions; source fingerprint and version conflicts prevent stale overwrite. Narrative creation is content-idempotent.",
+  "acceptance": [
+    "Actual goal checkins and milestones, measurement corrections, lab source artifacts and missing intervention observations project without invented metrics.",
+    "Artifact versions retain old source revisions and notes; stale fingerprints/versions and unrelated artifact edits are rejected.",
+    "Authenticated HTTP and native read return same actual records; console creates and revises actual artifacts and loads history through real HTTP."
+  ],
+  "limitations": [
+    "Narratives are user-authored; automated model synthesis and semantic quality are not claimed.",
+    "Measurement and lab series are bounded to latest 500 records, goals and active interventions to 200; reach-limit coverage is explicit."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/insights.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_insights.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Insights.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_insights.py",
+    "checks/runtime/capabilities/platform/insights_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Insights.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_insights.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Insights.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": [
+    "/tmp/gideon-platform.18-checks-29i03eyu/evidence.json",
+    "/tmp/gideon-platform.18-checks-etx21l28/evidence.json"
+  ],
+  "qualification": {
+    "runtime_tests": 11,
+    "ui_tests": 2,
+    "production_lines": 123,
+    "test_lines": 250,
+    "repair_cycles": 2,
+    "stages": "Compile and runtime retained from repair1; UI-only repair2 passed. Automated synthesis unimplemented, user-authored source-linked narratives qualified."
+  }
+}

@@ -45,6 +45,16 @@ VIDEO_INPUT = {"type": "object", "additionalProperties": False, "required": ["pr
 CATALOG["media_video_capabilities"] = ("Read selected video model controls, conditioning and processing availability.", (), {}, False)
 CATALOG["media_video_submit"] = ("Queue video generation with advertised controls or pinned frame/continuation references; outputs become canonical artifacts.", ("request_id", "input"), {"request_id": STRING, "input": VIDEO_INPUT}, True)
 
+EPISODE_FIELDS = {"title": STRING, "width": INTEGER, "height": INTEGER, "fps": INTEGER, "aspect_ratio": STRING, "revision": {"type": "integer", "minimum": 0}, "request_id": STRING, "scenes": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "object", "additionalProperties": False, "required": ["prompt", "duration_seconds", "mode", "allow_fallback"], "properties": {"prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "duration_seconds": {"type": "number", "minimum": .05, "maximum": 60}, "mode": {"enum": ["establish", "continue", "reuse"]}, "allow_fallback": {"type": "boolean"}, "artifact_id": STRING, "version": INTEGER}}}}
+CATALOG.update({
+    "media_episodes_list": ("List continuous episode plans.", (), {}, False),
+    "media_episodes_get": ("Read a pinned episode plan revision.", ("episode_id",), {"episode_id": STRING, "revision": INTEGER}, False),
+    "media_episodes_history": ("Read retained episode revisions.", ("episode_id",), {"episode_id": STRING}, False),
+    "media_episodes_save": ("Validate and save ordered establish/continue/reuse scenes with explicit continuation fallback policy.", ("title", "width", "height", "fps", "aspect_ratio", "scenes", "request_id"), {**EPISODE_FIELDS, "episode_id": STRING}, True),
+    "media_episode_render": ("Queue sequential scene generation and canonical episode stitching; completed scene checkpoints survive retry.", ("request_id", "input"), {"request_id": STRING, "input": {"type": "object", "additionalProperties": False, "required": ["episode_id", "revision"], "properties": {"episode_id": STRING, "revision": INTEGER}}}, True),
+    "media_episode_scenes": ("Inspect retained scene status, predecessor lineage, fallback events and outputs for an episode job.", ("job_id",), {"job_id": STRING}, False),
+})
+
 TIMELINE_FIELDS = {"title": STRING, "width": INTEGER, "height": INTEGER, "fps": INTEGER, "revision": {"type": "integer", "minimum": 0}, "request_id": STRING, **{key: {"type": "array", "maxItems": 20, "items": {"type": "object"}} for key in ("segments", "overlays", "audio")}}
 CATALOG.update({
     "media_timelines_list": ("List saved video timelines.", (), {}, False),
@@ -131,6 +141,20 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_episodes_list':
+            return self.jobs.episodes.list()
+        if name == 'media_episodes_get':
+            return self.jobs.episodes.get(args['episode_id'], args.get('revision'))
+        if name == 'media_episodes_history':
+            return self.jobs.episodes.history(args['episode_id'])
+        if name == 'media_episodes_save':
+            return self.jobs.episodes.save(args, args.pop('episode_id', None))
+        if name == 'media_episode_render':
+            return self.jobs.submit(dict(operation='episode_render', **args))
+        if name == 'media_episode_scenes':
+            if self.jobs.get(args['job_id'])['operation'] != 'episode_render':
+                raise SketchError('Job is not an episode')
+            return self.jobs.episodes.scenes(args['job_id'])
         if name == 'media_timelines_list':
             return self.jobs.timelines.list()
         if name == 'media_timelines_get':

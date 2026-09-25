@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from gideon.extensions.apps.background import BackgroundWorker
 
+from .episodes import EpisodeStore
 from .timelines import TimelineStore
 from .videos import VideoService
 from .cleanup import CleanupService
@@ -41,6 +42,7 @@ class MediaJobs:
         self.cleanup = CleanupService(self.images)
         self.videos = videos or VideoService(self.images)
         self.timelines = TimelineStore(self.path.parent / "timelines.sqlite3", self.videos)
+        self.episodes = EpisodeStore(self.path.parent / "episodes.sqlite3", self.videos, self.timelines)
         self.datasets = DatasetStore(self.path.parent / 'datasets.sqlite3', self.images)
         self.trainer = DiffusersTrainer(sketches.artifacts.root.parent, self.datasets, allowed=training_allowed)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +80,10 @@ class MediaJobs:
         if not isinstance(body, dict):
             raise SketchError('Expected an object')
         image_request = None
-        if body.get('operation') == 'timeline_render':
+        if body.get('operation') == 'episode_render':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.episodes.prepare(body['input'])
+        elif body.get('operation') == 'timeline_render':
             fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
             image_request = self.timelines.prepare(body['input'])
         elif body.get('operation') == 'video_generate':
@@ -221,7 +226,9 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            if job['operation'] == 'timeline_render':
+            if job['operation'] == 'episode_render':
+                result = asyncio.run(self.jobs.episodes.execute(job['input'], job['id'], lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested', lambda pid: self.jobs.attach_child(job['id'], pid), lambda value: self.jobs.progress(job['id'], value)))
+            elif job['operation'] == 'timeline_render':
                 result = self.jobs.timelines.execute(job['input'], job['id'], lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested', lambda pid: self.jobs.attach_child(job['id'], pid), lambda value: self.jobs.progress(job['id'], value))
             elif job['operation'] == 'video_generate':
                 result = asyncio.run(self.jobs.videos.execute(job['input'], job['id']))

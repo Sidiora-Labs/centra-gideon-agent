@@ -8,6 +8,9 @@ from gideon.core.config.loader import config_dir
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.workspace.capabilities.knowledge.archive import ConversationArchive
 from gideon.workspace.capabilities.knowledge.topics import TrackedTopics, SOURCE_TYPES
+from gideon.workspace.capabilities.knowledge.idea_format import preview as idea_preview
+from gideon.workspace.capabilities.knowledge.ideas import IdeaLists
+from gideon.workspace.capabilities.knowledge.idea_schedule import IdeaSchedules, IdeaSyncActionProvider
 from gideon.workspace.capabilities.knowledge.journals import DateJournals
 from gideon.workspace.capabilities.knowledge.reviews import ReviewService
 from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
@@ -28,7 +31,14 @@ _TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea"
 _ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string", "minLength": 1, "maxLength": 524288}}
 _REVIEW_FIELDS = {"period": {"enum": ["daily", "weekly"]}, "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "timezone": {"type": "string", "maxLength": 100}}
 _JOURNAL_FIELDS = {key: value for key, value in _REVIEW_FIELDS.items() if key != "period"}
+_IDEA_CONTENT = {"type": "string", "minLength": 1, "maxLength": 262144}
 _TOOLS = {
+    "knowledge_idea_list": ("List canonical idea lists and owned-vault availability.", False, {}, []),
+    "knowledge_idea_preview": ("Review portable idea-list Markdown, preserving ordered ideas and reporting extra metadata.", False, {"content": _IDEA_CONTENT}, ["content"]),
+    "knowledge_idea_import": ("Import reviewed idea-list Markdown into canonical collection/fleeting records with current expected_hash; use empty hash for a new list.", True, {"request_id": _REQUEST, "content": _IDEA_CONTENT, "preview_id": _ID, "expected_hash": {"type": "string", "maxLength": 128}}, ["request_id", "content", "preview_id", "expected_hash"]),
+    "knowledge_idea_export": ("Export current ordered canonical ideas as portable Markdown.", False, {"id": _ID}, ["id"]),
+    "knowledge_idea_sync": ("Synchronize an idea list through the existing opted-in owned two-way vault; reports conflicts and owner deletion.", True, {"id": _ID, "request_id": _REQUEST, "expected_hash": _ID}, ["id", "request_id", "expected_hash"]),
+    "knowledge_idea_schedule": ("Opt into or disable recurring idea-list exchange using the existing interval scheduler; no external messaging.", True, {"id": _ID, "request_id": _REQUEST, "revision": {"type": "integer", "minimum": 1}, "enabled": {"type": "boolean"}, "minutes": {"type": "integer", "minimum": 5, "maximum": 1440}}, ["id", "request_id", "revision", "enabled", "minutes"]),
     "knowledge_journal_get": ("Open the canonical date-keyed journal and current revision/fingerprint.", False, _JOURNAL_FIELDS, list(_JOURNAL_FIELDS)),
     "knowledge_journal_draft": ("Draft actual daily note and current completed-task activity with exact citations; review before saving.", False, _JOURNAL_FIELDS, list(_JOURNAL_FIELDS)),
     "knowledge_journal_save": ("Save reviewed journal text using the current canonical revision and fingerprint. Use empty preview_id for user-only text; no generated prose.", True, {**_JOURNAL_FIELDS, "request_id": _REQUEST, "revision": {"type": "integer", "minimum": 0}, "fingerprint": {"type": "string", "maxLength": 128}, "preview_id": {"type": "string", "maxLength": 128}, "title": {"type": "string", "minLength": 1, "maxLength": 300}, "content": {"type": "string", "minLength": 1, "maxLength": 100000}}, [*_JOURNAL_FIELDS, "request_id", "revision", "fingerprint", "preview_id", "title", "content"]),
@@ -87,6 +97,8 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._typed = None
         self._archive = None
         self._topics = None
+        self._ideas = None
+        self._idea_schedules = None
         self._journals = None
         self._reviews = None
         self._review_schedules = None
@@ -136,7 +148,24 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_journal_"):
+            if tool_name.startswith("knowledge_idea_"):
+                if self._ideas is None:
+                    self._ideas = IdeaLists(self._store, self._home)
+                    self._idea_schedules = IdeaSchedules(self._ideas)
+                    register_action_provider(IdeaSyncActionProvider(self._idea_schedules))
+                if tool_name == "knowledge_idea_list":
+                    result = self._ideas.list()
+                elif tool_name == "knowledge_idea_preview":
+                    result = idea_preview(arguments['content'])
+                elif tool_name == "knowledge_idea_import":
+                    result = self._ideas.import_list(arguments)
+                elif tool_name == "knowledge_idea_export":
+                    result = self._ideas.export(arguments['id'])
+                elif tool_name == "knowledge_idea_sync":
+                    result = self._ideas.sync(arguments['id'], {key: value for key, value in arguments.items() if key != 'id'})
+                else:
+                    result = self._idea_schedules.save(arguments['id'], {key: value for key, value in arguments.items() if key != 'id'})
+            elif tool_name.startswith("knowledge_journal_"):
                 if self._journals is None:
                     self._journals = DateJournals(self._store, self._home)
                 if tool_name == "knowledge_journal_get":

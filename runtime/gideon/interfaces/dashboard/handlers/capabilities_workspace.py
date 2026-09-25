@@ -253,7 +253,26 @@ async def external_terminal_endpoint(request):
         return web.json_response({'error':'Native mirror unavailable; requires local macOS, iTerm2 SDK and native authorization'},status=503)
 
 
+async def provider_terminal_endpoint(request):
+    if not request.get('user') or request.get('app'):
+        return web.json_response({'error':'Owner authentication required'},status=403)
+    from gideon.workspace.capabilities.workspace.provider_terminal import profiles,upload
+    try:
+        if request.method=='GET':return web.json_response({'profiles':profiles()})
+        if request.content_length is not None and request.content_length>8388608:
+            raise ValueError('Image must be at most 8 MiB')
+        body=bytearray()
+        async for chunk in request.content.iter_chunked(65536):
+            body.extend(chunk)
+            if len(body)>8388608:raise ValueError('Image must be at most 8 MiB')
+        return web.json_response(upload(bytes(body),str(request['user'])))
+    except (ValueError,OSError) as error:
+        return web.json_response({'error':str(error)},status=400)
+
+
 def register(app):
+    app.router.add_get('/api/capabilities/workspace/provider-terminals',provider_terminal_endpoint)
+    app.router.add_post('/api/capabilities/workspace/provider-terminals/images',provider_terminal_endpoint)
     app.router.add_get('/api/capabilities/workspace/external-terminals',external_terminal_endpoint)
     app.router.add_get('/api/capabilities/workspace/external-terminals/{id}',external_terminal_endpoint)
     app.on_cleanup.append(close_desktops)
