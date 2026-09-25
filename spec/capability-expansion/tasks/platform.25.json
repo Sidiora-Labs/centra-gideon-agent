@@ -16,12 +16,14 @@
   "test_files": [
     "checks/runtime/capabilities/platform/test_migration.py",
     "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
+    "checks/runtime/capabilities/platform/test_migration_knowledge_coordinator.py",
     "checks/runtime/capabilities/platform/migration_ui_server.py",
     "apps/console/src/features/capabilities/platform/Migration.test.tsx"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/platform/test_migration.py",
-    "checks/runtime/capabilities/platform/test_migration_people_coordinator.py"
+    "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
+    "checks/runtime/capabilities/platform/test_migration_knowledge_coordinator.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/platform/Migration.test.tsx"
@@ -50,11 +52,15 @@
     "Common-coordinator restart resumes the first pending record, late failure compensates every unchanged owned record in reverse order, and any applied-record drift preserves the complete journal and all remaining targets",
     "The schema-2 common coordinator accepts reviewed people alongside projects, admin actions and tracked threads, orders people by source identity before projects and dependency-ordered tasks, and records the stable canonical person ID and source identity in its receipt",
     "Same-archive brain.person references resolve to the deterministic canonical person identity through preserved platform-migration provenance; restart adopts an exact revision-1 person written before its step checkpoint, exact replay deduplicates, and body, revision or touchpoint drift freezes recovery",
-    "Late failure compensates unchanged coordinator-owned people only after dependent tasks and projects in reverse order; person deletion requires the exact canonical body, revision 1 and no touchpoints"
+    "Late failure compensates unchanged coordinator-owned people only after dependent tasks and projects in reverse order; person deletion requires the exact canonical body, revision 1 and no touchpoints",
+    "The schema-2 common coordinator orders canonical buckets and idea, journal, memory and link items after people and projects but before dependency-ordered tasks, preserving stable item and collection identities in its receipt",
+    "Knowledge ownership requires exact canonical item content, provenance, timestamps, tags and optional link membership; collection ownership requires the exact bucket body and only planned link memberships",
+    "Restart adopts unchanged coordinator-owned knowledge and collection writes before their step checkpoints, while item, tag, membership or collection drift freezes the complete recovery journal and preserves every remaining target",
+    "Late failure compensates unchanged tasks, knowledge rows, FTS entries, tags and memberships before deleting an empty unchanged bucket; mixed inbox archives are rejected during inspection before any canonical mutation"
   ],
   "limits": [
     "This sub-slice supports only version-1 people, projects, admin, threads, ideas, journals, memories, links, buckets, inbox and songs collection records; every other archive domain, relational dump and future schema is rejected.",
-    "Song and knowledge archive families remain separate; the reusable multi-record coordinator accepts people, projects, admin actions and tracked threads.",
+    "Songs and inbox capture histories remain separate; the reusable multi-record coordinator accepts people, projects, buckets, ideas, journals, memories, links, admin actions and tracked threads.",
     "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal; settings, logs, database backends and every mixed authoritative-store matrix outside the declared coordinator remain rejected.",
     "Shared durability inventory, packaged backup inclusion and the final aggregate fresh-home restore journey remain owned by the root integration slice."
   ],
@@ -82,30 +88,5 @@
     "reported_by": "oss_workspace_r2",
     "coverage": "Real song and PDF migration, packaged snapshot, restore_apply into fresh home, canonical record/artifact/journal bytes, receipt replay without duplication",
     "scope": "One song archive; mixed authoritative-store archive acceptance remains separate."
-  },
-  "oss_unverified_increment": {
-    "name": "people in schema-2 canonical coordinator",
-    "base_revision": "993876837d7c3b5b663da8839050c3d12b7316eb",
-    "source_counterpart": "hosted platform.25 evidence /tmp/gideon-platform.25-checks-m51tsovr/evidence.json",
-    "source_counterpart_evidence_sha256": "64cb1b32d527dcddaa5517bb5a4b0c39081fc459947280686607a9abf9376694",
-    "files": [
-      "runtime/gideon/workspace/capabilities/platform/migration.py",
-      "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
-      "spec/capability-expansion/tasks/platform.25.json"
-    ],
-    "status": "implemented_unverified",
-    "reason": "User prohibited OSS compile, tests, browser journeys and runtime execution for this adaptation",
-    "hosted_only_exclusions": [
-      "allocation identity and path scope assertions",
-      "hosted console allocation-bound UI test"
-    ],
-    "intended_tests": [
-      "people-project-task ordering, canonical references, restart and exact replay",
-      "same-archive stable person identity preferred over older matching provenance",
-      "late-failure reverse compensation",
-      "crash after person write before journal checkpoint",
-      "person touchpoint identity drift preservation",
-      "deterministic person target collision before publication"
-    ]
   }
 }
