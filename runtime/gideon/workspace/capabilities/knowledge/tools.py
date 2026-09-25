@@ -6,6 +6,7 @@ from jsonschema import ValidationError, validate
 from gideon.cognition.memory_service import MemoryService
 from gideon.core.config.loader import config_dir
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
+from gideon.workspace.capabilities.knowledge.archive import ConversationArchive
 from gideon.engine import session_restrictions
 from gideon.integrations.action_providers.services import get_action_services
 from gideon.integrations.mcp_core import get_current_session_key
@@ -19,7 +20,11 @@ _ID = {"type": "string", "minLength": 1, "maxLength": 128}
 _REQUEST = {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$"}
 _PAGING = {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "minimum": 0, "maximum": 1000000}}
 _TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea", "admin", "memory"]}, "fields": {"type": "object"}}
+_ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string", "minLength": 1, "maxLength": 524288}}
 _TOOLS = {
+    "knowledge_archive_preview": ("Review an exported conversation archive without executing its contents; report invalid branches and unsupported parts.", False, _ARCHIVE_FIELDS, list(_ARCHIVE_FIELDS)),
+    "knowledge_archive_commit": ("Import selected reviewed archive conversations into canonical knowledge notes, preserving the original archive and source dates. Retry same request_id after interruption.", True, {**_ARCHIVE_FIELDS, "request_id": _REQUEST, "source_digest": _ID, "conversation_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 500, "uniqueItems": True}}, [*_ARCHIVE_FIELDS, "request_id", "source_digest", "conversation_ids"]),
+    "knowledge_archive_list": ("List conversation archive import receipts and exact canonical source links.", False, _PAGING, []),
     "knowledge_type_preview": ("Review capture classification and unsupported fields before canonical import.", False, _TYPE_FIELDS, list(_TYPE_FIELDS)),
     "knowledge_type_commit": ("Import the reviewed capture into the canonical destination once; preserve the preview and request_id when retrying.", True, {**_TYPE_FIELDS, "request_id": _REQUEST, "preview_id": _ID, "revision": {"type": "integer", "minimum": 1}}, [*_TYPE_FIELDS, "request_id", "preview_id", "revision"]),
     "knowledge_type_list": ("List immutable reviewed import receipts with original provenance and destination links.", False, _PAGING, []),
@@ -61,6 +66,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._store = self._services.state.knowledge_store if self._services else None
         self._inbox = None
         self._typed = None
+        self._archive = None
         self._home = config_dir()
 
     @property
@@ -107,7 +113,16 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_type_"):
+            if tool_name.startswith("knowledge_archive_"):
+                if self._archive is None:
+                    self._archive = ConversationArchive(self._store)
+                if tool_name == "knowledge_archive_preview":
+                    result = self._archive.preview(arguments)
+                elif tool_name == "knowledge_archive_commit":
+                    result = self._archive.commit(arguments)
+                else:
+                    result = self._archive.list(**arguments)
+            elif tool_name.startswith("knowledge_type_"):
                 if self._typed is None:
                     self._typed = TypedCapture(self._store, service, self._home)
                 if tool_name == "knowledge_type_preview":
