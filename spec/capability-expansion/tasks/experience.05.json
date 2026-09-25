@@ -1,0 +1,47 @@
+{
+  "id": "experience.05",
+  "status": "locally_checked_browser_pending",
+  "base_revision": "ad0ecb2d",
+  "dependencies": [
+    "596a3309",
+    "84930c40"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/ambient.py",
+    "runtime/gideon/workspace/capabilities/experience/ambient_http.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/AmbientDisplay.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_ambient.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/AmbientDisplay.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_ambient.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/AmbientDisplay.test.tsx"
+  ],
+  "contract": "Fullscreen ambient presentation of existing scheduled automations, native tasks, human goals/planned sessions/progress, recorded health measurements, canonical digest and existing pinned artifact tiles. Presentation preferences persist with revision; visibility-aware source refresh and explicit unavailable/freshness/error states.",
+  "remaining_limits": [
+    "Native browser fullscreen permission and responsive visual geometry require real browser qualification; local DOM exercises actual unsupported API branch",
+    "External calendar events and mortality estimates remain unavailable; no synthetic health or measured-effort data"
+  ],
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify experience.05",
+    "evidence": "/tmp/gideon-experience.05-checks-ox9qyghd/evidence.json",
+    "runtime_tests": 24,
+    "ui_tests": 5,
+    "production_lines": 200,
+    "test_lines": 255,
+    "ratio": 1.275,
+    "repairs": [
+      "Assert actual inline fontSize instead of unsupported camelCase style matcher expectation",
+      "Missing progress profile reports unavailable/null totals; explicit refresh recovers draft after concurrent preference conflict"
+    ]
+  }
+}
