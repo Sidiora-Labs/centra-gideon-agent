@@ -1,0 +1,60 @@
+{
+  "id": "experience.11",
+  "status": "locally_qualified",
+  "base_revision": "b5dd953c",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/world_foundations.py",
+    "runtime/gideon/workspace/capabilities/experience/world_foundations_http.py",
+    "runtime/gideon/workspace/capabilities/experience/world_foundations_provider.py",
+    "apps/console/src/features/capabilities/experience/WorldFoundations.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_world_foundations.py",
+    "apps/console/src/features/capabilities/experience/WorldFoundations.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_world_foundations.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/WorldFoundations.test.tsx"
+  ],
+  "contract": "Durable foundation record/package/promote/inherit/adopt/withdraw lifecycle with SHA-256 candidate fingerprints, explicit provenance, and local-only style. The built-in ambient_beacon controller installs, arms, restarts, stops, retires and reconciles by executing constrained verbs through the canonical separately installed managed world engine; durable desired state is distinct from engine acknowledgements.",
+  "dependencies": {
+    "experience.10": "b5dd953c locally qualified canonical managed world engine, signed world operations, durable worlds and guest identity protocol"
+  },
+  "shared_hooks": [
+    "Root dashboard handler registers register_world_foundations(app, app[STORE]) from world_foundations_http",
+    "Root Console experience page mounts WorldFoundations",
+    "Root native provider registry exposes world_foundations_provider.create_provider"
+  ],
+  "remaining_limits": [
+    "Cross-instance transport of candidate and withdrawal envelopes remains owned by the platform peer integration; this slice verifies the exact receiving contract on a second durable instance",
+    "Controller definitions are intentionally restricted to the built-in ambient_beacon; arbitrary scripts, permissions and configured-record-only controllers are refused"
+  ],
+  "evidence": {
+    "ratio_failure": "/tmp/gideon-experience.11-checks-km18ayla/evidence.json",
+    "runtime_failure": "/tmp/gideon-experience.11-checks-pe3xyv0d/evidence.json",
+    "qualified_compile_and_runtime": "/tmp/gideon-experience.11-checks-ici0_e1q/evidence.json",
+    "qualified_ui": "/tmp/gideon-experience.11-checks-1_kvjanw/evidence.json"
+  },
+  "qualification": {
+    "compile_exit": 0,
+    "runtime_passed": 9,
+    "runtime_failed": 0,
+    "ui_passed": 3,
+    "ui_failed": 0,
+    "repair_cycles": 3,
+    "continued_ui_repair_cycles": 1,
+    "production_lines": 293,
+    "test_lines": 354,
+    "ratio": 1.2184300341296928,
+    "file_hashes": {
+      "apps/console/src/features/capabilities/experience/WorldFoundations.tsx": "8a8a08c927803f831538de1ac6f079336c3770d32db73e032faa68b346ade8bf",
+      "runtime/gideon/workspace/capabilities/experience/world_foundations.py": "95a94c9a88b2d9044b1527b25887b8565592acd94e232b4fee6d761a4a628e67",
+      "runtime/gideon/workspace/capabilities/experience/world_foundations_http.py": "53abbd2703ac5b0f40fe035c34868b57533e9e591db08b0d6061b00a0fd75203",
+      "runtime/gideon/workspace/capabilities/experience/world_foundations_provider.py": "59b293f83c9d063b652f360f6bb63c134ed081521f77054a5190d233193aa9f3",
+      "apps/console/src/features/capabilities/experience/WorldFoundations.test.tsx": "5a50a85e8a2b656ffcb94766ecd84f22708e702db82cb783dc0622cbe8d55783",
+      "checks/runtime/capabilities/experience/test_world_foundations.py": "5dd20af79aeee3e5f6855093a049759063ae6d22dcde774c9302b81d59e81ce8"
+    }
+  }
+}
