@@ -20,7 +20,8 @@
       "desktop-message-import",
       "beeper-outbox",
       "telegram-operations",
-      "calendar-mirror"
+      "calendar-mirror",
+      "social-account-registry"
     ]
   },
   "native": true
