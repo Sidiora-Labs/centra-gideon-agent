@@ -27,6 +27,8 @@ from gideon.workspace.capabilities.music.store import RepertoireStore
 from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
 from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
+from gideon.workspace.capabilities.wellbeing.cognition import CognitiveStore
+from gideon.workspace.capabilities.wellbeing.memory_practice import MemoryPracticeStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
 from gideon.workspace.capabilities.wellbeing.store import instant
 
@@ -65,7 +67,8 @@ MUSIC_ENTRIES = ("music.artists", "music.tracks", "music.albums", "music.songs",
 WELLBEING_HEALTH_ENTRIES = ("wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics")
 WELLBEING_ROUTINE_ENTRIES = ("wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records")
 WELLBEING_GENOME_ENTRIES = ("wellbeing.genome_sources", "wellbeing.genome_variants")
-WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES}
+WELLBEING_PRACTICE_ENTRIES = ("wellbeing.cognitive_sessions", "wellbeing.memory_cards")
+WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES, *WELLBEING_PRACTICE_ENTRIES}
 SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *WELLBEING_ENTRIES})
 
 
@@ -107,6 +110,8 @@ def _wellbeing_path(home: Path) -> Path:
     ConsumptionStore(home)
     InterventionStore(home)
     GenomeStore(home)
+    CognitiveStore(home)
+    MemoryPracticeStore(home)
     return home / "capabilities/wellbeing.sqlite3"
 
 
@@ -212,6 +217,15 @@ def validate_wellbeing_entries(scope: str, entries: list[dict]) -> None:
             counts[source_id] += 1
         if any(data.get("variant_count") != counts[identity] for identity, data in sources.items()):
             raise ValueError("Genome source variant count does not match transmitted records")
+    if scope == "wellbeing.practice":
+        for row in rows["wellbeing.cognitive_sessions"]:
+            data = row["data"]
+            if data.get("status") not in {"completed", "cancelled", "expired"} or data.get("current_trial") is not None or _contains_keys(data, {"expected"}):
+                raise ValueError("Cognitive replication accepts terminal results without hidden answers")
+        for row in rows["wellbeing.memory_cards"]:
+            artifact = row["data"].get("artifact")
+            if not isinstance(artifact, dict) or set(artifact) != {"slug", "version", "sha256"} or not _pinned({"slug": artifact["slug"], "version": artifact["version"]}):
+                raise ValueError("Memory cards require exact pinned content metadata")
 
 
 def _contains_keys(value: object, forbidden: set[str]) -> bool:
@@ -220,6 +234,14 @@ def _contains_keys(value: object, forbidden: set[str]) -> bool:
     if isinstance(value, list):
         return any(_contains_keys(item, forbidden) for item in value)
     return False
+
+
+def _without_key(value: object, key: str) -> object:
+    if isinstance(value, dict):
+        return {name: _without_key(item, key) for name, item in value.items() if name != key}
+    if isinstance(value, list):
+        return [_without_key(item, key) for item in value]
+    return value
 
 
 def read_rows(home: Path, entry_id: str) -> list[dict]:
@@ -248,11 +270,16 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
                     row["data"]["exports"] = []
             return rows
     if entry_id in WELLBEING_ENTRIES:
+        if entry_id == "wellbeing.cognitive_sessions":
+            with sqlite3.connect(_wellbeing_path(home)) as db:
+                rows = db.execute("SELECT r.id,r.data FROM cognitive_sessions r WHERE revision=(SELECT max(s.revision) FROM cognitive_sessions s WHERE s.id=r.id) AND json_extract(r.data,'$.status')!='active' ORDER BY r.id")
+                return [{"id": row[0], "data": _without_key(json.loads(row[1]), "expected")} for row in rows]
         table = {
             "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
             "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
             "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
             "wellbeing.genome_sources": "genome_sources", "wellbeing.genome_variants": "genome_variants",
+            "wellbeing.memory_cards": "memory_card_revisions",
         }[entry_id]
         revisioned = entry_id not in {"wellbeing.metrics", "wellbeing.genome_sources"}
         where = " WHERE revision=(SELECT max(s.revision) FROM {table} s WHERE s.id={table}.id)".format(table=table) if revisioned else ""
@@ -426,6 +453,7 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
         "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
         "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
         "wellbeing.genome_sources": "genome_sources", "wellbeing.genome_variants": "genome_variants",
+        "wellbeing.cognitive_sessions": "cognitive_sessions", "wellbeing.memory_cards": "memory_card_revisions",
     }[entry_id]
     with sqlite3.connect(_wellbeing_path(home)) as db:
         if row is None:
@@ -446,6 +474,10 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
             db.execute("INSERT OR REPLACE INTO genome_sources VALUES(?,?)", (entity_id, json.dumps(data, sort_keys=True)))
         elif entry_id == "wellbeing.genome_variants":
             db.execute("INSERT INTO genome_variants VALUES(?,?,?,?,?,?,?)", (entity_id, data["revision"], data["source_id"], data["chromosome"], data["position"], data["rsid"], json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.cognitive_sessions":
+            db.execute("INSERT INTO cognitive_sessions VALUES(?,?,?)", (entity_id, data["revision"], json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.memory_cards":
+            db.execute("INSERT INTO memory_card_revisions VALUES(?,?,?,?)", (entity_id, data["revision"], instant(data["schedule"]["due_at"]), json.dumps(data, sort_keys=True)))
         else:
             parent, day = (data["plan_id"], data["date"]) if entry_id.endswith("records") else ("", "")
             db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], parent, day, json.dumps(data, sort_keys=True)))

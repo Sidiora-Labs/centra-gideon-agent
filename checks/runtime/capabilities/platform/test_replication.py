@@ -32,6 +32,8 @@ from gideon.workspace.capabilities.music.store import RepertoireStore
 from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
 from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
 from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
+from gideon.workspace.capabilities.wellbeing.cognition import CognitiveStore
+from gideon.workspace.capabilities.wellbeing.memory_practice import MemoryPracticeStore
 from gideon.workspace.capabilities.wellbeing.labs import LabStore
 from gideon.workspace.capabilities.wellbeing.store import MeasurementStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
@@ -330,11 +332,12 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "wellbeing.health", "entries": ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]},
         {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
         {"scope": "wellbeing.genome", "entries": ["wellbeing.genome_sources", "wellbeing.genome_variants"]},
+        {"scope": "wellbeing.practice", "entries": ["wellbeing.cognitive_sessions", "wellbeing.memory_cards"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -851,3 +854,75 @@ def test_genome_scope_two_home_refs_conflict_restore_tombstones_and_privacy(home
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.genome")
+
+
+def seed_practice(home):
+    cognition = CognitiveStore(home)
+    active = cognition.start({"request_id": "cognitive-start", "kind": "arithmetic", "planned_trials": 1, "time_limit_seconds": 60})
+    stimulus = active["current_trial"]["stimulus"]
+    answer = str(stimulus["left"] + stimulus["right"] if stimulus["operator"] == "+" else stimulus["left"] - stimulus["right"])
+    session = cognition.answer(active["id"], {"request_id": "cognitive-answer", "revision": 1, "answer": answer})
+    memory = MemoryPracticeStore(home)
+    card = memory.create({"request_id": "memory-create", "front": "Capital of France?", "back": "Paris", "source": "personal study", "tags": ["geography"]})
+    with sqlite3.connect(home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("INSERT INTO requests VALUES(?,?,?)", ("practice-private", '{"password":"practice-private-password","native_helper":"local-only"}', "{}"))
+    return session, card
+
+
+def test_practice_scope_terminal_results_memory_conflicts_tombstones_and_privacy(home):
+    none_a, none_b = home / "practice-none-a", home / "practice-none-b"
+    _, none_peer = pair(none_a, none_b)
+    seed_practice(none_a)
+    with pytest.raises(ReplicationError, match="policy denies"): ReplicationService(none_a).export_batch(none_peer["peer_id"], "wellbeing.practice")
+
+    a_home, b_home = home / "practice-a", home / "practice-b"
+    aid, bid = pair_for(a_home, b_home, "wellbeing.practice")
+    session, card = seed_practice(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "wellbeing.practice")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["wellbeing.cognitive_sessions", "wellbeing.memory_cards"]
+    wire = json.dumps(baseline)
+    assert '"expected"' not in wire and "practice-private-password" not in wire and "native_helper" not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    received_session = CognitiveStore(b_home).get(session["id"])
+    assert received_session["status"] == "completed" and received_session["score"]["accuracy"] == 1
+    memory_b = MemoryPracticeStore(b_home)
+    assert memory_b.artifacts.get(card["artifact"]["slug"], version=1) is None
+    with memory_b.connection() as db: received_card = json.loads(db.execute("SELECT data FROM memory_card_revisions WHERE id=?", (card["id"],)).fetchone()[0])
+    assert received_card["artifact"] == card["artifact"] and "front" not in received_card
+    source_artifact = MemoryPracticeStore(a_home).artifacts.get(card["artifact"]["slug"], version=1)
+    memory_b.artifacts.create(name="Capital of France?", content=source_artifact.content, kind="document", source="local", slug=card["artifact"]["slug"], readonly=True)
+
+    practiced = MemoryPracticeStore(a_home).practice(card["id"], {"request_id": "local-practice", "revision": 1, "grade": "good"})
+    memory_b.update(card["id"], {"request_id": "peer-archive", "revision": 1, "archived": True})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "wellbeing.practice")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][1]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "wellbeing.memory_cards")
+    ReplicationService(a_home).restore_fields(conflict.id, ["archived"])
+    merged = MemoryPracticeStore(a_home).get(card["id"])
+    assert merged["archived"] is True and merged["schedule"] == practiced["schedule"] and merged["revision"] == 3
+
+    c_home, d_home = home / "practice-c", home / "practice-d"
+    cid, did = pair_for(c_home, d_home, "wellbeing.practice")
+    doomed_session, doomed_card = seed_practice(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.practice")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with sqlite3.connect(c_home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("DELETE FROM cognitive_sessions WHERE id=?", (doomed_session["id"],))
+        db.execute("DELETE FROM memory_card_revisions WHERE id=?", (doomed_card["id"],))
+    tombstones = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.practice")
+    assert [item["removed"] for item in ReplicationService(d_home).apply_batch(cid["peer_id"], tombstones)["entries"]] == [1, 1]
+
+    bad_home, target_home = home / "practice-bad", home / "practice-target"
+    bad_id, target_id = pair_for(bad_home, target_home, "wellbeing.practice")
+    seed_practice(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "wellbeing.practice")
+    malformed["entries"][0]["rows"][0]["data"]["status"] = "active"
+    with pytest.raises(ReplicationError, match="terminal results") as rejected: ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422 and CognitiveStore(target_home).list_sessions() == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.practice")
