@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Harnesses from './Harnesses'
-import { useSearchParams } from 'react-router-dom'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
@@ -11,21 +11,17 @@ const safeReads = new Set([endpoint, '/api/prompts/syntax'])
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
-  const [params, setParams] = useSearchParams()
+  const { query: params, setQuery } = useHashRoute('capabilities')
   const [catalog, setCatalog] = useState<Catalog>()
   const [error, setError] = useState('')
   const [response, setResponse] = useState('')
   const [busy, setBusy] = useState(false)
   const [reload, setReload] = useState(0)
-  const offset = Number(params.get('offset') || 0)
-  const query = params.get('q') || ''
-  const method = params.get('method') || ''
-  const selection = params.get('route') || ''
-  const update = (key: string, value: string) => setParams(previous => {
-    const next = new URLSearchParams(previous)
-    if (value) next.set(key, value); else next.delete(key)
-    return next
-  })
+  const offset = Number(params.offset || 0)
+  const query = params.q || ''
+  const method = params.method || ''
+  const selection = params.route || ''
+  const update = (key: string, value: string) => setQuery({ [key]: value })
   useEffect(() => {
     let current = true
     setCatalog(undefined); setError(''); setResponse('')
