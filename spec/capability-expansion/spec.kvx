@@ -395,10 +395,10 @@ implementation_status = "locally_qualified"
 title = "Broker case lifecycle and verification"
 wave = 14
 owner_lane = "wellbeing"
-status = "done"
+status = "in_progress"
 requires = ["wellbeing.13"]
 verify_cmd = "python3 tooling/capability_workflow.py verify wellbeing.14"
-implementation_status = "locally_qualified"
+implementation_status = "in_progress"
 
 [task.communications.01]
 title = "People and relationship touchpoints"
@@ -494,10 +494,10 @@ implementation_status = "locally_qualified"
 title = "Stacker News territory and action workflow"
 wave = 11
 owner_lane = "communications"
-status = "in_progress"
+status = "done"
 requires = ["communications.10"]
 verify_cmd = "python3 tooling/capability_workflow.py verify communications.11"
-implementation_status = "in_progress"
+implementation_status = "locally_qualified"
 
 [task.communications.12]
 title = "Agent platform account lifecycle"
@@ -1160,10 +1160,10 @@ implementation_status = "locally_qualified"
 title = "Subscription and instance usage accounting"
 wave = 17
 owner_lane = "platform"
-status = "in_progress"
+status = "done"
 requires = ["platform.16"]
 verify_cmd = "python3 tooling/capability_workflow.py verify platform.17"
-implementation_status = "locally_qualified_external_pending"
+implementation_status = "locally_qualified"
 
 [task.platform.18]
 title = "Personal insight and scorecard projections"

@@ -1,7 +1,7 @@
 {
   "id": "wellbeing.14",
   "schema_version": 1,
-  "status": "locally_qualified",
+  "status": "in_progress",
   "base_revision": "809b6bfa",
   "production_files": [
     "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py",
@@ -72,5 +72,6 @@
     "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py": "267192430ed0bd17f3d60f97ac9c647d2cfcdec351d59d9406560d2d897400e8",
     "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "ee67fa19f02546167557b229a6a900213beeef1ad39eba835d64a1f2e5eb3ff3",
     "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
-  }
+  },
+  "active_continuation": "Email-based broker removal and verification workflow; existing Spokeo adapter qualification remains retained."
 }

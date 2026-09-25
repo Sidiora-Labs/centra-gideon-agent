@@ -988,7 +988,7 @@
       "id": "wellbeing.14",
       "title": "Broker case lifecycle and verification",
       "owner_lane": "wellbeing",
-      "status": "done",
+      "status": "in_progress",
       "wave": 14,
       "requires": [
         "wellbeing.13"
@@ -1004,7 +1004,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
       "acceptance": "Complete the broker case lifecycle and verification workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "locally_qualified",
+      "implementation_status": "in_progress",
       "evidence_record": "spec/capability-expansion/tasks/wellbeing.14.json"
     },
     {
@@ -1239,7 +1239,7 @@
       "id": "communications.11",
       "title": "Stacker News territory and action workflow",
       "owner_lane": "communications",
-      "status": "in_progress",
+      "status": "done",
       "wave": 11,
       "requires": [
         "communications.10"
@@ -1255,7 +1255,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify communications.11",
       "acceptance": "Complete the stacker news territory and action workflow workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "in_progress",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/communications.11.json"
     },
     {
@@ -2931,7 +2931,7 @@
       "id": "platform.17",
       "title": "Subscription and instance usage accounting",
       "owner_lane": "platform",
-      "status": "in_progress",
+      "status": "done",
       "wave": 17,
       "requires": [
         "platform.16"
@@ -2947,7 +2947,7 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify platform.17",
       "acceptance": "Complete the subscription and instance usage accounting workflow through real persistence, operations, API and console. Before claiming, refine domain-specific acceptance, dependencies and exact paths in the task record; generic wording alone cannot qualify this task.",
       "contract": "Refine the domain contract before implementation; preserve the existing platform boundaries and all applicable common acceptance criteria.",
-      "implementation_status": "locally_qualified_external_pending",
+      "implementation_status": "locally_qualified",
       "evidence_record": "spec/capability-expansion/tasks/platform.17.json"
     },
     {
