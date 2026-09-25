@@ -13,7 +13,11 @@ from gideon.operations.durability import conflicts, inventory, reconcile, tombst
 from gideon.operations.durability.shards import canonical_json
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 from gideon.workspace.capabilities.platform import replication_adapters
+from gideon.workspace.capabilities.platform import replication_commissions
 from gideon.workspace.capabilities.platform import replication_creative_direction
+from gideon.workspace.capabilities.platform import replication_experience_stories
+from gideon.workspace.capabilities.platform import replication_identity_stories
+from gideon.workspace.capabilities.platform import replication_knowledge_collections
 from gideon.workspace.capabilities.platform import replication_music_video
 from gideon.workspace.capabilities.platform import replication_video
 
@@ -30,10 +34,14 @@ class Domain:
 DOMAINS = {
     "workspace.records": Domain("workspace.records", ("projects", "tasks")),
     "knowledge.records": Domain("knowledge.records", ("knowledge.items",)),
+    replication_knowledge_collections.SCOPE: Domain(replication_knowledge_collections.SCOPE, replication_knowledge_collections.ENTRIES),
     "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
+    replication_commissions.SCOPE: Domain(replication_commissions.SCOPE, replication_commissions.ENTRIES),
     replication_creative_direction.SCOPE: Domain(replication_creative_direction.SCOPE, replication_creative_direction.ENTRIES),
     "identity.goals": Domain("identity.goals", tuple(replication_adapters.IDENTITY_TABLES)),
     "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
+    replication_identity_stories.SCOPE: Domain(replication_identity_stories.SCOPE, replication_identity_stories.ENTRIES),
+    replication_experience_stories.SCOPE: Domain(replication_experience_stories.SCOPE, replication_experience_stories.ENTRIES),
     "communications.contacts": Domain("communications.contacts", tuple(replication_adapters.COMMUNICATION_TABLES)),
     "music.library": Domain("music.library", replication_adapters.MUSIC_ENTRIES),
     "media.assets": Domain("media.assets", replication_adapters.MEDIA_ENTRIES),
@@ -88,6 +96,14 @@ class ReplicationService:
         return replace(entry, merge=_DOMAIN_MERGES.get(entry_id, entry.merge))
 
     def _rows(self, entry_id: str) -> list[dict]:
+        if entry_id in replication_identity_stories.ENTRIES:
+            return replication_identity_stories.read_rows(self.home, entry_id)
+        if entry_id in replication_knowledge_collections.ENTRIES:
+            return replication_knowledge_collections.read_rows(self.home, entry_id)
+        if entry_id in replication_experience_stories.ENTRIES:
+            return replication_experience_stories.read_rows(self.home, entry_id)
+        if entry_id in replication_commissions.ENTRIES:
+            return replication_commissions.read_rows(self.home, entry_id)
         if entry_id in replication_creative_direction.ENTRIES:
             return replication_creative_direction.read_rows(self.home, entry_id)
         if entry_id in replication_video.ENTRIES:
@@ -148,6 +164,14 @@ class ReplicationService:
             raise ReplicationError("Invalid replication rows")
         try:
             replication_adapters.validate_entries(scope, entries)
+            if scope == replication_identity_stories.SCOPE:
+                replication_identity_stories.validate_entries(entries)
+            if scope == replication_knowledge_collections.SCOPE:
+                replication_knowledge_collections.validate_entries(entries, self.home)
+            if scope == replication_experience_stories.SCOPE:
+                replication_experience_stories.validate_entries(entries)
+            if scope == replication_commissions.SCOPE:
+                replication_commissions.validate_entries(entries)
             if scope == replication_creative_direction.SCOPE:
                 replication_creative_direction.validate_entries(entries)
             if scope == replication_video.SCOPE:
@@ -174,9 +198,37 @@ class ReplicationService:
                 raise ReplicationError(f"Replication cursor expects sequence {expected}", 409)
             queue = conflicts.ConflictQueue(self.home)
             results, ancestor_updates = [], []
-            for item in entries:
+            if scope == replication_knowledge_collections.SCOPE:
+                try:
+                    applied = replication_knowledge_collections.apply_entries(
+                        self.home, entries,
+                        {entry_id: self._ancestors(connection, peer_id, entry_id) for entry_id in domain.entries},
+                        queue, now,
+                    )
+                except ValueError as error:
+                    raise ReplicationError(str(error), 422) from error
+                applied_items = [(item, applied[item["entry_id"]]) for item in entries]
+            else:
+                applied_items = []
+            pending_entries = () if scope == replication_knowledge_collections.SCOPE else entries
+            for item in pending_entries:
                 entry_id = item["entry_id"]
-                if entry_id in replication_creative_direction.ENTRIES:
+                if entry_id in replication_identity_stories.ENTRIES:
+                    try:
+                        result = replication_identity_stories.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_experience_stories.ENTRIES:
+                    try:
+                        result = replication_experience_stories.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_commissions.ENTRIES:
+                    try:
+                        result = replication_commissions.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_creative_direction.ENTRIES:
                     try:
                         result = replication_creative_direction.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
                     except ValueError as error:
@@ -199,6 +251,9 @@ class ReplicationService:
                 else:
                     entry = self._entry(entry_id)
                     result = replication_adapters.apply_inventory_rows(self.home, entry, item["rows"], self._ancestors(connection, peer_id, entry.id), queue, now)
+                applied_items.append((item, result))
+            for item, result in applied_items:
+                entry_id = item["entry_id"]
                 if result.verdict != "consumed":
                     raise ReplicationError(f"Replication payload for {entry_id} was rejected", 422)
                 results.append({"entry_id": entry_id, "added": result.added, "updated": result.updated, "removed": result.removed, "conflicts": result.conflicts})
@@ -229,6 +284,14 @@ class ReplicationService:
     def restore_fields(self, conflict_id: str, fields: list[str]) -> dict:
         try:
             record = conflicts.ConflictQueue(self.home).get(conflict_id)
+            if record is not None and record.entry_id in replication_identity_stories.ENTRIES:
+                return replication_identity_stories.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+            if record is not None and record.entry_id in replication_knowledge_collections.ENTRIES:
+                return replication_knowledge_collections.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+            if record is not None and record.entry_id in replication_experience_stories.ENTRIES:
+                return replication_experience_stories.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+            if record is not None and record.entry_id in replication_commissions.ENTRIES:
+                return replication_commissions.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_creative_direction.ENTRIES:
                 return replication_creative_direction.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_video.ENTRIES:
