@@ -46,6 +46,36 @@ class Desktops(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(.05)
         self.fail('Real desktop terminal did not create expected file')
 
+    async def test_dedicated_display_survives_last_client_disconnect(self):
+        import secrets
+        display=1000+secrets.randbelow(30000)
+        folder=self.root/'probe';folder.mkdir(mode=0o700)
+        authority=folder/'authority';authority.touch(mode=0o600)
+        handle={'display':f':{display}','auth':authority,'home':folder,'cwd':str(self.repo)}
+        self.assertFalse(Path(f'/tmp/.X11-unix/X{display}').exists())
+        self.assertFalse(Path(f'/tmp/.X{display}-lock').exists())
+        await self.registry._command(handle,['xauth','-f',str(authority),'add',handle['display'],'MIT-MAGIC-COOKIE-1',secrets.token_hex(16)])
+        proc,profile=await self.registry._spawn(handle,['Xvfb',handle['display'],'-screen','0','800x600x24','-nolisten','tcp','-noreset','-auth',str(authority)])
+        try:
+            for attempt in range(30):
+                try:
+                    await self.registry._command(handle,['xdpyinfo'],262144)
+                    break
+                except ValueError:
+                    if attempt==29:raise
+                    await asyncio.sleep(.1)
+            await self.registry._command(handle,['xprop','-root','-f','GIDEON_LIFETIME','8s','-set','GIDEON_LIFETIME','owned-server'])
+            for _ in range(2):
+                await asyncio.sleep(.2)
+                value=await self.registry._command(handle,['xprop','-root','GIDEON_LIFETIME'])
+                self.assertIn(b'owned-server',value)
+                self.assertIsNone(proc.returncode)
+        finally:
+            from gideon.core.cancellation import terminate_and_reap
+            await terminate_and_reap(proc)
+            if profile:Path(profile).unlink(missing_ok=True)
+        self.assertIsNotNone(proc.returncode)
+
     async def test_real_frames_terminal_input_and_clean_stop(self):
         self.assertTrue(self.registry.availability()['available'])
         record=await self.registry.start(self.payload())

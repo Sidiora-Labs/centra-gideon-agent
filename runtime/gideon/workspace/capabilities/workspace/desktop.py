@@ -132,7 +132,7 @@ class DesktopRegistry:
             try:
                 if Path(f'/tmp/.X11-unix/X{display}').exists() or Path(f'/tmp/.X{display}-lock').exists():raise ConflictError('Display allocation collided; retry a new request')
                 await self._command(handle,['xauth','-f',str(auth),'add',handle['display'],'MIT-MAGIC-COOKIE-1',secrets.token_hex(16)])
-                proc,profile=await self._spawn(handle,['Xvfb',handle['display'],'-screen','0',f"{payload['width']}x{payload['height']}x24",'-nolisten','tcp','-auth',str(auth)])
+                proc,profile=await self._spawn(handle,['Xvfb',handle['display'],'-screen','0',f"{payload['width']}x{payload['height']}x24",'-nolisten','tcp','-noreset','-auth',str(auth)])
                 handle['processes'].append((proc,profile))
                 for attempt in range(30):
                     if proc.returncode is not None:raise ValueError('Isolated display failed to start')

@@ -141,5 +141,19 @@
       "/tmp/gideon-workspace.06-checks-io_o8g12/evidence.json",
       "/tmp/gideon-workspace.06-checks-i8o9cdhq/evidence.json"
     ]
+  },
+  "followup_reset_proof": {
+    "status": "locally_qualified",
+    "reason": "Dedicated X server must retain state when the last readiness probe disconnects",
+    "command": "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest -q checks/runtime/capabilities/workspace/test_desktops.py::Desktops::test_dedicated_display_survives_last_client_disconnect checks/runtime/capabilities/workspace/test_desktops.py::Desktops::test_real_frames_terminal_input_and_clean_stop",
+    "exit_code": 0,
+    "result": "2 passed, 1 warning in 32.00s; real-home rail unchanged",
+    "files": {
+      "runtime/gideon/workspace/capabilities/workspace/desktop.py": "46652d481075eea57122ad2572bfe586296cdcb77d31c5ef56c9c71e6fb765db",
+      "checks/runtime/capabilities/workspace/test_desktops.py": "84b837c9ce937749ef1b3b8a517e021a3eeaaf1623081561a07412b65cb50b0d"
+    },
+    "production_changed_lines": 1,
+    "test_added_executable_lines": 29,
+    "unchanged_stage_evidence_preserved": true
   }
 }
