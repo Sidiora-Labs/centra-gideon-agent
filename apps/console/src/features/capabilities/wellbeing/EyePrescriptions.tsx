@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
 import { useUILanguage } from '../../../shared/i18n';
 
@@ -31,37 +31,60 @@ function EyeFields({ side, labels, draft, setDraft, disabled }: { side: 'left' |
 
 export default function EyePrescriptions() {
   const language = useUILanguage(), w = words[language];
+  const mounted = useRef(false), generation = useRef(0);
   const [records, setRecords] = useState<Prescription[]>([]), [selected, setSelected] = useState<Prescription | null>(null);
   const [history, setHistory] = useState<Prescription[]>([]), [draft, setDraft] = useState<Draft>(blank());
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [exported, setExported] = useState('');
-  async function run(action: () => Promise<void>) { setBusy(true); setError(''); try { await action(); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function load() { setRecords((await requestJson<{ prescriptions: Prescription[] }>(base)).prescriptions); }
-  async function select(id: string) {
+  const current = (token: number) => mounted.current && generation.current === token;
+  async function run(action: (token: number) => Promise<void>) {
+    const token = ++generation.current;
+    setBusy(true); setError('');
+    try { await action(token); } catch (reason) { if (current(token)) setError(String(reason)); } finally { if (current(token)) setBusy(false); }
+  }
+  async function load(token: number) {
+    const rows = (await requestJson<{ prescriptions: Prescription[] }>(base)).prescriptions;
+    if (current(token)) setRecords(rows);
+  }
+  async function select(id: string, token: number) {
     const row = await requestJson<Prescription>(`${base}/${encodeURIComponent(id)}`);
-    setSelected(row); setDraft(fromRecord(row));
-    setHistory((await requestJson<{ history: Prescription[] }>(`${base}/${encodeURIComponent(id)}/history`)).history);
+    const versions = (await requestJson<{ history: Prescription[] }>(`${base}/${encodeURIComponent(id)}/history`)).history;
+    if (!current(token)) return;
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    if (params.get('view') !== 'eyes') return;
+    setSelected(row); setDraft(fromRecord(row)); setHistory(versions);
     window.history.replaceState(null, '', `#/capabilities/wellbeing?view=eyes&id=${encodeURIComponent(id)}`);
   }
-  useEffect(() => { void run(async () => { await load(); const id = new URLSearchParams(location.hash.split('?')[1]).get('id'); if (id) await select(id); }); }, []);
+  useEffect(() => {
+    mounted.current = true;
+    const token = ++generation.current;
+    const id = new URLSearchParams(location.hash.split('?')[1] || '').get('id');
+    setBusy(true); setError('');
+    void (async () => {
+      try { await load(token); if (id && current(token)) await select(id, token); }
+      catch (reason) { if (current(token)) setError(String(reason)); }
+      finally { if (current(token)) setBusy(false); }
+    })();
+    return () => { mounted.current = false; generation.current += 1; };
+  }, []);
   const payload = () => ({ observed_date: draft.observed_date, source: draft.source, notes: draft.notes,
     left: eye(draft.leftSphere, draft.leftCylinder, draft.leftAxis), right: eye(draft.rightSphere, draft.rightCylinder, draft.rightAxis) });
   async function save(event: FormEvent) {
     event.preventDefault();
-    await run(async () => {
+    await run(async token => {
       if (selected) {
         const { source: _source, ...changes } = payload();
         const row = await requestJson<Prescription>(`${base}/${encodeURIComponent(selected.id)}`, 'PUT', { ...changes, revision: selected.revision, request_id: crypto.randomUUID() });
-        await load(); await select(row.id);
+        await load(token); if (current(token)) await select(row.id, token);
       } else {
         const row = await requestJson<Prescription>(base, 'POST', { ...payload(), request_id: crypto.randomUUID() });
-        await load(); await select(row.id);
+        await load(token); if (current(token)) await select(row.id, token);
       }
     });
   }
   return <main dir={language === 'ar' ? 'rtl' : 'auto'} style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }}><h1>{w[0]}</h1>
     <p>{w[1]}</p>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[2]}</p>}
-    <button disabled={busy} onClick={() => { setSelected(null); setHistory([]); setDraft(blank()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=eyes'); }}>{w[3]}</button>
+    <button disabled={busy} onClick={() => { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setDraft(blank()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=eyes'); }}>{w[3]}</button>
     <form onSubmit={save} style={{ display: 'grid', gap: 12 }}>
       <label>{w[4]}<input required type="date" value={draft.observed_date} onChange={event => setDraft({ ...draft, observed_date: event.target.value })} /></label>
       <label>{w[5]}<input required disabled={!!selected} value={draft.source} onChange={event => setDraft({ ...draft, source: event.target.value })} /></label>
@@ -69,9 +92,9 @@ export default function EyePrescriptions() {
       <label>{w[11]}<textarea value={draft.notes} onChange={event => setDraft({ ...draft, notes: event.target.value })} /></label>
       <button disabled={busy}>{selected ? w[12] : w[13]}</button>
     </form>
-    <section><h2>{w[14]}</h2>{!busy && records.length === 0 && <p>{w[15]}</p>}<ul>{records.map(row => <li key={row.id}><button onClick={() => void run(() => select(row.id))}>{row.observed_date} · {row.source} · v{row.revision}</button></li>)}</ul></section>
+    <section><h2>{w[14]}</h2>{!busy && records.length === 0 && <p>{w[15]}</p>}<ul>{records.map(row => <li key={row.id}><button onClick={() => void run(token => select(row.id, token))}>{row.observed_date} · {row.source} · v{row.revision}</button></li>)}</ul></section>
     {selected && <section><h2>{w[16]}</h2><ol>{history.map(row => <li key={row.revision}>v{row.revision}: {w[6]} {row.left.sphere} D / {row.left.cylinder} D × {row.left.axis} {w[19]}; {w[7]} {row.right.sphere} D / {row.right.cylinder} D × {row.right.axis} {w[19]} · {row.notes}</li>)}</ol></section>}
-    <button disabled={busy} onClick={() => void run(async () => setExported(JSON.stringify(await requestJson(base + '/export'), null, 2)))}>{w[17]}</button>
+    <button disabled={busy} onClick={() => void run(async token => { const value = await requestJson(base + '/export'); if (current(token)) setExported(JSON.stringify(value, null, 2)); })}>{w[17]}</button>
     {exported && <pre aria-label={w[18]}>{exported}</pre>}
   </main>;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
 import { useUILanguage } from '../../../shared/i18n';
 
@@ -25,9 +25,11 @@ export default function EpigeneticRecords() {
   const [bio, setBio] = useState(''), [bioUnit, setBioUnit] = useState('years'), [chronological, setChronological] = useState(''), [chronoUnit, setChronoUnit] = useState('years');
   const [pace, setPace] = useState(''), [paceScale, setPaceScale] = useState('years/year'), [scores, setScores] = useState('{}');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const mounted = useRef(false), generation = useRef(0);
 
-  async function run(action: () => Promise<void>) { setBusy(true); setError(''); try { await action(); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } }
-  async function load() { const records = (await requestJson<{ records: RecordRow[] }>(base)).records; setRows(records); return records; }
+  const current = (token: number) => mounted.current && generation.current === token;
+  async function run(action: (token: number) => Promise<void>) { const token = ++generation.current; if (!mounted.current) return; setBusy(true); setError(''); try { await action(token); } catch (reason) { if (current(token)) setError(String(reason)); } finally { if (current(token)) setBusy(false); } }
+  async function load(token: number) { const records = (await requestJson<{ records: RecordRow[] }>(base)).records; if (current(token)) setRows(records); return records; }
   function populate(row: RecordRow) {
     setSelected(row); setReportId(row.source_report_id); setObserved(row.observed_at); setSource(row.source); setNotes(row.notes);
     setBio(row.biological_age == null ? '' : String(row.biological_age.value)); setBioUnit(row.biological_age?.unit || row.biological_age?.scale || 'years');
@@ -35,8 +37,26 @@ export default function EpigeneticRecords() {
     setPace(row.pace_of_aging == null ? '' : String(row.pace_of_aging.value)); setPaceScale(row.pace_of_aging?.scale || row.pace_of_aging?.unit || 'years/year');
     setScores(JSON.stringify(row.organ_scores, null, 2));
   }
-  async function select(row: RecordRow) { populate(row); setHistory((await requestJson<{ history: RecordRow[] }>(`${base}/${row.id}/history`)).history); window.history.replaceState(null, '', `#/capabilities/wellbeing?view=epigenetic&id=${encodeURIComponent(row.id)}`); }
-  useEffect(() => { void run(async () => { await load(); const id = new URLSearchParams(location.hash.split('?')[1]).get('id'); if (id) await select(await requestJson<RecordRow>(`${base}/${encodeURIComponent(id)}`)); }); }, []);
+  async function select(row: RecordRow, token: number) {
+    const versions = (await requestJson<{ history: RecordRow[] }>(`${base}/${row.id}/history`)).history;
+    if (!current(token)) return;
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    if (params.get('view') !== 'epigenetic') return;
+    populate(row); setHistory(versions);
+    if (current(token)) window.history.replaceState(null, '', `#/capabilities/wellbeing?view=epigenetic&id=${encodeURIComponent(row.id)}`);
+  }
+  useEffect(() => {
+    mounted.current = true;
+    const token = ++generation.current;
+    const id = new URLSearchParams(location.hash.split('?')[1] || '').get('id');
+    setBusy(true); setError('');
+    void (async () => {
+      try { await load(token); if (id && current(token)) await select(await requestJson<RecordRow>(`${base}/${encodeURIComponent(id)}`), token); }
+      catch (reason) { if (current(token)) setError(String(reason)); }
+      finally { if (current(token)) setBusy(false); }
+    })();
+    return () => { mounted.current = false; generation.current += 1; };
+  }, []);
   function body() {
     let organScores: Record<string, Reported>;
     try { organScores = JSON.parse(scores) as Record<string, Reported>; } catch { throw new Error('Organ scores must be valid JSON'); }
@@ -46,15 +66,15 @@ export default function EpigeneticRecords() {
     };
   }
   async function save(event: FormEvent) {
-    event.preventDefault(); await run(async () => {
+    event.preventDefault(); await run(async token => {
       const payload = body();
       const row = selected
         ? await requestJson<RecordRow>(`${base}/${selected.id}`, 'PUT', { ...payload, source: undefined, request_id: crypto.randomUUID(), revision: selected.revision })
         : await requestJson<RecordRow>(base, 'POST', { ...payload, request_id: crypto.randomUUID() });
-      await load(); await select(row);
+      if (!current(token)) return; await load(token); if (current(token)) await select(row, token);
     });
   }
-  function clear() { setSelected(null); setHistory([]); setReportId(''); setObserved(''); setSource(''); setNotes(''); setBio(''); setChronological(''); setPace(''); setScores('{}'); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=epigenetic'); }
+  function clear() { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setReportId(''); setObserved(''); setSource(''); setNotes(''); setBio(''); setChronological(''); setPace(''); setScores('{}'); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=epigenetic'); }
   const shown = (value?: Reported) => value == null ? w[23] : `${value.value} ${value.unit || value.scale}`;
   return <main dir={language === 'ar' ? 'rtl' : undefined} style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }}>
     <h1>{w[0]}</h1><p>{w[1]}</p>
@@ -74,7 +94,7 @@ export default function EpigeneticRecords() {
       <button disabled={busy}>{selected ? w[17] : w[18]}</button>
     </form>
     {!busy && rows.length === 0 && <p>{w[19]}</p>}
-    <ul>{rows.map(row => <li key={row.id}><button onClick={() => void run(() => select(row))}>{row.observed_at} · {row.source_report_id}</button></li>)}</ul>
+    <ul>{rows.map(row => <li key={row.id}><button onClick={() => void run(token => select(row, token))}>{row.observed_at} · {row.source_report_id}</button></li>)}</ul>
     {selected && <section><h2>{w[20]}</h2><p>{w[21]}</p><ol>{history.map(row => <li key={row.revision}>v{row.revision}: biological {shown(row.biological_age)}; chronological {shown(row.chronological_age)}; pace {shown(row.pace_of_aging)}</li>)}</ol></section>}
   </main>;
 }
