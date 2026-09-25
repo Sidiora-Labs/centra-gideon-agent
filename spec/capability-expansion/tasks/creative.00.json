@@ -1,0 +1,26 @@
+{
+  "id": "creative.00",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "7a6b5286",
+  "requires": [
+    "creative.01",
+    "creative.02"
+  ],
+  "acceptance": [
+    "Native manifest loads unique provider and actual tool registry invokes authoritative stores.",
+    "Catalog and moodboard lifecycle, source discovery, pinned export and paged revision history through native tools.",
+    "Strict scope fields, approval-bearing mutations, conflict propagation and two-home isolation."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/extensions/apps/native/gideon-creative/app.json"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": []
+}

@@ -1,0 +1,98 @@
+{
+  "id": "creative.02",
+  "status": "locally_qualified",
+  "base_revision": "c46600d7",
+  "schema_version": 1,
+  "requires": [
+    "creative.01"
+  ],
+  "contract": "Moodboard: stable id,title,ordered groups and artifact-version-pinned cards with captions/colors/immutable provenance,ingredient links,optimistic revision and immutable revision snapshots; JSON export excludes live status. Existing removed references remain explicitly missing; no artifact bytes duplicated.",
+  "acceptance": [
+    "Actual image artifacts from current home are selected and pinned by version; foreign or missing new references rejected.",
+    "Create/edit/reorder groups/cards/captions/colors and link ingredients via actual HTTP and UI.",
+    "Reopen, restore and export stable ordered snapshots and immutable provenance.",
+    "Reject stale writes, source rebinds, malformed colors/IDs/unknown keys and idempotency conflicts.",
+    "Search and paginate boards; search actual source and catalog pickers; fetch actual preview PNG bytes."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/moodboards.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Moodboards.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_moodboards.py",
+    "checks/runtime/capabilities/creative/moodboard_server.py",
+    "apps/console/src/features/capabilities/creative/Moodboards.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_moodboards.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Moodboards.test.tsx"
+  ],
+  "verification": {
+    "task": "creative.02",
+    "root": "/tmp/gideon-expansion-worktrees/creative",
+    "started_at": 1790294478.9261274,
+    "production_lines": 333,
+    "test_lines": 415,
+    "ratio": 1.2462462462462462,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+          "runtime/gideon/workspace/capabilities/creative/moodboards.py",
+          "checks/runtime/capabilities/creative/moodboard_server.py",
+          "checks/runtime/capabilities/creative/test_moodboards.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.02-checks-u28q02h5/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/creative/checks/runtime/capabilities/creative/test_moodboards.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.02-checks-u28q02h5/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/creative/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/creative/apps/console/src/features/capabilities/creative/Moodboards.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-creative.02-checks-u28q02h5/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-creative.02-checks-u28q02h5",
+    "completed_at": 1790294513.5609386,
+    "files": {
+      "apps/console/src/features/capabilities/creative/Moodboards.tsx": "983de09e140f9c07be370b103526015d8940d4416d234c6b108cb999b652f6e3",
+      "apps/console/src/features/capabilities/creative/Page.tsx": "5c419d8f331527c179be42670e3095408fc245dceabf22088677895c8fe9ebd9",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py": "8dbf30db5478a446f3affc0d23a26ce92da6e9c81eab05764a5fd6be162280a5",
+      "runtime/gideon/workspace/capabilities/creative/moodboards.py": "c415178aaff88f69f94d5582cc565c2d7face1359f417af775e312bd742428f6",
+      "apps/console/src/features/capabilities/creative/Moodboards.test.tsx": "7244438abc5d67a2ad12289e349fba29898293083bb73b56522b388327114633",
+      "checks/runtime/capabilities/creative/moodboard_server.py": "c463fa30d6d829992ad1045176f9dfd0c6823b9770c61bc9ee79a3f53267a186",
+      "checks/runtime/capabilities/creative/test_moodboards.py": "0b30b1c97b431f2b9fbbb3e9b52e32be292948763fc11761a8d55f416608832b"
+    }
+  },
+  "repair_cycles": 1,
+  "limits": [
+    "Native ToolProvider integration is the next creative.00 task.",
+    "Hosted isolation and integrated browser qualification are recorded separately."
+  ]
+}

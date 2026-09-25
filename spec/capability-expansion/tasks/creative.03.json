@@ -1,0 +1,36 @@
+{
+  "id": "creative.03",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "534028ec",
+  "requires": [
+    "creative.02",
+    "creative.00"
+  ],
+  "contract": "Universe ordered canon entries and visual identity palette/style notes, current-home ingredient links and revision-pinned moodboard references, immutable history/restore and stable export.",
+  "acceptance": [
+    "Actual HTTP/UI/native create edit order canon, palette/style, ingredient and pinned moodboard links.",
+    "Reopen persisted universe, restore revision with canon and visual identity, export stable pinned references.",
+    "Reject malformed entries/colors/scope overrides, unknown new references, stale updates and idempotency conflicts atomically; explicit missing historical refs.",
+    "Search/paginate universes, search library references, clear stale deep links and preserve edit continuity."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/universes.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Universes.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_universes.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Universes.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_universes.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Universes.test.tsx"
+  ]
+}
