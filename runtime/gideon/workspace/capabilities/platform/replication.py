@@ -32,6 +32,7 @@ DOMAINS = {
     "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
     "communications.contacts": Domain("communications.contacts", tuple(replication_adapters.COMMUNICATION_TABLES)),
     "music.library": Domain("music.library", replication_adapters.MUSIC_ENTRIES),
+    "media.assets": Domain("media.assets", replication_adapters.MEDIA_ENTRIES),
     "wellbeing.health": Domain("wellbeing.health", replication_adapters.WELLBEING_HEALTH_ENTRIES),
     "wellbeing.routines": Domain("wellbeing.routines", replication_adapters.WELLBEING_ROUTINE_ENTRIES),
     "wellbeing.genome": Domain("wellbeing.genome", replication_adapters.WELLBEING_GENOME_ENTRIES),

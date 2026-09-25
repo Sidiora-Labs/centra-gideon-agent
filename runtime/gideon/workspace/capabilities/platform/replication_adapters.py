@@ -21,6 +21,8 @@ from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
 from gideon.workspace.capabilities.communications.store import PeopleStore
 from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.artifacts.models import Artifact, ArtifactEvent
+from gideon.workspace.capabilities.media.library import MediaLibrary
 from gideon.workspace.capabilities.music.catalog import MusicCatalog
 from gideon.workspace.capabilities.music.listening import ListeningStore
 from gideon.workspace.capabilities.music.store import RepertoireStore
@@ -65,13 +67,14 @@ IDENTITY_TABLES = {
 IDENTITY_ENTRIES = frozenset({*IDENTITY_TABLES, "identity.progress_profile", "identity.twin_profile", "identity.twin_documents"})
 COMMUNICATION_TABLES = {"communications.people": "people", "communications.touchpoints": "touchpoints"}
 MUSIC_ENTRIES = ("music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks")
+MEDIA_ENTRIES = ("media.library_metadata",)
 WELLBEING_HEALTH_ENTRIES = ("wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics")
 WELLBEING_ROUTINE_ENTRIES = ("wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records")
 WELLBEING_GENOME_ENTRIES = ("wellbeing.genome_sources", "wellbeing.genome_variants")
 WELLBEING_PRACTICE_ENTRIES = ("wellbeing.cognitive_sessions", "wellbeing.memory_cards")
 WELLBEING_CALENDAR_ENTRIES = ("wellbeing.life_config", "wellbeing.life_events")
 WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES, *WELLBEING_PRACTICE_ENTRIES, *WELLBEING_CALENDAR_ENTRIES}
-SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *WELLBEING_ENTRIES})
+SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *MEDIA_ENTRIES, *WELLBEING_ENTRIES})
 
 
 def _knowledge(home: Path) -> KnowledgeStore:
@@ -132,6 +135,19 @@ def _contains_private_music_key(value: object) -> bool:
 
 
 def validate_entries(scope: str, entries: list[dict]) -> None:
+    if scope == "media.assets":
+        fields = {"id", "name", "kind", "mime", "version", "updated_at", "tags", "collection", "readonly", "source", "provenance"}
+        forbidden = {"content", "raw_url", "source_path", "events", "private_key", "credential", "credential_ref", "access_token", "secret"}
+        identities = set()
+        for row in entries[0]["rows"]:
+            data = row.get("data")
+            if (not isinstance(row.get("id"), str) or row["id"] in identities or not isinstance(data, dict)
+                    or data.get("id") != row["id"] or set(data) != fields or data.get("kind") not in {"image", "video"}
+                    or type(data.get("version")) is not int or data["version"] < 1 or not isinstance(data.get("tags"), list)
+                    or not isinstance(data.get("provenance"), dict) or _contains_keys(data, forbidden)):
+                raise ValueError("Media library replication requires exact non-binary current metadata")
+            identities.add(row["id"])
+        return
     if scope != "communications.contacts":
         return
     people = entries[0]["rows"]
@@ -256,6 +272,15 @@ def _without_key(value: object, key: str) -> object:
 
 
 def read_rows(home: Path, entry_id: str) -> list[dict]:
+    if entry_id in MEDIA_ENTRIES:
+        library = MediaLibrary(NativeArtifactProvider(home / "artifacts"))
+        rows = []
+        for artifact in library.artifacts.list():
+            if artifact.kind in {"image", "video"}:
+                data = library.project(artifact)
+                data.pop("raw_url", None)
+                rows.append({"id": artifact.slug, "data": data})
+        return sorted(rows, key=lambda row: row["id"])
     if entry_id == "knowledge.items":
         store = _knowledge(home)
         try:
@@ -467,6 +492,37 @@ def _write_music(home: Path, entry_id: str, row: dict | None, entity_id: str) ->
             db.execute(f"INSERT INTO {table}(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", (entity_id, json.dumps(data, sort_keys=True)))
 
 
+def _write_media(home: Path, row: dict | None, entity_id: str) -> None:
+    provider = NativeArtifactProvider(home / "artifacts")
+    if row is None:
+        provider.delete(entity_id)
+        return
+    data = row["data"]
+    current = provider._read_meta(entity_id)
+    provenance = dict(data["provenance"])
+    if current is None:
+        current = Artifact(slug=entity_id, name=data["name"], kind=data["kind"], source=data["source"],
+            tags=list(data["tags"]), version=data["version"], created_at=data["updated_at"], updated_at=data["updated_at"],
+            mime=data["mime"], collection=data["collection"], readonly=data["readonly"],
+            events=[ArtifactEvent(ts=data["updated_at"], type="created", version=data["version"], metadata=provenance)])
+    else:
+        current.name = data["name"]
+        current.kind = data["kind"]
+        current.source = data["source"]
+        current.tags = list(data["tags"])
+        current.version = data["version"]
+        current.updated_at = data["updated_at"]
+        current.mime = data["mime"]
+        current.collection = data["collection"]
+        current.readonly = data["readonly"]
+        created = next((event for event in current.events if event.type == "created"), None)
+        if created is None:
+            current.events.insert(0, ArtifactEvent(ts=current.created_at or data["updated_at"], type="created", version=1, metadata=provenance))
+        else:
+            created.metadata = provenance
+    provider._write_meta(current)
+
+
 def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
     table = {
         "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
@@ -523,6 +579,8 @@ def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> No
         _write_communications(home, entry_id, row, entity_id)
     elif entry_id in MUSIC_ENTRIES:
         _write_music(home, entry_id, row, entity_id)
+    elif entry_id in MEDIA_ENTRIES:
+        _write_media(home, row, entity_id)
     else:
         _write_wellbeing(home, entry_id, row, entity_id)
 
