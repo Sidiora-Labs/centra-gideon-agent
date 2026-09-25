@@ -1,6 +1,6 @@
 {
   "id": "communications.12",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "e2e3ebf5",
   "requires": [
@@ -15,34 +15,48 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/lifecycle.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/LifecyclePanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/LifecyclePanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_lifecycle.py",
-    "checks/runtime/capabilities/communications/test_tools.py",
     "apps/console/src/features/capabilities/communications/LifecyclePanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/communications/test_lifecycle.py",
-    "checks/runtime/capabilities/communications/test_tools.py"
+    "checks/runtime/capabilities/communications/test_lifecycle.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/communications/LifecyclePanel.test.tsx"
   ],
-  "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
-  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.12",
   "limits": [
-    "Local assignment metadata does not grant tool permission, provision external accounts or revoke external credentials.",
-    "External provisioning remains provider-specific residual; existing credential and destructive-action approval boundaries stay authoritative."
+    "Local assignment metadata does not grant tool permission, provision external accounts, perform external registration/posting or revoke external credentials.",
+    "Shared native-tool, route and Page mounts are retained as integration evidence and excluded from owned-file accounting because adjacent communications slices extend them."
   ],
   "qualification": {
-    "runtime": "29 passed",
-    "console_http": "4 passed",
-    "external_provisioning": "not implemented; local assignment lifecycle only"
-  }
+    "compile": "passed in retained exact-hash evidence",
+    "runtime_tests": 29,
+    "ui_tests": 4,
+    "production_lines": 177,
+    "test_lines": 288,
+    "ratio": 1.6271186440677967,
+    "repair_cycles": 1,
+    "current_ui_cwd": "/root/private-neo-v1/tmp/gideon-rooms-upstream/apps/console"
+  },
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "evidence": [
+    "/tmp/gideon-communications.12-checks-etk3frht/evidence.json",
+    "/tmp/gideon-communications.12-ui-source-main/evidence.json"
+  ],
+  "acceptance_coverage": [
+    "Assignments bind real AppConfig agent IDs to current active canonical social-account revisions and reject missing agents/accounts or malformed shapes atomically.",
+    "Idempotent requests, optimistic transitions, immutable reason history, terminal revoke and the database-enforced single-active-owner rule persist across reopen.",
+    "Missing configured agents and changed, archived or removed social registrations make readiness false while preserving assignment and history records.",
+    "Approval-gated native tools, actual HTTP handlers and the current console execute request, activate, pause, reactivation, history, conflict and local revoke journeys in isolated homes."
+  ]
 }
