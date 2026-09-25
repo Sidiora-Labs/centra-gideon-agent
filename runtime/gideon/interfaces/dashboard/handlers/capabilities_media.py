@@ -59,3 +59,6 @@ def register(app):
 
     from gideon.workspace.capabilities.media.images_http import register_images
     register_images(app)
+
+    from gideon.workspace.capabilities.media.datasets_http import register_datasets
+    register_datasets(app)

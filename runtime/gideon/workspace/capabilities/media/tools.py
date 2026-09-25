@@ -38,6 +38,17 @@ CATALOG.update({
     "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
 })
 
+DATASET_FIELDS = {"title": STRING, "base_model": STRING, "request_id": STRING, "revision": {"type": "integer", "minimum": 0}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object", "additionalProperties": False, "required": ["artifact_id", "version", "caption"], "properties": {"artifact_id": STRING, "version": INTEGER, "caption": {"type": "string", "maxLength": 2000}}}}}
+TRAIN_INPUT = {"type": "object", "additionalProperties": False, "required": ["dataset_id", "dataset_revision", "steps", "rank", "learning_rate", "seed"], "properties": {"dataset_id": STRING, "dataset_revision": INTEGER, "steps": INTEGER, "rank": INTEGER, "learning_rate": {"type": "number"}, "seed": {"type": "integer", "minimum": 0}}}
+CATALOG.update({
+    "media_datasets_list": ("List captioned training datasets with canonical pinned image references.", (), {}, False),
+    "media_datasets_get": ("Read a saved dataset revision.", ("dataset_id",), {"dataset_id": STRING, "revision": INTEGER}, False),
+    "media_datasets_save": ("Create or revise a captioned dataset; existing datasets require current revision.", ("title", "base_model", "request_id", "entries"), {**DATASET_FIELDS, "dataset_id": STRING}, True),
+    "media_training_readiness": ("Read actual local trainer installation and operator admission; no training success claim.", (), {}, False),
+    "media_training_submit": ("Queue a pinned dataset for the installed Diffusers trainer; missing runtime fails explicitly.", ("request_id", "input"), {"request_id": STRING, "input": TRAIN_INPUT}, True),
+    "media_training_checkpoints": ("List retained checkpoint directories for a training job; resumability is unverified until loaded.", ("job_id",), {"job_id": STRING}, False),
+})
+
 IMAGE_INPUT = {"type": "object", "additionalProperties": False, "required": ["prompt"], "properties": {
     "prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "size": STRING,
     "source_artifact_id": STRING, "source_version": INTEGER, "mask_artifact_id": STRING, "mask_version": INTEGER,
@@ -102,6 +113,22 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_datasets_list':
+            return self.jobs.datasets.list()
+        if name == 'media_datasets_get':
+            return self.jobs.datasets.get(args['dataset_id'], args.get('revision'))
+        if name == 'media_datasets_save':
+            dataset_id = args.pop('dataset_id', None)
+            return self.jobs.datasets.save(args, dataset_id)
+        if name == 'media_training_readiness':
+            return self.jobs.trainer.readiness()
+        if name == 'media_training_submit':
+            return self.jobs.submit(dict(operation='lora_train', **args))
+        if name == 'media_training_checkpoints':
+            job = self.jobs.get(args['job_id'])
+            if job['operation'] != 'lora_train':
+                raise SketchError('Job is not a training run')
+            return self.jobs.trainer.checkpoints(job['id'])
         if name == 'media_image_submit':
             return self.jobs.submit(dict(operation='image_generate', **args))
         if name == 'media_readiness_get':
