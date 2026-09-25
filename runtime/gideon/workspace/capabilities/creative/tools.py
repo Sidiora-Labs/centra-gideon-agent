@@ -8,6 +8,7 @@ from .universes import UniverseStore
 from .graph import UniverseGraph
 from .authors import AuthorStore
 from .works import WorkStore
+from .polishing import PolishingStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -68,6 +69,12 @@ def schemas():
     result["creative_work_drafts"] = obj({"id": STRING}, ["id"])
     result["creative_work_read_draft"] = obj({"id": STRING, "draft_id": STRING}, ["id", "draft_id"])
     result["creative_work_draft"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER, "text": STRING, "note": STRING}, ["request_id", "revision", "text"])}, ["id", "payload"])
+    result["creative_work_polish_list"] = obj({"id": STRING}, ["id"])
+    result["creative_work_polish_get"] = obj({"id": STRING, "proposal_id": STRING}, ["id", "proposal_id"])
+    result["creative_work_polish_propose"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER,
+        "start": {"type": "integer", "minimum": 0}, "end": NUMBER, "mode": {"enum": ["model", "authored"]},
+        "instruction": STRING, "replacement": STRING}, ["request_id", "revision", "start", "end", "mode"])}, ["id", "payload"])
+    result["creative_work_polish_promote"] = obj({"id": STRING, "proposal_id": STRING, "payload": obj({"revision": NUMBER}, ["revision"])}, ["id", "proposal_id", "payload"])
     result["creative_board_sources"] = obj({"q": STRING})
     result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
     result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
@@ -78,7 +85,7 @@ def schemas():
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -89,6 +96,7 @@ class CreativeToolProvider(ToolProvider):
         self.graphs = UniverseGraph(self.universes)
         self.authors = AuthorStore(self.ingredients.home)
         self.works = WorkStore(self.ingredients.home)
+        self.polishing = PolishingStore(self.works)
 
     @property
     def name(self):
@@ -118,7 +126,10 @@ class CreativeToolProvider(ToolProvider):
             _, entity, action = tool_name.split("_", 2)
             store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors, "work": self.works}[entity]
             args = dict(arguments)
-            if action in ("graph", "merge_preview", "merge"):
+            if action.startswith("polish_"):
+                method = getattr(self.polishing, action.removeprefix("polish_"))
+                result = await method(**args) if action == "polish_propose" else method(**args)
+            elif action in ("graph", "merge_preview", "merge"):
                 result = getattr(self.graphs, action)(**args)
             elif action == "revisions":
                 offset = integer(args.get("offset", 0), 0, 1000000)
