@@ -1,0 +1,50 @@
+{
+  "id": "creative.13",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "50f76790",
+  "requires": [
+    "creative.19"
+  ],
+  "contract": "A durable bounded production run pins the canonical series revision, author/universe references, chapter work revisions, immutable draft artifacts and editorial run evidence. Each call advances at most one stage. Configured-model output is staged as an immutable candidate and cannot change a WorkStore draft before explicit approval. Pause, restart, retry exhaustion, cancellation, residual editorial findings, keep/review and rollback remain explicit durable states.",
+  "acceptance": [
+    "Start is idempotent and optimistic; unprepared chapters or changed series revisions pause with exact residuals instead of generating or claiming progress.",
+    "Model mode uses only the configured reasoning adapter with bounded typed output and bounded attempts; failure pauses or exhausts without fabricated content. Authored mode is explicit and never represented as model generation.",
+    "Candidates are immutable artifacts separate from canonical work drafts. Apply approval promotes the exact pinned bytes; editorial evidence pins its draft/artifact/context revisions; keep/review or rollback is explicit and unrelated text/history remains intact.",
+    "Pause and cancel requests are durable and observed between stages and after provider work. Reopening a store demotes a running marker to a resumable runtime-restarted pause.",
+    "Real HTTP, native-tool and console journeys exercise the same store and expose source pins, residuals, approvals and terminal state without provider/model/home/runtime overrides."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/production.py",
+    "runtime/gideon/workspace/capabilities/creative/production_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_production.py",
+    "apps/console/src/features/capabilities/creative/Production.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_production.py",
+    "checks/runtime/capabilities/creative/production_server.py",
+    "apps/console/src/features/capabilities/creative/Production.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_production.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Production.test.tsx"
+  ],
+  "limits": [
+    "A configured external reasoning model may be unavailable during isolated qualification; successful generation remains external evidence, while adapter failure must remain truthful and non-mutating.",
+    "This child implements bounded production orchestration only. EPUB/PDF export is creative.14, and scheduled unattended production is not claimed.",
+    "creative.19 is the true implemented editorial prerequisite. Parent creative.12 remains externally unqualified for successful configured-model literary quality and complete multi-issue acceptance."
+  ],
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify creative.13",
+    "evidence": "/tmp/gideon-creative.13-checks-g8tgu947/evidence.json",
+    "compile": "passed",
+    "runtime": "29 passed",
+    "ui": "3 passed",
+    "production_lines": 484,
+    "test_lines": 525,
+    "test_to_production_ratio": 1.084710743801653,
+    "repair_reruns": 0
+  }
+}
