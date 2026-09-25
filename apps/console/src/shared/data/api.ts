@@ -2043,6 +2043,11 @@ export interface KnowledgeItem {
   neighbour_chunk_index?: number
   shared_entities?: number
 }
+export interface KnowledgeRsvpState {
+  item_id: string; title: string; word_index: number; wpm: number; chunk_size: 1 | 2
+  bookmark_index: number | null; word_count: number; content_revision: string
+  content_changed: boolean; updated_at: string | null
+}
 export interface ResearchScope {
   tags: string[]
   window_secs: number
@@ -4566,6 +4571,14 @@ export const api = {
   lexiconReset: () => post<{ ok: boolean }>('/api/lexicon/reset'),
 
   knowledgeItem: (id: string) => get<KnowledgeItem>(`/api/knowledge/items/${encodeURIComponent(id)}`),
+  knowledgeRsvp: (id: string) =>
+    get<KnowledgeRsvpState>(`/api/capabilities/knowledge/rsvp/${encodeURIComponent(id)}`),
+  saveKnowledgeRsvp: (id: string, body: Pick<KnowledgeRsvpState, 'word_index' | 'wpm' | 'chunk_size' | 'content_revision'>) =>
+    put<KnowledgeRsvpState>(`/api/capabilities/knowledge/rsvp/${encodeURIComponent(id)}`, body),
+  bookmarkKnowledgeRsvp: (id: string, word_index: number, content_revision: string) =>
+    post<KnowledgeRsvpState>(`/api/capabilities/knowledge/rsvp/${encodeURIComponent(id)}/bookmark`, { word_index, content_revision }),
+  restoreKnowledgeRsvp: (id: string) =>
+    post<KnowledgeRsvpState>(`/api/capabilities/knowledge/rsvp/${encodeURIComponent(id)}/restore`, {}),
   knowledgeReadingItem: (id: string) => {
     const encoded = encodeURIComponent(id)
     return Promise.all([

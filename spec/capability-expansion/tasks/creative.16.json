@@ -1,0 +1,65 @@
+{
+  "id": "creative.16",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "f66751b4",
+  "requires": [
+    "creative.15@a1f2a515"
+  ],
+  "contract": "A recurring creative commission is a typed standing brief with a supported ability, canonical direction sources, bounded deterministic plan, current cadence and retry budget. The shared TriggerStore remains the only clock authority. Every occurrence has one deterministic run identity and one idempotently linked DirectionStore project; all attempts, failures and immutable output references remain durable. Feedback is an author-separated revisioned reaction keyed to an actual commission/run/output identity and only a bounded live window is supplied as data to later direction projects.",
+  "acceptance": [
+    "Create validates video, image, music, music-video or series ability, typed intent/style/constraints/seeds, canonical work or series sources, a bounded direction plan and daily, weekly, custom cron, interval or guarded calendar recurrence cadence. It writes one deterministic shared clock trigger and surfaces trigger persistence failure instead of claiming the schedule is armed.",
+    "A real due TriggerStore fire dispatches the commission action provider. The provider rereads enabled state, schedule revision and cadence hash before work, so disabling or changing a commission before a stale tick creates no project or run.",
+    "Each occurrence creates at most one idempotent DirectionStore project, executes its bounded non-generation plan through real direction operations and records exact project/output artifact/version/hash links. Calendar recurrences preserve authored local wall time across daylight-saving changes, honor exclusions and finite bounds, and rearm the same shared one-shot trigger after a real success or failure. Repeated delivery returns the same completed run; failures retain bounded classifications and retry attempts until exhausted.",
+    "Restart preserves commission, trigger, run attempts, linked project and outputs. Manual HTTP and native tool runs use the same execution path and do not accept provider, model, credential, home or runtime overrides.",
+    "A feedback reaction resolves an actual linked output and is isolated by author. Rerating increments the same deterministic record, deletion leaves a tombstone, another author's reaction is unchanged, and later runs pin the revisions of only the bounded live feedback they consumed."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/commissions.py",
+    "runtime/gideon/workspace/capabilities/creative/commission_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_commissions.py",
+    "apps/console/src/features/capabilities/creative/Commissions.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_commissions.py",
+    "checks/runtime/capabilities/creative/commission_server.py",
+    "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_commissions.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Commissions.test.tsx"
+  ],
+  "limits": [
+    "Five-ability dispatch is incomplete. This slice schedules canonical creative direction projects and deterministic source/treatment steps, but image, video, music, music-video and manuscript/series commissions are not yet routed through their existing provider-backed canonical jobs or workflows.",
+    "Peer propagation of reaction records is deferred to the sharing slice; local author isolation, revision lineage and tombstones are implemented here.",
+    "Root integration must register the unique HTTP handler, console route, native tool provider and creative-commission trigger action provider."
+  ],
+  "qualified_increments": [
+    {
+      "name": "durable shared-clock commissions and local feedback",
+      "command": "python3 tooling/capability_workflow.py verify creative.16",
+      "evidence": "/tmp/gideon-creative.16-checks-b2hrysyu/evidence.json",
+      "compile": "passed",
+      "runtime": "54 passed",
+      "ui": "3 passed",
+      "production_lines": 602,
+      "test_lines": 615,
+      "test_to_production_ratio": 1.021594684385382,
+      "repair_reruns": 2
+    },
+    {
+      "name": "guarded calendar recurrence over shared one-shot triggers",
+      "command": "python3 tooling/capability_workflow.py verify creative.16",
+      "evidence": "/tmp/gideon-creative.16-checks-wmi94a17/evidence.json",
+      "compile": "passed",
+      "runtime": "66 passed",
+      "ui": "4 passed",
+      "production_lines": 707,
+      "test_lines": 743,
+      "test_to_production_ratio": 1.050919377652051,
+      "repair_reruns": 0
+    }
+  ]
+}

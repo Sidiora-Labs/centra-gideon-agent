@@ -125,7 +125,7 @@ it('configures an IMAP credential reference and reports unavailable credentials 
   await screen.findByRole('alert')
   expect(screen.getByRole('alert').textContent).toMatch(/credential/)
   fireEvent.click(screen.getByText('Adapter coverage'))
-  expect(screen.getByText(/teams: unavailable/)).toBeInTheDocument()
+  expect(screen.getByText(/teams: available/).textContent).toContain('separate_connector')
   expect(screen.getByText(/gmail: available/).textContent).toContain('external_credentials_required')
   cleanup()
 })

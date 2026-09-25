@@ -55,7 +55,7 @@ def test_manifest_loads_real_native_provider(runtime):
 def test_discovery_declares_risk_and_strict_input_shapes(runtime):
     provider = create_provider()
     tools = asyncio.run(provider.list_tools())
-    assert len(tools) == 46
+    assert len(tools) == 50
     assert len({tool.name for tool in tools}) == len(tools)
     by_name = {tool.name: tool for tool in tools}
     for name in ("knowledge_anniversaries", "knowledge_anniversary_source", "knowledge_capture_list", "knowledge_capture_get"):
@@ -69,6 +69,34 @@ def test_discovery_declares_risk_and_strict_input_shapes(runtime):
         assert "home" not in tool.parameters["properties"]
         assert "provider" not in tool.parameters["properties"]
         assert tool.provider == provider.name
+
+
+def test_native_rsvp_round_trip_uses_canonical_item(runtime):
+    item_id = runtime.state.knowledge_store.create_typed_item(
+        item_type="note", title="Native RSVP", content="Alpha beta, gamma. Delta epsilon"
+    )
+    provider = create_provider()
+    opened = invoke(provider, "knowledge_rsvp_get", {"id": item_id})
+    assert opened.success
+    state = json.loads(opened.output)
+    assert state["word_count"] == 5
+    saved = invoke(provider, "knowledge_rsvp_save", {
+        "id": item_id, "word_index": 2, "wpm": 425, "chunk_size": 2,
+        "content_revision": state["content_revision"],
+    })
+    assert saved.success
+    bookmark = invoke(provider, "knowledge_rsvp_bookmark", {
+        "id": item_id, "word_index": 2, "content_revision": state["content_revision"],
+    })
+    assert bookmark.success
+    moved = invoke(provider, "knowledge_rsvp_save", {
+        "id": item_id, "word_index": 4, "wpm": 425, "chunk_size": 1,
+        "content_revision": state["content_revision"],
+    })
+    assert moved.success
+    restored = invoke(provider, "knowledge_rsvp_restore", {"id": item_id})
+    assert restored.success
+    assert json.loads(restored.output)["word_index"] == 2
 
 
 def test_native_video_review_import_and_exact_transcript(runtime):

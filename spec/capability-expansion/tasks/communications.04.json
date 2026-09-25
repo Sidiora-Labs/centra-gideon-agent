@@ -1,14 +1,14 @@
 {
   "id": "communications.04",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "49b2f41e",
   "requires": [
     "communications.03"
   ],
-  "contract": "Durable account-local mail mirrors with real Maildir/mbox upload, IMAP TLS read-only fetch using existing credential references, normalization, source coverage, thread evidence, native tools and review UI. External successful sync requires real credentials and is not qualified by local archives.",
+  "contract": "Durable account-local mail mirrors with real Maildir/mbox upload, IMAP TLS read-only fetch using existing credential references, normalization, guarded MIME attachment retrieval into canonical content-addressed artifacts, source coverage, thread evidence, native tools and review UI. External successful sync requires real credentials and is not qualified by local archives.",
   "acceptance": [
-    "Actual Maildir and mbox sync/replay/restart and MIME normalization",
+    "Actual Maildir and mbox sync/replay/restart, MIME normalization and supported attachment materialization",
     "Strict account scope and credential reference validation with durable failure state",
     "Real HTTP and native account/upload/sync/read operations with approval metadata",
     "Actual HTTP-backed Console create/upload/sync/message/error journey",
@@ -16,10 +16,7 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/mirrors.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_mirrors.py",
@@ -36,18 +33,38 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-people/app.json"
   ],
+  "integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.04",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.04-checks-royxg6ys",
+  "production_lines": 460,
+  "test_lines": 591,
+  "ratio": 1.2847826086956522,
+  "files": {
+    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx": "ef881ef7f2c2840f3b1129feb326d97ba8df5a17fd3dc5b87f9382cfbf5ffc26",
+    "runtime/gideon/workspace/capabilities/communications/mirrors.py": "18cfc82b4fe92f0c79a155dcc51770aff525dc7284fc2ef1228be9ffd09561ad",
+    "apps/console/src/features/capabilities/communications/MirrorPanel.test.tsx": "bb15c6235e4adebdece5a2594874e8cf79da7ddb5f7804bf6ea37a2cca373c8f",
+    "checks/runtime/capabilities/communications/test_mirrors.py": "99b978f826bbd545cbcd03f4ca5c0c8c096f72efd404666ffd09cf6c9ab9cfd8",
+    "checks/runtime/capabilities/communications/test_tools.py": "b54cbe37fe6e21e2c696dde7ef68f5f7cf095a9c414e8e1c5f5cb023611f246f"
+  },
   "limits": [
     "IMAP TLS/Gmail/Outlook successful remote access pending real customer credentials.",
-    "Teams adapter absent in this native source; not implemented.",
+    "Teams is implemented as the separate communications.14 connector and is not a mirror account kind.",
     "Archives prove only uploaded/local source coverage, not complete external mailbox history.",
-    "Attachment metadata is mirrored; attachment binary retrieval is not implemented."
+    "Canonical artifacts support known image, video, PDF and Office MIME types; other attachment types retain source IDs and hashes with unsupported_content state."
   ],
   "qualification": {
-    "runtime": "46 passed",
+    "compile": "passed",
+    "runtime": "51 passed including guarded real loopback HTTP retrieval and artifact restart idempotence",
     "console_http": "3 passed",
+    "external_sends": "none performed",
+    "attachment_protocol": "qualified against isolated local HTTP server; production policy uses pinned public egress and rejects redirects",
     "external_imap": "pending real credential-backed connection",
-    "teams": "unimplemented",
+    "teams": "separate communications.14 connector",
     "integrated_browser": "pending root integration"
   }
 }

@@ -1,0 +1,55 @@
+{
+  "id": "creative.12",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "0ba6655f",
+  "requires": [
+    "creative.17",
+    "creative.18",
+    "creative.19"
+  ],
+  "contract": "The parent editorial workflow combines the source-grounded 80-check registry, canonical context and continuity evidence, configured-provider checks and explicit editorial controls. Findings pin immutable manuscript artifacts and Unicode offsets; every repair is a reviewed immutable candidate whose apply and undo use canonical work revisions without rewriting sibling issues or accepted evidence.",
+  "acceptance": [
+    "Run deterministic and contextual checks over canonical saved manuscript coverage with completed, skipped and externally unavailable states rather than fabricated findings.",
+    "Retain exact finding quote offsets, source draft and artifact versions across later source revisions; stale findings remain inspectable but cannot be repaired.",
+    "Prepare a reviewed anchored repair without changing prose, apply it through canonical promotion, and undo through canonical revision restoration while preserving unrelated text and sibling issue drafts.",
+    "Preserve accepted continuity evidence against its immutable source: applying a replacement marks it stale, undoing to the original draft makes it current again, and historical editorial provenance remains immutable.",
+    "Exercise configured-model checks, custom checks, judge, reader panel and comparative ranking with successful bounded typed outputs and exact real-manuscript anchors."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/prose_checks.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial_context.py",
+    "runtime/gideon/workspace/capabilities/creative/context_checks.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial_controls.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial.py",
+    "runtime/gideon/workspace/capabilities/creative/continuity.py",
+    "runtime/gideon/workspace/capabilities/creative/polishing.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_editorial.py",
+    "checks/runtime/capabilities/creative/test_editorial_context.py",
+    "checks/runtime/capabilities/creative/test_editorial_controls.py",
+    "checks/runtime/capabilities/creative/test_continuity.py",
+    "checks/runtime/capabilities/creative/test_editorial_closure.py",
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_editorial_closure.py"
+  ],
+  "ui_test_files": [],
+  "child_evidence": {
+    "creative.17": "/tmp/gideon-creative.17-checks-1fkal0lh/evidence.json",
+    "creative.18": "/tmp/gideon-creative.18-checks-hxhandfg/evidence.json",
+    "creative.19": "/tmp/gideon-creative.19-checks-gdraqhwh/evidence.json"
+  },
+  "local_closure": {
+    "command": "PYTHONPATH=runtime GIDEON_HOME=<isolated> /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/creative/test_editorial_closure.py -q",
+    "status": "1 passed",
+    "qualified_at": "2026-09-25"
+  },
+  "remaining_limits": [
+    "No configured external reasoning model was available in isolated qualification. Successful model editorial checks, custom checks, judge, reader-panel and comparative-rank execution therefore remains unqualified; unavailable outcomes are recorded honestly and no provider response is faked.",
+    "Deterministic scanners and model findings are editorial signals for human review, not objective proof of literary quality.",
+    "The parent remains in progress until the successful configured-model acceptance is exercised with real credentials and bounded typed anchored output."
+  ]
+}

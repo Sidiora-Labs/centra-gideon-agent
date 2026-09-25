@@ -14,6 +14,7 @@ from gideon.workspace.capabilities.knowledge.idea_schedule import IdeaSchedules,
 from gideon.workspace.capabilities.knowledge.transcript_format import preview as transcript_preview
 from gideon.workspace.capabilities.knowledge.videos import VideoIngests
 from gideon.workspace.capabilities.knowledge.external_vaults import ExternalVaults
+from gideon.workspace.capabilities.knowledge.rsvp import RsvpStates
 from gideon.workspace.capabilities.knowledge.journals import DateJournals
 from gideon.workspace.capabilities.knowledge.reviews import ReviewService
 from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
@@ -37,6 +38,10 @@ _JOURNAL_FIELDS = {key: value for key, value in _REVIEW_FIELDS.items() if key !=
 _IDEA_CONTENT = {"type": "string", "minLength": 1, "maxLength": 262144}
 _VIDEO_PREVIEW = {"url": {"type": "string", "maxLength": 2048}, "title": {"type": "string", "minLength": 1, "maxLength": 300}, "format": {"enum": ["vtt", "srt", "json"]}, "content": {"type": "string", "minLength": 1, "maxLength": 1048576}, "language": {"type": "string", "minLength": 1, "maxLength": 30}}
 _TOOLS = {
+    "knowledge_rsvp_get": ("Open durable rapid-reader state for one canonical Knowledge item.", False, {"id": _ID}, ["id"]),
+    "knowledge_rsvp_save": ("Save the canonical word offset and reviewed rapid-reader settings for one Knowledge item.", True, {"id": _ID, "word_index": {"type": "integer", "minimum": 0}, "wpm": {"type": "integer", "minimum": 100, "maximum": 1000}, "chunk_size": {"enum": [1, 2]}, "content_revision": _ID}, ["id", "word_index", "wpm", "chunk_size", "content_revision"]),
+    "knowledge_rsvp_bookmark": ("Bookmark an exact canonical word offset in one Knowledge item.", True, {"id": _ID, "word_index": {"type": "integer", "minimum": 0}, "content_revision": _ID}, ["id", "word_index", "content_revision"]),
+    "knowledge_rsvp_restore": ("Restore the saved rapid-reader bookmark for one Knowledge item.", True, {"id": _ID}, ["id"]),
     "knowledge_vault_list": ("List explicitly allowed external Markdown vault registrations and indexed note counts.", False, {}, []),
     "knowledge_vault_register": ("Register an existing Markdown directory beneath configured external_vault_roots.", True, {"name": {"type": "string", "minLength": 1, "maxLength": 200}, "path": {"type": "string", "minLength": 1, "maxLength": 1000}}, ["name", "path"]),
     "knowledge_vault_scan": ("Scan one registered vault and index canonical Knowledge references without recreating missing files.", True, {"id": _ID}, ["id"]),
@@ -119,6 +124,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._ideas = None
         self._videos = None
         self._vaults = None
+        self._rsvp = None
         self._idea_schedules = None
         self._journals = None
         self._reviews = None
@@ -169,7 +175,14 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_vault_"):
+            if tool_name.startswith("knowledge_rsvp_"):
+                if self._rsvp is None: self._rsvp = RsvpStates(self._store)
+                identity = arguments["id"]
+                if tool_name == "knowledge_rsvp_get": result = self._rsvp.get(identity)
+                elif tool_name == "knowledge_rsvp_save": result = self._rsvp.save(identity, {key: value for key, value in arguments.items() if key != "id"})
+                elif tool_name == "knowledge_rsvp_bookmark": result = self._rsvp.bookmark(identity, {key: value for key, value in arguments.items() if key != "id"})
+                else: result = self._rsvp.restore(identity)
+            elif tool_name.startswith("knowledge_vault_"):
                 if self._vaults is None: self._vaults = ExternalVaults(self._store, self._home)
                 identity = arguments.get("id")
                 if tool_name == "knowledge_vault_list": result = self._vaults.list()

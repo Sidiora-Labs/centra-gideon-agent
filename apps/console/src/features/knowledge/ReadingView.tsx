@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { Highlighter, PanelRight, Search, X } from 'lucide-react'
+import { Highlighter, PanelRight, Search, X, Zap } from 'lucide-react'
 import { FindBar } from '../../shared/ui/FindBar'
 import { Button } from '../../shared/ui/Button'
 import { TextArea } from '../../shared/ui/forms'
@@ -17,6 +17,7 @@ import { getReadingPosition, setReadingPosition } from './readingPosition'
 import { parseOutline, type OutlineEntry } from './readingOutline'
 import { DocumentOutline } from './DocumentOutline'
 import { RestructureControl } from './RestructureControl'
+import { RsvpReader } from './RsvpReader'
 
 const WPM = 220
 
@@ -85,6 +86,7 @@ export function ReadingView({
   const [activeOffset, setActiveOffset] = useState<number | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [blockText, setBlockText] = useState<string[]>([])
+  const [rsvpOpen, setRsvpOpen] = useState(false)
 
   const content = item.content || ''
   const minutes = item.word_count ? Math.max(1, Math.round(item.word_count / WPM)) : 0
@@ -225,7 +227,7 @@ export function ReadingView({
     if (!article) return
     setUnresolved(markAnchors(article, annotations))
     return () => clearMarks(article)
-  }, [annotations, content])
+  }, [annotations, content, rsvpOpen])
 
   const article = useMemo(
     () => <Markdown className="reading">{content}</Markdown>,
@@ -276,6 +278,8 @@ export function ReadingView({
     ? undefined
     : 'Select a passage in the article first'
 
+  if (rsvpOpen) return <RsvpReader item={item} onClose={() => setRsvpOpen(false)} />
+
   return (
     <div className="@container flex h-full min-h-0 flex-col gap-m">
       {err && <InlineError onDismiss={() => setErr('')}>{err}</InlineError>}
@@ -289,6 +293,9 @@ export function ReadingView({
           {annotations.length ? ` · ${annotations.length} highlight${annotations.length === 1 ? '' : 's'}` : ''}
         </span>
         <div className="ml-auto flex items-center gap-s">
+          <Button size="sm" variant="ghost" onClick={() => setRsvpOpen(true)}>
+            <Zap size={14} /> Rapid read
+          </Button>
           {
 }
           <Button size="sm" variant="ghost" ariaExpanded={findOpen}
