@@ -3,8 +3,9 @@ import json
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 
+from .readiness import MediaReadiness
 from .jobs import MediaJobs
 from .library import MediaLibrary
 from .annotations import AnnotationStore
@@ -38,6 +39,8 @@ CATALOG.update({
 })
 
 CATALOG.update({
+    "media_readiness_get": ("Read the last observed image/video provider readiness; availability is not inference verification.", (), {}, False),
+    "media_readiness_refresh": ("Probe selected image/video provider availability and catalogs without generating media or installing models.", (), {}, False),
     "media_jobs_list": ("List the latest 100 durable local rendering jobs.", (), {}, False),
     "media_jobs_get": ("Read rendering state, attempt history and any canonical result artifact.", ("job_id",), {"job_id": STRING}, False),
     "media_jobs_submit": ("Queue a saved sketch PNG export for the supervised media worker.", ("operation", "sketch_id", "revision", "request_id"), {"operation": {"enum": ["sketch_export"]}, "sketch_id": STRING, "revision": INTEGER, "request_id": STRING}, True),
@@ -54,6 +57,7 @@ def schema(name):
 class MediaToolProvider(ToolProvider):
     def __init__(self, sketches, library, annotations=None):
         self.sketches, self.library = sketches, library
+        self.readiness = MediaReadiness(sketches.path.parent / 'readiness.sqlite3')
         self.jobs = MediaJobs(sketches.path.parent / 'jobs.sqlite3', sketches)
         self.annotations = annotations or AnnotationStore(sketches.path.parent / 'annotations.sqlite3', sketches.artifacts)
 
@@ -75,13 +79,15 @@ class MediaToolProvider(ToolProvider):
             return ToolResult(success=False, error="Unknown media tool")
         try:
             Draft202012Validator(schema(tool_name)).validate(arguments)
-            result = await asyncio.to_thread(self._run, tool_name, dict(arguments))
+            result = await self.readiness.refresh() if tool_name == "media_readiness_refresh" else await asyncio.to_thread(self._run, tool_name, dict(arguments))
             return ToolResult(success=True, output=json.dumps(result, allow_nan=False))
         except (SketchError, ValidationError, ValueError) as exc:
             return ToolResult(success=False, error=str(exc)[:500], metadata={"status": getattr(exc, "status", 400)},
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_readiness_get':
+            return self.readiness.get()
         if name.startswith('media_jobs_'):
             action = name.removeprefix('media_jobs_')
             if action == 'list':
