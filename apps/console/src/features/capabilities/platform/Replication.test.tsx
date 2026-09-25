@@ -30,6 +30,7 @@ it('pushes the actual canonical domain through signed self-peer HTTP and reloads
   expect(await screen.findByText('workspace.records: projects, tasks')).toBeVisible()
   expect(screen.getByText('knowledge.records: knowledge.items')).toBeVisible()
   expect(screen.getByText(/creative.catalog: creative.ingredients/)).toBeVisible()
+  expect(screen.getByText('creative.direction: creative.direction_projects')).toBeVisible()
   expect(screen.getByText(/identity.goals: identity.goals/)).toBeVisible()
   expect(screen.getByText(/identity.profile: identity.progress_profile/)).toBeVisible()
   expect(screen.getByText('communications.contacts: communications.people, communications.touchpoints')).toBeVisible()

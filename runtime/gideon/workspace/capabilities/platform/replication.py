@@ -13,6 +13,7 @@ from gideon.operations.durability import conflicts, inventory, reconcile, tombst
 from gideon.operations.durability.shards import canonical_json
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 from gideon.workspace.capabilities.platform import replication_adapters
+from gideon.workspace.capabilities.platform import replication_creative_direction
 
 SCHEMA_VERSION = 1
 RECEIVE_PATH = "/api/capabilities/platform/replication/receive"
@@ -28,6 +29,7 @@ DOMAINS = {
     "workspace.records": Domain("workspace.records", ("projects", "tasks")),
     "knowledge.records": Domain("knowledge.records", ("knowledge.items",)),
     "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
+    replication_creative_direction.SCOPE: Domain(replication_creative_direction.SCOPE, replication_creative_direction.ENTRIES),
     "identity.goals": Domain("identity.goals", tuple(replication_adapters.IDENTITY_TABLES)),
     "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
     "communications.contacts": Domain("communications.contacts", tuple(replication_adapters.COMMUNICATION_TABLES)),
@@ -82,6 +84,8 @@ class ReplicationService:
         return replace(entry, merge=_DOMAIN_MERGES.get(entry_id, entry.merge))
 
     def _rows(self, entry_id: str) -> list[dict]:
+        if entry_id in replication_creative_direction.ENTRIES:
+            return replication_creative_direction.read_rows(self.home, entry_id)
         if entry_id in replication_adapters.SQLITE_ENTRIES:
             return replication_adapters.read_rows(self.home, entry_id)
         entry = self._entry(entry_id)
@@ -136,6 +140,8 @@ class ReplicationService:
             raise ReplicationError("Invalid replication rows")
         try:
             replication_adapters.validate_entries(scope, entries)
+            if scope == replication_creative_direction.SCOPE:
+                replication_creative_direction.validate_entries(entries)
             if scope == "music.library":
                 replication_adapters.validate_music_entries(entries)
             if scope.startswith("wellbeing."):
@@ -158,7 +164,12 @@ class ReplicationService:
             results, ancestor_updates = [], []
             for item in entries:
                 entry_id = item["entry_id"]
-                if entry_id in replication_adapters.SQLITE_ENTRIES:
+                if entry_id in replication_creative_direction.ENTRIES:
+                    try:
+                        result = replication_creative_direction.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_adapters.SQLITE_ENTRIES:
                     try:
                         result = replication_adapters.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
                     except ValueError as error:
@@ -195,6 +206,9 @@ class ReplicationService:
 
     def restore_fields(self, conflict_id: str, fields: list[str]) -> dict:
         try:
+            record = conflicts.ConflictQueue(self.home).get(conflict_id)
+            if record is not None and record.entry_id in replication_creative_direction.ENTRIES:
+                return replication_creative_direction.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             return replication_adapters.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
         except ValueError as error:
             raise ReplicationError(str(error), 409) from error

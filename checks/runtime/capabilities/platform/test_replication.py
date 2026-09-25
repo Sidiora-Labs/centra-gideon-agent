@@ -17,6 +17,8 @@ from gideon.workspace.capabilities.platform.replication import DOMAINS, Replicat
 from gideon.workspace.capabilities.platform.replication_tools import create_provider
 from gideon.workspace.capabilities.platform.replication_adapters import CREATIVE_TABLES
 from gideon.workspace.capabilities.creative.store import IngredientStore
+from gideon.workspace.capabilities.creative.direction import DirectionStore
+from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.goals import GoalStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
@@ -291,6 +293,42 @@ async def test_real_signed_guarded_push_between_two_homes(home):
 
 
 @pytest.mark.asyncio
+async def test_signed_creative_direction_scope_uses_canonical_owner_adapter(home):
+    denied_a, denied_b = home / "direction-denied-a", home / "direction-denied-b"
+    _, denied_peer = pair(denied_a, denied_b)
+    with pytest.raises(ReplicationError, match="policy denies"):
+        ReplicationService(denied_a).export_batch(denied_peer["peer_id"], "creative.direction")
+
+    a_home, b_home = home / "direction-a", home / "direction-b"
+    receiver = ReplicationService(b_home)
+
+    async def receive(request):
+        envelope = await request.json()
+        assert envelope["proof"]["scope"] == "creative.direction"
+        peer = PeerStore(b_home).verify_proof(envelope["proof"])
+        return web.json_response(receiver.apply_batch(peer["id"], envelope["payload"]))
+
+    app = web.Application(); app.router.add_post("/api/capabilities/platform/replication/receive", receive)
+    async with TestServer(app) as server:
+        a_peers, b_peers = PeerStore(a_home), PeerStore(b_home)
+        aid, bid = a_peers.snapshot()["self"], b_peers.snapshot()["self"]
+        a_peers.put(bid["peer_id"], peer_record(bid, str(server.make_url("/")), send=["creative.direction"], receive=["creative.direction"]))
+        b_peers.put(aid["peer_id"], peer_record(aid, "https://a.example", send=["creative.direction"], receive=["creative.direction"]))
+        works = WorkStore(a_home)
+        work = works.create({"request_id": "direction-work", "title": "Night signal", "kind": "work", "prompt": "", "author_ref": None, "universe_ref": None, "active_draft_id": None})
+        draft = works.draft(work["id"], {"request_id": "direction-draft", "revision": 1, "text": "A lighthouse answers.", "note": "approved"})
+        project = DirectionStore(a_home).create({"request_id": "direction-project", "name": "Harbor treatment", "treatment": "Cold blue light crosses the harbor.", "sources": [{"kind": "work", "id": draft["work"]["id"], "revision": draft["work"]["revision"]}], "steps": [{"id": "verify", "title": "Verify source", "operation": "source.verify", "depends_on": []}]})
+        result = await ReplicationService(a_home).push(bid["peer_id"], "creative.direction")
+    assert result["accepted"] is True and result["entries"][0]["entry_id"] == "creative.direction_projects"
+    assert DirectionStore(b_home).get(project["id"]) == project
+    assert WorkStore(b_home).list()["items"] == []
+    source_pin = project["sources"][0]["chapters"][0]
+    assert NativeArtifactProvider(b_home / "artifacts").get(source_pin["artifact_id"], version=source_pin["artifact_version"]) is None
+    with sqlite3.connect(b_home / "capabilities/creative/direction.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM direction_requests").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
 async def test_http_boundaries_status_native_and_signed_receive(home, tmp_path):
     remote_home = tmp_path / "remote"
     local_id, remote_id = pair(home, remote_home)
@@ -327,6 +365,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": SCOPE, "entries": ["projects", "tasks"]},
         {"scope": "knowledge.records", "entries": ["knowledge.items"]},
         {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
+        {"scope": "creative.direction", "entries": ["creative.direction_projects"]},
         {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
@@ -341,7 +380,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "creative.direction", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
