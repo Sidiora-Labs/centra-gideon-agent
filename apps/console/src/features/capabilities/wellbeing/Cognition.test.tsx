@@ -107,7 +107,7 @@ test('ink color response and cancellation retain real trial result', async () =>
   expect(['red', 'blue', 'green', 'yellow']).toContain(ink)
   expect(stimulus.style.color).not.toBe('')
   expect(['red', 'blue', 'green', 'yellow']).toContain(stimulus.textContent)
-  fireEvent.click(screen.getByRole('button', { name: ink, exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: ink }))
   await screen.findByRole('heading', { name: 'Trial 2' })
   expect(screen.getByText('Answered: 1 · Correct: 1')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Cancel exercise' }))

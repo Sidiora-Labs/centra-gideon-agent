@@ -3019,6 +3019,112 @@
       "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.15",
       "acceptance": "All wellbeing pages must render under the actual hash shell, retain URL-addressable state, respond to same-subroute navigation and preserve mutation/reload continuity without an added router fixture.",
       "contract": "Use existing useHashRoute consumer and actual HTTP fixtures; correct integration only, preserve existing runtime evidence."
+    },
+    {
+      "id": "identity.09",
+      "title": "Goal hierarchy milestones and activity-linked progress",
+      "owner_lane": "identity",
+      "status": "pending",
+      "wave": 9,
+      "requires": [
+        "identity.04",
+        "identity.05"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/identity",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+        "apps/console/src/features/capabilities/identity",
+        "checks/runtime/capabilities/identity",
+        "spec/capability-expansion/tasks/identity.09.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify identity.09",
+      "acceptance": "Persist hierarchical goals and milestones with acyclic relationships; reference actual existing activity and loops, derive velocity only from source evidence, and expose source-linked console/native operations with conflict and replay handling.",
+      "contract": "Complete original declared identity capability breadth using existing canonical runtime consumers; refine exact bounded schema and paths before implementation."
+    },
+    {
+      "id": "identity.10",
+      "title": "Complete guarded agent lifecycle",
+      "owner_lane": "identity",
+      "status": "pending",
+      "wave": 10,
+      "requires": [
+        "identity.06"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/identity",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+        "apps/console/src/features/capabilities/identity",
+        "checks/runtime/capabilities/identity",
+        "spec/capability-expansion/tasks/identity.10.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify identity.10",
+      "acceptance": "Bind enable/start/wake/stop and bounded self-thinking policy to actual existing runtime engines and permission/grant consumers; preserve scheduled maintenance and distinguish active turn cancellation from idle policy.",
+      "contract": "Complete original declared identity capability breadth using existing canonical runtime consumers; refine exact bounded schema and paths before implementation."
+    },
+    {
+      "id": "identity.11",
+      "title": "Complete selective identity bundle inventory",
+      "owner_lane": "identity",
+      "status": "pending",
+      "wave": 11,
+      "requires": [
+        "identity.07"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/identity",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+        "apps/console/src/features/capabilities/identity",
+        "checks/runtime/capabilities/identity",
+        "spec/capability-expansion/tasks/identity.11.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify identity.11",
+      "acceptance": "Extend selective versioned encrypted bundles to actual supported agent definitions/model policy/avatar and human identity groups; preserve destination credential/grant boundary, preview conflicts, atomic or explicit resumable restoration and source provenance.",
+      "contract": "Complete original declared identity capability breadth using existing canonical runtime consumers; refine exact bounded schema and paths before implementation."
+    },
+    {
+      "id": "identity.12",
+      "title": "Guarded cross-provider recipe execution",
+      "owner_lane": "identity",
+      "status": "pending",
+      "wave": 12,
+      "requires": [
+        "identity.08"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/identity",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity.py",
+        "apps/console/src/features/capabilities/identity",
+        "checks/runtime/capabilities/identity",
+        "spec/capability-expansion/tasks/identity.12.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify identity.12",
+      "acceptance": "Compile bounded versioned recipes to actual existing tool/workflow invocation with current session permissions, approvals, per-step provenance, cancellation/retry and idempotent writes; never bypass dispatcher policies.",
+      "contract": "Complete original declared identity capability breadth using existing canonical runtime consumers; refine exact bounded schema and paths before implementation."
+    },
+    {
+      "id": "experience.15",
+      "title": "Native duplex audio and paired desktop execution",
+      "owner_lane": "experience",
+      "status": "pending",
+      "wave": 15,
+      "requires": [
+        "experience.07"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/experience",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+        "apps/console/src/features/capabilities/experience",
+        "checks/runtime/capabilities/experience",
+        "spec/capability-expansion/tasks/experience.15.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify experience.15",
+      "acceptance": "Implement actual macOS duplex capture/playback source with existing STT/TTS/session handoff and explicit device permissions; implement authenticated paired desktop executor for hosted control without exposing host facilities. Preserve uncertain call state and require explicit external-call approval. Mac/device/network execution qualification remains separate.",
+      "contract": "Complete remaining original native call implementation; no protocol-only placeholder or generic web-call substitution."
     }
   ]
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { beforeAll, afterAll, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import Cadence from './Cadence'
 let server: ChildProcess
 let baseUrl: string

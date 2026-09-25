@@ -73,6 +73,16 @@ async def test_all_capability_routes_share_the_actual_authenticated_application(
             response=await client.get(base+'/api/capabilities/music/catalog/artists')
             assert response.status==200,await response.text()
             for path in [
+                '/api/capabilities/knowledge/reviews',
+                '/api/capabilities/identity/goal-plans',
+                '/api/capabilities/wellbeing/memory/cards',
+                '/api/capabilities/wellbeing/life/config',
+                '/api/capabilities/music/models3d/config',
+                '/api/capabilities/music/assemblies',
+                '/api/capabilities/platform/maintenance',
+                '/api/capabilities/platform/pr-screening',
+                '/api/capabilities/platform/cadence',
+                '/api/capabilities/communications/calendar/sources',
                 '/api/capabilities/knowledge/types', '/api/capabilities/knowledge/archives',
                 '/api/capabilities/identity/fidelity/cases', '/api/capabilities/identity/goals/goals',
                 '/api/capabilities/identity/progress', '/api/capabilities/identity/continuity',
@@ -133,6 +143,13 @@ def test_snapshot_preserves_live_wal_records_without_raw_overwrite(home,tmp_path
     people=PeopleStore(home/"capabilities/communications")
     person=people.save({'name':'Snapshot Person','notes':'Persistent','ring':'core','cadence_days':7,'identities':[]})
     assert Path(str(path)+'-wal').stat().st_size>0
+    private=home/'capabilities/workspace/desktops/desktop-private/Xauthority'
+    private.parent.mkdir(parents=True)
+    private.write_bytes(b'ephemeral-display-cookie')
+    assert inventory.is_ignored(str(private.relative_to(home)))
+    cadence=home/'capabilities/platform/cadence.json'
+    cadence.parent.mkdir(parents=True,exist_ok=True)
+    cadence.write_text('{"enabled":true}')
     output=tmp_path/'snapshots'
     try:
         assert snapshot_main([str(output),'--keep','1'])==0
@@ -143,6 +160,9 @@ def test_snapshot_preserves_live_wal_records_without_raw_overwrite(home,tmp_path
     assert len(archives)==1
     with tarfile.open(archives[0]) as archive:
         members=archive.getnames()
+        assert not any('desktop-private' in name for name in members)
+        cadence_member=next(name for name in members if name.endswith('/capabilities/platform/cadence.json'))
+        assert archive.extractfile(cadence_member).read()==cadence.read_bytes()
         source=next(name for name in members if name.endswith('/capabilities/identity/stories.sqlite3'))
         assert not any(name.endswith(('.sqlite3-wal','.sqlite3-shm')) for name in members)
         restored=tmp_path/'restored.sqlite3'

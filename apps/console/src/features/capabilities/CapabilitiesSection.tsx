@@ -15,6 +15,16 @@ const pages: Record<string, ComponentType> = {
   platform: lazy(() => import('./platform/Page')),
 }
 const nested: Record<string, ComponentType> = {
+  'wellbeing/life': lazy(() => import('./wellbeing/LifeCalendar')),
+  'wellbeing/memory': lazy(() => import('./wellbeing/MemoryPractice')),
+  'identity/goal-plans': lazy(() => import('./identity/GoalPlanPage')),
+  'knowledge/reviews': lazy(() => import('./knowledge/ReviewsPage')),
+  'knowledge/topics': lazy(() => import('./knowledge/TopicsPage')),
+  'identity/bundles': lazy(() => import('./identity/BundlesPage')),
+  'identity/recipes': lazy(() => import('./identity/RecipesPage')),
+  'wellbeing/interventions': lazy(() => import('./wellbeing/Interventions')),
+  'wellbeing/cognition': lazy(() => import('./wellbeing/Cognition')),
+
   'identity/continuity': lazy(() => import('./identity/ContinuityPage')),
   'knowledge/archives': lazy(() => import('./knowledge/ArchivePage')),
   'knowledge/types': lazy(() => import('./knowledge/TypesPage')),

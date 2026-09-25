@@ -13,3 +13,6 @@
 .capabilities-content h1 { font-size:1.4rem; font-weight:600; }
 .capabilities-content h2 { font-size:1.1rem; font-weight:600; }
 .capabilities-content a { color:var(--color-primary); }
+
+.gideon-workspace .capabilities-shell { padding-block-start:var(--shell-corner-rh, 44px); box-sizing:border-box; }
+.capabilities-content nav { display:flex; flex-wrap:wrap; gap:.5rem 1rem; }

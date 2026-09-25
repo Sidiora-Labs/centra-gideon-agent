@@ -95,6 +95,19 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_models_loras", kind=KIND_TREE, path="models/loras", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_models_lora_training", kind=KIND_TREE, path="models/lora-training", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_cadence", kind=KIND_JSON_FILE, path="capabilities/platform/cadence.json", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_pr_screening", kind=KIND_TREE, path="capabilities/platform/pr_screening", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_platform_maintenance", kind=KIND_TREE, path="capabilities/platform/maintenance", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_workspace_desktops_project_operations", kind=KIND_SQLITE, path="capabilities/workspace/desktops/project-operations.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_workspace_desktops_desktop_sessions", kind=KIND_SQLITE, path="capabilities/workspace/desktops/desktop-sessions.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_media_datasets", kind=KIND_SQLITE, path="capabilities/media/datasets.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_music_assemblies", kind=KIND_SQLITE, path="capabilities/music/assemblies.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_music_image3d", kind=KIND_SQLITE, path="capabilities/music/image3d.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_identity_bundles", kind=KIND_SQLITE, path="capabilities/identity/bundles.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_identity_recipes", kind=KIND_SQLITE, path="capabilities/identity/recipes.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_music_music_video", kind=KIND_SQLITE, path="capabilities/music/music_video.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_identity_continuity", kind=KIND_SQLITE, path="capabilities/identity/continuity.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_workspace_git_git_operations", kind=KIND_SQLITE, path="capabilities/workspace/git/git-operations.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_workspace_git_project_operations", kind=KIND_SQLITE, path="capabilities/workspace/git/project-operations.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
@@ -1044,6 +1057,7 @@ INVENTORY: tuple[StateEntry, ...] = (
 
 
 IGNORED: tuple[str, ...] = (
+    "desktop-private",
     "snapshots",
     "outbox",
     "sync",

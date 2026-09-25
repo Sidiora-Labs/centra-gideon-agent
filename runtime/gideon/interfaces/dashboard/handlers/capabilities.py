@@ -12,6 +12,15 @@ def register(app):
         module = import_module(f"gideon.interfaces.dashboard.handlers.capabilities_{lane}")
         module.register(app)
     additional = (
+        ('/api/capabilities/platform/cadence', 'cadence'),
+        ('/api/capabilities/platform/pr-screening', 'pr_screening'),
+        ('/api/capabilities/platform/maintenance', 'maintenance'),
+        ('/api/capabilities/music/assemblies', 'music_assemblies'),
+        ('/api/capabilities/music/models3d/config', 'music_models3d'),
+        ('/api/capabilities/wellbeing/life/config', 'wellbeing_life'),
+        ('/api/capabilities/wellbeing/memory/cards', 'wellbeing_memory'),
+        ('/api/capabilities/identity/goal-plans', 'identity_goal_plans'),
+        ('/api/capabilities/knowledge/reviews', 'knowledge_reviews'),
         ("/api/capabilities/knowledge/captures", "knowledge_capture"),
         ("/api/capabilities/identity/twin", "identity_twin"),
         ("/api/capabilities/wellbeing/labs", "wellbeing_labs"),
@@ -32,6 +41,14 @@ def register(app):
         ('/api/capabilities/platform/references', 'references'),
         ('/api/capabilities/knowledge/archives', 'knowledge_archives'),
         ('/api/capabilities/identity/continuity', 'identity_continuity'),
+        ('/api/capabilities/knowledge/topics', 'knowledge_topics'),
+        ('/api/capabilities/identity/bundles', 'identity_bundles'),
+        ('/api/capabilities/identity/recipes', 'identity_recipes'),
+        ('/api/capabilities/wellbeing/interventions/plans', 'wellbeing_intervention'),
+        ('/api/capabilities/wellbeing/cognition/sessions', 'wellbeing_cognition'),
+        ('/api/capabilities/music/videos', 'music_video'),
+        ('/api/capabilities/platform/ownership', 'ownership'),
+        ('/api/capabilities/platform/gsd', 'gsd'),
     )
     for path, module_name in additional:
         if not any(route.resource.canonical == path for route in app.router.routes()):
