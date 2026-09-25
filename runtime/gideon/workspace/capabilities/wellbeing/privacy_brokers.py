@@ -44,6 +44,14 @@ class VerifiedBrokerObservation:
     evidence_ref: str
 
 
+@dataclass(frozen=True)
+class BrokerAdapterResult:
+    provider: str
+    outcome: str
+    checked_at: str
+    evidence_ref: str
+
+
 class PrivacyBrokerStore(PrivacyStore):
     def __init__(self, home):
         super().__init__(home)
@@ -207,6 +215,64 @@ class PrivacyBrokerStore(PrivacyStore):
                 raise MeasurementError('Verified observation does not match the case lifecycle', 409, 'conflict')
             row.update(state=state, evidence_basis='verified_rescan', evidence=observation.evidence_ref, verifier=observation.verifier, verified_at=observation.checked_at, next_recheck_at=self._next(state))
             return self._append(db, row, 'verified_observation', outcome=observation.outcome)
+
+    def apply_adapter_scan(self, identity, payload, result):
+        fields(payload, ('request_id', 'revision'))
+        if not isinstance(result, BrokerAdapterResult) or result.outcome not in OBSERVATIONS:
+            raise MeasurementError('Broker scan requires a typed adapter result', 403, 'verification_required')
+        return self._adapter_mutation('privacy-broker-adapter-scan', identity, payload, result, 'broker_scan')
+
+    def apply_adapter_prepared(self, identity, payload, result):
+        fields(payload, ('request_id', 'revision'))
+        if not isinstance(result, BrokerAdapterResult) or result.outcome != 'prepared':
+            raise MeasurementError('Opt-out preparation requires a typed adapter result', 403, 'verification_required')
+        return self._adapter_mutation('privacy-broker-adapter-prepare', identity, payload, result, 'broker_submit')
+
+    def apply_adapter_submission(self, identity, payload, result):
+        fields(payload, ('request_id', 'revision'))
+        if not isinstance(result, BrokerAdapterResult) or result.outcome != 'submitted':
+            raise MeasurementError('Opt-out submission requires a typed adapter result', 403, 'verification_required')
+        return self._adapter_mutation('privacy-broker-adapter-submit', identity, payload, result, 'broker_submit')
+
+    def apply_adapter_verification(self, identity, payload, result):
+        fields(payload, ('request_id', 'revision'))
+        if not isinstance(result, BrokerAdapterResult) or result.outcome not in ('found', 'not_found'):
+            raise MeasurementError('Verification requires a typed adapter result', 403, 'verification_required')
+        return self._adapter_mutation('privacy-broker-adapter-verify', identity, payload, result, 'broker_scan')
+
+    def _adapter_mutation(self, kind, identity, payload, result, scope):
+        text(result.provider, 'provider', 100)
+        text(result.evidence_ref, 'evidence_ref', 1000)
+        try:
+            datetime.fromisoformat(result.checked_at.replace('Z', '+00:00'))
+        except (ValueError, AttributeError) as exc:
+            raise MeasurementError('Adapter checked_at must be an offset timestamp') from exc
+        def execute(db):
+            row = self._case(db, identity)
+            self._require(db, row['subject_id'], scope)
+            self._revision(row, payload)
+            if kind.endswith('-scan'):
+                if row['state'] not in ('unscanned', 'found', 'not_found', 'indirect_exposure', 'blocked', 'confirmed_removed', 'reappeared'):
+                    raise MeasurementError('Case is owned by the opt-out workflow', 409, 'conflict')
+                state, operation = ('reappeared' if row['state'] == 'confirmed_removed' and result.outcome == 'found' else result.outcome), 'provider_scan'
+            elif kind.endswith('-prepare'):
+                if row['state'] not in ('found', 'indirect_exposure', 'reappeared'):
+                    raise MeasurementError('Case is not ready for opt-out preparation', 409, 'conflict')
+                state, operation = 'optout_in_progress', 'provider_optout_prepared'
+            elif kind.endswith('-submit'):
+                if row['state'] != 'optout_in_progress':
+                    raise MeasurementError('Case is not ready for opt-out submission', 409, 'conflict')
+                state, operation = 'submitted', 'provider_optout_submitted'
+            else:
+                if row['state'] not in ('submitted', 'verification_pending', 'awaiting_processing'):
+                    raise MeasurementError('Case is not ready for provider verification', 409, 'conflict')
+                state = 'confirmed_removed' if result.outcome == 'not_found' else 'awaiting_processing'
+                operation = 'provider_verified'
+            row.update(state=state, evidence_basis='provider_protocol', evidence=result.evidence_ref,
+                       verifier=result.provider, verified_at=result.checked_at,
+                       next_recheck_at=self._next(state))
+            return self._append(db, row, operation, provider=result.provider, outcome=result.outcome)
+        return self._mutate_case(kind, identity, payload, execute)
 
     @staticmethod
     def _revision(row, payload):
