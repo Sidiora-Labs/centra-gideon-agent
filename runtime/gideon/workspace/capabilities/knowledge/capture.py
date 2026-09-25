@@ -2,10 +2,15 @@
 
 import hashlib
 import json
+import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
+from gideon.core.config.loader import CONFIG_DIR_NAME
+from gideon.core.config.locations import configuration_home
 
 
 class CaptureError(ValueError):
@@ -27,7 +32,8 @@ def text_field(value, name, maximum, required=True):
 
 
 class CaptureInbox:
-    def __init__(self, store):
+    def __init__(self, store, home=None):
+        self.runtime_home = Path(home).resolve() if home is not None else self._runtime_home()
         self.store = store
         self.db = store.db
         database = self.db.execute("PRAGMA database_list").fetchone()[2]
@@ -54,6 +60,14 @@ class CaptureInbox:
             CREATE UNIQUE INDEX IF NOT EXISTS capture_destination_guid ON items(guid)
                 WHERE substr(guid,1,8) = 'capture:';
         """)
+
+    @staticmethod
+    def _runtime_home():
+        return configuration_home(os.environ.get('GIDEON_HOME'), Path.home() / CONFIG_DIR_NAME, logging.getLogger(__name__)).resolve()
+
+    def assert_write_scope(self):
+        if self._runtime_home() != self.runtime_home:
+            raise CaptureError('Runtime home changed; restore the bound allocation before writing personal knowledge', 409)
 
     def get(self, identity):
         row = self.db.execute("SELECT * FROM capability_knowledge_captures WHERE id=?", (identity,)).fetchone()
@@ -85,6 +99,7 @@ class CaptureInbox:
             if (previous["original_text"], previous["input_origin"], previous["audio_sha256"]) != (text, origin, audio_sha256):
                 raise CaptureError("request_id already belongs to different input", 409)
             return self.get(previous["id"])
+        self.assert_write_scope()
         if audio_item_id:
             source = self.store.get_item(audio_item_id)
             if not source or source.get("item_type", source.get("type")) != "audio":
@@ -109,6 +124,7 @@ class CaptureInbox:
             if record["input_origin"] != "voice" or record["audio_sha256"] != digest:
                 raise CaptureError("request_id already belongs to different input", 409)
             return record
+        self.assert_write_scope()
         self.files_root.mkdir(parents=True, exist_ok=True)
         path = self.files_root / f"capture-{digest}{suffix}"
         if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() != digest:
@@ -130,6 +146,7 @@ class CaptureInbox:
             raise CaptureError("Only voice captures can be transcribed")
         if record["transcript"]:
             return record
+        self.assert_write_scope()
         item = self.store.get_item(record["audio_item_id"])
         path = Path(item.get("file_path", "")) if item else Path("")
         if not path.is_file() or not path.resolve().is_relative_to(self.files_root) or hashlib.sha256(path.read_bytes()).hexdigest() != record["audio_sha256"]:
@@ -171,6 +188,7 @@ class CaptureInbox:
             raise CaptureError("A previous route must be retried before another change", 409)
         if current["revision"] != payload["revision"]:
             raise CaptureError("Capture changed; reload before routing", 409)
+        self.assert_write_scope()
         self.db.execute("UPDATE capability_knowledge_captures SET pending=? WHERE id=?", (packed, identity))
         self.db.commit()
         destination_id = current["destination_id"]

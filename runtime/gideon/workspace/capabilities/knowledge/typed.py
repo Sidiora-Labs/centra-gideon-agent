@@ -78,8 +78,8 @@ class BoundTasks(NativeTaskProvider):
 
 class TypedCapture:
     def __init__(self, store, memory=None, home=None):
-        self.inbox, self.memory = CaptureInbox(store), memory
         self.home = Path(home if home is not None else config_dir()).resolve()
+        self.inbox, self.memory = CaptureInbox(store, home=self.home), memory
         self.db, self.store = store.db, store
         self.db.executescript('''
             CREATE UNIQUE INDEX IF NOT EXISTS typed_capture_guid ON items(guid) WHERE substr(guid,1,14) = 'typed_capture:';
@@ -140,6 +140,7 @@ class TypedCapture:
             raise CaptureError('Capture or reviewed fields changed; preview again', 409)
         if not preview['available']:
             raise CaptureError(preview['unavailable_reason'], 503)
+        self.inbox.assert_write_scope()
         if not previous:
             self.db.execute('INSERT INTO capability_knowledge_types VALUES (?,?,?,NULL)', (body['capture_id'], body['request_id'], payload))
             self.db.commit()

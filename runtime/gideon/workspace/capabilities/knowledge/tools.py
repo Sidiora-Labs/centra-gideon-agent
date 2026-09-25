@@ -115,7 +115,7 @@ class KnowledgeCapabilityTools(ToolProvider):
             service = MemoryService.over_vector_store(archive) if archive is not None else None
             if tool_name.startswith("knowledge_archive_"):
                 if self._archive is None:
-                    self._archive = ConversationArchive(self._store)
+                    self._archive = ConversationArchive(self._store, home=self._home)
                 if tool_name == "knowledge_archive_preview":
                     result = self._archive.preview(arguments)
                 elif tool_name == "knowledge_archive_commit":
@@ -139,7 +139,7 @@ class KnowledgeCapabilityTools(ToolProvider):
                     raise CaptureError("Source not found", 404)
             else:
                 if self._inbox is None:
-                    self._inbox = CaptureInbox(self._store)
+                    self._inbox = CaptureInbox(self._store, home=self._home)
                 if tool_name == "knowledge_capture_list":
                     result = self._inbox.list(**arguments)
                 elif tool_name == "knowledge_capture_get":

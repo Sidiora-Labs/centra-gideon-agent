@@ -188,10 +188,16 @@ def test_bound_service_store_survives_registry_and_home_changes(runtime, tmp_pat
     other_state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     other_state._knowledge_store = other_store
     set_action_services(ActionServices(state=other_state, spawn_background=asyncio.create_task))
+    before = str(provider._home)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "unrelated-home"))
     result = invoke(provider, "knowledge_capture_text", {"request_id": "bound-store-native", "text": "Stay in the original store"})
+    assert not result.success
+    assert result.metadata["status"] == 409
+    assert not (tmp_path / "unrelated-home").exists()
+    assert runtime.state.knowledge_store.db.execute("SELECT count(*) FROM capability_knowledge_captures").fetchone()[0] == 0
+    monkeypatch.setenv("GIDEON_HOME", before)
+    result = invoke(provider, "knowledge_capture_text", {"request_id": "bound-store-native", "text": "Stay in the original store"})
     assert result.success
-    assert runtime.state.knowledge_store.db.execute("SELECT count(*) FROM capability_knowledge_captures").fetchone()[0] == 1
     second = create_provider()
     isolated = invoke(second, "knowledge_capture_list", {})
     assert json.loads(isolated.output)["total"] == 0
