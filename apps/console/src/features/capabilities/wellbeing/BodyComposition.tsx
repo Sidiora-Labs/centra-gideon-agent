@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { useUILanguage } from '../../../shared/i18n'
 
@@ -15,40 +15,63 @@ const words = {
 export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) {
   const w = words[useUILanguage()]
   const base = `${baseUrl}/api/capabilities/wellbeing/body-composition`
+  const mounted = useRef(false), generation = useRef(0)
   const [records, setRecords] = useState<RecordRow[]>([]), [selected, setSelected] = useState<RecordRow | null>(null), [history, setHistory] = useState<RecordRow[]>([])
   const [observed, setObserved] = useState(''), [source, setSource] = useState(''), [notes, setNotes] = useState('')
   const [muscle, setMuscle] = useState(''), [fat, setFat] = useState(''), [bone, setBone] = useState(''), [boneUnit, setBoneUnit] = useState('kg'), [temperature, setTemperature] = useState(''), [temperatureUnit, setTemperatureUnit] = useState('C')
   const [requestId, setRequestId] = useState(() => crypto.randomUUID()), [busy, setBusy] = useState(false), [error, setError] = useState(''), [exported, setExported] = useState('')
-  const run = async (action: () => Promise<void>) => { setBusy(true); setError(''); try { await action() } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
-  const load = async () => setRecords((await requestJson<{ records: RecordRow[] }>(base)).records)
-  const open = async (id: string) => {
+  const current = (token: number) => mounted.current && generation.current === token
+  const run = async (action: (token: number) => Promise<void>) => {
+    const token = ++generation.current
+    setBusy(true); setError('')
+    try { await action(token) } catch (reason) { if (current(token)) setError(String(reason)) } finally { if (current(token)) setBusy(false) }
+  }
+  const load = async (token: number) => {
+    const rows = (await requestJson<{ records: RecordRow[] }>(base)).records
+    if (current(token)) setRecords(rows)
+  }
+  const open = async (id: string, token: number) => {
     const row = await requestJson<RecordRow>(`${base}/${encodeURIComponent(id)}`)
     const versions = await requestJson<{ history: RecordRow[] }>(`${base}/${encodeURIComponent(id)}/history`)
+    if (!current(token)) return
+    const params = new URLSearchParams(location.hash.split('?')[1] || '')
+    if (params.get('view') !== 'body-composition') return
     setSelected(row); setObserved(row.observed_at); setSource(row.source); setNotes(row.notes)
     setMuscle(String(row.original_values.muscle_percent)); setFat(String(row.original_values.fat_percent))
     setBone(String(row.original_values.bone_mass.value)); setBoneUnit(row.original_values.bone_mass.unit)
     setTemperature(String(row.original_values.temperature.value)); setTemperatureUnit(row.original_values.temperature.unit)
     setHistory(versions.history); setRequestId(crypto.randomUUID())
-    const params = new URLSearchParams(location.hash.split('?')[1] || ''); params.set('view', 'body-composition'); params.set('id', row.id); window.history.replaceState(null, '', `#/capabilities/wellbeing?${params}`)
+    params.set('id', row.id); window.history.replaceState(null, '', `#/capabilities/wellbeing?${params}`)
   }
-  useEffect(() => { void run(async () => { await load(); const id = new URLSearchParams(location.hash.split('?')[1] || '').get('id'); if (id) await open(id) }) }, [])
-  const reset = () => { setSelected(null); setHistory([]); setObserved(''); setSource(''); setNotes(''); setMuscle(''); setFat(''); setBone(''); setBoneUnit('kg'); setTemperature(''); setTemperatureUnit('C'); setRequestId(crypto.randomUUID()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=body-composition') }
+  useEffect(() => {
+    mounted.current = true
+    const token = ++generation.current
+    const id = new URLSearchParams(location.hash.split('?')[1] || '').get('id')
+    setBusy(true); setError('')
+    void (async () => {
+      try { await load(token); if (id && current(token)) await open(id, token) }
+      catch (reason) { if (current(token)) setError(String(reason)) }
+      finally { if (current(token)) setBusy(false) }
+    })()
+    return () => { mounted.current = false; generation.current += 1 }
+  }, [])
+  const reset = () => { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setObserved(''); setSource(''); setNotes(''); setMuscle(''); setFat(''); setBone(''); setBoneUnit('kg'); setTemperature(''); setTemperatureUnit('C'); setRequestId(crypto.randomUUID()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=body-composition') }
   const save = async (event: FormEvent) => {
     event.preventDefault()
-    await run(async () => {
+    await run(async token => {
       const values: Values = { muscle_percent: Number(muscle), fat_percent: Number(fat), bone_mass: { value: Number(bone), unit: boneUnit }, temperature: { value: Number(temperature), unit: temperatureUnit } }
       const payload = { request_id: requestId, ...(selected ? { revision: selected.revision } : { source }), observed_at: observed, values, notes }
       const row = await requestJson<RecordRow>(selected ? `${base}/${selected.id}` : base, selected ? 'PUT' : 'POST', payload)
-      await load(); await open(row.id)
+      await load(token); if (current(token)) await open(row.id, token)
     })
   }
-  const download = async () => { await run(async () => { const value = await requestJson<object>(`${base}/export`); setExported(JSON.stringify(value, null, 2)) }) }
+  const download = async () => { await run(async token => { const value = await requestJson<object>(`${base}/export`); if (current(token)) setExported(JSON.stringify(value, null, 2)) }) }
   return <main style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }} aria-busy={busy}>
     <h1>{w[0]}</h1>
     <p>{w[1]}</p>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[2]}</p>}
     <button onClick={reset}>{w[3]}</button> <button onClick={() => void download()}>{w[4]}</button>
-    <ul>{records.map(row => <li key={row.id}><button onClick={() => void run(() => open(row.id))}>{row.observed_at} · {row.source}</button></li>)}</ul>
+    <ul>{records.map(row => <li key={row.id}><button onClick={() => void run(token => open(row.id, token))}>{row.observed_at} · {row.source}</button></li>)}</ul>
     {!busy && records.length === 0 && <p>{w[5]}</p>}
     <form onSubmit={save} style={{ display: 'grid', gap: 10 }}>
       <label>{w[6]}<input required value={observed} onChange={event => setObserved(event.target.value)} placeholder="2026-09-25T08:00:00Z" /></label>

@@ -52,3 +52,11 @@ def register(app: web.Application, home: Path | None = None):
     register_spokeo(app, bound_home)
     register_whitepages(app, bound_home)
     register_beenverified(app, bound_home)
+    from gideon.workspace.capabilities.wellbeing.epigenetic_http import register as register_epigenetic
+    from gideon.workspace.capabilities.wellbeing.eyes_http import register as register_eyes
+    from gideon.workspace.capabilities.wellbeing.lifestyle_profile_http import register as register_lifestyle_profiles
+    from gideon.workspace.capabilities.wellbeing.body_composition_http import register as register_body_composition
+    register_epigenetic(app, bound_home)
+    register_eyes(app, bound_home)
+    register_lifestyle_profiles(app, bound_home)
+    register_body_composition(app, bound_home)

@@ -20,6 +20,10 @@ TABLES = {
     'cognition': [('sessions', 'cognitive_sessions', 'data')],
     'memory': [('cards', 'memory_card_revisions', 'data')],
     'life': [('history', 'life_calendar_revisions', 'data'), ('reminder_claims', 'life_reminder_claims', None)],
+    'epigenetic': [('history', 'epigenetic_results', 'data')],
+    'eye_prescriptions': [('history', 'eye_prescription_revisions', 'data')],
+    'lifestyle_profiles': [('history', 'lifestyle_profile_revisions', 'data')],
+    'body_composition': [('history', 'body_composition_revisions', 'data')],
 }
 
 
