@@ -10,6 +10,8 @@ async def dispatch(request):
             raise SketchError('Query parameters are not accepted')
         jobs = request.app[JOBS_KEY]
         if request.method == 'GET':
+            if request.path.endswith('/videos'):
+                return web.json_response(await jobs.videos.capabilities())
             result = await jobs.images.lora_inventory(request.match_info.get('adapter_id')) if '/loras' in request.path else await jobs.images.capabilities()
         else:
             try:
@@ -25,6 +27,8 @@ async def dispatch(request):
 
 
 def register_images(app):
+    app.router.add_get('/api/capabilities/media/videos', dispatch)
+    app.router.add_post('/api/capabilities/media/videos', dispatch)
     app.router.add_get('/api/capabilities/media/images', dispatch)
     app.router.add_post('/api/capabilities/media/images', dispatch)
     app.router.add_get('/api/capabilities/media/loras', dispatch)

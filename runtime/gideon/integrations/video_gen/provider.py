@@ -14,6 +14,13 @@ from gideon.integrations.generation_catalog import provider_identity
 
 
 @dataclass
+class VideoControl:
+    minimum: float
+    maximum: float
+    integer: bool = False
+
+
+@dataclass
 class VideoGenModel:
     """A model a video-gen provider offers.
 
@@ -28,6 +35,11 @@ class VideoGenModel:
     max_duration_s: int = 10
     downloaded: bool = True
     active: bool = False
+    supports_first_frame: bool = False
+    supports_last_frame: bool = False
+    supports_continuation: bool = False
+    supported_controls: dict[str, VideoControl] = field(default_factory=dict)
+    durations: list[int] = field(default_factory=list)
 
 
 @dataclass
