@@ -10,6 +10,9 @@ from uuid import uuid4
 
 from gideon.extensions.apps.background import BackgroundWorker
 
+from .cleanup import CleanupService
+from .datasets import DatasetStore
+from .training import DiffusersTrainer
 from .images import ImageService
 from .sketches import SketchError, fields, integer
 
@@ -22,7 +25,7 @@ def identity(pid):
 
 
 def public(job):
-    return {key: value for key, value in job.items() if key not in ("owner_pid", "owner_identity")}
+    return {key: value for key, value in job.items() if key not in ("owner_pid", "owner_identity", "child_pid", "child_identity")}
 
 
 def now():
@@ -30,9 +33,12 @@ def now():
 
 
 class MediaJobs:
-    def __init__(self, path, sketches, images=None):
+    def __init__(self, path, sketches, images=None, training_allowed=True):
         self.path, self.sketches = Path(path), sketches
         self.images = images or ImageService(sketches.artifacts)
+        self.cleanup = CleanupService(self.images)
+        self.datasets = DatasetStore(self.path.parent / 'datasets.sqlite3', self.images)
+        self.trainer = DiffusersTrainer(sketches.artifacts.root.parent, self.datasets, allowed=training_allowed)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, request TEXT UNIQUE, fingerprint TEXT, status TEXT, body TEXT)')
@@ -68,7 +74,13 @@ class MediaJobs:
         if not isinstance(body, dict):
             raise SketchError('Expected an object')
         image_request = None
-        if body.get('operation') == 'image_generate':
+        if body.get('operation') == 'image_cleanup':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.cleanup.prepare(body['input'])
+        elif body.get('operation') == 'lora_train':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.trainer.prepare(body['input'])
+        elif body.get('operation') == 'image_generate':
             fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
             image_request = self.images.prepare(body['input'])
         else:
@@ -135,6 +147,15 @@ class MediaJobs:
             job.update(owner_pid=os.getpid(), owner_identity=identity(os.getpid()), attempt=job['attempt']+1)
             return self._write(db, job, 'running', 'Media worker claimed the job')
 
+    def attach_child(self, job_id, pid):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            job = self.get(job_id, internal=True)
+            if job['owner_pid'] != os.getpid():
+                raise SketchError('Job is not owned by this worker', 409)
+            job.update(child_pid=pid, child_identity=identity(pid))
+            db.execute('UPDATE jobs SET body=? WHERE id=?', (json.dumps(job), job_id))
+
     def finish(self, job_id, result=None, error=None):
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -142,7 +163,7 @@ class MediaJobs:
             if job['status'] not in ('running', 'cancel_requested') or job['owner_pid'] != os.getpid():
                 raise SketchError('Job is not owned by this worker', 409)
             status = 'cancelled' if job['status'] == 'cancel_requested' else 'failed' if error else 'succeeded'
-            job.update(result=result, error=error, owner_pid=None)
+            job.update(result=result, error=error, owner_pid=None, child_pid=None, child_identity=None)
             return self._write(db, job, status, error or 'Renderer finished; any output artifact remains available')
 
     def recover(self):
@@ -153,6 +174,11 @@ class MediaJobs:
             for row in rows:
                 job = json.loads(row[0])
                 if identity(job['owner_pid']) != job['owner_identity'] or not job['owner_identity']:
+                    if job.get('child_pid') and identity(job['child_pid']) == job.get('child_identity'):
+                        try:
+                            os.killpg(job['child_pid'], 9)
+                        except ProcessLookupError:
+                            pass
                     job.update(error='Media worker exited before recording completion', owner_pid=None, owner_identity=None)
                     recovered.append(self._write(db, job, 'failed', job['error']))
         return recovered
@@ -176,7 +202,12 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            result = asyncio.run(self.jobs.images.execute(job['input'], job['id'])) if job['operation'] == 'image_generate' else self.jobs.sketches.export(job['sketch_id'], {'revision': job['revision']})
+            if job['operation'] == 'image_cleanup':
+                result = self.jobs.cleanup.execute(job['input'], job['id'])
+            elif job['operation'] == 'lora_train':
+                result = self.jobs.trainer.execute(job['input'], job['id'], lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested', lambda pid: self.jobs.attach_child(job['id'], pid))
+            else:
+                result = asyncio.run(self.jobs.images.execute(job['input'], job['id'])) if job['operation'] == 'image_generate' else self.jobs.sketches.export(job['sketch_id'], {'revision': job['revision']})
             self.jobs.finish(job['id'], result=result)
         except Exception as exc:
-            self.jobs.finish(job['id'], error=str(exc)[:500])
+            self.jobs.finish(job['id'], error=('Training failed; inspect local diagnostics' if job['operation'] == 'lora_train' and not isinstance(exc, SketchError) else str(exc)[:500]))

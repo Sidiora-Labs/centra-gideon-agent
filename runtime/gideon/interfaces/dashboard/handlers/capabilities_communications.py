@@ -8,12 +8,24 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/calendar/' in request.path:
+            source_id = request.match_info.get('source_id')
+            route = request.path.rsplit('/', 1)[-1]
+            if route == 'daily':
+                return web.json_response(calendar.daily(store, request.query.get('date', ''), request.query.get('timezone') or AppConfig.load().timezone or 'UTC'))
+            if route == 'upload':
+                return web.json_response({'sync': calendar.upload(store, source_id, await request.json())})
+            if route == 'sync':
+                return web.json_response({'sync': await calendar.sync_remote(store, source_id, await request.json())})
+            if request.method == 'GET':
+                return web.json_response({'sources': calendar.sources(store)})
+            return web.json_response({'source': calendar.save_source(store, await request.json(), source_id)}, status=200 if source_id else 201)
         if '/telegram/' in request.path:
             route = request.path.rsplit('/', 1)[-1]
             if route == 'config':
@@ -128,6 +140,13 @@ async def handle(request):
 
 
 def register(app):
+    calendar_base = "/api/capabilities/communications/calendar"
+    app.router.add_get(calendar_base + "/daily", handle)
+    app.router.add_get(calendar_base + "/sources", handle)
+    app.router.add_post(calendar_base + "/sources", handle)
+    app.router.add_put(calendar_base + "/sources/{source_id}", handle)
+    app.router.add_post(calendar_base + "/sources/{source_id}/upload", handle)
+    app.router.add_post(calendar_base + "/sources/{source_id}/sync", handle)
     telegram_base = "/api/capabilities/communications/telegram"
     app.router.add_get(telegram_base + "/config", handle)
     app.router.add_put(telegram_base + "/config", handle)

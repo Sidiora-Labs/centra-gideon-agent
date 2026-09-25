@@ -189,6 +189,7 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
             "knowledge-consolidate",
             "knowledge-propose",
             "knowledge-report",
+            "knowledge-review",
             "source-digest",
         ),
     ),

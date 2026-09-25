@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "task": "platform.12",
+  "status": "locally_qualified",
+  "base_revision": "04836eb0",
+  "contract": "Explicit seven audit workflow ladder with actual native maintenance issue drain between audits, durable child recovery, pinned installed definition, required verification/guard commands, original workspace binding, sticky cancellation and explicit resume. Real workflow engine qualification does not claim external model audit quality.",
+  "acceptance": [
+    "Run actual installed workflow through real supervisor for all seven audit stages; store child outcomes and recover launch-before-write crashes.",
+    "Drain real nonterminal native tasks; stop after three unchanged issue sets; persist failure and support explicit resume.",
+    "Require bound workspace and verification/guard commands; reject changed workflow definitions, conflicting project runs and unauthenticated controls.",
+    "Console and native tools read/control actual persisted workflow sequence; verify real engine and HTTP backed UI without doubles."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/maintenance.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_maintenance.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Maintenance.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_maintenance.py",
+    "checks/runtime/capabilities/platform/maintenance_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Maintenance.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_maintenance.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Maintenance.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.12-checks-2bqvq2dp/evidence.json",
+  "qualification": {
+    "runtime_tests": 7,
+    "ui_tests": 2,
+    "production_lines": 233,
+    "test_lines": 335,
+    "repair_cycles": 0,
+    "limitations": [
+      "Real transform/wait workflow definitions qualify coordinator behavior; external model audit quality is not claimed."
+    ]
+  }
+}

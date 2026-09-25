@@ -14,6 +14,12 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect, request_phase
 
 _SCHEMAS = {
+    "platform_task_cadence": {"type": "object", "properties": {}, "additionalProperties": False},
+    "platform_task_cadence_set": {"type": "object", "properties": {"trigger_id": {"type": "string"}, "revision": {"type": "integer"}, "enabled": {"type": "boolean"}, "task_class": {"type": "string"}}, "required": ["trigger_id", "revision", "enabled", "task_class"], "additionalProperties": False},
+    "platform_pr_screening": {"type": "object", "properties": {}, "additionalProperties": False},
+    "platform_pr_capture": {"type": "object", "properties": {key: {"type": "integer" if key == "number" else "string"} for key in ("repo", "number", "credential", "screen_provider", "review_provider")}, "required": ["repo", "number", "credential", "screen_provider", "review_provider"], "additionalProperties": False},
+    "platform_maintenance": {"type": "object", "properties": {}, "additionalProperties": False},
+    "platform_maintenance_control": {"type": "object", "properties": {"id": {"type": "string"}, "action": {"enum": ["cancel", "resume"]}}, "required": ["id", "action"], "additionalProperties": False},
     "platform_gsd_project": {"type": "object", "properties": {"project_id": {"type": "string"}, "document": {"type": "string"}}, "required": ["project_id"], "additionalProperties": False},
     "platform_gsd_phase_task": {"type": "object", "properties": {"project_id": {"type": "string"}, "phase": {"type": "string"}, "action": {"enum": ["plan", "execute", "verify"]}}, "required": ["project_id", "phase", "action"], "additionalProperties": False},
     "platform_feature_ownership": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -26,6 +32,12 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_task_cadence": "Read opt-in interval cadence decisions and typed execution evidence.",
+    "platform_task_cadence_set": "Opt a native interval trigger into or out of task-class cadence adaptation.",
+    "platform_pr_screening": "Read pinned external PR screening and authorized disposition state.",
+    "platform_pr_capture": "Capture bounded GitHub PR content with a named credential; never submit a review.",
+    "platform_maintenance": "Read actual project maintenance stages and child workflow status.",
+    "platform_maintenance_control": "Cancel or resume an explicitly requested maintenance sequence.",
     "platform_gsd_project": "Read original project planning documents and phase artifact inventory.",
     "platform_gsd_phase_task": "Create or find an open native task requesting explicit GSD phase work.",
     "platform_feature_ownership": "Read durable project feature owners and revisions.",
@@ -44,14 +56,40 @@ class PlatformTools(ToolProvider):
     display_name = "Platform tools"
 
     async def list_tools(self):
-        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
+        return [ToolDefinition(name=name, description=_DESCRIPTIONS[name], provider=self.name, parameters=schema, requires_approval=name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set"}, risk_level=RiskLevel.CAUTION if name in {"platform_feature_claim", "platform_gsd_phase_task", "platform_maintenance_control", "platform_pr_capture", "platform_task_cadence_set"} else RiskLevel.SAFE) for name, schema in _SCHEMAS.items()]
 
     async def invoke(self, tool_name, arguments):
         if tool_name not in _SCHEMAS:
             return ToolResult(success=False, error="Unknown platform tool")
         try:
             validate(arguments, _SCHEMAS[tool_name])
-            if tool_name == "platform_api_catalog":
+            if tool_name == "platform_task_cadence":
+                from gideon.workspace.capabilities.platform.cadence import view
+                result = view()
+            elif tool_name == "platform_task_cadence_set":
+                if not get_current_session_key():
+                    raise ValueError("Authenticated cadence editor required")
+                from gideon.workspace.capabilities.platform.cadence import mutate
+                result = mutate(arguments["trigger_id"], {key: arguments[key] for key in ("revision", "enabled", "task_class")})
+            elif tool_name == "platform_pr_screening":
+                from gideon.workspace.capabilities.platform.pr_screening import view
+                result = view()
+            elif tool_name == "platform_pr_capture":
+                from gideon.workspace.capabilities.platform.pr_screening import capture
+                session = get_current_session_key()
+                if not session:
+                    raise ValueError("Authenticated PR requester required")
+                result = await capture(arguments, "session:" + session)
+            elif tool_name == "platform_maintenance":
+                from gideon.workspace.capabilities.platform.maintenance import view
+                result = view()
+            elif tool_name == "platform_maintenance_control":
+                if not get_current_session_key():
+                    raise ValueError("Authenticated maintenance controller required")
+                from gideon.workspace.capabilities.platform.maintenance import control
+                from gideon.interfaces.dashboard.handlers.capabilities_maintenance import supervisor
+                result = await control(arguments["id"], arguments["action"], supervisor())
+            elif tool_name == "platform_api_catalog":
                 result = current_catalog(**arguments)
             elif tool_name == "prompt_dependency_usage":
                 result = prompt_usage(arguments.get("provider", "native"), arguments["name"])

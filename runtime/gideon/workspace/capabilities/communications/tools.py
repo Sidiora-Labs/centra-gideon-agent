@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop, beeper, telegram
+from . import mirrors, desktop, beeper, telegram, calendar
 
 
 def obj(properties, required=()):
@@ -39,7 +39,14 @@ ACCOUNT = obj({key: STRING for key in mirrors.ACCOUNT_FIELDS}, ('name', 'kind', 
 DESKTOP = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING, 'content_base64': {'type': 'string', 'maxLength': 11184812}}
 OUTBOX_ACTION = {'outbox_id': STRING, 'revision': {'type': 'integer', 'minimum': 1}}
 TGCONFIG = {'enabled': {'type': 'boolean'}, 'automatic_replies': {'type': 'boolean'}, 'bot_credential_ref': STRING, 'webhook_credential_ref': STRING, 'allowed_chat_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'allowed_user_ids': {'type': 'array', 'items': {'type': 'integer'}, 'maxItems': 50}, 'revision': {'type': 'integer', 'minimum': 0}}
+CAL_SOURCE = {key: STRING for key in calendar.SOURCE_FIELDS}
 SPECS = {
+    'people_calendar_sources': ('Read calendar source and coverage state.', obj({}), False),
+    'people_calendar_create': ('Configure an ICS or existing Google/Outlook calendar credential reference.', obj({'source': obj(CAL_SOURCE, ('name', 'kind'))}, ('source',)), True),
+    'people_calendar_update': ('Update a calendar source at its current revision; invalidate previous projection.', obj({'source_id': STRING, 'source': obj({**CAL_SOURCE, 'revision': {'type': 'integer', 'minimum': 1}}, ('name', 'kind', 'revision'))}, ('source_id', 'source')), True),
+    'people_calendar_upload': ('Import a bounded actual ICS snapshot; unsupported recurrence is explicit.', obj({'source_id': STRING, 'content': STRING, 'revision': {'type': 'integer', 'minimum': 1}}, ('source_id', 'content', 'revision')), True),
+    'people_calendar_sync': ('Read a bounded Google/Outlook event window using an existing connection.', obj({'source_id': STRING, 'start': STRING, 'end': STRING}, ('source_id', 'start', 'end')), True),
+    'people_calendar_daily': ('Read events overlapping a local day with source freshness and coverage.', obj({'date': STRING, 'timezone': STRING}, ('date',)), False),
     'people_telegram_config': ('Read Telegram operational settings without credentials.', obj({}), False),
     'people_telegram_configure': ('Configure allowlisted Telegram operations and optional automatic replies.', obj(TGCONFIG, TGCONFIG), True),
     'people_telegram_command': ('Project /people, /care or /status from the real local people store without sending.', obj({'command': {'enum': ['/people', '/care', '/status']}}, ('command',)), False),
@@ -108,7 +115,19 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name.startswith('people_telegram_'):
+            if tool_name.startswith('people_calendar_'):
+                action = tool_name.removeprefix('people_calendar_')
+                if action == 'sources':
+                    result = {'sources': calendar.sources(store)}
+                elif action in ('create', 'update'):
+                    result = {'source': calendar.save_source(store, arguments['source'], arguments.get('source_id'))}
+                elif action == 'upload':
+                    result = {'sync': calendar.upload(store, arguments['source_id'], {k: v for k, v in arguments.items() if k != 'source_id'})}
+                elif action == 'sync':
+                    result = {'sync': await calendar.sync_remote(store, arguments['source_id'], {k: v for k, v in arguments.items() if k != 'source_id'})}
+                else:
+                    result = calendar.daily(store, arguments['date'], zone)
+            elif tool_name.startswith('people_telegram_'):
                 action = tool_name.removeprefix('people_telegram_')
                 if action == 'config':
                     result = {'config': telegram.config(store)}

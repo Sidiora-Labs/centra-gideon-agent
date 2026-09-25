@@ -100,6 +100,18 @@ CONTRACTS.update({
 })
 
 
+MILESTONE = {"type": "object", "additionalProperties": False, "properties": {"id": IDENTIFIER, "title": TEXT, "done": {"type": "boolean"}, "target_date": {"type": ["string", "null"]}}, "required": ["id", "title", "done", "target_date"]}
+GOAL_LINK = {"type": "object", "additionalProperties": False, "properties": {"kind": {"enum": ["task", "loop", "session"]}, "id": IDENTIFIER}, "required": ["kind", "id"]}
+GOAL_PLAN = {"goal_id": IDENTIFIER, "parent_id": {"type": ["string", "null"]}, "horizon": {"enum": ["short_term", "long_term", "lifetime"]}, "milestones": {"type": "array", "maxItems": 100, "items": MILESTONE}, "links": {"type": "array", "maxItems": 100, "items": GOAL_LINK}, "unit": TEXT, "target_value": {"type": ["number", "null"]}, "expected_revision": {"type": "integer", "minimum": 0}, "request_id": IDENTIFIER}
+CHECKIN = {"goal_id": IDENTIFIER, "value": {"type": "number"}, "observed_at": TEXT, "notes": {"type": "string", "maxLength": 5000}, "request_id": IDENTIFIER}
+CONTRACTS.update({
+    "identity_goal_plan_list": ({}, [], "Project human goals, hierarchy, milestones and actual linked source states", False),
+    "identity_goal_plan_get": ({"goal_id": IDENTIFIER}, ["goal_id"], "Read a human goal plan and reported metric velocity", False),
+    "identity_goal_plan_configure": (GOAL_PLAN, list(GOAL_PLAN), "Set human hierarchy, milestones and local activity/task/loop references", True),
+    "identity_goal_plan_checkin": (CHECKIN, list(CHECKIN), "Record a human-reported metric observation; never treats automation completion as human attainment", True),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},

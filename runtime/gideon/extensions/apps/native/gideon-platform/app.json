@@ -22,7 +22,13 @@
       "platform_feature_ownership",
       "platform_feature_claim",
       "platform_gsd_project",
-      "platform_gsd_phase_task"
+      "platform_gsd_phase_task",
+      "platform_maintenance",
+      "platform_maintenance_control",
+      "platform_pr_screening",
+      "platform_pr_capture",
+      "platform_task_cadence",
+      "platform_task_cadence_set"
     ]
   },
   "native": true

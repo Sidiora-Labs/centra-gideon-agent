@@ -17,7 +17,8 @@
       "managed_processes",
       "port_reservations",
       "project_discovery",
-      "project_git"
+      "project_git",
+      "isolated_desktops"
     ]
   },
   "native": true

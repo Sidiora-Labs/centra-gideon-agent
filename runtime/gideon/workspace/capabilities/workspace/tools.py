@@ -14,6 +14,10 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_desktops', 'List isolated desktop lifecycle records.', {}, [], False),
+            ('workspace_desktop_get', 'Read one isolated desktop session.', {'id':{'type':'string'}}, ['id'], False),
+            ('workspace_desktop_start', 'Start an approved isolated Linux desktop and shell for a canonical project.', {'project_id':{'type':'string'},'request_id':{'type':'string'},'width':{'type':'integer'},'height':{'type':'integer'}}, ['project_id','request_id','width','height'], True),
+            ('workspace_desktop_stop', 'Stop only the owned isolated desktop session.', {'id':{'type':'string'},'revision':{'type':'integer'}}, ['id','revision'], True),
             ('workspace_git_inspect', 'Inspect a canonical project repository and initialized submodules.', {'project_id':{'type':'string'}}, ['project_id'], False),
             ('workspace_git_history', 'Read bounded durable project Git operation receipts.', {'project_id':{'type':'string'}}, ['project_id'], False),
             ('workspace_git_mutate', 'Create or switch a clean local branch, or reset an initialized submodule to its cached pinned revision.', {key:{'type':'string'} for key in ('project_id','operation','target','expected_head','request_id')}, ['project_id','operation','target','expected_head','request_id'], True),
@@ -56,7 +60,14 @@ class WorkspaceToolProvider(ToolProvider):
                 expected = str if schema['properties'][key]['type'] == 'string' else int
                 if type(value) is not expected:
                     raise ValueError('Invalid argument type')
-            if tool_name.startswith('workspace_git'):
+            if tool_name.startswith('workspace_desktop'):
+                from .desktop import get_desktop_registry
+                registry = get_desktop_registry(root,allowed_roots=roots)
+                if tool_name == 'workspace_desktops':result=registry.list()
+                elif tool_name == 'workspace_desktop_get':result=registry.get(arguments['id'])
+                elif tool_name == 'workspace_desktop_start':result=await registry.start(arguments)
+                else:result=await registry.stop(arguments['id'],arguments['revision'])
+            elif tool_name.startswith('workspace_git'):
                 from .git_ops import GitService
                 git = GitService(root, allowed_roots=roots)
                 if tool_name == 'workspace_git_inspect':

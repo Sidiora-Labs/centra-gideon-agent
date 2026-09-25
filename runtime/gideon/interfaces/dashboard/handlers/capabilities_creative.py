@@ -12,6 +12,8 @@ from gideon.workspace.capabilities.creative.graph import UniverseGraph
 from gideon.workspace.capabilities.creative.authors import AuthorStore
 from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.capabilities.creative.polishing import PolishingStore
+from gideon.workspace.capabilities.creative.stories import StoryStore
+STORIES = web.AppKey("creative_stories", StoryStore)
 POLISHING = web.AppKey("creative_polishing", PolishingStore)
 WORKS = web.AppKey("creative_works", WorkStore)
 AUTHORS = web.AppKey("creative_authors", AuthorStore)
@@ -68,6 +70,40 @@ async def universes(request):
         else:
             payload = await request.json()
             result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
+        return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
+async def stories(request):
+    store = request.app[STORIES]
+    id = request.match_info.get("id")
+    action = request.path.rsplit("/", 1)[-1]
+    try:
+        if request.method == "GET":
+            if set(request.query) - {"q", "offset", "limit", "revision"}:
+                raise CatalogError("Unexpected query parameter")
+            if action == "suggestions":
+                result = store.suggestions(id)
+            elif action == "export":
+                revision = int(request.query["revision"]) if "revision" in request.query else None
+                return web.json_response(store.export(id, revision), headers={"Content-Disposition": f'attachment; filename="story-{id}.json"'})
+            elif action == "revisions":
+                result = {"items": store.revisions(id)}
+            elif id:
+                result = store.get(id)
+            else:
+                result = store.list(request.query.get("q", ""), int(request.query.get("offset", 0)), int(request.query.get("limit", 25)))
+        else:
+            payload = await request.json()
+            if action == "suggestions":
+                result = await store.suggest(id, payload)
+            elif action == "adopt":
+                result = store.adopt(id, payload)
+            elif action == "work":
+                result = store.create_work(id, payload)
+            else:
+                result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
         return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
     except (CatalogError, ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
@@ -199,6 +235,18 @@ async def polishing(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    app[STORIES] = StoryStore(app[STORE].home)
+    app.router.add_get("/api/capabilities/creative/stories", stories)
+    app.router.add_post("/api/capabilities/creative/stories", stories)
+    app.router.add_get("/api/capabilities/creative/stories/{id}", stories)
+    app.router.add_patch("/api/capabilities/creative/stories/{id}", stories)
+    app.router.add_get("/api/capabilities/creative/stories/{id}/revisions", stories)
+    app.router.add_post("/api/capabilities/creative/stories/{id}/restore", stories)
+    app.router.add_get("/api/capabilities/creative/stories/{id}/export", stories)
+    app.router.add_get("/api/capabilities/creative/stories/{id}/suggestions", stories)
+    app.router.add_post("/api/capabilities/creative/stories/{id}/suggestions", stories)
+    app.router.add_post("/api/capabilities/creative/stories/{id}/adopt", stories)
+    app.router.add_post("/api/capabilities/creative/stories/{id}/work", stories)
     app[WORKS] = WorkStore(app[STORE].home)
     app[POLISHING] = PolishingStore(app[WORKS])
     app.router.add_get("/api/capabilities/creative/works/{id}/polishing", polishing)

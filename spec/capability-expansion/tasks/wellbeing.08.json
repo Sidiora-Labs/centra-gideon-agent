@@ -1,0 +1,52 @@
+{
+  "id": "wellbeing.08",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "de3b8cec",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/memory_practice.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/memory_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_memory.py",
+    "apps/console/src/features/capabilities/wellbeing/MemoryPractice.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_memory_practice.py",
+    "apps/console/src/features/capabilities/wellbeing/MemoryPractice.test.tsx"
+  ],
+  "contract": "Canonical readonly memory-card content artifacts with pinned revision references; wellbeing ledger owns immutable source and versioned self-graded schedules. Actual practice timestamps, grade-specific elapsed-day intervals, due projection, archive and content history, agent/HTTP/actual-hash UI with answer reveal before grading.",
+  "remaining_limits": [
+    "Grades are self-reported, not measured cognition or clinical interpretation",
+    "Version1 intervals: again10minutes; hard max1day/1.2x; good1day then3days then2x; easy max4days/3x;365daycap",
+    "Catalog maximum500; content bounds10000prompt/20000answer,20tags",
+    "Root registers memory handler/console route/provider metadata"
+  ],
+  "source_revision": "de3b8cec",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.08",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.08-checks-ai46deoe/evidence.json",
+  "production_lines": 247,
+  "test_lines": 349,
+  "test_ratio": 1.4129554655870444,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/MemoryPractice.tsx": "bfc6d6fa2ac40a891144192ee8c5171077de8ec0f455b5683c91042c38110509",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_memory.py": "8e8925f05dc5dbe9b37d7e0a68d818061366d2055cee691ab7a0c5f0693ea809",
+    "runtime/gideon/workspace/capabilities/wellbeing/memory_practice.py": "7d05536abd26944a83cb0067e9885aac00d2fe30ede8b4bc22229ed0feeabcd6",
+    "runtime/gideon/workspace/capabilities/wellbeing/memory_provider.py": "0f6f4683cb2aef60134a91dabb23ec8a1e707191ca01c83b14b9a0f6689b7fa8",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "4d8127f3cf85f05f62891b592abdbaee8f533c0aff5848597df6b873446d2d64",
+    "apps/console/src/features/capabilities/wellbeing/MemoryPractice.test.tsx": "4beaea136eef31575720088f4b4a17a31d8f4e42285f62d38c3d8c9dfd7f25dd",
+    "checks/runtime/capabilities/wellbeing/test_memory_practice.py": "cd5103f3cd00e39f628b0e5203a5c56d2a2b3384050602169977c47600bb08c8"
+  },
+  "repair_cycles": 0,
+  "acceptance_coverage": [
+    "canonical readonly artifact content with no ledger content copy",
+    "pinned content revisions and immutable source",
+    "independent version1 scheduling vectors and cap",
+    "actual practice timestamps and exact due filters",
+    "again lapse reset and replay receipts",
+    "archive and historical records",
+    "concurrent requests and home isolation",
+    "native/real HTTP consumers",
+    "actual hash reveal grade edit archive and reload UI"
+  ]
+}

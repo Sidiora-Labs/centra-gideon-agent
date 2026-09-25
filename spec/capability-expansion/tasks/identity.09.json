@@ -1,0 +1,101 @@
+{
+  "id": "identity.09",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Extend canonical human goals with atomic acyclic hierarchy and explicit horizons/milestones",
+    "Link actual native tasks, automation loops and recorded planning sessions with missing-source reporting and no duplicated source authority",
+    "Persist immutable timestamped human metric check-ins with replay protection and derive unit-aware velocity only from distinct observed timestamps",
+    "Keep human attainment and reported observations separate from automation completion or planned activity durations",
+    "Actual HTTP console/native goal planning, revisions/retry conflicts and source-linked projection tests"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/goal_plans.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goal_plans.py",
+    "apps/console/src/features/capabilities/identity/GoalPlanPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_goal_plans.py",
+    "checks/runtime/capabilities/identity/goal_plans_ui_server.py",
+    "apps/console/src/features/capabilities/identity/GoalPlanPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_goal_plans.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/GoalPlanPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity09-baseline",
+  "remaining_limits": [
+    "External calendar scheduling remains unqualified; current calendar consumer is ICS export",
+    "Velocity is change in explicitly reported metric per elapsed day, not predicted completion or verified human effort",
+    "Linked task/loop status never marks human goal or milestone complete"
+  ],
+  "evidence": {
+    "task": "identity.09",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790298480.3714616,
+    "production_lines": 243,
+    "test_lines": 319,
+    "ratio": 1.3127572016460904,
+    "stage": "all",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goal_plans.py",
+          "runtime/gideon/workspace/capabilities/identity/goal_plans.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/goal_plans_ui_server.py",
+          "checks/runtime/capabilities/identity/test_goal_plans.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.09-checks-58kbreap/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_goal_plans.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.09-checks-58kbreap/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/GoalPlanPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.09-checks-58kbreap/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.09-checks-58kbreap",
+    "completed_at": 1790298502.4279058,
+    "files": {
+      "apps/console/src/features/capabilities/identity/GoalPlanPage.tsx": "6784f95479980e2242bc75fa710bad6e46b7a723a9bd7750ca21d20cf5f4df17",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goal_plans.py": "8af3a89edea8b7d350c85f52fa2244b4eb0117ef0dfaf476093a32aa51876260",
+      "runtime/gideon/workspace/capabilities/identity/goal_plans.py": "c19f4fb3b9b9033ed039f05bcbc8a8be44f10717d43ab00cfdccdb804b368cc7",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "b39b3351a246b2f6aa452490942741855b068f6d7e7136029eb7ed3e4116fa54",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "86eb5b431d21dd66bef02c73183c4059779881f16ad4deca21d2cc38e90b9f4d",
+      "apps/console/src/features/capabilities/identity/GoalPlanPage.test.tsx": "0225c24908c4c33101d2c7011df7ee477afe0c69ce890339fb63221664a30579",
+      "checks/runtime/capabilities/identity/goal_plans_ui_server.py": "112710d17b70bf7bd00b774d47496f77dc00b8446a995a604c76d3b889cfb6a5",
+      "checks/runtime/capabilities/identity/test_goal_plans.py": "1661d2690f630233e82a45274498e18ccff7744a0763ea06c0396dd52014084c"
+    }
+  },
+  "repair_cycles": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.09"
+}

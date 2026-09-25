@@ -196,7 +196,52 @@ async def git_endpoint(request):
         return web.json_response({'error':'Git operation unavailable'},status=503)
 
 
+def desktops():
+    from gideon.workspace.capabilities.workspace.desktop import get_desktop_registry
+    from .files import _dashboard_roots
+    return get_desktop_registry(config_dir()/'capabilities'/'workspace',allowed_roots=[p for _,p in _dashboard_roots()])
+
+
+async def desktop_endpoint(request):
+    if not request.get('user') or request.get('app'):
+        return web.json_response({'error':'Owner authentication required'},status=403)
+    try:
+        registry=desktops()
+        sid=request.match_info.get('id')
+        operation=request.match_info.get('operation')
+        if request.method=='GET':
+            if operation=='frame':
+                return web.Response(body=await registry.frame(sid),content_type='image/png',headers={'Cache-Control':'no-store'})
+            result=registry.availability() if operation=='availability' else registry.get(sid) if sid else registry.list()
+        else:
+            body=await read_json_body(request)
+            if operation=='input':result=await registry.input(sid,body)
+            elif operation=='stop':result=await registry.stop(sid,body.get('revision'))
+            else:result=await registry.start(body)
+        return web.json_response(result)
+    except ConflictError as error:
+        return web.json_response({'error':str(error)},status=409)
+    except FileNotFoundError:
+        return web.json_response({'error':'Desktop or project not found'},status=404)
+    except (ValueError,TypeError) as error:
+        return web.json_response({'error':str(error)},status=400)
+    except (OSError,TimeoutError):
+        return web.json_response({'error':'Desktop temporarily unavailable'},status=503)
+
+
+async def close_desktops(app):
+    from gideon.workspace.capabilities.workspace.desktop import close_desktop_registry
+    await close_desktop_registry(config_dir()/'capabilities'/'workspace')
+
+
 def register(app):
+    app.on_cleanup.append(close_desktops)
+    app.router.add_get('/api/capabilities/workspace/desktops',desktop_endpoint)
+    app.router.add_post('/api/capabilities/workspace/desktops',desktop_endpoint)
+    app.router.add_get('/api/capabilities/workspace/desktops/{operation:availability}',desktop_endpoint)
+    app.router.add_get('/api/capabilities/workspace/desktops/{id}',desktop_endpoint)
+    app.router.add_get('/api/capabilities/workspace/desktops/{id}/{operation:frame}',desktop_endpoint)
+    app.router.add_post('/api/capabilities/workspace/desktops/{id}/{operation:input|stop}',desktop_endpoint)
     app.router.add_post('/api/capabilities/workspace/git/operations',git_endpoint)
     app.router.add_get('/api/capabilities/workspace/git/{project_id}/{history:operations}',git_endpoint)
     app.router.add_get('/api/capabilities/workspace/git/{project_id}',git_endpoint)
