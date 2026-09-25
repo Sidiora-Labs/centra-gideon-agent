@@ -119,6 +119,10 @@ class WorkStore(IngredientStore):
             return {"items": [json.loads(row[0]) for row in db.execute("SELECT record FROM work_drafts WHERE work_id=? ORDER BY rowid DESC", (id,))]}
 
     def draft(self, id, payload):
+        with self.connection() as db:
+            return self.draft_in_transaction(db, id, payload)
+
+    def draft_in_transaction(self, db, id, payload):
         keys(payload, {"request_id", "revision", "text", "note"})
         request = identifier(payload.get("request_id"))
         content = text(payload.get("text"), 1000000)
@@ -126,36 +130,35 @@ class WorkStore(IngredientStore):
             raise CatalogError("Draft text is required")
         note = text(payload.get("note", ""), 2000)
         digest = hashlib.sha256(json.dumps({"id": identifier(id), **payload}, sort_keys=True).encode()).hexdigest()
-        with self.connection() as db:
-            prior = db.execute("SELECT payload_hash,record FROM work_draft_requests WHERE id=?", (request,)).fetchone()
-            if prior:
-                if prior[0] != digest:
-                    raise CatalogError("Draft request already used with different values", 409)
-                return json.loads(prior[1])
-            work = self._work(db, id)
-            if integer(payload.get("revision")) != work["revision"]:
-                raise CatalogError("Work changed; reload before saving a draft", 409)
-            draft_id = hashlib.sha256((id + ":" + request).encode()).hexdigest()
-            slug = "creative-draft-" + draft_id
-            artifact = self.artifacts.get(slug, version=1)
-            if artifact:
-                if artifact.content != content or not artifact.readonly or artifact.description != digest:
-                    raise CatalogError("Draft artifact conflicts with this request", 409)
-            else:
-                artifact = self.artifacts.create(name=work["title"] + " draft", slug=slug, kind="markdown", content=content,
-                                                 description=digest, readonly=True)
-                if artifact.slug != slug:
-                    raise CatalogError("Draft artifact name changed; retry", 409)
-            persisted = self.artifacts.get(slug, version=1)
-            if persisted is None or persisted.content != content or not persisted.readonly or persisted.description != digest:
-                raise CatalogError("Draft artifact persistence could not be confirmed", 500)
-            draft = {"id": draft_id, "artifact_id": artifact.slug, "artifact_version": 1, "note": note,
-                     "created_at": datetime.now(timezone.utc).isoformat(), "characters": len(content)}
-            db.execute("INSERT INTO work_drafts VALUES(?,?,?)", (draft_id, id, json.dumps(draft)))
-            record = self._save(db, {**work, "active_draft_id": draft_id, "revision": work["revision"] + 1, "updated_at": draft["created_at"]})
-            result = {"work": record, "draft": draft}
-            db.execute("INSERT INTO work_draft_requests VALUES(?,?,?)", (request, digest, json.dumps(result)))
-            return result
+        prior = db.execute("SELECT payload_hash,record FROM work_draft_requests WHERE id=?", (request,)).fetchone()
+        if prior:
+            if prior[0] != digest:
+                raise CatalogError("Draft request already used with different values", 409)
+            return json.loads(prior[1])
+        work = self._work(db, id)
+        if integer(payload.get("revision")) != work["revision"]:
+            raise CatalogError("Work changed; reload before saving a draft", 409)
+        draft_id = hashlib.sha256((id + ":" + request).encode()).hexdigest()
+        slug = "creative-draft-" + draft_id
+        artifact = self.artifacts.get(slug, version=1)
+        if artifact:
+            if artifact.content != content or not artifact.readonly or artifact.description != digest:
+                raise CatalogError("Draft artifact conflicts with this request", 409)
+        else:
+            artifact = self.artifacts.create(name=work["title"] + " draft", slug=slug, kind="markdown", content=content,
+                                             description=digest, readonly=True)
+            if artifact.slug != slug:
+                raise CatalogError("Draft artifact name changed; retry", 409)
+        persisted = self.artifacts.get(slug, version=1)
+        if persisted is None or persisted.content != content or not persisted.readonly or persisted.description != digest:
+            raise CatalogError("Draft artifact persistence could not be confirmed", 500)
+        draft = {"id": draft_id, "artifact_id": artifact.slug, "artifact_version": 1, "note": note,
+                 "created_at": datetime.now(timezone.utc).isoformat(), "characters": len(content)}
+        db.execute("INSERT INTO work_drafts VALUES(?,?,?)", (draft_id, id, json.dumps(draft)))
+        record = self._save(db, {**work, "active_draft_id": draft_id, "revision": work["revision"] + 1, "updated_at": draft["created_at"]})
+        result = {"work": record, "draft": draft}
+        db.execute("INSERT INTO work_draft_requests VALUES(?,?,?)", (request, digest, json.dumps(result)))
+        return result
 
     def read_draft(self, id, draft_id):
         with self.connection() as db:

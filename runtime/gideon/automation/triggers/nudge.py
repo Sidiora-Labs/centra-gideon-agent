@@ -164,6 +164,9 @@ class NudgeAttempt:
             logger.info("AutoNudge: loop %s reached max_cycles — deactivating", loop.id)
             await service.update(loop.id, active=False)
             return False, "max_cycles"
+        from gideon.workspace.capabilities.identity.lifecycle import nudge_allowed
+        if not nudge_allowed(loop.session_name):
+            return False, "identity_policy_blocked"
         if service._on_fire is None:
             return False, "no_deliverer"
         try:

@@ -13,6 +13,8 @@ from gideon.workspace.capabilities.creative.authors import AuthorStore
 from gideon.workspace.capabilities.creative.works import WorkStore
 from gideon.workspace.capabilities.creative.polishing import PolishingStore
 from gideon.workspace.capabilities.creative.stories import StoryStore
+from gideon.workspace.capabilities.creative.series import SeriesStore
+SERIES = web.AppKey("creative_series", SeriesStore)
 STORIES = web.AppKey("creative_stories", StoryStore)
 POLISHING = web.AppKey("creative_polishing", PolishingStore)
 WORKS = web.AppKey("creative_works", WorkStore)
@@ -70,6 +72,35 @@ async def universes(request):
         else:
             payload = await request.json()
             result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
+        return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
+async def series(request):
+    store = request.app[SERIES]
+    id = request.match_info.get("id")
+    action = request.path.rsplit("/", 1)[-1]
+    try:
+        if request.method == "GET":
+            if set(request.query) - {"q", "offset", "limit", "revision"}:
+                raise CatalogError("Unexpected query parameter")
+            if action == "export":
+                revision = int(request.query["revision"]) if "revision" in request.query else None
+                return web.json_response(store.export(id, revision), headers={"Content-Disposition": f'attachment; filename="series-{id}.json"'})
+            elif action == "revisions":
+                result = {"items": store.revisions(id)}
+            elif id:
+                result = store.get(id)
+            else:
+                result = store.list(request.query.get("q", ""), int(request.query.get("offset", 0)), int(request.query.get("limit", 25)))
+        else:
+            payload = await request.json()
+            chapter_id = request.match_info.get("chapter_id")
+            if chapter_id:
+                result = await store.draft(id, chapter_id, payload) if action == "draft" else getattr(store, action)(id, chapter_id, payload)
+            else:
+                result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
         return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
     except (CatalogError, ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
@@ -235,6 +266,17 @@ async def polishing(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    app[SERIES] = SeriesStore(app[STORE].home)
+    app.router.add_get("/api/capabilities/creative/series", series)
+    app.router.add_post("/api/capabilities/creative/series", series)
+    app.router.add_get("/api/capabilities/creative/series/{id}", series)
+    app.router.add_patch("/api/capabilities/creative/series/{id}", series)
+    app.router.add_get("/api/capabilities/creative/series/{id}/revisions", series)
+    app.router.add_post("/api/capabilities/creative/series/{id}/restore", series)
+    app.router.add_get("/api/capabilities/creative/series/{id}/export", series)
+    app.router.add_post("/api/capabilities/creative/series/{id}/chapters/{chapter_id}/prepare", series)
+    app.router.add_post("/api/capabilities/creative/series/{id}/chapters/{chapter_id}/draft", series)
+    app.router.add_post("/api/capabilities/creative/series/{id}/chapters/{chapter_id}/review", series)
     app[STORIES] = StoryStore(app[STORE].home)
     app.router.add_get("/api/capabilities/creative/stories", stories)
     app.router.add_post("/api/capabilities/creative/stories", stories)

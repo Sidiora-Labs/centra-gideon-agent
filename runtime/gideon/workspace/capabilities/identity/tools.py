@@ -50,7 +50,14 @@ class IdentityToolProvider(ToolProvider):
             return ToolResult(success=False, error="Invalid identity arguments: " + problem.message,
                               recovery_hints=["Use the tool's declared fields and current revision."])
         try:
-            if tool_name == "identity_recipe_advance":
+            if tool_name.startswith("identity_lifecycle_"):
+                from gideon.workspace.capabilities.identity.lifecycle import LifecycleStore
+                from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+                from gideon.automation.triggers.nudge import get_instance
+                store = LifecycleStore(self.home)
+                operation = tool_name.removeprefix("identity_lifecycle_")
+                result = await store.dispatch(**arguments, state=get_dashboard_state(), service=get_instance()) if operation == "dispatch" else getattr(store, operation)(**arguments)
+            elif tool_name == "identity_recipe_advance":
                 store = RecipeStore(self.home / "capabilities/identity/recipes.sqlite3")
                 result = await store.advance(**arguments, provider=self)
             elif tool_name == "identity_fidelity_run":

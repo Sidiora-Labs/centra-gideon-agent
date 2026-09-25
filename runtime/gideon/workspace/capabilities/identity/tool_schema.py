@@ -118,3 +118,9 @@ def definitions():
                            requires_approval=write,
                            risk_level=RiskLevel.DESTRUCTIVE if "delete" in name else RiskLevel.CAUTION if write else RiskLevel.SAFE)
             for name, (fields, required, description, write) in CONTRACTS.items()]
+
+CONTRACTS.update({
+    "identity_lifecycle_status": ({}, [], "Read actual bound agent loop lifecycle and honest delivery receipts", False),
+    "identity_lifecycle_request_thinking": ({"request_id": IDENTIFIER, "preset": {"enum": ["reflect", "review"]}}, ["request_id", "preset"], "Queue bounded self-reflection within human-approved loop authority", True),
+    "identity_lifecycle_dispatch": ({"id": IDENTIFIER}, ["id"], "Dispatch one approved thinking request through the existing guarded loop delivery path", True),
+})

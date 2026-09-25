@@ -14,6 +14,8 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_external_terminals', 'Read existing native iTerm pane metadata without taking ownership.', {}, [], False),
+            ('workspace_external_terminal_screen', 'Read the visible text of one existing native iTerm pane.', {'id':{'type':'string'}}, ['id'], False),
             ('workspace_desktops', 'List isolated desktop lifecycle records.', {}, [], False),
             ('workspace_desktop_get', 'Read one isolated desktop session.', {'id':{'type':'string'}}, ['id'], False),
             ('workspace_desktop_start', 'Start an approved isolated Linux desktop and shell for a canonical project.', {'project_id':{'type':'string'},'request_id':{'type':'string'},'width':{'type':'integer'},'height':{'type':'integer'}}, ['project_id','request_id','width','height'], True),
@@ -60,7 +62,11 @@ class WorkspaceToolProvider(ToolProvider):
                 expected = str if schema['properties'][key]['type'] == 'string' else int
                 if type(value) is not expected:
                     raise ValueError('Invalid argument type')
-            if tool_name.startswith('workspace_desktop'):
+            if tool_name.startswith('workspace_external_terminal'):
+                from .iterm import ExternalTerminalMirror
+                mirror=ExternalTerminalMirror()
+                result=await mirror.screen(arguments['id']) if tool_name.endswith('_screen') else await mirror.inventory()
+            elif tool_name.startswith('workspace_desktop'):
                 from .desktop import get_desktop_registry
                 registry = get_desktop_registry(root,allowed_roots=roots)
                 if tool_name == 'workspace_desktops':result=registry.list()

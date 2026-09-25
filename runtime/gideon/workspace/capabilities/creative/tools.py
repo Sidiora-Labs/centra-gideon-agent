@@ -10,6 +10,7 @@ from .authors import AuthorStore
 from .works import WorkStore
 from .polishing import PolishingStore
 from .stories import StoryStore
+from .series import SeriesStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -57,9 +58,14 @@ STORY = {"title": STRING, "genre": STRING, "premise": STRING, "protagonist_goal"
          "beats": {"type": "array", "items": obj({"id": STRING, "title": STRING, "summary": STRING}, ["id", "title"])}}
 
 
+SERIES = {"title": STRING, "synopsis": STRING, "author_ref": WORK["author_ref"], "universe_ref": WORK["universe_ref"],
+          "volumes": {"type": "array", "items": obj({"id": STRING, "title": STRING, "chapters": {"type": "array", "items": obj({"id": STRING, "title": STRING, "prompt": STRING}, ["id", "title"])}}, ["id", "title"])},
+          "arcs": {"type": "array", "items": obj({"id": STRING, "title": STRING, "summary": STRING, "chapter_ids": {"type": "array", "items": STRING}}, ["id", "title"])}}
+
+
 def schemas():
     result = {}
-    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE), ("author", AUTHOR), ("work", WORK), ("story", STORY)):
+    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE), ("author", AUTHOR), ("work", WORK), ("story", STORY), ("series", SERIES)):
         result[f"creative_{entity}_list"] = obj({**PAGE, **({"type": {"enum": list(TYPES)}, "tag": STRING} if entity == "ingredient" else {})})
         result[f"creative_{entity}_get"] = obj({"id": STRING}, ["id"])
         result[f"creative_{entity}_create"] = obj({"payload": obj({**fields, "request_id": STRING}, ["title", "request_id", *(["type"] if entity == "ingredient" else [])])}, ["payload"])
@@ -87,6 +93,11 @@ def schemas():
     result["creative_story_suggest"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER, "instruction": STRING, "mode": {"enum": ["model", "authored"]}, "patch": obj({key: STORY[key] for key in ("genre", "premise", "protagonist_goal", "conflict", "stakes", "ending", "beats")})}, ["request_id", "revision"])}, ["id", "payload"])
     result["creative_story_adopt"] = obj({"id": STRING, "payload": obj({"revision": NUMBER, "suggestion_id": STRING}, ["revision", "suggestion_id"])}, ["id", "payload"])
     result["creative_story_create_work"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER}, ["request_id", "revision"])}, ["id", "payload"])
+    result["creative_series_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_series_prepare"] = obj({"id": STRING, "chapter_id": STRING, "payload": obj({"revision": NUMBER}, ["revision"])}, ["id", "chapter_id", "payload"])
+    result["creative_series_review"] = obj({"id": STRING, "chapter_id": STRING, "payload": obj({"revision": NUMBER, "work_revision": NUMBER}, ["revision", "work_revision"])}, ["id", "chapter_id", "payload"])
+    result["creative_series_draft"] = obj({"id": STRING, "chapter_id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER,
+        "work_revision": NUMBER, "mode": {"enum": ["model", "authored"]}, "text": STRING, "note": STRING, "instruction": STRING}, ["request_id", "revision", "work_revision", "mode"])}, ["id", "chapter_id", "payload"])
     result["creative_board_sources"] = obj({"q": STRING})
     result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
     result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
@@ -97,7 +108,7 @@ def schemas():
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -110,6 +121,7 @@ class CreativeToolProvider(ToolProvider):
         self.works = WorkStore(self.ingredients.home)
         self.polishing = PolishingStore(self.works)
         self.stories = StoryStore(self.ingredients.home)
+        self.series = SeriesStore(self.ingredients.home)
 
     @property
     def name(self):
@@ -137,9 +149,12 @@ class CreativeToolProvider(ToolProvider):
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
             _, entity, action = tool_name.split("_", 2)
-            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors, "work": self.works, "story": self.stories}[entity]
+            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors, "work": self.works, "story": self.stories, "series": self.series}[entity]
             args = dict(arguments)
-            if entity == "story" and action == "suggest":
+            if entity == "series" and action in ("prepare", "draft", "review"):
+                method = getattr(store, action)
+                result = await method(**args) if action == "draft" else method(**args)
+            elif entity == "story" and action == "suggest":
                 result = await store.suggest(**args)
             elif action.startswith("polish_"):
                 method = getattr(self.polishing, action.removeprefix("polish_"))

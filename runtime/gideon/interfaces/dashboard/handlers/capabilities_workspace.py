@@ -234,7 +234,28 @@ async def close_desktops(app):
     await close_desktop_registry(config_dir()/'capabilities'/'workspace')
 
 
+async def external_terminal_endpoint(request):
+    if not request.get('user') or request.get('app'):
+        return web.json_response({'error':'Owner authentication required'},status=403)
+    from gideon.workspace.capabilities.workspace.iterm import ExternalTerminalMirror
+    mirror=ExternalTerminalMirror()
+    try:
+        if request.query:raise ValueError('External terminal query overrides are not supported')
+        identity=request.match_info.get('id')
+        if identity=='availability':result=mirror.availability()
+        else:result=await mirror.screen(identity) if identity else await mirror.inventory()
+        return web.json_response(result,headers={'Cache-Control':'no-store'})
+    except FileNotFoundError:
+        return web.json_response({'error':'Native pane no longer exists'},status=404)
+    except ValueError as error:
+        return web.json_response({'error':str(error)},status=400)
+    except (OSError,TimeoutError):
+        return web.json_response({'error':'Native mirror unavailable; requires local macOS, iTerm2 SDK and native authorization'},status=503)
+
+
 def register(app):
+    app.router.add_get('/api/capabilities/workspace/external-terminals',external_terminal_endpoint)
+    app.router.add_get('/api/capabilities/workspace/external-terminals/{id}',external_terminal_endpoint)
     app.on_cleanup.append(close_desktops)
     app.router.add_get('/api/capabilities/workspace/desktops',desktop_endpoint)
     app.router.add_post('/api/capabilities/workspace/desktops',desktop_endpoint)

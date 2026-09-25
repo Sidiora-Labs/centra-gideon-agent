@@ -18,7 +18,8 @@
       "port_reservations",
       "project_discovery",
       "project_git",
-      "isolated_desktops"
+      "isolated_desktops",
+      "external_terminal_mirror"
     ]
   },
   "native": true

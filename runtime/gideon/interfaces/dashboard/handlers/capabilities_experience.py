@@ -55,6 +55,8 @@ def register(app):
     register_ambient(app, app[STORE])
     from gideon.workspace.capabilities.experience.avatar_http import register_avatars
     register_avatars(app, app[STORE])
+    from gideon.workspace.capabilities.experience.native_calls_http import register_native_calls
+    register_native_calls(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource
         app.router.add_get(path, handle)

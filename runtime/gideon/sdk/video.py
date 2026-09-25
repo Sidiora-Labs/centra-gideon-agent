@@ -6,6 +6,7 @@ the core registry through these, not the core modules directly.
 """
 
 from gideon.integrations.video_gen.provider import (
+    VideoControl,
     VideoGenError,
     VideoGenModel,
     VideoGenProvider,
@@ -14,6 +15,7 @@ from gideon.integrations.video_gen.provider import (
 from gideon.integrations.video_gen.registry import active_video_gen  # noqa: F401
 
 __all__ = [
+    "VideoControl",
     "VideoGenProvider",
     "VideoGenModel",
     "VideoResult",

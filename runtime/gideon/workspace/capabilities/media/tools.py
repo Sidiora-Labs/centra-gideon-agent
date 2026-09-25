@@ -41,6 +41,10 @@ CATALOG.update({
 CLEANUP_INPUT = {"type": "object", "additionalProperties": False, "required": ["source_artifact_id", "source_version", "operations"], "properties": {"source_artifact_id": STRING, "source_version": INTEGER, "operations": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object", "required": ["op"], "properties": {"op": {"enum": ["crop", "resize", "rotate", "flip", "brightness", "contrast", "sharpen", "solid_background"]}}}}}}
 CATALOG["media_cleanup_submit"] = ("Queue ordered local image transforms preserving the pinned original; solid-background cleanup is deterministic edge color removal, not semantic segmentation.", ("request_id", "input"), {"request_id": STRING, "input": CLEANUP_INPUT}, True)
 
+VIDEO_INPUT = {"type": "object", "additionalProperties": False, "required": ["prompt", "duration_seconds"], "properties": {"prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "duration_seconds": {"type": "number", "minimum": 1, "maximum": 60}, "aspect_ratio": STRING, **{prefix+"_artifact_id": STRING for prefix in ("first_frame", "last_frame", "continuation")}, **{prefix+"_version": INTEGER for prefix in ("first_frame", "last_frame", "continuation")}, "controls": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "integer" if key == "seed" else "number"} for key in ("seed", "guidance", "motion")}}}}
+CATALOG["media_video_capabilities"] = ("Read selected video model controls, conditioning and processing availability.", (), {}, False)
+CATALOG["media_video_submit"] = ("Queue video generation with advertised controls or pinned frame/continuation references; outputs become canonical artifacts.", ("request_id", "input"), {"request_id": STRING, "input": VIDEO_INPUT}, True)
+
 DATASET_FIELDS = {"title": STRING, "base_model": STRING, "request_id": STRING, "revision": {"type": "integer", "minimum": 0}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object", "additionalProperties": False, "required": ["artifact_id", "version", "caption"], "properties": {"artifact_id": STRING, "version": INTEGER, "caption": {"type": "string", "maxLength": 2000}}}}}
 TRAIN_INPUT = {"type": "object", "additionalProperties": False, "required": ["dataset_id", "dataset_revision", "steps", "rank", "learning_rate", "seed"], "properties": {"dataset_id": STRING, "dataset_revision": INTEGER, "steps": INTEGER, "rank": INTEGER, "learning_rate": {"type": "number"}, "seed": {"type": "integer", "minimum": 0}}}
 CATALOG.update({
@@ -106,6 +110,8 @@ class MediaToolProvider(ToolProvider):
                 result = await self.readiness.refresh()
             elif tool_name in ("media_loras_list", "media_loras_get"):
                 result = await self.jobs.images.lora_inventory(arguments.get("adapter_id"))
+            elif tool_name == "media_video_capabilities":
+                result = await self.jobs.videos.capabilities()
             elif tool_name == "media_image_capabilities":
                 result = await self.jobs.images.capabilities()
             else:
@@ -116,6 +122,8 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_video_submit':
+            return self.jobs.submit(dict(operation='video_generate', **args))
         if name == 'media_cleanup_submit':
             return self.jobs.submit(dict(operation='image_cleanup', **args))
         if name == 'media_datasets_list':
