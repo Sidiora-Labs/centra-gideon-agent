@@ -43,8 +43,7 @@
   "limits": [
     "This sub-slice supports only version-1 people, projects, admin, threads, ideas, journals, memories, links, buckets, inbox and songs collection records; every other archive domain, relational dump and future schema is rejected.",
     "People, project, task, song and knowledge archive families require separate imports so each authoritative store has explicit publication semantics; project, task and song archives are limited to one record.",
-    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal, but arbitrary mixed authoritative-store archives remain rejected rather than claiming unsupported global atomicity.",
-    "Shared durability inventory, packaged backup inclusion and the final aggregate fresh-home restore journey remain owned by the root integration slice."
+    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal, but arbitrary mixed authoritative-store archives remain rejected rather than claiming unsupported global atomicity."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
   "verification": {
@@ -57,5 +56,15 @@
     "production_lines": 916,
     "test_lines": 934,
     "repair_cycles": 1
+  },
+  "packaged_song_restore": {
+    "test": "checks/runtime/capabilities/platform/test_migration_journal_durability.py",
+    "sha256": "56acbb008312811a11b997666611be4f72fac10f42ca0b12e9ae3b768054cd4b",
+    "command": "env PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/platform/test_migration_journal_durability.py -q",
+    "exit_code": 0,
+    "result": "1 passed",
+    "reported_by": "oss_workspace_r2",
+    "coverage": "Real song and PDF migration, packaged snapshot, restore_apply into fresh home, canonical record/artifact/journal bytes, receipt replay without duplication",
+    "scope": "One song archive; mixed authoritative-store archive acceptance remains separate."
   }
 }
