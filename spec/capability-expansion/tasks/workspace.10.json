@@ -1,0 +1,47 @@
+{
+  "id": "workspace.10",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "mode": "QUALIFY",
+  "scope": "Bounded read-only storage attribution for Gideon-owned state and canonical project roots",
+  "base_revision": "426d0518",
+  "acceptance": [
+    "Measure actual logical file bytes and entry counts only beneath captured runtime home or canonical HierarchyStore project roots",
+    "Never accept arbitrary paths, traverse symlinks, filesystem roots or mounted filesystem boundaries, and expose truthful bounded partial scans",
+    "Attribute project workspace and canonical project metadata separately without writing, deleting or cleaning any storage",
+    "Owner HTTP, native safe tool and console share the same diagnosis with real filesystem and Chromium tests"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/storage.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Storage.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_storage.py",
+    "apps/console/src/features/capabilities/workspace/Storage.test.ts"
+  ],
+  "runtime_test_files": ["checks/runtime/capabilities/workspace/test_storage.py"],
+  "ui_test_files": ["apps/console/src/features/capabilities/workspace/Storage.test.ts"],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.10",
+  "limitations": [
+    "Logical attributed bytes are not filesystem allocated blocks, snapshots, caches outside Gideon home or canonical workspaces",
+    "A diagnosis is a bounded point-in-time read and may be partial under concurrent filesystem changes or its entry limit",
+    "Native macOS storage-device and external volume qualification remains outside this local Linux checkpoint"
+  ],
+  "repair_cycles": 2,
+  "exit_code": 0,
+  "evidence": {
+    "evidence_dir": "/tmp/gideon-workspace.10-checks-ri0kj867",
+    "production_lines": 183,
+    "test_lines": 287,
+    "ratio": 1.5683060109289617,
+    "compile_exit_code": 0,
+    "runtime_exit_code": 0,
+    "runtime_result": "10 passed, 9 subtests passed",
+    "ui_exit_code": 0,
+    "ui_result": "2 Chromium cases passed",
+    "status": "locally_qualified"
+  }
+}

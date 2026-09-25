@@ -272,7 +272,31 @@ async def provider_terminal_endpoint(request):
         return web.json_response({'error':str(error)},status=400)
 
 
+async def storage_endpoint(request):
+    if not request.get('user') or request.get('app'):
+        return web.json_response({'error':'Owner authentication required'},status=403)
+    from gideon.workspace.capabilities.workspace.storage import StorageDiagnosis
+    from .files import _dashboard_roots
+    try:
+        service=StorageDiagnosis(config_dir(),allowed_roots=[p for _,p in _dashboard_roots()])
+        if request.method=='POST':
+            result=await asyncio.to_thread(service.scan,await read_json_body(request))
+        else:
+            project_id=request.query.get('project_id')
+            if set(request.query)-{'project_id','token'}:raise ValueError('Unknown storage query')
+            result=await asyncio.to_thread(service.report,project_id)
+        return web.json_response(result)
+    except FileNotFoundError:
+        return web.json_response({'error':'Project not found'},status=404)
+    except (ValueError,TypeError) as error:
+        return web.json_response({'error':str(error)},status=400)
+    except OSError:
+        return web.json_response({'error':'Storage diagnosis unavailable'},status=503)
+
+
 def register(app):
+    app.router.add_get('/api/capabilities/workspace/storage',storage_endpoint)
+    app.router.add_post('/api/capabilities/workspace/storage/scan',storage_endpoint)
     app.router.add_get('/api/capabilities/workspace/provider-terminals',provider_terminal_endpoint)
     app.router.add_post('/api/capabilities/workspace/provider-terminals/images',provider_terminal_endpoint)
     app.router.add_get('/api/capabilities/workspace/external-terminals',external_terminal_endpoint)

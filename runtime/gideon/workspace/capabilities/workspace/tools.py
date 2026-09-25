@@ -14,6 +14,7 @@ class WorkspaceToolProvider(ToolProvider):
     async def list_tools(self):
         definitions = []
         for name, description, fields, required, write in [
+            ('workspace_storage_diagnosis', 'Read bounded attributed storage for Gideon-owned state and canonical project roots.', {'project_id':{'type':'string'}}, [], False),
             ('workspace_provider_terminal_profiles', 'Read configured interactive provider engine availability.', {}, [], False),
             ('workspace_external_terminals', 'Read existing native iTerm pane metadata without taking ownership.', {}, [], False),
             ('workspace_external_terminal_screen', 'Read the visible text of one existing native iTerm pane.', {'id':{'type':'string'}}, ['id'], False),
@@ -67,6 +68,9 @@ class WorkspaceToolProvider(ToolProvider):
             if tool_name == 'workspace_provider_terminal_profiles':
                 from .provider_terminal import profiles
                 result=profiles()
+            elif tool_name == 'workspace_storage_diagnosis':
+                from .storage import StorageDiagnosis
+                result=StorageDiagnosis(config_dir(),allowed_roots=roots).report(arguments.get('project_id'))
             elif tool_name.startswith('workspace_external_terminal'):
                 from .iterm import ExternalTerminalMirror
                 mirror=ExternalTerminalMirror()
