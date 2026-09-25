@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
@@ -40,8 +40,9 @@ function Correction({ row, saved }: { row: Lab; saved: () => void }) {
 }
 
 export default function Labs() {
-  const [params, setParams] = useSearchParams()
-  const identity = params.get('id')
+  const { query: params, setQuery: setRouteQuery } = useHashRoute('capabilities')
+  const setParams = (values: Record<string, string>) => setRouteQuery({ id: null, ...values })
+  const identity = params.id
   const [filename, setFilename] = useState('')
   const [format, setFormat] = useState('csv')
   const [content, setContent] = useState('')

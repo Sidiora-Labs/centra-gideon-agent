@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
@@ -51,9 +51,10 @@ function Editor({ row, presets, presetMode, saved }: { row: Product | Entry | nu
 }
 
 export default function Substances() {
-  const [params, setParams] = useSearchParams()
-  const identity = params.get('id'), presetId = params.get('preset')
-  const presetMode = params.get('mode') === 'presets'
+  const { query: params, setQuery: setRouteQuery } = useHashRoute('capabilities')
+  const setParams = (values: Record<string, string>) => setRouteQuery({ id: null, preset: null, mode: null, ...values })
+  const identity = params.id, presetId = params.preset
+  const presetMode = params.mode === 'presets'
   const [entries, setEntries] = useState<Entry[]>([])
   const [presets, setPresets] = useState<Product[]>([])
   const [selected, setSelected] = useState<Entry | null>(null)
