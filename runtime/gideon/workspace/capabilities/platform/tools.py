@@ -6,14 +6,17 @@ from gideon.workspace.capabilities.platform.catalog import current_catalog
 from gideon.workspace.capabilities.platform.connections import projection
 from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 from gideon.workspace.capabilities.platform.harnesses import inventory
+from gideon.workspace.capabilities.platform.comparisons import view as comparison_view
 
 _SCHEMAS = {
+    "platform_model_comparisons": {"type": "object", "properties": {"run_id": {"type": "string", "maxLength": 200}}, "additionalProperties": False},
     "platform_harness_inventory": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_api_catalog": {"type": "object", "properties": {"offset": {"type": "integer", "minimum": 0, "maximum": 100000}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, "additionalProperties": False},
     "prompt_dependency_usage": {"type": "object", "properties": {"provider": {"type": "string", "maxLength": 100}, "name": {"type": "string", "minLength": 1, "maxLength": 100}}, "required": ["name"], "additionalProperties": False},
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_model_comparisons": "Read attributed comparison observations and recorded judge benchmark tables.",
     "platform_harness_inventory": "Inspect real managed CLI adapters, installed versions and dependencies.",
     "platform_api_catalog": "Inspect actual registered dashboard routes and declared app events.",
     "prompt_dependency_usage": "Inspect active and declared consumers before removing a saved prompt.",
@@ -39,6 +42,8 @@ class PlatformTools(ToolProvider):
                 result = prompt_usage(arguments.get("provider", "native"), arguments["name"])
             elif tool_name == "platform_harness_inventory":
                 result = inventory()
+            elif tool_name == "platform_model_comparisons":
+                result = comparison_view(arguments.get("run_id"))
             else:
                 result = projection()
             return ToolResult(success=True, output=json.dumps(result))
