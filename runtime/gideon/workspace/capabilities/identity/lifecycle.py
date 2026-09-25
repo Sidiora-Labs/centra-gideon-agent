@@ -80,29 +80,30 @@ class LifecycleStore:
             raise ValueError("Expected canonical loop ID and enabled boolean")
         if state is None or service is None:
             raise ValueError("Loop engine unavailable")
-        previous = self.policy()
-        if previous["loop_id"] and previous["loop_id"] != loop_id:
-            raise ValueError("This identity is already bound to another loop")
-        async with manager.dashboard_boundary_lock(state, loop_id):
-            replay = self._claim(request_id, dict(loop_id=loop_id, enabled=enabled, expected_revision=expected_revision))
-            if replay:
-                return replay
-            try:
-                previous = self.policy()
-                loop = loops.get(loop_id)
-                if loop is None:
-                    raise ValueError("Loop not found")
-                if enabled:
-                    require_route(loop)
-                elif loop.status == LoopStatus.RUNNING:
-                    await manager.pause(state, service, loop_id)
-                policy = {"revision": previous["revision"] + 1, "enabled": enabled, "loop_id": loop_id, "route_fingerprint": route_fingerprint(loop) if enabled else previous["route_fingerprint"]}
-                with sqlite3.connect(self.path) as db:
-                    db.execute("INSERT OR REPLACE INTO policy VALUES(1,?)", (json.dumps(policy),))
-                return self._finish(request_id, "applied", policy=policy)
-            except Exception as error:
-                self._finish(request_id, "failed", error=str(error))
-                raise
+        async with manager.dashboard_boundary_lock(state, "identity-policy"):
+            previous = self.policy()
+            if previous["loop_id"] and previous["loop_id"] != loop_id:
+                raise ValueError("This identity is already bound to another loop")
+            async with manager.dashboard_boundary_lock(state, loop_id):
+                replay = self._claim(request_id, dict(loop_id=loop_id, enabled=enabled, expected_revision=expected_revision))
+                if replay:
+                    return replay
+                try:
+                    previous = self.policy()
+                    loop = loops.get(loop_id)
+                    if loop is None:
+                        raise ValueError("Loop not found")
+                    if enabled:
+                        require_route(loop)
+                    elif loop.status == LoopStatus.RUNNING:
+                        await manager.pause(state, service, loop_id)
+                    policy = {"revision": previous["revision"] + 1, "enabled": enabled, "loop_id": loop_id, "route_fingerprint": route_fingerprint(loop) if enabled else previous["route_fingerprint"]}
+                    with sqlite3.connect(self.path) as db:
+                        db.execute("INSERT OR REPLACE INTO policy VALUES(1,?)", (json.dumps(policy),))
+                    return self._finish(request_id, "applied", policy=policy)
+                except Exception as error:
+                    self._finish(request_id, "failed", error=str(error))
+                    raise
 
     async def action(self, *, action, expected_revision, request_id, state, service):
         loop = self._loop()
