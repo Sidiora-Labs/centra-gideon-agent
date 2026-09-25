@@ -1,6 +1,6 @@
 {
   "id": "communications.13",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
   "base_revision": "449c6cd4",
   "requires": [
@@ -15,36 +15,45 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/timeline.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/TimelinePanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/TimelinePanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_timeline.py",
-    "checks/runtime/capabilities/communications/test_tools.py",
     "apps/console/src/features/capabilities/communications/TimelinePanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/communications/test_timeline.py",
-    "checks/runtime/capabilities/communications/test_tools.py"
+    "checks/runtime/capabilities/communications/test_timeline.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/communications/TimelinePanel.test.tsx"
   ],
-  "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
-  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.13",
   "limits": [
-    "Recorded communications activity only, not a complete life/activity record.",
-    "Calendar entries are schedules, not proof of attendance.",
-    "At most10000rows per canonical source scanned, with truncation coverage surfaced.",
-    "Seek pagination follows current records and is not a frozen snapshot."
+    "Recorded communications activity only, not a complete human activity record. Calendar entries are schedules and never proof of attendance.",
+    "At most 10000 rows per canonical source are scanned; truncation is surfaced. Seek pagination follows current records rather than a frozen snapshot.",
+    "Shared native-tool, route and Page mounts are retained as integration evidence and excluded from owned-file accounting because adjacent communications slices extend them."
   ],
   "qualification": {
-    "runtime": "37 passed",
-    "console_http": "3 passed",
-    "scope": "canonical recorded communications activity; schedule is not attendance"
-  }
+    "compile": "passed",
+    "runtime_tests": 37,
+    "ui_tests": 3,
+    "production_lines": 147,
+    "test_lines": 313,
+    "ratio": 2.129251700680272,
+    "repair_cycles": 1
+  },
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/Page.tsx",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "evidence": "/tmp/gideon-communications.13-checks-qn8h15l1/evidence.json",
+  "acceptance_coverage": [
+    "Read-only projection merges canonical touchpoint, relationship-message, calendar, social and assignment history rows with stable provenance IDs and source links; mirrored desktop/mail rows are not duplicated.",
+    "IANA local-day boundaries cover DST, timed and all-day overlap and cancellation while strict person/kind filters exclude unrelated records.",
+    "Query-bound seek cursors, bounded per-source scans and explicit incomplete coverage prevent unbounded reads and cursor reuse across changed queries.",
+    "Actual native, HTTP and console journeys filter, paginate, follow safe source links and surface invalid dates/timezones without exposing message bodies, credential references or private reasons."
+  ]
 }
