@@ -10,7 +10,8 @@ from gideon.workspace.capabilities.wellbeing.store import MeasurementError
 
 
 def register(app: web.Application, home: Path | None = None):
-    store = PrivacyStore(home if home is not None else config_dir())
+    bound_home = home if home is not None else config_dir()
+    store = PrivacyStore(bound_home)
 
     async def handle(request):
         try:
@@ -49,3 +50,5 @@ def register(app: web.Application, home: Path | None = None):
     app.router.add_put(base + '/{scope:facts}/{id}', handle)
     app.router.add_get(base + '/{scope:facts}/{id}/{suffix:history}', handle)
     app.router.add_post(base + '/{scope:facts}/{id}/{suffix:reveal}', handle)
+    from .capabilities_wellbeing_holdings import register as register_holdings
+    register_holdings(app, bound_home)

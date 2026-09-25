@@ -1,0 +1,62 @@
+{
+  "id": "wellbeing.13",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "29bd4dce",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_holdings.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/holdings_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_holdings.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_privacy.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyOrganizations.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Privacy.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_privacy_holdings.py",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyOrganizations.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/wellbeing/test_privacy_holdings.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/wellbeing/PrivacyOrganizations.test.tsx"
+  ],
+  "contract": "Revisioned subject-scoped organizations and fact holdings in the existing secret privacy.sqlite3. Declaring a current encrypted-fact revision change atomically propagates eligible holdings to update_pending. Derived per-change totals and revisioned user-reported updated/removed dispositions retain evidence and full organization, holding and target histories. HTTP/UI operate on masked fact metadata; native tools are read-only metadata and never accept values, passphrases, reveal, attestations, drafts or sends.",
+  "remaining_limits": [
+    "No external sends or automatic organization contact",
+    "Optional update draft remains pending because this revision has no generic communications draft service; a future adapter must use an existing communications draft queue, explicit scoped consent and a transient authenticated passphrase, and must never send",
+    "Organization names, contact, source and disposition evidence are owner-visible metadata inside the secret local database",
+    "No private database export, replication or plaintext projection; central secret inventory classification remains root-owned",
+    "Disposition evidence is explicitly user-reported and is not independent verification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.13",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.13-checks-5eyn61xl/evidence.json",
+  "repair_cycles": 1,
+  "production_lines": 384,
+  "test_lines": 386,
+  "test_ratio": 1.0052083333333333,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Privacy.tsx": "d44929851aeb898dcb1f3cc2d7a0b32e864381e30bc078df00205f000ea17f94",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyOrganizations.tsx": "4a760e65475e568c3081f1e66f1b55a3a9d2362d44995f1c209fa8c50bae08bf",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_holdings.py": "e520c76a41c3b0bc5ca0b210f3b756e3718bff79ddb90dd77922fbf814613746",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_privacy.py": "1db5de32004b8c7a0fdb044f4888cab4623401b576bafd2de35217a120a5d414",
+    "runtime/gideon/workspace/capabilities/wellbeing/holdings_provider.py": "f935eb1ce337c56967d0f0254d2dcd62461dde25693c25fabb9602cf71929196",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_holdings.py": "be411119f04b5aacb8a9689352af24555e2a61ca6ea89c54145bc1f616ac49fe",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "94a12f87fcbd90599ea3e753c45740bd248b5c80440e0ff09c467025c4543383",
+    "apps/console/src/features/capabilities/wellbeing/PrivacyOrganizations.test.tsx": "d168275790291c0afbc9295cb35cc9e877f00e813eaf896f19a8a18dc43f5fa3",
+    "checks/runtime/capabilities/wellbeing/test_privacy_holdings.py": "45e2491d831e752d1bb433b8956e7521332233f0590f97e77629d7caf4469958"
+  },
+  "acceptance_coverage": [
+    "revisioned organization create/update/archive and optimistic conflict handling",
+    "same-subject masked fact holdings with revision/status/history and invalid cross-subject refusal",
+    "atomic changed-fact propagation to every eligible active organization holding",
+    "derived pending/updated/removed/total progress after durable reopen",
+    "user-attested updated and removed dispositions with evidence and immutable target/holding history",
+    "metadata-only native reads with no plaintext, passphrase, mutation, attestation, draft or send operation",
+    "real isolated HTTP owner workflow with no-store and home isolation",
+    "real HTTP React organization, holding, change, progress, evidence, history and reload workflow",
+    "SQLite byte checks prove private values and transient passphrase remain absent from plaintext storage"
+  ]
+}
