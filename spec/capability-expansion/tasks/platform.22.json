@@ -56,16 +56,24 @@
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_replication.py",
     "runtime/gideon/workspace/capabilities/platform/replication_tools.py",
     "apps/console/src/features/capabilities/platform/Replication.tsx",
-    "runtime/gideon/workspace/capabilities/platform/replication_creative_direction.py"
+    "runtime/gideon/workspace/capabilities/platform/replication_creative_direction.py",
+    "runtime/gideon/workspace/capabilities/platform/replication_video.py",
+    "runtime/gideon/workspace/capabilities/platform/replication_music_video.py"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_replication.py",
     "checks/runtime/capabilities/platform/replication_ui_server.py",
     "apps/console/src/features/capabilities/platform/Replication.test.tsx",
-    "checks/runtime/capabilities/platform/test_replication_creative_direction.py"
+    "checks/runtime/capabilities/platform/test_replication_creative_direction.py",
+    "checks/runtime/capabilities/platform/test_replication_video.py",
+    "checks/runtime/capabilities/platform/test_replication_music_video.py",
+    "checks/runtime/capabilities/platform/test_replication_video_domains.py"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/platform/test_replication.py"
+    "checks/runtime/capabilities/platform/test_replication.py",
+    "checks/runtime/capabilities/platform/test_replication_video.py",
+    "checks/runtime/capabilities/platform/test_replication_music_video.py",
+    "checks/runtime/capabilities/platform/test_replication_video_domains.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/platform/Replication.test.tsx"
@@ -91,5 +99,13 @@
     "test_lines": 1029,
     "repair_cycles": 1,
     "stages": "The retained evidence qualifies through media.assets. The later creative.direction central integration is implemented but unverified in OSS: its only gate was interrupted by user instruction during runtime and exited 130; no replacement source gate was started."
-  }
+  },
+  "source_unverified_increments": [
+    {
+      "scope": "media.video_projects and music.video",
+      "integration_commit": "127d1179",
+      "status": "implemented_unverified",
+      "reason": "User requires hosted-only verification; no OSS compile, tests or runtime executed. Earlier evidence does not qualify these new adapters or central wiring."
+    }
+  ]
 }
