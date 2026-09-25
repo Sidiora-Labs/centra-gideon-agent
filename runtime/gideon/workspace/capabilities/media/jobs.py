@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ from uuid import uuid4
 
 from gideon.extensions.apps.background import BackgroundWorker
 
+from .images import ImageService
 from .sketches import SketchError, fields, integer
 
 
@@ -28,8 +30,9 @@ def now():
 
 
 class MediaJobs:
-    def __init__(self, path, sketches):
+    def __init__(self, path, sketches, images=None):
         self.path, self.sketches = Path(path), sketches
+        self.images = images or ImageService(sketches.artifacts)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, request TEXT UNIQUE, fingerprint TEXT, status TEXT, body TEXT)')
@@ -62,15 +65,22 @@ class MediaJobs:
         return public(job)
 
     def submit(self, body):
-        fields(body, ('operation', 'sketch_id', 'revision', 'request_id'), ('operation', 'sketch_id', 'revision', 'request_id'))
-        if body['operation'] != 'sketch_export':
-            raise SketchError('Unsupported media operation')
-        integer(body['revision'], 1, 1000000)
+        if not isinstance(body, dict):
+            raise SketchError('Expected an object')
+        image_request = None
+        if body.get('operation') == 'image_generate':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.images.prepare(body['input'])
+        else:
+            fields(body, ('operation', 'sketch_id', 'revision', 'request_id'), ('operation', 'sketch_id', 'revision', 'request_id'))
+            if body['operation'] != 'sketch_export':
+                raise SketchError('Unsupported media operation')
+            integer(body['revision'], 1, 1000000)
+            sketch = self.sketches.get(body['sketch_id'])
+            if sketch['revision'] != body['revision']:
+                raise SketchError('Sketch revision changed', 409)
         if not isinstance(body['request_id'], str) or not 1 <= len(body['request_id']) <= 100:
             raise SketchError('Invalid request ID')
-        sketch = self.sketches.get(body['sketch_id'])
-        if sketch['revision'] != body['revision']:
-            raise SketchError('Sketch revision changed', 409)
         fingerprint = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -80,7 +90,7 @@ class MediaJobs:
                     raise SketchError('Request ID conflicts with a prior job', 409)
                 return public(json.loads(row[1]))
             timestamp = now()
-            job = dict(id=str(uuid4()), operation='sketch_export', sketch_id=body['sketch_id'], revision=body['revision'], status='queued',
+            job = dict(id=str(uuid4()), operation=body['operation'], sketch_id=body.get('sketch_id'), revision=body.get('revision'), input=image_request, status='queued',
                        attempt=0, state_revision=1, owner_pid=None, owner_identity=None, result=None, error=None, created_at=timestamp, updated_at=timestamp,
                        events=[dict(status='queued', at=timestamp, detail='Waiting for the media worker')])
             db.execute('INSERT INTO jobs VALUES (?,?,?,?,?)', (job['id'], body['request_id'], fingerprint, 'queued', json.dumps(job)))
@@ -166,7 +176,7 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            result = self.jobs.sketches.export(job['sketch_id'], {'revision': job['revision']})
+            result = asyncio.run(self.jobs.images.execute(job['input'], job['id'])) if job['operation'] == 'image_generate' else self.jobs.sketches.export(job['sketch_id'], {'revision': job['revision']})
             self.jobs.finish(job['id'], result=result)
         except Exception as exc:
             self.jobs.finish(job['id'], error=str(exc)[:500])

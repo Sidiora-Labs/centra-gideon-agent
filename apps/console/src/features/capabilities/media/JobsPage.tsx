@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type MediaJob = { id: string; sketch_id: string; revision: number; status: string; state_revision: number; attempt: number; error: string | null; result: { artifact_id: string; version: number } | null; events: { status: string; at: string; detail: string; attempt?: number; result?: { artifact_id: string; version: number } | null }[] }
+export type MediaJob = { id: string; operation?: string; input?: { prompt: string } | null; sketch_id: string; revision: number; status: string; state_revision: number; attempt: number; error: string | null; result: { artifact_id: string; version: number } | null; events: { status: string; at: string; detail: string; attempt?: number; result?: { artifact_id: string; version: number } | null }[] }
 const base = '/api/capabilities/media/jobs'
 async function api(path: string, body?: object) {
   const response = await fetch(base + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined)
@@ -8,7 +8,7 @@ async function api(path: string, body?: object) {
 }
 export function JobCard({ job, act, busy }: { job: MediaJob; act: (job: MediaJob, action: string) => void; busy: boolean }) {
   return <article className="rounded border p-3 space-y-2">
-    <h2>Sketch {job.sketch_id} · revision {job.revision}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
+    <h2>{job.operation === 'image_generate' ? 'Image generation: ' + job.input?.prompt : <>Sketch {job.sketch_id} · revision {job.revision}</>}</h2><p role="status">{job.status} · attempt {job.attempt}</p>
     {job.error && <p role="alert">{job.error}</p>}
     {job.result && <a href={'/api/artifacts/' + job.result.artifact_id + '/raw?version=' + job.result.version}>Open rendered PNG</a>}
     {['queued', 'running'].includes(job.status) && <button disabled={busy} onClick={() => act(job, 'cancel')}>Cancel</button>}

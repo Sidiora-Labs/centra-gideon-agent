@@ -38,7 +38,13 @@ CATALOG.update({
     "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
 })
 
+IMAGE_INPUT = {"type": "object", "additionalProperties": False, "required": ["prompt"], "properties": {
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "size": STRING,
+    "source_artifact_id": STRING, "source_version": INTEGER, "mask_artifact_id": STRING, "mask_version": INTEGER,
+    "controls": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "integer" if key in ("seed", "steps") else "number"} for key in ("seed", "steps", "guidance", "strength")}}}}
 CATALOG.update({
+    "media_image_capabilities": ("Read the selected image model's advertised controls and conditioning support.", (), {}, False),
+    "media_image_submit": ("Queue image generation or pinned-source conditioning; unsupported controls fail explicitly before provider inference.", ("request_id", "input"), {"request_id": STRING, "input": IMAGE_INPUT}, True),
     "media_readiness_get": ("Read the last observed image/video provider readiness; availability is not inference verification.", (), {}, False),
     "media_readiness_refresh": ("Probe selected image/video provider availability and catalogs without generating media or installing models.", (), {}, False),
     "media_jobs_list": ("List the latest 100 durable local rendering jobs.", (), {}, False),
@@ -79,13 +85,20 @@ class MediaToolProvider(ToolProvider):
             return ToolResult(success=False, error="Unknown media tool")
         try:
             Draft202012Validator(schema(tool_name)).validate(arguments)
-            result = await self.readiness.refresh() if tool_name == "media_readiness_refresh" else await asyncio.to_thread(self._run, tool_name, dict(arguments))
+            if tool_name == "media_readiness_refresh":
+                result = await self.readiness.refresh()
+            elif tool_name == "media_image_capabilities":
+                result = await self.jobs.images.capabilities()
+            else:
+                result = await asyncio.to_thread(self._run, tool_name, dict(arguments))
             return ToolResult(success=True, output=json.dumps(result, allow_nan=False))
         except (SketchError, ValidationError, ValueError) as exc:
             return ToolResult(success=False, error=str(exc)[:500], metadata={"status": getattr(exc, "status", 400)},
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_image_submit':
+            return self.jobs.submit(dict(operation='image_generate', **args))
         if name == 'media_readiness_get':
             return self.readiness.get()
         if name.startswith('media_jobs_'):

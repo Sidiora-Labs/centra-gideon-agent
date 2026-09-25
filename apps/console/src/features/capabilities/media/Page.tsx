@@ -1,3 +1,4 @@
+import ImagePage from './ImagePage'
 import Readiness from './Readiness'
 import JobsPage from './JobsPage'
 import { useEffect, useRef, useState } from 'react'
@@ -92,7 +93,7 @@ function SketchPage() {
         {download && <a href={download} download="sketch.png">Download PNG</a>}
       </div>
       <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
-      <a href="#/capabilities/media?view=jobs">Media jobs</a><a href="#/capabilities/media?view=readiness">Media readiness</a>
+      <a href="#/capabilities/media?view=jobs">Media jobs</a><a href="#/capabilities/media?view=readiness">Media readiness</a><a href="#/capabilities/media?view=images">Generate image</a>
       <p role="status">Revision {sketch.revision}{dirty ? ' · Unsaved changes' : ' · Saved'}. Erase removes drawing only; the original image stays intact.</p>
       <div className="relative max-w-full" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
         {sketch.source_artifact_id && <img alt="Original image" src={base + '/' + sketch.id + '/source'} className="absolute inset-0 w-full h-full" onError={() => setError('Original image is unavailable')} />}
@@ -108,5 +109,5 @@ function SketchPage() {
 export default function Page() {
   const [view, setView] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view'))
   useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view')); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
-  return view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
+  return view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
 }

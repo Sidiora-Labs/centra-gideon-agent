@@ -1,0 +1,24 @@
+import { useEffect, useState } from 'react'
+export type ImageCapabilities = { selection: string; available: boolean; models: { name: string; sizes: string[]; supports_edit: boolean; supports_mask: boolean; controls: Record<string, { minimum: number; maximum: number; integer: boolean }> }[] }
+export function ConditioningFields({ capabilities, values, change }: { capabilities: ImageCapabilities; values: Record<string, string>; change: (key: string, value: string) => void }) {
+  const model = capabilities.models[0]
+  if (!model) return <p>No selected model capability catalog is available.</p>
+  return <fieldset className="space-y-2"><legend>Model controls</legend>
+    <label>Output size<select value={values.size || ''} onChange={event => change('size', event.target.value)}><option value="">Provider default</option>{model.sizes.map(size => <option key={size}>{size}</option>)}</select></label>
+    {Object.entries(model.controls).map(([name, bounds]) => <label key={name}>{name}<input type="number" min={bounds.minimum} max={bounds.maximum} step={bounds.integer ? 1 : 'any'} value={values[name] || ''} onChange={event => change(name, event.target.value)} /></label>)}
+    {Object.keys(model.controls).length === 0 && <p>This model advertises no seed, steps, guidance or strength controls.</p>}
+    {model.supports_edit ? <><label>Source image artifact<input value={values.source_artifact_id || ''} onChange={event => change('source_artifact_id', event.target.value)} /></label><label>Source version<input type="number" min="1" value={values.source_version || '1'} onChange={event => change('source_version', event.target.value)} /></label></> : <p>Image conditioning is not advertised by this model.</p>}
+    {model.supports_mask && <><label>Mask image artifact<input value={values.mask_artifact_id || ''} onChange={event => change('mask_artifact_id', event.target.value)} /></label><label>Mask version<input type="number" min="1" value={values.mask_version || '1'} onChange={event => change('mask_version', event.target.value)} /></label><p>Mask dimensions must match the pinned source; mask alpha is preserved.</p></>}
+  </fieldset>
+}
+export default function ImagePage() {
+  const [capabilities, setCapabilities] = useState<ImageCapabilities | null>(null), [values, setValues] = useState<Record<string, string>>({}), [prompt, setPrompt] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  useEffect(() => { let live = true; fetch('/api/capabilities/media/images').then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); if (live) setCapabilities(result) }).catch(reason => { if (live) setError(String(reason)) }); return () => { live = false } }, [])
+  const submit = async () => { setBusy(true); try { const input: Record<string, unknown> = { prompt, size: values.size || '', controls: Object.fromEntries(['seed', 'steps', 'guidance', 'strength'].filter(key => values[key] !== undefined && values[key] !== '').map(key => [key, Number(values[key])])) }; for (const key of ['source', 'mask']) if (values[key + '_artifact_id']) { input[key + '_artifact_id'] = values[key + '_artifact_id']; input[key + '_version'] = Number(values[key + '_version'] || '1') }; const response = await fetch('/api/capabilities/media/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'image_generate', request_id: crypto.randomUUID(), input }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); location.hash = '#/capabilities/media?view=jobs' } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
+  return <section className="p-6 space-y-4"><h1>Image generation</h1><a href="#/capabilities/media?view=readiness">Media readiness</a> · <a href="#/capabilities/media?view=jobs">Media jobs</a>
+    <p>Requests pin the selected model and original image versions. Generated output becomes a separate artifact. Unsupported controls fail before inference; provider execution requires an available configured model.</p>
+    {error && <p role="alert">{error}</p>}{!capabilities && <p>Loading image capabilities…</p>}{capabilities && <><p>Selected: {capabilities.selection || 'None'}</p>{!capabilities.available && <p role="status">Provider unavailable. Configure a model through media readiness.</p>}
+      <label>Prompt<textarea maxLength={4000} value={prompt} onChange={event => setPrompt(event.target.value)} /></label><ConditioningFields capabilities={capabilities} values={values} change={(key, value) => setValues(old => ({ ...old, [key]: value }))} />
+      <button disabled={busy || !capabilities.available || !prompt.trim()} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue image generation'}</button></>}
+  </section>
+}

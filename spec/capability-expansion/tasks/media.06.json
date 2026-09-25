@@ -1,0 +1,48 @@
+{
+  "id": "media.06",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "a6c9e9a8",
+  "contract": "Typed model-advertised seed/steps/guidance/strength bounds and source/mask support extend existing image SDK without changing defaults. Requests pin selected model and canonical source/mask versions; bounded real decoding preserves alpha and source. Existing durable jobs invoke actual selected provider generate/edit under supervised worker and materialize canonical PNG with request lineage; mismatched selection, unsupported controls, unavailable provider and malformed output fail explicitly. No second queue or media byte store.",
+  "acceptance": "Real typed provider/model/ImageResult contracts, genuine decoded source/mask/output pixels and unchanged source bytes, SDK compatibility, request validation and capability rejection, output idempotence/provenance, actual unavailable-adapter worker failure/retry, durable HTTP/tool requests and console control rendering. No fake provider endpoint; configured external inference and actual seed/control effect remain unqualified until an available real provider exists.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/images.py",
+    "runtime/gideon/workspace/capabilities/media/images_http.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/integrations/image_gen/provider.py",
+    "runtime/gideon/sdk/image.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/ImagePage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "checks/runtime/capabilities/media/test_jobs.py",
+    "apps/console/src/features/capabilities/media/ImagePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_images.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "checks/runtime/capabilities/media/test_jobs.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/ImagePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "No configured image inference provider or GPU was available; real generation/edit effect cannot be qualified locally",
+    "Existing OpenAI-compatible adapter advertises no advanced controls or mask; unsupported options are rejected, not ignored",
+    "Provider generation cancellation is cooperative at job boundaries; worker crash during remote inference may cause repeat inference on explicit retry",
+    "Full supervised installation, browser interaction and provider-specific control-effect qualification remain root/operator integration"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.06",
+  "external_status": "unavailable",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.06-checks-9qemfsnu/evidence.json",
+  "production_lines": 242,
+  "test_lines": 279,
+  "ratio": 1.1528925619834711,
+  "repair_cycles": 1
+}
