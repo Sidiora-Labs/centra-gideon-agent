@@ -4,36 +4,45 @@
   "status": "in_progress",
   "base_revision": "809b6bfa",
   "production_files": [
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py",
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo_provider.py",
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx"
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_whitepages.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_whitepages_provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_whitepages.py",
+    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.tsx"
   ],
   "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json"
+    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-whitepages/app.json"
   ],
   "test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py",
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py",
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages_provider.py",
+    "checks/runtime/capabilities/wellbeing/whitepages_ui_server.py",
+    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py",
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages_provider.py"
   ],
   "ui_test_files": [
-    "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.test.tsx"
   ],
-  "contract": "The supported Spokeo adapter is consumed through explicit console and discoverable native-provider operations for scan, prepare, approved submit and verify. Every action targets an existing consented durable case at an exact revision. Preparation submits nothing and returns disabled, contract-only or live readiness explicitly. Submission requires a per-request approval checkbox/constant, native tool approval, the exact approval phrase and, outside a contract server, the disabled-by-default runtime live-submit gate. Verification confirms removal only from a later negative provider rescan.",
+  "contract": "The supported Spokeo adapter is consumed through explicit console and discoverable native-provider operations for scan, prepare, approved submit and verify. Every action targets an existing consented durable case at an exact revision. Preparation submits nothing and returns disabled, contract-only or live readiness explicitly. Submission requires a per-request approval checkbox/constant, native tool approval, the exact approval phrase and, outside a contract server, the disabled-by-default runtime live-submit gate. Verification confirms removal only from a later negative provider rescan. The supported Whitepages continuation prepares a fixed-recipient removal/deletion email only through the canonical account-bound outbound-email record, requires exact digest approval and separate dispatch confirmation, retains SMTP acceptance separately from uncertain delivery, and correlates only already-ingested replies. Manual verification codes must match canonical reply content; links remain unopened and neither reply nor SMTP acceptance proves removal.",
   "remaining_limits": [
     "Local qualification uses a real HTTP contract server implementing the supported Spokeo request and response protocol; it is protocol evidence, not proof that the live broker currently accepts the flow",
     "Contract-server readiness is labelled separately from live-broker readiness in the console",
     "No live Spokeo opt-out was submitted during development; live submission requires both exact owner approval text and GIDEON_ALLOW_LIVE_SPOKEO_SUBMIT=1",
     "Spokeo CAPTCHA, changed forms, cross-origin actions, redirects and inconclusive verification fail closed or require a human",
     "Other data brokers remain catalog/manual-case entries without provider adapters; this slice does not claim full broker parity",
-    "Dashboard registration of capabilities_wellbeing_broker_spokeo.register remains a root-owned shared integration hook"
+    "Dashboard registration of capabilities_wellbeing_broker_spokeo.register remains a root-owned shared integration hook",
+    "Whitepages local qualification uses a real loopback SMTP protocol server; no live broker request or third-party email is sent.",
+    "Whitepages accepted or uncertain email advances only to submitted. Confirmed removal still requires later provider rescan evidence.",
+    "Whitepages reply URLs remain unopened text and manual code matching is local against the canonical ingested message.",
+    "Other remaining catalog brokers still lack provider adapters, so wellbeing.14 remains partial against original full broker breadth.",
+    "Root must register capabilities_wellbeing_broker_whitepages.register; the unique handler and panel integration are included in this continuation."
   ],
   "integration_hooks": [
-    "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo.register with the shared dashboard application; no shared registration file is changed in this slice"
+    "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo.register with the shared dashboard application; no shared registration file is changed in this slice",
+    "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_whitepages.register with the shared dashboard application while preserving existing privacy and Spokeo registrations.",
+    "Mount WhitepagesBrokerPanel for selected Whitepages cases in PrivacyBrokers after the unique panel qualifies."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
   "acceptance_coverage": [
@@ -42,7 +51,11 @@
     "native app registry resolves an actual provider factory with a canonical-origin-only settings signature",
     "four exact native schemas require tool approval and submission additionally requires the literal owner approval phrase",
     "production factory cannot accept caller home, arbitrary provider origin, contract mode or endpoint overrides",
-    "generic manual broker cases retain their existing non-provider workflow"
+    "generic manual broker cases retain their existing non-provider workflow",
+    "Whitepages preparation creates a fixed-recipient canonical outbound-email draft and performs no network send.",
+    "Exact digest approval and separate dispatch confirmation are enforced through communications.17; accepted remains delivery uncertain.",
+    "Real local SMTP, HTTP handler, native tool and Console journeys preserve durable case-to-draft linkage and prevent duplicate send.",
+    "Canonical reply correlation and optional manual code matching open no links and never claim confirmed removal."
   ],
   "exit_code": 0,
   "evidence_log": "/tmp/gideon-wellbeing.14-checks-0uumku1q/evidence.json",
@@ -73,5 +86,52 @@
     "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "ee67fa19f02546167557b229a6a900213beeef1ad39eba835d64a1f2e5eb3ff3",
     "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
   },
-  "active_continuation": "Email-based broker removal and verification workflow; existing Spokeo adapter qualification remains retained."
+  "whitepages_continuation": {
+    "status": "locally_qualified",
+    "base_revision": "dd2dad68",
+    "qualification": {
+      "compile": "Python and scoped TypeScript passed",
+      "runtime": "9 passed",
+      "ui": "3 passed",
+      "full_evidence": "/tmp/gideon-wellbeing.14-checks-5_blyyd9",
+      "ui_evidence": "/tmp/gideon-wellbeing.14-checks-p9o0d2ey",
+      "ratio": "314 test / 277 production executable lines",
+      "external_actions": "none; real loopback SMTP only"
+    }
+  },
+  "prior_spokeo_slice": {
+    "production_files": [
+      "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py",
+      "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo_provider.py",
+      "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx"
+    ],
+    "test_files": [
+      "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py",
+      "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py",
+      "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx"
+    ],
+    "qualification": {
+      "compile": "passed in initial full gate",
+      "runtime": "10 passed in initial full gate",
+      "ui": "4 passed in affected-stage repair 2",
+      "failed_ui_evidence": [
+        "/tmp/gideon-wellbeing.14-checks-0uumku1q/evidence.json",
+        "/tmp/gideon-wellbeing.14-checks-husphsz1/evidence.json"
+      ],
+      "repairs": [
+        "Awaited the durable case-list refresh after opt-out preparation instead of reading the prior revision synchronously",
+        "Aligned the final UI assertion with the typed adapter ledger evidence basis provider_protocol; verified_rescan belongs to the separate legacy verifier path"
+      ]
+    },
+    "file_hashes": {
+      "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo.py": "150c6bb2d87e8ee66d8e72690f21644e614ee9f8c678e4c8befd64b9c5b0ba14",
+      "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_spokeo_provider.py": "1f418c109eb6045485fa54c5f133fde8c7782fb3c62ebf6c98c2dccf64c57948",
+      "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.tsx": "cdae3a23a21310aea1181722d3a7662e91f7edd9200fa6f59a790a79176f43ef",
+      "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo.py": "ffd90d5fe6123a2ce7b1df56700d5160afc8420f08cee4e82e04315447dc14db",
+      "checks/runtime/capabilities/wellbeing/test_privacy_broker_spokeo_provider.py": "267192430ed0bd17f3d60f97ac9c647d2cfcdec351d59d9406560d2d897400e8",
+      "apps/console/src/features/capabilities/wellbeing/PrivacyBrokers.test.tsx": "ee67fa19f02546167557b229a6a900213beeef1ad39eba835d64a1f2e5eb3ff3",
+      "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
+    }
+  },
+  "overall_status": "partial: Spokeo and Whitepages adapters locally qualified; remaining original broker adapters and live provider proof remain open"
 }
