@@ -1,17 +1,18 @@
 {
   "schema_version": 1,
   "task": "platform.17",
-  "status": "locally_qualified_external_pending",
+  "status": "locally_qualified",
   "base_revision": "32bd3507",
-  "contract": "Forward-only canonical TurnUsage/record_turn attribution records actual bound allocation machine identity and exact provider-instance/credential reference plus declared subscription source at emission. No secret values or credential resolution. Missing/generic provider and historical rows retain unknown attribution. Read projections group only stored snapshots; rotation/currentregistry never rewrites history. Retained per-turn scope is distinct from existing guarded-call audit views; no vendor billing/quota claim.",
+  "contract": "Forward-only canonical TurnUsage/record_turn attribution records actual bound allocation machine identity and exact provider-instance/credential reference plus declared subscription source at emission. Bounded Claude Code and Codex JSONL imports normalize actual historical token records into the same ledger with hashed provenance, replay-safe identities and unknown pricing. No prompt bodies, working directories, secret values or credential resolution persist. Read projections group only stored snapshots; rotation/current registry never rewrites history. Retained per-turn scope is distinct from existing guarded-call audit views; no vendor billing/quota claim.",
   "acceptance": [
     "Real AgentEvent/record_from_event writes canonical additive attribution and existing token/cost fields without secret leakage.",
     "Exact registry/connection credential rotations preserve prior snapshots and distinct accounting groups; generic ACP remains unknown and emission still records.",
     "Actual allocation instance IDs differ by home; legacy rows remain byte-identical and unknown.",
-    "HTTP/native/UI filter real canonical usage and show unpriced/unknown billing/quota without modifying source."
+    "HTTP/native/UI filter real canonical usage and show unpriced/unknown billing/quota without modifying source.",
+    "Actual Claude Code assistant-usage and Codex cumulative token-count JSONL files import through owner HTTP/UI, retain bounded hashed provenance, deduplicate repeated and growing files, and never fabricate cost."
   ],
   "external_acceptance_pending": [
-    "Vendor plan, invoice and live quota authority unavailable; historical third-party CLI import schema not implemented."
+    "Vendor plan, invoice and live quota authority remain unavailable."
   ],
   "production_files": [
     "runtime/gideon/operations/usage_ledger.py",
@@ -22,7 +23,9 @@
   "test_files": [
     "checks/runtime/capabilities/platform/test_accounting.py",
     "checks/runtime/capabilities/platform/accounting_ui_server.py",
-    "apps/console/src/features/capabilities/platform/Accounting.test.tsx"
+    "apps/console/src/features/capabilities/platform/Accounting.test.tsx",
+    "checks/runtime/capabilities/platform/fixtures/claude_code_usage.jsonl",
+    "checks/runtime/capabilities/platform/fixtures/codex_rollout_usage.jsonl"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/platform/test_accounting.py"
@@ -35,19 +38,19 @@
     "apps/console/src/features/capabilities/platform/Page.tsx",
     "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
   ],
-  "evidence": "/tmp/gideon-platform.17-checks-jq88lf6a/evidence.json",
+  "evidence": "/tmp/gideon-platform.17-checks-sxajrpjv/evidence.json",
   "qualification": {
-    "runtime_tests": 8,
-    "ui_tests": 2,
-    "production_lines": 82,
-    "evidence_production_lines": 90,
-    "test_lines": 272,
-    "current_test_ratio": 3.317073170731707,
-    "repair_cycles": 0,
-    "evidence_reused_without_rerun": true,
-    "evidence_reconciliation": "Owned writer, projection, HTTP, Console and test hashes remain exact. Shared tool, page and manifest changes are additive later-task integration only.",
+    "compile_exit": 0,
+    "runtime_tests": 14,
+    "ui_tests": 3,
+    "production_lines": 273,
+    "test_lines": 357,
+    "current_test_ratio": 1.3076923076923077,
+    "repair_cycles": 1,
+    "evidence": "/tmp/gideon-platform.17-checks-sxajrpjv/evidence.json",
+    "import_scope": "Actual Claude Code assistant usage and Codex rollout cumulative token-count JSONL fixtures import into the canonical ledger. Duplicate streamed messages, repeated snapshots, repeated files and growing files are deduplicated. Prompt bodies and working directories are not persisted; provenance uses source filename, file hash and hashed record identity.",
     "limitations": [
-      "Vendor plan, invoice and live quota authority unavailable; historical third-party CLI import schema not implemented."
+      "Vendor plan, invoice and live quota authority remain unavailable. Imported historical rows are explicitly unpriced with zero recorded cost."
     ]
   }
 }
