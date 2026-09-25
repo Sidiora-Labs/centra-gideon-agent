@@ -47,6 +47,7 @@ def start_digest(jobs, owner, body, retry=False):
         job = {'id': uuid4().hex, 'session_id': key, 'source_kind': 'proactive_digest', 'run_id': source['run_id'],
                'story_id': '', 'story_revision': 0, 'node_id': 'digest', 'source_hash': source['source_hash'],
                'voice_hash': '', 'status': 'queued', 'artifact_slug': '', 'artifact_version': None, 'audio_hash': '', 'error': ''}
+        job['source_description'] = f"Proactive digest run {source['run_id']}; source {source['source_hash']}"
         job['audio_url'] = '/api/capabilities/experience/narrations/' + job['id'] + '/audio'
         db.execute('INSERT INTO narrations VALUES(?,?,?,?,?)', (job['id'], key, job['id'], source['source_hash'], json.dumps(job)))
     task = asyncio.create_task(jobs.produce(job['id'], source['text']))

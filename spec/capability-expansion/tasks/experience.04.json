@@ -35,12 +35,12 @@
   ],
   "qualification": {
     "command": "python3 tooling/capability_workflow.py verify experience.04",
-    "evidence": "/tmp/gideon-experience.04-checks-9ef79gak/evidence.json",
+    "evidence": "/tmp/gideon-experience.04-checks-uan3i60w/evidence.json",
     "runtime_tests": 25,
     "ui_tests": 3,
-    "production_lines": 272,
-    "test_lines": 288,
-    "ratio": 1.0588235294117647,
-    "repair": "Real workflow fixture uses structural root instance path; released late acquired ownership after component cleanup."
+    "production_lines": 273,
+    "test_lines": 289,
+    "ratio": 1.0586080586080586,
+    "repair": "Real workflow fixture uses structural root instance path; released late acquired ownership after component cleanup. Final source provenance fix labels canonical proactive artifact by real digest run instead of story fields."
   }
 }

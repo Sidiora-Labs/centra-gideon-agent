@@ -202,6 +202,7 @@ async def test_real_persisted_digest_source_and_no_provider_boundary(owner, tmp_
     result = start_digest(jobs,owner,credentials(lease))
     assert result['narration']['run_id'] == run.id
     assert result['narration']['source_kind'] == 'proactive_digest'
+    assert result['narration']['source_description'] == f"Proactive digest run {run.id}; source {source['source_hash']}"
     assert result['narration']['source_hash'] == source['source_hash']
     assert start_digest(jobs,owner,credentials(lease))['narration']['id'] == result['narration']['id']
     await __import__('asyncio').gather(*tuple(jobs.tasks.values()))
