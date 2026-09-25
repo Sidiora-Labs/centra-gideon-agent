@@ -41,7 +41,20 @@ async def receive(request):
         return web.json_response({"error": "Replication store unavailable"}, status=503)
 
 
+async def restore_fields(request):
+    _authorized(request)
+    try:
+        body = await read_json_body(request)
+        if not isinstance(body, dict) or set(body) != {"fields"} or not isinstance(body["fields"], list):
+            raise ReplicationError("Conflict fields are required")
+        result = await asyncio.to_thread(ReplicationService().restore_fields, request.match_info["conflict_id"], body["fields"])
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+    except ReplicationError as error:
+        return web.json_response({"error": str(error)}, status=error.status)
+
+
 def register(app):
     app.router.add_get("/api/capabilities/platform/replication", status)
     app.router.add_post("/api/capabilities/platform/replication/peers/{peer_id}/push", push)
     app.router.add_post("/api/capabilities/platform/replication/receive", receive)
+    app.router.add_post("/api/capabilities/platform/replication/conflicts/{conflict_id}/restore-fields", restore_fields)

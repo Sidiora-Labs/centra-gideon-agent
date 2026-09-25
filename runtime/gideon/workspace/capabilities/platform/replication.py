@@ -12,6 +12,7 @@ from gideon.core.config.loader import config_dir
 from gideon.operations.durability import conflicts, inventory, reconcile, tombstones
 from gideon.operations.durability.shards import canonical_json
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
+from gideon.workspace.capabilities.platform import replication_adapters
 
 SCHEMA_VERSION = 1
 RECEIVE_PATH = "/api/capabilities/platform/replication/receive"
@@ -23,7 +24,11 @@ class Domain:
     entries: tuple[str, ...]
 
 
-DOMAINS = {"workspace.records": Domain("workspace.records", ("projects", "tasks"))}
+DOMAINS = {
+    "workspace.records": Domain("workspace.records", ("projects", "tasks")),
+    "knowledge.records": Domain("knowledge.records", ("knowledge.items",)),
+    "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
+}
 _INVENTORY = {entry.id: entry for entry in inventory.INVENTORY}
 _DOMAIN_MERGES = {"projects": inventory.MERGE_LWW, "tasks": inventory.MERGE_LWW}
 
@@ -67,6 +72,8 @@ class ReplicationService:
         return replace(entry, merge=_DOMAIN_MERGES.get(entry_id, entry.merge))
 
     def _rows(self, entry_id: str) -> list[dict]:
+        if entry_id in replication_adapters.SQLITE_ENTRIES:
+            return replication_adapters.read_rows(self.home, entry_id)
         entry = self._entry(entry_id)
         rows = reconcile.read_local_rows(entry, self.home / entry.path)
         if entry.tombstones:
@@ -132,12 +139,19 @@ class ReplicationService:
             queue = conflicts.ConflictQueue(self.home)
             results, ancestor_updates = [], []
             for item in entries:
-                entry = self._entry(item["entry_id"])
-                result = reconcile.reconcile_entry(self.home, entry, item["rows"], ancestors=self._ancestors(connection, peer_id, entry.id), queue=queue, now=now)
+                entry_id = item["entry_id"]
+                if entry_id in replication_adapters.SQLITE_ENTRIES:
+                    try:
+                        result = replication_adapters.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                else:
+                    entry = self._entry(entry_id)
+                    result = replication_adapters.apply_inventory_rows(self.home, entry, item["rows"], self._ancestors(connection, peer_id, entry.id), queue, now)
                 if result.verdict != "consumed":
-                    raise ReplicationError(f"Replication payload for {entry.id} was rejected", 422)
-                results.append({"entry_id": entry.id, "added": result.added, "updated": result.updated, "removed": result.removed, "conflicts": result.conflicts})
-                ancestor_updates.extend((entry.id, entity_id, sha) for entity_id, sha in result.new_ancestors.items())
+                    raise ReplicationError(f"Replication payload for {entry_id} was rejected", 422)
+                results.append({"entry_id": entry_id, "added": result.added, "updated": result.updated, "removed": result.removed, "conflicts": result.conflicts})
+                ancestor_updates.extend((entry_id, entity_id, sha) for entity_id, sha in result.new_ancestors.items())
             for entry_id, entity_id, sha in ancestor_updates:
                 connection.execute("INSERT INTO ancestors VALUES(?,?,?,?) ON CONFLICT(peer_id,entry_id,entity_id) DO UPDATE SET sha=excluded.sha", (peer_id, entry_id, entity_id, sha))
             response = {"accepted": True, "domain": scope, "sequence": sequence, "batch_id": batch["batch_id"], "entries": results}
@@ -160,6 +174,12 @@ class ReplicationService:
             raise ReplicationError("Peer did not acknowledge the replication batch", 502)
         self._record_sent(peer_id, batch)
         return response
+
+    def restore_fields(self, conflict_id: str, fields: list[str]) -> dict:
+        try:
+            return replication_adapters.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+        except ValueError as error:
+            raise ReplicationError(str(error), 409) from error
 
     def status(self) -> dict:
         with self._connect() as connection:

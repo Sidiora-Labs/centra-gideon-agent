@@ -28,6 +28,8 @@ afterAll(async () => {
 it('pushes the actual canonical domain through signed self-peer HTTP and reloads its cursor', async () => {
   render(<Replication baseUrl={baseUrl} />)
   expect(await screen.findByText('workspace.records: projects, tasks')).toBeVisible()
+  expect(screen.getByText('knowledge.records: knowledge.items')).toBeVisible()
+  expect(screen.getByText(/creative.catalog: creative.ingredients/)).toBeVisible()
   expect(screen.getByText('No peer batches received.')).toBeVisible()
   fireEvent.change(screen.getByLabelText('Replication peer'), { target: { value: (screen.getByRole('option', { name: 'Local integration peer' }) as HTMLOptionElement).value } })
   fireEvent.click(screen.getByRole('button', { name: 'Push canonical domain' }))

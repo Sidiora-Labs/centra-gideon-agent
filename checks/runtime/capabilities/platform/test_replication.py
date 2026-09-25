@@ -7,12 +7,15 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.engine.tasks.hierarchy import HierarchyStore
+from gideon.cognition.knowledge.store import KnowledgeStore, knowledge_db_path
 from gideon.interfaces.dashboard.handlers.capabilities_replication import register
 from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware, use_ephemeral_secret
 from gideon.operations.durability.conflicts import ConflictQueue, STATUS_NEEDS_REVIEW
 from gideon.workspace.capabilities.platform.peers import PeerStore
 from gideon.workspace.capabilities.platform.replication import DOMAINS, ReplicationError, ReplicationService
 from gideon.workspace.capabilities.platform.replication_tools import create_provider
+from gideon.workspace.capabilities.platform.replication_adapters import CREATIVE_TABLES
+from gideon.workspace.capabilities.creative.store import IngredientStore
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -36,6 +39,59 @@ def pair(a_home, b_home, a_endpoint="https://a.example", b_endpoint="https://b.e
     a.put(bid["peer_id"], peer_record(bid, b_endpoint))
     b.put(aid["peer_id"], peer_record(aid, a_endpoint))
     return aid, bid
+
+
+def pair_for(a_home, b_home, scope):
+    a, b = PeerStore(a_home), PeerStore(b_home)
+    aid, bid = a.snapshot()["self"], b.snapshot()["self"]
+    a.put(bid["peer_id"], peer_record(bid, "https://b.example", send=[scope], receive=[scope]))
+    b.put(aid["peer_id"], peer_record(aid, "https://a.example", send=[scope], receive=[scope]))
+    return aid, bid
+
+
+def knowledge_store(home):
+    return KnowledgeStore(str(knowledge_db_path(home)))
+
+
+def create_domain_record(home, scope, title="base", content="local body"):
+    if scope == "knowledge.records":
+        store = knowledge_store(home)
+        try:
+            identity = store.create_typed_item(item_type="note", title=title, content=content, tags=["shared"])
+            store.db.commit()
+            return identity
+        finally:
+            store.db.close()
+    return IngredientStore(home).create({"request_id": "create-" + title.replace(" ", "-"), "type": "concept", "title": title, "body": content, "tags": ["shared"], "source_refs": [], "relations": []})["id"]
+
+
+def get_domain_record(home, scope, identity):
+    if scope == "knowledge.records":
+        store = knowledge_store(home)
+        try: return store.get_item(identity)
+        finally: store.db.close()
+    try: return IngredientStore(home).get(identity)
+    except Exception: return None
+
+
+def update_domain_record(home, scope, identity, title, content):
+    if scope == "knowledge.records":
+        store = knowledge_store(home)
+        try: store.update_item(identity, title=title, content=content); store.db.commit()
+        finally: store.db.close()
+    else:
+        old = IngredientStore(home).get(identity)
+        IngredientStore(home).update(identity, {"revision": old["revision"], "title": title, "body": content})
+
+
+def delete_domain_record(home, scope, identity):
+    if scope == "knowledge.records":
+        store = knowledge_store(home)
+        try: store.delete_item(identity)
+        finally: store.db.close()
+    else:
+        with IngredientStore(home).connection() as db:
+            db.execute("DELETE FROM ingredients WHERE id=?", (identity,))
 
 
 def in_home(home, action):
@@ -244,14 +300,139 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     local_id, remote_id = pair(home, remote_home)
     service = ReplicationService(home)
     value = service.status()
-    assert value["domains"] == [{"scope": SCOPE, "entries": ["projects", "tasks"]}]
+    assert value["domains"] == [
+        {"scope": SCOPE, "entries": ["projects", "tasks"]},
+        {"scope": "knowledge.records", "entries": ["knowledge.items"]},
+        {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
+    ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
     invalid = pytest.raises(ReplicationError, match="Unsupported")
     with invalid:
         service.export_batch(remote_id["peer_id"], "identity.secrets")
+
+
+@pytest.mark.parametrize("scope", ["knowledge.records", "creative.catalog"])
+def test_sqlite_domain_two_home_create_edit_delete_restart_conflict_restore_and_disabled(scope, home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, scope)
+    identity = create_domain_record(a_home, scope)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    first = a.export_batch(bid["peer_id"], scope)
+    assert [row["entry_id"] for row in first["entries"]] == list(DOMAINS[scope].entries)
+    assert b.apply_batch(aid["peer_id"], first)["entries"][0]["added"] == 1
+    a._record_sent(bid["peer_id"], first)
+    assert get_domain_record(b_home, scope, identity)["title"] == "base"
+
+    update_domain_record(a_home, scope, identity, "edited", "A body")
+    second = ReplicationService(a_home).export_batch(bid["peer_id"], scope)
+    assert ReplicationService(b_home).apply_batch(aid["peer_id"], second)["sequence"] == 2
+    assert get_domain_record(b_home, scope, identity)["title"] == "edited"
+    ReplicationService(a_home)._record_sent(bid["peer_id"], second)
+
+    update_domain_record(a_home, scope, identity, "A title", "A body kept")
+    update_domain_record(b_home, scope, identity, "B title", "B body")
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], scope)
+    conflict_result = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert conflict_result["entries"][0]["conflicts"] == 1
+    conflict = ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW)[0]
+    restored = ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    assert restored["fields"] == ["title"]
+    merged = get_domain_record(a_home, scope, identity)
+    assert merged["title"] == "B title"
+    assert (merged["content"] if scope == "knowledge.records" else merged["body"]) == "A body kept"
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, scope)
+    identity2 = create_domain_record(c_home, scope, title="delete me")
+    fresh = ReplicationService(c_home).export_batch(did["peer_id"], scope)
+    ReplicationService(d_home).apply_batch(cid["peer_id"], fresh)
+    ReplicationService(c_home)._record_sent(did["peer_id"], fresh)
+    delete_domain_record(c_home, scope, identity2)
+    removal = ReplicationService(c_home).export_batch(did["peer_id"], scope)
+    applied = ReplicationService(d_home).apply_batch(cid["peer_id"], removal)
+    assert applied["entries"][0]["removed"] >= 1
+    assert get_domain_record(d_home, scope, identity2) is None
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], removal) == applied
+
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"):
+        ReplicationService(a_home).export_batch(bid["peer_id"], scope)
+
+
+def test_creative_catalog_covers_every_declared_authoritative_current_record_table(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "creative.catalog")
+    service = ReplicationService(a_home)
+    initial = service.export_batch(bid["peer_id"], "creative.catalog")
+    assert initial["sequence"] == 1
+    assert [item["entry_id"] for item in initial["entries"]] == list(CREATIVE_TABLES)
+    ReplicationService(b_home).apply_batch(aid["peer_id"], initial)
+    path = a_home / "capabilities/creative/catalog.sqlite3"
+    expected = {}
+    with sqlite3.connect(path) as db:
+        for number, (entry_id, table) in enumerate(CREATIVE_TABLES.items(), 1):
+            identity = f"canonical-{number}"
+            record = {"id": identity, "title": entry_id, "revision": 1,
+                      "created_at": "2026-09-25T10:00:00+00:00",
+                      "updated_at": "2026-09-25T10:00:00+00:00"}
+            db.execute(f"INSERT INTO {table}(id,record) VALUES(?,?)", (identity, json.dumps(record)))
+            expected[entry_id] = record
+    batch = service.export_batch(bid["peer_id"], "creative.catalog")
+    assert batch["sequence"] == 2
+    receipt = ReplicationService(b_home).apply_batch(aid["peer_id"], batch)
+    assert receipt["accepted"] is True
+    assert sum(item["added"] for item in receipt["entries"]) == len(CREATIVE_TABLES)
+    remote_path = b_home / "capabilities/creative/catalog.sqlite3"
+    with sqlite3.connect(remote_path) as db:
+        for entry_id, table in CREATIVE_TABLES.items():
+            row = db.execute(f"SELECT record FROM {table}").fetchone()
+            assert json.loads(row[0]) == expected[entry_id]
+    service._record_sent(bid["peer_id"], batch)
+    with sqlite3.connect(path) as db:
+        for table in CREATIVE_TABLES.values():
+            db.execute(f"DELETE FROM {table}")
+    deletion = ReplicationService(a_home).export_batch(bid["peer_id"], "creative.catalog")
+    removed = ReplicationService(b_home).apply_batch(aid["peer_id"], deletion)
+    assert sum(item["removed"] for item in removed["entries"]) == len(CREATIVE_TABLES)
+    with sqlite3.connect(remote_path) as db:
+        assert all(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0 for table in CREATIVE_TABLES.values())
+
+
+@pytest.mark.asyncio
+async def test_field_restore_http_requires_dashboard_auth_and_refuses_unsafe_fields(home, tmp_path):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "creative.catalog")
+    identity = create_domain_record(a_home, "creative.catalog")
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "creative.catalog")
+    b.apply_batch(aid["peer_id"], baseline)
+    a._record_sent(bid["peer_id"], baseline)
+    update_domain_record(a_home, "creative.catalog", identity, "local", "keep")
+    update_domain_record(b_home, "creative.catalog", identity, "remote", "replace")
+    a.apply_batch(bid["peer_id"], b.export_batch(aid["peer_id"], "creative.catalog"))
+    conflict = ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW)[0]
+    monkey_home = os.environ["GIDEON_HOME"]
+    os.environ["GIDEON_HOME"] = str(a_home)
+    try:
+        app = web.Application(middlewares=[token_auth_middleware(port=8001)]); register(app)
+        async with TestClient(TestServer(app)) as client:
+            route = f"{PREFIX}/conflicts/{conflict.id}/restore-fields"
+            assert (await client.post(route, json={"fields": ["title"]})).status == 403
+            headers = {"Cookie": "gideon_token_8001=" + generate_token("dashboard:restore")}
+            unsafe = await client.post(route, headers=headers, json={"fields": ["id"]})
+            assert unsafe.status == 409
+            accepted = await client.post(route, headers=headers, json={"fields": ["title"]})
+            assert accepted.status == 200
+            assert (await accepted.json())["fields"] == ["title"]
+    finally:
+        os.environ["GIDEON_HOME"] = monkey_home
+    merged = get_domain_record(a_home, "creative.catalog", identity)
+    assert merged["title"] == "remote"
+    assert merged["body"] == "keep"
