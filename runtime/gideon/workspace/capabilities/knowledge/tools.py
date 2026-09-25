@@ -4,6 +4,8 @@ import json
 from jsonschema import ValidationError, validate
 
 from gideon.cognition.memory_service import MemoryService
+from gideon.core.config.loader import config_dir
+from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.engine import session_restrictions
 from gideon.integrations.action_providers.services import get_action_services
 from gideon.integrations.mcp_core import get_current_session_key
@@ -16,7 +18,11 @@ from gideon.workspace.capabilities.knowledge.capture import CaptureError, Captur
 _ID = {"type": "string", "minLength": 1, "maxLength": 128}
 _REQUEST = {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$"}
 _PAGING = {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "minimum": 0, "maximum": 1000000}}
+_TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea", "admin", "memory"]}, "fields": {"type": "object"}}
 _TOOLS = {
+    "knowledge_type_preview": ("Review capture classification and unsupported fields before canonical import.", False, _TYPE_FIELDS, list(_TYPE_FIELDS)),
+    "knowledge_type_commit": ("Import the reviewed capture into the canonical destination once; preserve the preview and request_id when retrying.", True, {**_TYPE_FIELDS, "request_id": _REQUEST, "preview_id": _ID, "revision": {"type": "integer", "minimum": 1}}, [*_TYPE_FIELDS, "request_id", "preview_id", "revision"]),
+    "knowledge_type_list": ("List immutable reviewed import receipts with original provenance and destination links.", False, _PAGING, []),
     "knowledge_anniversaries": ("Revisit prior-year notes, journals and episodic memories by local calendar date.", False,
         {**_PAGING, "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "timezone": {"type": "string", "maxLength": 100}}, []),
     "knowledge_anniversary_source": ("Read the exact original source identified by an anniversary result.", False,
@@ -54,6 +60,8 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._services = services or get_action_services()
         self._store = self._services.state.knowledge_store if self._services else None
         self._inbox = None
+        self._typed = None
+        self._home = config_dir()
 
     @property
     def name(self):
@@ -99,7 +107,16 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name == "knowledge_anniversaries":
+            if tool_name.startswith("knowledge_type_"):
+                if self._typed is None:
+                    self._typed = TypedCapture(self._store, service, self._home)
+                if tool_name == "knowledge_type_preview":
+                    result = self._typed.preview(arguments)
+                elif tool_name == "knowledge_type_commit":
+                    result = await self._typed.commit(arguments)
+                else:
+                    result = self._typed.list(**arguments)
+            elif tool_name == "knowledge_anniversaries":
                 result = anniversaries(self._store, service, **arguments)
             elif tool_name == "knowledge_anniversary_source":
                 result = source_record(self._store, service, **arguments)
