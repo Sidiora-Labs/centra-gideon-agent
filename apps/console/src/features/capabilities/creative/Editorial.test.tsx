@@ -52,6 +52,35 @@ async function seed(text = original) {
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }) }
 
 describe('Editorial checks and explicit canonical repair review', () => {
+  it('binds typed canonical context and enables its checks through real HTTP', async () => {
+    const work = await seed()
+    render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => {}} />)
+    await screen.findByText('canon: missing · no_canonical_context_binding')
+    change('Canonical JSON', JSON.stringify({
+      characters: [{ id: 'hero', name: 'Hero' }, { id: 'hera', name: 'Hera' }],
+      objects: [], rules: [],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Bind canonical context' }))
+    await screen.findByText('canon context bound to an immutable JSON artifact.')
+    await screen.findByText('canon: available · revision 1')
+    const state = await (await fetch(`${apiRoot}/${work.id}/editorial`)).json()
+    const canon = state.contexts.find((item: { family: string }) => item.family === 'canon')
+    expect(canon.artifact_version).toBe(1)
+    expect(canon.data.characters[0].name).toBe('Hero')
+    const naming = screen.getByText(/Character name dissimilarity/).parentElement?.querySelector('input')
+    expect(naming).toBeEnabled()
+  })
+
+  it('surfaces malformed context without claiming a binding', async () => {
+    const work = await seed()
+    render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => {}} />)
+    await screen.findByText('canon: missing · no_canonical_context_binding')
+    change('Canonical JSON', '{broken')
+    fireEvent.click(screen.getByRole('button', { name: 'Bind canonical context' }))
+    await screen.findByRole('alert')
+    expect(screen.getByText('canon: missing · no_canonical_context_binding')).toBeInTheDocument()
+  })
+
   it('runs exact prose checks, prepares a candidate, promotes and restores through the real Works page', async () => {
     const work = await seed()
     location.hash = `#/capabilities/creative?view=works&work=${work.id}`

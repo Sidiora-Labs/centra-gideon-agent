@@ -121,6 +121,10 @@ def schemas():
         "baseline": {"enum": ["drafted", "exemplars", "blended"]}, "min_words": NUMBER, "min_chapters": NUMBER, "z_threshold": {"type": "number"},
         "wells": {"type": "object", "additionalProperties": {"type": "array", "items": STRING}}}, ["revision", "series_revision"])}, ["id", "payload"])
     result["creative_work_editorial_get"] = obj({"id": STRING}, ["id"])
+    result["creative_work_editorial_context_bind"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER,
+        "family": {"enum": ["canon", "cast", "scene", "pov", "arc", "world", "research", "comic"]},
+        "schema_version": {"type": "integer", "const": 1}, "data": {"type": "object"}},
+        ["request_id", "work_revision", "family", "schema_version", "data"])}, ["id", "payload"])
     result["creative_work_editorial_run"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "start": {"type": "integer", "minimum": 0}, "end": NUMBER,
         "check_ids": {"type": "array", "items": STRING}}, ["request_id", "work_revision", "start", "end"])}, ["id", "payload"])
     result["creative_work_editorial_repair"] = obj({"id": STRING, "run_id": STRING, "finding_id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "replacement": STRING}, ["request_id", "work_revision", "replacement"])}, ["id", "run_id", "finding_id", "payload"])
@@ -128,7 +132,7 @@ def schemas():
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair", "editorial_context_bind"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -180,8 +184,13 @@ class CreativeToolProvider(ToolProvider):
             elif entity == "story" and action == "suggest":
                 result = await store.suggest(**args)
             elif action.startswith("editorial_"):
-                method = getattr(self.editorial, action.removeprefix("editorial_"))
-                result = await method(**args) if action == "editorial_repair" else method(**args)
+                if action == "editorial_context_bind":
+                    result = self.editorial.context.bind(args["id"], args["payload"])
+                elif action == "editorial_run":
+                    result = await self.editorial.run_async(**args)
+                else:
+                    method = getattr(self.editorial, action.removeprefix("editorial_"))
+                    result = await method(**args) if action == "editorial_repair" else method(**args)
             elif action.startswith("voice_"):
                 result = getattr(self.voice, action.removeprefix("voice_"))(**args)
             elif action.startswith("continuity_"):

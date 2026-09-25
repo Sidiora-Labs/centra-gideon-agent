@@ -4,8 +4,9 @@ import { Button } from '../../../shared/ui/Button'
 
 type Finding = { id: string; check_id: string; start: number; end: number; quote: string; problem: string; suggestion: string }
 type Run = { id: string; draft_id: string; work_revision: number; stale: boolean; missing: boolean; coverage: { start: number; end: number; total_characters: number }; readiness: string; results: { check_id: string; status: string; reason?: string; truncated?: boolean }[]; findings: Finding[] }
-type Catalog = { id: string; label: string; availability: string; kind: string; scope: string }
-type State = { catalog: Catalog[]; runs: Run[] }
+type Catalog = { id: string; label: string; availability: string; kind: string; scope: string; context_family?: string }
+type Context = { family: string; status: string; reason?: string; revision?: number; artifact_id?: string; artifact_version?: number }
+type State = { catalog: Catalog[]; contexts: Context[]; runs: Run[] }
 const control = 'w-full rounded border border-outline bg-surface p-2 text-on-surface'
 export default function Editorial({ id, revision, text, apiRoot, onPrepared }: { id: string; revision: number; text: string; apiRoot: string; onPrepared: () => void }) {
   const [state, setState] = useState<State | null>(null)
@@ -18,6 +19,8 @@ export default function Editorial({ id, revision, text, apiRoot, onPrepared }: {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const [contextFamily, setContextFamily] = useState('canon')
+  const [contextJson, setContextJson] = useState('{}')
   const root = `${apiRoot}/${id}/editorial`
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : 'Editorial request failed')
   useEffect(() => {
@@ -30,13 +33,26 @@ export default function Editorial({ id, revision, text, apiRoot, onPrepared }: {
     setBusy(true); setError(''); setMessage('')
     try { await requestJson(`${root}/runs`, 'POST', { request_id: requestId, work_revision: revision, start, end, check_ids: checks }); setState(await requestJson<State>(root)); setRequestId(crypto.randomUUID()) } catch (e) { fail(e) } finally { setBusy(false) }
   }
+  async function bindContext() {
+    setBusy(true); setError(''); setMessage('')
+    try {
+      const data = JSON.parse(contextJson)
+      await requestJson(`${root}/context`, 'POST', { request_id: requestId, work_revision: revision, family: contextFamily, schema_version: 1, data })
+      setState(await requestJson<State>(root)); setMessage(`${contextFamily} context bound to an immutable JSON artifact.`); setRequestId(crypto.randomUUID())
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
   async function repair() {
     if (!selected) return
     setBusy(true); setError('')
     try { await requestJson(`${root}/runs/${selected.run.id}/findings/${selected.finding.id}/repair`, 'POST', { request_id: requestId, work_revision: revision, replacement }); setMessage('Repair candidate prepared. Review and promote it in manuscript polishing.'); setRequestId(crypto.randomUUID()); onPrepared() } catch (e) { fail(e) } finally { setBusy(false) }
   }
-  return <section aria-label="Editorial review" className="space-y-3 rounded border border-outline p-3"><h2>Editorial review</h2><p>English prose heuristics produce advisory findings, not quality judgments. Review exact saved-source evidence before preparing a repair. Other editorial families remain pending.</p>
+  return <section aria-label="Editorial review" className="space-y-3 rounded border border-outline p-3"><h2>Editorial review</h2><p>Editorial checks use exact saved-source evidence. Structured families require a versioned canonical JSON binding; model checks use the configured provider and never invent success when it is unavailable.</p>
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}{!state && !error && <p>Loading editorial checks…</p>}
+    <section aria-label="Editorial context"><h3>Canonical context</h3><ul>{state?.contexts.map(context => <li key={context.family}>{context.family}: {context.status}{context.revision && ` · revision ${context.revision}`}{context.reason && ` · ${context.reason}`}</li>)}</ul>
+      <label className="block">Context family<select className={control} value={contextFamily} onChange={e => changed(() => setContextFamily(e.target.value))}>{['canon', 'cast', 'scene', 'pov', 'arc', 'world', 'research', 'comic'].map(family => <option key={family}>{family}</option>)}</select></label>
+      <label className="block">Canonical JSON<textarea className={control} value={contextJson} onChange={e => changed(() => setContextJson(e.target.value))} /></label>
+      <Button disabled={busy || !contextJson.trim()} onClick={() => void bindContext()}>Bind canonical context</Button>
+    </section>
     <label className="block">Editorial coverage start<input className={control} type="number" value={start} onChange={e => changed(() => setStart(Number(e.target.value)))} /></label><label className="block">Editorial coverage end<input className={control} type="number" value={end} onChange={e => changed(() => setEnd(Number(e.target.value)))} /></label>
     <p>Coverage uses Unicode codepoints; at most 20000 per run.</p><details><summary>Editorial check catalog</summary>{state?.catalog.map(check => <label key={check.id} className="block"><input type="checkbox" disabled={busy || check.availability !== 'available'} checked={checks.includes(check.id)} onChange={e => changed(() => setChecks(e.target.checked ? [...checks, check.id] : checks.filter(c => c !== check.id)))} />{check.label} · {check.kind} · {check.availability}</label>)}</details>
     <Button disabled={busy || !state || !checks.length || end <= start || start < 0 || end > Array.from(text).length || end - start > 20000} onClick={() => void runChecks()}>Run selected editorial checks</Button>
