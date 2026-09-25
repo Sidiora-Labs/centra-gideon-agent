@@ -8,12 +8,22 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors
+from gideon.workspace.capabilities.communications import mirrors, desktop
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/desktop/' in request.path:
+            if request.path.endswith('/imports'):
+                return web.json_response({'imports': desktop.imports(store)})
+            if request.path.endswith('/history'):
+                return web.json_response({'messages': desktop.history(store, request.query.get('source', ''), request.query.get('source_account_id', ''))})
+            data = await request.json()
+            if request.path.endswith('/preview'):
+                return web.json_response(desktop.preview(store, data))
+            receipt, created = desktop.commit(store, data)
+            return web.json_response({'receipt': receipt, 'created': created}, status=201 if created else 200)
         if '/mirror/' in request.path:
             account_id = request.match_info.get('account_id')
             if request.path.endswith('/capabilities'):
@@ -66,6 +76,11 @@ async def handle(request):
 
 
 def register(app):
+    desktop_base = "/api/capabilities/communications/desktop"
+    app.router.add_get(desktop_base + "/imports", handle)
+    app.router.add_get(desktop_base + "/history", handle)
+    app.router.add_post(desktop_base + "/preview", handle)
+    app.router.add_post(desktop_base + "/commit", handle)
     mirror = "/api/capabilities/communications/mirror"
     app.router.add_get(mirror + "/capabilities", handle)
     app.router.add_get(mirror + "/accounts", handle)
