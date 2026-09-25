@@ -1,0 +1,65 @@
+{
+  "id": "knowledge.00",
+  "status": "locally_qualified",
+  "base_revision": "4dd7bf5c",
+  "schema_version": 1,
+  "contract": "Native personal knowledge ToolProvider over bound ActionServices, using original anniversary and capture services with strict schemas, session memory policy, output redaction and honest unavailable states. Unique native application manifest supplies a real factory.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-personal-knowledge/app.json"
+  ],
+  "remaining_limits": [
+    "Central metadata and integrated native-agent/browser journeys remain root-owned.",
+    "Successful speech recognition is not certified without a configured real speech provider."
+  ],
+  "verification": {
+    "task": "knowledge.00",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790294702.2744985,
+    "production_lines": 115,
+    "test_lines": 220,
+    "ratio": 1.9130434782608696,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.00-checks-9a4wcbww/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.00-checks-9a4wcbww/runtime.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.00-checks-9a4wcbww",
+    "completed_at": 1790294723.055588,
+    "files": {
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "6c1e5e64152d02dd7b78d7e20c7555dd8ce136cba11d51de12fdf0dbd9e88a7f",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "8a496259222a0c5f05ebc2d6706f81ba5714958d3e8f93f36455430345e533ea"
+    }
+  }
+}
