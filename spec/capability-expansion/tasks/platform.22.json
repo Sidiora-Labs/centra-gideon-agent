@@ -38,13 +38,14 @@
     "memory.records is independently default-denied and admits only allowlisted semantic namespaces with exact value, confidence, source, category, timestamps and explicit tombstones; protected local-owner conflicts hold, and restore permits only value, confidence or category.",
     "wellbeing.clinical_records is independently default-denied, requires complete ordered coverage of all four canonical current families, excludes request authority and private material, preserves exact remote identity/revision/timestamps, and restores only declared clinical fields through a new local immutable revision.",
     "memory.episodes is independently default-denied and carries only explicitly authored immutable records or explicit tombstones; same-identity immutable differences hold as conflicts and cannot use field restoration.",
-    "platform.usage is independently default-denied and appends only allowlisted imported CLI events through signed central receive; replay is idempotent, identity collisions hold, absence never deletes, and local machine attribution replaces sender machine state."
+    "platform.usage is independently default-denied and appends only allowlisted imported CLI events through signed central receive; replay is idempotent, identity collisions hold, absence never deletes, and local machine attribution replaces sender machine state.",
+    "creative.work_documents is independently default-denied and carries complete ordered immutable work-version history plus authored draft metadata and text after its canonical creative.works parent exists; signed receive preserves exact revisions and pinned context without creating request receipts, and immutable collisions hold without field restoration."
   ],
   "limitations": [
-    "Current-record coverage now includes policy-screened semantic and explicitly authored episodic memory, knowledge items and collections, identity goals/profile/life stories, authored experience story graphs, creative catalog/direction/commission definitions, contacts, music metadata and video projects, media metadata, imported CLI usage events, and the declared wellbeing families. Message and calendar content remain outside the current communications scope. Immutable artifact and domain history requires a separate selective history protocol and is not counted as current-record coverage.",
+    "Current-record coverage now includes policy-screened semantic and explicitly authored episodic memory, knowledge items and collections, identity goals/profile/life stories, authored experience story graphs, creative catalog/direction/commission definitions and authored work documents, contacts, music metadata and video projects, media metadata, imported CLI usage events, and the declared wellbeing families. Message and calendar content remain outside the current communications scope. Other immutable artifact and domain history requires a separate selective history protocol and is not counted as current-record coverage.",
     "Memory replication excludes generated episodic summaries, lessons, slots, procedural memory, commitments, persona, approvals, scope authority, embeddings, indexes, counters and event history; absence does not imply deletion because semantic and episodic tombstones are explicit records.",
     "Usage replication covers only stable imported CLI token events with zero unpriced historical cost; live turns, prompts, sessions, agents, credentials, subscriptions, allocation and billing/control-plane state remain local.",
-    "Knowledge uploaded source files and derived embeddings, chunks, FTS/index state, entity extraction and watched-source cursors remain excluded; creative revision/request/draft/artifact/suggestion/polish/continuity/voice stores remain excluded.",
+    "Knowledge uploaded source files and derived embeddings, chunks, FTS/index state, entity extraction and watched-source cursors remain excluded. Creative work versions and authored draft text are covered by creative.work_documents; work request ledgers, mutable non-work artifact bodies, suggestions, polish jobs, continuity and voice stores remain local.",
     "Identity request ledgers, story/revision history, fidelity runs, recipes, lifecycle/continuity journals and encrypted portability bundles remain local; private twin documents are never exported even when identity.profile is permitted.",
     "Communications residual mapping: current people and touchpoints are covered; message mirrors and bodies, calendar sources/events, social accounts and credential references, import receipts/raw sources, relationship evidence/coverage, platform assignments, drafts/outboxes and all communication history remain unsupported by this scope.",
     "Music artifact references identify exact immutable versions, but referenced audio, images, documents and generated outputs are not transported or counted as replicated records by music.library.",
@@ -79,7 +80,9 @@
     "runtime/gideon/workspace/capabilities/wellbeing/body_composition.py",
     "runtime/gideon/workspace/capabilities/platform/replication_usage.py",
     "runtime/gideon/workspace/capabilities/platform/replication_episodic_memory.py",
-    "runtime/gideon/cognition/archive_episode_import.py"
+    "runtime/gideon/cognition/archive_episode_import.py",
+    "runtime/gideon/workspace/capabilities/platform/replication_creative_documents.py",
+    "runtime/gideon/workspace/capabilities/creative/works.py"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_replication.py",
@@ -97,7 +100,9 @@
     "checks/runtime/capabilities/platform/test_replication_memory.py",
     "checks/runtime/capabilities/platform/test_replication_clinical.py",
     "checks/runtime/capabilities/platform/test_replication_usage.py",
-    "checks/runtime/capabilities/platform/test_replication_episodic_memory.py"
+    "checks/runtime/capabilities/platform/test_replication_episodic_memory.py",
+    "checks/runtime/capabilities/platform/test_replication_creative_documents.py",
+    "checks/runtime/capabilities/platform/test_replication_creative_documents_central.py"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/platform/test_replication.py",
@@ -112,7 +117,9 @@
     "checks/runtime/capabilities/platform/test_replication_memory.py",
     "checks/runtime/capabilities/platform/test_replication_clinical.py",
     "checks/runtime/capabilities/platform/test_replication_usage.py",
-    "checks/runtime/capabilities/platform/test_replication_episodic_memory.py"
+    "checks/runtime/capabilities/platform/test_replication_episodic_memory.py",
+    "checks/runtime/capabilities/platform/test_replication_creative_documents.py",
+    "checks/runtime/capabilities/platform/test_replication_creative_documents_central.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/platform/Replication.test.tsx"

@@ -16,6 +16,7 @@ from gideon.workspace.capabilities.platform import replication_adapters
 from gideon.workspace.capabilities.platform import replication_commissions
 from gideon.workspace.capabilities.platform import replication_clinical
 from gideon.workspace.capabilities.platform import replication_creative_direction
+from gideon.workspace.capabilities.platform import replication_creative_documents
 from gideon.workspace.capabilities.platform import replication_experience_stories
 from gideon.workspace.capabilities.platform import replication_episodic_memory
 from gideon.workspace.capabilities.platform import replication_identity_stories
@@ -42,6 +43,7 @@ DOMAINS = {
     "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
     replication_commissions.SCOPE: Domain(replication_commissions.SCOPE, replication_commissions.ENTRIES),
     replication_creative_direction.SCOPE: Domain(replication_creative_direction.SCOPE, replication_creative_direction.ENTRIES),
+    replication_creative_documents.SCOPE: Domain(replication_creative_documents.SCOPE, replication_creative_documents.ENTRIES),
     "identity.goals": Domain("identity.goals", tuple(replication_adapters.IDENTITY_TABLES)),
     "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
     replication_identity_stories.SCOPE: Domain(replication_identity_stories.SCOPE, replication_identity_stories.ENTRIES),
@@ -120,6 +122,8 @@ class ReplicationService:
             return replication_usage.read_rows(self.home, entry_id)
         if entry_id in replication_creative_direction.ENTRIES:
             return replication_creative_direction.read_rows(self.home, entry_id)
+        if entry_id in replication_creative_documents.ENTRIES:
+            return replication_creative_documents.read_rows(self.home, entry_id)
         if entry_id in replication_video.ENTRIES:
             return replication_video.read_rows(self.home, entry_id)
         if entry_id in replication_music_video.ENTRIES:
@@ -196,6 +200,8 @@ class ReplicationService:
                 replication_usage.validate_entries(entries)
             if scope == replication_creative_direction.SCOPE:
                 replication_creative_direction.validate_entries(entries)
+            if scope == replication_creative_documents.SCOPE:
+                replication_creative_documents.validate_entries(entries)
             if scope == replication_video.SCOPE:
                 replication_video.validate_entries(entries)
             if scope == replication_music_video.SCOPE:
@@ -270,6 +276,11 @@ class ReplicationService:
                 elif entry_id in replication_creative_direction.ENTRIES:
                     try:
                         result = replication_creative_direction.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_creative_documents.ENTRIES:
+                    try:
+                        result = replication_creative_documents.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
                     except ValueError as error:
                         raise ReplicationError(str(error), 422) from error
                 elif entry_id in replication_video.ENTRIES:
