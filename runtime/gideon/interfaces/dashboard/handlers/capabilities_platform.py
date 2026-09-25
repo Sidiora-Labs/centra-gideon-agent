@@ -20,3 +20,6 @@ async def api_catalog(request: web.Request) -> web.Response:
 def register(app: web.Application) -> None:
     bind_application(app)
     app.router.add_get(CATALOG_PATH, api_catalog, name="capabilities-platform-catalog")
+    from gideon.workspace.capabilities.platform.domain_alerts_http import register as register_domains
+
+    register_domains(app)
