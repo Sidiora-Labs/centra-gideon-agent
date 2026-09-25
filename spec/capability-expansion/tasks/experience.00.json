@@ -1,0 +1,42 @@
+{
+  "id": "experience.00",
+  "status": "locally_qualified",
+  "base_revision": "f567a220",
+  "contract": "Native ToolProvider and uniquely named app manifest invoke existing authoritative story/session/narration services; reads are safe and mutations preserve approval metadata. Tool and HTTP consumers share one live narration service per captured home.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/workspace/capabilities/experience/narration.py",
+    "runtime/gideon/workspace/capabilities/experience/narration_http.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-experience/app.json"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "acceptance_coverage": [
+    "Actual native manifest loads through provider registry, registers a real provider, invokes it and deregisters on disable",
+    "Static discovery yields twelve strict schemas without creating domain storage",
+    "Read and mutation tool definitions preserve risk/approval metadata",
+    "Agent operations author/update/delete stories, play both branches, resume snapshots and surface stale/request conflicts",
+    "Narration jobs are shared with HTTP without reclassifying live jobs as interrupted",
+    "Queued narration cancellation uses the real service and publishes no invented speech"
+  ],
+  "remaining_limits": [
+    "Root adds shared native category metadata and final integrated runtime discovery",
+    "External speech success remains pending as recorded in experience.02"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify experience.00",
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify experience.00",
+    "exit_code": 0,
+    "evidence": "/tmp/gideon-experience.00-checks-m0j8l70j/evidence.json",
+    "runtime_tests": 6,
+    "production_lines": 81,
+    "test_lines": 139,
+    "ratio": 1.7160493827160495
+  }
+}

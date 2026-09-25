@@ -1,0 +1,39 @@
+{
+  "id": "experience.03",
+  "status": "locally_checked_external_pending",
+  "base_revision": "a4b3f9fd",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/navigation.py",
+    "runtime/gideon/workspace/capabilities/experience/navigation_http.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/navigation.ts",
+    "apps/console/src/features/capabilities/experience/SpokenNavigation.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_navigation.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/SpokenNavigation.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_navigation.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/SpokenNavigation.test.tsx"
+  ],
+  "contract": "Real microphone/STT command input resolves actual supplied shell labels; durable requested receipts become applied only after observed route acknowledgement. Native tools read receipts without claiming browser execution.",
+  "remaining_limits": [
+    "Root shell insertion pending",
+    "Actual microphone/STT transcription remains externally unqualified; no fake audio provider output used"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify experience.03",
+  "qualification": {
+    "evidence": "/tmp/gideon-experience.03-checks-wqwmam4p/evidence.json",
+    "exit_code": 0,
+    "production_lines": 168,
+    "test_lines": 218,
+    "ratio": 1.2976190476190477,
+    "repair": "Test diagnostic output element changed to div to avoid implicit status role collision"
+  }
+}

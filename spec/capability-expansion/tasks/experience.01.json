@@ -1,0 +1,43 @@
+{
+  "id": "experience.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "contract": "Authored directed scene graphs with stable node/choice IDs, source revision snapshots, transactional player sessions and request-id replay.",
+  "storage": "capabilities/experience.sqlite3",
+  "acceptance_coverage": [
+    "Actual console authoring creates a branching story with two endings through the real HTTP handler",
+    "Independent player sessions reach alternate endings and resume via URL",
+    "Store reopen and fresh Python process preserve exact session history",
+    "Edits and source deletion retain immutable revisions referenced by existing sessions",
+    "Graph validation refuses dangling, unreachable and trapped-cycle graphs",
+    "Optimistic writes and concurrent choices refuse stale revisions",
+    "Start and choice request retries replay exact receipts and conflicting reuse fails",
+    "Isolated homes and malformed payload rejection preserve scope",
+    "Console retains invalid and conflicted drafts with actual HTTP error messages"
+  ],
+  "integration_hooks": {
+    "handler": "gideon.interfaces.dashboard.handlers.capabilities_experience.register(app)",
+    "console": "apps/console/src/features/capabilities/experience/Page.tsx default export",
+    "prefix": "/api/capabilities/experience",
+    "agent_operations": "stories GET/POST; stories/{id} GET/PUT/DELETE; sessions GET/POST; sessions/{id} GET; sessions/{id}/choices POST"
+  },
+  "remaining_limits": [
+    "Root integrates handler, console navigation, native agent operations and durability inventory",
+    "Local console journey uses a DOM renderer and real local HTTP process; full browser and integrated hosted qualification are separate",
+    "No model generation, hosted voice or multiplayer is claimed"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify experience.01",
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify experience.01",
+    "exit_code": 0,
+    "evidence": "/tmp/gideon-experience.01-checks-he5hdldb/evidence.json",
+    "compile_exit_code": 0,
+    "runtime_tests": 26,
+    "ui_tests": 3,
+    "production_lines": 352,
+    "test_lines": 390,
+    "ratio": 1.1079545454545454,
+    "boundary": "Local authored graph, durable player and actual console controls against real HTTP. Root integration remains separate."
+  }
+}

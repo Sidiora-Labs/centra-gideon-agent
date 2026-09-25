@@ -1,0 +1,47 @@
+{
+  "id": "music.05",
+  "status": "locally_qualified",
+  "base_revision": "c609ea69",
+  "requires": [
+    "music.04"
+  ],
+  "contract": "Transcribe actual canonical mono16bit PCM WAV8-48kHz<=60seconds with NumPy autocorrelation. Persist source reference, method, timing, detected notes and request fingerprint. Edit pitch36..96, velocity1..127, bounded timing with optimistic revision. Export real standard type0 MIDI as version-pinned canonical audio artifact. Exact API /api/capabilities/music/midi GET/POST, /{id} GET/PATCH, /{id}/export POST revision.",
+  "acceptance": [
+    "Real pitch and timing vectors from authored PCM including silence and harmonic notes; no precomputed note substitution",
+    "Persistent idempotency, conflict detection, same-home source lookup and stale edit refusal",
+    "Interactive piano roll and editable note table, API/native consumers, canonical MIDI export parseable into expected note and tempo events"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/midi.py",
+    "runtime/gideon/workspace/capabilities/music/midi_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_midi.py",
+    "runtime/gideon/workspace/artifacts/models.py",
+    "apps/console/src/features/capabilities/music/MidiPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_midi.py",
+    "checks/runtime/capabilities/music/serve_midi.py",
+    "apps/console/src/features/capabilities/music/MidiPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_midi.py"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-midi/app.json"
+  ],
+  "limits": [
+    "Monophonic heuristic transcription; polyphonic mixtures, noisy or unpitched recordings have no accuracy guarantee and require review",
+    "No ML provider, new dependency installation or synthetic provider response",
+    "Audio-device playback and root browser integration remain separate"
+  ],
+  "verification": {
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.05",
+    "attempts": 1,
+    "evidence": "/tmp/gideon-music.05-checks-dnz7whht/evidence.json",
+    "production_lines": 311,
+    "test_lines": 326,
+    "ratio": 1.0482315112540193,
+    "scope": "Real PCM pitch/rate/harmonic/silence/timing vectors; actual canonical MIDI byte parsing, SQLite/native/HTTP; two real HTTP UI journeys. Monophonic bounded scope only."
+  }
+}
