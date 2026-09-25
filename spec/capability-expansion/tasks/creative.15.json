@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "task": "creative.15",
+  "status": "locally_qualified",
+  "base_revision": "935b50bea8fcef8fd59de2f67aae32725c5bceb0",
+  "requires": ["creative.09"],
+  "contract": "Persist creative direction projects with reviewed treatment text, exact canonical Work or ordered Series revisions, and dependency-ordered production steps. Source pins reuse the canonical creative.13 chapter/work/draft/artifact/version/content-hash tuple without copying manuscripts. Deterministic source verification and readonly treatment snapshot steps execute one at a time through optimistic revision control. Pause, restart, edit remaining work and resume while completed step definitions, results and attempt history remain immutable.",
+  "acceptance": [
+    "Create and reopen an idempotent direction project whose Work or ordered Series source resolves to real immutable manuscript artifacts and exact content hashes; missing or unprepared sources create no placeholder project.",
+    "Start and complete a real source verification step, pause, reopen the store, replace the remaining plan, resume and finish while the completed step and result remain unchanged.",
+    "Treatment snapshot execution creates and reopens an actual readonly canonical markdown artifact with verified content hash and artifact route; source drift blocks execution without false completion.",
+    "Owner HTTP, console and approval-gated native tools exercise real persistence and lifecycle controls; stale revisions and invalid state transitions fail explicitly."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/direction.py",
+    "runtime/gideon/workspace/capabilities/creative/direction_tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_direction.py",
+    "apps/console/src/features/capabilities/creative/CreativeDirection.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_direction.py",
+    "checks/runtime/capabilities/creative/direction_ui_server.py",
+    "apps/console/src/features/capabilities/creative/CreativeDirection.test.tsx"
+  ],
+  "runtime_test_files": ["checks/runtime/capabilities/creative/test_direction.py"],
+  "ui_test_files": ["apps/console/src/features/capabilities/creative/CreativeDirection.test.tsx"],
+  "extra_files": ["runtime/gideon/extensions/apps/native/gideon-creative-direction/app.json"],
+  "evidence": "/tmp/gideon-creative.15-checks-93sgveef/evidence.json",
+  "qualification": {"runtime_tests": 21,"ui_tests": 2,"production_lines": 201,"test_lines": 245,"repair_cycles": 1,"limitations":["Shared creative route registration, page mounting and direction SQLite durability enrollment remain root integration hooks."]}
+}
