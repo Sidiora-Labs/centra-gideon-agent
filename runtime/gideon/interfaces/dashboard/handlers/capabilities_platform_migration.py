@@ -14,7 +14,7 @@ async def endpoint(request):
     projects = BoundHierarchy(config_dir())
     try:
         if request.method == "GET":
-            return web.json_response({"receipts": receipts(store, knowledge, projects), "supported_domains": ["people", "projects", "ideas", "journals", "memories", "links"]})
+            return web.json_response({"receipts": receipts(store, knowledge, projects), "supported_domains": ["people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox"]})
         body = await request.json()
         action = body.pop("action", None)
         if action == "preview":

@@ -126,7 +126,7 @@ it('imports a checksummed memory into canonical knowledge and reports its durabl
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 memories ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
-  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links'])
+  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links', 'buckets', 'inbox'])
   expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.memories === 1)).toBe(true)
 })
 

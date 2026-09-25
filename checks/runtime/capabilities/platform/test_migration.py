@@ -360,3 +360,81 @@ def test_journal_date_segments_and_idea_fields_fail_closed():
         preview(domains_archive({"journals": [{"id": "2026-09-22", "date": "2026-09-22", "content": "x", "segments": [{"text": "x", "at": "now", "source": "unknown"}], "createdAt": "2026-09-22T00:00:00Z", "updatedAt": "2026-09-22T00:00:00Z"}]}))
     with pytest.raises(MigrationError, match="one-liner"):
         preview(domains_archive({"ideas": [{"id": "12121212-1212-4212-8212-121212121212", "title": "Missing", "status": "active", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]}))
+
+
+def test_buckets_and_links_import_as_canonical_collection_membership(tmp_path):
+    bucket_id = "14141414-1414-4414-8414-141414141414"
+    link_id = "15151515-1515-4515-8515-151515151515"
+    source = domains_archive({
+        "buckets": [{"id": bucket_id, "name": "Research", "color": "purple", "icon": "books", "order": 3,
+                     "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-02-01T00:00:00Z"}],
+        "links": [{"id": link_id, "title": "Reference", "url": "https://example.com/reference", "description": "Source",
+                   "bucketId": bucket_id, "bucketOrder": 7, "createdAt": "2025-01-02T00:00:00Z", "updatedAt": "2025-02-02T00:00:00Z"}],
+    })
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["links", "buckets"]
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created and receipt["domains"] == {"buckets": 1, "links": 1}
+    collection = dict(knowledge.db.execute("SELECT * FROM collections WHERE id=?", (bucket_id,)).fetchone())
+    assert (collection["name"], collection["kind"], collection["icon"], collection["position"]) == ("Research", "manual", "books", 3)
+    assert tuple(knowledge.db.execute("SELECT collection_id,item_id FROM collection_items").fetchone()) == (bucket_id, link_id)
+    metadata = knowledge.get_item(link_id)["file_metadata"]
+    assert (metadata["bucket_id"], metadata["bucket_order"]) == (bucket_id, 7)
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert not created and again == receipt
+
+
+def test_missing_bucket_reference_rolls_back_link_and_receipt(tmp_path):
+    link_id = "16161616-1616-4616-8616-161616161616"
+    source = domains_archive({"links": [{"id": link_id, "title": "Orphan", "url": "https://example.com/orphan",
+        "bucketId": "17171717-1717-4717-8717-171717171717", "bucketOrder": 0,
+        "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    with pytest.raises(MigrationError, match="missing canonical bucket"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.get_item(link_id) is None
+    assert knowledge.db.execute("SELECT count(*) FROM collection_items").fetchone()[0] == 0
+    assert receipts(people, knowledge) == []
+
+
+def test_inbox_state_and_history_import_with_same_transaction_destination(tmp_path):
+    idea_id = "18181818-1818-4818-8818-181818181818"
+    capture_id = "19191919-1919-4919-8919-191919191919"
+    source = domains_archive({
+        "ideas": [{"id": idea_id, "title": "Solar notes", "status": "active", "oneLiner": "Build a collector",
+                   "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-02T00:00:00Z"}],
+        "inbox": [{"id": capture_id, "capturedText": "Build a solar collector", "capturedAt": "2025-01-01T00:00:00Z",
+                   "source": "brain_ui", "status": "corrected", "creative": True,
+                   "classification": {"destination": "projects", "confidence": 0.6, "title": "Solar", "extracted": {}},
+                   "filed": {"destination": "ideas", "destinationId": idea_id},
+                   "correction": {"correctedAt": "2025-01-02T00:00:00Z", "previousDestination": "projects", "newDestination": "ideas"}}],
+    })
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created and receipt["domains"] == {"ideas": 1, "inbox": 1}
+    capture = dict(knowledge.db.execute("SELECT * FROM capability_knowledge_captures WHERE id=?", (capture_id,)).fetchone())
+    assert (capture["original_text"], capture["status"], capture["destination_id"]) == ("Build a solar collector", "routed", idea_id)
+    event = knowledge.db.execute("SELECT event,payload,happened_at FROM capability_knowledge_capture_events WHERE capture_id=?", (capture_id,)).fetchone()
+    assert event["event"] == "migration_snapshot" and json.loads(event["payload"])["creative"] is True
+    assert event["happened_at"] == "2025-01-01T00:00:00Z"
+
+
+def test_inbox_rejects_unverifiable_route_and_collision_rolls_back(tmp_path):
+    capture_id = "20202020-2020-4020-8020-202020202020"
+    bad = domains_archive({"inbox": [{"id": capture_id, "capturedText": "Call Ada", "capturedAt": "2025-01-01T00:00:00Z",
+        "source": "brain_ui", "status": "filed", "filed": {"destination": "people", "destinationId": "21212121-2121-4121-8121-212121212121"}}]})
+    with pytest.raises(MigrationError, match="supported canonical destination"):
+        preview(bad)
+    source = domains_archive({"inbox": [{"id": capture_id, "capturedText": "Review later", "capturedAt": "2025-01-01T00:00:00Z",
+        "source": "brain_ui", "status": "needs_review"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
+    CaptureInbox(knowledge)
+    knowledge.db.execute("INSERT INTO capability_knowledge_captures (id,request_id,input_origin,original_text,captured_at,status,revision) VALUES (?,?,?,?,?,?,1)",
+                         (capture_id, "existing-request", "text", "Existing", "2025-01-01T00:00:00Z", "needs_review"))
+    knowledge.db.commit()
+    with pytest.raises(MigrationError, match="target identity"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.db.execute("SELECT count(*) FROM capability_knowledge_capture_events").fetchone()[0] == 0
+    assert receipts(people, knowledge) == []

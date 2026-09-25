@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
 from gideon.engine.tasks.models import Project
 from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
+from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy
 from gideon.workspace.capabilities.communications.store import PeopleStore, person_values
 
@@ -127,12 +128,12 @@ def _inspect(data):
     for name, expected in normalized.items():
         if hashlib.sha256(data_files[name]).hexdigest() != expected:
             raise MigrationError(f"Checksum mismatch for {name}", 409)
-    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
+    allowed = re.compile(r"^brain/(?:people|projects|ideas|journals|memories|links|buckets|inbox)/(?:index\.json|[A-Za-z0-9_-]{1,128}/index\.json)$")
     unsupported = sorted(name for name in data_files if not allowed.fullmatch(name))
     if unsupported:
         domains = sorted({name.split("/", 1)[0] for name in unsupported})
         raise MigrationError(f"Archive contains unsupported domains: {', '.join(domains)}")
-    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links") if f"brain/{domain}/index.json" in data_files]
+    domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
     if ("people" in domains or "projects" in domains) and len(domains) > 1:
@@ -189,6 +190,85 @@ def _inspect(data):
                             "status": "archived" if record["status"] == "done" else "active", "brief": "\n".join(filter(None, details)),
                             "created_at": record.get("createdAt"), "updated_at": record.get("updatedAt")}})
             continue
+        if domain == "buckets":
+            fields = {"id", "name", "color", "icon", "order", "createdAt", "updatedAt", "originInstanceId"}
+            if not UUID.fullmatch(record_id) or set(record) - fields:
+                raise MigrationError("Buckets record identity or fields are unsupported")
+            if (not isinstance(record.get("name"), str) or not record["name"].strip() or len(record["name"]) > 100
+                    or record.get("color") not in (None, "accent", "success", "warning", "error", "purple", "pink", "cyan", "slate")
+                    or not isinstance(record.get("icon", ""), str) or len(record.get("icon", "")) > 50
+                    or type(record.get("order", 0)) is not int):
+                raise MigrationError("Buckets record fields are invalid")
+            for value in (record.get("createdAt"), record.get("updatedAt")):
+                try:
+                    if not isinstance(value, str) or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                        raise ValueError()
+                except (ValueError, OverflowError):
+                    raise MigrationError("Buckets record timestamps are invalid") from None
+            records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id,
+                            "name": record["name"].strip(), "icon": record.get("icon") or record.get("color") or "",
+                            "position": record.get("order", 0), "created_at": record["createdAt"], "updated_at": record["updatedAt"]}})
+            continue
+        if domain == "inbox":
+            fields = {"id", "capturedText", "capturedAt", "source", "ai", "classification", "status", "filed", "correction", "error", "creative", "sentToCatalogAt", "originInstanceId"}
+            if not UUID.fullmatch(record_id) or set(record) - fields:
+                raise MigrationError("Inbox record identity or fields are unsupported")
+            text = record.get("capturedText")
+            status = record.get("status")
+            if (not isinstance(text, str) or not text.strip() or len(text) > 10000 or record.get("source") != "brain_ui"
+                    or status not in ("classifying", "filed", "needs_review", "corrected", "done", "error")):
+                raise MigrationError("Inbox record fields are invalid")
+            try:
+                captured = record["capturedAt"]
+                if not isinstance(captured, str) or datetime.fromisoformat(captured.replace("Z", "+00:00")).utcoffset() is None:
+                    raise ValueError()
+            except (KeyError, ValueError, OverflowError):
+                raise MigrationError("Inbox captured timestamp is invalid") from None
+            filed = record.get("filed")
+            if status in ("filed", "corrected", "done"):
+                if (not isinstance(filed, dict) or set(filed) != {"destination", "destinationId"}
+                        or filed.get("destination") not in ("ideas", "memories", "links") or not UUID.fullmatch(str(filed.get("destinationId", "")))):
+                    raise MigrationError("Routed inbox records require a supported canonical destination")
+            elif filed is not None:
+                raise MigrationError("Unrouted inbox records cannot carry a filed destination")
+            error = record.get("error")
+            if error is not None and (not isinstance(error, dict) or set(error) - {"message", "stack"} or not isinstance(error.get("message"), str)):
+                raise MigrationError("Inbox error details are invalid")
+            ai = record.get("ai")
+            if ai is not None and (not isinstance(ai, dict) or set(ai) - {"providerId", "modelId", "promptTemplateId", "temperature", "maxTokens"}
+                                   or any(not isinstance(ai.get(key), str) for key in ("providerId", "modelId", "promptTemplateId"))
+                                   or "temperature" in ai and (type(ai["temperature"]) not in (int, float) or not 0 <= ai["temperature"] <= 2)
+                                   or "maxTokens" in ai and (type(ai["maxTokens"]) is not int or ai["maxTokens"] <= 0)):
+                raise MigrationError("Inbox AI provenance is invalid")
+            classification = record.get("classification")
+            if classification is not None and (not isinstance(classification, dict)
+                    or set(classification) - {"destination", "confidence", "title", "cleanedUp", "thoughts", "extracted", "reasons"}
+                    or classification.get("destination") not in ("people", "projects", "ideas", "admin", "memories", "links", "unknown")
+                    or type(classification.get("confidence")) not in (int, float) or not 0 <= classification["confidence"] <= 1
+                    or not isinstance(classification.get("title"), str) or not 0 < len(classification["title"]) <= 200
+                    or not isinstance(classification.get("extracted"), dict)):
+                raise MigrationError("Inbox classification is invalid")
+            correction = record.get("correction")
+            if correction is not None and (not isinstance(correction, dict) or set(correction) - {"correctedAt", "previousDestination", "newDestination", "note"}
+                    or correction.get("previousDestination") not in ("people", "projects", "ideas", "admin", "memories", "links", "unknown")
+                    or correction.get("newDestination") not in ("people", "projects", "ideas", "admin", "memories")
+                    or not isinstance(correction.get("correctedAt"), str)):
+                raise MigrationError("Inbox correction is invalid")
+            if "creative" in record and type(record["creative"]) is not bool:
+                raise MigrationError("Inbox creative flag is invalid")
+            for value in filter(None, [correction.get("correctedAt") if correction else None, record.get("sentToCatalogAt")]):
+                try:
+                    if datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is None:
+                        raise ValueError()
+                except (AttributeError, ValueError, OverflowError):
+                    raise MigrationError("Inbox event timestamp is invalid") from None
+            records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id,
+                            "title": text.strip()[:200], "text": text, "captured_at": captured,
+                            "status": "routed" if filed else "error" if status == "error" else "needs_review",
+                            "destination_id": filed.get("destinationId") if filed else None,
+                            "error": error.get("message") if error else None,
+                            "event": {key: record[key] for key in ("ai", "classification", "filed", "correction", "creative", "sentToCatalogAt", "status") if key in record}}})
+            continue
         if domain != "journals" and not UUID.fullmatch(record_id):
             raise MigrationError(f"{domain.title()} record identity must be a UUID")
         common = {"id", "title", "tags", "createdAt", "updatedAt", "originInstanceId"}
@@ -213,6 +293,9 @@ def _inspect(data):
             raise MigrationError(f"{domain.title()} record tags are invalid")
         if domain == "links" and (not isinstance(url, str) or not re.fullmatch(r"https?://[^\s]+", url)):
             raise MigrationError("Links record URL is invalid")
+        if domain == "links" and (record.get("bucketId") is not None and not UUID.fullmatch(str(record["bucketId"]))
+                                  or record.get("bucketOrder") is not None and type(record["bucketOrder"]) is not int):
+            raise MigrationError("Links bucket membership is invalid")
         created = record.get("sourceCreatedAt") or record.get("createdAt")
         updated = record.get("sourceUpdatedAt") or record.get("updatedAt") or created
         for value in (created, updated):
@@ -228,7 +311,8 @@ def _inspect(data):
                     "source": record.get("source"), "source_ref": record.get("sourceRef"), "mood": record.get("mood"),
                     "link_type": record.get("linkType"), "legacy_status": record.get("status"), "journal_date": record_id if domain == "journals" else None,
                     "journal_timezone": "UTC" if domain == "journals" else None, "journal_revision": 1 if domain == "journals" else None,
-                    "segments": segments, "repository": {key: record.get(key) for key in ("isRepo", "repoHost", "repoOwner", "repoName") if key in record}}
+                    "segments": segments, "bucket_id": record.get("bucketId"), "bucket_order": record.get("bucketOrder"),
+                    "repository": {key: record.get(key) for key in ("isRepo", "repoHost", "repoOwner", "repoName") if key in record}}
         records.append({"domain": domain, "source_id": record_id, "values": {"id": record_id, "title": title.strip(), "content": content,
                         "item_type": "note" if domain == "memories" else "bookmark" if domain == "links" else "fleeting" if domain == "ideas" else "journal",
                         "summary": record.get("description", "") or record.get("oneLiner", ""), "url": normalize_url(url) if url else "",
@@ -292,6 +376,8 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
 
 def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
     db = store.db
+    if any(row["domain"] == "inbox" for row in records):
+        CaptureInbox(store)
     db.execute("BEGIN IMMEDIATE")
     try:
         db.execute("CREATE TABLE IF NOT EXISTS platform_migrations (archive_digest TEXT PRIMARY KEY, review_token TEXT NOT NULL, receipt TEXT NOT NULL)")
@@ -302,7 +388,7 @@ def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
             db.execute("ROLLBACK")
             return json.loads(prior["receipt"]), False
         imported = []
-        for row in records:
+        for row in (candidate for candidate in records if candidate["domain"] not in ("buckets", "inbox")):
             values = row["values"]
             if db.execute("SELECT 1 FROM items WHERE id=?", (values["id"],)).fetchone():
                 raise MigrationError("Migration target identity already exists", 409)
@@ -313,6 +399,34 @@ def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
             rowid = db.execute("SELECT rowid FROM items WHERE id=?", (values["id"],)).fetchone()[0]
             db.execute("INSERT INTO items_fts (rowid,title,content,tags) VALUES (?,?,?,?)", (rowid, values["title"], values["content"], _fts_tags(values["tags"])))
             imported.append({"source_id": row["source_id"], "item_id": values["id"], "domain": row["domain"]})
+        for row in (candidate for candidate in records if candidate["domain"] == "buckets"):
+            values = row["values"]
+            if db.execute("SELECT 1 FROM collections WHERE id=?", (values["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+            db.execute("INSERT INTO collections (id,name,kind,query,icon,position,created_at,updated_at) VALUES (?,?,'manual','',?,?,?,?)",
+                       (values["id"], values["name"], values["icon"], values["position"], values["created_at"], values["updated_at"]))
+            imported.append({"source_id": row["source_id"], "collection_id": values["id"], "domain": "buckets"})
+        for row in (candidate for candidate in records if candidate["domain"] == "links"):
+            values = row["values"]
+            bucket_id = values["file_metadata"].get("bucket_id")
+            if bucket_id is None:
+                continue
+            if not db.execute("SELECT 1 FROM collections WHERE id=?", (bucket_id,)).fetchone():
+                raise MigrationError("Link references a missing canonical bucket", 409)
+            db.execute("INSERT INTO collection_items (collection_id,item_id,added_at) VALUES (?,?,?)",
+                       (bucket_id, values["id"], values["created_at"]))
+        for row in (candidate for candidate in records if candidate["domain"] == "inbox"):
+            values = row["values"]
+            if db.execute("SELECT 1 FROM capability_knowledge_captures WHERE id=?", (values["id"],)).fetchone():
+                raise MigrationError("Migration target identity already exists", 409)
+            if values["destination_id"] is not None and not db.execute("SELECT 1 FROM items WHERE id=?", (values["destination_id"],)).fetchone():
+                raise MigrationError("Inbox record references a missing canonical destination", 409)
+            request_id = "migration-inbox-" + values["id"]
+            db.execute("INSERT INTO capability_knowledge_captures (id,request_id,input_origin,original_text,captured_at,status,error,revision,destination_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                       (values["id"], request_id, "text", values["text"], values["captured_at"], values["status"], values["error"], 1, values["destination_id"]))
+            db.execute("INSERT INTO capability_knowledge_capture_events (capture_id,request_id,event,payload,happened_at) VALUES (?,?,?,?,?)",
+                       (values["id"], "migration-event-" + values["id"], "migration_snapshot", json.dumps(values["event"], sort_keys=True), values["captured_at"]))
+            imported.append({"source_id": row["source_id"], "capture_id": values["id"], "domain": "inbox"})
         counts = {domain: sum(row["domain"] == domain for row in records) for domain in sorted(set(row["domain"] for row in records))}
         receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated, "committed_at": datetime.now(timezone.utc).isoformat(), "domains": counts, "records": imported}
         db.execute("INSERT INTO platform_migrations VALUES (?,?,?)", (digest, token, json.dumps(receipt)))

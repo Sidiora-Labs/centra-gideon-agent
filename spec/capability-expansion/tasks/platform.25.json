@@ -4,7 +4,7 @@
   "mode": "QUALIFY",
   "owner_lane": "platform",
   "status": "locally_qualified_partial",
-  "scope": "Checksummed bounded legacy snapshot preview with canonical people, project, idea, journal, memory and link migration",
+  "scope": "Checksummed bounded legacy snapshot preview with canonical people, project, idea, journal, memory, link, bucket and inbox migration",
   "requires": [
     "platform.24"
   ],
@@ -31,23 +31,25 @@
     "Reviewed people records map into the canonical PeopleStore in one SQLite transaction with a durable replay-safe receipt",
       "Authenticated HTTP and console file selection expose verified preview, explicit supported-domain coverage, reviewed commit and persisted receipts",
     "Version-1 memory, link, idea and journal records retain stable conflict IDs, source identity, timestamps, tags, URLs and structured provenance in one canonical KnowledgeStore transaction",
-    "One version-1 project is staged and atomically published per archive with its stable relationship ID and replay receipt in the canonical project tree"
+    "One version-1 project is staged and atomically published per archive with its stable relationship ID and replay receipt in the canonical project tree",
+    "Version-1 bookmark buckets become canonical manual collections and link bucket IDs become validated relational memberships in the same KnowledgeStore transaction",
+    "Version-1 inbox records preserve stable capture IDs, meaningful routing state and immutable classification history; routed records require an existing or same-transaction canonical knowledge destination"
   ],
   "limits": [
-    "This sub-slice supports only version-1 people, projects, ideas, journals, memories and links collection records; every other archive domain, relational dump and future schema is rejected.",
+    "This sub-slice supports only version-1 people, projects, ideas, journals, memories, links, buckets and inbox collection records; every other archive domain, relational dump and future schema is rejected.",
     "People, project and knowledge archive families require separate imports so each authoritative store and its receipt publish atomically; project archives are limited to one record.",
     "Shared durability inventory and final fresh-home restore integration remain owned by the root integration slice.",
-    "Complete original domain breadth, binary media restoration and full archive restore proof remain pending."
+    "Admin, threads, songs, binary media restoration and full archive restore proof remain pending; no cross-store archive is accepted without one durable atomic publication design."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
   "verification": {
-    "previous_evidence": "/tmp/gideon-platform.25-checks-4gqtfrl3/evidence.json",
-    "evidence": "/tmp/gideon-platform.25-checks-0rgl1jey/evidence.json",
+    "previous_evidence": "/tmp/gideon-platform.25-checks-0rgl1jey/evidence.json",
+    "evidence": "/tmp/gideon-platform.25-checks-luc3apxv/evidence.json",
     "compile_exit": 0,
-    "runtime_passed": 34,
+    "runtime_passed": 38,
     "ui_passed": 4,
-    "production_lines": 397,
-    "test_lines": 451,
-    "repair_cycles": 1
+    "production_lines": 511,
+    "test_lines": 521,
+    "repair_cycles": 0
   }
 }
