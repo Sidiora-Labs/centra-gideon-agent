@@ -7,6 +7,7 @@ from .moodboards import BoardStore
 from .universes import UniverseStore
 from .graph import UniverseGraph
 from .authors import AuthorStore
+from .works import WorkStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -42,9 +43,15 @@ AUTHOR = {"title": STRING, "biography": STRING, "voice": obj({"perspective": {"e
           "sample_refs": {"type": "array", "items": obj({"artifact_id": STRING, "artifact_version": NUMBER}, ["artifact_id", "artifact_version"])}}
 
 
+WORK = {"title": STRING, "kind": {"enum": ["work", "exercise"]}, "prompt": STRING,
+        "author_ref": {"anyOf": [obj({"id": STRING, "revision": NUMBER}, ["id", "revision"]), {"type": "null"}]},
+        "universe_ref": {"anyOf": [obj({"id": STRING, "revision": NUMBER}, ["id", "revision"]), {"type": "null"}]},
+        "active_draft_id": {"type": ["string", "null"]}}
+
+
 def schemas():
     result = {}
-    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE), ("author", AUTHOR)):
+    for entity, fields in (("ingredient", INGREDIENT), ("board", BOARD), ("universe", UNIVERSE), ("author", AUTHOR), ("work", WORK)):
         result[f"creative_{entity}_list"] = obj({**PAGE, **({"type": {"enum": list(TYPES)}, "tag": STRING} if entity == "ingredient" else {})})
         result[f"creative_{entity}_get"] = obj({"id": STRING}, ["id"])
         result[f"creative_{entity}_create"] = obj({"payload": obj({**fields, "request_id": STRING}, ["title", "request_id", *(["type"] if entity == "ingredient" else [])])}, ["payload"])
@@ -56,6 +63,11 @@ def schemas():
     result["creative_author_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_author_brief"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
     result["creative_author_sources"] = obj({"q": STRING})
+    result["creative_work_export"] = obj({"id": STRING, "revision": NUMBER}, ["id"])
+    result["creative_work_context"] = obj({"id": STRING}, ["id"])
+    result["creative_work_drafts"] = obj({"id": STRING}, ["id"])
+    result["creative_work_read_draft"] = obj({"id": STRING, "draft_id": STRING}, ["id", "draft_id"])
+    result["creative_work_draft"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "revision": NUMBER, "text": STRING, "note": STRING}, ["request_id", "revision", "text"])}, ["id", "payload"])
     result["creative_board_sources"] = obj({"q": STRING})
     result["creative_universe_graph"] = obj({"id": STRING}, ["id"])
     result["creative_universe_merge_preview"] = obj({"id": STRING, "payload": obj({"source_id": STRING}, ["source_id"])}, ["id", "payload"])
@@ -66,7 +78,7 @@ def schemas():
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge"}
+WRITES = {"create", "update", "restore", "merge", "draft"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -76,6 +88,7 @@ class CreativeToolProvider(ToolProvider):
         self.universes = UniverseStore(self.ingredients.home)
         self.graphs = UniverseGraph(self.universes)
         self.authors = AuthorStore(self.ingredients.home)
+        self.works = WorkStore(self.ingredients.home)
 
     @property
     def name(self):
@@ -90,8 +103,8 @@ class CreativeToolProvider(ToolProvider):
             description=(f"{name.removeprefix('creative_').replace('_', ' ').capitalize()} in the current runtime creative library. "
                          "Mutations require the current revision; create requires a unique request_id. "
                          "Use board sources for canonical artifact IDs and versions. No generated images."),
-            parameters=deepcopy(schema), requires_approval=name.rsplit("_", 1)[1] in WRITES,
-            risk_level=RiskLevel.CAUTION if name.rsplit("_", 1)[1] in WRITES else RiskLevel.SAFE)
+            parameters=deepcopy(schema), requires_approval=name.split("_", 2)[2] in WRITES,
+            risk_level=RiskLevel.CAUTION if name.split("_", 2)[2] in WRITES else RiskLevel.SAFE)
             for name, schema in SCHEMAS.items()]
 
     async def invoke(self, tool_name, arguments):
@@ -103,7 +116,7 @@ class CreativeToolProvider(ToolProvider):
             if set(schema["required"]) - set(arguments):
                 raise CatalogError("Missing required arguments")
             _, entity, action = tool_name.split("_", 2)
-            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors}[entity]
+            store = {"ingredient": self.ingredients, "board": self.boards, "universe": self.universes, "author": self.authors, "work": self.works}[entity]
             args = dict(arguments)
             if action in ("graph", "merge_preview", "merge"):
                 result = getattr(self.graphs, action)(**args)

@@ -10,6 +10,8 @@ PREFIX = "/api/capabilities/creative/ingredients"
 from gideon.workspace.capabilities.creative.universes import UniverseStore
 from gideon.workspace.capabilities.creative.graph import UniverseGraph
 from gideon.workspace.capabilities.creative.authors import AuthorStore
+from gideon.workspace.capabilities.creative.works import WorkStore
+WORKS = web.AppKey("creative_works", WorkStore)
 AUTHORS = web.AppKey("creative_authors", AuthorStore)
 GRAPHS = web.AppKey("creative_graphs", UniverseGraph)
 UNIVERSES = web.AppKey("creative_universes", UniverseStore)
@@ -64,6 +66,37 @@ async def universes(request):
         else:
             payload = await request.json()
             result = store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
+        return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
+async def works(request):
+    store = request.app[WORKS]
+    id = request.match_info.get("id")
+    action = request.path.rsplit("/", 1)[-1]
+    try:
+        if request.method == "GET":
+            if set(request.query) - {"q", "offset", "limit", "revision"}:
+                raise CatalogError("Unexpected query parameter")
+            if request.match_info.get("draft_id"):
+                result = store.read_draft(id, request.match_info["draft_id"])
+            elif action == "drafts":
+                result = store.drafts(id)
+            elif action == "context":
+                result = store.context(id)
+            elif action == "export":
+                revision = int(request.query["revision"]) if "revision" in request.query else None
+                return web.json_response(store.export(id, revision), headers={"Content-Disposition": f'attachment; filename="work-{id}.json"'})
+            elif action == "revisions":
+                result = {"items": store.revisions(id)}
+            elif id:
+                result = store.get(id)
+            else:
+                result = store.list(request.query.get("q", ""), int(request.query.get("offset", 0)), int(request.query.get("limit", 25)))
+        else:
+            payload = await request.json()
+            result = store.draft(id, payload) if action == "drafts" else store.restore(id, payload) if action == "restore" else store.update(id, payload) if id else store.create(payload)
         return web.json_response(result, status=201 if request.method == "POST" and not id else 200)
     except (CatalogError, ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
@@ -147,6 +180,18 @@ async def universe_graph(request):
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
+    app[WORKS] = WorkStore(app[STORE].home)
+    app.router.add_get("/api/capabilities/creative/works", works)
+    app.router.add_post("/api/capabilities/creative/works", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}", works)
+    app.router.add_patch("/api/capabilities/creative/works/{id}", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}/revisions", works)
+    app.router.add_post("/api/capabilities/creative/works/{id}/restore", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}/export", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}/context", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}/drafts", works)
+    app.router.add_post("/api/capabilities/creative/works/{id}/drafts", works)
+    app.router.add_get("/api/capabilities/creative/works/{id}/drafts/{draft_id}", works)
     app[AUTHORS] = AuthorStore(app[STORE].home)
     app.router.add_get("/api/capabilities/creative/authors", authors)
     app.router.add_post("/api/capabilities/creative/authors", authors)

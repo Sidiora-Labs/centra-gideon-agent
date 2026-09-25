@@ -57,12 +57,12 @@ def test_manifest_factory_and_actual_tool_registry(tmp_path):
 def test_tool_definitions_complete_strict_and_approval_bearing(tmp_path):
     provider = CreativeToolProvider(tmp_path)
     definitions = asyncio.run(provider.list_tools())
-    assert len(definitions) == 33
+    assert len(definitions) == 44
     assert {definition.name for definition in definitions} == set(SCHEMAS)
     for definition in definitions:
         assert definition.provider == 'gideon-creative'
         assert definition.parameters['additionalProperties'] is False
-        mutates = definition.name.rsplit('_', 1)[1] in {'create', 'update', 'restore', 'merge'}
+        mutates = definition.name.split('_', 2)[2] in {'create', 'update', 'restore', 'merge', 'draft'}
         assert definition.requires_approval is mutates
         assert definition.risk_level == (RiskLevel.CAUTION if mutates else RiskLevel.SAFE)
         assert definition.description

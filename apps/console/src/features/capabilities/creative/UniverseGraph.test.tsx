@@ -47,9 +47,7 @@ async function current() {
   expect(response.status).toBe(200)
   return response.json()
 }
-async function ready() {
-  await waitFor(() => expect(screen.queryByText('Loading universes…')).not.toBeInTheDocument())
-}
+
 
 async function seed(title: string, body: string, colors: string[]) {
   const response = await fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: crypto.randomUUID(), title, canon: [{ id: 'law', title: 'Law', body }], visual_identity: { colors, style_notes: title } }) })
