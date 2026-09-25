@@ -19,6 +19,7 @@ from .datasets import DatasetStore
 from .training import DiffusersTrainer
 from .images import ImageService
 from .animations import AnimationService
+from .downloads import SourceDownloader
 from .sketches import SketchError, fields, integer
 
 
@@ -43,6 +44,7 @@ class MediaJobs:
         self.images = images or ImageService(sketches.artifacts)
         self.cleanup = CleanupService(self.images)
         self.animations = AnimationService(sketches.artifacts)
+        self.downloads = SourceDownloader(sketches.artifacts)
         self.sprites = SpriteService(self.path.parent / "sprites.sqlite3", self.images)
         self.videos = videos or VideoService(self.images)
         self.timelines = TimelineStore(self.path.parent / "timelines.sqlite3", self.videos)
@@ -84,7 +86,10 @@ class MediaJobs:
         if not isinstance(body, dict):
             raise SketchError('Expected an object')
         image_request = None
-        if body.get('operation') == 'code_animation_generate':
+        if body.get('operation') == 'source_download':
+            fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
+            image_request = self.downloads.prepare(body['input'])
+        elif body.get('operation') == 'code_animation_generate':
             fields(body, ('operation', 'request_id', 'input'), ('operation', 'request_id', 'input'))
             image_request = self.animations.prepare(body['input'])
         elif body.get('operation') in ('sprite_generate', 'sprite_compile'):
@@ -236,7 +241,9 @@ class MediaWorker(BackgroundWorker):
             self.jobs.finish(job['id'])
             return
         try:
-            if job['operation'] == 'code_animation_generate':
+            if job['operation'] == 'source_download':
+                result = asyncio.run(self.jobs.downloads.execute(job['input'], job['id'], lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested'))
+            elif job['operation'] == 'code_animation_generate':
                 result = asyncio.run(self.jobs.animations.execute(job['input'], job['id']))
             elif job['operation'] in ('sprite_generate', 'sprite_compile'):
                 stopped = lambda: ctx.should_stop() or self.jobs.get(job['id'])['status'] == 'cancel_requested'
