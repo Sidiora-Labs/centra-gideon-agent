@@ -1,7 +1,7 @@
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
-from .narration import NarrationJobs
+from .narration import NarrationJobs, get_narration_jobs
 from .store import Conflict, NotFound
 
 JOBS = web.AppKey("experience_narration", NarrationJobs)
@@ -32,7 +32,7 @@ async def handle(request):
 
 
 def register_narration(app, store):
-    app[JOBS] = NarrationJobs(store)
+    app[JOBS] = get_narration_jobs(store)
     prefix = "/api/capabilities/experience"
     app.router.add_post(prefix + "/sessions/{session_id}/narration", handle)
     app.router.add_get(prefix + "/narrations/{narration_id}", handle)
