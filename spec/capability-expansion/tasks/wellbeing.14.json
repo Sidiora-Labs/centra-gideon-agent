@@ -4,28 +4,28 @@
   "status": "in_progress",
   "base_revision": "809b6bfa",
   "production_files": [
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_whitepages.py",
-    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_whitepages_provider.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_whitepages.py",
-    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.tsx"
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_beenverified.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/privacy_broker_beenverified_provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_broker_beenverified.py",
+    "apps/console/src/features/capabilities/wellbeing/BeenVerifiedBrokerPanel.tsx"
   ],
   "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-whitepages/app.json"
+    "runtime/gideon/extensions/apps/native/gideon-privacy-broker-beenverified/app.json"
   ],
   "test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages.py",
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages_provider.py",
-    "checks/runtime/capabilities/wellbeing/whitepages_ui_server.py",
-    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.test.tsx"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_beenverified.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_beenverified_provider.py",
+    "checks/runtime/capabilities/wellbeing/beenverified_ui_server.py",
+    "apps/console/src/features/capabilities/wellbeing/BeenVerifiedBrokerPanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages.py",
-    "checks/runtime/capabilities/wellbeing/test_privacy_broker_whitepages_provider.py"
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_beenverified.py",
+    "checks/runtime/capabilities/wellbeing/test_privacy_broker_beenverified_provider.py"
   ],
   "ui_test_files": [
-    "apps/console/src/features/capabilities/wellbeing/WhitepagesBrokerPanel.test.tsx"
+    "apps/console/src/features/capabilities/wellbeing/BeenVerifiedBrokerPanel.test.tsx"
   ],
-  "contract": "The supported Spokeo adapter is consumed through explicit console and discoverable native-provider operations for scan, prepare, approved submit and verify. Every action targets an existing consented durable case at an exact revision. Preparation submits nothing and returns disabled, contract-only or live readiness explicitly. Submission requires a per-request approval checkbox/constant, native tool approval, the exact approval phrase and, outside a contract server, the disabled-by-default runtime live-submit gate. Verification confirms removal only from a later negative provider rescan. The supported Whitepages continuation prepares a fixed-recipient removal/deletion email only through the canonical account-bound outbound-email record, requires exact digest approval and separate dispatch confirmation, retains SMTP acceptance separately from uncertain delivery, and correlates only already-ingested replies. Manual verification codes must match canonical reply content; links remain unopened and neither reply nor SMTP acceptance proves removal.",
+  "contract": "The supported Spokeo adapter is consumed through explicit console and discoverable native-provider operations for scan, prepare, approved submit and verify. Every action targets an existing consented durable case at an exact revision. Preparation submits nothing and returns disabled, contract-only or live readiness explicitly. Submission requires a per-request approval checkbox/constant, native tool approval, the exact approval phrase and, outside a contract server, the disabled-by-default runtime live-submit gate. Verification confirms removal only from a later negative provider rescan. The supported Whitepages continuation prepares a fixed-recipient removal/deletion email only through the canonical account-bound outbound-email record, requires exact digest approval and separate dispatch confirmation, retains SMTP acceptance separately from uncertain delivery, and correlates only already-ingested replies. Manual verification codes must match canonical reply content; links remain unopened and neither reply nor SMTP acceptance proves removal. The BeenVerified continuation implements only its documented fixed-address deletion-email follow-up through the same canonical outbound-email approval and correlation contract. It does not automate or claim completion of the primary suppression web form, affiliate rescans, or removal.",
   "remaining_limits": [
     "Local qualification uses a real HTTP contract server implementing the supported Spokeo request and response protocol; it is protocol evidence, not proof that the live broker currently accepts the flow",
     "Contract-server readiness is labelled separately from live-broker readiness in the console",
@@ -37,12 +37,18 @@
     "Whitepages accepted or uncertain email advances only to submitted. Confirmed removal still requires later provider rescan evidence.",
     "Whitepages reply URLs remain unopened text and manual code matching is local against the canonical ingested message.",
     "Other remaining catalog brokers still lack provider adapters, so wellbeing.14 remains partial against original full broker breadth.",
-    "Root must register capabilities_wellbeing_broker_whitepages.register; the unique handler and panel integration are included in this continuation."
+    "Root must register capabilities_wellbeing_broker_whitepages.register; the unique handler and panel integration are included in this continuation.",
+    "BeenVerified primary suppression remains its external web form; this adapter implements only the donor-documented privacy@beenverified.com deletion-email follow-up.",
+    "BeenVerified affiliate properties require separate rescans, and neither an SMTP receipt nor a correlated reply proves deletion or suppression.",
+    "BeenVerified planned qualification is confined to real loopback SMTP; no live broker email, form submission, link navigation, or affiliate scan is permitted.",
+    "BeenVerified shared handler registration and case-specific panel mount are implemented while preserving the existing privacy, Spokeo, and Whitepages hooks; the entire new delta remains OSS-unverified."
   ],
   "integration_hooks": [
     "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo.register with the shared dashboard application; no shared registration file is changed in this slice",
     "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_whitepages.register with the shared dashboard application while preserving existing privacy and Spokeo registrations.",
-    "Mount WhitepagesBrokerPanel for selected Whitepages cases in PrivacyBrokers after the unique panel qualifies."
+    "Mount WhitepagesBrokerPanel for selected Whitepages cases in PrivacyBrokers after the unique panel qualifies.",
+    "The shared dashboard application registers capabilities_wellbeing_broker_beenverified using the same bound home as the existing privacy broker handlers.",
+    "PrivacyBrokers mounts BeenVerifiedBrokerPanel only for a selected BeenVerified case."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.14",
   "acceptance_coverage": [
@@ -55,15 +61,12 @@
     "Whitepages preparation creates a fixed-recipient canonical outbound-email draft and performs no network send.",
     "Exact digest approval and separate dispatch confirmation are enforced through communications.17; accepted remains delivery uncertain.",
     "Real local SMTP, HTTP handler, native tool and Console journeys preserve durable case-to-draft linkage and prevent duplicate send.",
-    "Canonical reply correlation and optional manual code matching open no links and never claim confirmed removal."
+    "Canonical reply correlation and optional manual code matching open no links and never claim confirmed removal.",
+    "BeenVerified prepares a fixed-recipient deletion-email follow-up for a confirmed listing without sending or representing the primary suppression form as complete.",
+    "BeenVerified exact digest approval, separate dispatch confirmation, uncertain delivery, canonical reply correlation, and no-link-opening behavior use communications.17 unchanged.",
+    "The console and native provider disclose that external suppression and affiliate rescans remain required."
   ],
-  "exit_code": 0,
-  "evidence_log": "/tmp/gideon-wellbeing.14-checks-0uumku1q/evidence.json",
-  "ui_repair_evidence_log": "/tmp/gideon-wellbeing.14-checks-ykxxjcxy/evidence.json",
-  "repair_cycles": 2,
-  "production_lines": 126,
-  "test_lines": 129,
-  "test_ratio": 1.0238095238095237,
+  "repair_cycles": 0,
   "qualification": {
     "compile": "passed in initial full gate",
     "runtime": "10 passed in initial full gate",
@@ -133,5 +136,13 @@
       "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
     }
   },
-  "overall_status": "partial: Spokeo and Whitepages adapters locally qualified; remaining original broker adapters and live provider proof remain open"
+  "overall_status": "partial: Spokeo and Whitepages are locally qualified; BeenVerified deletion-email follow-up is implemented pending focused qualification; primary web suppression, remaining broker adapters, affiliate rescans, and live provider proof remain open",
+  "beenverified_continuation": {
+    "status": "implemented_unverified",
+    "base_revision": "133b69bc",
+    "donor": "archive/agentcore/optional-skills/security/unbroker/references/brokers/beenverified.json",
+    "scope": "documented deletion email follow-up only; primary suppression form and affiliate rescans remain external",
+    "verification": "not run in the source worktree under the user restriction; hosted counterpart may qualify the mirrored slice",
+    "shared_integration": "implemented without OSS tests, compilation, browser, or runtime execution; preserves existing Spokeo and Whitepages registrations"
+  }
 }
