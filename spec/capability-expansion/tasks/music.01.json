@@ -7,20 +7,48 @@
     "handler": "gideon.interfaces.dashboard.handlers.capabilities_music.register",
     "page": "features/capabilities/music/Page.tsx",
     "store": "capabilities/music/repertoire.sqlite3",
-    "agent_api": "RepertoireStore.create/get/list/update/practice"
+    "agent_api": "RepertoireStore.create/get/list/update/practice/import_song/rollback_import"
   },
   "acceptance": [
     "Real HTTP author/edit/practice/replay/reopen",
     "Transactional failure and cross-connection concurrency",
     "Canonical artifact version validation and home isolation",
     "All six grade vectors and DST-aware calendar-day schedule",
-    "Real console DOM interaction against an ephemeral production aiohttp app"
+    "Real console DOM interaction against an ephemeral production aiohttp app",
+    "SongBook breadth retains artist, typed instrument, tags, key, capo, tuning, notation format/text, guarded source URL, typed cross-links and bounded scroll duration without changing server-owned practice state",
+    "Exact canonical attachment versions expose artifact metadata and local availability without copying bytes; legacy repertoire rows gain additive read defaults",
+    "Stable-ID archive import preserves source timestamps and normalized scheduling with atomic idempotency receipts, conflict detection and guarded rollback"
   ],
   "limits": [
     "Root owns navigation, agent-tool registration, durability enrollment and authenticated integrated browser qualification",
-    "Index currently shows the first 100 records; API supports offset/limit pagination. Integrated browser/auth/tool/durability qualification belongs to root."
+    "Index currently shows the first 100 records; API supports offset/limit pagination. Integrated browser/auth/tool/durability qualification belongs to root.",
+    "PortOS URL fetching, tablature parsing, autoscroll and playback are not claimed; source_url and typed related-record links are provenance metadata, scroll duration is retained, and notation remains preserved text.",
+    "Legacy archive parsing, binary hash/size/path/MIME validation and attachment-byte materialization belong to platform.25; this task supplies the canonical repertoire target, exact-version availability projection and transactional import/rollback seam."
   ],
-  "evidence": {
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.01",
+  "repair_cycles": 2,
+  "breadth_continuation": "Original SongBook metadata, notation and canonical attachment availability for platform.25 archive migration.",
+  "base_revision": "1016055c98310740d61639a61e5d4cc82a8bc3e5",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/store.py",
+    "runtime/gideon/workspace/capabilities/music/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music.py",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_repertoire.py",
+    "checks/runtime/capabilities/music/test_tools.py",
+    "checks/runtime/capabilities/music/serve_ui.py",
+    "apps/console/src/features/capabilities/music/Page.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_repertoire.py",
+    "checks/runtime/capabilities/music/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/music/Page.test.tsx"
+  ],
+  "prior_evidence": {
     "task": "music.01",
     "root": "/tmp/gideon-expansion-worktrees/music",
     "started_at": 1790293541.0811703,
@@ -80,6 +108,69 @@
       "checks/runtime/capabilities/music/test_repertoire.py": "4ab7942abcb4f9cfad9336e229884312e381d94297c1d1ba83f3959ab4391985"
     }
   },
-  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.01",
-  "repair_cycles": 2
+  "breadth_repair_cycles": 2,
+  "evidence": {
+    "task": "music.01",
+    "root": "/tmp/gideon-expansion-worktrees/music-songbook",
+    "started_at": 1790309872.7991455,
+    "production_lines": 230,
+    "test_lines": 282,
+    "ratio": 1.2260869565217392,
+    "stage": "all",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_music.py",
+          "runtime/gideon/workspace/capabilities/music/store.py",
+          "runtime/gideon/workspace/capabilities/music/tools.py",
+          "checks/runtime/capabilities/music/serve_ui.py",
+          "checks/runtime/capabilities/music/test_repertoire.py",
+          "checks/runtime/capabilities/music/test_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-84h25xct/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/music-songbook/checks/runtime/capabilities/music/test_repertoire.py",
+          "/tmp/gideon-expansion-worktrees/music-songbook/checks/runtime/capabilities/music/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-84h25xct/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/music-songbook/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/music-songbook/apps/console/src/features/capabilities/music/Page.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.01-checks-84h25xct/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-music.01-checks-84h25xct",
+    "completed_at": 1790309959.5155942,
+    "files": {
+      "apps/console/src/features/capabilities/music/Page.tsx": "b593ca224f8412779e2604c462a7dd18aa98aa0dba066cf5df7f96399f35a56a",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_music.py": "63277b06abeb7bf3bab6afc65c241f0b62cabaedb41acea16d8cdfe42d9db9dc",
+      "runtime/gideon/workspace/capabilities/music/store.py": "21a6b772f0df574fd49d10dc769545d24ce9ea7e58662b7b8e22e6799e7c368c",
+      "runtime/gideon/workspace/capabilities/music/tools.py": "c5be4aa07d032381cee23596eed45a8871248314fe975793c81d6d0381e6e460",
+      "apps/console/src/features/capabilities/music/Page.test.tsx": "98c891ae15b25b717ea8f4779a657b4ea0a8b8ad43fa0cbb61faf6fcbcb3e36d",
+      "checks/runtime/capabilities/music/serve_ui.py": "fd6fa7e6d5d75650da917983ee6c22d43efd865ac1a14682318fb996d946c9eb",
+      "checks/runtime/capabilities/music/test_repertoire.py": "8c3ae5fd76868a68e0d250a76a0bcdd96a4d82914a3b2a8084cca541090fc44e",
+      "checks/runtime/capabilities/music/test_tools.py": "c7fb6af415f5b63dd0a5885b77f165544f4f1a61320c8fe0aaf54f5ed4cbda39"
+    }
+  }
 }

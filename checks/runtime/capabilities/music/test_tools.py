@@ -42,9 +42,18 @@ async def test_native_manifest_resolves_factory_and_exposes_complete_tools():
 @pytest.mark.asyncio
 async def test_native_repertoire_author_practice_replay_and_edit(tmp_path):
     provider = provider_at(tmp_path)
-    created = await provider.invoke('music_repertoire_create', {'data': {'title': 'Agent repertoire', 'body': 'D G A'}})
+    created = await provider.invoke('music_repertoire_create', {'data': {'title': 'Agent repertoire', 'artist': 'The Placeholders',
+        'instrument': 'guitar', 'body': 'Slow practice', 'tags': ['study'], 'key': 'D', 'capo': 2,
+        'tuning': 'Drop D', 'notation': {'format': 'tab', 'text': 'D|--0--|'},
+        'source_url': 'https://example.com/chart',
+        'links': [{'type': 'round', 'id': 'round-1', 'label': 'Opening round'}],
+        'scroll_duration_seconds': 90}})
     assert created.success
     item = json.loads(created.output)
+    assert item['artist'] == 'The Placeholders' and item['notation']['format'] == 'tab'
+    assert item['links'] == [{'type': 'round', 'id': 'round-1', 'label': 'Opening round'}]
+    assert item['scroll_duration_seconds'] == 90
+    assert item['key'] == 'D' and item['capo'] == 2 and item['tuning'] == 'Drop D'
     payload = attempt(item)
     practiced = await provider.invoke('music_repertoire_practice', {'id': item['id'], 'data': payload})
     assert practiced.success
