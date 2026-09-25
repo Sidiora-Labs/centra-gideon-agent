@@ -54,11 +54,13 @@ def test_native_manifest_resolves_real_tool_provider(isolated_home):
     writes |= {'people_desktop_commit'}
     reads |= {'people_beeper_settings', 'people_beeper_page', 'people_beeper_asset', 'people_beeper_outbox'}
     writes |= {'people_beeper_configure', 'people_beeper_refresh', 'people_beeper_asset_fetch', 'people_beeper_draft', 'people_beeper_send', 'people_beeper_reconcile', 'people_beeper_discard', 'people_beeper_recover'}
+    reads |= {'people_telegram_config', 'people_telegram_command', 'people_telegram_deliveries'}
+    writes |= {'people_telegram_configure', 'people_telegram_queue', 'people_telegram_send'}
     assert set(by_name) == reads | writes
     for name, tool in by_name.items():
         assert tool.provider == 'gideon-people'
         assert tool.requires_approval is (name in writes)
-        assert tool.risk_level == (RiskLevel.DESTRUCTIVE if name == 'people_beeper_send' else RiskLevel.CAUTION if name in writes else RiskLevel.SAFE)
+        assert tool.risk_level == (RiskLevel.DESTRUCTIVE if name in ('people_beeper_send', 'people_telegram_send', 'people_telegram_configure') else RiskLevel.CAUTION if name in writes else RiskLevel.SAFE)
         assert tool.interactive is False
         Draft202012Validator.check_schema(tool.parameters)
         assert tool.parameters['additionalProperties'] is False
