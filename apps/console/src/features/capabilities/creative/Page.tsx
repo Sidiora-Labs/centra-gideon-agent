@@ -1,3 +1,4 @@
+import Series from './Series'
 import Stories from './Stories'
 import Works from './Works'
 import Authors from './Authors'
@@ -140,6 +141,6 @@ export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
   const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') || 'ingredients'
   const [boards, setBoards] = useState(readView)
   useEffect(() => { const changed = () => setBoards(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
-  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a><a href="#/capabilities/creative?view=authors">Authors</a><a href="#/capabilities/creative?view=works">Writing</a><a href="#/capabilities/creative?view=stories">Stories</a></nav>
-    {boards === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : boards === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : boards === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
+  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a><a href="#/capabilities/creative?view=authors">Authors</a><a href="#/capabilities/creative?view=works">Writing</a><a href="#/capabilities/creative?view=stories">Stories</a><a href="#/capabilities/creative?view=series">Series</a></nav>
+    {boards === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : boards === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : boards === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : boards === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
 }
