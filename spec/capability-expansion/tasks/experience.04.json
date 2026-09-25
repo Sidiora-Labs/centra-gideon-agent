@@ -1,0 +1,46 @@
+{
+  "id": "experience.04",
+  "status": "locally_checked_external_pending",
+  "base_revision": "7f57fcb6",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/speech_owner.py",
+    "runtime/gideon/workspace/capabilities/experience/speech_http.py",
+    "runtime/gideon/workspace/capabilities/experience/proactive_speech.py",
+    "runtime/gideon/workspace/capabilities/experience/narration.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/audibleOwner.ts",
+    "apps/console/src/features/capabilities/experience/OwnedAudio.tsx",
+    "apps/console/src/features/capabilities/experience/ProactiveSpeech.tsx",
+    "apps/console/src/features/capabilities/experience/Narration.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_speech_owner.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/ProactiveSpeech.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_speech_owner.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/ProactiveSpeech.test.tsx"
+  ],
+  "contract": "Opt-in proactive speech uses actual persisted completed triage digest and existing notification delivery gate; one expiring audible lease shared by narrative and digest playback; actual TTS and canonical artifact output, no submitted prose.",
+  "remaining_limits": [
+    "Root shell insertion pending",
+    "Real generated speech, autoplay permissions, audible playback and external provider availability remain unqualified",
+    "No audible browser audio/PCM lifecycle claimed by local tests; external provider and browser qualification remains required",
+    "After competing audible ownership interrupts this browser, user explicitly enables spoken updates again"
+  ],
+  "qualification": {
+    "command": "python3 tooling/capability_workflow.py verify experience.04",
+    "evidence": "/tmp/gideon-experience.04-checks-9ef79gak/evidence.json",
+    "runtime_tests": 25,
+    "ui_tests": 3,
+    "production_lines": 272,
+    "test_lines": 288,
+    "ratio": 1.0588235294117647,
+    "repair": "Real workflow fixture uses structural root instance path; released late acquired ownership after component cleanup."
+  }
+}

@@ -49,6 +49,8 @@ def register(app):
     from gideon.workspace.capabilities.experience.navigation_http import register_navigation
     register_narration(app, app[STORE])
     register_navigation(app, app[STORE])
+    from gideon.workspace.capabilities.experience.speech_http import register_speech
+    register_speech(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource
         app.router.add_get(path, handle)

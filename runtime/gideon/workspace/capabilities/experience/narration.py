@@ -141,7 +141,7 @@ class NarrationJobs:
                     raise ValueError("speech provider produced no owned audio file")
                 data = Path(result).read_bytes()
                 mime = audio_mime(data)
-                artifact = self.artifacts.create_binary(name=f"Story narration {job['node_id']}", data=data, mime=mime, kind="audio", source="manual", tags=["story-narration"], description=f"Story {job['story_id']} revision {job['story_revision']}; node {job['node_id']}; source {job['source_hash']}")
+                artifact = self.artifacts.create_binary(name=f"{job.get('source_kind', 'Story narration')} {job['node_id']}", data=data, mime=mime, kind="audio", source="manual", tags=[job.get("source_kind", "story-narration")], description=f"Story {job['story_id']} revision {job['story_revision']}; node {job['node_id']}; source {job['source_hash']}")
                 self.update(key, status="ready", artifact_slug=artifact.slug, artifact_version=artifact.version, audio_hash=hashlib.sha256(data).hexdigest())
         except asyncio.CancelledError:
             self.update(key, status="cancelled", error="Narration cancelled.")

@@ -66,15 +66,15 @@ async def test_native_manifest_loads_registers_invokes_and_disables_real_provide
 @pytest.mark.asyncio
 async def test_static_tool_schemas_preserve_approval_and_do_not_create_storage(provider, tmp_path):
     definitions = await provider.list_tools()
-    assert len(definitions) == 14
-    assert len({tool.name for tool in definitions}) == 14
+    assert len(definitions) == 15
+    assert len({tool.name for tool in definitions}) == 15
     assert all(tool.provider == "gideon-experience" for tool in definitions)
     assert not (tmp_path / "capabilities/experience.sqlite3").exists()
     for tool in definitions:
         assert tool.parameters["additionalProperties"] is False
         assert set(tool.parameters["required"]) == set(tool.parameters["properties"])
         assert "home" not in tool.parameters["properties"]
-        if tool.name.endswith(("_list", "_get")):
+        if tool.name.endswith(("_list", "_get", "_state")):
             assert tool.requires_approval is False
             assert tool.risk_level == RiskLevel.SAFE
         elif tool.name == "experience_story_delete":
