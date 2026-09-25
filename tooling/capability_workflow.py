@@ -128,12 +128,14 @@ def run_command(command: list[str], root: Path, env: dict, log: Path) -> int:
     return result.returncode
 
 
-def verify(root: Path, task_id: str) -> tuple[int,dict]:
+def verify(root: Path, task_id: str, stage: str = "all") -> tuple[int,dict]:
+    if stage not in {"all", "compile", "runtime", "ui"}:
+        raise ValueError("invalid verification stage")
     info=inspect_task(root,task_id)
     output=Path(tempfile.mkdtemp(prefix=f'gideon-{task_id}-checks-'))
     evidence={'task':task_id,'root':str(root),'started_at':time.time(),
               'production_lines':info['production_lines'],'test_lines':info['test_lines'],
-              'ratio':info['ratio'],'commands':[],'status':'failed','evidence_dir':str(output)}
+              'ratio':info['ratio'],'stage':stage,'commands':[],'status':'failed','evidence_dir':str(output)}
     if not info['ratio_pass']:
         evidence['error']='test executable lines must be at least production executable lines, with nonempty production'
         (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
@@ -152,19 +154,26 @@ def verify(root: Path, task_id: str) -> tuple[int,dict]:
     ui=info['detail'].get('ui_test_files', [value for value in info['test_files'] if '.test.' in value and value.endswith(('.ts','.tsx','.js','.jsx'))])
     for value in runtime+ui:
         if value not in info['test_files']: raise ValueError('test selection must be declared in test_files')
-    if not runtime:
+    if not runtime and stage != 'ui':
         evidence['error']='real runtime behavior tests are required'
         (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
         return 1,evidence
-    commands.append(('runtime',[py,'-m','pytest',*[str(root/value) for value in runtime],'-q']))
+    if runtime:
+        commands.append(('runtime',[py,'-m','pytest',*[str(root/value) for value in runtime],'-q']))
     if any(value.endswith(('.tsx','.jsx')) for value in info['production_files']) and not ui:
         evidence['error']='UI behavior tests are required for UI implementation';return 1,evidence
-    if ui:
+    if ui and stage in {'all', 'ui'}:
         vitest=root/'node_modules/vitest/vitest.mjs'
         if not vitest.exists():
             evidence['error']='installed vitest unavailable; dependencies were not modified';return 1,evidence
         command=['node',str(vitest),'run',*[str(root/value) for value in ui]]
         commands.append(('ui',command))
+    if stage != 'all':
+        commands=[row for row in commands if row[0] == stage]
+        if not commands:
+            evidence['error']='requested stage has no declared tests'
+            (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
+            return 1,evidence
     for name,command in commands:
         cwd=root/'apps/console' if name=='ui' else root
         log=output/f'{name}.log'
@@ -172,17 +181,18 @@ def verify(root: Path, task_id: str) -> tuple[int,dict]:
         evidence['commands'].append({'name':name,'argv':command,'exit_code':code,'log':str(log)})
         if code:
             evidence['error']=f'{name} failed';break
-    else:evidence['status']='locally_qualified'
+    else:evidence['status']='locally_qualified' if stage == 'all' else 'stage_qualified'
     evidence['completed_at']=time.time()
     evidence['files']={value:hashlib.sha256((root/value).read_bytes()).hexdigest() for value in info['production_files']+info['test_files']}
     (output/'evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
-    return (0 if evidence['status']=='locally_qualified' else 1),evidence
+    return (0 if evidence['status'] in {'locally_qualified','stage_qualified'} else 1),evidence
 
 
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation',choices=['inspect','verify','ready'])
     parser.add_argument('task',nargs='?')
+    parser.add_argument('--stage',choices=['all','compile','runtime','ui'],default='all')
     parser.add_argument('--root',type=Path,default=Path.cwd())
     args=parser.parse_args(argv)
     root=args.root.resolve()
@@ -194,7 +204,7 @@ def main(argv=None) -> int:
             code=0
         elif not args.task:raise ValueError('task identifier is required')
         elif args.operation=='inspect':result=inspect_task(root,args.task);code=0
-        else:code,result=verify(root,args.task)
+        else:code,result=verify(root,args.task,args.stage)
         print(json.dumps(result,indent=2));return code
     except (ValueError,OSError,KeyError,SyntaxError,json.JSONDecodeError) as exc:
         print(json.dumps({'error':str(exc)}),file=sys.stderr);return 2

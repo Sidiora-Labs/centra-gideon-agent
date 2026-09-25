@@ -298,3 +298,48 @@ def test_undeclared_test_selection_is_rejected(tmp_path):
                  'runtime_test_files':['checks/other.py']})
     with pytest.raises(ValueError,match='must be declared'):
         workflow.verify(root,'sample.01')
+
+
+def test_requested_compile_stage_never_claims_full_qualification(tmp_path):
+    root=project(tmp_path)
+    source(root,'runtime/gideon/workspace/capabilities/sample/store.py','value=6\n')
+    source(root,'checks/runtime/capabilities/sample/test_store.py','def test_not_requested():\n    raise AssertionError("must not run")\n')
+    code,evidence=workflow.verify(root,'sample.01','compile')
+    assert code==0,evidence
+    assert evidence['status']=='stage_qualified'
+    assert evidence['stage']=='compile'
+    assert [row['name'] for row in evidence['commands']]==['compile']
+    assert all(row['exit_code']==0 for row in evidence['commands'])
+    saved=json.loads((Path(evidence['evidence_dir'])/'evidence.json').read_text())
+    assert saved['status']=='stage_qualified'
+    assert len(saved['files'])==2
+
+
+def test_requested_runtime_stage_runs_real_pytest_without_other_stages(tmp_path):
+    root=project(tmp_path)
+    source(root,'runtime/gideon/workspace/capabilities/sample/store.py','value=6\n')
+    source(root,'checks/runtime/capabilities/sample/test_store.py','from pathlib import Path\ndef test_actual_source():\n    root=Path(__file__).parents[4]\n    namespace={}\n    exec((root/"runtime/gideon/workspace/capabilities/sample/store.py").read_text(),namespace)\n    assert namespace["value"]==6\n')
+    code,evidence=workflow.verify(root,'sample.01','runtime')
+    assert code==0,evidence
+    assert evidence['status']=='stage_qualified'
+    assert [row['name'] for row in evidence['commands']]==['runtime']
+    assert '1 passed' in Path(evidence['commands'][0]['log']).read_text()
+
+
+def test_requested_ui_stage_without_declared_tests_fails_with_saved_evidence(tmp_path):
+    root=project(tmp_path)
+    source(root,'runtime/gideon/workspace/capabilities/sample/store.py','value=6\n')
+    source(root,'checks/runtime/capabilities/sample/test_store.py','def test_value():\n    assert 6==6\n')
+    code,evidence=workflow.verify(root,'sample.01','ui')
+    assert code==1
+    assert evidence['error']=='requested stage has no declared tests'
+    assert evidence['commands']==[]
+    saved=json.loads((Path(evidence['evidence_dir'])/'evidence.json').read_text())
+    assert saved['status']=='failed'
+    assert saved['stage']=='ui'
+
+
+def test_invalid_stage_is_rejected_before_creating_evidence(tmp_path):
+    root=project(tmp_path)
+    with pytest.raises(ValueError,match='invalid verification stage'):
+        workflow.verify(root,'sample.01','unknown')
