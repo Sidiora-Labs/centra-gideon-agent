@@ -1,0 +1,54 @@
+{
+  "id": "creative.17",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "0ba6655f",
+  "requires": [
+    "creative.11"
+  ],
+  "contract": "Declarative 80-check inventory retains scope/kind/source/severity. Eighteen English prose/dialogue deterministic heuristic scanners execute against explicitly bounded canonical draft coverage and persist exact Unicode finding anchors. Other contextual/model families remain pending for creative.18 and parent creative.12. Authored repair creates immutable PolishingStore candidate; explicit existing review/promotion/WorkStore restoration preserves source/history.",
+  "acceptance": [
+    "Preserve original lexical/vocabulary and regression prose vectors; exact anchors for phrase/cliche/modifier/filter/hedge/crutch/adverb/passive/gesture/repetition/rhythm/stock-pattern/paragraph/dialogue/italic scans.",
+    "Actual HTTP/native/UI run/list finding/repair; structured complete versus skipped status, explicit capped results and partial coverage.",
+    "Idempotent run/repair with exact retry receipt after promotion, stale/missing canonical source protection and isolated runtime references.",
+    "Real candidate diff review/promotion/restoration leaves unrelated manuscript text unchanged."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/prose_checks.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Editorial.tsx",
+    "apps/console/src/features/capabilities/creative/Works.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_editorial.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_editorial.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/workspace/capabilities/creative/editorial_catalog.json",
+    "runtime/gideon/workspace/capabilities/creative/editorial.LICENSE"
+  ],
+  "evidence": "/tmp/gideon-creative.17-checks-1fkal0lh/evidence.json",
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 66,
+    "ui_tests": 3,
+    "production_lines": 342,
+    "test_lines": 362,
+    "ratio": 1.0584795321637428,
+    "attempts": 1
+  },
+  "limits": [
+    "Parent creative.12 remains incomplete. Contextual and model-based check families require creative.18; overrides/custom/judges/panels/rank/cut workflows require creative.19.",
+    "Deterministic scanners are advisory English heuristics; full original check-family parity is not asserted by this child checkpoint."
+  ]
+}
