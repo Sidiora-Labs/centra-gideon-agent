@@ -89,6 +89,19 @@ function songFixture() {
   return tarFile({ 'snapshot-song/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-song/data/${name}`, value])) })
 }
 
+function coordinatedFixture() {
+  const projectId = '45454545-4545-4545-8545-454545454545'
+  const taskId = 'thread-ui-coordinated'
+  const data: Record<string, Buffer> = {
+    'brain/projects/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'projects', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
+    [`brain/projects/${projectId}/index.json`]: Buffer.from(JSON.stringify({ id: projectId, name: 'UI coordinated project', status: 'active', nextAction: 'Verify task', notes: 'Published first', tags: ['migration'], createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' })),
+    'brain/threads/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'threads', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
+    [`brain/threads/${taskId}/index.json`]: Buffer.from(JSON.stringify({ id: taskId, title: 'UI coordinated task', status: 'open', priority: 'high', nextAction: 'Verify project link', notes: 'Published second', tags: ['migration'], pinned: false, refs: [{ kind: 'brain.project', id: projectId, label: 'UI coordinated project' }], createdAt: '2026-02-02T00:00:00Z', updatedAt: '2026-02-03T00:00:00Z' })),
+  }
+  const manifest = { generatedAt: '2026-09-25T00:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
+  return tarFile({ 'snapshot-coordinated/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-coordinated/data/${name}`, value])) })
+}
+
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
@@ -194,4 +207,20 @@ it('imports a verified song and attachment through the API into the canonical re
   const repertoire = await (await fetch(`${baseUrl}/api/capabilities/music/items/song-ui`)).json()
   expect(repertoire.item.artist).toBe('UI Band')
   expect(repertoire.item.attachment_availability[0]).toMatchObject({ available: true, kind: 'pdf', mime: 'application/pdf' })
+})
+
+it('coordinates a project and referencing thread through the actual API', async () => {
+  render(<Migration baseUrl={baseUrl} />)
+  const file = new File([coordinatedFixture()], 'coordinated.tar.gz', { type: 'application/gzip' })
+  fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
+  expect(await screen.findByText('Domains: projects, threads')).toBeVisible()
+  expect(screen.getByText('projects: UI coordinated project')).toBeVisible()
+  expect(screen.getByText('threads: UI coordinated task')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
+  expect(await screen.findByText(/1 projects, 1 threads ·/)).toBeVisible()
+  const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
+  const receipt = state.receipts.find((row: { domains: Record<string, number> }) => row.domains.projects === 1 && row.domains.threads === 1)
+  expect(receipt).toBeTruthy()
 })
