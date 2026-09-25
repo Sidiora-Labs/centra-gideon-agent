@@ -371,6 +371,8 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
         {"scope": "media.assets", "entries": ["media.library_metadata"]},
+        {"scope": "media.video_projects", "entries": ["media.timelines"]},
+        {"scope": "music.video", "entries": ["music.video_projects"]},
         {"scope": "wellbeing.health", "entries": ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]},
         {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
         {"scope": "wellbeing.genome", "entries": ["wellbeing.genome_sources", "wellbeing.genome_variants"]},
@@ -380,7 +382,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "creative.direction", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "creative.direction", "identity.goals", "identity.profile", "communications.contacts", "music.library", "media.assets", "media.video_projects", "music.video", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
