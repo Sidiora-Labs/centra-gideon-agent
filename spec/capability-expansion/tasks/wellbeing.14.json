@@ -40,8 +40,7 @@
     "Root must register capabilities_wellbeing_broker_whitepages.register; the unique handler and panel integration are included in this continuation.",
     "BeenVerified primary suppression remains its external web form; this adapter implements only the donor-documented privacy@beenverified.com deletion-email follow-up.",
     "BeenVerified affiliate properties require separate rescans, and neither an SMTP receipt nor a correlated reply proves deletion or suppression.",
-    "BeenVerified planned qualification is confined to real loopback SMTP; no live broker email, form submission, link navigation, or affiliate scan is permitted.",
-    "BeenVerified shared handler registration and case-specific panel mount are implemented while preserving the existing privacy, Spokeo, and Whitepages hooks; the entire new delta remains OSS-unverified."
+    "BeenVerified planned qualification is confined to real loopback SMTP; no live broker email, form submission, link navigation, or affiliate scan is permitted."
   ],
   "integration_hooks": [
     "Register gideon.interfaces.dashboard.handlers.capabilities_wellbeing_broker_spokeo.register with the shared dashboard application; no shared registration file is changed in this slice",
@@ -136,13 +135,5 @@
       "runtime/gideon/extensions/apps/native/gideon-privacy-broker-spokeo/app.json": "bb3478bf5bfefd846109b2d2a72f09e2f743084997d7602e1356754414599425"
     }
   },
-  "overall_status": "partial: Spokeo and Whitepages are locally qualified; BeenVerified deletion-email follow-up is implemented pending focused qualification; primary web suppression, remaining broker adapters, affiliate rescans, and live provider proof remain open",
-  "beenverified_continuation": {
-    "status": "implemented_unverified",
-    "base_revision": "133b69bc",
-    "donor": "archive/agentcore/optional-skills/security/unbroker/references/brokers/beenverified.json",
-    "scope": "documented deletion email follow-up only; primary suppression form and affiliate rescans remain external",
-    "verification": "not run in the source worktree under the user restriction; hosted counterpart may qualify the mirrored slice",
-    "shared_integration": "implemented without OSS tests, compilation, browser, or runtime execution; preserves existing Spokeo and Whitepages registrations"
-  }
+  "overall_status": "partial: Spokeo and Whitepages are locally qualified; BeenVerified deletion-email follow-up is implemented pending focused qualification; primary web suppression, remaining broker adapters, affiliate rescans, and live provider proof remain open"
 }

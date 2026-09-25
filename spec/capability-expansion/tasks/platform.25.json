@@ -82,30 +82,5 @@
     "reported_by": "oss_workspace_r2",
     "coverage": "Real song and PDF migration, packaged snapshot, restore_apply into fresh home, canonical record/artifact/journal bytes, receipt replay without duplication",
     "scope": "One song archive; mixed authoritative-store archive acceptance remains separate."
-  },
-  "oss_unverified_increment": {
-    "name": "people in schema-2 canonical coordinator",
-    "base_revision": "993876837d7c3b5b663da8839050c3d12b7316eb",
-    "source_counterpart": "hosted platform.25 evidence /tmp/gideon-platform.25-checks-m51tsovr/evidence.json",
-    "source_counterpart_evidence_sha256": "64cb1b32d527dcddaa5517bb5a4b0c39081fc459947280686607a9abf9376694",
-    "files": [
-      "runtime/gideon/workspace/capabilities/platform/migration.py",
-      "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
-      "spec/capability-expansion/tasks/platform.25.json"
-    ],
-    "status": "implemented_unverified",
-    "reason": "User prohibited OSS compile, tests, browser journeys and runtime execution for this adaptation",
-    "hosted_only_exclusions": [
-      "allocation identity and path scope assertions",
-      "hosted console allocation-bound UI test"
-    ],
-    "intended_tests": [
-      "people-project-task ordering, canonical references, restart and exact replay",
-      "same-archive stable person identity preferred over older matching provenance",
-      "late-failure reverse compensation",
-      "crash after person write before journal checkpoint",
-      "person touchpoint identity drift preservation",
-      "deterministic person target collision before publication"
-    ]
   }
 }

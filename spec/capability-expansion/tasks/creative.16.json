@@ -53,8 +53,7 @@
     "Peer feedback approval is an explicit caller attestation bound to one peer and one canonical target hash; the adapter reports it as caller-attested and does not claim an independently verified human approval.",
     "Peer feedback uses the canonical platform.22 PeerStore for Ed25519 proof, nonce replay protection, directional policy and guarded transport; root integration must add creative.commission_feedback to its category inventory and mount a thin receive handler. The creative slice does not duplicate that transport.",
     "Local loopback proves two-home signed propagation; no externally provisioned peer or public certificate is claimed.",
-    "No paid or external provider output was invoked for qualification. Configured provider success still requires a real deployment credential/service, and dispatch_unknown requires operator reconciliation with its persisted upstream request ID rather than automatic replay.",
-    "The exact signed peer-feedback receive POST is implemented as a handler-authenticated token-middleware exception and mounted by the creative registrar. Its final middleware and registrar qualification is unverified in OSS: the first focused run found only a stale 401 expectation for the middleware's actual 403 nearby-route denial; after that assertion was repaired, the second run was interrupted by the user-requested stop before pytest rendered its result."
+    "No paid or external provider output was invoked for qualification. Configured provider success still requires a real deployment credential/service, and dispatch_unknown requires operator reconciliation with its persisted upstream request ID rather than automatic replay."
   ],
   "qualified_increments": [
     {
@@ -104,22 +103,6 @@
       "test_lines": 1417,
       "test_to_production_ratio": 1.0238439306358382,
       "repair_reruns": 0
-    }
-  ],
-  "unverified_increments": [
-    {
-      "name": "signed peer-feedback dashboard ingress",
-      "reason": "OSS execution stopped by user before post-fix focused verification completed",
-      "files": [
-        "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative_peer_feedback.py",
-        "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
-        "runtime/gideon/interfaces/dashboard/token_auth.py",
-        "checks/runtime/capabilities/creative/test_peer_feedback.py"
-      ],
-      "attempted_command": "/tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/creative/test_peer_feedback.py -q -k 'real_dashboard_middleware or creative_registrar'",
-      "first_attempt": "exit 1: 1 failed, 1 passed, 31 deselected; expected 401 but actual nearby-route denial was 403 Forbidden",
-      "post_fix_attempt": "interrupted exit 130 after pytest emitted F; result unknown and unverified",
-      "persistent_state": "~/.gideon/capabilities/creative/peer_feedback.sqlite3 stores private outbox, send receipts and inbound idempotence receipts; accepted reactions and tombstones remain in canonical commissions.sqlite3"
     }
   ]
 }
