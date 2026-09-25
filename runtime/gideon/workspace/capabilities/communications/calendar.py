@@ -91,7 +91,129 @@ def ics_time(value, params, default_zone):
     return local_instant(value, params.get('TZID', default_zone)), False
 
 
-def parse_ics(content, default_zone):
+def _local_time(value, params, default_zone):
+    if params.get('VALUE') == 'DATE' or re.fullmatch(r'\d{8}', value):
+        return datetime.strptime(value, '%Y%m%d').date(), True
+    if value.endswith('Z'):
+        return datetime.strptime(value, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc), False
+    observed = datetime.strptime(value, '%Y%m%dT%H%M%S')
+    tz = zone(params.get('TZID', default_zone))
+    aware = observed.replace(tzinfo=tz)
+    if aware.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != observed or aware.utcoffset() != observed.replace(tzinfo=tz, fold=1).utcoffset():
+        raise PeopleError('Ambiguous or nonexistent local calendar time; export UTC instants')
+    return aware, False
+
+
+def _event(raw, default_zone, identity=None):
+    uid = text(raw.get('UID', ('', {}))[0], 'UID', 500, True)
+    if 'DTSTART' not in raw:
+        raise PeopleError('Event DTSTART is required')
+    start, all_day = ics_time(*raw['DTSTART'], default_zone)
+    if 'DTEND' in raw:
+        end, end_all_day = ics_time(*raw['DTEND'], default_zone)
+        if end_all_day != all_day:
+            raise PeopleError('Event start and end value types differ')
+    else:
+        end = (date.fromisoformat(start) + timedelta(days=1)).isoformat() if all_day else start
+    if end < start:
+        raise PeopleError('Calendar event ends before it starts')
+    unescape = lambda value: value.replace('\\n', '\n').replace('\\N', '\n').replace('\\,', ',').replace('\\;', ';').replace('\\\\', '\\')
+    return {'id': identity or uid, 'uid': uid, 'title': unescape(raw.get('SUMMARY', ('', {}))[0])[:1000],
+            'location': unescape(raw.get('LOCATION', ('', {}))[0])[:2000], 'start': start, 'end': end,
+            'all_day': all_day, 'status': raw.get('STATUS', ('CONFIRMED', {}))[0].lower(),
+            'recurrence_unexpanded': False}
+
+
+def _window(start, end, master_start):
+    if start is None and end is None:
+        beginning = master_start
+        ending = beginning + timedelta(days=366)
+    else:
+        try:
+            beginning = datetime.fromisoformat(start)
+            ending = datetime.fromisoformat(end)
+        except (TypeError, ValueError):
+            raise PeopleError('Recurrence window requires ISO start and end') from None
+        if beginning.tzinfo is None:
+            beginning = beginning.replace(tzinfo=timezone.utc)
+        if ending.tzinfo is None:
+            ending = ending.replace(tzinfo=timezone.utc)
+    if not beginning < ending or ending - beginning > timedelta(days=366):
+        raise PeopleError('Recurrence window must be positive and at most 366 days')
+    return beginning.astimezone(timezone.utc), ending.astimezone(timezone.utc)
+
+
+def _rule(value):
+    result = {}
+    for item in value.split(';'):
+        if '=' not in item:
+            raise PeopleError('Invalid RRULE property')
+        key, raw = item.split('=', 1)
+        if key not in {'FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'BYMONTHDAY', 'BYMONTH', 'WKST'} or key in result:
+            raise PeopleError('Unsupported or duplicate RRULE component: ' + key)
+        result[key] = raw
+    if result.get('FREQ') not in {'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'}:
+        raise PeopleError('RRULE FREQ must be DAILY, WEEKLY, MONTHLY or YEARLY')
+    try:
+        result['INTERVAL'] = int(result.get('INTERVAL', '1'))
+        result['COUNT'] = int(result['COUNT']) if 'COUNT' in result else None
+    except ValueError:
+        raise PeopleError('RRULE interval and count must be integers') from None
+    if result['INTERVAL'] < 1 or result['INTERVAL'] > 366 or result['COUNT'] is not None and not 1 <= result['COUNT'] <= 5000:
+        raise PeopleError('RRULE interval or count is outside supported bounds')
+    return result
+
+
+def _matches(day_value, anchor, rule):
+    delta = (day_value - anchor.date()).days
+    if delta < 0:
+        return False
+    freq, interval = rule['FREQ'], rule['INTERVAL']
+    months = (day_value.year - anchor.year) * 12 + day_value.month - anchor.month
+    if freq == 'DAILY' and delta % interval:
+        return False
+    if freq == 'WEEKLY' and delta // 7 % interval:
+        return False
+    if freq == 'MONTHLY' and (months < 0 or months % interval):
+        return False
+    if freq == 'YEARLY' and ((day_value.year - anchor.year) < 0 or (day_value.year - anchor.year) % interval):
+        return False
+    weekdays = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
+    tokens = rule.get('BYDAY', '').split(',') if rule.get('BYDAY') else []
+    if tokens and day_value.weekday() not in [weekdays.get(token[-2:]) for token in tokens]:
+        return False
+    if not tokens and freq == 'WEEKLY' and day_value.weekday() != anchor.weekday():
+        return False
+    months_allowed = [int(value) for value in rule.get('BYMONTH', '').split(',') if value]
+    if months_allowed and day_value.month not in months_allowed:
+        return False
+    if not months_allowed and freq == 'YEARLY' and day_value.month != anchor.month:
+        return False
+    month_days = [int(value) for value in rule.get('BYMONTHDAY', '').split(',') if value]
+    month_end = (date(day_value.year + (day_value.month == 12), day_value.month % 12 + 1, 1) - timedelta(days=1)).day
+    resolved = [value if value > 0 else month_end + value + 1 for value in month_days]
+    if resolved and day_value.day not in resolved:
+        return False
+    if not resolved and freq in ('MONTHLY', 'YEARLY') and not tokens and day_value.day != anchor.day:
+        return False
+    return True
+
+
+def _occurrence(master, raw, start_local, original_key, default_zone):
+    base_start, all_day = _local_time(*raw['DTSTART'], default_zone)
+    base_end, _ = _local_time(*raw['DTEND'], default_zone) if 'DTEND' in raw else (base_start + timedelta(days=1) if all_day else base_start, all_day)
+    duration = base_end - base_start
+    if all_day:
+        start = start_local.isoformat()
+        end = (start_local + duration).isoformat()
+    else:
+        start = start_local.astimezone(timezone.utc).isoformat()
+        end = (start_local + duration).astimezone(timezone.utc).isoformat()
+    return {**master, 'id': master['uid'] + '#' + original_key, 'start': start, 'end': end,
+            'recurring': True, 'recurrence_id': original_key}
+
+
+def parse_ics(content, default_zone, window_start=None, window_end=None):
     content = text(content, 'ICS content', 1048576, True)
     if len(content.encode()) > 1048576:
         raise PeopleError('Calendar export exceeds 1 MiB')
@@ -126,36 +248,97 @@ def parse_ics(content, default_zone):
             tokens = key.split(';')
             name = tokens[0].upper()
             params = dict(token.split('=', 1) for token in tokens[1:] if '=' in token)
-            if name in current and name in ('UID', 'DTSTART', 'DTEND', 'SUMMARY', 'RECURRENCE-ID'):
+            if name in current and name in ('UID', 'DTSTART', 'DTEND', 'SUMMARY', 'RECURRENCE-ID', 'RRULE'):
                 raise PeopleError('Duplicate calendar identity or time property')
-            current[name] = (value, params)
+            if name in ('RDATE', 'EXDATE'):
+                current.setdefault(name, []).append((value, params))
+            else:
+                current[name] = (value, params)
     if current is not None or len(rows) > 1000:
         raise PeopleError('Incomplete calendar event or more than 1000 events')
     events, seen, warnings = [], set(), []
     try:
+        grouped = {}
         for raw in rows:
             uid = text(raw.get('UID', ('', {}))[0], 'UID', 500, True)
-            if 'DTSTART' not in raw:
-                raise PeopleError('Event DTSTART is required')
-            start, all_day = ics_time(*raw['DTSTART'], default_zone)
-            if 'DTEND' in raw:
-                end, end_all_day = ics_time(*raw['DTEND'], default_zone)
-                if end_all_day != all_day:
-                    raise PeopleError('Event start and end value types differ')
+            grouped.setdefault(uid, []).append(raw)
+        for uid, group in grouped.items():
+            masters = [raw for raw in group if 'RECURRENCE-ID' not in raw]
+            if len(masters) != 1:
+                raise PeopleError('Each recurring UID requires exactly one master event')
+            raw = masters[0]
+            master = _event(raw, default_zone)
+            if 'DURATION' in raw:
+                raise PeopleError('DURATION recurrence is not supported; supply DTEND')
+            if not any(key in raw for key in ('RRULE', 'RDATE', 'EXDATE')):
+                if master['id'] in seen:
+                    raise PeopleError('Duplicate calendar event identity')
+                seen.add(master['id'])
+                events.append(master)
+                continue
+            base_local, all_day = _local_time(*raw['DTSTART'], default_zone)
+            anchor = datetime.combine(base_local, datetime.min.time()) if all_day else base_local
+            lower, upper = _window(window_start, window_end, anchor.replace(tzinfo=anchor.tzinfo or timezone.utc).astimezone(timezone.utc))
+            exclusions = set()
+            additions = []
+            for name, target in (('EXDATE', exclusions), ('RDATE', additions)):
+                for value, params in raw.get(name, []):
+                    for part in value.split(','):
+                        local_value, value_all_day = _local_time(part, params, default_zone)
+                        if value_all_day != all_day:
+                            raise PeopleError(name + ' value type differs from DTSTART')
+                        target.add(local_value.isoformat()) if name == 'EXDATE' else target.append(local_value)
+            overrides = {}
+            for override in (item for item in group if 'RECURRENCE-ID' in item):
+                recurrence_value, recurrence_all_day = _local_time(*override['RECURRENCE-ID'], default_zone)
+                if recurrence_all_day != all_day:
+                    raise PeopleError('RECURRENCE-ID value type differs from DTSTART')
+                key = recurrence_value.isoformat()
+                if key in overrides:
+                    raise PeopleError('Duplicate recurrence override identity')
+                overrides[key] = override
+            candidates = []
+            if 'RRULE' in raw:
+                rule = _rule(raw['RRULE'][0])
+                cursor = anchor.date()
+                count = 0
+                until = None
+                if rule.get('UNTIL'):
+                    until_value, _ = _local_time(rule['UNTIL'], {}, default_zone)
+                    until = until_value if isinstance(until_value, datetime) else datetime.combine(until_value, datetime.max.time(), anchor.tzinfo)
+                while count < (rule['COUNT'] or 5000) and len(candidates) <= 5000:
+                    if _matches(cursor, anchor, rule):
+                        occurrence = cursor if all_day else datetime.combine(cursor, anchor.timetz()).replace(tzinfo=anchor.tzinfo)
+                        if until is not None and occurrence > until:
+                            break
+                        count += 1
+                        occurrence_utc = datetime.combine(occurrence, datetime.min.time(), timezone.utc) if all_day else occurrence.astimezone(timezone.utc)
+                        if occurrence_utc >= upper:
+                            break
+                        if occurrence_utc >= lower:
+                            candidates.append(occurrence)
+                    cursor += timedelta(days=1)
             else:
-                end = (date.fromisoformat(start) + timedelta(days=1)).isoformat() if all_day else start
-            if end < start:
-                raise PeopleError('Calendar event ends before it starts')
-            recurrence = raw.get('RECURRENCE-ID', ('', {}))[0]
-            identity = uid + ('#' + recurrence if recurrence else '')
-            if identity in seen:
-                raise PeopleError('Duplicate calendar event identity')
-            seen.add(identity)
-            unsupported = [key for key in ('RRULE', 'RDATE', 'EXDATE', 'DURATION') if key in raw]
-            if unsupported:
-                warnings.append({'uid': uid, 'unsupported': unsupported})
-            unescape = lambda value: value.replace('\\n', '\n').replace('\\N', '\n').replace('\\,', ',').replace('\\;', ';').replace('\\\\', '\\')
-            events.append({'id': identity, 'uid': uid, 'title': unescape(raw.get('SUMMARY', ('', {}))[0])[:1000], 'location': unescape(raw.get('LOCATION', ('', {}))[0])[:2000], 'start': start, 'end': end, 'all_day': all_day, 'status': raw.get('STATUS', ('CONFIRMED', {}))[0].lower(), 'recurrence_unexpanded': bool(unsupported)})
+                candidates.append(base_local)
+            candidates.extend(additions)
+            unique = {candidate.isoformat(): candidate for candidate in candidates}
+            for original_key, occurrence in sorted(unique.items()):
+                if original_key in exclusions:
+                    continue
+                override = overrides.pop(original_key, None)
+                if override:
+                    if override.get('STATUS', ('', {}))[0].upper() == 'CANCELLED':
+                        continue
+                    item = _event(override, default_zone, uid + '#' + original_key)
+                    item.update(recurring=True, recurrence_id=original_key, overridden=True)
+                else:
+                    item = _occurrence(master, raw, occurrence, original_key, default_zone)
+                if item['id'] in seen:
+                    raise PeopleError('Duplicate calendar occurrence identity')
+                seen.add(item['id'])
+                events.append(item)
+            if overrides:
+                warnings.append({'uid': uid, 'unmatched_overrides': sorted(overrides)})
     except PeopleError:
         raise
     except (ValueError, TypeError):
@@ -163,7 +346,7 @@ def parse_ics(content, default_zone):
     return events, warnings
 
 
-def persist(store, source_row, events, sync, raw=''):
+def persist(store, source_row, events, sync, raw='', digest_material=None):
     if len(events) > 5000:
         raise PeopleError('Calendar sync exceeds 5000 events')
     if len({event['id'] for event in events}) != len(events):
@@ -182,26 +365,27 @@ def persist(store, source_row, events, sync, raw=''):
         body['sync'] = sync
         db.execute('UPDATE calendar_sources SET body=? WHERE id=?', (json.dumps(body), source_row['id']))
         if raw:
-            digest = hashlib.sha256((str(source_row['revision']) + ':' + raw).encode()).hexdigest()
+            digest = hashlib.sha256((str(source_row['revision']) + ':' + (digest_material or raw)).encode()).hexdigest()
             db.execute('INSERT INTO calendar_imports VALUES (?,?,?,?) ON CONFLICT(source_id,digest) DO NOTHING', (source_row['id'], digest, json.dumps(sync), raw))
     return sync
 
 
 def upload(store, source_id, data):
-    fields(data, {'content', 'revision'})
+    fields(data, {'content', 'revision', 'window_start', 'window_end'})
     row = source(store, source_id)
     if row['kind'] != 'ics' or data.get('revision') != row['revision']:
         raise PeopleError('ICS import requires the current ICS source revision', 409)
     content = data.get('content')
     text(content, 'ICS content', 1048576, True)
-    digest = hashlib.sha256((str(row['revision']) + ':' + content).encode()).hexdigest()
+    digest_material = json.dumps([data.get('window_start'), data.get('window_end'), content], separators=(',', ':'))
+    digest = hashlib.sha256((str(row['revision']) + ':' + digest_material).encode()).hexdigest()
     with closing(store.connect()) as db:
         previous = db.execute('SELECT body FROM calendar_imports WHERE source_id=? AND digest=?', (source_id, digest)).fetchone()
         if previous:
             return json.loads(previous[0])
-    events, warnings = parse_ics(content, row['timezone'])
-    sync = {'state': 'synced', 'coverage': 'partial' if warnings else 'available_snapshot', 'scope': 'uploaded_ics', 'captured_at': datetime.now(timezone.utc).isoformat(), 'warnings': warnings, 'events': len(events), 'source_digest': hashlib.sha256(content.encode()).hexdigest(), 'source_revision': row['revision']}
-    return persist(store, row, events, sync, content)
+    events, warnings = parse_ics(content, row['timezone'], data.get('window_start'), data.get('window_end'))
+    sync = {'state': 'synced', 'coverage': 'partial' if warnings else 'available_snapshot', 'scope': 'uploaded_ics', 'captured_at': datetime.now(timezone.utc).isoformat(), 'warnings': warnings, 'events': len(events), 'source_digest': hashlib.sha256(content.encode()).hexdigest(), 'source_revision': row['revision'], 'start': data.get('window_start'), 'end': data.get('window_end')}
+    return persist(store, row, events, sync, content, digest_material)
 
 
 def provider_event(raw, kind):
@@ -325,7 +509,7 @@ def daily(store, day, timezone_name='UTC'):
         row['review_coverage'] = sync['coverage']
         if not captured or now - datetime.fromisoformat(captured) > timedelta(hours=24):
             row['review_coverage'] = 'unknown'
-        elif sync.get('scope') == 'provider_window' and not (sync['start'] <= lower and upper <= sync['end']):
+        elif sync.get('scope') in ('provider_window', 'uploaded_ics') and sync.get('start') and not (sync['start'] <= lower and upper <= sync['end']):
             row['review_coverage'] = 'unknown'
     coverage = 'unknown' if not source_rows else 'available_snapshot' if all(row['review_coverage'] == 'available_snapshot' for row in source_rows) else 'partial'
     return {'date': day, 'timezone': timezone_name, 'events': sorted(events, key=lambda row: (row['start'], row['id'])), 'sources': source_rows, 'coverage': coverage}

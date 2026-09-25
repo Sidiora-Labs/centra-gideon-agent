@@ -67,7 +67,7 @@ it('creates a real ICS source, imports it, and reviews the selected local day', 
   cleanup()
 })
 
-it('retains imported data on invalid input and exposes partial recurrence honestly', async () => {
+it('retains imported data on invalid input and expands recurrence in the selected window', async () => {
   render(<CalendarPanel />)
   await screen.findByText('Calendar sync: synced; available_snapshot')
   fireEvent.change(screen.getByLabelText('ICS export content'), { target: { value: 'invalid calendar' } })
@@ -76,19 +76,24 @@ it('retains imported data on invalid input and exposes partial recurrence honest
   expect(screen.getByRole('alert').textContent).toContain('VCALENDAR')
   expect(screen.getByLabelText('ICS export content')).toHaveValue('invalid calendar')
   const recurring = calendarExport.replace('END:VEVENT', 'RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT')
+  fireEvent.change(screen.getByLabelText('ICS recurrence window start'), { target: { value: '2026-01-01' } })
+  fireEvent.change(screen.getByLabelText('ICS recurrence window end'), { target: { value: '2027-01-01' } })
   fireEvent.change(screen.getByLabelText('ICS export content'), { target: { value: recurring } })
   fireEvent.click(screen.getByRole('button', { name: 'Import calendar export' }))
-  await screen.findByText('Calendar sync: synced; partial')
-  fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-09-25' } })
+  await screen.findByText('Calendar sync: synced; available_snapshot')
+  fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-09-26' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Review calendar day' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Review calendar day' }))
-  await screen.findByText('Review coverage: partial')
-  expect(screen.getByText('Recurrence not expanded; additional occurrences may be missing.')).toBeInTheDocument()
+  await screen.findByText('Review coverage: available_snapshot')
+  expect(screen.getByText('UI calendar meeting')).toBeInTheDocument()
+  const response = await originalFetch(origin + base + '/calendar/daily?date=2026-09-27&timezone=UTC')
+  expect((await response.json()).events).toHaveLength(1)
   cleanup()
 })
 
 it('edits source settings with actual revision invalidation and then imports current source data', async () => {
   render(<CalendarPanel />)
-  await screen.findByText('Calendar sync: synced; partial')
+  await screen.findByText('Calendar sync: synced; available_snapshot')
   fireEvent.click(screen.getByRole('button', { name: 'Edit calendar source' }))
   expect(screen.getByLabelText('Calendar name')).toHaveValue('UI Calendar')
   expect(screen.getByLabelText('Calendar kind')).toBeDisabled()
