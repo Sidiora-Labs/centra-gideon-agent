@@ -23,8 +23,11 @@ def media_tools():
 
 def probe_video(path):
     media_tools()
+    header = Path(path).read_bytes()[:16]
+    if header[4:8] != b'ftyp' and not header.startswith(b'\x1aE\xdf\xa3'):
+        raise SketchError('Video requires an MP4 or WebM container')
     try:
-        completed = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name:format=duration,format_name', '-of', 'json', str(path)], capture_output=True, timeout=20, check=True)
+        completed = subprocess.run(['ffprobe', '-protocol_whitelist', 'file,pipe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name:format=duration,format_name', '-of', 'json', str(path)], capture_output=True, timeout=20, check=True)
         info = json.loads(completed.stdout)
         stream = info['streams'][0]
         duration = float(info['format']['duration'])
@@ -127,7 +130,7 @@ class VideoService:
             probe_video(source)
             frame = directory / 'continuation.png'
             try:
-                subprocess.run(['ffmpeg', '-v', 'error', '-y', '-sseof', '-1', '-i', str(source), '-map', '0:v:0', '-vsync', '0', '-update', '1', str(frame)], capture_output=True, timeout=30, check=True)
+                subprocess.run(['ffmpeg', '-protocol_whitelist', 'file,pipe', '-v', 'error', '-y', '-sseof', '-1', '-i', str(source), '-map', '0:v:0', '-vsync', '0', '-update', '1', str(frame)], capture_output=True, timeout=30, check=True)
             except (OSError, subprocess.SubprocessError) as exc:
                 raise SketchError('Continuation frame extraction failed') from exc
             if not frame.is_file():
@@ -172,6 +175,8 @@ class VideoService:
         if raw[1] == 'video/mp4' and 'mp4' not in decoded['format'] or raw[1] == 'video/webm' and 'webm' not in decoded['format']:
             raise SketchError('Video MIME does not match its decoded container')
         metadata = dict(media_job_id=job_id, video_request_sha256=hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(), model_selection=request['selection'])
+        if request.get('engine') == 'ffmpeg':
+            metadata.update(engine='FFmpeg', timeline_id=request['timeline_id'], timeline_revision=request['revision'])
         if request.get('continuation_artifact_id'):
             metadata.update(source_artifact_id=request['continuation_artifact_id'], source_version=request['continuation_version'])
         slug = 'video-job-'+job_id

@@ -45,6 +45,15 @@ VIDEO_INPUT = {"type": "object", "additionalProperties": False, "required": ["pr
 CATALOG["media_video_capabilities"] = ("Read selected video model controls, conditioning and processing availability.", (), {}, False)
 CATALOG["media_video_submit"] = ("Queue video generation with advertised controls or pinned frame/continuation references; outputs become canonical artifacts.", ("request_id", "input"), {"request_id": STRING, "input": VIDEO_INPUT}, True)
 
+TIMELINE_FIELDS = {"title": STRING, "width": INTEGER, "height": INTEGER, "fps": INTEGER, "revision": {"type": "integer", "minimum": 0}, "request_id": STRING, **{key: {"type": "array", "maxItems": 20, "items": {"type": "object"}} for key in ("segments", "overlays", "audio")}}
+CATALOG.update({
+    "media_timelines_list": ("List saved video timelines.", (), {}, False),
+    "media_timelines_get": ("Read an immutable timeline revision.", ("timeline_id",), {"timeline_id": STRING, "revision": INTEGER}, False),
+    "media_timelines_history": ("Read retained timeline revisions.", ("timeline_id",), {"timeline_id": STRING}, False),
+    "media_timelines_save": ("Save ordered pinned clips/stills, image overlays and explicit soundtrack placement using revision compare-and-swap.", ("title", "width", "height", "fps", "segments", "overlays", "audio", "request_id"), {**TIMELINE_FIELDS, "timeline_id": STRING}, True),
+    "media_timeline_render": ("Queue an immutable timeline revision for FFmpeg rendering; source clip audio is muted and explicit soundtrack tracks are mixed.", ("request_id", "input"), {"request_id": STRING, "input": {"type": "object", "additionalProperties": False, "required": ["timeline_id", "revision"], "properties": {"timeline_id": STRING, "revision": INTEGER}}}, True),
+})
+
 DATASET_FIELDS = {"title": STRING, "base_model": STRING, "request_id": STRING, "revision": {"type": "integer", "minimum": 0}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object", "additionalProperties": False, "required": ["artifact_id", "version", "caption"], "properties": {"artifact_id": STRING, "version": INTEGER, "caption": {"type": "string", "maxLength": 2000}}}}}
 TRAIN_INPUT = {"type": "object", "additionalProperties": False, "required": ["dataset_id", "dataset_revision", "steps", "rank", "learning_rate", "seed"], "properties": {"dataset_id": STRING, "dataset_revision": INTEGER, "steps": INTEGER, "rank": INTEGER, "learning_rate": {"type": "number"}, "seed": {"type": "integer", "minimum": 0}}}
 CATALOG.update({
@@ -122,6 +131,16 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_timelines_list':
+            return self.jobs.timelines.list()
+        if name == 'media_timelines_get':
+            return self.jobs.timelines.get(args['timeline_id'], args.get('revision'))
+        if name == 'media_timelines_history':
+            return self.jobs.timelines.history(args['timeline_id'])
+        if name == 'media_timelines_save':
+            return self.jobs.timelines.save(args, args.pop('timeline_id', None))
+        if name == 'media_timeline_render':
+            return self.jobs.submit(dict(operation='timeline_render', **args))
         if name == 'media_video_submit':
             return self.jobs.submit(dict(operation='video_generate', **args))
         if name == 'media_cleanup_submit':

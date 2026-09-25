@@ -1,0 +1,44 @@
+{
+  "id": "media.11",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "950488805bebd64dd3f155135d98e63266972faa",
+  "contract": "Immutable CAS timeline revisions reference pinned canonical video/image/audio artifacts. Ordered clip/still trims, scaled letterbox output, timed image overlays and explicit soundtrack placement/trim/volume/fades render via actual FFmpeg subprocesses and supervised jobs with retained progress and cancellation. Original clip audio is muted; only explicit soundtrack tracks are mixed. API/native tools/console expose save/reopen/history/restore and pinned rendering; canonical MP4 provenance retains timeline revision.",
+  "acceptance": "Real FFmpeg/Pillow/WAV fixtures verify rendered pixel order, exact clip trim, overlay position and timing, audio silence/levels/fades, original preservation, durable progress/provenance, CAS/history/replay, invalid references/playlist rejection, actual process cancellation and HTTP/native same-store consumers.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/timelines.py",
+    "runtime/gideon/workspace/capabilities/media/timelines_http.py",
+    "runtime/gideon/workspace/capabilities/media/videos.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/TimelinePage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_timelines.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_timelines.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Original clip audio intentionally muted; add explicit soundtrack tracks",
+    "Output max300seconds/1920pixels per side/20items pertrack/canonical16MiB; no arbitrary filters, transitions or text overlays claimed",
+    "Live browser and aggregate supervisor integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.11",
+  "evidence": "/tmp/gideon-media.11-checks-n0s086df/evidence.json",
+  "production_lines": 350,
+  "test_lines": 365,
+  "ratio": 1.042857142857143,
+  "repair_cycles": 1,
+  "repair_detail": "Actual AAC decoded RMS3998.98 required bounded3800..4200 tolerance around expected4000 instead of strict greater-than4000",
+  "exit_code": 0
+}
