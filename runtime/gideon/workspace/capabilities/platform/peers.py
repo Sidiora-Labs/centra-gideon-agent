@@ -45,6 +45,7 @@ CATEGORIES = (
     "wellbeing.genome",
     "wellbeing.practice",
     "wellbeing.life_calendar",
+    "wellbeing.clinical_records",
     "platform.usage",
 )
 _CATEGORY = re.compile(r"[a-z][a-z0-9_]{1,31}\.[a-z][a-z0-9_]{1,63}")

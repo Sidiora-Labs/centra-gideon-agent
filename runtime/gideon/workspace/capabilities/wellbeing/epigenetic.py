@@ -159,3 +159,33 @@ class EpigeneticStore:
         for record in history:
             current[record['id']] = record
         return {'schema_version': 1, 'record_family': 'source_reported_epigenetic_results', 'records': list(current.values()), 'history': history}
+
+    def import_current(self, record):
+        generated = {'id', 'revision', 'evidence_basis', 'created_at', 'updated_at'}
+        if not isinstance(record, dict) or not generated <= set(record) or record['evidence_basis'] != 'source_reported':
+            raise MeasurementError('Invalid canonical epigenetic import')
+        try:
+            from uuid import UUID
+            if str(UUID(record['id'])) != record['id']:
+                raise ValueError
+            created, updated = datetime.fromisoformat(record['created_at']), datetime.fromisoformat(record['updated_at'])
+        except (TypeError, ValueError) as exc:
+            raise MeasurementError('Invalid canonical epigenetic import identity or timestamp') from exc
+        if created.utcoffset() is None or updated.utcoffset() is None or updated < created or type(record['revision']) is not int or record['revision'] < 1:
+            raise MeasurementError('Invalid canonical epigenetic import revision or timestamp')
+        payload = {key: value for key, value in record.items() if key not in generated}
+        values = validate_record({'request_id': 'peer-import', **payload})
+        expected = {**values, 'id': record['id'], 'revision': record['revision'], 'evidence_basis': 'source_reported',
+                    'created_at': record['created_at'], 'updated_at': record['updated_at']}
+        expected.setdefault('notes', ''); expected.setdefault('organ_scores', {})
+        if expected != record:
+            raise MeasurementError('Canonical epigenetic import is not exact')
+        with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT revision,data FROM epigenetic_results WHERE id=? ORDER BY revision DESC LIMIT 1', (record['id'],)).fetchone()
+            if row and json.loads(row[1]) == record:
+                return 'unchanged'
+            if row and row[0] >= record['revision']:
+                raise MeasurementError('Canonical epigenetic import conflicts with local history', 409, 'conflict')
+            self._append(db, record)
+        return 'imported'
