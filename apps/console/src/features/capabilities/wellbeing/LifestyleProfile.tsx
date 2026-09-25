@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
-import { useUILanguage } from '../../../shared/i18n'
+import { Button } from '../../../shared/ui/Button'
+import { Field, Select, TextInput } from '../../../shared/ui/forms'
 
 type Scale={minimum:number;maximum:number;label:string}
 type Observation={id:string;revision:number;observed_at:string;source:string;reported_sex:string;sex_source:string;smoking_status:string;diet_quality:{value:number;scale:Scale};stress:{value:number;scale:Scale};reported_bmi:number;condition_labels:string[];reported_daily_alcohol:{value:number;unit:string}|null}
@@ -14,10 +15,20 @@ const words={
   'zh-CN':['生活方式档案观察','仅记录报告的观察。Gideon 不诊断疾病，也不推断测量值。','观察时间','观察来源','报告的性别','性别报告来源','吸烟状态','饮食质量值','饮食量表最小值','饮食量表最大值','饮食量表标签','压力值','压力量表最小值','压力量表最大值','压力量表标签','报告的 BMI','慢性状况标签（逗号分隔）','报告的每日酒精量','酒精数量单位','记录观察','保存更正','导出规范档案','没有生活方式观察','观察历史','正在保存…','已导出'],
 }
 
+function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
+  const value = (typeof document !== 'undefined' && document.documentElement.lang) || (typeof navigator !== 'undefined' && navigator.language) || 'en'
+  if (value.toLowerCase().startsWith('es')) return 'es'
+  if (value.toLowerCase().startsWith('ar')) return 'ar'
+  if (value.toLowerCase().startsWith('hi')) return 'hi'
+  if (value.toLowerCase().startsWith('zh')) return 'zh-CN'
+  return 'en'
+}
+
 export default function LifestyleProfile(){
-  const w=words[useUILanguage()]
+  const w=words[uiLanguage()]
   const [form,setForm]=useState(initial),[rows,setRows]=useState<Observation[]>([]),[selected,setSelected]=useState<Observation|null>(null),[history,setHistory]=useState<Observation[]>([])
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[exported,setExported]=useState('')
+  const [editing,setEditing]=useState(false)
   const selection=useRef(0),mounted=useRef(false)
   const currentView=()=>{const view=new URLSearchParams(location.hash.split('?')[1]).get('view');return !view||view==='lifestyle'}
   const change=(key:string,value:string)=>setForm(current=>({...current,[key]:value}))
@@ -27,21 +38,21 @@ export default function LifestyleProfile(){
     condition_labels:form.conditions.split(',').map(value=>value.trim()).filter(Boolean),reported_daily_alcohol:form.alcohol===''?null:{value:Number(form.alcohol),unit:form.alcohol_unit}})
   async function run(action:()=>Promise<void>){setBusy(true);setError('');try{await action()}catch(value){if(mounted.current&&currentView())setError(String(value))}finally{if(mounted.current&&currentView())setBusy(false)}}
   async function load(){const records=(await requestJson<{records:Observation[]}>(base)).records;if(mounted.current&&currentView())setRows(records)}
-  async function choose(id:string){const generation=++selection.current;const [row,versions]=await Promise.all([requestJson<Observation>(`${base}/${id}`),requestJson<{history:Observation[]}>(`${base}/${id}/history`)]);if(!mounted.current||generation!==selection.current||!currentView())return;const next={observed_at:row.observed_at,source:row.source,reported_sex:row.reported_sex,sex_source:row.sex_source,smoking_status:row.smoking_status,diet_value:String(row.diet_quality.value),diet_min:String(row.diet_quality.scale.minimum),diet_max:String(row.diet_quality.scale.maximum),diet_label:row.diet_quality.scale.label,stress_value:String(row.stress.value),stress_min:String(row.stress.scale.minimum),stress_max:String(row.stress.scale.maximum),stress_label:row.stress.scale.label,bmi:String(row.reported_bmi),conditions:row.condition_labels.join(', '),alcohol:row.reported_daily_alcohol?String(row.reported_daily_alcohol.value):'',alcohol_unit:row.reported_daily_alcohol?.unit||'standard_drinks_per_day'};setForm(next);setHistory(versions.history);setSelected(row);window.history.replaceState(null,'',`#/capabilities/wellbeing?view=lifestyle&id=${encodeURIComponent(id)}`)}
+  async function choose(id:string){const generation=++selection.current;const [row,versions]=await Promise.all([requestJson<Observation>(`${base}/${id}`),requestJson<{history:Observation[]}>(`${base}/${id}/history`)]);if(!mounted.current||generation!==selection.current||!currentView())return;const next={observed_at:row.observed_at,source:row.source,reported_sex:row.reported_sex,sex_source:row.sex_source,smoking_status:row.smoking_status,diet_value:String(row.diet_quality.value),diet_min:String(row.diet_quality.scale.minimum),diet_max:String(row.diet_quality.scale.maximum),diet_label:row.diet_quality.scale.label,stress_value:String(row.stress.value),stress_min:String(row.stress.scale.minimum),stress_max:String(row.stress.scale.maximum),stress_label:row.stress.scale.label,bmi:String(row.reported_bmi),conditions:row.condition_labels.join(', '),alcohol:row.reported_daily_alcohol?String(row.reported_daily_alcohol.value):'',alcohol_unit:row.reported_daily_alcohol?.unit||'standard_drinks_per_day'};setForm(next);setHistory(versions.history);setSelected(row);setEditing(false);window.history.replaceState(null,'',`#/capabilities/wellbeing?view=lifestyle&id=${encodeURIComponent(id)}`)}
   useEffect(()=>{mounted.current=true;void run(async()=>{await load();const id=new URLSearchParams(location.hash.split('?')[1]).get('id');if(id)await choose(id)});return()=>{mounted.current=false;selection.current++}},[])
   async function submit(event:FormEvent){event.preventDefault();await run(async()=>{const data=payload();const row=selected?await requestJson<Observation>(`${base}/${selected.id}`,'PUT',{...data,observed_at:undefined,source:undefined,request_id:crypto.randomUUID(),revision:selected.revision}):await requestJson<Observation>(base,'POST',{...data,request_id:crypto.randomUUID()});await load();await choose(row.id)})}
   async function exportRecords(){await run(async()=>{const result=await requestJson<{records:Observation[];history:Observation[]}>(base+'/export');if(mounted.current&&currentView())setExported(`${w[25]} ${result.records.length} current and ${result.history.length} historical observations`)})}
-  const input=(label:string,key:string,type='text')=><label>{label}<input required type={type} step={type==='number'?'any':undefined} value={(form as Record<string,string>)[key]} onChange={event=>change(key,event.target.value)}/></label>
-  return <main><h1>{w[0]}</h1><p>{w[1]}</p>{error&&<p role="alert">{error}</p>}{busy&&<p role="status">{w[24]}</p>}{exported&&<p role="status">{exported}</p>}
-    <form onSubmit={submit} style={{display:'grid',gap:8}}>{input(w[2],'observed_at')}{input(w[3],'source')}{input(w[4],'reported_sex')}{input(w[5],'sex_source')}
-      <label>{w[6]}<select value={form.smoking_status} onChange={event=>change('smoking_status',event.target.value)}><option value="never">Never</option><option value="former">Former</option><option value="current">Current</option><option value="unknown">Unknown</option></select></label>
+  const input=(label:string,key:string,type:'text'|'number'='text')=><Field label={label}><TextInput required type={type} value={(form as Record<string,string>)[key]} onChange={value=>change(key,value)}/></Field>
+  function create(){setSelected(null);setHistory([]);setForm(initial);setEditing(true);window.history.replaceState(null,'','#/capabilities/wellbeing?view=lifestyle')}
+  return <main className="mx-auto w-full space-y-l px-l py-2xl text-on-surface" style={{ maxWidth: 'var(--content-width)' }}><header className="flex flex-wrap items-start justify-between gap-l"><div><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs max-w-[42rem] text-on-surface-var">{w[1]}</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={()=>void exportRecords()}>{w[21]}</Button>{!editing&&<Button disabled={busy} onClick={create}>{w[19]}</Button>}</div></header>{error&&<p role="alert" className="rounded-lg border border-danger/30 bg-danger/10 p-3 text-danger">{error}</p>}{busy&&<p role="status">{w[24]}</p>}{exported&&<p role="status" className="rounded-lg bg-surface-high p-3">{exported}</p>}
+    <section aria-label={w[0]} className="grid gap-l lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]"><aside className="space-y-2 rounded-lg bg-surface-container p-l"><h2 data-type="label-l" className="text-on-surface">Current observations</h2>{rows.length===0&&!busy?<div className="rounded-lg border border-dashed border-outline-variant/30 p-l text-on-surface-var"><p>{w[22]}</p></div>:<ul className="space-y-2">{rows.map(row=><li key={row.id}><Button variant={selected?.id===row.id?'tonal':'ghost'} className="w-full justify-start text-left" onClick={()=>void run(()=>choose(row.id))}>{row.observed_at} · {row.source} · BMI {row.reported_bmi}</Button></li>)}</ul>}</aside>
+    <div className="min-w-0 space-y-l">{selected&&!editing&&<section className="rounded-lg bg-surface-container p-l"><div className="flex flex-wrap items-start justify-between gap-l"><div><h2 data-type="title-s" className="text-on-surface">{selected.source}</h2><p>{selected.reported_sex} · {selected.smoking_status} · BMI {selected.reported_bmi}</p></div><Button variant="secondary" onClick={()=>setEditing(true)}>Edit observation</Button></div><h3 data-type="label-l" className="mt-l text-on-surface">{w[23]}</h3><ol className="mt-2 space-y-1 text-on-surface-var">{history.map(row=><li key={row.revision}>v{row.revision}: diet {row.diet_quality.value}/{row.diet_quality.scale.maximum}; stress {row.stress.value}/{row.stress.scale.maximum}; BMI {row.reported_bmi}</li>)}</ol></section>}
+    {editing&&<form onSubmit={submit} className="grid gap-l rounded-lg bg-surface-container p-l sm:grid-cols-2"><h2 data-type="title-s" className="sm:col-span-2 text-on-surface">{selected?w[20]:w[19]}</h2>{input(w[2],'observed_at')}{input(w[3],'source')}{input(w[4],'reported_sex')}{input(w[5],'sex_source')}
+      <Field label={w[6]}><Select value={form.smoking_status} onChange={value=>change('smoking_status',value)} options={['never','former','current','unknown'].map(value=>({value,label:value[0].toUpperCase()+value.slice(1)}))} /></Field>
       {input(w[7],'diet_value','number')}{input(w[8],'diet_min','number')}{input(w[9],'diet_max','number')}{input(w[10],'diet_label')}
       {input(w[11],'stress_value','number')}{input(w[12],'stress_min','number')}{input(w[13],'stress_max','number')}{input(w[14],'stress_label')}
-      {input(w[15],'bmi','number')}{input(w[16],'conditions')}<label>{w[17]}<input type="number" min="0" step="any" value={form.alcohol} onChange={event=>change('alcohol',event.target.value)}/></label>
-      <label>{w[18]}<select value={form.alcohol_unit} onChange={event=>change('alcohol_unit',event.target.value)}><option value="standard_drinks_per_day">Standard drinks/day</option><option value="g_per_day">g/day</option><option value="ml_ethanol_per_day">mL ethanol/day</option></select></label>
-      <button disabled={busy}>{selected?w[20]:w[19]}</button></form>
-    <button disabled={busy} onClick={()=>void exportRecords()}>{w[21]}</button>
-    {rows.length===0&&!busy?<p>{w[22]}</p>:<ul>{rows.map(row=><li key={row.id}><button onClick={()=>void run(()=>choose(row.id))}>{row.observed_at} · {row.source} · BMI {row.reported_bmi}</button></li>)}</ul>}
-    {selected&&<section><h2>{w[23]}</h2><p>{selected.reported_sex} · {selected.smoking_status} · BMI {selected.reported_bmi}</p><ol>{history.map(row=><li key={row.revision}>v{row.revision}: diet {row.diet_quality.value}/{row.diet_quality.scale.maximum}; stress {row.stress.value}/{row.stress.scale.maximum}; BMI {row.reported_bmi}</li>)}</ol></section>}
+      {input(w[15],'bmi','number')}{input(w[16],'conditions')}<Field label={w[17]}><TextInput type="number" min={0} value={form.alcohol} onChange={value=>change('alcohol',value)} /></Field>
+      <Field label={w[18]}><Select value={form.alcohol_unit} onChange={value=>change('alcohol_unit',value)} options={[{value:'standard_drinks_per_day',label:'Standard drinks/day'},{value:'g_per_day',label:'g/day'},{value:'ml_ethanol_per_day',label:'mL ethanol/day'}]} /></Field>
+      <div className="flex flex-wrap gap-2 sm:col-span-2"><Button type="submit" loading={busy}>{selected?w[20]:w[19]}</Button><Button variant="ghost" onClick={()=>setEditing(false)}>Cancel</Button></div></form>}</div></section>
   </main>
 }

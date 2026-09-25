@@ -1,5 +1,6 @@
 import LoraPicker, { type LoraInventory } from './LoraPicker'
 import { useEffect, useState } from 'react'
+import NativeMediaPage from './NativeMediaPage'
 export type ImageCapabilities = { selection: string; available: boolean; models: { name: string; sizes: string[]; supports_edit: boolean; supports_mask: boolean; controls: Record<string, { minimum: number; maximum: number; integer: boolean }> }[] }
 export function ConditioningFields({ capabilities, values, change }: { capabilities: ImageCapabilities; values: Record<string, string>; change: (key: string, value: string) => void }) {
   const model = capabilities.models[0]
@@ -18,11 +19,11 @@ export default function ImagePage() {
   useEffect(() => { fetch('/api/capabilities/media/loras').then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); setInventory(result) }).catch(reason => setError(String(reason))) }, [])
   useEffect(() => { let live = true; fetch('/api/capabilities/media/images').then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); if (live) setCapabilities(result) }).catch(reason => { if (live) setError(String(reason)) }); return () => { live = false } }, [])
   const submit = async () => { setBusy(true); try { const input: Record<string, unknown> = { prompt, loras: Object.entries(adapters).map(([id, scale]) => ({ id, scale: Number(scale), sha256: inventory?.items.find(item => item.id === id)?.sha256 })), size: values.size || '', controls: Object.fromEntries(['seed', 'steps', 'guidance', 'strength'].filter(key => values[key] !== undefined && values[key] !== '').map(key => [key, Number(values[key])])) }; for (const key of ['source', 'mask']) if (values[key + '_artifact_id']) { input[key + '_artifact_id'] = values[key + '_artifact_id']; input[key + '_version'] = Number(values[key + '_version'] || '1') }; const response = await fetch('/api/capabilities/media/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'image_generate', request_id: crypto.randomUUID(), input }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); location.hash = '#/capabilities/media?view=jobs' } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
-  return <section className="p-6 space-y-4"><h1>Image generation</h1><a href="#/capabilities/media?view=readiness">Media readiness</a> · <a href="#/capabilities/media?view=jobs">Media jobs</a>
+  return <NativeMediaPage title="Image generation" actions={<><a href="#/capabilities/media?view=readiness">Readiness</a><a href="#/capabilities/media?view=jobs">Jobs</a></>}>
     <p>Requests pin the selected model and original image versions. Generated output becomes a separate artifact. Unsupported controls fail before inference; provider execution requires an available configured model.</p>
     {error && <p role="alert">{error}</p>}{!capabilities && <p>Loading image capabilities…</p>}{capabilities && <><p>Selected: {capabilities.selection || 'None'}</p>{!capabilities.available && <p role="status">Provider unavailable. Configure a model through media readiness.</p>}
       <label>Prompt<textarea maxLength={4000} value={prompt} onChange={event => setPrompt(event.target.value)} /></label><ConditioningFields capabilities={capabilities} values={values} change={(key, value) => setValues(old => ({ ...old, [key]: value }))} />
       {inventory && <LoraPicker inventory={inventory} selected={adapters} change={(id, value) => setAdapters(old => { const next = { ...old }; if (value === null) delete next[id]; else next[id] = value; return next })} />}
       <button disabled={busy || !capabilities.available || !prompt.trim()} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue image generation'}</button></>}
-  </section>
+  </NativeMediaPage>
 }

@@ -24,7 +24,7 @@ export function DomainReadiness({ baseUrl = '' }: { baseUrl?: string }) {
     }
   }
   useEffect(() => { void load() }, [baseUrl])
-  return <section aria-label="Domain readiness" className="space-y-s">
+  return <section aria-label="Domain readiness" className="grid gap-m">
     <h2 className="text-l">Domain readiness</h2>
     <div className="flex flex-wrap gap-s">
       <Button onClick={() => void load(true)}>Check domain alerts</Button>

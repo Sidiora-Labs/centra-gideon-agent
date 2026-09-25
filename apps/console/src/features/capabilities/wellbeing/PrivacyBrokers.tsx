@@ -114,12 +114,12 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
     })
   }
 
-  return <section aria-label="Privacy broker cases" className="space-y-5">
+  return <section aria-label="Privacy broker cases" className="space-y-2xl">
     <h2 data-type="title-m">Privacy broker cases</h2>
     <p>Track owner-observed exposure and opt-out work without sending requests. Owner reports stay labelled user-attested. Confirmed removal is reserved for an integrated verifier re-scan.</p>
     {loading && <p role="status">Loading broker cases…</p>}
     {error && <p role="alert">{error}</p>}
-    <form onSubmit={addBroker} className="grid gap-3 sm:grid-cols-2">
+    <form onSubmit={addBroker} className="grid gap-m sm:grid-cols-2">
       <h3 className="sm:col-span-2">Add broker</h3>
       <Field label="Broker name"><TextInput value={name} onChange={setName} required /></Field>
       <Field label="Broker website"><TextInput value={website} onChange={setWebsite} required /></Field>
@@ -127,31 +127,31 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
       <Field label="Broker source"><TextInput value={source} onChange={setSource} required /></Field>
       <Button type="submit" disabled={busy}>Save broker</Button>
     </form>
-    <form onSubmit={addCase} className="space-y-3">
+    <form onSubmit={addCase} className="space-y-m">
       <h3>Start subject case</h3>
-      <label>Broker<select aria-label="Case broker" value={brokerId} onChange={event => setBrokerId(event.target.value)}>{brokers.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+      <label>Broker<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Case broker" value={brokerId} onChange={event => setBrokerId(event.target.value)}>{brokers.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       <Button type="submit" disabled={busy || !brokerId}>Start broker case</Button>
     </form>
-    <div className="flex flex-wrap gap-2">{cases.map(row => <Button key={row.id} variant="secondary" onClick={() => setQuery({ broker_case: row.id })}>{row.broker?.name ?? row.broker_id} · {row.state}</Button>)}</div>
-    {selected && <section aria-label="Selected broker case" className="space-y-3">
+    <div className="flex flex-wrap gap-s">{cases.map(row => <Button key={row.id} variant="secondary" onClick={() => setQuery({ broker_case: row.id })}>{row.broker?.name ?? row.broker_id} · {row.state}</Button>)}</div>
+    {selected && <section aria-label="Selected broker case" className="space-y-m">
       <h3>{selected.broker?.name ?? selected.broker_id}</h3>
       <p>State: {selected.state} · evidence: {selected.evidence_basis} · revision {selected.revision}</p>
       {selected.evidence && <p>Recorded evidence: {selected.evidence}</p>}
       <p>Next re-check: {selected.next_recheck_at}</p>
-      {selected.broker?.name.trim().toLowerCase() === 'spokeo' && <section aria-label="Spokeo provider controls" className="space-y-3">
+      {selected.broker?.name.trim().toLowerCase() === 'spokeo' && <section aria-label="Spokeo provider controls" className="space-y-m">
         <h4>Spokeo provider</h4>
         <p>Each action uses the current provider protocol and writes its durable outcome to this case. No action runs automatically.</p>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-m sm:grid-cols-2">
           <Field label="Spokeo first name"><TextInput value={firstName} onChange={setFirstName} required /></Field>
           <Field label="Spokeo last name"><TextInput value={lastName} onChange={setLastName} required /></Field>
           <Field label="Spokeo city"><TextInput value={city} onChange={setCity} /></Field>
           <Field label="Spokeo state"><TextInput value={region} onChange={setRegion} required /></Field>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-s">
           <Button variant="secondary" disabled={busy || !firstName || !lastName || !region} onClick={() => spokeo('scan')}>Scan Spokeo</Button>
           <Button variant="secondary" disabled={busy || !firstName || !lastName || !region || !['submitted', 'verification_pending', 'awaiting_processing'].includes(selected.state)} onClick={() => spokeo('verify')}>Verify removal</Button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-m sm:grid-cols-2">
           <Field label="Spokeo profile URL"><TextInput value={profileUrl} onChange={setProfileUrl} required /></Field>
           <Field label="Spokeo contact email"><TextInput value={email} onChange={setEmail} required /></Field>
         </div>
@@ -159,18 +159,18 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
         {spokeoPlan && <div role="status" className="space-y-2">
           <p>{providerStatus}</p>
           <p>Submission discloses: {spokeoPlan.disclosed_fields.join(', ')}.</p>
-          <label><input type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I approve this Spokeo opt-out submission</label>
+          <label><input className="size-4 rounded border-outline-variant/40 text-primary focus:ring-primary" type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I approve this Spokeo opt-out submission</label>
           <Button disabled={busy || !approved || !spokeoPlan.live_submission_enabled} onClick={() => spokeo('submit')}>Submit approved opt-out</Button>
         </div>}
         {!spokeoPlan && providerStatus && <p role="status">{providerStatus}</p>}
       </section>}
       {selected.broker?.name.trim().toLowerCase() === 'whitepages' && <WhitepagesBrokerPanel brokerCase={selected} onChanged={row => setCases(current => current.map(item => item.id === row.id ? { ...item, ...row, broker: item.broker } : item))} />}
       {selected.broker?.name.trim().toLowerCase() === 'beenverified' && <BeenVerifiedBrokerPanel brokerCase={selected} onChanged={row => setCases(current => current.map(item => item.id === row.id ? { ...item, ...row, broker: item.broker } : item))} />}
-      <form onSubmit={observe} className="space-y-3"><label>Owner observation<select aria-label="Owner observation" value={outcome} onChange={event => setOutcome(event.target.value)}>{['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => <option key={value}>{value}</option>)}</select></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy}>Record user-attested observation</Button></form>
+      <form onSubmit={observe} className="space-y-m"><label>Owner observation<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Owner observation" value={outcome} onChange={event => setOutcome(event.target.value)}>{['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => <option key={value}>{value}</option>)}</select></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy}>Record user-attested observation</Button></form>
       <Field label="Transition reason"><TextInput value={reason} onChange={setReason} /></Field>
-      <div className="flex flex-wrap gap-2">{selected.allowed_transitions.map(state => <Button key={state} variant="secondary" disabled={busy} onClick={() => transition(state)}>Move to {state}</Button>)}<Button variant="secondary" disabled={busy} onClick={recheck}>Request re-check</Button></div>
+      <div className="flex flex-wrap gap-s">{selected.allowed_transitions.map(state => <Button key={state} variant="secondary" disabled={busy} onClick={() => transition(state)}>Move to {state}</Button>)}<Button variant="secondary" disabled={busy} onClick={recheck}>Request re-check</Button></div>
     </section>}
-    {!!history.length && <section aria-label="Broker case history"><h3>Revision history</h3>{history.map(row => <p key={row.revision}>Revision {row.revision} · {row.state} · {row.evidence_basis}</p>)}</section>}
-    {!!events.length && <section aria-label="Broker case events"><h3>Case events</h3>{events.map(row => <p key={row.revision}>Revision {row.revision} · {row.operation} · {row.state}</p>)}</section>}
+    {!!history.length && <section aria-label="Broker case history" className="space-y-l rounded-lg bg-surface-container p-l"><h3>Revision history</h3>{history.map(row => <p key={row.revision}>Revision {row.revision} · {row.state} · {row.evidence_basis}</p>)}</section>}
+    {!!events.length && <section aria-label="Broker case events" className="space-y-l rounded-lg bg-surface-container p-l"><h3>Case events</h3>{events.map(row => <p key={row.revision}>Revision {row.revision} · {row.operation} · {row.state}</p>)}</section>}
   </section>
 }

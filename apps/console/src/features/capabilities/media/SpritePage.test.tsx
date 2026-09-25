@@ -60,7 +60,7 @@ describe('sprite approval and atlas preview', () => {
   })
   it('links generation and compilation jobs back to the same sprite workspace', () => {
     const page = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    expect(page.querySelector('nav a[href="#/capabilities/media?view=sprites"]')?.textContent).toBe('Sprite production')
+    expect(page.querySelector('nav button[aria-label="Sprite production"]')?.textContent).toBe('Sprite production')
     const job = { id: 'sprite', operation: 'sprite_compile', progress: .5, sketch_id: '', revision: 0, state_revision: 3, attempt: 1, status: 'running', error: null, result: null, events: [] }
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<JobCard job={job} busy={false} act={() => {}} />), 'text/html')
     expect(doc.querySelector('h2')?.textContent).toBe('Sprite atlas compilation')

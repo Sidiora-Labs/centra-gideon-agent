@@ -64,7 +64,7 @@ afterAll(async () => {
 })
 
 test('renders owned runtime and canonical project storage with symlink exclusion', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=storage`)
   const region = page.getByRole('region', { name: 'Storage diagnosis' })
   await region.getByText('Gideon runtime:', { exact: false }).waitFor()
   const projectArticle = region.getByRole('article').filter({ hasText: 'Storage browser project' })
@@ -80,7 +80,7 @@ test('renders owned runtime and canonical project storage with symlink exclusion
 })
 
 test('refreshes the real projection and keeps server errors visible', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=storage`)
   const region = page.getByRole('region', { name: 'Storage diagnosis' })
   await region.getByText('Gideon runtime:', { exact: false }).waitFor()
   writeFileSync(resolve(repo, 'later.bin'), Buffer.alloc(8192, 9))

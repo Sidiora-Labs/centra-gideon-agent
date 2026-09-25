@@ -37,7 +37,7 @@ describe('video generation workspace', () => {
   })
   it('offers video navigation in an empty sketch workspace', () => {
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    expect(doc.querySelector('a[href="#/capabilities/media?view=videos"]')?.textContent).toBe('Generate video')
+    expect(doc.querySelector('nav button[aria-label="Generate video"]')?.textContent).toBe('Generate video')
     expect(doc.querySelector('canvas')).toBeNull()
   })
   it('renders video job provenance and canonical result link', () => {

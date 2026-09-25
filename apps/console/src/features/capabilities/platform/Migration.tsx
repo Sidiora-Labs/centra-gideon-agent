@@ -34,14 +34,14 @@ export default function Migration({ baseUrl = '' }: { baseUrl?: string }) {
       if (result.receipt) { setPreview(undefined); setContent(''); await load() }
     } catch (reason) { setError(String(reason)) } finally { setBusy(false) }
   }
-  return <section aria-label="Archive migration" className="space-y-m">
-    <h2>Legacy archive migration</h2>
+  return <section aria-label="Archive migration" className="grid gap-l">
+    <h2 data-type="title-m">Legacy archive migration</h2>
     <p>Verified imports currently cover version-1 people, projects, admin actions, tracked threads, ideas, journals, memories, links, buckets, inbox captures, and song sheets with verified attachments. Mixed song archives commit as independent canonical-record and song groups after full-plan validation; when inbox is present, they commit as independent canonical-record, immutable inbox, and song groups. Completed groups are retained, unfinished groups resume only from the exact reviewed archive, and partial completion is reported without claiming archive-wide rollback or deleting immutable inbox events. Settings, logs, relational dumps, unrelated media, and reference files remain refused.</p>
     {error && <p role="alert">{error}</p>}
-    <label>Snapshot archive<input aria-label="Snapshot archive" type="file" accept=".tar.gz,.tgz,application/gzip" disabled={busy} onChange={event => void choose(event.target.files?.[0])} /></label>
+    <label className="grid gap-xs text-sm">Snapshot archive<input className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Snapshot archive" type="file" accept=".tar.gz,.tgz,application/gzip" disabled={busy} onChange={event => void choose(event.target.files?.[0])} /></label>
     <Button disabled={busy || !content} onClick={() => void act('preview')}>Preview verified archive</Button>
     {preview && <div><p>{preview.records.length} records verified from {preview.generated_at}</p><p>Domains: {preview.coverage.supported.join(', ')}</p><p>Unsupported: {preview.coverage.unsupported}.</p>{preview.commit_groups && <div><p>{preview.completion_policy}</p><ul>{preview.commit_groups.map(group => <li key={group.id}>{group.id}: {group.domains.join(', ')}</li>)}</ul></div>}<ul>{preview.records.map(row => <li key={`${row.domain}:${row.source_id}`}>{row.domain}: {row.name}</li>)}</ul><Button disabled={busy} onClick={() => void act('commit')}>Import reviewed records</Button></div>}
-    <h3>Import receipts</h3>
+    <h3 data-type="headline-s">Import receipts</h3>
     {receipts.length ? <ul>{receipts.map(row => <li key={row.archive_digest}>{row.status ? `${row.status} · ` : ''}{Object.entries(row.domains).map(([domain, count]) => `${count} ${domain}`).join(', ')} · {row.committed_at}</li>)}</ul> : <p>No archive imports recorded.</p>}
   </section>
 }

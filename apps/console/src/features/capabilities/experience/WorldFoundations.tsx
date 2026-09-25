@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Surface } from '../../../shared/ui/Surface'
 
 type Foundation = { id: string; title: string; state: string; revision: number; style: Record<string, unknown> | null; provenance: { kind: string } }
 type Controller = { id: string; foundation_id: string; world: string; state: string; desired_state: string; revision: number; last_receipt: { complete?: boolean } | null }
@@ -17,15 +18,15 @@ export default function WorldFoundations({ baseUrl = '/api/capabilities/experien
     try { await requestJson(baseUrl + '/world-foundations/controllers/' + row.id + '/' + operation, 'POST', { revision: row.revision }); await refresh() }
     catch (error) { setError(String(error)) } finally { setBusy('') }
   }
-  return <section aria-label="World foundations" className="space-y-3 rounded-lg border p-4">
-    <h2>World foundations and controllers</h2>
-    <p>Foundation style remains local. Controller status reflects operations acknowledged by the installed world engine.</p>
+  return <section aria-label="World foundations" className="space-y-m">
+    <header className="space-y-xs"><h2 data-type="title-m">World foundations and controllers</h2>
+    <p className="text-on-surface-variant">Foundation style remains local. Controller status reflects operations acknowledged by the installed world engine.</p></header>
     {error && <p role="alert">{error}</p>}
     {!snapshot ? <p>Loading foundations…</p> : <>
       <p role="status">{snapshot.foundations.length} foundations · {snapshot.controllers.length} controllers</p>
-      <ul>{snapshot.foundations.map(row => <li key={row.id}><strong>{row.title}</strong> — {row.state} · {row.provenance.kind}{row.style === null ? ' · no transferred style' : ''}</li>)}</ul>
-      <ul>{snapshot.controllers.map(row => <li key={row.id}><strong>{row.world}</strong> — {row.state} (desired {row.desired_state}) {row.last_receipt?.complete && '· engine acknowledged'} <Button disabled={busy === row.id || row.state === 'retired'} onClick={() => void control(row, row.desired_state === 'armed' ? 'stop' : 'arm')}>{row.desired_state === 'armed' ? 'Stop controller' : 'Arm controller'}</Button>{row.desired_state === 'armed' && <Button disabled={busy === row.id} onClick={() => void control(row, 'restart')}>Restart controller</Button>}</li>)}</ul>
-      <Button disabled={Boolean(busy)} onClick={() => void refresh().catch(error => setError(String(error)))}>Refresh lifecycle</Button>
+      <div className="grid gap-m lg:grid-cols-2"><Surface tone="low" className="p-m"><h3 data-type="title-m">Foundation library</h3><ul className="divide-y divide-outline-variant/30">{snapshot.foundations.map(row => <li key={row.id}><strong>{row.title}</strong> — {row.state} · {row.provenance.kind}{row.style === null ? ' · no transferred style' : ''}</li>)}</ul></Surface>
+      <Surface className="p-m"><h3 data-type="title-m">Installed controllers</h3><ul className="divide-y divide-outline-variant/30">{snapshot.controllers.map(row => <li key={row.id}><strong>{row.world}</strong> — {row.state} (desired {row.desired_state}) {row.last_receipt?.complete && '· engine acknowledged'} <Button disabled={busy === row.id || row.state === 'retired'} onClick={() => void control(row, row.desired_state === 'armed' ? 'stop' : 'arm')}>{row.desired_state === 'armed' ? 'Stop controller' : 'Arm controller'}</Button>{row.desired_state === 'armed' && <Button disabled={busy === row.id} onClick={() => void control(row, 'restart')}>Restart controller</Button>}</li>)}</ul></Surface></div>
+      <Button variant="secondary" disabled={Boolean(busy)} onClick={() => void refresh().catch(error => setError(String(error)))}>Refresh lifecycle</Button>
     </>}
   </section>
 }

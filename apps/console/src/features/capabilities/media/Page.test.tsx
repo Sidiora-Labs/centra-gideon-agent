@@ -45,7 +45,7 @@ describe('sketch entry surface', () => {
     expect(select?.querySelector('option')?.getAttribute('value')).toBe('')
     expect(select?.textContent).toBe('Choose a sketch')
     expect(select?.hasAttribute('disabled')).toBe(false)
-    const buttons = [...document.querySelectorAll('button')]
+    const buttons = [...document.querySelectorAll('section[aria-label="Image sketches"] button')]
     expect(buttons.map(button => button.textContent)).toEqual(['New sketch'])
     expect(buttons[0].hasAttribute('disabled')).toBe(false)
     expect(document.body.textContent).not.toContain('Saved changes')

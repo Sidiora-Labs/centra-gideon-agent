@@ -60,7 +60,7 @@ afterAll(async () => {
 })
 
 test('holds an actual port, reports a competing claim and releases its reservation', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=ports`)
   await page.getByText('No port reservations.').waitFor()
   await page.getByLabel('Reservation project ID', { exact: true }).fill('Browser port')
   await page.getByRole('button', { name: 'Reserve port', exact: true }).click()
@@ -84,11 +84,11 @@ test('holds an actual port, reports a competing claim and releases its reservati
   await page.getByRole('heading', { name: 'Browser port', exact: true }).waitFor()
   expect(await page.getByText(`Port ${number} · released`, { exact: true }).count()).toBe(1)
   await page.getByRole('button', { name: 'Inspect port availability', exact: true }).click()
-  await page.getByText(`${number}: Available`, { exact: true }).waitFor()
+  await page.getByText(String(number), { exact: true }).locator('..').getByText('Available', { exact: true }).waitFor()
 }, 60000)
 
 test('keeps out-of-allocation error and repairs the entered request', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=ports`)
   await page.getByLabel('Reservation project ID', { exact: true }).fill('Bounded allocation')
   await page.getByLabel('Port (optional)', { exact: true }).fill('5000')
   await page.getByRole('button', { name: 'Reserve port', exact: true }).click()

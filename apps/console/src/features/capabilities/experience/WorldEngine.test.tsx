@@ -33,8 +33,7 @@ it('displays actual missing engine readiness and never exposes an unavailable if
   expect(status.state).toBe('unavailable')
   expect(status.version).toBeNull()
   expect(status.engine_url).toBeNull()
-  expect(screen.getByRole('link', { name: 'Eidoverse Worlds' })).toHaveAttribute('href', 'https://github.com/atomantic/eidoverse-worlds')
-  expect(screen.getByText(/AGPL-3.0/)).toBeVisible()
+  expect(screen.getByText('The world engine runs as a separately installed local application.')).toBeVisible()
 })
 it('refreshes authoritative status and keeps operator configuration outside customer controls', async () => {
   render(<WorldEngine baseUrl={base} />)

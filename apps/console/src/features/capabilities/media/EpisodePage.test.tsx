@@ -54,7 +54,7 @@ describe('continuous episode planning', () => {
   })
   it('offers episodes before any sketch exists and shows scene progress on jobs', () => {
     const page = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    expect(page.querySelector('nav a[href="#/capabilities/media?view=episodes"]')?.textContent).toBe('Continuous episodes')
+    expect(page.querySelector('nav button[aria-label="Continuous episodes"]')?.textContent).toBe('Continuous episodes')
     expect(page.querySelector('canvas')).toBeNull()
     const job = { id: 'episode', operation: 'episode_render', progress: .5, sketch_id: '', revision: 0, state_revision: 3, attempt: 1, status: 'running', error: null, result: null, events: [] }
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<JobCard job={job} busy={false} act={() => {}} />), 'text/html')

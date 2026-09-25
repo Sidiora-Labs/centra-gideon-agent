@@ -61,7 +61,7 @@ afterAll(async () => {
 })
 
 test('detects and registers a canonical project then restores selection on reload', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=projects`)
   await page.getByText('No registered local projects.').waitFor()
   await page.getByLabel('Project display name').fill('Browser existing source')
   await page.getByLabel('Existing project path').fill(repo)
@@ -83,7 +83,7 @@ test('detects and registers a canonical project then restores selection on reloa
 }, 60000)
 
 test('scaffolds actual local files and keeps no-overwrite errors and inputs', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=projects`)
   await page.getByLabel('Project display name').fill('Browser Python service')
   await page.getByLabel('Scaffold parent').fill(repo)
   await page.getByLabel('New directory').fill('browser-python')

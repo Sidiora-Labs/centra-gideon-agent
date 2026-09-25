@@ -46,21 +46,21 @@ export function RemoteSessions({ baseUrl = '' }: { baseUrl?: string }) {
     } catch { setError('Remote reply stream failed.') } finally { setBusy(false) }
   }
 
-  return <section aria-label="Remote agent sessions" className="space-y-s">
-    <h2 className="text-l">Remote agent sessions</h2>
+  return <section aria-label="Remote agent sessions" className="grid gap-m">
+    <h2 data-type="title-m">Remote agent sessions</h2>
     <p>Sessions remain owned by their configured external runtime. Gideon retains identity and provenance.</p>
     {error && <p role="alert">{error}</p>}
     {connections.length === 0 && !error && <p>No remote agent connections configured.</p>}
-    {connections.map(connection => <article key={connection.id}>
-      <h3>{connection.label}</h3><p>{connection.base_url} · credential {connection.credential_ref}</p>
+    {connections.map(connection => <article className="grid gap-s rounded-lg border border-outline-variant/20 bg-surface-container p-l" key={connection.id}>
+      <h3 data-type="headline-s">{connection.label}</h3><p>{connection.base_url} · credential {connection.credential_ref}</p>
       <Button loading={busy} onClick={() => void refresh(connection.id)}>Refresh remote sessions</Button>
       <ul>{connection.retained_sessions.map(session => <li key={session.id}><button type="button" onClick={() => void open(connection.id, session.id)}>{session.title}</button> <span>{session.provenance}</span></li>)}</ul>
     </article>)}
     {active && <div aria-label="Remote conversation">
-      <h3>Session {active.session}</h3>
+      <h3 data-type="headline-s">Session {active.session}</h3>
       <ol>{messages.map(message => <li key={message.id}><strong>{message.role}</strong>: {message.content} <small>{message.source.kind}</small></li>)}</ol>
       {reply && <pre aria-label="Remote reply stream">{reply}</pre>}
-      <label>Message<textarea value={composer} onChange={event => setComposer(event.target.value)} /></label>
+      <label className="grid gap-xs text-sm">Message<textarea className="min-h-24 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={composer} onChange={event => setComposer(event.target.value)} /></label>
       <Button loading={busy} onClick={() => void send()}>Send to remote agent</Button>
     </div>}
   </section>

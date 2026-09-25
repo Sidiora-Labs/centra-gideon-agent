@@ -35,11 +35,11 @@ describe('media source downloader', () => {
     expect(artifactUrl({ id: 'done', status: 'succeeded', result: { artifact_id: 'source / clip', version: 4, kind: 'video' } })).toBe('/api/artifacts/source%20%2F%20clip/raw?version=4')
   })
 
-  it('registers a unique downloader link in media navigation', () => {
+  it('registers a unique downloader destination in media navigation', () => {
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    const links = [...doc.querySelectorAll('nav a')].filter(link => link.textContent === 'Source downloader')
-    expect(links).toHaveLength(1)
-    expect(links[0].getAttribute('href')).toBe('#/capabilities/media?view=downloads')
+    const destinations = doc.querySelectorAll('nav button[aria-label="Source downloader"]')
+    expect(destinations).toHaveLength(1)
+    expect(destinations[0].textContent).toBe('Source downloader')
   })
 
   it('links queued download jobs to the exact downloader record', () => {

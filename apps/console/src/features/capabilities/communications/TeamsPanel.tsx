@@ -7,7 +7,7 @@ type Source = { id: string; name: string; owner_email: string; credential_ref: s
 type Message = { provenance_key: string; source_kind: string; conversation_id: string; sender: { name: string }; person_id: string | null; direction: string; created_at: string; deleted_at: string | null; body: string; attachments: { id: string; name: string }[] }
 const base = '/api/capabilities/communications/teams/sources'
 const selected = () => new URLSearchParams(location.hash.split('?')[1] || '').get('teams_source') || ''
-const style = 'block w-full rounded border border-outline bg-surface p-2 text-on-surface'
+const style = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export function TeamsPanel() {
   const [sources, setSources] = useState<Source[]>([])
@@ -51,11 +51,11 @@ export function TeamsPanel() {
     finally { setBusy(false) }
   }
   const current = sources.find(row => row.id === id)
-  return <section className="my-6 space-y-3" aria-label="Microsoft Teams history">
-    <h2>Microsoft Teams history</h2>
+  return <section className="space-y-l" aria-label="Microsoft Teams history">
+    <h2 data-type="title-m">Microsoft Teams history</h2>
     <p>Read channel and chat history from the Microsoft account named in Gideon's credential store. Sync never sends messages.</p>
     <div className="flex flex-wrap gap-2"><Button onClick={() => open('')}>New Teams source</Button>{sources.map(source => <a key={source.id} className="text-primary underline" href={`#/capabilities/communications?teams_source=${encodeURIComponent(source.id)}`}>{source.name}</a>)}</div>
-    {loading && <p role="status">Loading Teams sources…</p>}
+    {loading && <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">Loading Teams sources…</p>}
     {error && <p role="alert" className="text-danger">{error}</p>}
     <label className="block">Teams source name<input className={style} value={form.name} maxLength={200} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
     <label className="block">Verified Microsoft owner email<input className={style} type="email" value={form.owner_email} onChange={event => setForm({ ...form, owner_email: event.target.value })} /></label>

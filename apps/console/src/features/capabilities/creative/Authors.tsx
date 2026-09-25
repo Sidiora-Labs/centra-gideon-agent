@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { EmptyState, ListRow, ListScaffold } from '../../../shared/ui/ListScaffold'
+import { FilePenLine, Plus, UserRound } from 'lucide-react'
+import { SearchField } from '../../../shared/ui/SearchField'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 
 type Sample = { artifact_id: string; artifact_version: number }
 type Voice = { perspective: string; tense: string; tone: string; diction: string; rhythm: string; avoid: string }
@@ -9,10 +14,10 @@ type Author = Values & { id: string; revision: number; sample_status?: (Sample &
 type Brief = { title: string; revision: number; voice: Voice; biography: string; samples: (Sample & { title: string; content: string; missing: boolean; truncated: boolean; original_characters: number })[] }
 const blank = (): Values => ({ title: '', biography: '', voice: { perspective: 'any', tense: 'any', tone: '', diction: '', rhythm: '', avoid: '' }, sample_refs: [] })
 const readId = () => new URLSearchParams(location.hash.split('?')[1]).get('author') || ''
-const control = 'w-full rounded border border-outline bg-surface p-2 text-on-surface'
 const values = (a: Author): Values => ({ title: a.title, biography: a.biography, voice: a.voice, sample_refs: a.sample_refs })
 
 export default function Authors({ apiRoot = '/api/capabilities/creative/authors' }: { apiRoot?: string }) {
+  const t = (value: string) => value
   const [id, setId] = useState(readId)
   const [selected, setSelected] = useState<Author | null>(null)
   const [draft, setDraft] = useState<Values>(blank)
@@ -30,12 +35,16 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
   const [error, setError] = useState('')
   const [brief, setBrief] = useState<Brief | null>(null)
   const [exported, setExported] = useState('')
+  const [creating, setCreating] = useState(true)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : 'Unable to load authors')
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load authors'))
   function choose(next: string) {
     location.hash = `/capabilities/creative?view=authors${next ? `&author=${next}` : ''}`
-    setId(next); setError(''); setBrief(null); setExported('')
+    setId(next); setCreating(true); setError(''); setBrief(null); setExported('')
     if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setRequestId(crypto.randomUUID()) }
+  }
+  function startNew() {
+    choose(''); setCreating(true)
   }
   useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
   useEffect(() => {
@@ -74,26 +83,27 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
       }
     } catch (e) { fail(e) }
   }
-  return <main className="space-y-4 p-4 text-on-surface"><h1 className="text-xl font-semibold">Literary authors</h1>
-    {error && <div role="alert">{error}<Button onClick={() => { setError(''); setRefresh(v => v + 1); setReload(v => v + 1) }}>Retry</Button></div>}
-    {loading && <p>Loading authors…</p>}
-    <div className="grid gap-4 lg:grid-cols-[18rem_1fr]"><aside className="space-y-3"><label>Search authors<input className={control} value={query} onChange={e => { setQuery(e.target.value); setOffset(0) }} /></label>
-      <Button onClick={() => choose('')}>New author</Button>{!loading && !items.length && <p>No authors found.</p>}
-      {items.map(item => <Button key={item.id} onClick={() => choose(item.id)}>{item.title}</Button>)}
-      <p>{total} authors</p><Button disabled={!offset} onClick={() => setOffset(v => Math.max(0, v - 25))}>Previous page</Button><Button disabled={offset + 25 >= total} onClick={() => setOffset(v => v + 25)}>Next page</Button>
-    </aside><section className="min-w-0 space-y-3">
-      {selected && <p>Author revision {selected.revision}</p>}
-      <label className="block">Author name<input className={control} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
-      <label className="block">Author biography<textarea className={control} value={draft.biography} onChange={e => setDraft({ ...draft, biography: e.target.value })} /></label>
-      <label className="block">Perspective<select className={control} value={draft.voice.perspective} onChange={e => setDraft({ ...draft, voice: { ...draft.voice, perspective: e.target.value } })}><option value="any">Any perspective</option><option value="first">First person</option><option value="third">Third person</option></select></label>
-      <label className="block">Tense<select className={control} value={draft.voice.tense} onChange={e => setDraft({ ...draft, voice: { ...draft.voice, tense: e.target.value } })}><option value="any">Any tense</option><option value="past">Past</option><option value="present">Present</option></select></label>
-      {(['tone', 'diction', 'rhythm', 'avoid'] as const).map(field => <label key={field} className="block">{field === 'avoid' ? 'Avoid in writing' : field[0].toUpperCase() + field.slice(1)}<textarea className={control} value={draft.voice[field]} onChange={e => setDraft({ ...draft, voice: { ...draft.voice, [field]: e.target.value } })} /></label>)}
-      <label className="block">Search writing samples<input className={control} value={sampleQuery} onChange={e => setSampleQuery(e.target.value)} /></label>
-      <label className="block">Pin writing sample<select className={control} value="" onChange={e => { const sample = samples.find(s => s.id === e.target.value); if (sample && !draft.sample_refs.some(s => s.artifact_id === sample.id && s.artifact_version === sample.version)) setDraft({ ...draft, sample_refs: [...draft.sample_refs, { artifact_id: sample.id, artifact_version: sample.version }] }) }}><option value="">Choose text artifact</option>{samples.map(sample => <option key={sample.id} value={sample.id}>{sample.title} · version {sample.version}</option>)}</select></label>
-      {draft.sample_refs.map(ref => <p key={`${ref.artifact_id}:${ref.artifact_version}`} className="break-all">{selected?.sample_status?.find(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version)?.title || ref.artifact_id} · pinned version {ref.artifact_version}{selected?.sample_status?.some(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version && s.missing) && ' — Sample missing'}<Button onClick={() => setDraft({ ...draft, sample_refs: draft.sample_refs.filter(s => s !== ref) })}>Unpin sample {ref.artifact_id}</Button></p>)}
-      <Button disabled={busy || (!!id && !selected)} onClick={() => void save()}>Save author</Button>
-      {selected && <><Button disabled={busy} onClick={() => void readOutput('brief')}>Build voice brief</Button><Button disabled={busy} onClick={() => void readOutput('export')}>Export author</Button><section aria-label="Author history">{history.map(item => <p key={item.revision}>Revision {item.revision}: {item.title}<Button disabled={busy || item.revision === selected.revision} onClick={() => void save(item.revision)}>Restore author revision {item.revision}</Button></p>)}</section></>}
-      {brief && <section aria-label="Configured voice brief"><h2>Configured voice brief · revision {brief.revision}</h2><p>{brief.biography}</p>{Object.entries(brief.voice).map(([key, value]) => <p key={key}>{key}: {value}</p>)}{brief.samples.map(sample => <article key={`${sample.artifact_id}:${sample.artifact_version}`}><h3>{sample.title} · version {sample.artifact_version}</h3>{sample.missing ? <p>Sample missing</p> : <><pre className="whitespace-pre-wrap break-words">{sample.content}</pre><p>{sample.original_characters} source characters{sample.truncated && ' · Excerpt limited to 4000 characters'}</p></>}</article>)}</section>}
-      {exported && <label className="block">Author export<textarea className={control} readOnly value={exported} /></label>}
-    </section></div></main>
+  return <ListScaffold title={t('Literary authors')} right={<Button onClick={startNew} disabled={busy}><Plus size={16} aria-hidden/>{t('New author')}</Button>}><p data-type="body-m" className="mb-xl text-on-surface-low">{t('Build reusable voices from authored guidance and pinned writing samples.')}</p>
+    {error && <div role="alert">{error}<Button onClick={() => { setError(''); setRefresh(v => v + 1); setReload(v => v + 1) }}>{t('Retry')}</Button></div>}
+    {loading && <p>{t('Loading authors…')}</p>}
+    <Surface className="grid min-h-[32rem] lg:grid-cols-[19rem_minmax(0,1fr)]"><aside className="space-y-m border-b border-outline-variant/20 p-l lg:border-b-0 lg:border-r"><SearchField ariaLabel={t('Search authors')} placeholder={t('Search authors')} value={query} onChange={value => { setQuery(value); setOffset(0) }} />
+      {!loading && !items.length ? <EmptyState icon={UserRound} title={t('No authors found.')} hint={t(query ? 'Try a different search.' : 'Create an author to reuse a consistent voice across manuscripts.')} action={query ? undefined : { label: t('New author'), onClick: startNew, icon: Plus }}/> : <div className="space-y-2">{items.map((item, index) => <ListRow key={item.id} index={index} onClick={() => choose(item.id)} label={item.title} accent={item.id === id ? 'var(--color-primary)' : undefined}><FilePenLine size={17} className="shrink-0 text-on-surface-low" aria-hidden/><div className="min-w-0 flex-1"><p className="truncate font-medium">{item.title}</p><p className="truncate text-xs text-on-surface-low">{item.voice.perspective} · {item.voice.tense} · {t('revision')} {item.revision}</p></div></ListRow>)}</div>}
+      <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/20 pt-3"><p className="mr-auto text-xs text-on-surface-low">{total} {t('authors')}</p><Button size="sm" variant="ghost" disabled={!offset} onClick={() => setOffset(v => Math.max(0, v - 25))}>{t('Previous page')}</Button><Button size="sm" variant="ghost" disabled={offset + 25 >= total} onClick={() => setOffset(v => v + 25)}>{t('Next page')}</Button></div>
+    </aside><section className="min-w-0 space-y-l p-l lg:p-2xl">
+      {!selected && !creating ? <EmptyState icon={FilePenLine} title={t('Choose an author')} hint={t('Open a saved author to edit voice guidance, samples, and revision history.')} action={{ label: t('New author'), onClick: startNew, icon: Plus }}/> : <>
+      {selected && <p>{t('Author revision')} {selected.revision}</p>}
+      <Field label={t('Author name')}><TextInput value={draft.title} onChange={value => setDraft({ ...draft, title: value })} /></Field>
+      <Field label={t('Author biography')}><TextArea value={draft.biography} onChange={value => setDraft({ ...draft, biography: value })} /></Field>
+      <div className="grid gap-l sm:grid-cols-2"><Field label={t('Perspective')}><Select value={draft.voice.perspective} onChange={value => setDraft({ ...draft, voice: { ...draft.voice, perspective: value } })} options={[{ value: 'any', label: t('Any perspective') }, { value: 'first', label: t('First person') }, { value: 'third', label: t('Third person') }]} /></Field>
+      <Field label={t('Tense')}><Select value={draft.voice.tense} onChange={value => setDraft({ ...draft, voice: { ...draft.voice, tense: value } })} options={[{ value: 'any', label: t('Any tense') }, { value: 'past', label: t('Past') }, { value: 'present', label: t('Present') }]} /></Field></div>
+      {(['tone', 'diction', 'rhythm', 'avoid'] as const).map(field => <Field key={field} label={t(field === 'avoid' ? 'Avoid in writing' : field[0].toUpperCase() + field.slice(1))}><TextArea value={draft.voice[field]} onChange={value => setDraft({ ...draft, voice: { ...draft.voice, [field]: value } })} /></Field>)}
+      <Field label={t('Search writing samples')}><TextInput value={sampleQuery} onChange={setSampleQuery} /></Field>
+      <Field label={t('Pin writing sample')}><Select value="" onChange={value => { const sample = samples.find(s => s.id === value); if (sample && !draft.sample_refs.some(s => s.artifact_id === sample.id && s.artifact_version === sample.version)) setDraft({ ...draft, sample_refs: [...draft.sample_refs, { artifact_id: sample.id, artifact_version: sample.version }] }) }} options={[{ value: '', label: t('Choose text artifact') }, ...samples.map(sample => ({ value: sample.id, label: `${sample.title} · ${t('version')} ${sample.version}` }))]} /></Field>
+      {draft.sample_refs.map(ref => <p key={`${ref.artifact_id}:${ref.artifact_version}`} className="break-all">{selected?.sample_status?.find(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version)?.title || ref.artifact_id} · {t('pinned version')} {ref.artifact_version}{selected?.sample_status?.some(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version && s.missing) && ` — ${t('Sample missing')}`}<Button onClick={() => setDraft({ ...draft, sample_refs: draft.sample_refs.filter(s => s !== ref) })}>{t('Unpin sample')} {ref.artifact_id}</Button></p>)}
+      <Button disabled={busy || (!!id && !selected)} onClick={() => void save()}>{t('Save author')}</Button>
+      {selected && <><Button disabled={busy} onClick={() => void readOutput('brief')}>{t('Build voice brief')}</Button><Button disabled={busy} onClick={() => void readOutput('export')}>{t('Export author')}</Button><section aria-label={t('Author history')}>{history.map(item => <p key={item.revision}>{t('Revision')} {item.revision}: {item.title}<Button disabled={busy || item.revision === selected.revision} onClick={() => void save(item.revision)}>{t('Restore author revision')} {item.revision}</Button></p>)}</section></>}
+      {brief && <section aria-label={t('Configured voice brief')}><h2>{t('Configured voice brief')} · {t('revision')} {brief.revision}</h2><p>{brief.biography}</p>{Object.entries(brief.voice).map(([key, value]) => <p key={key}>{t(key)}: {key === 'perspective' || key === 'tense' ? t(value) : value}</p>)}{brief.samples.map(sample => <article key={`${sample.artifact_id}:${sample.artifact_version}`}><h3>{sample.title} · {t('version')} {sample.artifact_version}</h3>{sample.missing ? <p>{t('Sample missing')}</p> : <><pre className="whitespace-pre-wrap break-words">{sample.content}</pre><p>{sample.original_characters} {t('source characters')}{sample.truncated && ` · ${t('Excerpt limited to 4000 characters')}`}</p></>}</article>)}</section>}
+      {exported && <Field label={t('Author export')}><textarea aria-label={t('Author export')} readOnly value={exported} rows={8} className="w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" /></Field>}
+      </>}
+    </section></Surface></ListScaffold>
 }

@@ -56,24 +56,24 @@ export default function AppleHealth() {
     } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
-  return <main className="h-full overflow-auto p-4 sm:p-6 space-y-6 text-on-surface">
-    <h1 data-type="headline-s">Apple Health imports</h1>
+  return <main style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface">
+    <h2 data-type="title-m">Apple Health imports</h2>
     <p>Import XML, ZIP, Health Auto Export JSON or FHIR laboratory observations. Original files stay attached. Limits: 8 MiB upload, 32 MiB expanded ZIP, 20,000 records. Unsupported record counts are shown in preview.</p>
-    <section className="space-y-3" aria-label="Apple export import">
+    <section className="space-y-m" aria-label="Apple export import">
       <label className="block">Choose export<input aria-label="Choose export" type="file" accept=".xml,.zip,.json" className="block w-full" onChange={e => choose(e.target.files?.[0])} /></label>
       {file.filename && <p>Selected: {file.filename}</p>}
       <Field label="Export source"><TextInput value={source} onChange={setSource} required /></Field>
-      <label className="block">Format<select aria-label="Export format" value={format} onChange={e => setFormat(e.target.value)} className="block rounded-md bg-surface-container p-2"><option value="xml">Apple XML</option><option value="zip">Apple ZIP</option><option value="json">Health Auto Export JSON</option><option value="fhir">FHIR JSON</option></select></label>
+      <label className="block">Format<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Export format" value={format} onChange={e => setFormat(e.target.value)}><option value="xml">Apple XML</option><option value="zip">Apple ZIP</option><option value="json">Health Auto Export JSON</option><option value="fhir">FHIR JSON</option></select></label>
       <Button disabled={!file.content_base64} loading={busy} onClick={() => run(false)}>Preview export</Button>
-      {preview && current && <div className="space-y-3"><p>{preview.result.metric_count} metrics; {preview.result.lab_count} laboratory results.</p>{Object.entries(preview.result.skipped).map(([reason, count]) => <p key={reason}>{reason}: {count} skipped</p>)}<p>Preview shows at most 100 metric rows.</p><ul>{preview.result.metrics.map((row, index) => <li key={index}>{row.metric}: {row.value} {row.unit} · {row.stage ?? row.device_source}</li>)}</ul><Button loading={busy} onClick={() => run(true)}>Commit export import</Button></div>}
+      {preview && current && <div className="space-y-m"><p>{preview.result.metric_count} metrics; {preview.result.lab_count} laboratory results.</p>{Object.entries(preview.result.skipped).map(([reason, count]) => <p key={reason}>{reason}: {count} skipped</p>)}<p>Preview shows at most 100 metric rows.</p><ul>{preview.result.metrics.map((row, index) => <li key={index}>{row.metric}: {row.value} {row.unit} · {row.stage ?? row.device_source}</li>)}</ul><Button loading={busy} onClick={() => run(true)}>Commit export import</Button></div>}
       {notice && <p role="status">{notice}</p>}
     </section>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" onSubmit={e => { e.preventDefault(); setError(''); const next = new URLSearchParams(); if (filter) next.set('metric', filter); if (unit) next.set('unit', unit); if (from) next.set('from', from); setQuery(next.toString()) }}><Field label="Metric identifier"><TextInput value={filter} onChange={setFilter} /></Field><Field label="Exact unit"><TextInput value={unit} onChange={setUnit} /></Field><Field label="From timestamp with offset"><TextInput value={from} onChange={setFrom} /></Field><Button type="submit">Filter imported metrics</Button></form>
-    <section aria-label="Imported metrics" className="space-y-3">
+    <form className="grid gap-m sm:grid-cols-2 lg:grid-cols-4" onSubmit={e => { e.preventDefault(); setError(''); const next = new URLSearchParams(); if (filter) next.set('metric', filter); if (unit) next.set('unit', unit); if (from) next.set('from', from); setQuery(next.toString()) }}><Field label="Metric identifier"><TextInput value={filter} onChange={setFilter} /></Field><Field label="Exact unit"><TextInput value={unit} onChange={setUnit} /></Field><Field label="From timestamp with offset"><TextInput value={from} onChange={setFrom} /></Field><Button type="submit">Filter imported metrics</Button></form>
+    <section aria-label="Imported metrics" className="space-y-m">
       {loading && <p role="status">Loading imported metrics…</p>}
       {!loading && !error && !metrics.length && <p>No imported metrics.</p>}
-      {metrics.map(row => <article key={row.id} className="rounded-lg bg-surface-container p-4 break-words"><h2 data-type="title-s">{row.metric}: {row.value} {row.unit}</h2><p>{row.observed_at}{row.end_at ? ` → ${row.end_at}` : ''}</p><p>{row.source} · {row.device_source}{row.stage ? ` · ${row.stage}` : ''}</p><a href={`${base}/metrics/${row.id}/source`} className="text-primary underline">Download original export</a></article>)}
+      {metrics.map(row => <article key={row.id} className="rounded-lg border border-outline-variant/20 bg-surface-container p-l break-words"><h2 data-type="title-s">{row.metric}: {row.value} {row.unit}</h2><p>{row.observed_at}{row.end_at ? ` → ${row.end_at}` : ''}</p><p>{row.source} · {row.device_source}{row.stage ? ` · ${row.stage}` : ''}</p><a href={`${base}/metrics/${row.id}/source`} className="text-primary underline">Download original export</a></article>)}
       {metrics.length === 100 && <Button onClick={() => { const next = new URLSearchParams(query); next.set('offset', String(Number(next.get('offset') ?? 0) + 100)); setQuery(next.toString()) }}>Next metrics page</Button>}
     </section>
     <a href="#/capabilities/wellbeing/labs" className="text-primary underline">Open imported laboratory results</a>

@@ -36,13 +36,13 @@ function Editor({ row, presets, presetMode, saved }: { row: Product | Entry | nu
     catch (err) { setError(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
-  return <form onSubmit={submit} className="space-y-3">
+  return <form onSubmit={submit} className="space-y-m">
     <h2 data-type="title-m">{row ? 'Edit' : 'New'} {presetMode ? 'product preset' : 'consumption entry'}</h2>
-    {!presetMode && !row && <label className="block">Product preset<select aria-label="Product preset" value={presetId} onChange={e => setPresetId(e.target.value)} className="block w-full rounded-md bg-surface-container p-2"><option value="">Enter product details</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+    {!presetMode && !row && <label className="block">Product preset<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Product preset" value={presetId} onChange={e => setPresetId(e.target.value)}><option value="">Enter product details</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
     {!presetId && <>
-      {!row && <label className="block">Kind<select aria-label={presetMode ? 'Preset kind' : 'Entry kind'} value={kind} onChange={e => setKind(e.target.value as Product['kind'])} className="block rounded-md bg-surface-container p-2"><option value="alcohol">Alcohol</option><option value="nicotine">Nicotine</option></select></label>}
+      {!row && <label className="block">Kind<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label={presetMode ? 'Preset kind' : 'Entry kind'} value={kind} onChange={e => setKind(e.target.value as Product['kind'])}><option value="alcohol">Alcohol</option><option value="nicotine">Nicotine</option></select></label>}
       <Field label="Product name"><TextInput value={name} onChange={setName} required /></Field>
-      {kind === 'alcohol' ? <div className="grid gap-3 sm:grid-cols-2"><Field label="Volume per serving (mL)"><TextInput value={volume} onChange={setVolume} required /></Field><Field label="ABV (%)"><TextInput value={abv} onChange={setAbv} required /></Field></div> : <Field label="Labeled nicotine per unit (mg)"><TextInput value={mg} onChange={setMg} required /></Field>}
+      {kind === 'alcohol' ? <div className="grid gap-m sm:grid-cols-2"><Field label="Volume per serving (mL)"><TextInput value={volume} onChange={setVolume} required /></Field><Field label="ABV (%)"><TextInput value={abv} onChange={setAbv} required /></Field></div> : <Field label="Labeled nicotine per unit (mg)"><TextInput value={mg} onChange={setMg} required /></Field>}
     </>}
     {!presetMode && <><Field label="Servings or units"><TextInput value={count} onChange={setCount} required /></Field><Field label="Observed at (with offset)"><TextInput value={observed} onChange={setObserved} required /></Field><Field label="Entry source"><TextInput value={source} onChange={setSource} required disabled={!!row} /></Field><Field label="Entry notes"><TextInput value={notes} onChange={setNotes} /></Field></>}
     {error && <p role="alert" className="text-danger">{error}</p>}
@@ -84,10 +84,10 @@ export default function Substances() {
   }
   const product = presets.find(p => p.id === presetId) ?? null
   const edited = presetMode ? product : selected
-  return <main className="h-full overflow-auto p-4 sm:p-6 space-y-6 text-on-surface">
-    <h1 data-type="headline-s">Alcohol and nicotine records</h1>
+  return <main style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface">
+    <h2 data-type="title-m">Alcohol and nicotine records</h2>
     <p>Ethanol totals use volume × ABV × 0.789 g/mL. Nicotine totals use labeled product content. Missing days remain unrecorded.</p>
-    <div className="flex flex-wrap gap-3"><Button onClick={() => setParams({})}>New entry</Button><Button variant="secondary" onClick={() => setParams({ mode: 'presets' })}>Manage product presets</Button></div>
+    <div className="flex flex-wrap gap-m"><Button onClick={() => setParams({})}>New entry</Button><Button variant="secondary" onClick={() => setParams({ mode: 'presets' })}>Manage product presets</Button></div>
     {error && <p role="alert" className="text-danger">{error} <Button onClick={() => setGeneration(n => n + 1)}>Reload records</Button></p>}
     {loading && <p role="status">Loading consumption records…</p>}
     <div className="grid gap-6 lg:grid-cols-2">
@@ -95,7 +95,7 @@ export default function Substances() {
         {!loading && (presetMode ? !presetId || product : !identity || selected) && <Editor key={`${presetMode}:${edited?.id ?? 'new'}:${edited?.revision ?? generation}`} row={edited} presets={presets} presetMode={presetMode} saved={() => setGeneration(n => n + 1)} />}
         {presetMode && presetId && !product && !loading && <p>Product preset not found.</p>}
         {edited && !edited.deleted && <Button variant="danger" loading={deleting} onClick={() => remove(edited, presetMode)}>Delete {presetMode ? 'product preset' : 'consumption entry'}</Button>}
-        {!!history.length && !presetMode && <section aria-label="Entry history"><h2 data-type="title-m">Entry history</h2>{history.map(row => <p key={row.revision}>Revision {row.revision}: {row.name} · {row.count} units · {quantity(row.ethanol_g ?? row.nicotine_mg)} {row.kind === 'alcohol' ? 'g ethanol' : 'mg nicotine'} · {row.notes}{row.deleted ? ' · deleted' : ''}</p>)}</section>}
+        {!!history.length && !presetMode && <section aria-label="Entry history" className="space-y-l rounded-lg bg-surface-container p-l"><h2 data-type="title-m">Entry history</h2>{history.map(row => <p key={row.revision}>Revision {row.revision}: {row.name} · {row.count} units · {quantity(row.ethanol_g ?? row.nicotine_mg)} {row.kind === 'alcohol' ? 'g ethanol' : 'mg nicotine'} · {row.notes}{row.deleted ? ' · deleted' : ''}</p>)}</section>}
       </section>
       <section className="space-y-3 min-w-0" aria-label={presetMode ? 'Product presets' : 'Consumption entries'}>
         {presetMode ? presets.map(row => <button key={row.id} onClick={() => setParams({ mode: 'presets', preset: row.id })} className="block w-full text-left rounded-lg bg-surface-container p-3">{row.name} · {row.kind}</button>) : entries.map(row => <button key={row.id} onClick={() => setParams({ id: row.id })} className="block w-full text-left rounded-lg bg-surface-container p-3 break-words">{row.name}: {quantity(row.ethanol_g ?? row.nicotine_mg)} {row.kind === 'alcohol' ? 'g ethanol' : 'mg nicotine'}<p>{row.observed_at} · {row.source}</p></button>)}
@@ -103,7 +103,7 @@ export default function Substances() {
         {!presetMode && entries.length === 100 && <Button onClick={() => { const next = new URLSearchParams(query); next.set('offset', String(Number(next.get('offset') ?? 0) + 100)); setQuery(next.toString()) }}>Next entries page</Button>}
       </section>
     </div>
-    <form className="flex flex-wrap items-end gap-3" onSubmit={e => { e.preventDefault(); setZone(timezone) }}><Field label="Summary timezone"><TextInput value={timezone} onChange={setTimezone} /></Field><Button type="submit">Apply summary timezone</Button></form>
-    {summary && <section className="space-y-3"><h2 data-type="title-m">Last 30 local calendar days</h2><p>Ethanol: {quantity(summary.totals.ethanol_g)} g · {summary.logged_days.alcohol} logged days</p><p>Labeled nicotine: {quantity(summary.totals.nicotine_mg)} mg · {summary.logged_days.nicotine} logged days</p><p>Per logged day: {quantity(summary.averages_per_logged_day.ethanol_g)} g ethanol; {quantity(summary.averages_per_logged_day.nicotine_mg)} mg nicotine.</p><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr><th>Date</th><th>Entries</th><th>Ethanol (g)</th><th>Nicotine (mg)</th></tr></thead><tbody>{summary.days.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.entry_count}</td><td>{quantity(day.ethanol_g)}</td><td>{quantity(day.nicotine_mg)}</td></tr>)}</tbody></table></div></section>}
+    <form className="flex flex-wrap items-end gap-m" onSubmit={e => { e.preventDefault(); setZone(timezone) }}><Field label="Summary timezone"><TextInput value={timezone} onChange={setTimezone} /></Field><Button type="submit">Apply summary timezone</Button></form>
+    {summary && <section className="space-y-m"><h2 data-type="title-m">Last 30 local calendar days</h2><p>Ethanol: {quantity(summary.totals.ethanol_g)} g · {summary.logged_days.alcohol} logged days</p><p>Labeled nicotine: {quantity(summary.totals.nicotine_mg)} mg · {summary.logged_days.nicotine} logged days</p><p>Per logged day: {quantity(summary.averages_per_logged_day.ethanol_g)} g ethanol; {quantity(summary.averages_per_logged_day.nicotine_mg)} mg nicotine.</p><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr><th>Date</th><th>Entries</th><th>Ethanol (g)</th><th>Nicotine (mg)</th></tr></thead><tbody>{summary.days.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.entry_count}</td><td>{quantity(day.ethanol_g)}</td><td>{quantity(day.nicotine_mg)}</td></tr>)}</tbody></table></div></section>}
   </main>
 }

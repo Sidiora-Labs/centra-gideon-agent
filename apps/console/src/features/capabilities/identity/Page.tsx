@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
+import { PageTitle } from '../../../shared/ui/PageTitle'
+import { TopBar } from '../../../shared/ui/TopBar'
+import { WorkbenchLayout } from '../../../shared/ui/WorkbenchLayout'
+import { Surface } from '../../../shared/ui/Surface'
+import { EmptyState, ListRow, ListSkeleton } from '../../../shared/ui/ListScaffold'
+import { HeaderActions, HeaderControl } from '../../../shared/ui/HeaderActions'
+import { BookOpen, Download, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { gatewayHeaders, readJson } from '../../../shared/data/gatewayRequest'
 
 type Story = {
@@ -12,6 +19,7 @@ const selectedId = () => new URLSearchParams(window.location.hash.split('?')[1] 
 export default function Page({ endpoint = '/api/capabilities/identity' }: { endpoint?: string }) {
   const [stories, setStories] = useState<Story[]>([])
   const [selected, setSelected] = useState<string | null>(selectedId)
+  const [mode, setMode] = useState<'idle' | 'read' | 'create' | 'edit'>(() => selectedId() ? 'read' : 'idle')
   const [chain, setChain] = useState<Story[]>([])
   const [draft, setDraft] = useState(empty)
   const [revision, setRevision] = useState(0)
@@ -26,6 +34,7 @@ export default function Page({ endpoint = '/api/capabilities/identity' }: { endp
     if (id !== selected) setLoading(true)
     window.location.hash = '#/capabilities/identity' + (id ? '?story=' + encodeURIComponent(id) : '')
     setSelected(id)
+    setMode(id ? 'read' : 'idle')
   }
   const load = async () => {
     setLoading(true)
@@ -51,7 +60,7 @@ export default function Page({ endpoint = '/api/capabilities/identity' }: { endp
       const story = await call<Story>(selected ? '/stories/' + selected : '/stories', selected ? 'PUT' : 'POST',
         { ...draft, ...(selected ? { expected_revision: revision } : { request_id: requestId }) })
       setRequestId(crypto.randomUUID()); setRevision(story.revision)
-      if (selected === story.id) await load()
+      if (selected === story.id) { await load(); setMode('read') }
       else select(story.id)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
@@ -63,38 +72,20 @@ export default function Page({ endpoint = '/api/capabilities/identity' }: { endp
     finally { setBusy(false) }
   }
   const newStory = (parent_id: string | null = null) => {
-    setDraft({ ...empty, parent_id }); setRevision(0); setRequestId(crypto.randomUUID()); select(null)
+    setDraft({ ...empty, parent_id }); setRevision(0); setRequestId(crypto.randomUUID()); select(null); setMode('create')
   }
-  return <section className="p-4 space-y-4 text-on-surface max-w-5xl mx-auto">
-    <h1 className="text-2xl">Your life stories</h1>
-    <p>Keep your answers and follow-up stories together. Earlier answers remain in revision history.</p>
-    <div className="flex flex-wrap gap-2"><Button onClick={() => newStory()} disabled={busy}>New story</Button>
-      <Button variant="secondary" onClick={() => void load()} disabled={busy}>Reload stories</Button>
-      <a className="underline p-2" href={endpoint + '/export'} download="life-stories.json">Export chronology</a></div>
-    {error && <p role="alert" className="text-danger">{error}</p>}
-    {loading && <p role="status">Loading stories…</p>}
-    <div className="grid gap-4 md:grid-cols-2">
-      <nav aria-label="Life stories" className="space-y-2 min-w-0">
-        {!loading && stories.length === 0 && <p>No stories yet. Start with a question you want to remember.</p>}
-        {stories.map(story => <a key={story.id} className="block underline break-words" href={'#/capabilities/identity?story=' + story.id}
-          onClick={() => select(story.id)}>{story.prompt}</a>)}
-      </nav>
-      <form className="space-y-3 min-w-0" onSubmit={e => { e.preventDefault(); void save() }}>
-        <label className="block" htmlFor="story-prompt">Question</label>
-        <input id="story-prompt" className="w-full bg-surface-high p-2 rounded" value={draft.prompt} maxLength={4000} required onChange={e => setDraft({ ...draft, prompt: e.target.value })} />
-        <label className="block" htmlFor="story-theme">Theme</label>
-        <input id="story-theme" className="w-full bg-surface-high p-2 rounded" value={draft.theme} maxLength={200} required onChange={e => setDraft({ ...draft, theme: e.target.value })} />
-        <label className="block" htmlFor="story-text">Your answer</label>
-        <textarea id="story-text" className="w-full bg-surface-high p-2 rounded" rows={8} value={draft.text} maxLength={100000} required onChange={e => setDraft({ ...draft, text: e.target.value })} />
-        {draft.parent_id && <p>Follow-up to {stories.find(s => s.id === draft.parent_id)?.prompt || draft.parent_id}</p>}
-        <div className="flex flex-wrap gap-2"><Button type="submit" loading={busy} disabled={loading}>Save answer</Button>
-          {selected && <><Button variant="secondary" disabled={busy || loading} onClick={() => newStory(selected)}>Add follow-up</Button>
-            <Button variant="danger" disabled={busy || loading} onClick={() => void remove()}>Delete story</Button></>}</div>
-      </form>
-    </div>
-    {selected && <section aria-label="Story chain"><h2 className="text-xl">Story chain</h2>
-      {chain.map(story => <article key={story.id} className="py-3 border-b border-outline"><a className="underline" href={'#/capabilities/identity?story=' + story.id}>{story.prompt}</a>
-        <p className="whitespace-pre-wrap break-words">{story.text}</p><small>{story.created_at} · Revision {story.revision}</small></article>)}
-    </section>}
-  </section>
+  const current = stories.find(story => story.id === selected)
+  return <WorkbenchLayout topBar={<TopBar keepCornerPadding left={<PageTitle>Your life stories</PageTitle>} right={<HeaderActions><HeaderControl icon={RefreshCw} label="Reload stories" disabled={busy} onClick={() => void load()} /><HeaderControl icon={Plus} label="New story" variant="primary" priority="primary" disabled={busy} onClick={() => newStory()} /></HeaderActions>} />}>
+  <main className="mx-auto grid w-full max-w-[72rem] gap-l px-l py-2xl text-on-surface lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.4fr)]">
+    <section className="space-y-m" aria-label="Life stories">
+      <div><h2 data-type="title-m">Story collection</h2><p data-type="body-s" className="mt-xs text-on-surface-low">Keep your answers and follow-up stories together. Earlier answers remain in revision history.</p></div>
+      {error && !stories.length ? <p role="alert" className="text-danger">{error}</p> : loading && !stories.length ? <ListSkeleton rows={3} what="life stories" /> : !stories.length ? <EmptyState icon={BookOpen} title="No stories yet" hint="Start with a question or memory you want to preserve." action={{ label: 'Write your first story', onClick: () => newStory(), icon: Plus }} /> : <ol className="flex flex-col gap-s">{stories.map((story, index) => <li key={story.id}><ListRow index={index} label={story.prompt} onClick={() => select(story.id)}><div className="min-w-0 flex-1"><p data-type="title-m" className="truncate">{story.prompt}</p><p data-type="caption" className="mt-xs truncate text-on-surface-low">{story.theme} · {new Date(story.updated_at).toLocaleDateString()}</p></div></ListRow></li>)}</ol>}
+      <a className="inline-flex text-primary" href={endpoint + '/export'} download="life-stories.json"><Download size={15} className="mr-xs" />Export chronology</a>
+    </section>
+    <section className="min-w-0" aria-label="Story workspace">
+      {error && !!stories.length && <p role="alert" className="mb-m text-danger">{error}</p>}
+      {selected && !loading && !current ? <EmptyState title="Story not found" hint="It may have been removed. Choose another story from the collection." /> : mode === 'read' && current ? <Surface className="p-l"><article className="space-y-l"><header className="flex flex-wrap items-start justify-between gap-m"><div><p data-type="label-s" className="text-primary">{current.theme}</p><h2 data-type="title-l" className="mt-xs">{current.prompt}</h2></div><Button size="sm" variant="tonal" onClick={() => setMode('edit')}><Pencil size={15} />Edit story</Button></header><p data-type="body-l" className="whitespace-pre-wrap break-words">{current.text}</p><footer data-type="caption" className="text-on-surface-low">Updated {new Date(current.updated_at).toLocaleString()} · Revision {current.revision}</footer><div className="flex flex-wrap gap-s"><Button variant="tonal" onClick={() => newStory(current.id)}>Add follow-up</Button><Button variant="danger" disabled={busy} onClick={() => void remove()}>Delete story</Button></div></article></Surface> : mode === 'create' || mode === 'edit' ? <Surface className="p-l"><form className="space-y-m" onSubmit={event => { event.preventDefault(); void save() }}><div><h2 data-type="title-l">{mode === 'edit' ? 'Edit story' : 'New story'}</h2><p data-type="body-s" className="mt-xs text-on-surface-low">Capture the event in your own words. Follow-ups remain connected to the earlier story.</p></div><label className="block" htmlFor="story-prompt">Question</label><input id="story-prompt" className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={draft.prompt} maxLength={4000} required onChange={event => setDraft({ ...draft, prompt: event.target.value })} /><label className="block" htmlFor="story-theme">Theme</label><input id="story-theme" className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={draft.theme} maxLength={200} required onChange={event => setDraft({ ...draft, theme: event.target.value })} /><label className="block" htmlFor="story-text">Your answer</label><textarea id="story-text" className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" rows={8} value={draft.text} maxLength={100000} required onChange={event => setDraft({ ...draft, text: event.target.value })} />{draft.parent_id && <p data-type="body-s" className="text-on-surface-low">Follow-up to {stories.find(story => story.id === draft.parent_id)?.prompt || draft.parent_id}</p>}<div className="flex flex-wrap gap-s"><Button type="submit" loading={busy} disabled={loading}>Save answer</Button><Button variant="ghost" disabled={busy} onClick={() => setMode(selected ? 'read' : 'idle')}>Cancel</Button></div></form></Surface> : !loading && stories.length ? <EmptyState icon={BookOpen} title="Choose a story" hint="Select a story to read it, or start a new one from the page header." /> : null}
+      {selected && chain.length > 1 && <section aria-label="Story chain" className="mt-l"><h2 data-type="title-m">Story chain</h2><div className="mt-s space-y-s">{chain.map(story => <Surface key={story.id} className="p-m"><button className="text-start text-primary" onClick={() => select(story.id)}>{story.prompt}</button><p data-type="body-s" className="mt-s line-clamp-3 whitespace-pre-wrap break-words">{story.text}</p><p data-type="caption" className="mt-s text-on-surface-low">{new Date(story.created_at).toLocaleString()} · Revision {story.revision}</p></Surface>)}</div></section>}
+    </section>
+  </main></WorkbenchLayout>
 }

@@ -170,11 +170,12 @@ describe('Artifact-backed moodboard journeys', () => {
     location.hash = '/capabilities/creative?view=boards'
     render(<Page apiRoot={apiRoot.replace(/boards$/, 'ingredients')} />)
     expect(screen.getByRole('heading', { name: 'Moodboards' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ingredients' })).toHaveAttribute('href', '#/capabilities/creative')
+    expect(screen.getByRole('button', { name: 'Moodboards' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('navigation', { name: 'Creative workspace' })).toBeInTheDocument()
-    location.hash = '/capabilities/creative'
-    fireEvent(window, new Event('hashchange'))
+    fireEvent.click(screen.getByRole('button', { name: 'Ingredients' }))
     await screen.findByRole('heading', { name: 'Creative ingredients' })
-    expect(screen.getByRole('link', { name: 'Moodboards' })).toHaveAttribute('href', '#/capabilities/creative?view=boards')
+    expect(screen.getByRole('button', { name: 'Moodboards' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Moodboards' }))
+    expect(location.hash).toBe('#/capabilities/creative?view=boards')
   })
 })

@@ -6,11 +6,14 @@ import Universes from './Universes'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { ListScaffold } from '../../../shared/ui/ListScaffold'
 import Moodboards from './Moodboards'
 import ManuscriptExports from './ManuscriptExports'
 import Production from './Production'
 import CreativeDirection from './CreativeDirection'
 import { Commissions } from './Commissions'
+import { BookOpen, Boxes, Clapperboard, FileArchive, Feather, Images, Library, PenLine, Sparkles, Timer, Users } from 'lucide-react'
+import { AreaNavigation, type AreaDestination } from '../AreaNavigation'
 
 export type Ingredient = {
   id: string; type: string; title: string; body: string; tags: string[]; revision: number
@@ -20,7 +23,7 @@ export type Ingredient = {
 const kinds = ['character', 'place', 'object', 'theme', 'event', 'concept']
 const base = '/api/capabilities/creative/ingredients'
 const empty = () => ({ type: 'character', title: '', body: '', tags: '', sources: '', relations: '' })
-const control = 'w-full rounded border border-outline bg-surface p-2 text-on-surface'
+const control = 'w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 const message = (error: unknown) => error instanceof Error ? error.message : 'Unable to load catalog'
 function parseLines(value: string, key: 'id' | 'target_id') {
   return value.split('\n').filter(line => line.trim()).map(line => {
@@ -101,27 +104,26 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
     finally { setBusy(false) }
   }
 
-  return <main className="mx-auto max-w-5xl space-y-4 p-4 text-on-surface">
-    <h1 className="text-2xl">Creative ingredients</h1>
-    <p>Keep characters, places and ideas with their sources and revision history.</p>
-    {error && <div role="alert">{error} <Button onClick={() => { setError(''); setRefresh(n => n + 1) }}>Reload catalog</Button></div>}
-    <div className="grid gap-3 sm:grid-cols-3">
+  return <ListScaffold title="Creative ingredients" right={<Button onClick={() => choose('')} disabled={busy}>New ingredient</Button>}>
+    <main className="space-y-l text-on-surface">
+    <p data-type="body-m" className="max-w-[48rem] text-on-surface-low">Keep characters, places and ideas with their sources and revision history.</p>
+    {error && <div role="alert" className="border-l-2 border-danger/40 pl-s text-danger">{error} <Button onClick={() => { setError(''); setRefresh(n => n + 1) }}>Reload catalog</Button></div>}
+    <section aria-label="Catalog filters" className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-3">
       <label>Search<input className={control} value={q} onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
       <label>Filter type<select className={control} value={type} onChange={e => { setType(e.target.value); setOffset(0) }}><option value="">All types</option>{kinds.map(k => <option key={k}>{k}</option>)}</select></label>
       <label>Filter tag<input className={control} value={tag} onChange={e => { setTag(e.target.value); setOffset(0) }} /></label>
-    </div>
-    <Button onClick={() => choose('')} disabled={busy}>New ingredient</Button>
-    <div className="grid gap-5 md:grid-cols-2">
-      <section aria-label="Ingredient list">
+    </section>
+    <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)]">
+      <section aria-label="Ingredient list" className="h-fit space-y-m rounded-lg bg-surface-container p-l">
         {loading ? <p role="status">Loading ingredients…</p> : !items.length ? <p>No ingredients found.</p> : <ul className="space-y-2">{items.map(item => <li key={item.id}>
-          <Button onClick={() => choose(item.id)} disabled={busy}>{item.title} · {item.type}</Button>
+          <Button variant={selected?.id === item.id ? 'tonal' : 'ghost'} ariaLabel={`${item.title} · ${item.type}`} ariaPressed={selected?.id === item.id} className="h-auto w-full justify-start rounded-xl px-m py-m text-left" onClick={() => choose(item.id)} disabled={busy}><span className="min-w-0"><strong className="block truncate">{item.title}</strong><span className="block text-on-surface-low">{item.type}{item.tags.length ? ` · ${item.tags.slice(0, 3).join(', ')}` : ''}</span></span></Button>
         </li>)}</ul>}
-        <p>{total} ingredients</p>
-        <Button disabled={offset === 0 || loading} onClick={() => setOffset(n => Math.max(0, n - 25))}>Previous</Button>
-        <Button disabled={offset + 25 >= total || loading} onClick={() => setOffset(n => n + 25)}>Next</Button>
+        <p className="text-on-surface-low">{total} ingredients</p>
+        <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" disabled={offset === 0 || loading} onClick={() => setOffset(n => Math.max(0, n - 25))}>Previous</Button>
+        <Button size="sm" variant="secondary" disabled={offset + 25 >= total || loading} onClick={() => setOffset(n => n + 25)}>Next</Button></div>
       </section>
-      <section aria-label="Ingredient editor" className="min-w-0 space-y-3">
-        <h2>{selected ? `Edit ingredient · revision ${selected.revision}` : 'New ingredient'}</h2>
+      <section aria-label="Ingredient editor" className="min-w-0 space-y-m rounded-lg bg-surface-container p-l">
+        <div><h2 data-type="title-s">{selected ? `Edit ingredient · revision ${selected.revision}` : 'New ingredient'}</h2><p data-type="body-s" className="text-on-surface-low">Capture the idea, its canonical sources, and its relationships.</p></div>
         <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save() }}>
           <label className="block">Type<select className={control} value={draft.type} onChange={e => setDraft({ ...draft, type: e.target.value })}>{kinds.map(k => <option key={k}>{k}</option>)}</select></label>
           <label className="block">Title<input required maxLength={200} className={control} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
@@ -131,14 +133,14 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
           <label className="block">Relations<textarea className={control} placeholder="related:ingredient-id or contains:ingredient-id" value={draft.relations} onChange={e => setDraft({ ...draft, relations: e.target.value })} /></label>
           <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save ingredient'}</Button>
         </form>
-        {selected && <p className="break-all">ID: {selected.id}</p>}
+        {selected && <p className="break-all text-on-surface-low">ID: {selected.id}</p>}
         {selected?.source_status?.map(ref => <p key={`${ref.kind}:${ref.id}`} className="break-all">{ref.kind}:{ref.id} — {ref.missing ? 'Source missing' : 'Source available'}</p>)}
         {!!history.length && <section aria-label="Revision history"><h3>Revision history</h3><ul>{history.map(item => <li key={item.revision}>
           Revision {item.revision}: {item.title} <Button disabled={busy || item.revision === selected?.revision} onClick={() => void save(item.revision)}>Restore revision {item.revision}</Button>
         </li>)}</ul></section>}
       </section>
     </div>
-  </main>
+  </main></ListScaffold>
 }
 
 function ProductionView({ apiRoot }: { apiRoot?: string }) {
@@ -147,16 +149,33 @@ function ProductionView({ apiRoot }: { apiRoot?: string }) {
   const [revision, setRevision] = useState<number>()
   const [error, setError] = useState('')
   useEffect(() => { let alive = true; setRevision(undefined); setError(''); if (id) requestJson<{ revision: number }>(`${seriesRoot}/${id}`).then(row => { if (alive) setRevision(row.revision) }).catch(reason => { if (alive) setError(message(reason)) }); return () => { alive = false } }, [id, seriesRoot])
-  if (!id) return <p className="p-4">Choose a series before opening production.</p>
-  if (error) return <p role="alert" className="p-4">{error}</p>
-  return revision ? <Production id={id} revision={revision} apiRoot={seriesRoot} /> : <p role="status" className="p-4">Loading series production…</p>
+  if (!id) return <ListScaffold title="Production"><div className="space-y-m"><p data-type="body-m" className="text-on-surface-low">Choose a series before opening production.</p><Button onClick={() => { window.location.hash = "/capabilities/creative?view=series" }}>Choose a series</Button></div></ListScaffold>
+  if (error) return <ListScaffold title="Production"><p role="alert">{error}</p></ListScaffold>
+  return revision ? <Production id={id} revision={revision} apiRoot={seriesRoot} /> : <ListScaffold title="Production"><p role="status">Loading series production…</p></ListScaffold>
 }
 
 export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
   const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') || 'ingredients'
-  const [boards, setBoards] = useState(readView)
-  useEffect(() => { const changed = () => setBoards(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  const [view, setView] = useState(readView)
+  useEffect(() => { const changed = () => setView(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
   const selectedSeries = new URLSearchParams(location.hash.split('?')[1]).get('series')
-  return <><nav aria-label="Creative workspace" className="flex gap-3 p-4"><a href="#/capabilities/creative">Ingredients</a><a href="#/capabilities/creative?view=boards">Moodboards</a><a href="#/capabilities/creative?view=universes">Universes</a><a href="#/capabilities/creative?view=authors">Authors</a><a href="#/capabilities/creative?view=works">Writing</a><a href="#/capabilities/creative?view=stories">Stories</a><a href="#/capabilities/creative?view=series">Series</a><a href={`#/capabilities/creative?view=production${selectedSeries ? `&series=${encodeURIComponent(selectedSeries)}` : ''}`}>Production</a><a href="#/capabilities/creative?view=direction">Direction</a><a href="#/capabilities/creative?view=commissions">Commissions</a><a href="#/capabilities/creative?view=exports">Exports</a></nav>
-    {boards === 'commissions' ? <Commissions apiRoot={apiRoot?.replace(/ingredients$/, 'commissions')} /> : boards === 'direction' ? <CreativeDirection apiRoot={apiRoot?.replace(/ingredients$/, 'direction')} /> : boards === 'production' ? <ProductionView apiRoot={apiRoot} /> : boards === 'exports' ? <ManuscriptExports apiRoot={apiRoot?.replace(/ingredients$/, 'exports')} /> : boards === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : boards === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : boards === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : boards === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : boards === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : boards === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />}</>
+  const destinations: AreaDestination[] = [
+    { id: 'ingredients', label: 'Ingredients', icon: Library, group: 'Library' },
+    { id: 'boards', label: 'Moodboards', icon: Images, group: 'Library' },
+    { id: 'universes', label: 'Universes', icon: Boxes, group: 'Library' },
+    { id: 'authors', label: 'Authors', icon: Users, group: 'Library' },
+    { id: 'works', label: 'Writing', icon: PenLine, group: 'Studio' },
+    { id: 'stories', label: 'Stories', icon: BookOpen, group: 'Studio' },
+    { id: 'series', label: 'Series', icon: Feather, group: 'Studio' },
+    { id: 'production', label: 'Production', icon: Clapperboard, group: 'Studio' },
+    { id: 'direction', label: 'Direction', icon: Sparkles, group: 'Studio' },
+    { id: 'commissions', label: 'Commissions', icon: Timer, group: 'Studio' },
+    { id: 'exports', label: 'Exports', icon: FileArchive, group: 'Studio' },
+  ]
+  const content = view === 'commissions' ? <Commissions apiRoot={apiRoot?.replace(/ingredients$/, 'commissions')} /> : view === 'direction' ? <CreativeDirection apiRoot={apiRoot?.replace(/ingredients$/, 'direction')} /> : view === 'production' ? <ProductionView apiRoot={apiRoot} /> : view === 'exports' ? <ManuscriptExports apiRoot={apiRoot?.replace(/ingredients$/, 'exports')} /> : view === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : view === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : view === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : view === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : view === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : view === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />
+  const navigate = (next: string) => {
+    location.hash = next === 'ingredients' ? '/capabilities/creative'
+      : `/capabilities/creative?view=${encodeURIComponent(next)}${next === 'production' && selectedSeries ? `&series=${encodeURIComponent(selectedSeries)}` : ''}`
+  }
+  return <AreaNavigation label="Creative workspace" items={destinations} active={view} onChange={navigate}>{content}</AreaNavigation>
 }

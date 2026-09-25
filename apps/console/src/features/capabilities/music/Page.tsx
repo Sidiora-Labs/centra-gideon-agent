@@ -9,6 +9,11 @@ import RoundsPage from './RoundsPage'
 import GenerationPage from './GenerationPage'
 import CatalogPage from './CatalogPage'
 import { Button } from '../../../shared/ui/Button'
+import {Album,Boxes,Disc3,Layers3,ListMusic,Music2,Piano,Video,Waves} from 'lucide-react'
+import {AreaNavigation} from '../AreaNavigation'
+import {ListScaffold} from '../../../shared/ui/ListScaffold'
+import {Field,NumberField,Select,TextArea,TextInput} from '../../../shared/ui/forms'
+import {Surface} from '../../../shared/ui/Surface'
 
 type Attachment = { slug: string; version: number }
 type AttachmentAvailability = Attachment & { available: boolean; name: string; kind: string; mime: string; source: string }
@@ -17,7 +22,7 @@ type Notation = { format: 'chordpro' | 'tab' | 'plain' | 'drum'; text: string }
 type SongLink = { type: string; id: string; label: string }
 type Item = { id: string; title: string; artist: string; instrument: string; body: string; tags: string[]; key: string; capo: number; tuning: string; notation: Notation; source_url: string; links: SongLink[]; scroll_duration_seconds: number | null; attachment_refs: Attachment[]; attachment_availability: AttachmentAvailability[]; stage: string; due_at: string | null; revision: number; practice_history: Attempt[] }
 const selected = () => window.location.hash.split('/music/')[1]?.split('?')[0] || ''
-const fieldClass = 'w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
+const urlClass='h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: string }) {
   const [items, setItems] = useState<Item[]>([])
@@ -103,33 +108,32 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
       show(value.item); pending.current = null
     } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
-  return <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 overflow-auto p-4 text-on-surface">
-    <h1 className="text-xl">Repertoire and practice</h1>
+  return <ListScaffold title="Repertoire and practice" bodyClassName="mx-auto flex w-full max-w-4xl flex-col gap-l px-l py-xl">
     {error && <p role="alert">{error}</p>}
     {loading ? <p role="status">Loading repertoire…</p> : <>
-      {!id && <nav aria-label="Repertoire">{items.length ? items.map(row => <a className="block p-2 text-primary" key={row.id} href={`#/capabilities/music/${row.id}`} onClick={() => setId(row.id)}>{row.title} · {row.stage}</a>) : <p>No repertoire yet. Add your first piece.</p>}</nav>}
+      {!id && <nav aria-label="Repertoire" className="grid gap-s sm:grid-cols-2">{items.length ? items.map(row => <a className="rounded-lg border border-outline-variant/25 bg-surface-container/60 p-l text-on-surface transition-colors hover:bg-surface-high" key={row.id} href={`#/capabilities/music/${row.id}`} onClick={() => setId(row.id)}><strong data-type="label-m" className="block">{row.title}</strong><span data-type="body-s" className="text-on-surface-low">{row.stage}</span></a>) : <p className="text-on-surface-low">No repertoire yet. Add your first piece.</p>}</nav>}
       {id && <Button variant="secondary" onClick={() => open('')}>All repertoire</Button>}
-      <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void save() }}>
-        <label>Title<input className={fieldClass} required maxLength={300} value={title} onChange={event => setTitle(event.target.value)} /></label>
-        <label>Artist<input className={fieldClass} maxLength={300} value={artist} onChange={event => setArtist(event.target.value)} /></label>
-        <label>Instrument<select className={fieldClass} value={instrument} onChange={event => setInstrument(event.target.value)}>{['guitar', 'piano', 'ukulele', 'bass', 'voice', 'drums', 'other'].map(value => <option key={value}>{value}</option>)}</select></label>
-        <label>Tags<input className={fieldClass} placeholder="folk, recital" value={tags} onChange={event => setTags(event.target.value)} /></label>
+      <Surface className="p-l"><form className="grid gap-m sm:grid-cols-2" onSubmit={event => { event.preventDefault(); void save() }}>
+        <Field label="Title"><TextInput required maxLength={300} value={title} onChange={setTitle}/></Field>
+        <Field label="Artist"><TextInput maxLength={300} value={artist} onChange={setArtist}/></Field>
+        <Field label="Instrument"><Select value={instrument} onChange={setInstrument} options={['guitar','piano','ukulele','bass','voice','drums','other'].map(value=>({value,label:value}))}/></Field>
+        <Field label="Tags"><TextInput placeholder="folk, recital" value={tags} onChange={setTags}/></Field>
         <div className="grid gap-3 sm:grid-cols-3">
-          <label>Song key<input className={fieldClass} maxLength={20} value={songKey} onChange={event => setSongKey(event.target.value)} /></label>
-          <label>Capo<input className={fieldClass} type="number" min={0} max={12} value={capo} onChange={event => setCapo(Number(event.target.value))} /></label>
-          <label>Tuning<input className={fieldClass} maxLength={40} value={tuning} onChange={event => setTuning(event.target.value)} /></label>
+          <Field label="Song key"><TextInput maxLength={20} value={songKey} onChange={setSongKey}/></Field>
+          <Field label="Capo"><NumberField width="w-full" min={0} max={12} value={capo} onChange={setCapo}/></Field>
+          <Field label="Tuning"><TextInput maxLength={40} value={tuning} onChange={setTuning}/></Field>
         </div>
-        <label>Notation format<select className={fieldClass} value={notationFormat} onChange={event => setNotationFormat(event.target.value as Notation['format'])}>{['chordpro', 'tab', 'plain', 'drum'].map(value => <option key={value}>{value}</option>)}</select></label>
-        <label>Notation<textarea className={`${fieldClass} font-mono`} rows={10} maxLength={200000} value={notationText} onChange={event => setNotationText(event.target.value)} /></label>
-        <label>Practice notes<textarea className={fieldClass} rows={4} maxLength={100000} value={body} onChange={event => setBody(event.target.value)} /></label>
-        <label>Source URL<input className={fieldClass} type="url" maxLength={2000} value={sourceUrl} onChange={event => setSourceUrl(event.target.value)} /></label>
-        <label>Related records JSON<textarea className={`${fieldClass} font-mono`} rows={4} value={links} onChange={event => setLinks(event.target.value)} /></label>
-        <label>Scroll duration seconds<input className={fieldClass} type="number" min={15} max={3600} value={scrollDuration} onChange={event => setScrollDuration(event.target.value)} /></label>
-        <label>Artifact attachments (slug@version)<textarea className={fieldClass} value={refs} onChange={event => setRefs(event.target.value)} /></label>
-        <Button type="submit" disabled={busy || !title.trim()}>{item ? 'Save changes' : 'Add piece'}</Button>
-      </form>
+        <Field label="Notation format"><Select value={notationFormat} onChange={value=>setNotationFormat(value as Notation['format'])} options={['chordpro','tab','plain','drum'].map(value=>({value,label:value}))}/></Field>
+        <div className="sm:col-span-2"><Field label="Notation"><TextArea mono rows={10} value={notationText} onChange={value=>setNotationText(value.slice(0,200000))}/></Field></div>
+        <div className="sm:col-span-2"><Field label="Practice notes"><TextArea rows={4} value={body} onChange={value=>setBody(value.slice(0,100000))}/></Field></div>
+        <label className="min-w-0"><span data-type="caption" className="mb-1.5 block uppercase tracking-wide text-on-surface-low">Source URL</span><input className={urlClass} type="url" maxLength={2000} value={sourceUrl} onChange={event=>setSourceUrl(event.target.value)}/></label>
+        <Field label="Scroll duration seconds"><TextInput type="number" min={15} max={3600} value={scrollDuration} onChange={setScrollDuration}/></Field>
+        <div className="sm:col-span-2"><Field label="Related records JSON"><TextArea mono rows={4} value={links} onChange={setLinks}/></Field></div>
+        <div className="sm:col-span-2"><Field label="Artifact attachments (slug@version)"><TextArea mono value={refs} onChange={setRefs}/></Field></div>
+        <Button type="submit" disabled={busy||!title.trim()}>{item?'Save changes':'Add piece'}</Button>
+      </form></Surface>
       {item && <article aria-label="Practice reader" className="flex flex-col gap-3">
-        <h2>{item.title}</h2><p>{item.artist || 'Unknown artist'} · {item.instrument}{item.key ? ` · ${item.key}` : ''}{item.capo ? ` · capo ${item.capo}` : ''}{item.tuning ? ` · ${item.tuning}` : ''}</p>
+        <h2 data-type="title-m">{item.title}</h2><p data-type="body-s" className="text-on-surface-low">{item.artist || 'Unknown artist'} · {item.instrument}{item.key ? ` · ${item.key}` : ''}{item.capo ? ` · capo ${item.capo}` : ''}{item.tuning ? ` · ${item.tuning}` : ''}</p>
         {item.notation.text && <pre aria-label="Song notation" className="overflow-x-auto whitespace-pre font-mono">{item.notation.text}</pre>}
         {item.body && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
         {item.source_url && <a className="text-primary" href={item.source_url} target="_blank" rel="noreferrer">Original source</a>}
@@ -139,25 +143,21 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
           ? <a key={`${ref.slug}@${ref.version}`} className="text-primary" href={`/api/artifacts/${encodeURIComponent(ref.slug)}/versions/${ref.version}`} target="_blank" rel="noreferrer">{ref.name || ref.slug} · {ref.kind || ref.mime} · version {ref.version}</a>
           : <p key={`${ref.slug}@${ref.version}`}>{ref.slug} version {ref.version} is not available in this workspace</p>)}
         <p>Stage: {item.stage}. Next practice: {item.due_at ? new Date(item.due_at).toLocaleString() : 'Not scheduled'}</p>
-        <label>Practice grade<select className={fieldClass} value={grade} onChange={event => setGrade(Number(event.target.value))}>{['0 — No recall', '1 — Incorrect', '2 — Difficult recall', '3 — Correct with effort', '4 — Correct', '5 — Easy'].map((label, index) => <option key={index} value={index}>{label}</option>)}</select></label>
-        <label>Practice timezone<input className={fieldClass} value={zone} onChange={event => setZone(event.target.value)} /></label>
+        <Field label="Practice grade"><Select value={String(grade)} onChange={value=>setGrade(Number(value))} options={['0 — No recall','1 — Incorrect','2 — Difficult recall','3 — Correct with effort','4 — Correct','5 — Easy'].map((label,index)=>({value:String(index),label}))}/></Field>
+        <Field label="Practice timezone"><TextInput value={zone} onChange={setZone}/></Field>
         <Button disabled={busy} onClick={() => void practice()}>{pending.current ? 'Retry practice submission' : 'Log practice'}</Button>
         <ol aria-label="Practice history">{item.practice_history.map(attempt => <li key={attempt.attempt_id}>Grade {attempt.grade} · {attempt.occurred_at} · {attempt.timezone}</li>)}</ol>
       </article>}
     </>}
-  </section>
+  </ListScaffold>
 }
 
 export default function Page(props: { apiBase?: string }) {
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => { const changed = () => setHash(window.location.hash); window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed) }, [])
-  if (hash.includes('/music/decks')) return <DeckPage />
-  if (hash.includes('/music/listening')) return <ListeningPage />
-  if (hash.includes('/music/assemblies')) return <AssemblyPage />
-  if (hash.includes('/music/models3d')) return <Models3DPage />
-  if (hash.includes('/music/videos')) return <VideoPage />
-  if (hash.includes('/music/midi')) return <MidiPage />
-  if (hash.includes('/music/rounds')) return <RoundsPage />
-  if (hash.includes('/music/generation')) return <GenerationPage />
-  return hash.includes('/music/catalog') ? <CatalogPage /> : <><a className="p-4 text-primary" href="#/capabilities/music/catalog/tracks">Music catalog</a><a className="p-4 text-primary" href="#/capabilities/music/generation">Music generation</a><a className="p-4 text-primary" href="#/capabilities/music/rounds">Musical canons</a><a className="p-4 text-primary" href="#/capabilities/music/midi">Audio to MIDI</a><a className="p-4 text-primary" href="#/capabilities/music/videos">Music videos</a><a className="p-4 text-primary" href="#/capabilities/music/models3d">Image to 3D</a><a className="p-4 text-primary" href="#/capabilities/music/assemblies">Procedural assemblies</a><a className="p-4 text-primary" href="#/capabilities/music/listening">Listening history</a><a className="p-4 text-primary" href="#/capabilities/music/decks">Card decks</a><RepertoirePage {...props} /></>
+  const path=hash.split('/music/')[1]?.split('?')[0]||''
+  const active=path.startsWith('catalog')?'catalog':['generation','rounds','midi','videos','models3d','assemblies','listening','decks'].includes(path)?path:'repertoire'
+  const items=[{id:'repertoire',label:'Repertoire',icon:Music2,group:'Library'},{id:'catalog',label:'Catalog',icon:Disc3,group:'Library'},{id:'listening',label:'Listening',icon:Waves,group:'Library'},{id:'generation',label:'Generation',icon:Music2,group:'Studios'},{id:'decks',label:'Card decks',icon:Album,group:'Studios'},{id:'rounds',label:'Canons',icon:ListMusic,group:'Studios'},{id:'midi',label:'Audio to MIDI',icon:Piano,group:'Studios'},{id:'videos',label:'Music videos',icon:Video,group:'Visuals'},{id:'models3d',label:'Image to 3D',icon:Boxes,group:'Visuals'},{id:'assemblies',label:'Assemblies',icon:Layers3,group:'Visuals'}]
+  const content=active==='decks'?<DeckPage/>:active==='listening'?<ListeningPage/>:active==='assemblies'?<AssemblyPage/>:active==='models3d'?<Models3DPage/>:active==='videos'?<VideoPage/>:active==='midi'?<MidiPage/>:active==='rounds'?<RoundsPage/>:active==='generation'?<GenerationPage/>:active==='catalog'?<CatalogPage/>:<RepertoirePage {...props}/>
+  return <AreaNavigation label="Music" items={items} active={active} onChange={view=>{window.location.hash=view==='repertoire'?'/capabilities/music':view==='catalog'?'/capabilities/music/catalog/tracks':`/capabilities/music/${view}`}}>{content}</AreaNavigation>
 }

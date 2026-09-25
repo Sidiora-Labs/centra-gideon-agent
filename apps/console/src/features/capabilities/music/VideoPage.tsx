@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
+import {ListScaffold} from '../../../shared/ui/ListScaffold'
 import { Button } from '../../../shared/ui/Button'
 type Ref={slug:string;version:number}
 type Scene={id:string;image_ref:Ref;beats:number;start_seconds?:number;duration_seconds?:number}
 type Project={id:string;revision:number;title:string;track_id:string;render_id:string;tempo_bpm:number;offset_seconds:number;scenes:Scene[];duration_seconds:number}
 type Job={id:string;status:string;project_id:string;revision:number;artifact_ref:Ref|null;error:string|null}
 type Track={id:string;title:string;renders:{id:string}[]}
-const cls='w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
+const cls='h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 const scene=():Scene=>({id:crypto.randomUUID(),image_ref:{slug:'',version:1},beats:4})
 export default function VideoPage({apiBase='/api/capabilities/music/videos',catalogBase='/api/capabilities/music/catalog'}:{apiBase?:string;catalogBase?:string}){
  const [projects,setProjects]=useState<Project[]>([]),[tracks,setTracks]=useState<Track[]>([]),[item,setItem]=useState<Project|null>(null),[title,setTitle]=useState(''),[selection,setSelection]=useState(''),[tempo,setTempo]=useState(120),[offset,setOffset]=useState(0),[scenes,setScenes]=useState<Scene[]>([scene()]),[jobs,setJobs]=useState<Job[]>([]),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false),[error,setError]=useState('')
@@ -17,7 +18,7 @@ export default function VideoPage({apiBase='/api/capabilities/music/videos',cata
  async function act(action:()=>Promise<void>){setBusy(true);setError('');try{await action()}catch(err){setError((err as Error).message)}finally{setBusy(false)}}
  function change(index:number,values:Partial<Scene>){setScenes(rows=>rows.map((row,i)=>i===index?{...row,...values}:row));setDirty(true)}
  const seconds=scenes.reduce((sum,row)=>sum+row.beats*60/tempo,0)
- return <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 overflow-auto p-4 text-on-surface"><h1>Beat-grid music videos</h1><a className="text-primary" href="#/capabilities/music">Repertoire</a><p>Set the tempo and scene lengths in beats. This uses your authored grid, not automatic beat detection. Output is 640 × 360 at 30 fps, up to 60 seconds.</p>{error&&<p role="alert">{error}</p>}
+ return <ListScaffold title="Beat-grid music videos" bodyClassName="mx-auto flex w-full max-w-5xl flex-col gap-l px-l py-xl"><p data-type="body-m" className="max-w-[48rem] text-on-surface-low">Set the tempo and scene lengths in beats. This uses your authored grid, not automatic beat detection. Output is 640 × 360 at 30 fps, up to 60 seconds.</p>{error&&<p role="alert">{error}</p>}
  <nav aria-label="Video projects">{projects.map(row=><Button key={row.id} variant="secondary" onClick={()=>void act(async()=>show((await request('/'+row.id)).item))}>{row.title}</Button>)}</nav>
  {item&&<Button variant="secondary" onClick={()=>{setItem(null);setTitle('');setScenes([scene()]);setDirty(false)}}>New video project</Button>}
  <form className="flex flex-col gap-3" onSubmit={event=>{event.preventDefault();void act(async()=>{const [track_id,render_id]=selection.split(':');const data={title,track_id,render_id,tempo_bpm:tempo,offset_seconds:offset,scenes:scenes.map(({id,image_ref,beats})=>({id,image_ref,beats})),...(item?{revision:item.revision}:{})};const result=(await request(item?'/'+item.id:'',item?'PATCH':'POST',data)).item;show(result);setProjects(rows=>[...rows.filter(row=>row.id!==result.id),result])})}}>
@@ -28,5 +29,5 @@ export default function VideoPage({apiBase='/api/capabilities/music/videos',cata
  <Button variant="secondary" disabled={scenes.length>=16} onClick={()=>{setScenes(rows=>[...rows,scene()]);setDirty(true)}}>Add image scene</Button><p>Total video {seconds.toFixed(2)} seconds</p><Button type="submit" disabled={busy||!title.trim()||!selection}>{item?'Save video project':'Create video project'}</Button></form>
  {item&&<><p>Saved video revision {item.revision}</p><Button disabled={busy||dirty} onClick={()=>void act(async()=>{const result=await request('/jobs','POST',{request_id:crypto.randomUUID(),project_id:item.id,revision:item.revision});setJobs(rows=>[result.job,...rows.filter(row=>row.id!==result.job.id)])})}>Render music video</Button>{dirty&&<p>Save changes before rendering.</p>}</>}
  <Button variant="secondary" onClick={()=>void act(refresh)}>Refresh renders</Button><ol aria-label="Video renders">{jobs.map(job=><li key={job.id} className="flex flex-col gap-2 border border-outline p-3"><p>Render {job.status} · revision {job.revision}</p>{job.error&&<p>{job.error}</p>}{['queued','running'].includes(job.status)&&<Button onClick={()=>void act(async()=>{await request('/jobs/'+job.id+'/cancel','POST',{});await refresh()})}>Cancel render</Button>}{job.artifact_ref&&<><video aria-label="Rendered music video" controls src={`/api/artifacts/${job.artifact_ref.slug}/raw?version=${job.artifact_ref.version}`}/><a href={`/api/artifacts/${job.artifact_ref.slug}/raw?version=${job.artifact_ref.version}`} download>Download music video</a></>}</li>)}</ol>
- </section>
+ </ListScaffold>
 }

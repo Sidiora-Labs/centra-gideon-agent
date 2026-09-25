@@ -19,11 +19,11 @@ export function ThreadsPanel() {
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [version])
-  return <section aria-label="Thread care evidence" className="my-5 space-y-3 rounded border border-outline p-3">
-    <h2>Thread care evidence</h2><p>These results describe imported observations, not live account status. Incomplete or stale coverage stays unknown.</p>
+  return <section aria-label="Thread care evidence" className="space-y-l">
+    <h2 data-type="title-m">Thread care evidence</h2><p data-type="body-s" className="text-on-surface-low">These results describe imported observations, not live account status. Incomplete or stale coverage stays unknown.</p>
     <Button onClick={() => setVersion(v => v + 1)} disabled={loading}>Refresh thread evidence</Button>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    {loading ? <p role="status">Loading thread evidence…</p> : report && <>
+    {loading ? <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">Loading thread evidence…</p> : report && <>
       <p>Timezone: {report.timezone}</p>
       {!report.threads.length && <p>No thread observations have been imported.</p>}
       <ul>{report.threads.map(t => <li className="my-3 border-b border-outline pb-3" key={`${t.source}/${t.source_account_id}/${t.person_id}/${t.thread_id}`}>

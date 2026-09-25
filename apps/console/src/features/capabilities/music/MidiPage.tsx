@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import {ListScaffold} from '../../../shared/ui/ListScaffold'
 import { Button } from '../../../shared/ui/Button'
 type Note={id:string;pitch:number;start_seconds:number;duration_seconds:number;velocity:number}
 type Score={id:string;title:string;tempo_bpm:number;duration_seconds:number;notes:Note[];revision:number;method:string}
 type Track={id:string;title:string;renders:{id:string;artifact_ref:{slug:string;version:number}}[]}
-const cls='w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
+const cls='h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 export default function MidiPage({apiBase='/api/capabilities/music/midi',catalogBase='/api/capabilities/music/catalog'}:{apiBase?:string;catalogBase?:string}){
  const [scores,setScores]=useState<Score[]>([]),[tracks,setTracks]=useState<Track[]>([]),[score,setScore]=useState<Score|null>(null),[title,setTitle]=useState(''),[tempo,setTempo]=useState(120),[selection,setSelection]=useState(''),[notes,setNotes]=useState<Note[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false),[download,setDownload]=useState(''),[offset,setOffset]=useState(0)
  async function request(path:string,method='GET',data?:unknown){const response=await fetch(apiBase+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});const body=await response.json();if(!response.ok)throw new Error(body.message||body.error);return body}
@@ -12,7 +13,7 @@ export default function MidiPage({apiBase='/api/capabilities/music/midi',catalog
  useEffect(()=>{fetch(catalogBase+'/tracks?limit=100').then(response=>{if(!response.ok)throw new Error('Cannot load recordings');return response.json()}).then(value=>setTracks(value.items)).catch(err=>setError(err.message))},[catalogBase])
  async function act(action:()=>Promise<void>){setBusy(true);setError('');try{await action()}catch(err){setError((err as Error).message)}finally{setBusy(false)}}
  function change(index:number,key:keyof Note,value:number){setNotes(rows=>rows.map((row,i)=>i===index?{...row,[key]:value}:row));setDirty(true);setDownload('')}
- return <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 overflow-auto p-4 text-on-surface"><h1>Audio to MIDI</h1><a className="text-primary" href="#/capabilities/music">Repertoire</a>
+ return <ListScaffold title="Audio to MIDI" bodyClassName="mx-auto flex w-full max-w-5xl flex-col gap-l px-l py-xl">
  <p>Monophonic PCM WAV only: one voice, 16-bit, 8–48 kHz, up to 60 seconds. Review detected notes before export; chords and noisy recordings may be inaccurate.</p>{error&&<p role="alert">{error}</p>}
  <nav aria-label="Transcriptions">{scores.map(row=><Button key={row.id} variant="secondary" onClick={()=>void act(async()=>show((await request('/'+row.id)).item))}>{row.title}</Button>)}<Button disabled={!offset} onClick={()=>setOffset(value=>Math.max(0,value-25))}>Previous</Button><Button disabled={scores.length<25} onClick={()=>setOffset(value=>value+25)}>Next</Button></nav>
  {!score?<form className="flex flex-col gap-3" onSubmit={event=>{event.preventDefault();void act(async()=>{const [track_id,render_id]=selection.split(':');const item=(await request('','POST',{request_id:crypto.randomUUID(),track_id,render_id,title,tempo_bpm:tempo})).item;show(item);setScores(rows=>[...rows,item])})}}>
@@ -28,5 +29,5 @@ export default function MidiPage({apiBase='/api/capabilities/music/midi',catalog
  <div className="flex gap-2"><Button disabled={busy||!dirty||!title.trim()} onClick={()=>void act(async()=>{const item=(await request('/'+score.id,'PATCH',{revision:score.revision,title,notes})).item;show(item);setScores(rows=>rows.map(row=>row.id===item.id?item:row))})}>Save notes</Button>
  <Button disabled={busy||dirty} onClick={()=>void act(async()=>{const result=await request('/'+score.id+'/export','POST',{revision:score.revision});setDownload(`/api/artifacts/${result.artifact_ref.slug}/raw?version=${result.artifact_ref.version}`)})}>Export MIDI</Button></div>{dirty&&<p>Save edits before export.</p>}{download&&<a className="text-primary" href={download} download={`${score.title}.mid`}>Download MIDI</a>}
  </>}
- </section>
+ </ListScaffold>
 }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { ListScaffold } from '../../../shared/ui/ListScaffold'
+import { Field, Select, TextArea } from '../../../shared/ui/forms'
 
 type Capture = { id: string; text: string; transcript: string | null }
 type Preview = { preview_id: string; capture_id: string; revision: number; kind: string; fields: Record<string, unknown>; mapped_fields: Record<string, unknown>; unsupported_fields: string[]; destination: string; available: boolean; unavailable_reason: string }
@@ -45,17 +47,15 @@ export default function TypesPage() {
     finally { setBusy(false) }
   }
   const selected = captures.find(item => item.id === captureId)
-  return <main className="mx-auto max-w-4xl space-y-5 p-6">
-    <h1 className="text-2xl font-semibold">Classify captures</h1>
-    <p>Review original fields and import into the existing destination. Edit saved records in their destination.</p>
-    <a href="#/capabilities/knowledge/capture">Open capture inbox</a>
-    {error && <p role="alert">{error}</p>}
-    <label className="block">Original capture<select aria-label="Original capture" value={captureId} disabled={busy} onChange={e => { setCaptureId(e.target.value); reset() }}><option value="">Choose a capture</option>{captures.map(item => <option key={item.id} value={item.id}>{(item.transcript || item.text || 'Voice capture').slice(0, 100)}</option>)}</select></label>
-    {selected && <blockquote className="whitespace-pre-wrap">{selected.text || selected.transcript}</blockquote>}
-    <label className="block">Record type<select aria-label="Record type" value={kind} disabled={busy} onChange={e => { setKind(e.target.value); setFields(JSON.stringify(samples[e.target.value], null, 2)); reset() }}>{Object.keys(samples).map(name => <option key={name} value={name}>{name}</option>)}</select></label>
-    <label className="block">Original fields (JSON)<textarea aria-label="Original fields (JSON)" className="block w-full min-h-48 border p-3" value={fields} disabled={busy} onChange={e => { setFields(e.target.value); reset() }} /></label>
+  return <main className="h-full"><ListScaffold title="Classify captures" right={<a data-type="label-m" className="inline-flex min-h-10 items-center rounded-pill bg-surface-high px-xl text-on-surface hover:bg-surface-highest" href="#/capabilities/knowledge/capture">Open capture inbox</a>} bodyClassName="mx-auto px-l py-l"><div className="flex flex-col gap-xl">
+    <p data-type="body-m" className="max-w-[42rem] text-on-surface-var">Review original fields and import into the existing destination. Edit saved records in their destination.</p>
+    {error && <p role="alert" className="border-l-2 border-danger/40 pl-s text-danger">{error}</p>}
+    <div className="grid gap-l lg:grid-cols-2"><section className="flex flex-col gap-m rounded-lg bg-surface-container p-l"><Field label="Original capture"><Select ariaLabel="Original capture" value={captureId} surface="high" disabled={busy} onChange={value => { setCaptureId(value); reset() }} options={[{value:'',label:'Choose a capture'},...captures.map(item=>({value:item.id,label:(item.transcript || item.text || 'Voice capture').slice(0,100)}))]} /></Field>
+    {selected && <blockquote className="whitespace-pre-wrap rounded-lg bg-surface-high p-m">{selected.text || selected.transcript}</blockquote>}
+    <Field label="Record type"><Select ariaLabel="Record type" value={kind} surface="high" disabled={busy} onChange={value => { setKind(value); setFields(JSON.stringify(samples[value], null, 2)); reset() }} options={Object.keys(samples).map(name=>({value:name,label:name}))} /></Field>
+    <Field label="Original fields (JSON)"><TextArea ariaLabel="Original fields (JSON)" rows={10} mono surface="high" value={fields} disabled={busy} onChange={value => { setFields(value); reset() }} /></Field>
     <Button disabled={!captureId || busy} onClick={() => void review()}>Review mapping</Button>
-    {preview && <section aria-label="Mapping review" className="space-y-3 border p-4"><p>Destination: {preview.destination}</p><pre className="whitespace-pre-wrap">{JSON.stringify(preview.mapped_fields, null, 2)}</pre><p>Unmapped original fields: {preview.unsupported_fields.join(', ') || 'None'}. Original fields remain in the import receipt.</p>{!preview.available && <p role="status">{preview.unavailable_reason}</p>}<Button disabled={busy || !preview.available} onClick={() => void commit()}>Import reviewed record</Button></section>}
-    <section aria-label="Import history"><h2>Import history</h2>{receipts.length === 0 && <p>No imports yet.</p>}{receipts.map(item => <p key={item.request_id}><a href={item.source_link}>Open {item.kind}</a> · <a href={`#/capabilities/knowledge/capture?capture=${item.capture_id}`}>Original capture</a></p>)}<Button disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous imports</Button><Button disabled={busy || next === null} onClick={() => setOffset(next!)}>Next imports</Button></section>
-  </main>
+    {preview && <section aria-label="Mapping review" className="flex flex-col gap-m rounded-lg bg-surface-high p-m"><h2 data-type="title-m">Mapping review</h2><p>Destination: {preview.destination}</p><pre className="whitespace-pre-wrap break-words">{JSON.stringify(preview.mapped_fields, null, 2)}</pre><p>Unmapped original fields: {preview.unsupported_fields.join(', ') || 'None'}. Original fields remain in the import receipt.</p>{!preview.available && <p role="status">{preview.unavailable_reason}</p>}<Button disabled={busy || !preview.available} onClick={() => void commit()}>Import reviewed record</Button></section>}</section>
+    <section aria-label="Import history" className="rounded-lg bg-surface-container p-l"><h2 data-type="title-m" className="mb-m">Import history</h2>{receipts.length === 0 && <p>No imports yet.</p>}{receipts.map(item => <p className="border-b border-outline-variant/20 py-s last:border-0" key={item.request_id}><a className="text-primary underline" href={item.source_link}>Open {item.kind}</a> · <a className="text-primary underline" href={`#/capabilities/knowledge/capture?capture=${item.capture_id}`}>Original capture</a></p>)}<div className="flex gap-s pt-m"><Button variant="secondary" disabled={busy || offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous imports</Button><Button variant="secondary" disabled={busy || next === null} onClick={() => setOffset(next!)}>Next imports</Button></div></section></div>
+  </div></ListScaffold></main>
 }

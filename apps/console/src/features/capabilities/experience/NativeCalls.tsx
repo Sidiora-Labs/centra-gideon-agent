@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 type Attempt = { id: string; command: string; state: string; result: string }
 type Snapshot = { readiness: { available: boolean; errors: string[]; target_name: string | null; detail: string }; requests: Attempt[] }
 export default function NativeCalls({ baseUrl = '/api/capabilities/experience' }: { baseUrl?: string }) {
@@ -26,8 +28,8 @@ export default function NativeCalls({ baseUrl = '/api/capabilities/experience' }
       setNotice('User-supplied transcript saved. Agent continuation has not started.'); setRequestId(crypto.randomUUID())
     } catch (e) { setError(String(e)) } finally { setBusy(false) }
   }
-  return <section aria-label="Native audio calls" className="space-y-3 rounded-lg border p-4">
-    <h2>Native audio calls</h2>
+  return <Surface className="p-m"><section aria-label="Native audio calls" className="space-y-m">
+    <h2 data-type="title-m">Native audio calls</h2>
     <p>Machine-local FaceTime control requires a configured Mac. Remote desktop execution and automatic audio transcription are not available here.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {!data ? <p>Loading native call readiness…</p> : <>
@@ -36,11 +38,11 @@ export default function NativeCalls({ baseUrl = '/api/capabilities/experience' }
       {data.readiness.target_name && <p>Configured recipient: {data.readiness.target_name}</p>}
       <div className="flex flex-wrap gap-2">{['probe', 'call', 'answer', 'hangup'].map(operation => <Button key={operation} disabled={busy || !data.readiness.available} onClick={() => void command(operation)}>{operation}</Button>)}<Button disabled={busy} onClick={() => void refresh().catch(e => setError(String(e)))}>Refresh native readiness</Button></div>
       <ul>{data.requests.map(row => <li key={row.id}>{row.command}: {row.state} — {row.result}</li>)}</ul>
-      <h3>Save a supplied transcript</h3><p>This records text you provide; it does not verify that a call connected or that audio was captured.</p>
-      <label>Native request<select value={selected} onChange={e => { setSelected(e.target.value); setRequestId(crypto.randomUUID()) }}><option value="">Choose a request</option>{data.requests.map(row => <option key={row.id} value={row.id}>{row.command} · {row.state}</option>)}</select></label>
-      <label>Existing conversation<input value={conversation} onChange={e => { setConversation(e.target.value); setRequestId(crypto.randomUUID()) }} /></label>
-      <label>Supplied transcript<textarea value={transcript} onChange={e => { setTranscript(e.target.value); setRequestId(crypto.randomUUID()) }} /></label>
+      <h3 data-type="title-m">Save a supplied transcript</h3><p>This records text you provide; it does not verify that a call connected or that audio was captured.</p>
+      <Field label="Native request"><Select value={selected} onChange={value => { setSelected(value); setRequestId(crypto.randomUUID()) }} options={[{value:'',label:'Choose a request'},...data.requests.map(row=>({value:row.id,label:`${row.command} · ${row.state}`}))]} /></Field>
+      <Field label="Existing conversation"><TextInput value={conversation} onChange={value => { setConversation(value); setRequestId(crypto.randomUUID()) }} /></Field>
+      <Field label="Supplied transcript"><TextArea rows={8} value={transcript} onChange={value => { setTranscript(value); setRequestId(crypto.randomUUID()) }} /></Field>
       <Button disabled={busy || !selected || !conversation || !transcript.trim()} onClick={() => void saveTranscript()}>Save transcript to conversation</Button>
     </>}
-  </section>
+  </section></Surface>
 }

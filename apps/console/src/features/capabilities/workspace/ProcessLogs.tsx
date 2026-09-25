@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Field, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 
 type Window = { text: string; start: number; next: number; end: number; dropped: number; status: string }
 export default function ProcessLogs({ id }: { id: string }) {
@@ -37,11 +39,11 @@ export default function ProcessLogs({ id }: { id: string }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   const visible = query ? text.split('\n').filter(line => line.toLowerCase().includes(query.toLowerCase())).join('\n') : text
-  return <section aria-label="Live process log" className="space-y-2">
-    <div className="flex flex-wrap gap-2"><Button onClick={() => setFollowing(value => !value)}>{following ? 'Pause live log' : 'Follow process log'}</Button><Button disabled={!text} onClick={download}>Download retained log</Button></div>
-    <label className="block">Filter retained lines <input aria-label="Filter retained log lines" maxLength={256} value={query} onChange={e => setQuery(e.target.value)} className="border rounded bg-surface p-2 max-w-full" /></label>
-    <p>Status: {status} · Cursor: {cursor.current} · {dropped} characters missed before retained window. Displays the latest 65,536 characters.</p>
+  return <Surface className="p-l"><section aria-label="Live process log" className="space-y-m">
+    <div className="flex flex-wrap items-center justify-between gap-m"><h3 data-type="title-m">Live process log</h3><div className="flex flex-wrap gap-s"><Button size="sm" onClick={() => setFollowing(value => !value)}>{following ? 'Pause live log' : 'Follow process log'}</Button><Button size="sm" variant="secondary" disabled={!text} onClick={download}>Download retained log</Button></div></div>
+    <Field label="Filter retained lines"><TextInput ariaLabel="Filter retained log lines" maxLength={256} value={query} onChange={setQuery}/></Field>
+    <p data-type="body-s" className="text-on-surface-low">Status: {status} · Cursor: {cursor.current} · {dropped} characters missed before retained window. Displays the latest 65,536 characters.</p>
     {error && <p role="alert">{error}</p>}
-    <pre aria-label="Live log output" className="max-h-72 overflow-auto whitespace-pre-wrap break-words">{visible || 'No matching output yet.'}</pre>
-  </section>
+    <pre aria-label="Live log output" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface p-m">{visible || 'No matching output yet.'}</pre>
+  </section></Surface>
 }

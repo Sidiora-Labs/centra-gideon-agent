@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Field, Select, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 
 type Detection = { workspace: string; types: string[]; commands: Record<string, string>; ports: number[]; has_git: boolean; source_files: string[] }
 type Project = { project: { id: string; name: string; workspace_dir: string }; detection: Detection }
@@ -46,24 +48,24 @@ export default function Projects() {
     setRows(old => [result, ...old.filter(x => x.project.id !== result.project.id)]); choose(result.project.id); setRetry(null)
   }
   const row = rows.find(item => item.project.id === selected)
-  return <section className="space-y-3 border-t border-outline pt-4"><h2 className="text-lg font-semibold">Project discovery and templates</h2>
-    <p>Inspect existing project files without running scripts, or create a new local HTTP service. Existing files are never overwritten.</p>
+  return <section className="mx-auto w-full space-y-l px-l py-l" style={{ maxWidth: 'var(--content-width)' }}><header><h2 data-type="title-m">Project discovery and templates</h2>
+    <p data-type="body-s" className="mt-1 text-on-surface-low">Inspect existing project files without running scripts, or create a new local HTTP service. Existing files are never overwritten.</p></header>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <label htmlFor="project-name" className="grid gap-1">Project display name<input id="project-name" value={name} onChange={e => setName(e.target.value)} className="rounded border border-outline bg-surface p-2" /></label>
-    <form className="grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(() => write('register')) }}>
-      <label htmlFor="project-existing" className="grid gap-1">Existing project path<input id="project-existing" value={workspace} onChange={e => { setWorkspace(e.target.value); setDetection(null) }} required className="min-w-0 rounded border border-outline bg-surface p-2" /></label>
+    <Surface className="space-y-m p-l"><Field label="Project display name"><TextInput id="project-name" value={name} onChange={setName}/></Field>
+    <form className="grid gap-m sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(() => write('register')) }}>
+      <Field label="Existing project path"><TextInput id="project-existing" value={workspace} onChange={value => { setWorkspace(value); setDetection(null) }} required/></Field>
       <div className="flex flex-wrap gap-2"><Button loading={busy} onClick={() => void act(async () => setDetection(await requestJson<Detection>(`${base}/detect`, 'POST', { workspace })))}>Detect project</Button><Button type="submit" loading={busy}>Register project</Button></div>
     </form>
-    {detection && <div aria-label="Project detection"><p>Types: {detection.types.join(', ') || 'Unrecognized'}</p><p>Git: {detection.has_git ? 'Present' : 'Absent'}</p><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(detection.commands, null, 2)}</pre></div>}
-    <form className="grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(() => write('scaffold')) }}>
-      {([['Scaffold parent', parent, setParent], ['New directory', directory, setDirectory]] as const).map(([label, value, setter], index) => <label htmlFor={`scaffold-${index}`} key={label} className="grid gap-1">{label}<input id={`scaffold-${index}`} value={value} onChange={e => setter(e.target.value)} required className="min-w-0 rounded border border-outline bg-surface p-2" /></label>)}
-      <label htmlFor="scaffold-template" className="grid gap-1">Service template<select id="scaffold-template" value={template} onChange={e => setTemplate(e.target.value)}>{templates.map(item => <option key={item.id} value={item.id}>{item.name}{item.available ? '' : ' (interpreter unavailable)'}</option>)}</select></label>
+    {detection && <Surface tone="high" className="p-m"><div aria-label="Project detection"><p>Types: {detection.types.join(', ') || 'Unrecognized'}</p><p>Git: {detection.has_git ? 'Present' : 'Absent'}</p><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(detection.commands, null, 2)}</pre></div></Surface>}
+    <form className="grid gap-m sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(() => write('scaffold')) }}>
+      {([['Scaffold parent', parent, setParent], ['New directory', directory, setDirectory]] as const).map(([label, value, setter], index) => <Field key={label} label={label}><TextInput id={`scaffold-${index}`} value={value} onChange={setter} required/></Field>)}
+      <Field label="Service template"><Select id="scaffold-template" value={template} onChange={setTemplate} options={templates.map(item => ({ value: item.id, label: `${item.name}${item.available ? '' : ' (interpreter unavailable)'}`, disabled: !item.available }))}/></Field>
       <Button type="submit" loading={busy}>Create project</Button>
-    </form>
+    </form></Surface>
     {!loaded && !error && <p role="status">Loading projects…</p>}
     {loaded && rows.length === 0 && <p>No registered local projects.</p>}
-    <ul>{rows.map(item => <li key={item.project.id}><Button variant="ghost" disabled={busy} onClick={() => choose(item.project.id)}>{item.project.name}</Button></li>)}</ul>
+    <ul className="space-y-s">{rows.map(item => <li key={item.project.id}><Button className="w-full justify-start" variant={selected === item.project.id ? 'tonal' : 'secondary'} disabled={busy} onClick={() => choose(item.project.id)}>{item.project.name}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Project not found in this view.</p>}
-    {row && <article className="space-y-2 break-words"><h3>{row.project.name}</h3><p>{row.project.workspace_dir}</p><p>{row.detection.types.join(', ') || 'Unrecognized project type'}</p><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(row.detection.commands, null, 2)}</pre></article>}
+    {row && <Surface className="space-y-m break-words p-l"><h3 data-type="title-m">{row.project.name}</h3><p className="text-on-surface-low">{row.project.workspace_dir}</p><p>{row.detection.types.join(', ') || 'Unrecognized project type'}</p><pre className="overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-m">{JSON.stringify(row.detection.commands, null, 2)}</pre></Surface>}
   </section>
 }

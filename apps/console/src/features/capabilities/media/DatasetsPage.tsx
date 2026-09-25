@@ -1,10 +1,11 @@
+import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useState } from 'react'
 export type Dataset = { id: string; revision: number; title: string; base_model: string; entries: { artifact_id: string; version: number; caption: string }[] }
 async function api(path: string, method = 'GET', body?: unknown) {
   const response = await fetch('/api/capabilities/media' + path, { method, ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Dataset request failed'); return result
 }
 export function DatasetEntries({ entries, change }: { entries: Dataset['entries']; change: (entries: Dataset['entries']) => void }) {
-  return <ol>{entries.map((entry, index) => <li key={index} className="border p-2"><p>{entry.artifact_id} · version {entry.version}</p><label>Caption<textarea maxLength={2000} value={entry.caption} onChange={event => change(entries.map((item, at) => at === index ? { ...item, caption: event.target.value } : item))} /></label><button onClick={() => change(entries.filter((_, at) => at !== index))}>Remove image</button></li>)}</ol>
+  return <ol>{entries.map((entry, index) => <li key={index} className="rounded-lg bg-surface-container p-m"><p>{entry.artifact_id} · version {entry.version}</p><label>Caption<textarea maxLength={2000} value={entry.caption} onChange={event => change(entries.map((item, at) => at === index ? { ...item, caption: event.target.value } : item))} /></label><button onClick={() => change(entries.filter((_, at) => at !== index))}>Remove image</button></li>)}</ol>
 }
 export default function DatasetsPage() {
   const [items, setItems] = useState<Dataset[]>([]), [current, setCurrent] = useState<Dataset | null>(null), [title, setTitle] = useState(''), [baseModel, setBaseModel] = useState(''), [entries, setEntries] = useState<Dataset['entries']>([]), [artifactId, setArtifactId] = useState(''), [version, setVersion] = useState(1), [history, setHistory] = useState<Dataset[]>([]), [readiness, setReadiness] = useState<{ available: boolean; reason: string } | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [steps, setSteps] = useState(100), [rank, setRank] = useState(4), [rate, setRate] = useState(.0001), [seed, setSeed] = useState(0)
@@ -13,7 +14,7 @@ export default function DatasetsPage() {
   const save = async () => { setBusy(true); try { const body = { title, base_model: baseModel, entries, request_id: crypto.randomUUID(), ...(current ? { revision: current.revision } : {}) }; const saved = await api('/datasets'+(current ? '/'+current.id : ''), current ? 'PUT' : 'POST', body); setCurrent(saved); setItems((await api('/datasets')).items); setHistory((await api('/datasets/'+saved.id+'/history')).items); setError('') } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
   const train = async () => { if (!current) return; setBusy(true); try { await api('/jobs', 'POST', { operation: 'lora_train', request_id: crypto.randomUUID(), input: { dataset_id: current.id, dataset_revision: current.revision, steps, rank, learning_rate: rate, seed } }); location.hash = '#/capabilities/media?view=jobs' } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
   const dirty = current ? title !== current.title || baseModel !== current.base_model || JSON.stringify(entries) !== JSON.stringify(current.entries) : !!(title || baseModel || entries.length)
-  return <section className="p-6 space-y-3"><h1>LoRA datasets and training</h1><a href="#/capabilities/media?view=library">Media library</a> · <a href="#/capabilities/media?view=jobs">Media jobs</a>
+  return <NativeMediaPage title="LoRA datasets and training" actions={<><a href="#/capabilities/media?view=library">Library</a><a href="#/capabilities/media?view=jobs">Jobs</a></>}>
     <p>Datasets retain pinned image references and authored captions. Each save preserves its prior revision. Training requires a separately installed and admitted Diffusers runtime; checkpoints are retained for retry.</p>
     {error && <p role="alert">{error}</p>}<label>Dataset<select disabled={busy || dirty} value={current?.id || ''} onChange={event => void choose(event.target.value)}><option value="">New dataset</option>{items.map(item => <option key={item.id} value={item.id}>{item.title} · revision {item.revision}</option>)}</select></label>
     <label>Title<input maxLength={120} value={title} onChange={event => setTitle(event.target.value)} /></label><label>Base model owner/name<input value={baseModel} onChange={event => setBaseModel(event.target.value)} /></label>
@@ -23,5 +24,5 @@ export default function DatasetsPage() {
     <h2>Checkpoint training</h2><p role="status">{readiness?.reason || 'Loading trainer readiness…'}</p>
     <label>Steps<input type="number" min="1" max="50000" value={steps} onChange={event => setSteps(Number(event.target.value))} /></label><label>Rank<input type="number" min="1" max="128" value={rank} onChange={event => setRank(Number(event.target.value))} /></label><label>Learning rate<input type="number" step="any" min="0.0000001" max="0.01" value={rate} onChange={event => setRate(Number(event.target.value))} /></label><label>Seed<input type="number" min="0" max="4294967295" value={seed} onChange={event => setSeed(Number(event.target.value))} /></label>
     <button disabled={busy || dirty || !current || !readiness?.available} onClick={() => void train()}>Queue training</button><p>File presence does not verify GPU readiness or successful training. Training jobs retain local diagnostics and checkpoints; retries resume the latest checkpoint when present.</p>
-  </section>
+  </NativeMediaPage>
 }

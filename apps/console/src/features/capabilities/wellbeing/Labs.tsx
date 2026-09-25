@@ -27,11 +27,11 @@ function Correction({ row, saved }: { row: Lab; saved: () => void }) {
     catch (err) { setError(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
-  return <form onSubmit={submit} className="space-y-3">
+  return <form onSubmit={submit} className="space-y-m">
     <h2 data-type="title-m">Correct {row.analyte}</h2>
     <p>{row.observed_at} · {row.source} · {row.unit}</p>
     <Field label="Result value"><TextInput value={value} onChange={setValue} required /></Field>
-    <div className="grid gap-3 sm:grid-cols-2"><Field label="Reference low"><TextInput value={low} onChange={setLow} /></Field><Field label="Reference high"><TextInput value={high} onChange={setHigh} /></Field></div>
+    <div className="grid gap-m sm:grid-cols-2"><Field label="Reference low"><TextInput value={low} onChange={setLow} /></Field><Field label="Reference high"><TextInput value={high} onChange={setHigh} /></Field></div>
     <Field label="Correction notes"><TextInput value={notes} onChange={setNotes} /></Field>
     <a href={`${base}/${row.id}/source`} className="text-primary underline">Original attachment · version {row.artifact.version}</a>
     {error && <p role="alert" className="text-danger">{error}</p>}
@@ -87,8 +87,8 @@ export default function Labs() {
     } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
-  return <main className="h-full overflow-auto p-4 sm:p-6 space-y-6 text-on-surface">
-    <h1 data-type="headline-s">Laboratory records</h1>
+  return <main style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface">
+    <h2 data-type="title-m">Laboratory records</h2>
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="space-y-3 min-w-0" aria-label="Import laboratory records">
         <h2 data-type="title-m">Import CSV or JSON</h2>
@@ -96,14 +96,14 @@ export default function Labs() {
         <label className="block">Choose source file<input aria-label="Choose source file" type="file" accept=".csv,.json" className="block w-full" onChange={async e => { const file = e.target.files?.[0]; if (!file) return; if (file.size > 500000) { setError('Source file exceeds 500000 bytes'); return } try { setContent(await file.text()); setFilename(file.name); setFormat(file.name.endsWith('.json') ? 'json' : 'csv'); setPreview(null) } catch (err) { setError(String(err)) } }} /></label>
         <Field label="Filename"><TextInput value={filename} onChange={setFilename} required /></Field>
         <Field label="Laboratory source"><TextInput value={source} onChange={setSource} required /></Field>
-        <label className="block">Format<select aria-label="Import format" value={format} onChange={e => setFormat(e.target.value)} className="block rounded-md bg-surface-container p-2"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
-        <label className="block">Source content<textarea aria-label="Source content" value={content} onChange={e => setContent(e.target.value)} rows={6} className="block w-full rounded-md bg-surface-container p-3 font-mono" /></label>
+        <label className="block">Format<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Import format" value={format} onChange={e => setFormat(e.target.value)}><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+        <label className="block">Source content<textarea className="w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Source content" value={content} onChange={e => setContent(e.target.value)} rows={6} /></label>
         <Button loading={busy} onClick={() => importAction(false)}>Preview import</Button>
         {preview && previewCurrent && <div className="space-y-2"><p>{preview.result.rows.length} rows; {preview.result.duplicates} duplicates.</p><ul>{preview.result.rows.map((row, index) => <li key={index}>{row.analyte}: {row.value} {row.unit} · {row.observed_at}</li>)}</ul><Button loading={busy} onClick={() => importAction(true)}>Commit import</Button></div>}
         {notice && <p role="status">{notice}</p>}
       </section>
       <section className="space-y-3 min-w-0" aria-label="Laboratory measurements">
-        <form onSubmit={e => { e.preventDefault(); const next = new URLSearchParams(); if (analyte) next.set('analyte', analyte); if (from) next.set('from', from); setQuery(next.toString()) }} className="space-y-3"><Field label="Filter analyte"><TextInput value={analyte} onChange={setAnalyte} /></Field><Field label="From timestamp"><TextInput value={from} onChange={setFrom} /></Field><Button type="submit">Filter laboratory records</Button></form>
+        <form onSubmit={e => { e.preventDefault(); const next = new URLSearchParams(); if (analyte) next.set('analyte', analyte); if (from) next.set('from', from); setQuery(next.toString()) }} className="space-y-m"><Field label="Filter analyte"><TextInput value={analyte} onChange={setAnalyte} /></Field><Field label="From timestamp"><TextInput value={from} onChange={setFrom} /></Field><Button type="submit">Filter laboratory records</Button></form>
         {loading && <p role="status">Loading laboratory records…</p>}
         {!loading && !error && !rows.length && <p>No laboratory records.</p>}
         {rows.map(row => <button key={row.id} onClick={() => setParams({ id: row.id })} className="block w-full text-left rounded-lg bg-surface-container p-3 break-words">{row.analyte}: {row.value} {row.unit}<p>{row.observed_at} · {row.source}</p></button>)}
@@ -111,6 +111,6 @@ export default function Labs() {
       </section>
     </div>
     {error && <div role="alert" className="text-danger">{error} <Button onClick={() => setGeneration(n => n + 1)}>Reload laboratory records</Button></div>}
-    {selected && <div className="grid gap-6 lg:grid-cols-2"><Correction key={`${selected.id}:${selected.revision}`} row={selected} saved={() => setGeneration(n => n + 1)} /><section className="space-y-3"><h2 data-type="title-m">Laboratory correction history</h2>{history.map(row => <p key={row.revision}>Revision {row.revision}: {row.value} {row.unit} · {row.notes}</p>)}<h2 data-type="title-m">Recorded trend · {selected.unit}</h2><p>Latest 500 observations with this exact analyte and unit, in chronological order.</p><ol>{trend.map(row => <li key={row.id}>{row.observed_at}: {row.value} {row.unit}</li>)}</ol></section></div>}
+    {selected && <div className="grid gap-6 lg:grid-cols-2"><Correction key={`${selected.id}:${selected.revision}`} row={selected} saved={() => setGeneration(n => n + 1)} /><section className="space-y-m"><h2 data-type="title-m">Laboratory correction history</h2>{history.map(row => <p key={row.revision}>Revision {row.revision}: {row.value} {row.unit} · {row.notes}</p>)}<h2 data-type="title-m">Recorded trend · {selected.unit}</h2><p>Latest 500 observations with this exact analyte and unit, in chronological order.</p><ol>{trend.map(row => <li key={row.id}>{row.observed_at}: {row.value} {row.unit}</li>)}</ol></section></div>}
   </main>
 }

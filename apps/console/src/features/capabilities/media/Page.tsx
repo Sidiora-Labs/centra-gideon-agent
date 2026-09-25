@@ -12,6 +12,9 @@ import JobsPage from './JobsPage'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import LibraryPage from './LibraryPage'
+import NativeMediaPage from './NativeMediaPage'
+import { AreaNavigation } from '../AreaNavigation'
+import { Clapperboard, Code2, Database, Download, Film, Gauge, Grid3X3, ImagePlus, Images, ListChecks, Paintbrush, Video, Wand2 } from 'lucide-react'
 
 type Stroke = { tool: 'draw' | 'erase'; color: string; width: number; points: number[][] }
 type Sketch = { id: string; width: number; height: number; strokes: Stroke[]; revision: number; source_artifact_id: string | null }
@@ -72,12 +75,9 @@ function SketchPage() {
     return [Math.max(0, Math.min(sketch!.width - 1, (e.clientX - rect.left) * sketch!.width / rect.width)), Math.max(0, Math.min(sketch!.height - 1, (e.clientY - rect.top) * sketch!.height / rect.height))]
   }
   const dirty = sketch && JSON.stringify(strokes) !== JSON.stringify(sketch.strokes)
-  return <section className="p-4 space-y-4 overflow-auto" aria-label="Image sketches">
-    <h1>Image sketches</h1>
-    <nav aria-label="Media workspaces" className="flex flex-wrap gap-3"><a href="#/capabilities/media?view=library">Media library</a>
-<a href="#/capabilities/media?view=jobs">Media jobs</a><a href="#/capabilities/media?view=downloads">Source downloader</a><a href="#/capabilities/media?view=readiness">Media readiness</a><a href="#/capabilities/media?view=images">Generate image</a><a href="#/capabilities/media?view=datasets">Training datasets</a><a href="#/capabilities/media?view=sprites">Sprite production</a><a href="#/capabilities/media?view=animation">Code animation</a><a href="#/capabilities/media?view=episodes">Continuous episodes</a><a href="#/capabilities/media?view=timelines">Video timeline</a><a href="#/capabilities/media?view=videos">Generate video</a><a href="#/capabilities/media?view=cleanup">Image cleanup</a></nav>
+  return <NativeMediaPage title="Image sketches">
     {error && <p role="alert">{error}</p>}
-    <div className="flex flex-wrap gap-3">
+    <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">
       <label>Source artifact ID (optional)<input aria-label="Source artifact ID" value={source} onChange={e => setSource(e.target.value)} /></label>
       <label>Source version<input aria-label="Source version" type="number" min="1" value={version} onChange={e => setVersion(Number(e.target.value))} /></label>
       {['Width', 'Height'].map((label, i) => <label key={label}>{label}<input aria-label={label} type="number" min="1" max="4096" value={size[i]} onChange={e => setSize(size.map((v, j) => j === i ? Number(e.target.value) : v))} /></label>)}
@@ -91,7 +91,7 @@ function SketchPage() {
     </select></label>
     {!sketch && <p>Create a blank canvas or open an image artifact at its original dimensions.</p>}
     {sketch && <>
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-end gap-s rounded-lg bg-surface-container p-m">
         <Button aria-pressed={tool === 'draw'} onClick={() => setTool('draw')}>Draw</Button><Button aria-pressed={tool === 'erase'} onClick={() => setTool('erase')}>Erase</Button>
         <label>Color<input aria-label="Color" type="color" value={color} onChange={e => setColor(e.target.value)} /></label>
         <label>Brush width<input aria-label="Brush width" type="number" min="1" max="128" value={width} onChange={e => setWidth(Math.max(1, Math.min(128, Number(e.target.value))))} /></label>
@@ -103,7 +103,7 @@ function SketchPage() {
       </div>
       <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
       <p role="status">Revision {sketch.revision}{dirty ? ' · Unsaved changes' : ' · Saved'}. Erase removes drawing only; the original image stays intact.</p>
-      <div className="relative max-w-full" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
+      <div className="relative max-w-full overflow-hidden rounded-lg ring-1 ring-outline-variant/30" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
         {sketch.source_artifact_id && <img alt="Original image" src={base + '/' + sketch.id + '/source'} className="absolute inset-0 w-full h-full" onError={() => setError('Original image is unavailable')} />}
         <canvas aria-label="Drawing canvas" ref={canvas} width={sketch.width} height={sketch.height} className="relative w-full h-full touch-none" onPointerDown={e => {
           if (busy || strokes.length >= 500) return
@@ -111,11 +111,27 @@ function SketchPage() {
         }} onPointerMove={e => { if (active.current && active.current.points.length < 5000) { active.current = { ...active.current, points: [...active.current.points, point(e)] }; setStrokes(old => [...old.slice(0, -1), active.current!]) } }} onPointerUp={() => { active.current = null }} onPointerCancel={() => { active.current = null }} />
       </div>
     </>}
-  </section>
+  </NativeMediaPage>
 }
 
 export default function Page() {
-  const [view, setView] = useState(() => typeof location !== 'undefined' && new URLSearchParams(location.hash.split('?')[1] || '').get('view'))
-  useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view')); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
-  return view === 'downloads' ? <DownloadPage /> : view === 'animation' ? <AnimationPage /> : view === 'sprites' ? <SpritePage /> : view === 'episodes' ? <EpisodePage /> : view === 'timelines' ? <TimelinePage /> : view === 'videos' ? <VideoPage /> : view === 'cleanup' ? <CleanupPage /> : view === 'datasets' ? <DatasetsPage /> : view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
+  const [view, setView] = useState(() => typeof location === 'undefined' ? 'sketches' : new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches')
+  useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches'); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
+  const content = view === 'downloads' ? <DownloadPage /> : view === 'animation' ? <AnimationPage /> : view === 'sprites' ? <SpritePage /> : view === 'episodes' ? <EpisodePage /> : view === 'timelines' ? <TimelinePage /> : view === 'videos' ? <VideoPage /> : view === 'cleanup' ? <CleanupPage /> : view === 'datasets' ? <DatasetsPage /> : view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
+  const destinations = [
+    { id: 'sketches', label: 'Image sketches', icon: Paintbrush, group: 'Create' },
+    { id: 'images', label: 'Generate image', icon: ImagePlus, group: 'Create' },
+    { id: 'videos', label: 'Generate video', icon: Video, group: 'Create' },
+    { id: 'animation', label: 'Code animation', icon: Code2, group: 'Create' },
+    { id: 'sprites', label: 'Sprite production', icon: Grid3X3, group: 'Create' },
+    { id: 'episodes', label: 'Continuous episodes', icon: Clapperboard, group: 'Edit' },
+    { id: 'timelines', label: 'Video timeline', icon: Film, group: 'Edit' },
+    { id: 'cleanup', label: 'Image cleanup', icon: Wand2, group: 'Edit' },
+    { id: 'library', label: 'Media library', icon: Images, group: 'Manage' },
+    { id: 'jobs', label: 'Media jobs', icon: ListChecks, group: 'Manage' },
+    { id: 'downloads', label: 'Source downloader', icon: Download, group: 'Manage' },
+    { id: 'datasets', label: 'Training datasets', icon: Database, group: 'Manage' },
+    { id: 'readiness', label: 'Media readiness', icon: Gauge, group: 'Manage' },
+  ]
+  return <AreaNavigation label="Media workspaces" items={destinations} active={view} onChange={id => { location.hash = id === 'sketches' ? '/capabilities/media' : `/capabilities/media?view=${id}` }}>{content}</AreaNavigation>
 }

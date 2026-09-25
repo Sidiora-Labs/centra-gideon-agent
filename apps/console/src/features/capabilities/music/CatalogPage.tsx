@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import {ListScaffold} from '../../../shared/ui/ListScaffold'
+import {Checkbox} from '../../../shared/ui/forms'
 import { Button } from '../../../shared/ui/Button'
 
 type Render = { id: string; artifact_ref: { slug: string; version: number }; duration_seconds: number; source: { kind: string; label: string; license: string; model: string | null } }
 type RecordItem = { id: string; revision: number; name?: string; title?: string; bio?: string; notes?: string; artist_id?: string; track_ids?: string[]; archived: boolean; renders?: Render[]; selected_render_id?: string }
 const route = () => window.location.hash.split('/catalog/')[1]?.split('/') || ['tracks']
-const inputClass = 'w-full rounded-lg border border-outline bg-surface p-2 text-on-surface'
+const inputClass = 'h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export default function CatalogPage({ apiBase = '/api/capabilities/music/catalog' }: { apiBase?: string }) {
   const [parts, setParts] = useState(route)
@@ -55,17 +57,17 @@ export default function CatalogPage({ apiBase = '/api/capabilities/music/catalog
     const data = kind === 'artists' ? { name: label, bio: details } : kind === 'albums' ? { title: label, artist_id: artist, track_ids: tracks.split('\n').map(value => value.trim()).filter(Boolean) } : { title: label, artist_id: artist, notes: details }
     void mutate(`/${kind}${id ? '/' + id : ''}`, id ? 'PATCH' : 'POST', { ...data, ...(item ? { revision: item.revision } : {}) })
   }
-  return <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 overflow-auto p-4 text-on-surface">
-    <h1>Music catalog</h1><a className="text-primary" href="#/capabilities/music">Repertoire</a>
+  return <ListScaffold title="Music catalog" bodyClassName="mx-auto flex w-full max-w-4xl flex-col gap-l px-l py-xl">
+
     <nav aria-label="Music collections" className="flex flex-wrap gap-2">{['artists', 'albums', 'tracks'].map(collection => <Button key={collection} variant={kind === collection ? 'primary' : 'secondary'} onClick={() => open(collection)}>{collection}</Button>)}</nav>
     {error && <p role="alert">{error}</p>}
-    {!id && <><label>Filter catalog<input className={inputClass} value={q} onChange={event => { setQ(event.target.value); setOffset(0) }} /></label><label><input type="checkbox" checked={archived} onChange={event => { setArchived(event.target.checked); setOffset(0) }} /> Archived records</label></>}
+    {!id && <><label>Filter catalog<input className={inputClass} value={q} onChange={event => { setQ(event.target.value); setOffset(0) }} /></label><label className="flex items-center gap-s"><Checkbox ariaLabel="Archived records" checked={archived} onChange={value=>{setArchived(value);setOffset(0)}}/>Archived records</label></>}
     {loading ? <p role="status">Loading catalog…</p> : <>
       {!id && <><ul>{rows.map(row => <li key={row.id}><a className="text-primary" href={`#/capabilities/music/catalog/${kind}/${row.id}`} onClick={() => setParts([kind, row.id])}>{row.name || row.title}</a> <span>{row.id}</span></li>)}</ul>{rows.length === 0 && <p>No matching records.</p>}<div className="flex gap-2"><Button disabled={!offset} onClick={() => setOffset(value => Math.max(0, value - 25))}>Previous</Button><Button disabled={rows.length < 25} onClick={() => setOffset(value => value + 25)}>Next</Button></div></>}
       {(!id || item) && <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); save() }}>
         <label>{kind === 'artists' ? 'Artist name' : 'Title'}<input className={inputClass} value={label} maxLength={200} required onChange={event => setLabel(event.target.value)} /></label>
         {kind !== 'artists' && <label>Artist ID (optional)<input className={inputClass} value={artist} onChange={event => setArtist(event.target.value)} /></label>}
-        {kind === 'albums' ? <label>Ordered track IDs (one per line)<textarea className={inputClass} value={tracks} onChange={event => setTracks(event.target.value)} /></label> : <label>{kind === 'artists' ? 'Biography' : 'Notes'}<textarea className={inputClass} value={details} onChange={event => setDetails(event.target.value)} /></label>}
+        {kind === 'albums' ? <label>Ordered track IDs (one per line)<textarea className={`${inputClass} h-auto min-h-24 py-2`} value={tracks} onChange={event => setTracks(event.target.value)} /></label> : <label>{kind === 'artists' ? 'Biography' : 'Notes'}<textarea className={`${inputClass} h-auto min-h-24 py-2`} value={details} onChange={event => setDetails(event.target.value)} /></label>}
         <Button type="submit" disabled={busy || !label.trim()}>{item ? 'Save metadata' : 'Create record'}</Button>
       </form>}
       {item && <><p>Record ID: {item.id}</p><Button variant="secondary" disabled={busy} onClick={() => void mutate(`/${kind}/${id}`, 'PATCH', { revision: item.revision, archived: !item.archived })}>{item.archived ? 'Restore record' : 'Archive record'}</Button></>}
@@ -83,5 +85,5 @@ export default function CatalogPage({ apiBase = '/api/capabilities/music/catalog
         </div>)}
       </article>}
     </>}
-  </section>
+  </ListScaffold>
 }

@@ -13,15 +13,15 @@ export default function References({ baseUrl = '' }: { baseUrl?: string }) {
     try { setData(await readJson<Snapshot>(await gatewayRequest(reference ? `${url}/${reference.id}${action === 'remove' ? '' : `/${action}`}` : url, action === 'remove' ? 'DELETE' : 'POST', reference ? { head: reference.snapshot?.head } : draft))); if (!reference) setDraft({ name: '', path: '', branch: 'main' }) }
     catch (reason) { setError(String(reason)) } finally { setBusy(false) }
   }
-  return <section aria-label="Reference repositories" className="space-y-m">
-    <h2>Reference repositories</h2><p>Check fetches the tracked origin branch. Only Mark reviewed advances your cursor. Failed checks retain the last successful snapshot.</p>
+  return <section aria-label="Reference repositories" className="grid gap-l">
+    <h2 data-type="title-m">Reference repositories</h2><p>Check fetches the tracked origin branch. Only Mark reviewed advances your cursor. Failed checks retain the last successful snapshot.</p>
     {error && <p role="alert">{error}</p>}
-    <div className="flex flex-wrap gap-s">{(['name', 'path', 'branch'] as const).map(field => <label key={field}>{field}<input aria-label={`Reference ${field}`} className="block bg-surface-high p-s" value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></label>)}</div>
+    <div className="grid gap-m sm:grid-cols-3">{(['name', 'path', 'branch'] as const).map(field => <label className="grid gap-xs text-sm" key={field}>{field}<input aria-label={`Reference ${field}`} className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></label>)}</div>
     <Button disabled={busy || !draft.name || !draft.path || !draft.branch} onClick={() => void write()}>Track reference</Button>
     <Button disabled={busy} onClick={() => void load()}>Refresh references</Button>
     {data && !data.references.length && <p>No reference repositories.</p>}
     {data?.references.map(reference => <article key={reference.id} aria-label={reference.name} className="space-y-s rounded bg-surface-high p-m">
-      <h3>{reference.name}</h3><p>{reference.path} · {reference.branch}</p><p>Reviewed: {reference.reviewed || 'Never'}</p>
+      <h3 data-type="headline-s">{reference.name}</h3><p>{reference.path} · {reference.branch}</p><p>Reviewed: {reference.reviewed || 'Never'}</p>
       {reference.checked_at && <p>Checked {reference.checked_at}{reference.stale ? ' · Stale snapshot' : ''}</p>}
       {reference.error && <p role="status">{reference.error}</p>}
       <Button disabled={busy} onClick={() => void write(reference, 'check')}>Check {reference.name}</Button>

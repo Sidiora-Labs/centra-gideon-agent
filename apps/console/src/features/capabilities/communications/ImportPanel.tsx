@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+const nativeControl = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 type Match = { id: string; name: string; revision: number }
 type Row = { row_id: string; name: string; error: string; candidate: { identities: { kind: string; value: string }[] } | null; matches: Match[] }
@@ -37,11 +38,11 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
       setReceipt(result.receipt); onImported()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
-  return <section aria-label="Import contacts" className="my-5 space-y-3 rounded border border-outline p-3">
-    <h2>Import contacts</h2>
+  return <section aria-label="Import contacts" className="space-y-l">
+    <h2 data-type="title-m">Import contacts</h2>
     <p>Preview CSV or UTF-8 vCard 3/4. CSV columns: name, email, phone, handle, notes. Separate multiple identities with |. Nothing is saved until you commit.</p>
-    <label className="block">Contact format<select value={format} disabled={busy} onChange={e => { setFormat(e.target.value); invalidate() }} className="ml-2 bg-surface p-2"><option value="csv">CSV</option><option value="vcard">vCard</option></select></label>
-    <label className="block">Contact data<textarea value={content} maxLength={262144} disabled={busy} onChange={e => { setContent(e.target.value); invalidate() }} className="block min-h-28 w-full rounded border border-outline bg-surface p-2" /></label>
+    <label className="block">Contact format<select className={nativeControl} value={format} disabled={busy} onChange={e => { setFormat(e.target.value); invalidate() }}><option value="csv">CSV</option><option value="vcard">vCard</option></select></label>
+    <label className="block">Contact data<textarea className="block min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={content} maxLength={262144} disabled={busy} onChange={e => { setContent(e.target.value); invalidate() }} /></label>
     <Button onClick={inspect} disabled={busy || !content.trim()}>Preview contacts</Button>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {preview && <><p>Choose what to import. Updating a match adds identities and preserves existing name, notes, ring and cadence. Conflicts never merge people automatically.</p>
@@ -50,7 +51,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
         <p>{row.candidate?.identities.map(i => `${i.kind}: ${i.value}`).join(' · ')}</p>
         {row.error && <p>{row.error}</p>}
         {row.matches.length > 1 && <p>Multiple people match. Resolve the conflicting identities before importing this row.</p>}
-        <label>Decision for contact {row.row_id}<select aria-label={`Decision for contact ${row.row_id}`} className="ml-2 bg-surface p-2" disabled={busy || !!receipt} value={choices[row.row_id]} onChange={e => setChoices({ ...choices, [row.row_id]: e.target.value })}>
+        <label className="block">Decision for contact {row.row_id}<select aria-label={`Decision for contact ${row.row_id}`} disabled={busy || !!receipt} value={choices[row.row_id]} onChange={e => setChoices({ ...choices, [row.row_id]: e.target.value })}>
           <option value="skip">Skip</option>{!row.error && !row.matches.length && <option value="create">Create person</option>}
           {!row.error && row.matches.length === 1 && row.matches.map(match => <option key={match.id} value={match.id}>Add identities to {match.name}</option>)}
         </select></label>

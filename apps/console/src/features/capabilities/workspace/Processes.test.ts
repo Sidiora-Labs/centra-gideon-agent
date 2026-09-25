@@ -61,7 +61,7 @@ afterAll(async () => {
 })
 
 test('starts a real process, reads output, stops and reloads its durable status', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=processes`)
   await page.getByText('No managed processes.').waitFor()
   await page.getByLabel('Process project ID', { exact: true }).fill('Browser service')
   await page.getByLabel('Process workspace', { exact: true }).fill(repo)
@@ -86,7 +86,7 @@ test('starts a real process, reads output, stops and reloads its durable status'
 }, 60000)
 
 test('shows a genuine policy refusal and preserves the command for correction', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=processes`)
   await page.getByLabel('Process project ID', { exact: true }).fill('Denied service')
   await page.getByLabel('Process workspace', { exact: true }).fill(repo)
   await page.getByLabel('Command', { exact: true }).fill('cat ~/.ssh/id_rsa')

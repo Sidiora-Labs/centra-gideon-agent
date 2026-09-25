@@ -1,3 +1,4 @@
+import { capabilityAreas, capabilityNavigationId } from '../../features/capabilities/navigation'
 import VoiceControls from './VoiceControls'
 import './shell.css'
 import { Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
@@ -77,7 +78,6 @@ installRoutePreload()
 const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'capabilities', label: 'Capabilities', icon: Sparkles },
   { id: 'rooms', label: 'Rooms', icon: Users },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
@@ -87,6 +87,7 @@ const NAV: NavItem[] = [
   { id: 'files', label: 'Files', icon: Files, section: 'Platform' },
   { id: 'artifacts', label: 'Artifacts', icon: FileCode, section: 'Platform' },
   { id: 'terminal', label: 'Terminal', icon: Terminal, section: 'Platform' },
+  ...capabilityAreas.map(area => ({ id: `capabilities/${area.id}`, label: area.label, section: area.group, icon: area.icon })),
   { id: 'agents', label: 'Agents', icon: Users, section: 'Capabilities' },
   { id: 'tools', label: 'Tools', icon: Wrench, section: 'Capabilities' },
   { id: 'skills', label: 'Skills', icon: Sparkles, section: 'Capabilities' },
@@ -231,7 +232,7 @@ function AppInner() {
   const rendered = ROUTABLE.has(route) ? route : 'dashboard'
   const active = (rendered === 'loop' || rendered === 'loops' || rendered === 'code') ? 'projects'
     : rendered === 'app' ? `app/${(sub ?? '').split('/')[0]}`
-      : rendered
+      : rendered === 'capabilities' ? capabilityNavigationId(sub ?? '') : rendered
 
   useEffect(() => {
     if (navMode !== 'starter') return
@@ -318,6 +319,7 @@ function AppInner() {
   const moreCount = undisclosedCount(navItems.map((n) => n.id), navPinned)
 
   const commands: Command[] = [
+    { id: 'go:capabilities', label: 'All workspaces', hint: 'Go to', icon: Sparkles, run: () => navigate('capabilities') },
     ...NAV.map((n) => ({ id: `go:${n.id}`, label: n.label, hint: 'Go to', icon: n.icon, keywords: n.section ?? '', run: () => navigate(n.id) })),
     ...appNavItems.map((n) => ({ id: `go:${n.id}`, label: n.label, hint: 'Go to', icon: n.icon, keywords: 'app', run: () => navigate(n.id) })),
     { id: 'go:mission-control', label: 'Mission Control', hint: 'Go to', icon: Radar, keywords: 'attention lanes approvals needs approval your turn working idle', run: () => navigate('mission-control') },
@@ -359,7 +361,7 @@ function AppInner() {
           </Suspense>
         </ErrorBoundary>
       </main>
-      <VoiceControls open={voiceOpen} onClose={() => setVoiceOpen(false)} items={navItems} navigate={navigate} currentRoute={[route, sub].filter(Boolean).join('/')} />
+      <VoiceControls open={voiceOpen} onClose={() => setVoiceOpen(false)} items={[...navItems, { id: 'capabilities', label: 'Capabilities', icon: Sparkles }]} navigate={navigate} currentRoute={[route, sub].filter(Boolean).join('/')} />
       <CommandPalette commands={commands} />
       {
 }

@@ -1,4 +1,8 @@
-import { lazy, Suspense, type ComponentType } from 'react'
+import { Archive, ArchiveRestore, BookOpen, CalendarDays, Fingerprint, Flag, FolderOpen, Inbox, Lightbulb, Link, ListChecks, NotebookPen, Play, RefreshCw, Shapes, Shield, Tags, Target, TrendingUp, Workflow } from 'lucide-react'
+import { AreaNavigation, type AreaDestination } from './AreaNavigation'
+import { capabilityAreas } from './navigation'
+import { ListScaffold } from '../../shared/ui/ListScaffold'
+import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import './capabilities.css'
 
@@ -49,26 +53,60 @@ const nested: Record<string, ComponentType> = {
   'wellbeing/labs': lazy(() => import('./wellbeing/Labs')),
   'identity/twin': lazy(() => import('./identity/TwinPage')),
 }
-const sections = [['workspace', 'Workspace'], ['knowledge', 'Knowledge and capture'], ['identity', 'Personal identity'], ['wellbeing', 'Wellbeing'], ['communications', 'People and communications'], ['media', 'Visual media'], ['creative', 'Creative writing'], ['music', 'Music'], ['experience', 'Interactive stories'], ['platform', 'Platform tools']] as const
+const destinations: Record<string, AreaDestination[]> = {
+  knowledge: [
+    { id: 'knowledge', label: 'Overview', icon: CalendarDays, group: 'My knowledge' },
+    { id: 'knowledge/capture', label: 'Inbox', icon: Inbox, group: 'My knowledge' },
+    { id: 'knowledge/ideas', label: 'Ideas', icon: Lightbulb, group: 'My knowledge' },
+    { id: 'knowledge/topics', label: 'Topics', icon: Tags, group: 'My knowledge' },
+    { id: 'knowledge/journals', label: 'Journal', icon: NotebookPen, group: 'Reflect' },
+    { id: 'knowledge/reviews', label: 'Reviews', icon: BookOpen, group: 'Reflect' },
+    { id: 'knowledge/videos', label: 'Videos', icon: Play, group: 'Read & collect' },
+    { id: 'knowledge/links', label: 'Saved links', icon: Link, group: 'Read & collect' },
+    { id: 'knowledge/archives', label: 'Conversation imports', icon: Archive, group: 'Sources' },
+    { id: 'knowledge/vaults', label: 'Connected folders', icon: FolderOpen, group: 'Sources' },
+    { id: 'knowledge/types', label: 'Record types', icon: Shapes, group: 'Sources' },
+  ],
+  identity: [
+    { id: 'identity', label: 'My story', icon: NotebookPen, group: 'About me' },
+    { id: 'identity/twin', label: 'Digital twin', icon: Fingerprint, group: 'About me' },
+    { id: 'identity/fidelity', label: 'Fidelity', icon: Target, group: 'About me' },
+    { id: 'identity/goals', label: 'Goals', icon: Flag, group: 'Progress' },
+    { id: 'identity/goal-plans', label: 'Goal plans', icon: ListChecks, group: 'Progress' },
+    { id: 'identity/progress', label: 'Progress', icon: TrendingUp, group: 'Progress' },
+    { id: 'identity/recipes', label: 'Recipes', icon: BookOpen, group: 'Actions' },
+    { id: 'identity/guarded-recipes', label: 'Protected recipes', icon: Shield, group: 'Actions' },
+    { id: 'identity/lifecycle', label: 'Lifecycle', icon: Workflow, group: 'Continuity' },
+    { id: 'identity/continuity', label: 'Continuity', icon: RefreshCw, group: 'Continuity' },
+    { id: 'identity/bundles', label: 'Portable bundles', icon: ArchiveRestore, group: 'Continuity' },
+  ],
 
-export default function CapabilitiesSection({ sub, navigate }: RouteProps) {
-  const label = (value: string) => value
+}
+
+export default function CapabilitiesSection({ sub, navigate, query }: RouteProps) {
   const lane = sub.split('/')[0]
-  const Page = nested[sub] || pages[lane]
-  return <section className="capabilities-shell">
-    <nav aria-label={label('Capabilities')} className="capabilities-nav">
-      {sections.map(([id, title]) => <a key={id} href={`#/capabilities/${id}`}
-        aria-current={lane === id ? 'page' : undefined}
-        onClick={(event) => { if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) { event.preventDefault(); navigate(`capabilities/${id}`) } }}>
-        {label(title)}
-      </a>)}
-    </nav>
-    {Object.keys(nested).some(path => path.startsWith(lane + '/')) && <nav className="capabilities-nav" aria-label={label('Area tools')}>
-      {Object.keys(nested).filter(path => path.startsWith(lane + '/')).map(path => <a key={path} href={`#/capabilities/${path}`} aria-current={sub === path ? 'page' : undefined}>{label(path.split('/')[1].replaceAll('-', ' '))}</a>)}
-    </nav>}
-    <div className="capabilities-content">
-      {Page ? <Suspense fallback={<p role="status">{label('Loading…')}</p>}><Page key={sub}/></Suspense>
-        : <div className="capabilities-intro"><h1>{label('Capabilities')}</h1><p>{label('Choose an area to open its tools and records.')}</p></div>}
-    </div>
-  </section>
+  const legacyHealth = lane === 'wellbeing' && sub.includes('/') ? sub.split('/')[1] : null
+  useEffect(() => {
+    if (legacyHealth) {
+      const view = legacyHealth === 'apple' ? 'import' : legacyHealth === 'substances' ? 'consumption' : legacyHealth
+      navigate(`capabilities/wellbeing?${new URLSearchParams({ ...query, view })}`, { replace: true })
+    }
+  }, [legacyHealth, navigate, query])
+  const Page = lane === 'wellbeing' ? pages.wellbeing : nested[sub] || pages[lane]
+  const body = Page ? <Suspense fallback={<p role="status" className="p-l text-on-surface-low">Loading…</p>}><Page key={sub}/></Suspense>
+    : <ListScaffold title="What would you like to do?">
+      <p data-type="body-m" className="mb-l text-on-surface-low">Choose a workspace to get started.</p>
+      <div className="capabilities-directory-grid">{capabilityAreas.map(area => {
+        const Icon = area.icon
+        return <a key={area.id} href={`#/capabilities/${area.id}`} className="capabilities-directory-link">
+          <Icon size={22} aria-hidden="true" />
+          <div><h2 data-type="title-m">{area.label}</h2><p data-type="body-m">{area.description}</p></div>
+        </a>
+      })}</div>
+    </ListScaffold>
+  const items = lane === 'wellbeing' ? undefined : destinations[lane]
+  return <section className="capabilities-shell"><div className="capabilities-content">
+    {items ? <AreaNavigation label={`${capabilityAreas.find(area => area.id === lane)?.label} sections`} items={items}
+      active={nested[sub] ? sub : lane} onChange={path => navigate(`capabilities/${path}`)}>{body}</AreaNavigation> : body}
+  </div></section>
 }

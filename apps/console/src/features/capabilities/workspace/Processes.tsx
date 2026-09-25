@@ -2,6 +2,8 @@ import ProcessLogs from './ProcessLogs'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Field, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 
 type Process = { id: string; project_id: string; workspace: string; command: string; status: string; revision: number; exit_code: number | null }
 const base = '/api/capabilities/workspace/processes'
@@ -43,24 +45,24 @@ export default function Processes() {
     update(row); choose(row.id); setRetry(null)
   }
   const row = rows.find(item => item.id === selected)
-  return <section className="space-y-3 border-t border-outline pt-4">
-    <h2 className="text-lg font-semibold">Managed processes</h2>
-    <p>Start a command in an allowed project directory. Stop affects only processes started here.</p>
+  return <section className="mx-auto w-full space-y-l px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
+    <header><h2 data-type="title-m">Managed processes</h2>
+    <p data-type="body-s" className="mt-1 text-on-surface-low">Start a command in an allowed project directory. Stop affects only processes started here.</p></header>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <form className="grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(start) }}>
-      {([['Process project ID', project, setProject], ['Process workspace', workspace, setWorkspace], ['Command', command, setCommand]] as const).map(([label, value, setter], index) => <label htmlFor={`process-${index}`} className="grid gap-1" key={label}>{label}<input id={`process-${index}`} value={value} onChange={e => setter(e.target.value)} required className="min-w-0 rounded border border-outline bg-surface p-2" /></label>)}
+    <Surface className="p-l"><form className="grid gap-m sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void act(start) }}>
+      {([['Process project ID', project, setProject], ['Process workspace', workspace, setWorkspace], ['Command', command, setCommand]] as const).map(([label, value, setter], index) => <Field key={label} label={label}><TextInput id={`process-${index}`} value={value} onChange={setter} required /></Field>)}
       <Button type="submit" loading={busy}>Start process</Button>
-    </form>
+    </form></Surface>
     {!loaded && !error && <p role="status">Loading processes…</p>}
     {loaded && rows.length === 0 && <p>No managed processes.</p>}
     <Button variant="secondary" loading={busy} onClick={() => void act(async () => { setRows(await requestJson<Process[]>(base)); setLoaded(true) })}>Refresh processes</Button>
-    <ul>{rows.map(item => <li key={item.id}><Button variant="ghost" disabled={busy} onClick={() => choose(item.id)}>{item.project_id} · {item.status}</Button></li>)}</ul>
+    <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} onClick={() => choose(item.id)}>{item.project_id} · {item.status}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Process not found in this page.</p>}
-    {row && <article className="space-y-2 break-words"><h3>{row.project_id}</h3><p>{row.workspace}</p><code>{row.command}</code><p aria-live="polite">Status: {row.status} · Exit: {row.exit_code ?? 'Not exited'}</p>
+    {row && <Surface className="space-y-m break-words p-l"><h3 data-type="title-m">{row.project_id}</h3><p className="text-on-surface-low">{row.workspace}</p><code className="block rounded-md bg-surface p-m">{row.command}</code><p aria-live="polite">Status: {row.status} · Exit: {row.exit_code ?? 'Not exited'}</p>
       <div className="flex flex-wrap gap-2"><Button loading={busy} onClick={() => void act(async () => { setText((await requestJson<{ text: string }>(`${base}/${row.id}/logs`)).text); update(await requestJson<Process>(`${base}/${row.id}`)) })}>Read process logs</Button>
       <Button variant="danger" loading={busy} disabled={!['running', 'starting'].includes(row.status)} onClick={() => void act(async () => { update(await requestJson<Process>(`${base}/${row.id}/stop`, 'POST', { revision: row.revision })) })}>Stop process</Button></div>
-      {text !== null && <pre className="max-h-72 overflow-auto whitespace-pre-wrap" aria-label="Process logs">{text || 'No output yet.'}</pre>}
+      {text !== null && <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-m" aria-label="Process logs">{text || 'No output yet.'}</pre>}
       <ProcessLogs key={row.id} id={row.id} />
-    </article>}
+    </Surface>}
   </section>
 }

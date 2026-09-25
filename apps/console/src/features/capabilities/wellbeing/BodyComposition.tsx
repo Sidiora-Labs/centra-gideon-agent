@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
-import { useUILanguage } from '../../../shared/i18n'
+import { Button } from '../../../shared/ui/Button'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
+import { Download, Plus, Scale } from 'lucide-react'
 
 type Values = { muscle_percent: number; fat_percent: number; bone_mass: { value: number; unit: string }; temperature: { value: number; unit: string } }
 type RecordRow = { id: string; revision: number; observed_at: string; source: string; notes: string; original_values: Values; normalized_values: { muscle_percent: number; fat_percent: number; bone_mass_kg: number; temperature_c: number } }
@@ -12,14 +14,24 @@ const words = {
   'zh-CN': ['身体成分观察', '仅记录用户输入的测量值。本记录不提供医疗建议，也不重复记录体重。', '加载中…', '新建观察', '导出记录', '暂无身体成分观察', '观察时间', '来源', '肌肉百分比', '脂肪百分比', '骨量', '骨量单位', '温度', '温度单位', '备注', '保存更正', '保存观察', '规范记录', '历史', '规范导出', '肌肉', '脂肪', '骨量'],
 }
 
+function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
+  const value = (typeof document !== 'undefined' && document.documentElement.lang) || (typeof navigator !== 'undefined' && navigator.language) || 'en'
+  if (value.toLowerCase().startsWith('es')) return 'es'
+  if (value.toLowerCase().startsWith('ar')) return 'ar'
+  if (value.toLowerCase().startsWith('hi')) return 'hi'
+  if (value.toLowerCase().startsWith('zh')) return 'zh-CN'
+  return 'en'
+}
+
 export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) {
-  const w = words[useUILanguage()]
+  const w = words[uiLanguage()]
   const base = `${baseUrl}/api/capabilities/wellbeing/body-composition`
   const mounted = useRef(false), generation = useRef(0)
   const [records, setRecords] = useState<RecordRow[]>([]), [selected, setSelected] = useState<RecordRow | null>(null), [history, setHistory] = useState<RecordRow[]>([])
   const [observed, setObserved] = useState(''), [source, setSource] = useState(''), [notes, setNotes] = useState('')
   const [muscle, setMuscle] = useState(''), [fat, setFat] = useState(''), [bone, setBone] = useState(''), [boneUnit, setBoneUnit] = useState('kg'), [temperature, setTemperature] = useState(''), [temperatureUnit, setTemperatureUnit] = useState('C')
   const [requestId, setRequestId] = useState(() => crypto.randomUUID()), [busy, setBusy] = useState(false), [error, setError] = useState(''), [exported, setExported] = useState('')
+  const [editing, setEditing] = useState(false)
   const current = (token: number) => mounted.current && generation.current === token
   const run = async (action: (token: number) => Promise<void>) => {
     const token = ++generation.current
@@ -36,7 +48,7 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
     if (!current(token)) return
     const params = new URLSearchParams(location.hash.split('?')[1] || '')
     if (params.get('view') !== 'body-composition') return
-    setSelected(row); setObserved(row.observed_at); setSource(row.source); setNotes(row.notes)
+    setSelected(row); setEditing(true); setObserved(row.observed_at); setSource(row.source); setNotes(row.notes)
     setMuscle(String(row.original_values.muscle_percent)); setFat(String(row.original_values.fat_percent))
     setBone(String(row.original_values.bone_mass.value)); setBoneUnit(row.original_values.bone_mass.unit)
     setTemperature(String(row.original_values.temperature.value)); setTemperatureUnit(row.original_values.temperature.unit)
@@ -55,7 +67,7 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
     })()
     return () => { mounted.current = false; generation.current += 1 }
   }, [])
-  const reset = () => { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setObserved(''); setSource(''); setNotes(''); setMuscle(''); setFat(''); setBone(''); setBoneUnit('kg'); setTemperature(''); setTemperatureUnit('C'); setRequestId(crypto.randomUUID()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=body-composition') }
+  const reset = () => { generation.current += 1; setBusy(false); setSelected(null); setEditing(true); setHistory([]); setObserved(''); setSource(''); setNotes(''); setMuscle(''); setFat(''); setBone(''); setBoneUnit('kg'); setTemperature(''); setTemperatureUnit('C'); setRequestId(crypto.randomUUID()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=body-composition') }
   const save = async (event: FormEvent) => {
     event.preventDefault()
     await run(async token => {
@@ -66,25 +78,22 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
     })
   }
   const download = async () => { await run(async token => { const value = await requestJson<object>(`${base}/export`); if (current(token)) setExported(JSON.stringify(value, null, 2)) }) }
-  return <main style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }} aria-busy={busy}>
-    <h1>{w[0]}</h1>
-    <p>{w[1]}</p>
+  return <main style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface" aria-busy={busy}>
+    <div className="flex flex-wrap items-start justify-between gap-l"><div><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs text-on-surface-var">{w[1]}</p></div><div className="flex gap-s"><Button onClick={reset}><Plus size={17} />{w[3]}</Button><Button variant="secondary" onClick={() => void download()}><Download size={17} />{w[4]}</Button></div></div>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[2]}</p>}
-    <button onClick={reset}>{w[3]}</button> <button onClick={() => void download()}>{w[4]}</button>
-    <ul>{records.map(row => <li key={row.id}><button onClick={() => void run(token => open(row.id, token))}>{row.observed_at} · {row.source}</button></li>)}</ul>
-    {!busy && records.length === 0 && <p>{w[5]}</p>}
-    <form onSubmit={save} style={{ display: 'grid', gap: 10 }}>
-      <label>{w[6]}<input required value={observed} onChange={event => setObserved(event.target.value)} placeholder="2026-09-25T08:00:00Z" /></label>
-      <label>{w[7]}<input required disabled={!!selected} value={source} onChange={event => setSource(event.target.value)} /></label>
-      <label>{w[8]}<input required type="number" min="0" max="100" step="any" value={muscle} onChange={event => setMuscle(event.target.value)} /></label>
-      <label>{w[9]}<input required type="number" min="0" max="100" step="any" value={fat} onChange={event => setFat(event.target.value)} /></label>
-      <label>{w[10]}<input required type="number" min="0" step="any" value={bone} onChange={event => setBone(event.target.value)} /></label>
-      <label>{w[11]}<select aria-label={w[11]} value={boneUnit} onChange={event => setBoneUnit(event.target.value)}>{['kg', 'g', 'lb'].map(value => <option key={value}>{value}</option>)}</select></label>
-      <label>{w[12]}<input required type="number" step="any" value={temperature} onChange={event => setTemperature(event.target.value)} /></label>
-      <label>{w[13]}<select aria-label={w[13]} value={temperatureUnit} onChange={event => setTemperatureUnit(event.target.value)}>{['C', 'F', 'K'].map(value => <option key={value}>{value}</option>)}</select></label>
-      <label>{w[14]}<textarea value={notes} onChange={event => setNotes(event.target.value)} /></label>
-      <button disabled={busy}>{selected ? w[15] : w[16]}</button>
-    </form>
+    <section className="rounded-lg border border-outline-variant/20 bg-surface-container p-l" aria-label={w[0]}>{!busy && records.length === 0 ? <div className="py-8 text-center"><Scale className="mx-auto mb-3 text-on-surface-low" /><p>{w[5]}</p><Button className="mt-4" onClick={reset}>{w[3]}</Button></div> : <ul className="divide-y divide-outline-variant/30">{records.map(row => <li key={row.id}><button className="flex w-full items-center justify-between py-3 text-left" onClick={() => void run(token => open(row.id, token))}><span>{new Date(row.observed_at).toLocaleDateString()} · {row.source}</span><strong>{row.original_values.muscle_percent}% {w[20]} · {row.original_values.fat_percent}% {w[21]}</strong></button></li>)}</ul>}</section>
+    {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
+      <Field label={w[6]}><TextInput required value={observed} onChange={setObserved} placeholder="2026-09-25T08:00:00Z" /></Field>
+      <Field label={w[7]}><TextInput required disabled={!!selected} value={source} onChange={setSource} /></Field>
+      <Field label={w[8]}><TextInput required type="number" min={0} max={100} value={muscle} onChange={setMuscle} /></Field>
+      <Field label={w[9]}><TextInput required type="number" min={0} max={100} value={fat} onChange={setFat} /></Field>
+      <Field label={w[10]}><TextInput required type="number" min={0} value={bone} onChange={setBone} /></Field>
+      <Field label={w[11]}><Select ariaLabel={w[11]} value={boneUnit} onChange={setBoneUnit} options={['kg', 'g', 'lb'].map(value => ({ value, label: value }))} /></Field>
+      <Field label={w[12]}><TextInput required type="number" value={temperature} onChange={setTemperature} /></Field>
+      <Field label={w[13]}><Select ariaLabel={w[13]} value={temperatureUnit} onChange={setTemperatureUnit} options={['C', 'F', 'K'].map(value => ({ value, label: value }))} /></Field>
+      <Field label={w[14]}><TextArea value={notes} onChange={setNotes} /></Field>
+      <Button type="submit" disabled={busy}>{selected ? w[15] : w[16]}</Button>
+    </form>}
     {selected && <section><h2>{w[17]}</h2><p>{selected.original_values.muscle_percent}% {w[20]} · {selected.original_values.fat_percent}% {w[21]} · {selected.original_values.bone_mass.value} {selected.original_values.bone_mass.unit} {w[22]} · {selected.original_values.temperature.value} °{selected.original_values.temperature.unit}</p><p>{selected.normalized_values.bone_mass_kg} kg {w[22]} · {selected.normalized_values.temperature_c} °C · {selected.source}</p><h3>{w[18]}</h3><ol>{history.map(row => <li key={row.revision}>v{row.revision}: {row.original_values.temperature.value} °{row.original_values.temperature.unit} · {row.notes}</li>)}</ol></section>}
     {exported && <section><h2>{w[19]}</h2><pre>{exported}</pre></section>}
   </main>

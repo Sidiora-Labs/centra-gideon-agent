@@ -40,9 +40,9 @@ describe('code animation workspace', () => {
 
   it('registers the animation workspace in media navigation', () => {
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    const link = doc.querySelector('nav a[href="#/capabilities/media?view=animation"]')
-    expect(link?.textContent).toBe('Code animation')
-    expect([...doc.querySelectorAll('nav a')].filter(item => item.textContent === 'Code animation')).toHaveLength(1)
+    const destination = doc.querySelector('nav button[aria-label="Code animation"]')
+    expect(destination?.textContent).toBe('Code animation')
+    expect(doc.querySelectorAll('nav button[aria-label="Code animation"]')).toHaveLength(1)
   })
 
   it('links animation jobs back to the exact workspace', () => {

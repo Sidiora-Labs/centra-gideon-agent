@@ -60,7 +60,7 @@ afterAll(async () => {
 })
 
 test('native mirror reports actual platform limitation and keeps observation opt in', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=external`)
   const area = page.getByRole('region', { name: 'External terminal mirror' })
   expect(await area.getByRole('heading').textContent()).toBe('External terminal mirror')
   expect(await area.getByRole('button', { name: 'Observe pane' }).isDisabled()).toBe(true)
@@ -80,7 +80,7 @@ test('native mirror reports actual platform limitation and keeps observation opt
 
 test('URL selection requires explicit observation and stale native content is not invented', async () => {
   await page.goto('about:blank')
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace?pane=missing-pane`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=external&pane=missing-pane`)
   const area = page.getByRole('region', { name: 'External terminal mirror' })
   await area.getByRole('button', { name: 'Observe pane' }).waitFor()
   expect(await area.getByRole('alert').count()).toBe(0)

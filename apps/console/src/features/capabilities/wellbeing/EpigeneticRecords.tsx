@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
-import { useUILanguage } from '../../../shared/i18n';
+import { Button } from '../../../shared/ui/Button';
+import { DateInput, Field, TextArea, TextInput } from '../../../shared/ui/forms';
+import { Plus, Sparkles } from 'lucide-react';
 
 type Reported = { value: number; unit?: string; scale?: string } | null;
 type RecordRow = { id: string; revision: number; source_report_id: string; observed_at: string; source: string; notes: string; evidence_basis: 'source_reported'; biological_age?: Reported; chronological_age?: Reported; pace_of_aging?: Reported; organ_scores: Record<string, Reported> };
@@ -18,13 +20,23 @@ function measure(value: string, label: string, authored: string) {
   return { value: Number(value), [label]: authored };
 }
 
+function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
+  const value = (typeof document !== 'undefined' && document.documentElement.lang) || (typeof navigator !== 'undefined' && navigator.language) || 'en'
+  if (value.toLowerCase().startsWith('es')) return 'es'
+  if (value.toLowerCase().startsWith('ar')) return 'ar'
+  if (value.toLowerCase().startsWith('hi')) return 'hi'
+  if (value.toLowerCase().startsWith('zh')) return 'zh-CN'
+  return 'en'
+}
+
 export default function EpigeneticRecords() {
-  const language = useUILanguage(), w = words[language];
+  const language = uiLanguage(), w = words[language];
   const [rows, setRows] = useState<RecordRow[]>([]), [selected, setSelected] = useState<RecordRow | null>(null), [history, setHistory] = useState<RecordRow[]>([]);
   const [reportId, setReportId] = useState(''), [observed, setObserved] = useState(''), [source, setSource] = useState(''), [notes, setNotes] = useState('');
   const [bio, setBio] = useState(''), [bioUnit, setBioUnit] = useState('years'), [chronological, setChronological] = useState(''), [chronoUnit, setChronoUnit] = useState('years');
   const [pace, setPace] = useState(''), [paceScale, setPaceScale] = useState('years/year'), [scores, setScores] = useState('{}');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
   const mounted = useRef(false), generation = useRef(0);
 
   const current = (token: number) => mounted.current && generation.current === token;
@@ -42,7 +54,7 @@ export default function EpigeneticRecords() {
     if (!current(token)) return;
     const params = new URLSearchParams(location.hash.split('?')[1] || '');
     if (params.get('view') !== 'epigenetic') return;
-    populate(row); setHistory(versions);
+    populate(row); setEditing(true); setHistory(versions);
     if (current(token)) window.history.replaceState(null, '', `#/capabilities/wellbeing?view=epigenetic&id=${encodeURIComponent(row.id)}`);
   }
   useEffect(() => {
@@ -74,27 +86,25 @@ export default function EpigeneticRecords() {
       if (!current(token)) return; await load(token); if (current(token)) await select(row, token);
     });
   }
-  function clear() { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setReportId(''); setObserved(''); setSource(''); setNotes(''); setBio(''); setChronological(''); setPace(''); setScores('{}'); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=epigenetic'); }
+  function clear() { generation.current += 1; setBusy(false); setSelected(null); setEditing(true); setHistory([]); setReportId(''); setObserved(''); setSource(''); setNotes(''); setBio(''); setChronological(''); setPace(''); setScores('{}'); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=epigenetic'); }
   const shown = (value?: Reported) => value == null ? w[23] : `${value.value} ${value.unit || value.scale}`;
-  return <main dir={language === 'ar' ? 'rtl' : undefined} style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }}>
-    <h1>{w[0]}</h1><p>{w[1]}</p>
+  return <main dir={language === 'ar' ? 'rtl' : undefined} style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface">
+    <div className="flex flex-wrap items-start justify-between gap-l"><div><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs text-on-surface-var">{w[1]}</p></div><Button type="button" onClick={clear}><Plus size={17} />{w[2]}</Button></div>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[22]}</p>}
-    <button type="button" onClick={clear}>{w[2]}</button>
-    <form onSubmit={save} style={{ display: 'grid', gap: 10 }}>
-      <label>{w[3]}<input required value={reportId} onChange={e => setReportId(e.target.value)} /></label>
-      <label>{w[4]}<input required type="date" value={observed} onChange={e => setObserved(e.target.value)} /></label>
-      <label>{w[5]}<input required disabled={selected !== null} value={source} onChange={e => setSource(e.target.value)} /></label>
+    <section className="rounded-lg border border-outline-variant/20 bg-surface-container p-l" aria-label={w[0]}>{!busy && rows.length === 0 ? <div className="py-8 text-center"><Sparkles className="mx-auto mb-3 text-on-surface-low" /><p>{w[19]}</p><Button className="mt-4" onClick={clear}>{w[2]}</Button></div> : <ul className="divide-y divide-outline-variant/30">{rows.map(row => <li key={row.id}><button className="flex w-full items-center justify-between py-3 text-left" onClick={() => void run(token => select(row, token))}><span>{row.observed_at} · {row.source}</span><strong>{shown(row.biological_age)}</strong></button></li>)}</ul>}</section>
+    {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
+      <Field label={w[3]}><TextInput required value={reportId} onChange={setReportId} /></Field>
+      <Field label={w[4]}><DateInput value={observed} onChange={setObserved} /></Field>
+      <Field label={w[5]}><TextInput required disabled={selected !== null} value={source} onChange={setSource} /></Field>
       <fieldset><legend>{w[6]}</legend>
-        <label>{w[7]}<input type="number" step="any" value={bio} onChange={e => setBio(e.target.value)} /></label><label>{w[8]}<input value={bioUnit} onChange={e => setBioUnit(e.target.value)} /></label>
-        <label>{w[9]}<input type="number" step="any" value={chronological} onChange={e => setChronological(e.target.value)} /></label><label>{w[10]}<input value={chronoUnit} onChange={e => setChronoUnit(e.target.value)} /></label>
+        <Field label={w[7]}><TextInput type="number" value={bio} onChange={setBio} /></Field><Field label={w[8]}><TextInput value={bioUnit} onChange={setBioUnit} /></Field>
+        <Field label={w[9]}><TextInput type="number" value={chronological} onChange={setChronological} /></Field><Field label={w[10]}><TextInput value={chronoUnit} onChange={setChronoUnit} /></Field>
       </fieldset>
-      <fieldset><legend>{w[11]}</legend><label>{w[12]}<input type="number" step="any" value={pace} onChange={e => setPace(e.target.value)} /></label><label>{w[13]}<input value={paceScale} onChange={e => setPaceScale(e.target.value)} /></label></fieldset>
-      <label>{w[14]}<textarea rows={5} value={scores} onChange={e => setScores(e.target.value)} aria-describedby="organ-help" /></label><small id="organ-help">{w[15]}</small>
-      <label>{w[16]}<textarea value={notes} onChange={e => setNotes(e.target.value)} /></label>
-      <button disabled={busy}>{selected ? w[17] : w[18]}</button>
-    </form>
-    {!busy && rows.length === 0 && <p>{w[19]}</p>}
-    <ul>{rows.map(row => <li key={row.id}><button onClick={() => void run(token => select(row, token))}>{row.observed_at} · {row.source_report_id}</button></li>)}</ul>
+      <fieldset className="grid gap-m sm:grid-cols-2"><legend data-type="label-l" className="mb-s">{w[11]}</legend><Field label={w[12]}><TextInput type="number" value={pace} onChange={setPace} /></Field><Field label={w[13]}><TextInput value={paceScale} onChange={setPaceScale} /></Field></fieldset>
+      <Field label={w[14]} hint={w[15]}><TextArea rows={5} value={scores} onChange={setScores} mono /></Field>
+      <Field label={w[16]}><TextArea value={notes} onChange={setNotes} /></Field>
+      <Button type="submit" disabled={busy}>{selected ? w[17] : w[18]}</Button>
+    </form>}
     {selected && <section><h2>{w[20]}</h2><p>{w[21]}</p><ol>{history.map(row => <li key={row.revision}>v{row.revision}: biological {shown(row.biological_age)}; chronological {shown(row.chronological_age)}; pace {shown(row.pace_of_aging)}</li>)}</ol></section>}
   </main>;
 }

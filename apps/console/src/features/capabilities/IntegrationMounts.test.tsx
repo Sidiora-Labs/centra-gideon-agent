@@ -101,6 +101,7 @@ afterAll(async () => {
 test('platform page mounts reviewed integration apps with its real HTTP workflow', async () => {
   history.replaceState(null, '', '#/capabilities/platform')
   const view = render(<PlatformPage baseUrl={platformOrigin} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Integrations' }))
   const region = await screen.findByRole('region', { name: 'Integration applications' })
   expect(region).toHaveTextContent('Jira, Datadog and GitHub')
   fireEvent.change(screen.getByLabelText('Integration provider'), { target: { value: 'github' } })

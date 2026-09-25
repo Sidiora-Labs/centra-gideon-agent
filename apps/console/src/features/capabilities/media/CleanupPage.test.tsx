@@ -22,8 +22,8 @@ describe('local image cleanup workspace', () => {
   })
   it('offers cleanup navigation before any sketch exists', () => {
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
-    expect(doc.querySelector('a[href="#/capabilities/media?view=cleanup"]')?.textContent).toBe('Image cleanup')
-    expect(doc.querySelector('a[href="#/capabilities/media?view=images"]')?.textContent).toBe('Generate image')
+    expect(doc.querySelector('nav button[aria-label="Image cleanup"]')?.textContent).toBe('Image cleanup')
+    expect(doc.querySelector('nav button[aria-label="Generate image"]')?.textContent).toBe('Generate image')
     expect(doc.querySelector('canvas')).toBeNull()
   })
   it('provides exact operation parameters and ordered editing affordances', () => {

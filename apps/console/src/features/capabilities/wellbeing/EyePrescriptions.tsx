@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
-import { useUILanguage } from '../../../shared/i18n';
+import { Button } from '../../../shared/ui/Button';
+import { Field, TextArea, TextInput } from '../../../shared/ui/forms';
+import { Download, Eye, Plus } from 'lucide-react';
 
 type Eye = { sphere: number; sphere_unit: 'D'; cylinder: number; cylinder_unit: 'D'; axis: number; axis_unit: 'degrees' };
 type Prescription = { id: string; observed_date: string; source: string; notes: string; left: Eye; right: Eye; revision: number; created_at: string; updated_at: string };
@@ -23,18 +25,28 @@ function EyeFields({ side, labels, draft, setDraft, disabled }: { side: 'left' |
   const prefix = side;
   const sideLabel = side === 'left' ? labels[6] : labels[7];
   const fields = [[labels[8], 'Sphere', 'D'], [labels[9], 'Cylinder', 'D'], [labels[10], 'Axis', labels[19]]] as const;
-  return <fieldset disabled={disabled}><legend>{sideLabel}</legend>{fields.map(([label, suffix, unit]) => {
+  return <fieldset disabled={disabled} className="grid gap-m"><legend data-type="label-l" className="mb-s">{sideLabel}</legend>{fields.map(([label, suffix, unit]) => {
     const key = `${prefix}${suffix}` as keyof Draft;
-    return <label key={key}>{sideLabel} {label} ({unit})<input required type="number" step="any" min={suffix === 'Axis' ? 0 : suffix === 'Cylinder' ? -20 : -40} max={suffix === 'Axis' ? 180 : suffix === 'Cylinder' ? 20 : 40} value={draft[key]} onChange={event => setDraft({ ...draft, [key]: event.target.value })} /></label>;
+    return <Field key={key} label={`${sideLabel} ${label} (${unit})`}><TextInput required disabled={disabled} type="number" min={suffix === 'Axis' ? 0 : suffix === 'Cylinder' ? -20 : -40} max={suffix === 'Axis' ? 180 : suffix === 'Cylinder' ? 20 : 40} value={draft[key]} onChange={value => setDraft({ ...draft, [key]: value })} /></Field>;
   })}</fieldset>;
 }
 
+function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
+  const value = (typeof document !== 'undefined' && document.documentElement.lang) || (typeof navigator !== 'undefined' && navigator.language) || 'en'
+  if (value.toLowerCase().startsWith('es')) return 'es'
+  if (value.toLowerCase().startsWith('ar')) return 'ar'
+  if (value.toLowerCase().startsWith('hi')) return 'hi'
+  if (value.toLowerCase().startsWith('zh')) return 'zh-CN'
+  return 'en'
+}
+
 export default function EyePrescriptions() {
-  const language = useUILanguage(), w = words[language];
+  const language = uiLanguage(), w = words[language];
   const mounted = useRef(false), generation = useRef(0);
   const [records, setRecords] = useState<Prescription[]>([]), [selected, setSelected] = useState<Prescription | null>(null);
   const [history, setHistory] = useState<Prescription[]>([]), [draft, setDraft] = useState<Draft>(blank());
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [exported, setExported] = useState('');
+  const [editing, setEditing] = useState(false);
   const current = (token: number) => mounted.current && generation.current === token;
   async function run(action: (token: number) => Promise<void>) {
     const token = ++generation.current;
@@ -51,7 +63,7 @@ export default function EyePrescriptions() {
     if (!current(token)) return;
     const params = new URLSearchParams(location.hash.split('?')[1] || '');
     if (params.get('view') !== 'eyes') return;
-    setSelected(row); setDraft(fromRecord(row)); setHistory(versions);
+    setSelected(row); setEditing(true); setDraft(fromRecord(row)); setHistory(versions);
     window.history.replaceState(null, '', `#/capabilities/wellbeing?view=eyes&id=${encodeURIComponent(id)}`);
   }
   useEffect(() => {
@@ -81,20 +93,18 @@ export default function EyePrescriptions() {
       }
     });
   }
-  return <main dir={language === 'ar' ? 'rtl' : 'auto'} style={{ maxWidth: 900, marginInline: 'auto', padding: 20 }}><h1>{w[0]}</h1>
-    <p>{w[1]}</p>
+  const create = () => { generation.current += 1; setBusy(false); setSelected(null); setEditing(true); setHistory([]); setDraft(blank()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=eyes'); };
+  return <main dir={language === 'ar' ? 'rtl' : 'auto'} style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface"><div className="flex flex-wrap items-start justify-between gap-l"><div className="min-w-0"><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs text-on-surface-var">{w[1]}</p></div><div className="flex w-full flex-wrap gap-s sm:w-auto"><Button disabled={busy} onClick={create}><Plus size={17} />{w[3]}</Button><Button variant="secondary" disabled={busy} onClick={() => void run(async token => { const value = await requestJson(base + '/export'); if (current(token)) setExported(JSON.stringify(value, null, 2)); })}><Download size={17} />{w[17]}</Button></div></div>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[2]}</p>}
-    <button disabled={busy} onClick={() => { generation.current += 1; setBusy(false); setSelected(null); setHistory([]); setDraft(blank()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=eyes'); }}>{w[3]}</button>
-    <form onSubmit={save} style={{ display: 'grid', gap: 12 }}>
-      <label>{w[4]}<input required type="date" value={draft.observed_date} onChange={event => setDraft({ ...draft, observed_date: event.target.value })} /></label>
-      <label>{w[5]}<input required disabled={!!selected} value={draft.source} onChange={event => setDraft({ ...draft, source: event.target.value })} /></label>
+    <section className="rounded-lg border border-outline-variant/20 bg-surface-container p-l"><h2 data-type="title-m" className="text-on-surface">{w[14]}</h2>{!busy && records.length === 0 ? <div className="py-8 text-center"><Eye className="mx-auto mb-3 text-on-surface-low" /><p>{w[15]}</p><Button className="mt-4" onClick={create}>{w[3]}</Button></div> : <ul className="mt-3 divide-y divide-outline-variant/30">{records.map(row => <li key={row.id}><button className="flex w-full items-center justify-between py-3 text-left" onClick={() => void run(token => select(row.id, token))}><span>{row.observed_date} · {row.source}</span><strong>{row.left.sphere} / {row.right.sphere} D</strong></button></li>)}</ul>}</section>
+    {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
+      <Field label={w[4]}><TextInput required value={draft.observed_date} onChange={value => setDraft({ ...draft, observed_date: value })} /></Field>
+      <Field label={w[5]}><TextInput required disabled={!!selected} value={draft.source} onChange={value => setDraft({ ...draft, source: value })} /></Field>
       <EyeFields side="left" labels={w} draft={draft} setDraft={setDraft} disabled={busy} /><EyeFields side="right" labels={w} draft={draft} setDraft={setDraft} disabled={busy} />
-      <label>{w[11]}<textarea value={draft.notes} onChange={event => setDraft({ ...draft, notes: event.target.value })} /></label>
-      <button disabled={busy}>{selected ? w[12] : w[13]}</button>
-    </form>
-    <section><h2>{w[14]}</h2>{!busy && records.length === 0 && <p>{w[15]}</p>}<ul>{records.map(row => <li key={row.id}><button onClick={() => void run(token => select(row.id, token))}>{row.observed_date} · {row.source} · v{row.revision}</button></li>)}</ul></section>
+      <Field label={w[11]}><TextArea value={draft.notes} onChange={value => setDraft({ ...draft, notes: value })} /></Field>
+      <Button type="submit" disabled={busy}>{selected ? w[12] : w[13]}</Button>
+    </form>}
     {selected && <section><h2>{w[16]}</h2><ol>{history.map(row => <li key={row.revision}>v{row.revision}: {w[6]} {row.left.sphere} D / {row.left.cylinder} D × {row.left.axis} {w[19]}; {w[7]} {row.right.sphere} D / {row.right.cylinder} D × {row.right.axis} {w[19]} · {row.notes}</li>)}</ol></section>}
-    <button disabled={busy} onClick={() => void run(async token => { const value = await requestJson(base + '/export'); if (current(token)) setExported(JSON.stringify(value, null, 2)); })}>{w[17]}</button>
     {exported && <pre aria-label={w[18]}>{exported}</pre>}
   </main>;
 }

@@ -44,32 +44,36 @@ function show(entry = '/capabilities/platform', origin = baseUrl) {
 describe('API explorer over real dashboard HTTP', () => {
   it('assembles the qualified platform slices over their real mounted HTTP routes', async () => {
     show()
-    for (const [label, path] of [
-      ['Subscription quota plans', '/api/capabilities/platform/quotas/plans'],
-      ['Remote agent sessions', '/api/capabilities/platform/remote-sessions'],
-      ['Integration applications', '/api/capabilities/platform/integration-apps'],
-      ['Direct peers', '/api/capabilities/platform/peers'],
-      ['Domain replication', '/api/capabilities/platform/replication'],
-      ['Remote media execution', '/api/capabilities/platform/remote-media'],
-      ['Selective media sharing', '/api/capabilities/platform/media-shares'],
-      ['Archive migration', '/api/capabilities/platform/migration'],
+    for (const [view, label, path] of [
+      ['Providers', 'Subscription quota plans', '/api/capabilities/platform/quotas/plans'],
+      ['Integrations', 'Integration applications', '/api/capabilities/platform/integration-apps'],
+      ['Network', 'Remote agent sessions', '/api/capabilities/platform/remote-sessions'],
+      ['Network', 'Direct peers', '/api/capabilities/platform/peers'],
+      ['Network', 'Domain replication', '/api/capabilities/platform/replication'],
+      ['Sharing', 'Remote media execution', '/api/capabilities/platform/remote-media'],
+      ['Sharing', 'Selective media sharing', '/api/capabilities/platform/media-shares'],
+      ['Archive migration', 'Archive migration', '/api/capabilities/platform/migration'],
     ]) {
-      expect(screen.getByRole('region', { name: label })).toBeVisible()
+      fireEvent.click(screen.getByRole('button', { name: view }))
+      expect(await screen.findByRole('region', { name: label })).toBeVisible()
       const response = await fetch(baseUrl + path, { headers: { 'X-Session-Key': 'dashboard:ui' } })
       expect(response.status, path).toBe(200)
       if (path !== '/api/capabilities/platform/migration') expect(response.headers.get('cache-control'), path).toBe('no-store')
     }
+    fireEvent.click(screen.getByRole('button', { name: 'Network' }))
     expect(await screen.findByText('No remote agent connections configured.')).toBeVisible()
     expect(await screen.findByText('No direct peers configured.')).toBeVisible()
     expect(await screen.findByText('No unresolved replication conflicts.')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Sharing' }))
     expect(await screen.findByText('No remote executions recorded.')).toBeVisible()
     expect(await screen.findByText('No media has been shared.')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Archive migration' }))
     expect(await screen.findByText('No archive imports recorded.')).toBeVisible()
   })
 
   it('loads registered methods, filters and preserves URL selection', async () => {
-    show()
-    expect(within(screen.getByRole('main')).getByText('Loading API catalog…')).toBeVisible()
+    show('/capabilities/platform?view=api')
+    expect(within(screen.getByRole('main')).getByText('Loading routes…')).toBeVisible()
     const syntax = await screen.findByRole('button', { name: 'GET /api/prompts/syntax' })
     expect(syntax).toBeVisible()
     expect(screen.getByText(/registered routes; page starts at 1./)).toBeVisible()
@@ -77,7 +81,7 @@ describe('API explorer over real dashboard HTTP', () => {
     fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'GET' } })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'HEAD /api/prompts/syntax' })).toBeNull())
     expect(screen.getByLabelText('Location')).toHaveTextContent('"method":"GET"')
-    fireEvent.change(screen.getByLabelText('Filter this page'), { target: { value: 'prompts' } })
+    fireEvent.change(screen.getByLabelText('Search routes'), { target: { value: 'prompts' } })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'GET /api/capabilities/platform/catalog' })).toBeNull())
     fireEvent.click(syntax)
     expect(await screen.findByRole('region', { name: 'Route detail' })).toHaveTextContent('api_prompt_syntax')
@@ -109,7 +113,7 @@ describe('API explorer over real dashboard HTTP', () => {
     fireEvent.click(execute)
     expect(screen.queryByLabelText('HTTP response')).toBeNull()
     fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'PATCH' } })
-    expect(await screen.findByText('No routes match this page.')).toBeVisible()
+    expect(await screen.findByText('No matching routes')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Previous' })).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('button', { name: 'Next' })).toHaveAttribute('aria-disabled', 'true')
     const detail = screen.getByRole('region', { name: 'Route detail' })

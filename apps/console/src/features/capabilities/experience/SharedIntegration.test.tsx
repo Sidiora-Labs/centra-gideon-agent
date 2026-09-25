@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import Page from './Page'
 
 let server: ChildProcess
@@ -40,15 +40,17 @@ afterAll(async () => {
 it('renders real experience components over the shared registered HTTP application', async () => {
   window.history.replaceState(null, '', '#/capabilities/experience')
   render(<Page baseUrl={baseUrl} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Foundations' }))
   expect(await screen.findByText('0 foundations · 0 controllers')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Game assets' }))
   expect(await screen.findByText('0 game projects')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Native calls' }))
   expect(await screen.findByText('Native duplex audio unavailable')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Moltworld' }))
   expect(await screen.findByRole('heading', { name: 'Moltworld' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Moltbook' }))
   expect(await screen.findByRole('heading', { name: 'Moltbook' })).toBeTruthy()
   expect(await screen.findByText('No Moltbook account configured')).toBeTruthy()
-  expect(screen.getByRole('heading', { name: 'World foundations and controllers' })).toBeTruthy()
-  expect(screen.getByRole('heading', { name: 'Game asset compiler' })).toBeTruthy()
-  expect(screen.getByRole('heading', { name: 'Native duplex audio' })).toBeTruthy()
   const foundations = await fetch(baseUrl + '/world-foundations')
   expect(foundations.status).toBe(200)
   const snapshot = await foundations.json()

@@ -1,3 +1,4 @@
+import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import Annotations from './Annotations'
@@ -7,7 +8,7 @@ type Result = { items: MediaItem[]; total: number; offset: number; limit: number
 const base = '/api/capabilities/media/library'
 
 export function MediaCard({ item, onSelect }: { item: MediaItem; onSelect: () => void }) {
-  return <article className="border rounded p-3 space-y-2 min-w-0">
+  return <article className="rounded-lg bg-surface-container p-l space-y-s min-w-0">
     {item.kind === 'image' ? <img alt={item.name} src={item.raw_url} loading="lazy" className="w-full h-40 object-contain" /> : <video aria-label={item.name} src={item.raw_url} controls preload="metadata" className="w-full h-40" />}
     <Button onClick={onSelect}>{item.name}</Button><p>{item.kind} · v{item.version}</p>
     <p>{item.collection || 'Unfiled'}{item.tags.length ? ' · ' + item.tags.join(', ') : ''}</p>
@@ -49,10 +50,9 @@ export default function LibraryPage() {
     return () => { active = false; window.removeEventListener('hashchange', load) }
   }, [])
   const dirty = selected && (selected.name !== name || selected.tags.join(', ') !== tags || selected.collection !== membership)
-  return <section className="p-4 space-y-4 overflow-auto" aria-label="Media library">
-    <h1>Media library</h1><a href="#/capabilities/media">Image sketches</a>
+  return <NativeMediaPage title="Media library" actions={<a href="#/capabilities/media">Image sketches</a>}>
     {error && <p role="alert">{error}</p>}
-    <div className="flex flex-wrap gap-3">
+    <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">
       <label>Search<input aria-label="Search media" type="search" value={q} onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
       <label>Kind<select aria-label="Media kind" value={kind} onChange={e => { setKind(e.target.value); setOffset(0) }}><option value="">Images and videos</option><option value="image">Images</option><option value="video">Videos</option></select></label>
       <label>Tag<input aria-label="Filter tag" value={tag} onChange={e => { setTag(e.target.value); setOffset(0) }} list="media-tags" /></label>
@@ -72,7 +72,7 @@ export default function LibraryPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{result.items.map(item => <MediaCard key={item.id} item={item} onSelect={() => { if (!dirty) location.hash = '/capabilities/media?view=library&artifact=' + item.id }} />)}</div>
       <div className="flex gap-3"><Button disabled={!offset || busy} onClick={() => setOffset(Math.max(0, offset - 24))}>Previous</Button><Button disabled={offset + 24 >= result.total || busy} onClick={() => setOffset(offset + 24)}>Next</Button></div>
     </>}
-    {selected && <section aria-label="Media details" className="border rounded p-3 space-y-3">
+    {selected && <section aria-label="Media details" className="rounded-lg bg-surface-high p-l space-y-m">
       <h2>{selected.name}</h2><a href={selected.raw_url} download>Download original</a>
       <label>Name<input aria-label="Media name" value={name} onChange={e => setName(e.target.value)} maxLength={200} /></label>
       <label>Tags (comma separated)<input aria-label="Media tags" value={tags} onChange={e => setTags(e.target.value)} /></label>
@@ -87,5 +87,5 @@ export default function LibraryPage() {
       <dl>{Object.entries(selected.provenance).map(([key, value]) => <div key={key}><dt>{key}</dt><dd className="break-all">{String(value)}</dd></div>)}</dl>
       <Annotations key={selected.id + ':' + selected.version} artifactId={selected.id} version={selected.version} />
     </section>}
-  </section>
+  </NativeMediaPage>
 }

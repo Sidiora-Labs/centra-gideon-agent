@@ -73,7 +73,7 @@ afterAll(async () => {
 })
 
 test('configured provider receives real uploaded image through the existing interactive terminal', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=provider`)
   const area = page.getByRole('region', { name: 'Provider terminal', exact: true })
   await area.getByLabel('Terminal provider').selectOption('workspace-codex-test')
   await area.getByLabel('Provider working directory').fill(repo)
@@ -94,7 +94,7 @@ test('configured provider receives real uploaded image through the existing inte
 
 test('invalid image remains a visible retryable error without launching a terminal', async () => {
   await page.goto('about:blank')
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=provider`)
   const area = page.getByRole('region', { name: 'Provider terminal', exact: true })
   await area.getByLabel('Terminal provider').selectOption('workspace-codex-test')
   await area.getByLabel('Provider working directory').fill(repo)

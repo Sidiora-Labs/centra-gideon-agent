@@ -8,7 +8,7 @@ it('mounts manuscript exports from the creative workspace route', async () => {
   location.hash = '#/capabilities/creative?view=exports'
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [] })))
   render(<Page apiRoot="/api/capabilities/creative/ingredients" />)
-  expect(await screen.findByRole('heading', { name: 'EPUB and print manuscript export' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Manuscript exports' })).toBeInTheDocument()
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/exports', expect.anything()))
 })
 
@@ -27,7 +27,7 @@ it('mounts creative direction with the exact shared route', async () => {
   location.hash = '#/capabilities/creative?view=direction'
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [] })))
   render(<Page apiRoot="/api/capabilities/creative/ingredients" />)
-  expect(await screen.findByRole('heading', { name: 'Creative direction and production plans' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Creative direction' })).toBeInTheDocument()
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/direction', expect.anything()))
 })
 
@@ -35,6 +35,6 @@ it('mounts recurring commissions with the exact shared route', async () => {
   location.hash = '#/capabilities/creative?view=commissions'
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [] })))
   render(<Page apiRoot="/api/capabilities/creative/ingredients" />)
-  expect(await screen.findByRole('heading', { name: 'Recurring creative commissions' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Commissions' })).toBeInTheDocument()
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/commissions'))
 })

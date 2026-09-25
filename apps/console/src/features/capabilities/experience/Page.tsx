@@ -13,6 +13,13 @@ import Worlds from './Worlds'
 import Moltworld from './Moltworld'
 import Moltbook from './Moltbook'
 import { requestJson } from '../../../shared/data/gatewayRequest'
+import { TopBar } from '../../../shared/ui/TopBar'
+import { PageTitle } from '../../../shared/ui/PageTitle'
+import { HeaderActions } from '../../../shared/ui/HeaderActions'
+import { Field, Select, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
+import { AreaNavigation } from '../AreaNavigation'
+import { BookOpen, Boxes, Gamepad2, Globe2, Mic2, Phone, Radio, Sparkles } from 'lucide-react'
 
 type Choice = { id: string; label: string; target: string }
 type Node = { id: string; text: string; kind: 'scene' | 'ending'; choices: Choice[] }
@@ -32,6 +39,18 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [route, setRoute] = useState(location.hash)
+  const activeView = new URLSearchParams(route.split('?')[1] || '').get('view') || 'stories'
+  const destinations = [
+    { id: 'stories', label: 'Interactive stories', icon: BookOpen, group: 'Create' },
+    { id: 'games', label: 'Game assets', icon: Gamepad2, group: 'Create' },
+    { id: 'world', label: 'World workspace', icon: Globe2, group: 'Worlds' },
+    { id: 'foundations', label: 'Foundations', icon: Boxes, group: 'Worlds' },
+    { id: 'voice', label: 'Voice and avatar', icon: Mic2, group: 'Presence' },
+    { id: 'calls', label: 'Native calls', icon: Phone, group: 'Presence' },
+    { id: 'moltworld', label: 'Moltworld', icon: Sparkles, group: 'Connected worlds' },
+    { id: 'moltbook', label: 'Moltbook', icon: Radio, group: 'Connected worlds' },
+  ] as const
+  const selectView = (next: string) => { const query = selected(); if (next === 'stories') query.delete('view'); else query.set('view', next); location.hash = '/capabilities/experience' + (query.size ? '?' + query : '') }
   const pending = useRef<{ key: string; id: string } | null>(null)
   const requestId = (key: string) => {
     if (pending.current?.key !== key) pending.current = { key, id: token() }
@@ -76,43 +95,50 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     setView(result)
   })
   if (new URLSearchParams(route.split('?')[1] || '').get('ambient') === '1') return <AmbientDisplay baseUrl={baseUrl} onClose={() => { location.hash = '/capabilities/experience' }} />
-  return <main className="experience-page p-4 max-w-4xl mx-auto space-y-4" aria-label="Interactive stories">
-    <h1>Interactive stories</h1>
-    <Button onClick={() => { location.hash = '/capabilities/experience?ambient=1' }}>Open ambient display</Button>
-    <WorldEngine baseUrl={baseUrl} /><WorldFoundations baseUrl={baseUrl} /><GameAssets baseUrl={baseUrl} /><Worlds baseUrl={baseUrl} /><Moltworld baseUrl={baseUrl} /><Moltbook apiRoot={`${baseUrl}/moltbook`} /><NativeCalls baseUrl={baseUrl} /><NativeDuplex baseUrl={baseUrl} /><AvatarPanel baseUrl={baseUrl} />
+  return <AreaNavigation label="Experience workspace" items={destinations} active={activeView} onChange={selectView}><div className="flex h-full min-h-0 flex-col text-on-surface">
+    <TopBar left={<PageTitle>{destinations.find(item => item.id === activeView)?.label || 'Experience'}</PageTitle>} right={activeView === 'stories' ? <HeaderActions><Button variant="secondary" onClick={() => { const query = selected(); query.set('ambient', '1'); location.hash = '/capabilities/experience?' + query }}>Open ambient display</Button><Button disabled={busy} onClick={() => { location.hash = '/capabilities/experience'; setDraft(blank()); setView(null) }}>New story</Button></HeaderActions> : undefined} />
+    <main className="experience-page min-h-0 flex-1 overflow-y-auto" aria-label="Interactive stories"><div className="mx-auto flex w-full flex-col gap-l px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+    {activeView === 'world' && <><WorldEngine baseUrl={baseUrl} /><Worlds baseUrl={baseUrl} /></>}
+    {activeView === 'foundations' && <WorldFoundations baseUrl={baseUrl} />}
+    {activeView === 'games' && <GameAssets baseUrl={baseUrl} />}
+    {activeView === 'voice' && <AvatarPanel baseUrl={baseUrl} />}
+    {activeView === 'calls' && <><NativeCalls baseUrl={baseUrl} /><NativeDuplex baseUrl={baseUrl} /></>}
+    {activeView === 'moltworld' && <Moltworld baseUrl={baseUrl} />}
+    {activeView === 'moltbook' && <Moltbook apiRoot={`${baseUrl}/moltbook`} />}
+    {activeView === 'stories' && <>
     <p>Author connected scenes and play choices into different endings.</p>
     {loading && <p role="status">Loading stories…</p>}
     {error && <p role="alert">{error}</p>}
-    <nav aria-label="Story library" className="flex flex-wrap gap-2">
-      <Button disabled={busy} onClick={() => { location.hash = '/capabilities/experience'; setDraft(blank()); setView(null) }}>New story</Button>
+    <nav aria-label="Story library" className="flex flex-wrap gap-s">
       {stories.map(s => <span key={s.id}><Button disabled={busy} onClick={() => navigate('story', s.id)}>{s.title}</Button> <Button disabled={busy} onClick={() => start(s)}>Play {s.title}</Button></span>)}
     </nav>
     {!loading && stories.length === 0 && <p>No stories yet. Write an opening below.</p>}
-    {view ? <section aria-label="Story player" className="space-y-3">
-      <h2>{view.story.title}</h2><p>Story revision {view.session.story_revision} · {view.session.history.length} choices</p>
+    {view ? <section aria-label="Story player"><Surface className="space-y-m p-m">
+      <h2 data-type="title-m">{view.story.title}</h2><p className="text-on-surface-variant">Story revision {view.session.story_revision} · {view.session.history.length} choices</p>
       <p style={{ whiteSpace: 'pre-wrap' }}>{view.node.text}</p>
       <Narration sessionId={view.session.id} revision={view.session.revision} baseUrl={baseUrl} />
       {view.node.kind === 'ending' && <p role="status">The end</p>}
       {view.node.choices.map(c => <Button key={c.id} disabled={busy} onClick={() => choose(c)}>{c.label}</Button>)}
-    </section> : <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save() }}>
-      <fieldset disabled={busy || loading} className="space-y-3">
-        <label>Story title<input required maxLength={200} value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} /></label>
-        <label>Start scene<select value={draft.start_node} onChange={e => setDraft(d => ({ ...d, start_node: e.target.value }))}>{draft.nodes.map(n => <option key={n.id} value={n.id}>{n.id}</option>)}</select></label>
-        {draft.nodes.map((n, i) => <section key={n.id} aria-label={`Scene ${i + 1}`} className="border rounded p-3 space-y-2">
-          <h3>{n.id}</h3><label>Scene {i + 1} text<textarea required maxLength={10000} value={n.text} onChange={e => editNode(n.id, { text: e.target.value })} /></label>
-          <label>Scene {i + 1} kind<select value={n.kind} onChange={e => editNode(n.id, { kind: e.target.value as Node['kind'], choices: [] })}><option value="scene">Scene</option><option value="ending">Ending</option></select></label>
+    </Surface></section> : <form className="space-y-m" onSubmit={e => { e.preventDefault(); void save() }}>
+      <fieldset disabled={busy || loading} className="space-y-m">
+        <div className="grid gap-m md:grid-cols-2"><Field label="Story title"><TextInput required maxLength={200} value={draft.title} onChange={title => setDraft(d => ({ ...d, title }))} /></Field>
+        <Field label="Start scene"><Select value={draft.start_node} onChange={start_node => setDraft(d => ({ ...d, start_node }))} options={draft.nodes.map(n => ({ value: n.id, label: n.id }))} /></Field></div>
+        <div className="grid gap-m lg:grid-cols-2">{draft.nodes.map((n, i) => <section key={n.id} aria-label={`Scene ${i + 1}`}><Surface className="h-full space-y-m p-m">
+          <h3 data-type="title-m">{n.id}</h3><Field label={`Scene ${i + 1} text`}><textarea aria-label={`Scene ${i + 1} text`} required maxLength={10000} value={n.text} onChange={event => editNode(n.id, { text: event.target.value })} className="min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" /></Field>
+          <Field label={`Scene ${i + 1} kind`}><Select value={n.kind} onChange={kind => editNode(n.id, { kind: kind as Node['kind'], choices: [] })} options={[{ value: 'scene', label: 'Scene' }, { value: 'ending', label: 'Ending' }]} /></Field>
           {n.choices.map((c, j) => <div key={c.id} className="flex flex-wrap gap-2">
-            <label>Choice {i + 1}.{j + 1}<input required maxLength={200} value={c.label} onChange={e => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, label: e.target.value } : x) })} /></label>
-            <label>Target {i + 1}.{j + 1}<select value={c.target} onChange={e => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, target: e.target.value } : x) })}>{draft.nodes.map(target => <option key={target.id} value={target.id}>{target.id}</option>)}</select></label>
+            <div className="min-w-0 flex-1"><Field label={`Choice ${i + 1}.${j + 1}`}><TextInput required maxLength={200} value={c.label} onChange={label => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, label } : x) })} /></Field></div>
+            <div className="min-w-0 flex-1"><Field label={`Target ${i + 1}.${j + 1}`}><Select value={c.target} onChange={target => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, target } : x) })} options={draft.nodes.map(target => ({ value: target.id, label: target.id }))} /></Field></div>
             <Button type="button" onClick={() => editNode(n.id, { choices: n.choices.filter(x => x.id !== c.id) })}>Remove choice {i + 1}.{j + 1}</Button>
           </div>)}
           {n.kind === 'scene' && <Button type="button" disabled={n.choices.length >= 20} onClick={() => editNode(n.id, { choices: [...n.choices, { id: token(), label: '', target: draft.nodes[0].id }] })}>Add choice to scene {i + 1}</Button>}
           <Button type="button" disabled={draft.nodes.length === 1} onClick={() => setDraft(d => ({ ...d, nodes: d.nodes.filter(x => x.id !== n.id) }))}>Remove scene {i + 1}</Button>
-        </section>)}
+        </Surface></section>)}</div>
         <Button type="button" disabled={draft.nodes.length >= 200} onClick={() => setDraft(d => ({ ...d, nodes: [...d.nodes, { id: token(), text: '', kind: 'ending', choices: [] }] }))}>Add scene</Button>
         <Button type="submit">Save story</Button>
       </fieldset>
     </form>}
-    <section aria-label="Saved playthroughs"><h2>Resume a playthrough</h2>{sessions.length === 0 && <p>No saved playthroughs.</p>}{sessions.map(s => <Button key={s.id} disabled={busy} onClick={() => navigate('session', s.id)}>{stories.find(x => x.id === s.story_id)?.title || 'Saved story'} · {s.current_node} · {s.id.slice(0, 8)}</Button>)}</section>
-  </main>
+    <section aria-label="Saved playthroughs" className="space-y-s"><h2 data-type="title-m">Resume a playthrough</h2>{sessions.length === 0 && <p>No saved playthroughs.</p>}<div className="flex flex-wrap gap-s">{sessions.map(s => <Button key={s.id} variant="secondary" disabled={busy} onClick={() => navigate('session', s.id)}>{stories.find(x => x.id === s.story_id)?.title || 'Saved story'} · {s.current_node} · {s.id.slice(0, 8)}</Button>)}</div></section>
+    </>}
+  </div></main></div></AreaNavigation>
 }

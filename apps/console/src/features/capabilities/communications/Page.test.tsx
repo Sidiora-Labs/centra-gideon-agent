@@ -40,6 +40,26 @@ afterAll(() => {
   rmSync(home, { recursive: true, force: true })
 })
 
+it('selects a communications destination before using its native workspace', async () => {
+  location.hash = '#/capabilities/communications'
+  render(<Page />)
+  await screen.findByRole('heading', { name: 'People and relationships' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Calendar' }))
+
+  expect(await screen.findByRole('heading', { name: 'Calendar daily review' })).toBeVisible()
+  expect(screen.getByLabelText('Calendar name')).toBeVisible()
+  expect(screen.queryByRole('heading', { name: 'People and relationships' })).not.toBeInTheDocument()
+  expect(location.hash).toContain('view=calendar')
+
+  fireEvent.click(screen.getByRole('button', { name: 'People' }))
+
+  expect(await screen.findByRole('heading', { name: 'People and relationships' })).toBeVisible()
+  expect(screen.getByLabelText('Name')).toBeVisible()
+  expect(location.hash).toBe('#/capabilities/communications')
+  cleanup()
+})
+
 it('creates, edits, records contact and reopens source-backed detail through actual HTTP', async () => {
   location.hash = '#/capabilities/communications'
   const view = render(<Page />)

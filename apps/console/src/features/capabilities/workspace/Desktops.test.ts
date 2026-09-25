@@ -64,7 +64,7 @@ test('operates an actual isolated desktop terminal with real frames and stops ow
   const registered = await page.request.post(`${origin}/api/capabilities/workspace/projects`, { data: { name: 'Browser desktop project', workspace: repo, request_id: 'desktop-project' } })
   expect(registered.status()).toBe(200)
   const record = await registered.json()
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=desktops`)
   await page.getByLabel('Desktop project', { exact: true }).selectOption(record.project.id)
   await page.getByRole('button', { name: 'Start isolated desktop', exact: true }).click()
   await page.getByText('Desktop status: running', { exact: true }).waitFor({ timeout: 60000 })

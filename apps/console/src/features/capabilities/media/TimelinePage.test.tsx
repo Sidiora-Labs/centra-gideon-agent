@@ -16,7 +16,7 @@ describe('video timeline editor', () => {
     expect(doc.body.textContent).toContain('Loading timelines')
     expect(doc.querySelector('fieldset')?.disabled).toBe(true)
     expect(doc.querySelectorAll('li')).toHaveLength(0)
-    expect(doc.querySelectorAll('section')).toHaveLength(3)
+    expect(doc.querySelectorAll('fieldset > section')).toHaveLength(3)
     expect(doc.querySelector('[role="alert"]')).toBeNull()
     const save = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Save timeline')
     expect(save?.disabled).toBe(true)
@@ -74,13 +74,13 @@ describe('video timeline editor', () => {
     expect(audio.body.textContent).toContain('volume')
     expect(audio.body.textContent).toContain('trim')
   })
-  it('wraps every workspace link in accessible wrapping navigation', () => {
+  it('registers every workspace in the shared accessible navigation', () => {
     const doc = new DOMParser().parseFromString(renderToStaticMarkup(<Page />), 'text/html')
     const nav = doc.querySelector('nav[aria-label="Media workspaces"]')
-    expect(nav?.classList.contains('flex-wrap')).toBe(true)
-    expect(nav?.classList.contains('gap-3')).toBe(true)
-    expect(nav?.querySelectorAll('a')).toHaveLength(10)
-    expect(nav?.querySelector('a[href="#/capabilities/media?view=timelines"]')?.textContent).toBe('Video timeline')
+    expect(nav?.classList.contains('capability-area-navigation')).toBe(true)
+    expect(nav?.querySelectorAll('button')).toHaveLength(13)
+    expect(nav?.querySelector('button[aria-label="Image sketches"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(nav?.querySelector('button[aria-label="Video timeline"]')?.textContent).toBe('Video timeline')
     expect(doc.querySelector('canvas')).toBeNull()
   })
   it('renders persisted progress and canonical completed output', () => {

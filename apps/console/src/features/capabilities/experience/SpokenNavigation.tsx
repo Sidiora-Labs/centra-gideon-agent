@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../../../shared/data/api'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { Field, TextInput } from '../../../shared/ui/forms'
+import { Surface } from '../../../shared/ui/Surface'
 import { MicCaptureChip } from '../../../shared/ui/MicCaptureChip'
 import { useMicRecorder } from '../../../shared/ui/composer/useMicRecorder'
 import { resolveNavigation, type NavigationItem } from './navigation'
@@ -48,9 +50,9 @@ export default function SpokenNavigation({ items, navigate, currentRoute, baseUr
       else navigate(result.receipt.target)
     } catch (cause) { if (mounted.current) { setError(String(cause)); setBusy(false) } }
   }
-  return <section aria-label="Spoken navigation" className="space-y-2">
-    <form onSubmit={event => { event.preventDefault(); void submit() }} className="flex flex-wrap items-end gap-2">
-      <label>Navigation command<input maxLength={400} value={command} disabled={busy} onChange={event => { setCommand(event.target.value); setOrigin('typed') }} className="rounded border p-2 bg-surface-high text-on-surface" /></label>
+  return <Surface tone="low" className="p-m"><section aria-label="Spoken navigation" className="space-y-m">
+    <form onSubmit={event => { event.preventDefault(); void submit() }} className="grid min-w-0 gap-s md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end">
+      <Field label="Navigation command"><TextInput maxLength={400} value={command} disabled={busy} onChange={value => { setCommand(value); setOrigin('typed') }} /></Field>
       <Button type="submit" disabled={busy || !command.trim()}>Go</Button>
       <Button disabled={busy || mic.state === 'transcribing'} onClick={() => void mic.toggle()}>{mic.listening ? 'Stop listening' : 'Use microphone'}</Button>
       {mic.listening && <MicCaptureChip onStop={() => void mic.toggle()} />}
@@ -59,5 +61,5 @@ export default function SpokenNavigation({ items, navigate, currentRoute, baseUr
     {mic.state === 'transcribing' && <p role="status">Transcribing navigation command…</p>}
     {receipt && <p role="status">{receipt.status === 'applied' ? `Opened ${receipt.target}` : `Waiting for ${receipt.target} to open`}</p>}
     {error && <p role="alert">{error}</p>}
-  </section>
+  </section></Surface>
 }

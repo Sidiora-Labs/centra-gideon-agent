@@ -64,7 +64,7 @@ test('creates and switches real local branches through authenticated UI and relo
   const registered = await page.request.post(`${origin}/api/capabilities/workspace/projects`, { data: { name: 'Browser Git source', workspace: repo, request_id: 'browser-git' } })
   expect(registered.status()).toBe(200)
   const record = await registered.json()
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=git`)
   await page.getByLabel('Git project', { exact: true }).selectOption(record.project.id)
   await page.getByRole('button', { name: 'Inspect Git project', exact: true }).click()
   await page.getByText('Current branch: main', { exact: false }).waitFor()
@@ -86,7 +86,7 @@ test('creates and switches real local branches through authenticated UI and relo
 }, 60000)
 
 test('shows real operation failures and preserves branch input', async () => {
-  await page.goto(`${origin}/workspace-test#/capabilities/workspace`)
+  await page.goto(`${origin}/workspace-test#/capabilities/workspace?view=git`)
   const response = await page.request.get(`${origin}/api/capabilities/workspace/projects`)
   const rows = await response.json()
   await page.getByLabel('Git project', { exact: true }).selectOption(rows[0].project.id)

@@ -4,7 +4,7 @@ import { Button } from '../../../shared/ui/Button'
 export type Annotation = { id: string; text: string; region?: number[]; time_seconds?: number }
 type Record = { revision: number; source_kind: string; source_available: boolean; annotations: Annotation[]; attribution: { creator: string; license: string; source_url: string } }
 export function AnnotationList({ entries, remove }: { entries: Annotation[]; remove: (id: string) => void }) {
-  return <ul>{entries.map(entry => <li key={entry.id} className="border rounded p-2 my-2">
+  return <ul>{entries.map(entry => <li key={entry.id} className="rounded-lg bg-surface-high p-m my-s">
     <p>{entry.text}</p>{entry.region && <p>Image region: {entry.region.join(', ')}</p>}{entry.time_seconds !== undefined && <p>At {entry.time_seconds} seconds · duration not verified</p>}
     <Button onClick={() => remove(entry.id)}>Remove note</Button>
   </li>)}</ul>
@@ -34,7 +34,7 @@ export default function Annotations({ artifactId, version }: { artifactId: strin
     fetch(base).then(response).then(value => { if (active) adopt(value) }).catch(e => { if (active) setError(e.message) })
     return () => { active = false }
   }, [base])
-  return <section aria-label="Media annotations" className="space-y-3 border rounded p-3">
+  return <section aria-label="Media annotations" className="space-y-3 rounded-lg bg-surface-container p-l">
     <h3>Notes and attribution · artifact version {version}</h3>
     {error && <p role="alert">{error}</p>}
     {!record && !error && <p role="status">Loading annotations…</p>}

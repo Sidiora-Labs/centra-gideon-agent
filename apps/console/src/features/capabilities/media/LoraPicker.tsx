@@ -4,7 +4,7 @@ export default function LoraPicker({ inventory, selected, change }: { inventory:
   return <fieldset className="space-y-2"><legend>Installed LoRA adapters</legend><p>Compatibility compares declared base-model metadata only. Tensor loading and image effect have not been verified.</p>
     {!inventory.supports_lora && <p role="status">The selected model does not advertise LoRA support.</p>}
     {inventory.items.length === 0 && <p>No installed adapters discovered.</p>}
-    {inventory.items.map(item => <article key={item.id}><label><input type="checkbox" disabled={!inventory.supports_lora || item.compatibility !== 'metadata_match'} checked={item.id in selected} onChange={event => change(item.id, event.target.checked ? '1' : null)} />{item.id}</label>
+    {inventory.items.map(item => <article key={item.id} className="rounded-lg bg-surface-high p-m"><label><input type="checkbox" disabled={!inventory.supports_lora || item.compatibility !== 'metadata_match'} checked={item.id in selected} onChange={event => change(item.id, event.target.checked ? '1' : null)} />{item.id}</label>
       <p>{item.compatibility} · base model: {item.base_model || 'Unknown'} · {item.bytes} bytes</p><p>SHA-256: {item.sha256}</p>{item.trigger_words && <p>Trigger words: {item.trigger_words}</p>}
       {item.id in selected && <label>Adapter scale<input type="number" min="-2" max="2" step="0.1" value={selected[item.id]} onChange={event => change(item.id, event.target.value)} /></label>}
     </article>)}
