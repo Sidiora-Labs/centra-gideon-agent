@@ -17,7 +17,8 @@
       "prompt_dependency_usage",
       "provider_connections_get",
       "platform_harness_inventory",
-      "platform_model_comparisons"
+      "platform_model_comparisons",
+      "platform_reference_repositories"
     ]
   },
   "native": true

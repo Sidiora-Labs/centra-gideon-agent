@@ -1,0 +1,44 @@
+{
+  "task": "platform.07",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "146b6018",
+  "dependency_refinement": ".06 host inference does not provide any input to Git reference cursors; this slice independently requires only existing workspace locator, Git and atomic persistence.",
+  "contract": "Workspace-contained named origin branch references, real Git fetch to FETCH_HEAD, bounded last-good commits, explicit observed-head review, changed origin/branch and nonancestor protection. Failed fetch persists timestamped stale snapshot. No repository checkout or push.",
+  "acceptance": [
+    "Track actual isolated upstream with two commits; real fetch check shows commits without cursor advancement.",
+    "Explicit review accepts only current nonstale observed head; restart preserves cursor and new check returns only later commits.",
+    "Actual inaccessible origin retains timestamped stale last-good snapshot and prevents review; changed origin/nonancestor history cannot reuse cursor.",
+    "Console track/check/stale/recover/review/remove over real Git HTTP; native read returns exact durable snapshots without fetching."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/references.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_references.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/References.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_references.py",
+    "checks/runtime/capabilities/platform/references_ui_server.py",
+    "apps/console/src/features/capabilities/platform/References.test.tsx",
+    "checks/runtime/capabilities/platform/ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_references.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/References.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": {
+    "path": "/tmp/gideon-platform.07-checks-yg4zwylz/evidence.json",
+    "runtime_tests": 13,
+    "ui_tests": 2,
+    "production_lines": 180,
+    "test_lines": 307,
+    "gate_runs": 1
+  }
+}
