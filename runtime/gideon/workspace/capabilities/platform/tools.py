@@ -14,6 +14,7 @@ from gideon.integrations.mcp_core import get_current_session_key
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect, request_phase
 
 _SCHEMAS = {
+    "platform_schedule_forecast": {"type": "object", "properties": {"horizon": {"type": "integer", "minimum": 60, "maximum": 86400}}, "additionalProperties": False},
     "platform_task_cadence": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_task_cadence_set": {"type": "object", "properties": {"trigger_id": {"type": "string"}, "revision": {"type": "integer"}, "enabled": {"type": "boolean"}, "task_class": {"type": "string"}}, "required": ["trigger_id", "revision", "enabled", "task_class"], "additionalProperties": False},
     "platform_pr_screening": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -32,6 +33,7 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_schedule_forecast": "Preview real trigger clocks and current admission without firing or changing schedules.",
     "platform_task_cadence": "Read opt-in interval cadence decisions and typed execution evidence.",
     "platform_task_cadence_set": "Opt a native interval trigger into or out of task-class cadence adaptation.",
     "platform_pr_screening": "Read pinned external PR screening and authorized disposition state.",
@@ -63,7 +65,10 @@ class PlatformTools(ToolProvider):
             return ToolResult(success=False, error="Unknown platform tool")
         try:
             validate(arguments, _SCHEMAS[tool_name])
-            if tool_name == "platform_task_cadence":
+            if tool_name == "platform_schedule_forecast":
+                from gideon.workspace.capabilities.platform.forecast import view
+                result = await view(**arguments)
+            elif tool_name == "platform_task_cadence":
                 from gideon.workspace.capabilities.platform.cadence import view
                 result = view()
             elif tool_name == "platform_task_cadence_set":

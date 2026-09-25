@@ -28,7 +28,8 @@
       "platform_pr_screening",
       "platform_pr_capture",
       "platform_task_cadence",
-      "platform_task_cadence_set"
+      "platform_task_cadence_set",
+      "platform_schedule_forecast"
     ]
   },
   "native": true
