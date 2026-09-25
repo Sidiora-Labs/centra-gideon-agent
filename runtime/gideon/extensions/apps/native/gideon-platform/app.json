@@ -20,7 +20,9 @@
       "platform_model_comparisons",
       "platform_reference_repositories",
       "platform_feature_ownership",
-      "platform_feature_claim"
+      "platform_feature_claim",
+      "platform_gsd_project",
+      "platform_gsd_phase_task"
     ]
   },
   "native": true
