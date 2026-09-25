@@ -33,7 +33,8 @@
       "platform_dashboard_compositions",
       "platform_dashboard_select",
       "platform_usage_accounting",
-      "platform_personal_scorecard"
+      "platform_personal_scorecard",
+      "platform_inference_host"
     ]
   },
   "native": true

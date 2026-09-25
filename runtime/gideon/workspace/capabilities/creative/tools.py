@@ -13,6 +13,7 @@ from .stories import StoryStore
 from .series import SeriesStore
 from .continuity import ContinuityStore
 from .voice import VoiceStore
+from .editorial import EditorialStore
 from .store import CatalogError, IngredientStore, TYPES, integer, keys
 
 
@@ -119,11 +120,15 @@ def schemas():
     result["creative_series_voice_configure"] = obj({"id": STRING, "payload": obj({"revision": {"type": "integer", "minimum": 0}, "series_revision": NUMBER,
         "baseline": {"enum": ["drafted", "exemplars", "blended"]}, "min_words": NUMBER, "min_chapters": NUMBER, "z_threshold": {"type": "number"},
         "wells": {"type": "object", "additionalProperties": {"type": "array", "items": STRING}}}, ["revision", "series_revision"])}, ["id", "payload"])
+    result["creative_work_editorial_get"] = obj({"id": STRING}, ["id"])
+    result["creative_work_editorial_run"] = obj({"id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "start": {"type": "integer", "minimum": 0}, "end": NUMBER,
+        "check_ids": {"type": "array", "items": STRING}}, ["request_id", "work_revision", "start", "end"])}, ["id", "payload"])
+    result["creative_work_editorial_repair"] = obj({"id": STRING, "run_id": STRING, "finding_id": STRING, "payload": obj({"request_id": STRING, "work_revision": NUMBER, "replacement": STRING}, ["request_id", "work_revision", "replacement"])}, ["id", "run_id", "finding_id", "payload"])
     return result
 
 
 SCHEMAS = schemas()
-WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure"}
+WRITES = {"create", "update", "restore", "merge", "draft", "polish_propose", "polish_promote", "suggest", "adopt", "create_work", "prepare", "review", "continuity_propose", "continuity_accept", "voice_configure", "editorial_run", "editorial_repair"}
 
 
 class CreativeToolProvider(ToolProvider):
@@ -136,6 +141,7 @@ class CreativeToolProvider(ToolProvider):
         self.works = WorkStore(self.ingredients.home)
         self.polishing = PolishingStore(self.works)
         self.continuity = ContinuityStore(self.works)
+        self.editorial = EditorialStore(self.works)
         self.stories = StoryStore(self.ingredients.home)
         self.series = SeriesStore(self.ingredients.home)
         self.voice = VoiceStore(self.series)
@@ -173,6 +179,9 @@ class CreativeToolProvider(ToolProvider):
                 result = await method(**args) if action == "draft" else method(**args)
             elif entity == "story" and action == "suggest":
                 result = await store.suggest(**args)
+            elif action.startswith("editorial_"):
+                method = getattr(self.editorial, action.removeprefix("editorial_"))
+                result = await method(**args) if action == "editorial_repair" else method(**args)
             elif action.startswith("voice_"):
                 result = getattr(self.voice, action.removeprefix("voice_"))(**args)
             elif action.startswith("continuity_"):

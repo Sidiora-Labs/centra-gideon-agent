@@ -45,7 +45,9 @@ def _walk(value, previous, outputs=None, depth=0):
 
 
 class RecipeStore:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, allowed_tools=None, guarded=False):
+        self.guarded = guarded
+        self.allowed_tools = READ_TOOLS if allowed_tools is None else frozenset(allowed_tools)
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
@@ -98,7 +100,7 @@ class RecipeStore:
                 raise ValueError("Each step requires id, tool and argument object")
             if not isinstance(step["id"], str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", step["id"]) or step["id"] in previous:
                 raise ValueError("Step identifiers must be unique names")
-            if step["tool"] not in READ_TOOLS:
+            if step["tool"] not in self.allowed_tools:
                 raise ValueError("Recipe tool is not an admitted read operation")
             _walk(step["arguments"], previous)
             previous.add(step["id"])
@@ -131,7 +133,10 @@ class RecipeStore:
             db.execute("BEGIN IMMEDIATE")
             replay = self._replay(db, request_id, fingerprint)
             if replay:
-                return self._get(db, "runs", replay["id"])
+                run = self._get(db, "runs", replay["id"])
+                if run.get("session_key") and not self.guarded:
+                    raise ValueError("Session-bound runs require the guarded recipe adapter")
+                return run
             recipe = self._get(db, "recipes", recipe_id)
             if not recipe["enabled"] or recipe["revision"] != revision:
                 raise ConflictError("Recipe is disabled or its revision changed")
@@ -142,16 +147,22 @@ class RecipeStore:
 
     def get_run(self, id):
         with sqlite3.connect(self.path) as db:
-            return self._get(db, "runs", id)
+            run = self._get(db, "runs", id)
+            if run.get("session_key") and not self.guarded:
+                raise ValueError("Session-bound runs require the guarded recipe adapter")
+            return run
 
     def list_runs(self):
         with sqlite3.connect(self.path) as db:
-            return [json.loads(row[0]) for row in db.execute("SELECT body FROM runs ORDER BY id")]
+            rows = [json.loads(row[0]) for row in db.execute("SELECT body FROM runs ORDER BY id")]
+            return rows if self.guarded else [row for row in rows if not row.get("session_key")]
 
     def cancel(self, run_id):
         with sqlite3.connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             run = self._get(db, "runs", run_id)
+            if run.get("session_key") and not self.guarded:
+                raise ValueError("Session-bound runs require the guarded recipe adapter")
             if run["status"] in ("ready", "running"):
                 run["status"] = "cancelled"
                 db.execute("UPDATE runs SET body=? WHERE id=?", (json.dumps(run), run_id))
@@ -167,6 +178,10 @@ class RecipeStore:
                 return run
             if expected_index != run["next_index"]:
                 raise ConflictError("Run step changed; reload before advancing")
+            if run.get("session_key") and not self.guarded:
+                raise ValueError("Session-bound runs require the guarded recipe adapter")
+            if run["recipe_snapshot"]["steps"][run["next_index"]]["tool"] not in self.allowed_tools:
+                raise ValueError("Recipe operation is not admitted by this execution adapter")
             current = self._get(db, "recipes", run["recipe_id"])
             if not current["enabled"] or current["revision"] != run["recipe_revision"]:
                 run["status"] = "revoked"

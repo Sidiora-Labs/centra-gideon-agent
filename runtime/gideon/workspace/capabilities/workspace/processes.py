@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import fcntl
 import json
 import os
@@ -35,6 +36,9 @@ class ProcessRegistry:
         self.mutex = asyncio.Lock()
         with self._db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS processes(id TEXT PRIMARY KEY, request_id TEXT UNIQUE, input TEXT NOT NULL, payload TEXT NOT NULL, log TEXT NOT NULL DEFAULT "")')
+            if 'log_sequence' not in {row[1] for row in db.execute('PRAGMA table_info(processes)')}:
+                db.execute('ALTER TABLE processes ADD COLUMN log_sequence INTEGER NOT NULL DEFAULT 0')
+                db.execute('UPDATE processes SET log_sequence=LENGTH(log)')
             for row in db.execute('SELECT id,payload FROM processes').fetchall():
                 record = json.loads(row[1])
                 if record['status'] in ('starting', 'running'):
@@ -112,11 +116,15 @@ class ProcessRegistry:
 
     async def _watch(self, process_id, proc, disposable):
         try:
-            while chunk := await proc.stdout.read(65536):
-                text, _ = redact_credentials(chunk.decode('utf-8', 'replace'))
-                with self._db() as db:
-                    previous = db.execute('SELECT log FROM processes WHERE id=?', (process_id,)).fetchone()[0]
-                    db.execute('UPDATE processes SET log=? WHERE id=?', ((previous + text)[-65536:], process_id))
+            decoder=codecs.getincrementaldecoder('utf-8')('replace')
+            while True:
+                chunk=await proc.stdout.read(65536)
+                text, _ = redact_credentials(decoder.decode(chunk,final=not chunk))
+                if text:
+                    with self._db() as db:
+                        previous = db.execute('SELECT log FROM processes WHERE id=?', (process_id,)).fetchone()[0]
+                        db.execute('UPDATE processes SET log=?,log_sequence=log_sequence+? WHERE id=?', ((previous + text)[-65536:],len(text),process_id))
+                if not chunk:break
             code = await proc.wait()
             status = 'stopped' if process_id in self.stopping else 'exited' if code == 0 else 'failed'
             self._update(process_id, status=status, exit_code=code, ended_at=datetime.now(timezone.utc).isoformat())
@@ -150,6 +158,19 @@ class ProcessRegistry:
         with self._db() as db:
             text = db.execute('SELECT log FROM processes WHERE id=?', (process_id,)).fetchone()[0]
         return {'text': text[-limit:]}
+
+    def log_window(self,process_id,*,after=0,limit=4096):
+        if type(after) is not int or after<0 or type(limit) is not int or not 1<=limit<=65536:
+            raise ValueError('Invalid log cursor or limit')
+        with self._db() as db:
+            row=db.execute('SELECT log,log_sequence,payload FROM processes WHERE id=?',(process_id,)).fetchone()
+        if row is None:raise FileNotFoundError('Managed process not found')
+        log,end,payload=row
+        if after>end:raise ValueError('Log cursor is ahead of retained stream')
+        first=end-len(log)
+        start=max(after,first)
+        text=log[start-first:start-first+limit]
+        return {'text':text,'start':start,'next':start+len(text),'end':end,'dropped':max(0,first-after),'status':json.loads(payload)['status'],'cursor_unit':'redacted_unicode_characters'}
 
     async def stop(self, process_id, revision):
         async with self.mutex:

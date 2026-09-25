@@ -38,12 +38,28 @@ CATALOG.update({
     "media_annotations_history": ("List retained media annotation revision summaries with pagination.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, False),
 })
 
+ANIMATION_INPUT = {"type": "object", "additionalProperties": False, "required": ["title", "concept", "renderer", "duration_seconds", "width", "height", "fps", "interactive"], "properties": {
+    "title": STRING, "concept": {"type": "string", "minLength": 1, "maxLength": 4000}, "renderer": {"enum": ["canvas2d", "svg", "css"]},
+    "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 180}, "width": INTEGER, "height": INTEGER,
+    "fps": {"type": "integer", "minimum": 1, "maximum": 60}, "interactive": {"type": "boolean"},
+}}
+CATALOG["media_code_animation_submit"] = ("Queue genuine reasoning-provider generation of a self-contained HTML animation and publish the validated response as a canonical artifact.", ("request_id", "input"), {"request_id": STRING, "input": ANIMATION_INPUT}, True)
+
 CLEANUP_INPUT = {"type": "object", "additionalProperties": False, "required": ["source_artifact_id", "source_version", "operations"], "properties": {"source_artifact_id": STRING, "source_version": INTEGER, "operations": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object", "required": ["op"], "properties": {"op": {"enum": ["crop", "resize", "rotate", "flip", "brightness", "contrast", "sharpen", "solid_background"]}}}}}}
 CATALOG["media_cleanup_submit"] = ("Queue ordered local image transforms preserving the pinned original; solid-background cleanup is deterministic edge color removal, not semantic segmentation.", ("request_id", "input"), {"request_id": STRING, "input": CLEANUP_INPUT}, True)
 
 VIDEO_INPUT = {"type": "object", "additionalProperties": False, "required": ["prompt", "duration_seconds"], "properties": {"prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "duration_seconds": {"type": "number", "minimum": 1, "maximum": 60}, "aspect_ratio": STRING, **{prefix+"_artifact_id": STRING for prefix in ("first_frame", "last_frame", "continuation")}, **{prefix+"_version": INTEGER for prefix in ("first_frame", "last_frame", "continuation")}, "controls": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "integer" if key == "seed" else "number"} for key in ("seed", "guidance", "motion")}}}}
 CATALOG["media_video_capabilities"] = ("Read selected video model controls, conditioning and processing availability.", (), {}, False)
 CATALOG["media_video_submit"] = ("Queue video generation with advertised controls or pinned frame/continuation references; outputs become canonical artifacts.", ("request_id", "input"), {"request_id": STRING, "input": VIDEO_INPUT}, True)
+
+SPRITE_GENERATE = {"type": "object", "additionalProperties": False, "required": ["title", "frames"], "properties": {"title": STRING, "frames": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "object"}}}}
+SPRITE_COMPILE = {"type": "object", "additionalProperties": False, "required": ["title", "frames", "cell_width", "cell_height", "columns", "padding", "trim", "fps"], "properties": {**SPRITE_GENERATE["properties"], **{key: INTEGER for key in ("cell_width", "cell_height", "columns", "fps")}, "padding": {"type": "integer", "minimum": 0}, "trim": {"type": "boolean"}}}
+CATALOG.update({
+    "media_sprite_inspect": ("Read canonical frame pixels and SHA256 before explicit approval.", ("artifact_id", "version"), {"artifact_id": STRING, "version": INTEGER}, False),
+    "media_sprite_generate": ("Queue actual selected-provider image generation for named directional animation frames; output still requires approval.", ("request_id", "input"), {"request_id": STRING, "input": SPRITE_GENERATE}, True),
+    "media_sprite_compile": ("Compile explicitly approved SHA-bound frames to deterministic transparent PNG atlas and JSON layout; originals remain unchanged.", ("request_id", "input"), {"request_id": STRING, "input": SPRITE_COMPILE}, True),
+    "media_sprite_frames": ("Read retained generated frame checkpoints and exact approval hashes.", ("job_id",), {"job_id": STRING}, False),
+})
 
 EPISODE_FIELDS = {"title": STRING, "width": INTEGER, "height": INTEGER, "fps": INTEGER, "aspect_ratio": STRING, "revision": {"type": "integer", "minimum": 0}, "request_id": STRING, "scenes": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "object", "additionalProperties": False, "required": ["prompt", "duration_seconds", "mode", "allow_fallback"], "properties": {"prompt": {"type": "string", "minLength": 1, "maxLength": 4000}, "duration_seconds": {"type": "number", "minimum": .05, "maximum": 60}, "mode": {"enum": ["establish", "continue", "reuse"]}, "allow_fallback": {"type": "boolean"}, "artifact_id": STRING, "version": INTEGER}}}}
 CATALOG.update({
@@ -141,6 +157,16 @@ class MediaToolProvider(ToolProvider):
                               recovery_hints=["Read the current artifact or sketch, correct the input, and retry with its current revision."])
 
     def _run(self, name, args):
+        if name == 'media_code_animation_submit':
+            return self.jobs.submit(dict(operation='code_animation_generate', **args))
+        if name == 'media_sprite_inspect':
+            return self.jobs.sprites.inspect(args)
+        if name in ('media_sprite_generate', 'media_sprite_compile'):
+            return self.jobs.submit(dict(operation='sprite_generate' if name.endswith('_generate') else 'sprite_compile', **args))
+        if name == 'media_sprite_frames':
+            if self.jobs.get(args['job_id'])['operation'] != 'sprite_generate':
+                raise SketchError('Job is not sprite generation')
+            return self.jobs.sprites.frames(args['job_id'])
         if name == 'media_episodes_list':
             return self.jobs.episodes.list()
         if name == 'media_episodes_get':

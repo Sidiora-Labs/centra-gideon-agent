@@ -124,3 +124,13 @@ CONTRACTS.update({
     "identity_lifecycle_request_thinking": ({"request_id": IDENTIFIER, "preset": {"enum": ["reflect", "review"]}}, ["request_id", "preset"], "Queue bounded self-reflection within human-approved loop authority", True),
     "identity_lifecycle_dispatch": ({"id": IDENTIFIER}, ["id"], "Dispatch one approved thinking request through the existing guarded loop delivery path", True),
 })
+
+CONTRACTS.update({
+    "identity_guarded_catalog": ({}, [], "Inspect this existing native session tool permissions for guarded recipes", False),
+    "identity_guarded_save": (RECIPE, ["title", "steps", "request_id"], "Author pinned cross-provider steps from this session current tool catalog", True),
+    "identity_guarded_begin": CONTRACTS["identity_recipe_begin"],
+    "identity_guarded_restore": CONTRACTS["identity_recipe_restore"],
+    "identity_guarded_get_run": ({"id": IDENTIFIER}, ["id"], "Read this session guarded recipe receipt", False),
+    "identity_guarded_advance": ({"run_id": IDENTIFIER, "expected_index": {"type": "integer", "minimum": 0}}, ["run_id", "expected_index"], "Dispatch through the existing native engine; busy current turns remain deferred", True),
+    "identity_guarded_cancel": ({"run_id": IDENTIFIER}, ["run_id"], "Cancel pending guarded recipe work through its existing session", True),
+})

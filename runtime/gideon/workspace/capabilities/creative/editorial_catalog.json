@@ -1,0 +1,1720 @@
+{
+  "checks": [
+    {
+      "id": "naming.dissimilar-names",
+      "label": "Character name dissimilarity",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "roster.economy",
+      "label": "Character roster economy / throwaway names",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "roster.unmodeled-names",
+      "label": "Unmodeled proper nouns used as character names",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "comic.lettering-density",
+      "label": "Comic lettering density / balloon load",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "comicScript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "comic.balloon-attribution",
+      "label": "Comic speech-balloon attribution",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "comicScript.pacing",
+        "canon"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "comic.prose-sync",
+      "label": "Comic ↔ prose synchronization (hybrid issues)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "prose",
+        "comicScript.pacing"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "cast.representation-balance",
+      "label": "Cast representation & balance (Bechdel signal, dialogue share, screen time)",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "reverseOutline"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "scene.component-balance",
+      "label": "Scene component balance (narrative / action / dialogue)",
+      "kind": "deterministic",
+      "scope": "scene",
+      "sources": [
+        "reverseOutline"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "visual.shot-continuity",
+      "label": "Storyboard shot continuity (180° rule, shot-type variety)",
+      "kind": "deterministic",
+      "scope": "scene",
+      "sources": [
+        "storyboard.shots"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "visual.eyeline-match",
+      "label": "Storyboard eyeline match (gaze continuity)",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "storyboard.shots"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "visual.appearance-continuity",
+      "label": "Storyboard appearance / prop continuity",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "storyboard.shots"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "sensory.balance",
+      "label": "Sensory balance (all-visual / sensory-bare scenes)",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "scene.white-room",
+      "label": "White-room / ungrounded scene",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "narration.summary-not-scene",
+      "label": "Narrated summary where a scene belongs",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "scene.interiority-balance",
+      "label": "Interiority balance (visually dense / emotionally empty scenes)",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "pov.justified",
+      "label": "POV justification (every viewpoint earns its arc)",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "reverseOutline",
+        "editorialArcs"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "pov.economy",
+      "label": "POV economy (count vs series length, late-introduced viewpoints)",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "reverseOutline"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "pov.head-hopping",
+      "label": "Head-hopping / POV discipline within scenes",
+      "kind": "llm",
+      "scope": "scene",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "series.styleGuide"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "continuity.timeline-contradiction",
+      "label": "Timeline / canon contradiction",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "continuityBible",
+        "reverseOutline",
+        "series.characterArcs"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "research.fact-accuracy",
+      "label": "Research / fact accuracy",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.factReference"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "character.consistency",
+      "label": "Character consistency (unearned personality shift)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "reverseOutline",
+        "series.characterArcs",
+        "series.characterArcs.evolution"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "character.secondary-arc",
+      "label": "Secondary-character arcs (recurring non-POV cast)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "canon",
+        "series.characterArcs.evolution"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "arc.transitions",
+      "label": "Character-arc transitions (change moments + flat arcs)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "series.characterArcs",
+        "series.characterArcs.evolution"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "arc.regression",
+      "label": "Character-arc regression / premature closure",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "series.characterArcs",
+        "series.characterArcs.evolution"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "plot.structure-momentum",
+      "label": "Plot structure & momentum",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "reverseOutline.plotlines",
+        "series.arc.readerMap"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "world.unforeshadowed-solution",
+      "label": "Unforeshadowed solution (worldbuilding deus ex machina)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "continuityBible"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "world.cost-free-power",
+      "label": "Cost-free power (limitation-free ability at a decisive moment)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "continuityBible"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "pacing.escalation-curve",
+      "label": "Pacing — escalation curve",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "theme.coherence",
+      "label": "Theme coherence / thematic throughline",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.arc.themes",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "arc.climax-agency",
+      "label": "Climax / resolution power (passive protagonist at the climax)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline",
+        "series.arc.readerMap",
+        "series.arc.themes",
+        "series.characterArcs.evolution"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "emotion.reaction-proportionality",
+      "label": "Emotional beat proportionality (reactions vs event magnitude)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "reverseOutline"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "relationships.reciprocity",
+      "label": "Relationship reciprocity",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "relationships.dangling-target",
+      "label": "Relationship dangling target",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "canon"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "relationships.opposition-reversal",
+      "label": "Opposition role-reversal payoff",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "arc.ticking-clock-hygiene",
+      "label": "Ticking-clock hygiene",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "series.arc.tickingClock"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "objects.unattached-significant",
+      "label": "Unattached significant object",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "objects.unmotivated-interaction",
+      "label": "Unmotivated object interaction",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "objects.backstory-consistency",
+      "label": "Attachment backstory consistency",
+      "kind": "llm",
+      "scope": "noun",
+      "sources": [
+        "canon"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "objects.weight-proportionality",
+      "label": "Object narrative-weight proportionality",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.info-dumping",
+      "label": "Info-dumping / \"as you know, Bob\" exposition",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "interiority.protagonist",
+      "label": "Protagonist interiority (mind / objective / emotion / decision)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "style.reading-level",
+      "label": "Reading-level conformance",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.styleGuide"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "style.conformance",
+      "label": "Style-guide conformance (tense / POV / rating)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript",
+        "series.styleGuide"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "chekhov.setups-payoffs",
+      "label": "Chekhov's guns (setups & payoffs)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon",
+        "series.arc.readerMap",
+        "series.arc.foreshadowing"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "continuity.premature-reveal",
+      "label": "Premature reveal (spoiler leak)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "high"
+    },
+    {
+      "id": "prose.cliches",
+      "label": "Cliché phrases (stock similes / idioms)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.modifier-stacking",
+      "label": "Overwriting — stacked adjectives / adverbs",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.filter-words",
+      "label": "Filter words (distancing verbs)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.hedge-words",
+      "label": "Hedge / weasel words (distance markers)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.crutch-words",
+      "label": "Crutch / filler words",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.adverbs",
+      "label": "Adverb overuse (-ly + dialogue tags)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.passive-voice",
+      "label": "Passive voice (overuse)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.repeated-gestures",
+      "label": "Repeated gestures / body-part autonomy",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.word-echoes",
+      "label": "Word repetition / echoes",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.sentence-rhythm",
+      "label": "Sentence rhythm & variety",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.slop-banned-words",
+      "label": "Tiered \"AI slop\" banned-word list",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.ai-tells",
+      "label": "Fiction AI-tell idioms",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "prose.structural-tics",
+      "label": "Structural rhetorical tics",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.burstiness",
+      "label": "Structural burstiness (em-dash / transitions / paragraphs / scene breaks)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.telling-emotion",
+      "label": "Telling-not-showing emotion (LLM)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "interiority.register",
+      "label": "Interiority register (thoughts that sound authored, not thought)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.dead-metaphor",
+      "label": "Dead / mixed metaphor, novel clichés & overwriting (LLM)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "opening.wrong-start",
+      "label": "Weak opening (wrong place to start)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "prose.mirror-description",
+      "label": "Mirror self-description",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "dialogue.pleasantries",
+      "label": "Empty greeting / small-talk openings",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.said-bookisms",
+      "label": "Said-bookisms & non-speech dialogue tags",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.attribution-clarity",
+      "label": "Dialogue attribution clarity (untrackable speakers)",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.tag-variety",
+      "label": "Dialogue tag variety / within-scene tag monotony",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.on-the-nose",
+      "label": "On-the-nose / subtext-free dialogue (LLM)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.reported-speech",
+      "label": "Reported speech where a quoted line belongs (LLM)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "dialogue.voice-distinctiveness",
+      "label": "Character voice distinctiveness (LLM)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "canon"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "style.voice-consistency",
+      "label": "Narrative voice / tone consistency (LLM)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.styleGuide"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "style.voice-drift",
+      "label": "Statistical voice drift (deterministic)",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.styleGuide"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.kill-your-darlings",
+      "label": "Kill your darlings (precious / self-indulgent passages)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "prose.adversarial-cuts",
+      "label": "Adversarial cuts (prose tightening)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "medium"
+    },
+    {
+      "id": "prose.italic-thoughts",
+      "label": "Italicized internal thoughts",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "manuscript"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "endings.cliffhanger",
+      "label": "Chapter-ending cliffhangers (soft landings)",
+      "kind": "llm",
+      "scope": "series",
+      "sources": [
+        "manuscript",
+        "series.arc.readerMap"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "endings.pov-switch",
+      "label": "Cliffhanger POV switch (multi-POV)",
+      "kind": "deterministic",
+      "scope": "series",
+      "sources": [
+        "reverseOutline",
+        "series.arc.readerMap"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "comic.panel-rhythm",
+      "label": "Comic panel rhythm & splash usage",
+      "kind": "deterministic",
+      "scope": "issue",
+      "sources": [
+        "comicScript.layout"
+      ],
+      "severity": "low"
+    },
+    {
+      "id": "comic.page-turn-beats",
+      "label": "Comic page-turn beat placement (LLM)",
+      "kind": "llm",
+      "scope": "issue",
+      "sources": [
+        "comicScript.pacing",
+        "series.arc.readerMap"
+      ],
+      "severity": "low"
+    }
+  ],
+  "lexicons": {
+    "FILTER_WORDS": [
+      "saw",
+      "watched",
+      "noticed",
+      "realized",
+      "realised",
+      "felt",
+      "heard",
+      "seemed",
+      "looked",
+      "wondered",
+      "thought",
+      "knew",
+      "decided",
+      "sensed",
+      "observed",
+      "spotted",
+      "glimpsed",
+      "began to",
+      "started to",
+      "could see",
+      "could hear",
+      "could feel",
+      "could smell",
+      "could tell",
+      "found himself",
+      "found herself",
+      "found themselves",
+      "found myself"
+    ],
+    "HEDGE_WORDS": [
+      "as if",
+      "as though",
+      "almost",
+      "somehow",
+      "somewhat",
+      "deep inside",
+      "deep down",
+      "somewhere inside",
+      "somewhere deep",
+      "part of him",
+      "part of her",
+      "part of them",
+      "something inside",
+      "in a way",
+      "in some way",
+      "kind of",
+      "sort of",
+      "more or less",
+      "i guess",
+      "i suppose",
+      "i think",
+      "i feel like",
+      "maybe",
+      "perhaps",
+      "possibly",
+      "probably",
+      "surely",
+      "no doubt",
+      "obviously",
+      "clearly",
+      "of course",
+      "naturally",
+      "undoubtedly",
+      "evidently",
+      "presumably",
+      "needless to say",
+      "arguably"
+    ],
+    "CRUTCH_WORDS": [
+      "just",
+      "really",
+      "very",
+      "quite",
+      "somewhat",
+      "suddenly",
+      "actually",
+      "basically",
+      "literally",
+      "simply",
+      "totally",
+      "definitely",
+      "certainly",
+      "in order to"
+    ],
+    "GESTURE_WORDS": [
+      "nod",
+      "smile",
+      "shrug",
+      "sigh",
+      "frown",
+      "grin",
+      "smirk",
+      "wince",
+      "blink",
+      "gasp",
+      "chuckle",
+      "glance",
+      "gulp",
+      "gawk",
+      "scowl",
+      "grimace"
+    ],
+    "NON_ADVERB_LY": [
+      "only",
+      "family",
+      "reply",
+      "supply",
+      "apply",
+      "ally",
+      "rally",
+      "bully",
+      "jelly",
+      "belly",
+      "lily",
+      "holy",
+      "ugly",
+      "italy",
+      "july",
+      "fly",
+      "ply",
+      "sly",
+      "rely",
+      "comply",
+      "imply",
+      "multiply",
+      "assembly",
+      "anomaly",
+      "monopoly",
+      "panoply",
+      "melancholy",
+      "early",
+      "lonely",
+      "lovely",
+      "silly",
+      "chilly",
+      "jolly",
+      "folly",
+      "dolly",
+      "gully",
+      "sully",
+      "tally",
+      "wally",
+      "telly",
+      "wholly",
+      "duly",
+      "truly",
+      "unduly",
+      "curly",
+      "burly",
+      "surly",
+      "gnarly",
+      "pearly",
+      "hourly",
+      "daily",
+      "doily",
+      "gaily"
+    ],
+    "STATIVE_PARTICIPLES": [
+      "tired",
+      "exhausted",
+      "worried",
+      "scared",
+      "frightened",
+      "terrified",
+      "excited",
+      "interested",
+      "bored",
+      "confused",
+      "surprised",
+      "amazed",
+      "astonished",
+      "pleased",
+      "satisfied",
+      "delighted",
+      "annoyed",
+      "frustrated",
+      "embarrassed",
+      "ashamed",
+      "relieved",
+      "concerned",
+      "determined",
+      "depressed",
+      "devastated",
+      "overwhelmed",
+      "thrilled",
+      "disappointed",
+      "shocked",
+      "stunned",
+      "intrigued",
+      "fascinated",
+      "alarmed",
+      "troubled",
+      "convinced",
+      "resigned",
+      "accustomed",
+      "amused",
+      "comforted",
+      "distracted",
+      "flustered",
+      "gone",
+      "dressed",
+      "seated",
+      "married",
+      "finished",
+      "done",
+      "located",
+      "situated",
+      "positioned",
+      "prepared",
+      "gathered"
+    ],
+    "SETTING_SUBJECTS": [
+      "sky",
+      "skies",
+      "sun",
+      "moon",
+      "stars",
+      "star",
+      "light",
+      "lights",
+      "sunlight",
+      "moonlight",
+      "starlight",
+      "dawn",
+      "dusk",
+      "twilight",
+      "horizon",
+      "rain",
+      "snow",
+      "wind",
+      "winds",
+      "air",
+      "fog",
+      "mist",
+      "haze",
+      "cloud",
+      "clouds",
+      "storm",
+      "world",
+      "ground",
+      "earth",
+      "floor",
+      "ceiling",
+      "wall",
+      "walls",
+      "room",
+      "hall",
+      "street",
+      "streets",
+      "road",
+      "path",
+      "valley",
+      "mountain",
+      "mountains",
+      "hills",
+      "hill",
+      "forest",
+      "woods",
+      "sea",
+      "ocean",
+      "water",
+      "waters",
+      "river",
+      "lake",
+      "field",
+      "fields",
+      "garden",
+      "meadow",
+      "landscape",
+      "silence",
+      "quiet",
+      "darkness",
+      "shadow",
+      "shadows",
+      "night",
+      "morning",
+      "evening",
+      "afternoon",
+      "day",
+      "sunset",
+      "sunrise",
+      "surface",
+      "distance",
+      "town",
+      "city",
+      "village"
+    ],
+    "IRREGULAR_PARTICIPLES": [
+      "broken",
+      "taken",
+      "given",
+      "seen",
+      "done",
+      "gone",
+      "written",
+      "spoken",
+      "chosen",
+      "frozen",
+      "stolen",
+      "driven",
+      "known",
+      "grown",
+      "thrown",
+      "blown",
+      "drawn",
+      "worn",
+      "born",
+      "borne",
+      "torn",
+      "sworn",
+      "shown",
+      "hidden",
+      "beaten",
+      "eaten",
+      "fallen",
+      "forgotten",
+      "gotten",
+      "held",
+      "kept",
+      "left",
+      "lost",
+      "made",
+      "met",
+      "paid",
+      "put",
+      "said",
+      "sent",
+      "set",
+      "sold",
+      "told",
+      "built",
+      "bought",
+      "brought",
+      "caught",
+      "taught",
+      "felt",
+      "found",
+      "hung",
+      "led",
+      "meant",
+      "read",
+      "struck",
+      "swept",
+      "swung",
+      "understood",
+      "wound",
+      "bound",
+      "ground",
+      "cut",
+      "hit",
+      "hurt",
+      "shut",
+      "split",
+      "spread",
+      "cast",
+      "forbidden",
+      "forgiven",
+      "mistaken",
+      "shaken",
+      "woken",
+      "risen",
+      "ridden",
+      "bitten",
+      "laid",
+      "lain"
+    ],
+    "DIALOGUE_TAGS": [
+      "said",
+      "asked",
+      "replied",
+      "whispered",
+      "shouted",
+      "muttered",
+      "murmured",
+      "answered",
+      "called",
+      "cried",
+      "yelled",
+      "snapped",
+      "hissed",
+      "breathed",
+      "added",
+      "continued",
+      "stated",
+      "remarked",
+      "demanded",
+      "growled"
+    ],
+    "REPORTING_TAG_ADVERBS": [
+      "quietly",
+      "softly",
+      "gently",
+      "sharply",
+      "slowly",
+      "quickly",
+      "calmly",
+      "evenly",
+      "flatly",
+      "dryly",
+      "drily",
+      "curtly",
+      "firmly",
+      "loudly",
+      "faintly",
+      "coolly",
+      "smoothly",
+      "hoarsely",
+      "breathlessly",
+      "lightly",
+      "plainly",
+      "simply",
+      "crisply",
+      "thickly",
+      "tightly",
+      "levelly",
+      "briskly",
+      "mildly",
+      "tonelessly",
+      "huskily",
+      "breathily"
+    ],
+    "CLICHE_PHRASES": [
+      "heart pounding like a drum",
+      "time stood still",
+      "little did they know",
+      "little did she know",
+      "little did he know",
+      "all hell broke loose",
+      "at the end of the day",
+      "calm before the storm",
+      "avoid like the plague",
+      "blood ran cold",
+      "heart skipped a beat",
+      "in the nick of time",
+      "fell on deaf ears",
+      "needle in a haystack",
+      "tip of the iceberg",
+      "weight of the world",
+      "dead of night",
+      "crack of dawn",
+      "white as a sheet",
+      "quiet as the grave",
+      "easier said than done",
+      "only time will tell",
+      "every fiber of her being",
+      "every fiber of his being",
+      "tears streamed down",
+      "a single tear",
+      "butterflies in her stomach",
+      "butterflies in his stomach",
+      "heart of gold",
+      "nerves of steel",
+      "deafening silence",
+      "ice in his veins",
+      "ice in her veins",
+      "world came crashing down",
+      "against all odds",
+      "by the skin of his teeth",
+      "like a deer in the headlights",
+      "thick as thieves",
+      "head over heels",
+      "weak in the knees",
+      "breath caught in her throat",
+      "breath caught in his throat",
+      "t believe her eyes\",\n  \"couldn",
+      "without a second thought",
+      "in the blink of an eye",
+      "raining cats and dogs",
+      "the apple of his eye",
+      "cold sweat",
+      "few and far between",
+      "last but not least",
+      "when push comes to shove",
+      "lo and behold",
+      "needless to say",
+      "a force to be reckoned with",
+      "wrong side of the bed",
+      "hook line and sinker",
+      "tip of the tongue",
+      "better late than never"
+    ],
+    "COMMON_ADJECTIVES": [
+      "big",
+      "small",
+      "old",
+      "new",
+      "young",
+      "tall",
+      "short",
+      "long",
+      "wide",
+      "deep",
+      "high",
+      "low",
+      "huge",
+      "tiny",
+      "thin",
+      "thick",
+      "soft",
+      "hard",
+      "warm",
+      "cold",
+      "hot",
+      "cool",
+      "dark",
+      "light",
+      "pale",
+      "bright",
+      "dull",
+      "dim",
+      "grim",
+      "vast",
+      "wet",
+      "dry",
+      "fat",
+      "lean",
+      "rich",
+      "poor",
+      "fine",
+      "rough",
+      "smooth",
+      "sharp",
+      "flat",
+      "round",
+      "square",
+      "fierce",
+      "gentle",
+      "quiet",
+      "loud",
+      "still",
+      "slow",
+      "quick",
+      "fast",
+      "weak",
+      "strong",
+      "proud",
+      "plain",
+      "odd",
+      "sweet",
+      "bitter",
+      "sour",
+      "clean",
+      "dirty",
+      "fresh",
+      "stale",
+      "red",
+      "blue",
+      "green",
+      "black",
+      "white",
+      "gray",
+      "grey",
+      "brown",
+      "gold",
+      "golden",
+      "silver",
+      "crimson",
+      "azure",
+      "amber",
+      "shiny",
+      "pretty",
+      "ugly",
+      "happy",
+      "angry",
+      "weary",
+      "dreary",
+      "empty",
+      "heavy",
+      "busy",
+      "lazy",
+      "dirty",
+      "dusty",
+      "rusty",
+      "foggy",
+      "misty",
+      "murky",
+      "silky",
+      "wispy",
+      "gloomy",
+      "creepy",
+      "spooky",
+      "sleepy",
+      "lonely",
+      "lovely"
+    ],
+    "TIER1_BANNED_WORDS": [
+      "delve",
+      "delves",
+      "delved",
+      "delving",
+      "tapestry",
+      "tapestries",
+      "myriad",
+      "plethora",
+      "utilize",
+      "utilizes",
+      "utilized",
+      "utilizing",
+      "utilization",
+      "leverage",
+      "leverages",
+      "leveraged",
+      "leveraging",
+      "boasts",
+      "boasting",
+      "testament",
+      "underscore",
+      "underscores",
+      "underscored",
+      "underscoring",
+      "multifaceted",
+      "intricate",
+      "intricacies",
+      "nuanced",
+      "unprecedented",
+      "ever-evolving",
+      "game-changer",
+      "cutting-edge",
+      "in the realm of",
+      "in the world of",
+      "navigate the complexities of",
+      "stands as a testament"
+    ],
+    "TIER2_SUSPICIOUS_WORDS": [
+      "robust",
+      "seamless",
+      "seamlessly",
+      "pivotal",
+      "vibrant",
+      "profound",
+      "resonate",
+      "resonates",
+      "resonated",
+      "resonating",
+      "resonance",
+      "illuminate",
+      "illuminates",
+      "illuminated",
+      "illuminating",
+      "embark",
+      "embarks",
+      "embarked",
+      "embarking",
+      "foster",
+      "fosters",
+      "fostered",
+      "fostering",
+      "bolster",
+      "bolsters",
+      "bolstered",
+      "bolstering",
+      "palpable",
+      "poignant",
+      "visceral",
+      "evocative",
+      "ethereal"
+    ],
+    "TRANSITION_OPENERS": [
+      "however",
+      "moreover",
+      "furthermore",
+      "additionally",
+      "meanwhile",
+      "nevertheless",
+      "nonetheless",
+      "consequently",
+      "ultimately",
+      "indeed",
+      "thus",
+      "therefore",
+      "in fact",
+      "of course",
+      "naturally",
+      "as a result",
+      "in addition",
+      "even so",
+      "all the same"
+    ],
+    "SAID_BOOKISMS": [
+      "expostulate",
+      "ejaculate",
+      "opine",
+      "interject",
+      "enunciate",
+      "articulate",
+      "proclaim",
+      "exclaim",
+      "vociferate",
+      "bellow",
+      "thunder",
+      "simper",
+      "chortle",
+      "guffaw",
+      "snarl",
+      "growl",
+      "hiss",
+      "purr",
+      "quip",
+      "retort",
+      "riposte",
+      "interpose",
+      "remonstrate",
+      "expound",
+      "asseverate",
+      "aver",
+      "posit",
+      "postulate",
+      "elucidate",
+      "intone",
+      "drawl",
+      "bleat",
+      "splutter",
+      "sputter",
+      "wheeze",
+      "rasp",
+      "croak",
+      "trill",
+      "warble",
+      "pontificate",
+      "declaim",
+      "orate",
+      "soliloquize"
+    ],
+    "NON_SPEECH_TAGS": [
+      "smile",
+      "grin",
+      "laugh",
+      "chuckle",
+      "nod",
+      "shrug",
+      "sigh",
+      "frown",
+      "beam",
+      "wink",
+      "sob",
+      "snort",
+      "gesture",
+      "scowl",
+      "smirk",
+      "pout",
+      "wince",
+      "gulp",
+      "shudder"
+    ],
+    "STOPWORDS": [
+      "the",
+      "a",
+      "an",
+      "and",
+      "or",
+      "but",
+      "nor",
+      "for",
+      "so",
+      "yet",
+      "of",
+      "to",
+      "in",
+      "on",
+      "at",
+      "by",
+      "as",
+      "is",
+      "are",
+      "was",
+      "were",
+      "be",
+      "been",
+      "being",
+      "am",
+      "it",
+      "its",
+      "he",
+      "she",
+      "they",
+      "them",
+      "his",
+      "her",
+      "their",
+      "him",
+      "i",
+      "me",
+      "my",
+      "we",
+      "us",
+      "our",
+      "you",
+      "your",
+      "this",
+      "that",
+      "these",
+      "those",
+      "there",
+      "here",
+      "with",
+      "from",
+      "into",
+      "onto",
+      "out",
+      "up",
+      "down",
+      "off",
+      "over",
+      "then",
+      "than",
+      "not",
+      "no",
+      "do",
+      "does",
+      "did",
+      "has",
+      "have",
+      "had",
+      "will",
+      "would",
+      "can",
+      "could",
+      "should",
+      "shall",
+      "may",
+      "might",
+      "must",
+      "if",
+      "when",
+      "while",
+      "all",
+      "one",
+      "who",
+      "what",
+      "which",
+      "how",
+      "why",
+      "where",
+      "about",
+      "just",
+      "very",
+      "some",
+      "any",
+      "each",
+      "both",
+      "more",
+      "most",
+      "such",
+      "only",
+      "own",
+      "too",
+      "now",
+      "said",
+      "like",
+      "back",
+      "get",
+      "got"
+    ]
+  }
+}

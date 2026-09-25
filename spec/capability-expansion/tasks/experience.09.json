@@ -1,0 +1,49 @@
+{
+  "id": "experience.09",
+  "status": "core_locally_checked_source_continuation_pending",
+  "base_revision": "0fd1926b",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/worlds.py",
+    "runtime/gideon/workspace/capabilities/experience/world_sources.py",
+    "runtime/gideon/workspace/capabilities/experience/worlds_http.py",
+    "runtime/gideon/workspace/capabilities/experience/assets/world-engine/world_api.js",
+    "runtime/gideon/workspace/capabilities/experience/assets/world-engine/launch.js",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/Worlds.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_worlds.py",
+    "checks/runtime/capabilities/experience/test_world_sources.py",
+    "checks/runtime/capabilities/experience/serve_worlds_ui.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/Worlds.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_worlds.py",
+    "checks/runtime/capabilities/experience/test_world_sources.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/Worlds.test.tsx"
+  ],
+  "contract": "Canonical actual engine state, live WS presence, revision-checked durable operation receipts and native permission dispatcher; explicit metadata projection from ambient, app, configured-agent, bound memory, durable process and canonical peer sources while preserving authored placement; real HTTP, native tool and Console consumers.",
+  "remaining_limits": [
+    "WebGPU geometry remains browser-pending",
+    "Canonical peer projection remains unavailable until the platform peer contract is merged; no duplicate peer store or synthetic substitute",
+    "Projection batches may partially apply under native engine limits; durable receipt and canonical state expose actual applied prefix"
+  ],
+  "evidence": {
+    "compile_runtime": "/tmp/gideon-experience.09-checks-uxk7t_98/evidence.json",
+    "ui": "/tmp/gideon-experience.09-checks-yhgzl9y3/evidence.json"
+  },
+  "qualification": {
+    "runtime_passed": 14,
+    "ui_passed": 3,
+    "production_lines": 350,
+    "test_lines": 452,
+    "ratio": 1.2914285714285714,
+    "repairs": "One world-switch state repair and one UI wait correction; runtime passed on the full gate and the repaired UI stage passed."
+  }
+}

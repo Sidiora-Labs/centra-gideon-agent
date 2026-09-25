@@ -16,6 +16,8 @@ from gideon.workspace.capabilities.creative.stories import StoryStore
 from gideon.workspace.capabilities.creative.series import SeriesStore
 from gideon.workspace.capabilities.creative.continuity import ContinuityStore
 from gideon.workspace.capabilities.creative.voice import VoiceStore
+from gideon.workspace.capabilities.creative.editorial import EditorialStore
+EDITORIAL = web.AppKey("creative_editorial", EditorialStore)
 VOICE = web.AppKey("creative_voice", VoiceStore)
 CONTINUITY = web.AppKey("creative_continuity", ContinuityStore)
 SERIES = web.AppKey("creative_series", SeriesStore)
@@ -296,6 +298,23 @@ async def voice(request):
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
 
 
+async def editorial(request):
+    try:
+        if request.query:
+            raise CatalogError("Unexpected query parameter")
+        store = request.app[EDITORIAL]
+        id = request.match_info['id']
+        if request.method == 'GET':
+            result = store.get(id)
+        elif 'finding_id' in request.match_info:
+            result = await store.repair(id, request.match_info['run_id'], request.match_info['finding_id'], await request.json())
+        else:
+            result = store.run(id, await request.json())
+        return web.json_response(result)
+    except (CatalogError, ValueError, TypeError) as exc:
+        return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
+
+
 def register(app):
     if STORE not in app:
         app[STORE] = IngredientStore()
@@ -327,6 +346,10 @@ def register(app):
     app.router.add_post("/api/capabilities/creative/stories/{id}/adopt", stories)
     app.router.add_post("/api/capabilities/creative/stories/{id}/work", stories)
     app[WORKS] = WorkStore(app[STORE].home)
+    app[EDITORIAL] = EditorialStore(app[WORKS])
+    app.router.add_get("/api/capabilities/creative/works/{id}/editorial", editorial)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs", editorial)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/repair", editorial)
     app[CONTINUITY] = ContinuityStore(app[WORKS])
     app.router.add_get("/api/capabilities/creative/works/{id}/continuity", continuity)
     app.router.add_get("/api/capabilities/creative/works/{id}/continuity/export", continuity)

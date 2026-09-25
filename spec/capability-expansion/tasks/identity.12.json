@@ -1,0 +1,161 @@
+{
+  "id": "identity.12",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Reuse canonical versioned recipes and existing NativeAgentRuntime tool batch dispatch across real tool providers",
+    "Pin current tool definitions and owning private session; serialize entire step through actual ConversationDirectory lease",
+    "Expose actual existing ApprovalGate approve/reject with current policy revalidation and cancellation receipts",
+    "Busy current native sessions defer instead of nested tool history mutation; append paired actual assistant/tool messages",
+    "Legacy read adapters cannot execute guarded writes or expose session-bound run outputs",
+    "Exercise genuine tool side effects, denied/rejected/approved calls, revocation and actual HTTP console control without inference calls",
+    "A revoked temporary-mode session can cancel its pending approval without exposing outputs or retaining the session lease; persisted receipts survive absent runtime"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/guarded_recipes.py",
+    "runtime/gideon/workspace/capabilities/identity/recipe_runtime_platform.py",
+    "runtime/gideon/workspace/capabilities/identity/recipes.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_guarded_recipes.py",
+    "apps/console/src/features/capabilities/identity/GuardedRecipesPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_guarded_recipes.py",
+    "checks/runtime/capabilities/identity/guarded_fixture.py",
+    "checks/runtime/capabilities/identity/guarded_ui_server.py",
+    "apps/console/src/features/capabilities/identity/GuardedRecipesPage.test.tsx",
+    "checks/runtime/capabilities/identity/test_guarded_cleanup.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_guarded_recipes.py",
+    "checks/runtime/capabilities/identity/test_guarded_cleanup.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/GuardedRecipesPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity12-baseline",
+  "remaining_limits": [
+    "Only existing private native sessions can execute; absent or ACP sessions explicitly unavailable",
+    "Busy sessions require explicit later dispatch; no nested execution during current model turn",
+    "External tool actions and model inference remain unqualified; local file and canonical identity writes exercise real guarded execution",
+    "Interrupted approval tasks are not silently recreated after process restart"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.12",
+  "qualification_checkpoints": [
+    {
+      "name": "full guarded recipe gate",
+      "evidence": {
+        "task": "identity.12",
+        "root": "/tmp/gideon-expansion-worktrees/identity",
+        "started_at": 1790301598.4535096,
+        "production_lines": 301,
+        "test_lines": 329,
+        "ratio": 1.0930232558139534,
+        "stage": "all",
+        "commands": [
+          {
+            "name": "compile",
+            "argv": [
+              "/tmp/gideon-runtime-venv/bin/python",
+              "-c",
+              "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+              "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_guarded_recipes.py",
+              "runtime/gideon/workspace/capabilities/identity/guarded_recipes.py",
+              "runtime/gideon/workspace/capabilities/identity/recipe_runtime_platform.py",
+              "runtime/gideon/workspace/capabilities/identity/recipes.py",
+              "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+              "runtime/gideon/workspace/capabilities/identity/tools.py",
+              "checks/runtime/capabilities/identity/guarded_fixture.py",
+              "checks/runtime/capabilities/identity/guarded_ui_server.py",
+              "checks/runtime/capabilities/identity/test_guarded_recipes.py"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.12-checks-1m_p16wn/compile.log"
+          },
+          {
+            "name": "runtime",
+            "argv": [
+              "/tmp/gideon-runtime-venv/bin/python",
+              "-m",
+              "pytest",
+              "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_guarded_recipes.py",
+              "-q"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.12-checks-1m_p16wn/runtime.log"
+          },
+          {
+            "name": "ui",
+            "argv": [
+              "node",
+              "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+              "run",
+              "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/GuardedRecipesPage.test.tsx"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.12-checks-1m_p16wn/ui.log"
+          }
+        ],
+        "status": "locally_qualified",
+        "evidence_dir": "/tmp/gideon-identity.12-checks-1m_p16wn",
+        "completed_at": 1790301660.2272317,
+        "files": {
+          "apps/console/src/features/capabilities/identity/GuardedRecipesPage.tsx": "e20bfadeebce13f06fce4c3130679b3a510f5186778fc5245b19eaef8406461b",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_guarded_recipes.py": "8339b1391e6a4ab12ad915a00d17efa239a4be160fffaba5f7e3a664387ef6d1",
+          "runtime/gideon/workspace/capabilities/identity/guarded_recipes.py": "b06557bcafe392b5c7cf6e660e745aba88c97abbb80374982c071a30ed753590",
+          "runtime/gideon/workspace/capabilities/identity/recipe_runtime_platform.py": "836474e8b157fa29d09705dd6f3e6270f408ed5486939cbe330bf0b43f476edc",
+          "runtime/gideon/workspace/capabilities/identity/recipes.py": "653d399744fc75fafa469c2724417f1ec8260d139ef8bd4c3cfc4e8957897af5",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "f852e2d4bca9146835e6211342c7fda5987fdcdde2347edd63a727fcfbf5ba9d",
+          "runtime/gideon/workspace/capabilities/identity/tools.py": "abfb8b7974fdb3fef8e32e5613f3577c66e92aadaec38f80e1e9c93e616046d6",
+          "apps/console/src/features/capabilities/identity/GuardedRecipesPage.test.tsx": "7bb7c3fb71a94f39f6d8c857b3d6b36314b612a7e3ecfe2b8b8a92dd5b9211dc",
+          "checks/runtime/capabilities/identity/guarded_fixture.py": "596d8ad80c3f1e8c3698a9c46db91d8d986fa9231e9ac6191ef7feef7d30e056",
+          "checks/runtime/capabilities/identity/guarded_ui_server.py": "0e3c5bae2f2ab6ac2f0763838caace07dc27e47cd5e7d0b119b2b184074b473c",
+          "checks/runtime/capabilities/identity/test_guarded_recipes.py": "60acf47ddfdcdb3ecc103c30953973fd9c33ae8089d82567582a7ceee7242d1f"
+        }
+      }
+    }
+  ],
+  "repair_cycles": 1,
+  "evidence": {
+    "task": "identity.12",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790301721.3097124,
+    "production_lines": 304,
+    "test_lines": 366,
+    "ratio": 1.2039473684210527,
+    "stage": "runtime",
+    "commands": [
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_guarded_cleanup.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.12-checks-uo9t2uh7/runtime.log"
+      }
+    ],
+    "status": "stage_qualified",
+    "evidence_dir": "/tmp/gideon-identity.12-checks-uo9t2uh7",
+    "completed_at": 1790301739.4287229,
+    "files": {
+      "apps/console/src/features/capabilities/identity/GuardedRecipesPage.tsx": "e20bfadeebce13f06fce4c3130679b3a510f5186778fc5245b19eaef8406461b",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_guarded_recipes.py": "8339b1391e6a4ab12ad915a00d17efa239a4be160fffaba5f7e3a664387ef6d1",
+      "runtime/gideon/workspace/capabilities/identity/guarded_recipes.py": "e51531cba8de2010b83cddf952f2e3ccc3f79293ad80676661a53dc573b8d6d2",
+      "runtime/gideon/workspace/capabilities/identity/recipe_runtime_platform.py": "836474e8b157fa29d09705dd6f3e6270f408ed5486939cbe330bf0b43f476edc",
+      "runtime/gideon/workspace/capabilities/identity/recipes.py": "653d399744fc75fafa469c2724417f1ec8260d139ef8bd4c3cfc4e8957897af5",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "f852e2d4bca9146835e6211342c7fda5987fdcdde2347edd63a727fcfbf5ba9d",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "abfb8b7974fdb3fef8e32e5613f3577c66e92aadaec38f80e1e9c93e616046d6",
+      "apps/console/src/features/capabilities/identity/GuardedRecipesPage.test.tsx": "7bb7c3fb71a94f39f6d8c857b3d6b36314b612a7e3ecfe2b8b8a92dd5b9211dc",
+      "checks/runtime/capabilities/identity/guarded_fixture.py": "596d8ad80c3f1e8c3698a9c46db91d8d986fa9231e9ac6191ef7feef7d30e056",
+      "checks/runtime/capabilities/identity/guarded_ui_server.py": "0e3c5bae2f2ab6ac2f0763838caace07dc27e47cd5e7d0b119b2b184074b473c",
+      "checks/runtime/capabilities/identity/test_guarded_cleanup.py": "d194db73adf8c217e6bd83e0b37d02fc7bb9bf041d0ad48ed560e6aab37f7cda",
+      "checks/runtime/capabilities/identity/test_guarded_recipes.py": "60acf47ddfdcdb3ecc103c30953973fd9c33ae8089d82567582a7ceee7242d1f"
+    }
+  },
+  "qualification_basis": "Initial complete AST/runtime/UI gate plus affected permission-cleanup runtime correction; unchanged UI not rerun"
+}
