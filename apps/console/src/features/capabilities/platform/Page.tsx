@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Harnesses from './Harnesses'
 import { useSearchParams } from 'react-router-dom'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -60,6 +61,7 @@ export default function Page({ baseUrl = '' }: { baseUrl?: string }) {
   const rows = catalog?.routes.filter(route => (!method || route.method === method) && `${route.path} ${route.name || ''} ${route.handler || ''}`.toLowerCase().includes(query.toLowerCase())) || []
   return <main className="min-w-0 space-y-l p-l text-on-surface">
     <h1 className="text-xl">API explorer</h1>
+    <Harnesses baseUrl={baseUrl} />
     <p>Live registered HTTP routes and declared app events. Unspecified schemas remain unknown.</p>
     <div className="flex flex-wrap gap-m">
       <label>Filter this page <input aria-label="Filter this page" className="bg-surface-high rounded p-s" value={query} onChange={event => update('q', event.target.value)} /></label>

@@ -1,0 +1,56 @@
+{
+  "task": "platform.04",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "requires": [
+    "platform.03"
+  ],
+  "contract": "Managed catalog-declared ACP package lifecycle: exact version install/update/remove, integrity provenance, optimistic installed version, dependent runtime protection, real HTTP/console/native inventory. No shared/global npm mutations. Existing runner readiness and sign-in remain authoritative.",
+  "acceptance": [
+    "Install actual catalog-declared ACP adapter at an exact version through authenticated HTTP into isolated managed prefix with integrity provenance.",
+    "Launch actual installed adapter and complete ACP initialize without claiming authenticated model inference.",
+    "Update exact package version, reject stale mutations and dependent runtime removal, remove package and provenance after disabling dependency.",
+    "Render real inventory and install/remove through console; native inventory tool returns real catalog and installed versions."
+  ],
+  "source_evidence": [
+    "runtime/gideon/engine/agents/runner_catalog.json:3 four existing runner declarations",
+    "runtime/gideon/integrations/acp/cli_resolve.py:223 actual provision_acp_adapter performs package installation",
+    "runtime/gideon/interfaces/dashboard/handlers/providers.py:118 existing readiness and login command API",
+    "apps/console/src/features/settings/ProvidersPanel.tsx:110 existing terminal sign-in handoff"
+  ],
+  "environment_observation": "Read-only command discovery found codex on PATH; no claude, gemini, kiro, opencode, kilo, cursor, grok, kimi or pi executable on PATH. This does not assert absence outside PATH or authentication status.",
+  "base_revision": "48a6e64c",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/harnesses.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_harnesses.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Harnesses.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_harnesses.py",
+    "checks/runtime/capabilities/platform/harnesses_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Harnesses.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_harnesses.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Harnesses.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "external_pending": [
+    "Authenticated vendor prompt/tool turn, streaming/cancel/reconnect and additional vendor harness coverage require vendor credentials/adapters; lifecycle qualification does not claim them."
+  ],
+  "evidence": {
+    "path": "/tmp/gideon-platform.04-checks-81r51fd3/evidence.json",
+    "runtime_tests": 13,
+    "ui_tests": 2,
+    "production_lines": 141,
+    "test_lines": 213,
+    "gate_runs": 2,
+    "repairs": 1
+  }
+}
