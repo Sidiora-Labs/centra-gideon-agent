@@ -3,6 +3,8 @@ from pathlib import Path
 from aiohttp import web
 from aiohttp.test_utils import TestClient,TestServer
 import pytest
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.providers.registry import RegisteredProvider,ToolTypeHandler
 from gideon.integrations.llm.credentials import CredentialStore
 from gideon.interfaces.dashboard.handlers.capabilities_experience_moltbook import PREFIX,register
 from gideon.workspace.capabilities.experience.moltbook import DEFAULT_BASE,MoltbookAdapter,MoltbookError,safe_base
@@ -37,6 +39,18 @@ async def service(tmp_path):
 
 def post_payload(**changes):return {'request_id':'post-request','kind':'post','submolt':'general','title':'A reviewed update','content':'Exact approved content.',**changes}
 def comment_payload(**changes):return {'request_id':'comment-request','kind':'comment','post_id':'post-1','content':'A deliberate reply.',**changes}
+
+def test_native_manifest_factory_loads_through_actual_tool_type_handler(tmp_path,monkeypatch):
+    monkeypatch.setenv('GIDEON_HOME',str(tmp_path))
+    path=Path('runtime/gideon/extensions/apps/native/gideon-moltbook/app.json')
+    manifest=AppManifest.from_json_file(path)
+    record=RegisteredProvider(name=manifest.name,manifest=manifest,provider_config=manifest.provider)
+    provider=ToolTypeHandler().create(record)
+    assert isinstance(provider,MoltbookTools) and provider.name=='gideon-moltbook'
+    definitions={item.name:item for item in asyncio.run(provider.list_tools())}
+    assert definitions['moltbook_read'].risk_level.value=='safe' and not definitions['moltbook_read'].requires_approval
+    assert definitions['moltbook_history'].risk_level.value=='safe' and not definitions['moltbook_history'].requires_approval
+    assert definitions['moltbook_write'].risk_level.value=='caution' and definitions['moltbook_write'].requires_approval
 
 def test_configuration_uses_named_credential_and_never_exposes_secret(tmp_path):
     adapter=MoltbookAdapter(tmp_path)

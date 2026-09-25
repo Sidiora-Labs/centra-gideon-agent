@@ -20,4 +20,4 @@ class MoltbookTools(ToolProvider):
             else:raise MoltbookError('Invalid Moltbook tool arguments')
             return ToolResult(success=True,output=json.dumps(result))
         except MoltbookError as exc:return ToolResult(success=False,error=str(exc),metadata={'status':exc.status,'code':exc.code})
-def create_provider(**kwargs):return MoltbookTools()
+def create_provider(config=None):return MoltbookTools()

@@ -26,5 +26,5 @@
   "ui_test_files":["apps/console/src/features/capabilities/experience/Moltbook.test.tsx"],
   "extra_files":["runtime/gideon/extensions/apps/native/gideon-moltbook/app.json"],
   "evidence":"/tmp/gideon-experience.14-checks-u4wjh98q/evidence.json",
-  "qualification":{"runtime_tests":11,"ui_tests":2,"production_lines":206,"test_lines":209,"repair_cycles":2,"runtime_evidence":"/tmp/gideon-experience.14-checks-s1__3db5/evidence.json","external_proof":"pending: no account credential supplied and no live outbound posts/comments authorized","limitations":["Shared experience route registration, page mounting and moltbook.sqlite3 durability enrollment remain root integration hooks."]}
+  "qualification":{"runtime_tests":12,"ui_tests":2,"production_lines":206,"test_lines":222,"repair_cycles":2,"runtime_evidence":"/tmp/gideon-experience.14-checks-s1__3db5/evidence.json","native_loader_runtime_evidence":"/tmp/gideon-experience.14-checks-xfc4i35w/evidence.json","external_proof":"pending: no account credential supplied and no live outbound posts/comments authorized","limitations":["Shared experience route registration, page mounting and moltbook.sqlite3 durability enrollment remain root integration hooks."]}
 }
