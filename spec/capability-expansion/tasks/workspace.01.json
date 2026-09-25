@@ -1,0 +1,94 @@
+{
+  "id": "workspace.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "mode": "BUILD",
+  "source_base": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "acceptance_coverage": [
+    "Real Git branch and dirty capture; detached HEAD; durable reload",
+    "Real process termination and surviving/missing reference reconciliation without workspace changes",
+    "Allowed-root, symlink and Git-metadata escape refusal; fsmonitor and inherited Git environment disabled",
+    "Idempotent capture and delete, stale revision refusal, bounded pagination, distinct stores",
+    "Production auth middleware with real HTTP capture/get/compare/delete/errors",
+    "Chromium-rendered console wired to real authenticated HTTP: save/compare/reload/delete/error retention"
+  ],
+  "integration_hooks": {
+    "handler": "gideon.interfaces.dashboard.handlers.capabilities_workspace.register(app)",
+    "page": "apps/console/src/features/capabilities/workspace/Page.tsx",
+    "http_prefix": "/api/capabilities/workspace",
+    "durability": "capabilities/workspace/snapshots.sqlite3"
+  },
+  "limits": [
+    "Root route/navigation/tool registration and durability enrollment pending; not integrated",
+    "Snapshots require an initialized Git repository inside allowed roots",
+    "Reference capture validates runtime existence; reconciliation does not recreate processes or switch branches",
+    "Browser harness exercises component against real HTTP; full-shell responsiveness qualification belongs to root integration"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.01",
+  "repair_cycles": 2,
+  "evidence": {
+    "task": "workspace.01",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790293576.5982258,
+    "production_lines": 238,
+    "test_lines": 372,
+    "ratio": 1.5630252100840336,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/__init__.py",
+          "runtime/gideon/workspace/capabilities/workspace/store.py",
+          "checks/runtime/capabilities/workspace/test_workspace.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.01-checks-s8w3n820/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.01-checks-s8w3n820/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Page.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.01-checks-s8w3n820/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.01-checks-s8w3n820",
+    "completed_at": 1790293625.274817,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "96e490cee0117df474f9ad7a608c22b2fdf86a42e9766d6fed895c6631e1d475",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "38074bd1fb43419d7614092b098b72711909b11f4d6ad01ba01231a793b41f03",
+      "runtime/gideon/workspace/capabilities/workspace/__init__.py": "97952937ff089aececc6b50c4158c12d8a62b9f571725cdd9052133b06a90f67",
+      "runtime/gideon/workspace/capabilities/workspace/store.py": "206933ecbc9cf8e5556aa1eaa6daebfe34ec537b6453fe3abb49a27c0f7235fb",
+      "apps/console/src/features/capabilities/workspace/Page.test.ts": "11fccf9be90d08b46504d896e98bc0eb867aff531d869920608077d278e0c19e",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/test_workspace.py": "0a4c571891c3429ca612bb5bcb5051be071284bc4878e8ba7f112682475bf39f",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    }
+  },
+  "exit_code": 0,
+  "production_lines": 238,
+  "test_lines": 372,
+  "test_ratio": 1.5630252100840336
+}
