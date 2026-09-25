@@ -1,7 +1,7 @@
 {
   "id": "creative.05",
   "schema_version": 1,
-  "status": "in_progress",
+  "status": "locally_qualified",
   "base_revision": "a400d15a",
   "requires": [
     "creative.04"
@@ -15,23 +15,30 @@
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/creative/authors.py",
-    "runtime/gideon/workspace/capabilities/creative/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
-    "apps/console/src/features/capabilities/creative/Authors.tsx",
-    "apps/console/src/features/capabilities/creative/Page.tsx"
+    "apps/console/src/features/capabilities/creative/Authors.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/creative/test_authors.py",
-    "checks/runtime/capabilities/creative/test_tools.py",
     "checks/runtime/capabilities/creative/author_server.py",
-    "apps/console/src/features/capabilities/creative/Authors.test.tsx",
-    "apps/console/src/features/capabilities/creative/Universes.test.tsx"
+    "apps/console/src/features/capabilities/creative/Authors.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/creative/test_authors.py",
-    "checks/runtime/capabilities/creative/test_tools.py"
+    "checks/runtime/capabilities/creative/test_authors.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/creative/Authors.test.tsx"
-  ]
+  ],
+  "shared_hooks": [
+    "Root owns capabilities_creative author route registration, CreativeToolProvider author operations, native capability metadata, and Creative Page mounting."
+  ],
+  "qualification": {
+    "evidence": "/tmp/gideon-creative.05-checks-3uumrs9y/evidence.json",
+    "compile": "passed",
+    "runtime": "35 passed",
+    "ui": "4 passed",
+    "production_lines": 228,
+    "test_lines": 373,
+    "ratio": 1.6359649122807018,
+    "file_identity": "Every unique production/test file hash matches the retained evidence; later shared hook changes are excluded from task ownership."
+  }
 }
