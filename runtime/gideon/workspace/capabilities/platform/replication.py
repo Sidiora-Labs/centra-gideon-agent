@@ -36,6 +36,7 @@ DOMAINS = {
     "wellbeing.routines": Domain("wellbeing.routines", replication_adapters.WELLBEING_ROUTINE_ENTRIES),
     "wellbeing.genome": Domain("wellbeing.genome", replication_adapters.WELLBEING_GENOME_ENTRIES),
     "wellbeing.practice": Domain("wellbeing.practice", replication_adapters.WELLBEING_PRACTICE_ENTRIES),
+    "wellbeing.life_calendar": Domain("wellbeing.life_calendar", replication_adapters.WELLBEING_CALENDAR_ENTRIES),
 }
 _INVENTORY = {entry.id: entry for entry in inventory.INVENTORY}
 _DOMAIN_MERGES = {"projects": inventory.MERGE_LWW, "tasks": inventory.MERGE_LWW}

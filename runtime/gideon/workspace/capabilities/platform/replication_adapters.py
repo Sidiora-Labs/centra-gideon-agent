@@ -29,6 +29,7 @@ from gideon.workspace.capabilities.wellbeing.intervention import InterventionSto
 from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
 from gideon.workspace.capabilities.wellbeing.cognition import CognitiveStore
 from gideon.workspace.capabilities.wellbeing.memory_practice import MemoryPracticeStore
+from gideon.workspace.capabilities.wellbeing.life_calendar import LifeCalendarStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
 from gideon.workspace.capabilities.wellbeing.store import instant
 
@@ -68,7 +69,8 @@ WELLBEING_HEALTH_ENTRIES = ("wellbeing.measurements", "wellbeing.labs", "wellbei
 WELLBEING_ROUTINE_ENTRIES = ("wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records")
 WELLBEING_GENOME_ENTRIES = ("wellbeing.genome_sources", "wellbeing.genome_variants")
 WELLBEING_PRACTICE_ENTRIES = ("wellbeing.cognitive_sessions", "wellbeing.memory_cards")
-WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES, *WELLBEING_PRACTICE_ENTRIES}
+WELLBEING_CALENDAR_ENTRIES = ("wellbeing.life_config", "wellbeing.life_events")
+WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES, *WELLBEING_GENOME_ENTRIES, *WELLBEING_PRACTICE_ENTRIES, *WELLBEING_CALENDAR_ENTRIES}
 SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *WELLBEING_ENTRIES})
 
 
@@ -112,6 +114,7 @@ def _wellbeing_path(home: Path) -> Path:
     GenomeStore(home)
     CognitiveStore(home)
     MemoryPracticeStore(home)
+    LifeCalendarStore(home)
     return home / "capabilities/wellbeing.sqlite3"
 
 
@@ -226,6 +229,14 @@ def validate_wellbeing_entries(scope: str, entries: list[dict]) -> None:
             artifact = row["data"].get("artifact")
             if not isinstance(artifact, dict) or set(artifact) != {"slug", "version", "sha256"} or not _pinned({"slug": artifact["slug"], "version": artifact["version"]}):
                 raise ValueError("Memory cards require exact pinned content metadata")
+    if scope == "wellbeing.life_calendar":
+        configs = rows["wellbeing.life_config"]
+        config_fields = {"id", "revision", "birth_date", "horizon_years", "sleep_hours", "timezone", "budgets", "source", "reminder", "created_at", "assumption"}
+        event_fields = {"id", "revision", "date", "title", "notes", "kind", "source", "deleted", "created_at"}
+        if len(configs) > 1 or any(row["id"] != "config" or set(row["data"]) != config_fields for row in configs):
+            raise ValueError("Life calendar configuration must exclude local automation state")
+        if any(set(row["data"]) != event_fields for row in rows["wellbeing.life_events"]):
+            raise ValueError("Life calendar events do not match the canonical current schema")
 
 
 def _contains_keys(value: object, forbidden: set[str]) -> bool:
@@ -274,6 +285,15 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
             with sqlite3.connect(_wellbeing_path(home)) as db:
                 rows = db.execute("SELECT r.id,r.data FROM cognitive_sessions r WHERE revision=(SELECT max(s.revision) FROM cognitive_sessions s WHERE s.id=r.id) AND json_extract(r.data,'$.status')!='active' ORDER BY r.id")
                 return [{"id": row[0], "data": _without_key(json.loads(row[1]), "expected")} for row in rows]
+        if entry_id in WELLBEING_CALENDAR_ENTRIES:
+            entity = "config" if entry_id == "wellbeing.life_config" else "event"
+            with sqlite3.connect(_wellbeing_path(home)) as db:
+                suffix = " AND json_extract(r.data,'$.deleted')=0" if entity == "event" else ""
+                rows = db.execute(f"SELECT r.id,r.data FROM life_calendar_revisions r WHERE r.entity=? AND revision=(SELECT max(s.revision) FROM life_calendar_revisions s WHERE s.entity=r.entity AND s.id=r.id){suffix} ORDER BY r.id", (entity,))
+                result = [{"id": row[0], "data": json.loads(row[1])} for row in rows]
+                if entity == "config":
+                    for row in result: row["data"].pop("trigger_id", None)
+                return result
         table = {
             "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
             "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
@@ -454,10 +474,15 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
         "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
         "wellbeing.genome_sources": "genome_sources", "wellbeing.genome_variants": "genome_variants",
         "wellbeing.cognitive_sessions": "cognitive_sessions", "wellbeing.memory_cards": "memory_card_revisions",
+        "wellbeing.life_config": "life_calendar_revisions", "wellbeing.life_events": "life_calendar_revisions",
     }[entry_id]
     with sqlite3.connect(_wellbeing_path(home)) as db:
         if row is None:
-            db.execute(f"DELETE FROM {table} WHERE id=?", (entity_id,))
+            if entry_id in WELLBEING_CALENDAR_ENTRIES:
+                entity = "config" if entry_id == "wellbeing.life_config" else "event"
+                db.execute("DELETE FROM life_calendar_revisions WHERE entity=? AND id=?", (entity, entity_id))
+            else:
+                db.execute(f"DELETE FROM {table} WHERE id=?", (entity_id,))
             if entry_id == "wellbeing.intervention_records": db.execute("DELETE FROM intervention_dates WHERE record_id=?", (entity_id,))
             return
         data = row["data"]
@@ -478,6 +503,9 @@ def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str
             db.execute("INSERT INTO cognitive_sessions VALUES(?,?,?)", (entity_id, data["revision"], json.dumps(data, sort_keys=True)))
         elif entry_id == "wellbeing.memory_cards":
             db.execute("INSERT INTO memory_card_revisions VALUES(?,?,?,?)", (entity_id, data["revision"], instant(data["schedule"]["due_at"]), json.dumps(data, sort_keys=True)))
+        elif entry_id in WELLBEING_CALENDAR_ENTRIES:
+            entity = "config" if entry_id == "wellbeing.life_config" else "event"
+            db.execute("INSERT INTO life_calendar_revisions VALUES(?,?,?,?)", (entity, entity_id, data["revision"], json.dumps(data, sort_keys=True)))
         else:
             parent, day = (data["plan_id"], data["date"]) if entry_id.endswith("records") else ("", "")
             db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], parent, day, json.dumps(data, sort_keys=True)))
