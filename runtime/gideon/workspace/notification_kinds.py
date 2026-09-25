@@ -231,6 +231,7 @@ _PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
     ("learning", "report"): "gideon.cognition.learning_report",
     ("approval", "requested"): "gideon.interfaces.dashboard.state",
     ("user", "note"): "gideon.interfaces.dashboard.handlers_inbox",
+    ("personal", "domain_alert"): "gideon.workspace.capabilities.platform.domain_alerts",
     (GENERIC_SOURCE, GENERIC_KIND): "gideon.interfaces.dashboard.state",
 }
 
@@ -365,6 +366,14 @@ _KINDS: tuple[NotificationKind, ...] = (
         attention=True,
         verifiable=False,
     ),
+    _built_in(
+        "personal",
+        "domain_alert",
+        "Personal domain observation",
+        "immediate",
+        SEV_WARNING,
+        attention=True,
+    ),
     _built_in(GENERIC_SOURCE, GENERIC_KIND, "Uncategorized", "immediate", SEV_INFO),
 )
 
@@ -388,6 +397,7 @@ _LEGACY_FLAT: dict[str, tuple[str, str]] = {
 }
 
 _ATTENTION_FLAT: dict[str, tuple[str, str]] = {
+    "personal_domain_alert": ("personal", "domain_alert"),
     "cron_failed": ("cron", "failed"),
     "loop_complete": ("loop", "complete"),
     "loop_failed": ("loop", "failed"),

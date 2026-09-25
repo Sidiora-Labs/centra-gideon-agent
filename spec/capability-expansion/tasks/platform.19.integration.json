@@ -1,0 +1,39 @@
+{
+  "id": "platform.19.integration",
+  "status": "locally_qualified",
+  "scope": "Shared collection, notification policy and Doctor registration for platform.19",
+  "requires": [
+    "platform.19"
+  ],
+  "production_files": [
+    "runtime/gideon/cognition/proactive/collect.py",
+    "runtime/gideon/workspace/notification_kinds.py",
+    "runtime/gideon/operations/resilience/doctor.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_domain_alerts_integration.py"
+  ],
+  "acceptance": [
+    "collect_all scans canonical personal evidence before projecting the existing Inbox lane and resolves removed conditions",
+    "personal/domain_alert is a configurable warning attention kind with a stable legacy wire name",
+    "Doctor registers personal.sources and reports unconfigured, ready and unavailable canonical stores through run_capability"
+  ],
+  "limits": [
+    "External delivery transports remain independently configured and are not claimed by this local integration qualification."
+  ],
+  "verify_cmd": "python3 -m pytest checks/runtime/capabilities/platform/test_domain_alerts_integration.py -q",
+  "qualification": {
+    "compile": {
+      "command": "/tmp/gideon-runtime-venv/bin/python -c import-ast over the three production files and focused integration test",
+      "exit_code": 0
+    },
+    "focused_pytest": {
+      "command": "/tmp/gideon-runtime-venv/bin/python -m pytest checks/runtime/capabilities/platform/test_domain_alerts_integration.py -q",
+      "exit_code": 0,
+      "result": "3 passed, 1 warning in 10.15s"
+    },
+    "production_lines": 36,
+    "test_lines": 90,
+    "repair_cycles": 1
+  }
+}

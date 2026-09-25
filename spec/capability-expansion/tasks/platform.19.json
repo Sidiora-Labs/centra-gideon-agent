@@ -1,0 +1,51 @@
+{
+  "id": "platform.19",
+  "schema_version": 1,
+  "mode": "BUILD",
+  "owner_lane": "platform",
+  "status": "locally_qualified",
+  "scope": "Canonical personal evidence alerts and read-only domain readiness",
+  "requires": [
+    "platform.18"
+  ],
+  "production_files": [
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Page.tsx",
+    "runtime/gideon/workspace/capabilities/platform/domain_alerts.py",
+    "runtime/gideon/workspace/capabilities/platform/domain_alerts_http.py",
+    "apps/console/src/features/capabilities/platform/DomainReadiness.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_domain_alerts.py",
+    "apps/console/src/features/capabilities/platform/DomainReadiness.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_domain_alerts.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/DomainReadiness.test.tsx"
+  ],
+  "base_revision": "a7ec30e5",
+  "acceptance": [
+    "Actual overdue goals and intervention recording gaps feed the existing attention store through the shared notification policy seam",
+    "Stable evidence fingerprints suppress repeats, changed evidence can resurface and removed conditions resolve open items",
+    "Read-only readiness distinguishes unconfigured, unreadable and ready canonical personal stores without creating absent stores",
+    "Authenticated HTTP, native tools and console expose exact readiness and supported detector scope",
+    "Conservative relationship threads, opted-in task quality, actual Doctor learning evidence and crash artifacts feed one deduplicated attention path"
+  ],
+  "limits": [
+    "External channel delivery requires a configured actual transport; local persisted attention is verified.",
+    "Relationship unknown or incomplete coverage never raises unanswered claims; unavailable sources do not fabricate healthy results.",
+    "Shared collect_all, personal/domain_alert notification registration and Doctor personal.sources registration are root integration hooks."
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify platform.19",
+  "verification": {
+    "evidence": "/tmp/gideon-platform.19-checks-6yoe5slv/evidence.json",
+    "runtime_passed": 8,
+    "ui_passed": 1,
+    "repair_cycles": 2,
+    "test_lines": 310,
+    "production_lines": 307
+  }
+}

@@ -1521,7 +1521,27 @@ async def _probe_resource_limits(_ctx: DoctorContext) -> ProbeResult:
     )
 
 
+async def _probe_personal_domains(ctx: DoctorContext) -> ProbeResult:
+    from gideon.workspace.capabilities.platform.domain_alerts import readiness
+
+    rows = readiness(ctx.home)
+    return ProbeResult(
+        ok=all(row["state"] == "ready" for row in rows),
+        detail="Personal domain source readiness",
+        evidence={"domains": rows},
+    )
+
+
 def _register_builtin_probes() -> None:
+    register_probe(
+        Probe(
+            "personal.sources",
+            "personal",
+            Tier.CAPABILITY,
+            _probe_personal_domains,
+            "Personal domain source readiness",
+        )
+    )
     register_probe(
         Probe(
             "gateway.process",

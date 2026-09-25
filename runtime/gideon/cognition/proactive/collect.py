@@ -71,7 +71,9 @@ def collect_inbox(store: Any, *, since_ts: float = 0.0) -> list[CollectedItem]:
         return []
     for item in items:
         try:
-            if not is_open_status(str(getattr(item, "status", ""))):
+            status = getattr(item, "status", "")
+            status = getattr(status, "value", status)
+            if not is_open_status(str(status)):
                 continue
             created = float(getattr(item, "created_at", 0.0) or 0.0)
             if since_ts and created and created < since_ts:
@@ -225,6 +227,13 @@ def collect_all(
 ) -> list[CollectedItem]:
     """The union of the three lanes. A `None` handle means that lane is simply absent."""
     items: list[CollectedItem] = []
+    if state is not None and inbox_store is not None:
+        try:
+            from gideon.workspace.capabilities.platform.domain_alerts import scan
+
+            scan(state, inbox_store)
+        except Exception:  # noqa: BLE001 - one unavailable source cannot stop triage
+            logger.warning("triage: domain alert source unavailable", exc_info=True)
     if inbox_store is not None:
         items.extend(collect_inbox(inbox_store, since_ts=since_ts))
     if state is not None:
