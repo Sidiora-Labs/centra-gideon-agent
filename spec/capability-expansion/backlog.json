@@ -3532,6 +3532,69 @@
       "contract": "Bounded child of creative.12; parent remains incomplete until all source-grounded editorial families and consumer journeys are implemented and qualified.",
       "implementation_status": "not_started",
       "evidence_record": null
+    },
+    {
+      "id": "communications.14",
+      "title": "Microsoft Teams conversation history integration",
+      "owner_lane": "communications",
+      "status": "pending",
+      "wave": 14,
+      "requires": [
+        "communications.04"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/communications",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+        "apps/console/src/features/capabilities/communications",
+        "checks/runtime/capabilities/communications",
+        "spec/capability-expansion/tasks/communications.14.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify communications.14",
+      "acceptance": "Implement actual Microsoft Graph Teams/channel/chat history acquisition through existing named credentials or hosted Connections. Incremental bounded pagination, canonical message provenance/dedup/person links, error/revocation states and actual console sync workflow; preserve existing integrations.",
+      "contract": "Close explicitly recorded original feature breadth using existing canonical communications stores and authorization boundaries; live external service/device qualification stays separate."
+    },
+    {
+      "id": "communications.15",
+      "title": "Encrypted Signal archive acquisition",
+      "owner_lane": "communications",
+      "status": "pending",
+      "wave": 15,
+      "requires": [
+        "communications.05"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/communications",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+        "apps/console/src/features/capabilities/communications",
+        "checks/runtime/capabilities/communications",
+        "spec/capability-expansion/tasks/communications.15.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify communications.15",
+      "acceptance": "Read actual supported encrypted Signal SQLite using genuine SQLCipher and explicitly supplied transient key/owned archive, preserving messages/attachments/provenance and canonical ingestion. No key guessing, no plaintext secret persistence or operator desktop access; hosted authenticated upload/paired helper where supported.",
+      "contract": "Close explicitly recorded original feature breadth using existing canonical communications stores and authorization boundaries; live external service/device qualification stays separate."
+    },
+    {
+      "id": "communications.16",
+      "title": "Complete calendar recurrence and exceptions",
+      "owner_lane": "communications",
+      "status": "pending",
+      "wave": 16,
+      "requires": [
+        "communications.08"
+      ],
+      "product": "oss",
+      "touches": [
+        "runtime/gideon/workspace/capabilities/communications",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+        "apps/console/src/features/capabilities/communications",
+        "checks/runtime/capabilities/communications",
+        "spec/capability-expansion/tasks/communications.16.json"
+      ],
+      "verify_cmd": "python3 tooling/capability_workflow.py verify communications.16",
+      "acceptance": "Expand supported RFC recurrence/EXDATE/RDATE/overrides/cancellations using genuine calendar semantics, bounded window and DST-aware timezone handling, canonical dedup and truthful source coverage. Preserve imported/provider event provenance and real UI daily availability.",
+      "contract": "Close explicitly recorded original feature breadth using existing canonical communications stores and authorization boundaries; live external service/device qualification stays separate."
     }
   ]
 }

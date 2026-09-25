@@ -95,6 +95,12 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_wellbeing_shared", kind=KIND_JSON_FILE, path="shared/wellbeing.json", domain=DOMAIN_KNOWLEDGE, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_privacy", kind=KIND_SQLITE, path="capabilities/privacy.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
+    StateEntry(id="capability_workspace_native_paired_devices", kind=KIND_SQLITE, path="capabilities/workspace/native/paired-devices.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_music_decks", kind=KIND_SQLITE, path="capabilities/music/decks.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_media_episodes", kind=KIND_SQLITE, path="capabilities/media/episodes.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_media_timelines", kind=KIND_SQLITE, path="capabilities/media/timelines.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_music_spotify", kind=KIND_SQLITE, path="capabilities/music/spotify.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_music_listening", kind=KIND_SQLITE, path="capabilities/music/listening.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_identity_lifecycle", kind=KIND_SQLITE, path="capabilities/identity/lifecycle.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),

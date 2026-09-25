@@ -73,6 +73,11 @@ async def test_all_capability_routes_share_the_actual_authenticated_application(
             response=await client.get(base+'/api/capabilities/music/catalog/artists')
             assert response.status==200,await response.text()
             for path in [
+                '/api/capabilities/knowledge/ideas',
+                '/api/capabilities/platform/insights',
+                '/api/capabilities/wellbeing/shared',
+                '/api/capabilities/music/decks',
+                '/api/capabilities/platform/accounting',
                 '/api/capabilities/wellbeing/exports',
                 '/api/capabilities/platform/compositions',
                 '/api/capabilities/experience/world-engine',
@@ -195,3 +200,17 @@ def test_corrupt_declared_database_fails_snapshot_instead_of_raw_copy(home,tmp_p
         snapshot_main([str(tmp_path/'output')])
     assert not list((tmp_path/'output').glob('*.tar.gz'))
     assert path.read_bytes()==b'not a database'
+
+
+def test_private_fact_store_is_never_an_export_or_replication_entry():
+    entry=inventory.claim_for('capabilities/privacy.sqlite3')
+    assert entry is not None
+    assert entry.secret
+    assert entry.kind==inventory.KIND_SQLITE
+    assert entry.domain==inventory.DOMAIN_SECURITY
+    assert entry.merge==inventory.MERGE_REPLACE_ONLY
+    assert entry not in inventory.export_entries()
+    assert entry.path in inventory.secret_paths()
+    assert entry in inventory.sqlite_entries()
+    assert inventory.is_ignored(entry.path+'-wal')
+    assert inventory.is_ignored(entry.path+'-shm')
