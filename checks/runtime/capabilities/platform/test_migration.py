@@ -9,6 +9,8 @@ from contextlib import closing
 import pytest
 
 from gideon.workspace.capabilities.communications import PeopleStore
+from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.platform.migration import FORMAT, MigrationError, commit, preview, receipts
 
 
@@ -31,11 +33,40 @@ def archive(records=None, *, extra=None, schema=1, mutate=None, manifest_patch=N
     return {"format": FORMAT, "content": base64.b64encode(output.getvalue()).decode()}
 
 
+def knowledge_archive(memories=None, links=None, *, schema=1):
+    files = {}
+    if memories is not None:
+        files["brain/memories/index.json"] = json.dumps({"schemaVersion": schema, "type": "memories", "updatedAt": "2026-09-12T00:00:00Z", "config": {}}).encode()
+        files.update({f"brain/memories/{row['id']}/index.json": json.dumps(row).encode() for row in memories})
+    if links is not None:
+        files["brain/links/index.json"] = json.dumps({"schemaVersion": schema, "type": "links", "updatedAt": "2026-09-12T00:00:00Z", "config": {}}).encode()
+        files.update({f"brain/links/{row['id']}/index.json": json.dumps(row).encode() for row in links})
+    manifest = {"generatedAt": "2026-09-12T00:00:00.000Z", "fileCount": len(files), "files": {name: hashlib.sha256(value).hexdigest() for name, value in files.items()}}
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as tar:
+        for name, value in {"snapshot-k/manifest.json": json.dumps(manifest).encode(), **{f"snapshot-k/data/{name}": value for name, value in files.items()}}.items():
+            info = tarfile.TarInfo(name); info.size = len(value); tar.addfile(info, io.BytesIO(value))
+    return {"format": FORMAT, "content": base64.b64encode(output.getvalue()).decode()}
+
+
+def domains_archive(collections, *, schema=1):
+    files = {}
+    for domain, rows in collections.items():
+        files[f"brain/{domain}/index.json"] = json.dumps({"schemaVersion": schema, "type": domain, "updatedAt": "2026-09-12T00:00:00Z", "config": {}}).encode()
+        files.update({f"brain/{domain}/{row['id']}/index.json": json.dumps(row).encode() for row in rows})
+    manifest = {"generatedAt": "2026-09-12T00:00:00.000Z", "fileCount": len(files), "files": {name: hashlib.sha256(value).hexdigest() for name, value in files.items()}}
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as tar:
+        for name, value in {"snapshot-domains/manifest.json": json.dumps(manifest).encode(), **{f"snapshot-domains/data/{name}": value for name, value in files.items()}}.items():
+            info = tarfile.TarInfo(name); info.size = len(value); tar.addfile(info, io.BytesIO(value))
+    return {"format": FORMAT, "content": base64.b64encode(output.getvalue()).decode()}
+
+
 def test_preview_verifies_manifest_and_maps_explicit_coverage():
     result = preview(archive())
     assert result["format"] == FORMAT
     assert result["coverage"] == {"supported": ["people"], "unsupported": "all other snapshot domains"}
-    assert result["records"] == [{"source_id": "person-1", "name": "Ada"}]
+    assert result["records"] == [{"source_id": "person-1", "domain": "people", "name": "Ada"}]
     assert len(result["archive_digest"]) == len(result["review_token"]) == 64
 
 
@@ -139,7 +170,7 @@ def test_more_than_one_snapshot_root_is_rejected():
 
 
 @pytest.mark.parametrize("extra,domain", [
-    ({"brain/ideas/idea/index.json": b"{}"}, "brain"),
+    ({"brain/future/admin/index.json": b"{}"}, "brain"),
     ({"media/item.bin": b"media"}, "media"),
     ({"../legacy-db.sql": b"select 1"}, "unsafe path"),
 ])
@@ -193,3 +224,345 @@ def test_preexisting_deterministic_target_rolls_back_receipt_and_all_new_rows(tm
         commit(store, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]})
     assert [row["name"] for row in store.people()] == ["Existing"]
     assert receipts(store) == []
+
+
+def test_memory_and_link_preview_and_atomic_canonical_commit(tmp_path):
+    memory_id = "11111111-1111-4111-8111-111111111111"
+    link_id = "22222222-2222-4222-8222-222222222222"
+    source = knowledge_archive(
+        memories=[{"id": memory_id, "title": "A durable evening", "content": "Rain and neon", "mood": "reflective", "tags": ["city", "memory"], "source": "conversation-import", "sourceRef": "conversation-7.json", "sourceCreatedAt": "2025-01-02T03:04:05Z", "sourceUpdatedAt": "2025-01-03T03:04:05Z", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}],
+        links=[{"id": link_id, "url": "https://Example.com/docs/?utm_source=old", "title": "Reference docs", "description": "Primary reference", "note": "Read chapter two", "linkType": "documentation", "tags": ["docs"], "isRepo": False, "createdAt": "2025-02-01T00:00:00Z", "updatedAt": "2025-02-02T00:00:00Z"}],
+    )
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["memories", "links"]
+    assert checked["records"] == [{"source_id": link_id, "domain": "links", "name": "Reference docs"}, {"source_id": memory_id, "domain": "memories", "name": "A durable evening"}]
+    people = PeopleStore(tmp_path / "people")
+    knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created is True
+    assert receipt["domains"] == {"links": 1, "memories": 1}
+    memory = knowledge.get_item(memory_id)
+    assert (memory["item_type"], memory["title"], memory["content"], memory["created_at"], memory["updated_at"]) == ("note", "A durable evening", "Rain and neon", "2025-01-02T03:04:05Z", "2025-01-03T03:04:05Z")
+    assert memory["provider"] == "legacy-migration" and memory["source_id"] == "legacy-archive" and memory["guid"] == f"memories:{memory_id}"
+    assert memory["tags"] == ["city", "memory"]
+    assert memory["file_metadata"]["source_ref"] == "conversation-7.json"
+    link = knowledge.get_item(link_id)
+    assert link["item_type"] == "bookmark" and link["url"] == "https://example.com/docs/"
+    assert link["content"] == "Primary reference\nRead chapter two" and link["tags"] == ["docs"]
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created is False and again == receipt
+    assert receipts(people, knowledge) == [receipt]
+
+
+def test_knowledge_collision_rolls_back_every_record_and_receipt(tmp_path):
+    first = "33333333-3333-4333-8333-333333333333"; second = "44444444-4444-4444-8444-444444444444"
+    rows = [{"id": first, "title": "First", "content": "one", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}, {"id": second, "title": "Second", "content": "two", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]
+    source = knowledge_archive(memories=rows)
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    knowledge.create_typed_item(item_type="note", title="Existing", content="same id")
+    knowledge.db.execute("UPDATE items SET id=? WHERE title='Existing'", (second,)); knowledge.db.commit()
+    with pytest.raises(MigrationError, match="target identity"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.get_item(first) is None
+    assert receipts(people, knowledge) == []
+
+
+def test_people_and_knowledge_must_be_separate_atomic_imports():
+    memory_id = "55555555-5555-4555-8555-555555555555"
+    extra = {"brain/memories/index.json": json.dumps({"schemaVersion": 1, "type": "memories"}).encode(), "brain/memories/" + memory_id + "/index.json": json.dumps({"id": memory_id, "title": "Memory", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}).encode()}
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(archive(extra=extra))
+
+
+def test_unknown_memory_fields_versions_and_tombstones_fail_closed():
+    identity = "66666666-6666-4666-8666-666666666666"
+    with pytest.raises(MigrationError, match="unsupported fields"):
+        preview(knowledge_archive(memories=[{"id": identity, "title": "Memory", "future": True, "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]))
+    with pytest.raises(MigrationError, match="schema version"):
+        preview(knowledge_archive(memories=[{"id": identity, "title": "Memory", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}], schema=2))
+    with pytest.raises(MigrationError, match="tombstone"):
+        preview(knowledge_archive(memories=[{"id": identity, "_deleted": True, "updatedAt": "2025-01-01T00:00:00Z"}]))
+
+
+def test_memory_content_is_stored_as_text_and_never_executed_as_sql(tmp_path):
+    identity = "77777777-7777-4777-8777-777777777777"
+    source = knowledge_archive(memories=[{"id": identity, "title": "Literal SQL", "content": "DROP TABLE items;", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}])
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.get_item(identity)["content"] == "DROP TABLE items;"
+    assert knowledge.db.execute("SELECT count(*) FROM items").fetchone()[0] == 1
+
+
+def test_ideas_and_journals_share_one_atomic_knowledge_commit(tmp_path):
+    idea_id = "99999999-9999-4999-8999-999999999999"
+    journal_id = "2026-09-20"
+    source = domains_archive({
+        "ideas": [{"id": idea_id, "title": "Build a solar kiln", "status": "done", "oneLiner": "Dry timber with sunlight", "notes": "Prototype used reclaimed glass", "tags": ["making"], "createdAt": "2025-05-01T00:00:00Z", "updatedAt": "2025-06-01T00:00:00Z"}],
+        "journals": [{"id": journal_id, "date": journal_id, "content": "Shipped the first prototype.", "segments": [{"text": "Shipped the first prototype.", "at": "2026-09-20T18:00:00Z", "source": "voice"}], "createdAt": "2026-09-20T18:00:00Z", "updatedAt": "2026-09-20T18:00:00Z"}],
+    })
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["ideas", "journals"]
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created and receipt["domains"] == {"ideas": 1, "journals": 1}
+    idea = knowledge.get_item(idea_id)
+    assert idea["item_type"] == "fleeting" and idea["is_archived"] is True
+    assert idea["content"] == "Dry timber with sunlight\nPrototype used reclaimed glass" and idea["tags"] == ["making"]
+    journal = knowledge.get_item(journal_id)
+    assert journal["item_type"] == "journal" and journal["guid"].startswith("date_journal:")
+    assert journal["file_metadata"]["journal_date"] == journal_id
+    assert journal["file_metadata"]["segments"][0]["source"] == "voice"
+
+
+def test_idea_collision_rolls_back_journal_and_receipt(tmp_path):
+    idea_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"; day = "2026-09-21"
+    source = domains_archive({"ideas": [{"id": idea_id, "title": "Collision", "status": "active", "oneLiner": "Existing", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}], "journals": [{"id": day, "date": day, "content": "Must roll back", "segments": [], "createdAt": "2026-09-21T00:00:00Z", "updatedAt": "2026-09-21T00:00:00Z"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    knowledge.create_typed_item(item_type="fleeting", title="Existing", content="collision")
+    knowledge.db.execute("UPDATE items SET id=? WHERE title='Existing'", (idea_id,)); knowledge.db.commit()
+    with pytest.raises(MigrationError, match="target identity"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.get_item(day) is None and receipts(people, knowledge) == []
+
+
+def test_single_project_is_atomically_published_with_replay_receipt(tmp_path):
+    project_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    source = domains_archive({"projects": [{"id": project_id, "name": "Solar kiln", "status": "blocked", "nextAction": "Source firebrick", "notes": "Waiting on supplier", "tags": ["woodshop"], "createdAt": "2025-03-01T00:00:00Z", "updatedAt": "2025-04-01T00:00:00Z"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db")); projects = BoundHierarchy(tmp_path / "home")
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects)
+    assert created and receipt["domains"] == {"projects": 1}
+    project = projects.get_project(project_id)
+    assert project.name == "Solar kiln" and project.status == "active"
+    assert project.created_at == "2025-03-01T00:00:00Z"
+    assert project.brief == "Waiting on supplier\nNext action: Source firebrick\nLegacy status: blocked\nTags: woodshop"
+    assert (tmp_path / "home/projects" / project_id / "context").is_dir()
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects)
+    assert created is False and again == receipt
+    assert receipts(people, knowledge, projects) == [receipt]
+
+
+def test_project_archive_refuses_multiple_records_and_mixed_store_domains(tmp_path):
+    def project(identity, name):
+        return {"id": identity, "name": name, "status": "active", "nextAction": "Continue", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}
+    source = domains_archive({"projects": [project("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "One"), project("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "Two")]})
+    checked = preview(source)
+    with pytest.raises(MigrationError, match="exactly one project"):
+        commit(PeopleStore(tmp_path / "people"), {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, KnowledgeStore(str(tmp_path / "knowledge.db")), BoundHierarchy(tmp_path / "home"))
+    mixed = domains_archive({"projects": [project("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "Mixed")], "ideas": [{"id": "ffffffff-ffff-4fff-8fff-ffffffffffff", "title": "Idea", "status": "active", "oneLiner": "Idea", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]})
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(mixed)
+
+
+def test_journal_date_segments_and_idea_fields_fail_closed():
+    with pytest.raises(MigrationError, match="ISO date"):
+        preview(domains_archive({"journals": [{"id": "not-a-day", "date": "not-a-day", "content": "x", "segments": [], "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]}))
+    with pytest.raises(MigrationError, match="segments"):
+        preview(domains_archive({"journals": [{"id": "2026-09-22", "date": "2026-09-22", "content": "x", "segments": [{"text": "x", "at": "now", "source": "unknown"}], "createdAt": "2026-09-22T00:00:00Z", "updatedAt": "2026-09-22T00:00:00Z"}]}))
+    with pytest.raises(MigrationError, match="one-liner"):
+        preview(domains_archive({"ideas": [{"id": "12121212-1212-4212-8212-121212121212", "title": "Missing", "status": "active", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]}))
+
+
+def test_buckets_and_links_import_as_canonical_collection_membership(tmp_path):
+    bucket_id = "14141414-1414-4414-8414-141414141414"
+    link_id = "15151515-1515-4515-8515-151515151515"
+    source = domains_archive({
+        "buckets": [{"id": bucket_id, "name": "Research", "color": "purple", "icon": "books", "order": 3,
+                     "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-02-01T00:00:00Z"}],
+        "links": [{"id": link_id, "title": "Reference", "url": "https://example.com/reference", "description": "Source",
+                   "bucketId": bucket_id, "bucketOrder": 7, "createdAt": "2025-01-02T00:00:00Z", "updatedAt": "2025-02-02T00:00:00Z"}],
+    })
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["links", "buckets"]
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created and receipt["domains"] == {"buckets": 1, "links": 1}
+    collection = dict(knowledge.db.execute("SELECT * FROM collections WHERE id=?", (bucket_id,)).fetchone())
+    assert (collection["name"], collection["kind"], collection["icon"], collection["position"]) == ("Research", "manual", "books", 3)
+    assert tuple(knowledge.db.execute("SELECT collection_id,item_id FROM collection_items").fetchone()) == (bucket_id, link_id)
+    metadata = knowledge.get_item(link_id)["file_metadata"]
+    assert (metadata["bucket_id"], metadata["bucket_order"]) == (bucket_id, 7)
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert not created and again == receipt
+
+
+def test_missing_bucket_reference_rolls_back_link_and_receipt(tmp_path):
+    link_id = "16161616-1616-4616-8616-161616161616"
+    source = domains_archive({"links": [{"id": link_id, "title": "Orphan", "url": "https://example.com/orphan",
+        "bucketId": "17171717-1717-4717-8717-171717171717", "bucketOrder": 0,
+        "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    with pytest.raises(MigrationError, match="missing canonical bucket"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.get_item(link_id) is None
+    assert knowledge.db.execute("SELECT count(*) FROM collection_items").fetchone()[0] == 0
+    assert receipts(people, knowledge) == []
+
+
+def test_inbox_state_and_history_import_with_same_transaction_destination(tmp_path):
+    idea_id = "18181818-1818-4818-8818-181818181818"
+    capture_id = "19191919-1919-4919-8919-191919191919"
+    source = domains_archive({
+        "ideas": [{"id": idea_id, "title": "Solar notes", "status": "active", "oneLiner": "Build a collector",
+                   "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-02T00:00:00Z"}],
+        "inbox": [{"id": capture_id, "capturedText": "Build a solar collector", "capturedAt": "2025-01-01T00:00:00Z",
+                   "source": "brain_ui", "status": "corrected", "creative": True,
+                   "classification": {"destination": "projects", "confidence": 0.6, "title": "Solar", "extracted": {}},
+                   "filed": {"destination": "ideas", "destinationId": idea_id},
+                   "correction": {"correctedAt": "2025-01-02T00:00:00Z", "previousDestination": "projects", "newDestination": "ideas"}}],
+    })
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert created and receipt["domains"] == {"ideas": 1, "inbox": 1}
+    capture = dict(knowledge.db.execute("SELECT * FROM capability_knowledge_captures WHERE id=?", (capture_id,)).fetchone())
+    assert (capture["original_text"], capture["status"], capture["destination_id"]) == ("Build a solar collector", "routed", idea_id)
+    event = knowledge.db.execute("SELECT event,payload,happened_at FROM capability_knowledge_capture_events WHERE capture_id=?", (capture_id,)).fetchone()
+    assert event["event"] == "migration_snapshot" and json.loads(event["payload"])["creative"] is True
+    assert event["happened_at"] == "2025-01-01T00:00:00Z"
+
+
+def test_inbox_rejects_unverifiable_route_and_collision_rolls_back(tmp_path):
+    capture_id = "20202020-2020-4020-8020-202020202020"
+    bad = domains_archive({"inbox": [{"id": capture_id, "capturedText": "Call Ada", "capturedAt": "2025-01-01T00:00:00Z",
+        "source": "brain_ui", "status": "filed", "filed": {"destination": "people", "destinationId": "21212121-2121-4121-8121-212121212121"}}]})
+    with pytest.raises(MigrationError, match="supported canonical destination"):
+        preview(bad)
+    source = domains_archive({"inbox": [{"id": capture_id, "capturedText": "Review later", "capturedAt": "2025-01-01T00:00:00Z",
+        "source": "brain_ui", "status": "needs_review"}]})
+    checked = preview(source); people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
+    CaptureInbox(knowledge)
+    knowledge.db.execute("INSERT INTO capability_knowledge_captures (id,request_id,input_origin,original_text,captured_at,status,revision) VALUES (?,?,?,?,?,?,1)",
+                         (capture_id, "existing-request", "text", "Existing", "2025-01-01T00:00:00Z", "needs_review"))
+    knowledge.db.commit()
+    with pytest.raises(MigrationError, match="target identity"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge)
+    assert knowledge.db.execute("SELECT count(*) FROM capability_knowledge_capture_events").fetchone()[0] == 0
+    assert receipts(people, knowledge) == []
+
+
+def test_admin_import_is_one_crash_safe_canonical_task_with_embedded_receipt(tmp_path):
+    identity = "22222222-2222-4222-8222-222222222222"
+    source = domains_archive({"admin": [{"id": identity, "title": "Renew insurance", "status": "waiting",
+        "dueDate": "2026-10-01T09:00:00Z", "nextAction": "Ask broker for revised terms", "notes": "Policy expires soon",
+        "createdAt": "2026-08-01T10:00:00Z", "updatedAt": "2026-09-01T10:00:00Z"}]})
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["admin"]
+    assert checked["records"] == [{"source_id": identity, "domain": "admin", "name": "Renew insurance"}]
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert created and receipt["domains"] == {"admin": 1}
+    task = tasks._all_tasks()[0]
+    assert task.id == identity and task.title == "Renew insurance" and task.status.value == "blocked"
+    assert task.description == "Policy expires soon" and task.due == "2026-10-01T09:00:00Z"
+    assert task.action_plan[0]["content"] == "Ask broker for revised terms" and not task.action_plan[0]["completed"]
+    marker = task.evidence[0]
+    assert marker["type"] == "platform_migration" and marker["archive_digest"] == checked["archive_digest"]
+    assert marker["receipt"] == receipt and marker["source_record_id"] == identity
+    assert not list((tmp_path / "home/tasks").glob(".migration-*"))
+    again, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert not created and again == receipt
+    assert receipts(people, knowledge, projects, tasks) == [receipt]
+
+
+def test_thread_import_preserves_work_state_and_resolves_real_references(tmp_path):
+    idea_id = "23232323-2323-4323-8323-232323232323"
+    thread_id = "24242424-2424-4424-8424-242424242424"
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    idea_source = domains_archive({"ideas": [{"id": idea_id, "title": "Solar kiln", "status": "active", "oneLiner": "Dry lumber",
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"}]})
+    idea_preview = preview(idea_source)
+    commit(people, {**idea_source, "archive_digest": idea_preview["archive_digest"], "review_token": idea_preview["review_token"]}, knowledge, projects, tasks)
+    source = domains_archive({"threads": [{"id": thread_id, "title": "Finish workshop plan", "status": "someday", "priority": "urgent",
+        "nextAction": "Price firebrick", "notes": "Resume after the roof repair", "waitingOn": "Dry weather",
+        "dueAt": "2026-12-01T00:00:00Z", "tags": ["workshop", "planning"], "pinned": True,
+        "refs": [{"kind": "brain.idea", "id": idea_id, "label": "Solar kiln"},
+                 {"kind": "url", "id": "https://example.com/firebrick", "label": "Supplier"}],
+        "source": {"kind": "github.issue", "key": "example/workshop#1"}, "externalState": "open",
+        "createdAt": "2026-02-01T00:00:00Z", "updatedAt": "2026-03-01T00:00:00Z"}]})
+    checked = preview(source)
+    receipt, created = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert created and receipt["domains"] == {"threads": 1}
+    task = tasks._read_task(tasks._task_path(thread_id))
+    assert task.status.value == "open" and task.priority.value == "critical"
+    assert task.labels == ["workshop", "planning", "someday", "pinned"]
+    assert task.notes == [{"content": "Waiting on: Dry weather", "timestamp": "2026-03-01T00:00:00Z"}]
+    assert task.action_plan[0]["content"] == "Price firebrick" and task.due == "2026-12-01T00:00:00Z"
+    refs = task.evidence[0]["references"]
+    assert refs == [{"kind": "brain.idea", "id": idea_id, "label": "Solar kiln", "canonical_id": idea_id},
+                    {"kind": "url", "id": "https://example.com/firebrick", "label": "Supplier", "canonical_id": "https://example.com/firebrick"}]
+    assert task.evidence[0]["source_state"] == {"source": {"kind": "github.issue", "key": "example/workshop#1"}, "externalState": "open"}
+
+
+def test_thread_person_reference_resolves_prior_migration_identity(tmp_path):
+    source_person = "25252525-2525-4525-8525-252525252525"
+    thread_id = "26262626-2626-4626-8626-262626262626"
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    person_source = archive([{"id": source_person, "name": "Ada", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}])
+    person_preview = preview(person_source)
+    person_receipt, _ = commit(people, {**person_source, "archive_digest": person_preview["archive_digest"], "review_token": person_preview["review_token"]}, knowledge, projects, tasks)
+    canonical_person = person_receipt["records"][0]["person_id"]
+    source = domains_archive({"threads": [{"id": thread_id, "title": "Ask Ada", "status": "open", "priority": "normal",
+        "nextAction": "Send questions", "notes": "", "tags": [], "pinned": False,
+        "refs": [{"kind": "brain.person", "id": source_person, "label": "Ada"}],
+        "createdAt": "2026-02-01T00:00:00Z", "updatedAt": "2026-02-01T00:00:00Z"}]})
+    checked = preview(source)
+    commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    task = tasks._read_task(tasks._task_path(thread_id))
+    assert task.evidence[0]["references"][0]["canonical_id"] == canonical_person
+
+
+def test_missing_thread_reference_fails_before_task_publication(tmp_path):
+    identity = "27272727-2727-4727-8727-272727272727"
+    source = domains_archive({"threads": [{"id": identity, "title": "Broken relation", "status": "open", "priority": "high",
+        "nextAction": "Inspect", "notes": "", "tags": [], "pinned": False,
+        "refs": [{"kind": "brain.project", "id": "28282828-2828-4828-8828-282828282828", "label": "Missing"}],
+        "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    checked = preview(source)
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home"); tasks = BoundTasks(tmp_path / "home")
+    with pytest.raises(MigrationError, match="missing canonical project"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert not tasks._task_path(identity).exists()
+    assert receipts(people, knowledge, projects, tasks) == []
+
+
+def test_task_archives_reject_multiple_records_and_cross_store_mixes(tmp_path):
+    def admin(identity, title):
+        return {"id": identity, "title": title, "status": "open", "nextAction": "Continue", "notes": "",
+                "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    source = domains_archive({"admin": [admin("29292929-2929-4929-8929-292929292929", "One"), admin("30303030-3030-4030-8030-303030303030", "Two")]})
+    checked = preview(source)
+    with pytest.raises(MigrationError, match="exactly one record"):
+        commit(PeopleStore(tmp_path / "people"), {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               KnowledgeStore(str(tmp_path / "knowledge.db")), BoundHierarchy(tmp_path / "home"), BoundTasks(tmp_path / "home"))
+    mixed = domains_archive({"admin": [admin("31313131-3131-4131-8131-313131313131", "Mixed")],
+        "ideas": [{"id": "32323232-3232-4232-8232-323232323232", "title": "Idea", "status": "active", "oneLiner": "Idea",
+                   "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(mixed)
+
+
+def test_threads_fail_closed_for_unknown_refs_invalid_urls_and_future_fields():
+    base = {"id": "33333333-3333-4333-8333-333333333333", "title": "Validate", "status": "open", "priority": "normal",
+            "nextAction": "Check", "notes": "", "tags": [], "pinned": False,
+            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    for ref in ({"kind": "brain.song", "id": "song", "label": "Unsupported"},
+                {"kind": "url", "id": "javascript:alert(1)", "label": "Unsafe"}):
+        with pytest.raises(MigrationError, match="reference"):
+            preview(domains_archive({"threads": [{**base, "refs": [ref]}]}))
+    with pytest.raises(MigrationError, match="unsupported"):
+        preview(domains_archive({"threads": [{**base, "refs": [], "future": True}]}))
+
+
+def test_song_records_and_unmanifested_binary_paths_remain_explicitly_unsupported():
+    song_id = "34343434-3434-4434-8434-343434343434"
+    song = {"id": song_id, "title": "A song", "artist": "Artist", "instrument": "guitar", "stage": "new",
+            "tags": [], "content": {"format": "tab", "text": "Am C"}, "attachments": [],
+            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+    with pytest.raises(MigrationError, match="unsupported domains"):
+        preview(domains_archive({"songs": [song]}))
+    with pytest.raises(MigrationError, match="unsupported domains"):
+        preview(archive(extra={f"brain/songs/{song_id}/attachments/score.pdf": b"%PDF"}))
