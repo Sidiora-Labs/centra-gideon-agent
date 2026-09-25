@@ -7,6 +7,7 @@ fal/openai/replicate/etc. are all implementations of this one contract.
 """
 
 from gideon.integrations.image_gen.provider import (
+    ImageControl,
     ImageGenError,
     ImageGenModel,
     ImageGenProvider,
@@ -15,6 +16,7 @@ from gideon.integrations.image_gen.provider import (
 from gideon.integrations.image_gen.registry import active_image_gen  # noqa: F401
 
 __all__ = [
+    "ImageControl",
     "ImageGenProvider",
     "ImageGenModel",
     "ImageResult",
