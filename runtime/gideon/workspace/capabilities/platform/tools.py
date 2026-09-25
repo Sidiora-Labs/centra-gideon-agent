@@ -7,8 +7,10 @@ from gideon.workspace.capabilities.platform.connections import projection
 from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 from gideon.workspace.capabilities.platform.harnesses import inventory
 from gideon.workspace.capabilities.platform.comparisons import view as comparison_view
+from gideon.workspace.capabilities.platform.references import view as references_view
 
 _SCHEMAS = {
+    "platform_reference_repositories": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_model_comparisons": {"type": "object", "properties": {"run_id": {"type": "string", "maxLength": 200}}, "additionalProperties": False},
     "platform_harness_inventory": {"type": "object", "properties": {}, "additionalProperties": False},
     "platform_api_catalog": {"type": "object", "properties": {"offset": {"type": "integer", "minimum": 0, "maximum": 100000}, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, "additionalProperties": False},
@@ -16,6 +18,7 @@ _SCHEMAS = {
     "provider_connections_get": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 _DESCRIPTIONS = {
+    "platform_reference_repositories": "Read reference repository snapshots and reviewed commit cursors without fetching.",
     "platform_model_comparisons": "Read attributed comparison observations and recorded judge benchmark tables.",
     "platform_harness_inventory": "Inspect real managed CLI adapters, installed versions and dependencies.",
     "platform_api_catalog": "Inspect actual registered dashboard routes and declared app events.",
@@ -44,6 +47,8 @@ class PlatformTools(ToolProvider):
                 result = inventory()
             elif tool_name == "platform_model_comparisons":
                 result = comparison_view(arguments.get("run_id"))
+            elif tool_name == "platform_reference_repositories":
+                result = references_view()
             else:
                 result = projection()
             return ToolResult(success=True, output=json.dumps(result))
