@@ -6,12 +6,15 @@ from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from .narration import get_narration_jobs
 from .navigation import NavigationReceipts
 from .speech_owner import SpeechOwner
+from .ambient import AmbientDisplay
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "ambient_get": ({}, False, "Read current ambient projections, unavailable sources and display preferences."),
+    "ambient_update": ({"revision": REVISION, "show_clock": {"type":"boolean"}, "font_scale": {"type":"integer","minimum":1,"maximum":3}, "idle_seconds": {"type":"integer","minimum":10,"maximum":300}}, True, "Save ambient presentation preferences with expected revision."),
     "speech_state": ({}, False, "Read proactive opt-in and audible owner expiry without lease credentials."),
     "story_list": ({}, False, "List authored stories."),
     "story_get": ({"id": STRING}, False, "Read an authored story and its revision."),
@@ -65,7 +68,9 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
-            if operation == "speech_state": result = {"owner": SpeechOwner(self.store).state()}
+            if operation == "ambient_get": result = await AmbientDisplay(self.store).snapshot()
+            elif operation == "ambient_update": result = {"preferences": AmbientDisplay(self.store).save(args)}
+            elif operation == "speech_state": result = {"owner": SpeechOwner(self.store).state()}
             elif operation == "story_list": result = {"stories": self.store.stories()}
             elif operation == "story_get": result = {"story": self.store.story(key)}
             elif operation == "story_create": result = {"story": self.store.save(args["story"])}
