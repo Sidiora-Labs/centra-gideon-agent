@@ -1,0 +1,53 @@
+{
+  "id": "communications.04",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "49b2f41e",
+  "requires": [
+    "communications.03"
+  ],
+  "contract": "Durable account-local mail mirrors with real Maildir/mbox upload, IMAP TLS read-only fetch using existing credential references, normalization, source coverage, thread evidence, native tools and review UI. External successful sync requires real credentials and is not qualified by local archives.",
+  "acceptance": [
+    "Actual Maildir and mbox sync/replay/restart and MIME normalization",
+    "Strict account scope and credential reference validation with durable failure state",
+    "Real HTTP and native account/upload/sync/read operations with approval metadata",
+    "Actual HTTP-backed Console create/upload/sync/message/error journey",
+    "Explicit adapter matrix and missing external qualification"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/mirrors.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/MirrorPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_mirrors.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/MirrorPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_mirrors.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/MirrorPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.04",
+  "limits": [
+    "IMAP TLS/Gmail/Outlook successful remote access pending real customer credentials.",
+    "Teams adapter absent in this native source; not implemented.",
+    "Archives prove only uploaded/local source coverage, not complete external mailbox history.",
+    "Attachment metadata is mirrored; attachment binary retrieval is not implemented."
+  ],
+  "qualification": {
+    "runtime": "46 passed",
+    "console_http": "3 passed",
+    "external_imap": "pending real credential-backed connection",
+    "teams": "unimplemented",
+    "integrated_browser": "pending root integration"
+  }
+}
