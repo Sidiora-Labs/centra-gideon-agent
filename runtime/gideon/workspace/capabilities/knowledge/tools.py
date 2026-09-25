@@ -7,6 +7,7 @@ from gideon.cognition.memory_service import MemoryService
 from gideon.core.config.loader import config_dir
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.workspace.capabilities.knowledge.archive import ConversationArchive
+from gideon.workspace.capabilities.knowledge.topics import TrackedTopics, SOURCE_TYPES
 from gideon.engine import session_restrictions
 from gideon.integrations.action_providers.services import get_action_services
 from gideon.integrations.mcp_core import get_current_session_key
@@ -22,6 +23,10 @@ _PAGING = {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "offset":
 _TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea", "admin", "memory"]}, "fields": {"type": "object"}}
 _ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string", "minLength": 1, "maxLength": 524288}}
 _TOOLS = {
+    "knowledge_topic_list": ("List saved keyword topics.", False, _PAGING, []),
+    "knowledge_topic_save": ("Create or revise a keyword topic over chosen canonical personal sources; preserves mutation retry receipts.", True, {"request_id": _REQUEST, "id": _ID, "revision": {"type": "integer", "minimum": 1}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "query": {"type": "string", "minLength": 1, "maxLength": 300}, "source_types": {"type": "array", "items": {"enum": list(SOURCE_TYPES)}, "minItems": 1, "uniqueItems": True}}, ["request_id", "name", "query", "source_types"]),
+    "knowledge_topic_delete": ("Delete a saved topic without deleting its source records; requires current revision.", True, {"id": _ID, "request_id": _REQUEST, "revision": {"type": "integer", "minimum": 1}}, ["id", "request_id", "revision"]),
+    "knowledge_topic_matches": ("Refresh literal keyword matches across current canonical sources; explicitly reports unavailable or scan-limited sources.", False, {**_PAGING, "id": _ID}, ["id"]),
     "knowledge_archive_preview": ("Review an exported conversation archive without executing its contents; report invalid branches and unsupported parts.", False, _ARCHIVE_FIELDS, list(_ARCHIVE_FIELDS)),
     "knowledge_archive_commit": ("Import selected reviewed archive conversations into canonical knowledge notes, preserving the original archive and source dates. Retry same request_id after interruption.", True, {**_ARCHIVE_FIELDS, "request_id": _REQUEST, "source_digest": _ID, "conversation_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 500, "uniqueItems": True}}, [*_ARCHIVE_FIELDS, "request_id", "source_digest", "conversation_ids"]),
     "knowledge_archive_list": ("List conversation archive import receipts and exact canonical source links.", False, _PAGING, []),
@@ -67,6 +72,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._inbox = None
         self._typed = None
         self._archive = None
+        self._topics = None
         self._home = config_dir()
 
     @property
@@ -113,7 +119,18 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_archive_"):
+            if tool_name.startswith("knowledge_topic_"):
+                if self._topics is None:
+                    self._topics = TrackedTopics(self._store, service, self._home)
+                if tool_name == "knowledge_topic_list":
+                    result = self._topics.list(**arguments)
+                elif tool_name == "knowledge_topic_save":
+                    result = self._topics.save(arguments)
+                elif tool_name == "knowledge_topic_matches":
+                    result = self._topics.matches(arguments["id"], **{key: value for key, value in arguments.items() if key != "id"})
+                else:
+                    result = self._topics.delete(arguments["id"], {key: value for key, value in arguments.items() if key != "id"})
+            elif tool_name.startswith("knowledge_archive_"):
                 if self._archive is None:
                     self._archive = ConversationArchive(self._store, home=self._home)
                 if tool_name == "knowledge_archive_preview":
