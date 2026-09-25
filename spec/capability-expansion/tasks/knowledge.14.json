@@ -1,0 +1,82 @@
+{
+  "id": "knowledge.14",
+  "status": "locally_qualified",
+  "base_revision": "dc33fea1",
+  "schema_version": 1,
+  "contract": "Non-destructive typed idea identity migration and concurrent retry admission. Preserve duplicate historical records and completed receipts; refuse new idea imports until conflicting identity history is explicitly resolved. Install exact unique canonical guid index on clean history.",
+  "acceptance": [
+    "Eight real SQLite connections concurrently retry one reviewed capture and receive identical immutable receipt and one canonical destination.",
+    "Competing request IDs for one capture admit one winner and return409 to the other without overwriting.",
+    "Existing duplicate GUID records remain readable with unchanged IDs/content/receipts; new ideas return actionable409 while uniqueness cannot be installed.",
+    "Explicit user deletion of a duplicate through canonical API permits installing index and retrying the original request; no automatic record deletion or rewriting."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/typed.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_typed_identity.py",
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_bound_writes.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_typed_identity.py",
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_bound_writes.py"
+  ],
+  "ui_test_files": [],
+  "remaining_limits": [
+    "While historical identity conflicts prevent a global unique index, new idea imports fail closed; other domains and completed receipts remain accessible.",
+    "Integrated hosted/native/user journeys remain parent-owned beyond scoped real-store tests."
+  ],
+  "verification": {
+    "task": "knowledge.14",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790297164.1131058,
+    "production_lines": 30,
+    "test_lines": 115,
+    "ratio": 3.8333333333333335,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/knowledge/typed.py",
+          "checks/runtime/capabilities/knowledge/test_bound_writes.py",
+          "checks/runtime/capabilities/knowledge/test_typed.py",
+          "checks/runtime/capabilities/knowledge/test_typed_identity.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.14-checks-l3bfbo7n/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_typed_identity.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_typed.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_bound_writes.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.14-checks-l3bfbo7n/runtime.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.14-checks-l3bfbo7n",
+    "completed_at": 1790297203.8843045,
+    "files": {
+      "runtime/gideon/workspace/capabilities/knowledge/typed.py": "9b671bd644c13056b858cfd80a5e78d911b02cff0b43cba35dcba752bcad811f",
+      "checks/runtime/capabilities/knowledge/test_bound_writes.py": "68145dc28a6fe0783d6771f92a763de5a616df46a436112263b9ba9ba024b2e3",
+      "checks/runtime/capabilities/knowledge/test_typed.py": "368071e256020ab26b60cf565a5f1287bdf4b834fe677da1bbd2e577f478a942",
+      "checks/runtime/capabilities/knowledge/test_typed_identity.py": "8d0a64d9f383366e4848b576e3f53121e1b2a16b56b130b8871e4708821914f3"
+    }
+  },
+  "repair_history": [
+    "Initial29/30runtimepass including8connection replay and2connection competition; fixed test assumption delete_item returns bool (actual API returnsNone).",
+    "Repair1all30runtimepass; production unchanged."
+  ]
+}
