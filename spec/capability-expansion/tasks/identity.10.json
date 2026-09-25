@@ -1,0 +1,42 @@
+{
+  "id": "identity.10",
+  "schema_version": 1,
+  "status": "in_progress",
+  "acceptance": [
+    "Bind identity enable and route approval to one actual canonical autonomous loop without competing lifecycle state",
+    "Delegate start/resume/pause/stop and separate current-turn cancellation to existing engine; preserve queues and unrelated loops",
+    "Bound durable self-thinking requests by fixed presets, revision/route approval, retry identity, UTC daily quota and separation",
+    "Guard actual manager start and nudge delivery for bound identity even outside capability APIs",
+    "Expose real HTTP/native/console with honest unavailable deliverer receipts and no provider completion claim"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/lifecycle.py",
+    "runtime/gideon/workspace/capabilities/identity/lifecycle_route.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/automation/loop/manager.py",
+    "runtime/gideon/automation/triggers/nudge.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_lifecycle.py",
+    "apps/console/src/features/capabilities/identity/LifecyclePage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_lifecycle.py",
+    "checks/runtime/capabilities/identity/lifecycle_ui_server.py",
+    "apps/console/src/features/capabilities/identity/LifecyclePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_lifecycle.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/LifecyclePage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity10-baseline",
+  "remaining_limits": [
+    "External model turn delivery and active-provider cancellation are unqualified; local tests exercise real engine arming and no-deliverer/idle paths",
+    "Self-thinking dispatch is explicit; regular autonomous cycles retain existing scheduling",
+    "Other loops and heartbeat maintenance are outside this identity binding",
+    "Existing stop may retain an inactive parallel trigger record; bound-loop delivery guard rejects it after terminal stop"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.10",
+  "repair_cycles": 2
+}
