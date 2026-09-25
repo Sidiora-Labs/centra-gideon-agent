@@ -8,6 +8,9 @@ from gideon.core.config.loader import config_dir
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.workspace.capabilities.knowledge.archive import ConversationArchive
 from gideon.workspace.capabilities.knowledge.topics import TrackedTopics, SOURCE_TYPES
+from gideon.workspace.capabilities.knowledge.reviews import ReviewService
+from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
+from gideon.integrations.action_providers.registry import register_action_provider
 from gideon.engine import session_restrictions
 from gideon.integrations.action_providers.services import get_action_services
 from gideon.integrations.mcp_core import get_current_session_key
@@ -22,7 +25,13 @@ _REQUEST = {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$"}
 _PAGING = {"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "offset": {"type": "integer", "minimum": 0, "maximum": 1000000}}
 _TYPE_FIELDS = {"capture_id": _ID, "kind": {"enum": ["person", "project", "idea", "admin", "memory"]}, "fields": {"type": "object"}}
 _ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string", "minLength": 1, "maxLength": 524288}}
+_REVIEW_FIELDS = {"period": {"enum": ["daily", "weekly"]}, "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "timezone": {"type": "string", "maxLength": 100}}
 _TOOLS = {
+    "knowledge_review_preview": ("Preview actual daily or weekly obligations and recent activity with exact source links; completed activity uses updated_at rather than immutable completion events.", False, _REVIEW_FIELDS, list(_REVIEW_FIELDS)),
+    "knowledge_review_save": ("Save a reviewed source snapshot and user reflection as a canonical knowledge note, rejecting changed sources.", True, {**_REVIEW_FIELDS, "request_id": _REQUEST, "preview_id": _ID, "reflection": {"type": "string", "maxLength": 100000}}, [*_REVIEW_FIELDS, "request_id", "preview_id", "reflection"]),
+    "knowledge_review_list": ("List immutable saved review receipts and canonical note links.", False, _PAGING, []),
+    "knowledge_review_schedules": ("List existing daily and weekly review clock schedules and their actual next fire.", False, {}, []),
+    "knowledge_review_schedule_save": ("Create or revise a recurring review using the existing trigger scheduler; disable through enabled=false. No messaging or model output is generated.", True, {"request_id": _REQUEST, "id": _ID, "revision": {"type": "integer", "minimum": 1}, "period": {"enum": ["daily", "weekly"]}, "timezone": {"type": "string", "maxLength": 100}, "time": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}, "weekday": {"type": "integer", "minimum": 0, "maximum": 6}, "enabled": {"type": "boolean"}}, ["request_id", "period", "timezone", "time", "weekday", "enabled"]),
     "knowledge_topic_list": ("List saved keyword topics.", False, _PAGING, []),
     "knowledge_topic_save": ("Create or revise a keyword topic over chosen canonical personal sources; preserves mutation retry receipts.", True, {"request_id": _REQUEST, "id": _ID, "revision": {"type": "integer", "minimum": 1}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "query": {"type": "string", "minLength": 1, "maxLength": 300}, "source_types": {"type": "array", "items": {"enum": list(SOURCE_TYPES)}, "minItems": 1, "uniqueItems": True}}, ["request_id", "name", "query", "source_types"]),
     "knowledge_topic_delete": ("Delete a saved topic without deleting its source records; requires current revision.", True, {"id": _ID, "request_id": _REQUEST, "revision": {"type": "integer", "minimum": 1}}, ["id", "request_id", "revision"]),
@@ -73,6 +82,8 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._typed = None
         self._archive = None
         self._topics = None
+        self._reviews = None
+        self._review_schedules = None
         self._home = config_dir()
 
     @property
@@ -119,7 +130,22 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_topic_"):
+            if tool_name.startswith("knowledge_review_"):
+                if self._reviews is None:
+                    self._reviews = ReviewService(self._store, self._home)
+                    self._review_schedules = ReviewSchedules(self._reviews)
+                    register_action_provider(ReviewActionProvider(self._review_schedules))
+                if tool_name == "knowledge_review_preview":
+                    result = self._reviews.preview(**arguments)
+                elif tool_name == "knowledge_review_save":
+                    result = self._reviews.save(arguments)
+                elif tool_name == "knowledge_review_list":
+                    result = self._reviews.list(**arguments)
+                elif tool_name == "knowledge_review_schedules":
+                    result = self._review_schedules.list()
+                else:
+                    result = self._review_schedules.save(arguments)
+            elif tool_name.startswith("knowledge_topic_"):
                 if self._topics is None:
                     self._topics = TrackedTopics(self._store, service, self._home)
                 if tool_name == "knowledge_topic_list":
