@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gideon.core.config.loader import CONFIG_DIR_NAME, config_dir
+from gideon.core.sqlite_compat import sqlite3
 from gideon.core.config.locations import configuration_home
 from gideon.engine.tasks.hierarchy import HierarchyStore
 from gideon.engine.tasks.native import NativeTaskProvider
@@ -82,7 +83,6 @@ class TypedCapture:
         self.inbox, self.memory = CaptureInbox(store, home=self.home), memory
         self.db, self.store = store.db, store
         self.db.executescript('''
-            CREATE UNIQUE INDEX IF NOT EXISTS typed_capture_guid ON items(guid) WHERE substr(guid,1,14) = 'typed_capture:';
             CREATE TABLE IF NOT EXISTS capability_knowledge_types (
                 capture_id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE,
                 payload TEXT NOT NULL, receipt TEXT
@@ -94,6 +94,23 @@ class TypedCapture:
             CREATE TRIGGER IF NOT EXISTS typed_receipt_delete BEFORE DELETE ON capability_knowledge_types
             BEGIN SELECT RAISE(ABORT,'typed provenance is immutable'); END;
         ''')
+        self._idea_index(allow_conflicts=True)
+
+    def _idea_index(self, allow_conflicts=False):
+        collisions = [row[0] for row in self.db.execute("SELECT guid FROM items WHERE substr(guid,1,14) = 'typed_capture:' GROUP BY guid HAVING count(*) > 1")]
+        if collisions:
+            if allow_conflicts:
+                return False
+            raise CaptureError('Idea import identity conflicts require review of existing records: ' + ', '.join(collisions), 409)
+        try:
+            self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS typed_capture_guid ON items(guid) WHERE substr(guid,1,14) = 'typed_capture:'")
+            self.db.commit()
+        except sqlite3.IntegrityError:
+            self.db.rollback()
+            if allow_conflicts:
+                return False
+            raise CaptureError("Idea import identities changed concurrently; review existing records and retry", 409) from None
+        return True
 
     def preview(self, body):
         if not isinstance(body, dict) or set(body) != {'capture_id', 'kind', 'fields'}:
@@ -141,9 +158,16 @@ class TypedCapture:
         if not preview['available']:
             raise CaptureError(preview['unavailable_reason'], 503)
         self.inbox.assert_write_scope()
+        if body['kind'] == 'idea':
+            self._idea_index()
         if not previous:
-            self.db.execute('INSERT INTO capability_knowledge_types VALUES (?,?,?,NULL)', (body['capture_id'], body['request_id'], payload))
+            self.db.execute('INSERT OR IGNORE INTO capability_knowledge_types VALUES (?,?,?,NULL)', (body['capture_id'], body['request_id'], payload))
             self.db.commit()
+            reserved = self.db.execute('SELECT * FROM capability_knowledge_types WHERE capture_id=? OR request_id=?', (body['capture_id'], body['request_id'])).fetchone()
+            if reserved['payload'] != payload:
+                raise CaptureError('This capture or request already has a different reviewed import', 409)
+            if reserved['receipt']:
+                return json.loads(reserved['receipt'])
         target, link = await self._destination(preview)
         receipt = {key: body[key] for key in ('request_id', 'preview_id', 'capture_id', 'kind')}
         receipt.update(destination=preview['destination'], destination_id=target, source_link=link,
@@ -182,6 +206,11 @@ class TypedCapture:
         if kind == 'idea':
             existing = self.db.execute('SELECT id FROM items WHERE guid=?', (marker,)).fetchone()
             target = existing[0] if existing else self.store.create_typed_item(item_type='fleeting', **fields, guid=marker, extra={'file_metadata': {'capture_id': preview['capture_id'], 'original_at': self.inbox.get(preview['capture_id'])['captured_at']}})
+            if target is None:
+                recovered = self.db.execute('SELECT id FROM items WHERE guid=?', (marker,)).fetchone()
+                if recovered is None:
+                    raise CaptureError('Canonical idea creation did not persist a destination', 409)
+                target = recovered[0]
             return target, '#/knowledge/item/' + target
         rows = self.memory.episodic_list(limit=2, tag_filter=[marker])
         if not rows:
