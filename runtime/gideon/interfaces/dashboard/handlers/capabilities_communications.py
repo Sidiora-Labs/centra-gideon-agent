@@ -8,12 +8,22 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper, telegram, calendar, social, xreading, stacker, lifecycle, timeline, teams
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/teams/' in request.path:
+            source_id = request.match_info.get('teams_source_id')
+            if request.path.endswith('/messages'):
+                return web.json_response({'messages': teams.messages(store, source_id), 'source': teams.get_source(store, source_id)})
+            if request.path.endswith('/sync'):
+                return web.json_response({'sync': await teams.sync(store, source_id)})
+            if request.method == 'GET':
+                return web.json_response({'source': teams.get_source(store, source_id)} if source_id else {'sources': teams.sources(store)})
+            row = teams.save_source(store, await request.json(), source_id)
+            return web.json_response({'source': row}, status=200 if source_id else 201)
         if request.path.endswith('/activity-timeline'):
             data = dict(request.query)
             if 'limit' in data:
@@ -199,6 +209,13 @@ async def handle(request):
 
 
 def register(app):
+    teams_base = '/api/capabilities/communications/teams/sources'
+    app.router.add_get(teams_base, handle)
+    app.router.add_post(teams_base, handle)
+    app.router.add_get(teams_base + '/{teams_source_id}', handle)
+    app.router.add_put(teams_base + '/{teams_source_id}', handle)
+    app.router.add_get(teams_base + '/{teams_source_id}/messages', handle)
+    app.router.add_post(teams_base + '/{teams_source_id}/sync', handle)
     app.router.add_get('/api/capabilities/communications/activity-timeline', handle)
     assignment_base = '/api/capabilities/communications/platform-assignments'
     app.router.add_get(assignment_base, handle)
