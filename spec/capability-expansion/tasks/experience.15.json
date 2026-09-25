@@ -2,40 +2,57 @@
   "id": "experience.15",
   "schema_version": 1,
   "status": "locally_qualified",
-  "base_revision": "dea7193f",
-  "contract": "A native duplex session attaches only to an existing nonterminal experience.07 native call request and never initiates, answers or ends an external call. The fixed paired-desktop operation set captures bounded mono PCM through bundled AVFoundation source, sends the isolated recording through Gideon's configured STT, accepts a bounded agent reply, sends it through Gideon's configured TTS and plays only that returned file through AVFoundation. Durable compare-and-swap session state preserves turns and marks in-flight restart state interrupted/unknown. No client executable, path, hostname or generic host command is accepted.",
-  "acceptance": "Bundled macOS source requests microphone permission, records 16 kHz mono linear PCM and plays returned audio with AVFoundation. Runtime validates existing call identity, bounded turns/duration/reply, request replay/conflict, fixed helper commands, durable restart recovery, STT/TTS bridge state, unavailable Mac/provider behavior and fixed HTTP actions. Console exposes readiness, attach/capture/speak/stop and retained turn state while stating that external call commands require separate explicit approval. Local checks do not claim Mac device, provider, network or call execution.",
+  "base_revision": "a669ec6d",
+  "contract": "A native duplex session attaches only to an existing nonterminal experience.07 native call request and never initiates, answers or ends an external call. The source runtime bridges bounded AVFoundation capture through configured STT and configured TTS back to playback. The separately enrolled paired-native helper exposes only fixed capture and play operations when --duplex-audio is explicitly enabled, applies its existing bearer authentication boundary to both routes, and advertises voice.duplex only while mounted. Requests accept session and operation identities plus bounded capture duration or digest-bound WAV bytes; no executable, path, endpoint, command, model or provider override is accepted. Durable executor receipts deny capture replay, make completed playback idempotent and mark interrupted device work uncertain after restart.",
+  "acceptance": "Bundled macOS Swift source requests microphone permission, records 16 kHz mono linear PCM and plays WAV audio through AVFoundation, and is included in wheel package data. The native helper mounts authenticated POST /v1/voice/duplex/capture and /play only with explicit duplex opt-in and then advertises voice.duplex. The executor validates exact schemas, 30-second capture and 2 MiB decoded-audio limits, WAV markers, byte digest, fixed Swift argv, bounded child supervision and private durable operation receipts. Capture replay is refused, completed playback replay returns the same receipt, conflicts are rejected, and restart leaves running device state uncertain. Source sessions retain their existing call/STT/TTS state contract. Local checks use real HTTP, SQLite, artifact source and platform types but do not claim Mac microphone/speaker, provider, public certificate, paired-device or live-call execution.",
   "production_files": [
     "runtime/gideon/workspace/capabilities/experience/native_duplex.py",
     "runtime/gideon/workspace/capabilities/experience/native_duplex_http.py",
-    "apps/console/src/features/capabilities/experience/NativeDuplex.tsx"
+    "runtime/gideon/workspace/capabilities/experience/native_duplex_helper.py",
+    "runtime/gideon/workspace/capabilities/workspace/native_helper.py",
+    "apps/console/src/features/capabilities/experience/NativeDuplex.tsx",
+    "pyproject.toml"
   ],
   "test_files": [
     "checks/runtime/capabilities/experience/test_native_duplex.py",
+    "checks/runtime/capabilities/experience/test_native_duplex_executor.py",
+    "checks/runtime/capabilities/experience/test_native_duplex_helper_mount.py",
     "apps/console/src/features/capabilities/experience/NativeDuplex.test.tsx"
   ],
   "extra_files": [
     "runtime/gideon/workspace/capabilities/experience/assets/native_duplex.swift"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/experience/test_native_duplex.py"
+    "checks/runtime/capabilities/experience/test_native_duplex.py",
+    "checks/runtime/capabilities/experience/test_native_duplex_executor.py",
+    "checks/runtime/capabilities/experience/test_native_duplex_helper_mount.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/experience/NativeDuplex.test.tsx"
   ],
   "remaining_limits": [
-    "AVFoundation compilation, microphone permission, real capture and real speaker playback require qualification on a paired Mac",
+    "AVFoundation compilation, microphone permission, real capture and real speaker playback require qualification on an enrolled paired Mac",
     "Configured STT and TTS providers were not invoked; provider credentials, local models and network availability remain unqualified",
     "The slice attaches to an existing native call request and never dials, answers or hangs up; those external mutations retain experience.07 approval and uncertain-state boundaries",
-    "Authenticated paired transport and tenant allocation are hosted integration responsibilities; this source runtime exposes fixed operations for the existing authenticated dashboard boundary",
-    "Root must register native_duplex_http in the shared experience handler, render NativeDuplex from the shared Page and enroll the Swift asset in package/native manifests",
+    "Local authenticated HTTP proves the mount and bearer boundary; public TLS certificate, remote paired transport and tenant allocation remain external integration proof",
+    "Root must register native_duplex_http in the shared experience handler and render NativeDuplex from the shared Page; this continuation does not edit either shared hook",
     "Live browser and aggregate application integration remain root qualification"
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify experience.15",
-  "evidence": "/tmp/gideon-experience.15-checks-auicwp07/evidence.json",
-  "production_lines": 173,
-  "test_lines": 189,
-  "ratio": 1.092485549132948,
+  "evidence": [
+    "/tmp/gideon-experience.15-checks-fv_zlbi2/evidence.json"
+  ],
+  "production_lines": 182,
+  "test_lines": 199,
+  "ratio": 1.0934065934065933,
   "repair_cycles": 0,
-  "exit_code": 0
+  "exit_code": 0,
+  "qualification": {
+    "runtime_tests": 50,
+    "ui_tests": 3,
+    "production_lines": 182,
+    "test_lines": 199,
+    "repair_cycles": 0,
+    "stages": "Compile, runtime and UI passed on the first qualification run."
+  }
 }
