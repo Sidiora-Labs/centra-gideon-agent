@@ -1,3 +1,5 @@
+import { useComposition, CompositionEditor } from '../capabilities/platform/Composition'
+import { CoreWidgets } from '../capabilities/platform/CoreWidgets'
 import { useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
@@ -34,14 +36,10 @@ import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { InlineError } from '../../shared/ui/InlineError'
 
-/** The dashboard — Gideon's home. Redesigned bare & launcher-forward: no
- *  bento boxes. A command launcher up top (jump straight into a chat or a
- *  feature), then framed sections of live signal under section labels. The customizable grid +
- *  per-user layout persistence were retired (clean break); everyone gets this
- *  one content-first layout. Widget bodies + the shared DashboardLive feed are
- *  retained behind shared section styling. */
 export function DashboardPage(route: RouteProps) {
   const { name } = useIdentity()
+  const composition = useComposition()
+  const custom = composition.selected && !composition.selected.preset
   return (
     <DashboardLiveProvider>
       <div className="flex h-full flex-col overflow-hidden">
@@ -62,6 +60,7 @@ export function DashboardPage(route: RouteProps) {
           {
 }
           <EntranceGroup className="mx-auto flex w-full flex-col gap-2xl px-l py-xl" style={{ maxWidth: 'var(--content-width)' }}>
+            <CompositionEditor model={composition} />
             <EntranceRegion><Launcher {...route} /></EntranceRegion>
 
             {
@@ -70,7 +69,7 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <PinnedTiles />
+            <PinnedTiles viewId={composition.selected?.id || 'overview'} />
 
             {
 }
@@ -78,6 +77,7 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
+            {custom ? <CoreWidgets tiles={composition.selected!.tiles} route={route} /> : <>
             <EntranceRegion className="grid grid-cols-1 gap-2xl lg:grid-cols-2">
               <Section label="Needs you" icon={ListTodo} tour="approvals">
                 <ActionCenter {...route} />
@@ -150,13 +150,14 @@ export function DashboardPage(route: RouteProps) {
             <EntranceRegion className="min-w-0 lg:hidden">
               <SystemRailIsland {...route} />
             </EntranceRegion>
+            </>}
           </EntranceGroup>
         </div>
         {
 }
-        <div className="hidden shrink-0 px-l pb-m pt-xs lg:block">
+        {!custom && <div className="hidden shrink-0 px-l pb-m pt-xs lg:block">
           <SystemRailIsland {...route} />
-        </div>
+        </div>}
       </div>
     </DashboardLiveProvider>
   )
