@@ -1,0 +1,106 @@
+{
+  "id": "knowledge.03",
+  "status": "locally_qualified",
+  "base_revision": "3323d880",
+  "schema_version": 1,
+  "contract": "Review original capture fields into canonical people, projects, fleeting ideas, native tasks or actual episodic memory; preserve immutable original fields and unsupported-field report, optimistic review hash and idempotent receipts. No duplicate domain stores.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/typed.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_types.py",
+    "apps/console/src/features/capabilities/knowledge/TypesPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "apps/console/src/features/capabilities/knowledge/TypesPage.test.tsx",
+    "checks/runtime/capabilities/knowledge/types_ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_typed.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/TypesPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Runtime home drift fails closed for canonical project/task imports because existing identity helpers read process config.",
+    "Successful memory import uses actual archive without generated embeddings; semantic retrieval and provider performance are not qualified.",
+    "Integrated central console navigation remains parent-owned."
+  ],
+  "acceptance": [
+    "Preview supported fields for person/project/idea/admin/memory against a real immutable capture; retain unsupported original fields explicitly.",
+    "Commit only matching preview hash and revision; one reviewed import per capture, same request replays exact durable receipt, conflicting input is409.",
+    "Create actual canonical contact/project/fleeting/task/episodic destinations, recover interrupted canonical creation, and expose existing UI destination links.",
+    "Apply actual native tool session restrictions and HTTP query/allocation boundaries. Project/task imports fail closed before any filesystem side effect on runtime home drift.",
+    "Exercise real store, HTTP and native invocation paths plus real HTTP DOM review/import/unavailability."
+  ],
+  "verification": {
+    "task": "knowledge.03",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790295904.7011008,
+    "production_lines": 276,
+    "test_lines": 392,
+    "ratio": 1.4202898550724639,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_types.py",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "runtime/gideon/workspace/capabilities/knowledge/typed.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py",
+          "checks/runtime/capabilities/knowledge/test_typed.py",
+          "checks/runtime/capabilities/knowledge/types_ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.03-checks-934uy18m/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_typed.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.03-checks-934uy18m/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/knowledge/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/knowledge/apps/console/src/features/capabilities/knowledge/TypesPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.03-checks-934uy18m/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.03-checks-934uy18m",
+    "completed_at": 1790295954.5478666,
+    "files": {
+      "apps/console/src/features/capabilities/knowledge/TypesPage.tsx": "648b47c3eed33265d2fef7a83bd98741dde6f1e852e13b6c4ef872374644317a",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_types.py": "0ed7ec7e6087fc097f435112306777f051b8acd4cf3225d0309a4a5724de9075",
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "9cca61ab3d8dfcb3036b04662fe7dc53cb28656e09435e5c2cc9dcacd79a0956",
+      "runtime/gideon/workspace/capabilities/knowledge/typed.py": "4c0ea5cc76198f4047726316a22872ae0779e3280cf16082d418840f113cab3b",
+      "apps/console/src/features/capabilities/knowledge/TypesPage.test.tsx": "b5a9fe5e498de414e58f5dbfd2269147f59604e9ea1d4107e83f096c93f024ce",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "9a9ca66531a9f8e4a8b7c5e6501445fd76d29bef2c0945980935b30075edd72e",
+      "checks/runtime/capabilities/knowledge/test_typed.py": "d54eaa7a14b2b5815fecd4abfaca6674e35560c924e8a077effd20b121dda553",
+      "checks/runtime/capabilities/knowledge/types_ui_server.py": "ce337f5171bad18a54bdf21d1b6ef08cdf8ae7a8403600f7d8192439c7939759"
+    }
+  },
+  "repair_history": [
+    "Initial gate:39/42runtime; fixed pure-home resolver side effect and SQLite/memory test schema assumptions.",
+    "Repair1 passed42runtime+2DOM; discovered canonical task UI uses query.open.",
+    "Repair2 corrected canonical task link and passed42runtime+2DOM."
+  ]
+}

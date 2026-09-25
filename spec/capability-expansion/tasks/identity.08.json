@@ -1,0 +1,107 @@
+{
+  "id": "identity.08",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Author at most five read-only steps with bounded typed prior-output JSON pointer bindings and immutable revision history",
+    "Restore a previous definition as a new optimistic revision; create/edit/begin replay protection",
+    "Execute actual IdentityToolProvider operations with caller session restrictions rechecked at every step",
+    "Pin definition per run; edits or disabling revoke pending steps; cancellation prevents further dispatch",
+    "Durable step claim prevents duplicate invocation under retries; partial/failed/inflight statuses never claim success",
+    "Actual HTTP console/native authoring and step execution, with restart/revoke/cancel vectors"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/recipes.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_recipes.py",
+    "apps/console/src/features/capabilities/identity/RecipesPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_recipes.py",
+    "checks/runtime/capabilities/identity/recipes_ui_server.py",
+    "apps/console/src/features/capabilities/identity/RecipesPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_recipes.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/RecipesPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity08-baseline",
+  "remaining_limits": [
+    "Only bounded existing identity read tools are admitted; cross-provider write recipes and workflow compilation remain pending original breadth",
+    "Step advance is explicit, no independent autonomous scheduler",
+    "In-flight interrupted read claims remain explicit and cannot auto-replay; cancel and create new run if needed"
+  ],
+  "evidence": {
+    "task": "identity.08",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790297860.6181817,
+    "production_lines": 304,
+    "test_lines": 349,
+    "ratio": 1.1480263157894737,
+    "stage": "combined_existing_compile_runtime_and_repaired_ui",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_recipes.py",
+          "runtime/gideon/workspace/capabilities/identity/recipes.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/recipes_ui_server.py",
+          "checks/runtime/capabilities/identity/test_recipes.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.08-checks-af57pb7w/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_recipes.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.08-checks-af57pb7w/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/RecipesPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.08-checks-tw7c_d0p/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.08-checks-tw7c_d0p",
+    "completed_at": 1790297875.2586052,
+    "files": {
+      "apps/console/src/features/capabilities/identity/RecipesPage.tsx": "21adc552400a2874e8c5f7e13f77efd0c0780e669a3956cacff39a5d02c24dc5",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_recipes.py": "aecffe1706771ede77d1e61cfdacb8a8e42e973c6c7905f93e93587c9644814a",
+      "runtime/gideon/workspace/capabilities/identity/recipes.py": "52624f7502200b80909ad7080728409f0426fca4dc399184b895c7267c2e9382",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "40c24928e09ed21dfda42bb9b1fb99e81cd233b790363104f655c2b72bb8142b",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "00f4308512784f950fa90f320cd4e7fab23406eb934e1c2238e2a2625aa014e5",
+      "apps/console/src/features/capabilities/identity/RecipesPage.test.tsx": "1dddcf350df2dd4312b464ebe1a9de51aa4fe91789902bf6cf8a9c2725538c9b",
+      "checks/runtime/capabilities/identity/recipes_ui_server.py": "267a69443c9551b8d6c45b699747229447867e972c8858300b8051722c111d6e",
+      "checks/runtime/capabilities/identity/test_recipes.py": "4588f39043f80b48663936302d3dc3ffd76821c0caef1350f00b9a434840d52d"
+    },
+    "source_evidence": [
+      "/tmp/gideon-identity.08-checks-af57pb7w/evidence.json",
+      "/tmp/gideon-identity.08-checks-tw7c_d0p/evidence.json"
+    ]
+  },
+  "repair_cycles": 1,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.08",
+  "repair_cmd": "python3 tooling/capability_workflow.py verify identity.08 --stage ui"
+}

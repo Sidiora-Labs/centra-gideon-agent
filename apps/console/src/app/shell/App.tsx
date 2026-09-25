@@ -1,3 +1,4 @@
+import VoiceControls from './VoiceControls'
 import './shell.css'
 import { Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
 import { useApplicationEvents, useShellNavigation, useTerminalShell } from './shellControllers'
@@ -46,6 +47,7 @@ const LoopsSection = lazyRoute('loops', () => import('../../features/loops/Loops
 const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
 const SettingsPage = lazyRoute('settings', () => import('../../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AgentsSection = lazyRoute('agents', () => import('../../features/agents/AgentsSection').then((m) => ({ default: m.AgentsSection })))
+const CapabilitiesSection = lazyRoute('capabilities', () => import('../../features/capabilities/CapabilitiesSection'))
 const RoomsSection = lazyRoute('rooms', () => import('../../features/rooms/RoomsSection').then((m) => ({ default: m.RoomsSection })))
 const NotificationsPage = lazyRoute('notifications', () => import('../../features/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })))
 const TriggersSection = lazyRoute('triggers', () => import('../../features/triggers/TriggersSection').then((m) => ({ default: m.TriggersSection })))
@@ -75,6 +77,7 @@ installRoutePreload()
 const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'capabilities', label: 'Capabilities', icon: Sparkles },
   { id: 'rooms', label: 'Rooms', icon: Users },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
@@ -108,6 +111,7 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   dashboard: DashboardPage,
   'mission-control': MissionControl,
   chat: ChatPage,
+  capabilities: CapabilitiesSection,
   rooms: RoomsSection,
   loop: LoopSection,
   loops: LoopsSection,
@@ -178,6 +182,7 @@ function AppInner() {
   const mobileNavOpen = rail.open
   const toggleNav = rail.toggle
   const onNavSelect = rail.select
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const [activeLoops, setActiveLoops] = useState(0)
   const [taskListCount, setTaskListCount] = useState(0)
   useEffect(() => {
@@ -319,6 +324,7 @@ function AppInner() {
     { id: 'go:notifications', label: 'Notifications', hint: 'Go to', icon: Bell, keywords: 'alerts feed', run: () => navigate('notifications') },
     { id: 'go:discover', label: 'Discover', hint: 'Go to', icon: Compass, keywords: 'tips tour learn features guide', run: () => navigate('discover') },
     { id: 'act:terminal-drawer', label: 'Toggle terminal drawer', hint: 'Action · ⌘`', icon: Terminal, keywords: 'shell pty console', run: () => terminal.toggle() },
+    { id: 'act:voice', label: 'Voice controls', hint: 'Action', icon: Sparkles, run: () => setVoiceOpen(true) },
     { id: 'act:settings', label: 'Open Settings', hint: 'Action', icon: Settings, run: () => navigate('settings') },
   ]
   return (
@@ -353,6 +359,7 @@ function AppInner() {
           </Suspense>
         </ErrorBoundary>
       </main>
+      <VoiceControls open={voiceOpen} onClose={() => setVoiceOpen(false)} items={navItems} navigate={navigate} currentRoute={[route, sub].filter(Boolean).join('/')} />
       <CommandPalette commands={commands} />
       {
 }

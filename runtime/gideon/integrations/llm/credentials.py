@@ -1,5 +1,6 @@
 """Resolve named credentials and publish private descriptor snapshots."""
 
+import fcntl
 import json
 import logging
 import os
@@ -88,6 +89,32 @@ class CredentialStore:
                 self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
             )
             self._descriptors = snapshot
+
+    def put(self, name: str, descriptor: dict[str, object]) -> None:
+        if not isinstance(name, str) or not name or not isinstance(descriptor, dict):
+            raise ValueError("Credential name and descriptor required")
+        self._mutate(name, dict(descriptor))
+
+    def remove(self, name: str) -> None:
+        if not isinstance(name, str) or not name:
+            raise ValueError("Credential name required")
+        self._mutate(name, None)
+
+    def _mutate(self, name: str, descriptor: dict[str, object] | None) -> None:
+        with self._state_lock:
+            self._home.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self._home / ".credentials.lock", os.O_CREAT | os.O_RDWR, self.FILE_MODE)
+            with os.fdopen(fd, "a+") as stream:
+                fcntl.flock(stream, fcntl.LOCK_EX)
+                try:
+                    snapshot = self._load_descriptors()
+                    if descriptor is None:
+                        snapshot.pop(name, None)
+                    else:
+                        snapshot[name] = descriptor
+                    self.save(snapshot)
+                finally:
+                    fcntl.flock(stream, fcntl.LOCK_UN)
 
     def _private_text(self, path: Path) -> str | None:
         if not path.is_file():

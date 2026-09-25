@@ -1,0 +1,1 @@
+{"name":"gideon-world-engine","version":"1.0.0","displayName":"World engine","description":"Managed bridge to a separately installed Eidoverse Worlds engine under its AGPL-3.0 license.","author":"Gideon","backend":{"type":"bun","entryPoint":"launch.js","healthCheck":"/health"},"permissions":{"storage":true}}

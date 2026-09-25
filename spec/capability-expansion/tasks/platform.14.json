@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task": "platform.14",
+  "status": "locally_qualified",
+  "base_revision": "fa5e006b",
+  "contract": "Opt-in native interval trigger task-class policies bind actual workflow configuration signatures. Last20 typed ExecutionJournal task outcomes pool perclass, >=5sample minimum, <50% execution success scales4x boundedday without accelerating longperiods; latest3successes or24hour idle restoresbase. Auth/transport/config/manual/unknown excluded. Actual next_after_completion/TickPass scheduling consumes policy; manualfire and unopted scheduling unchanged. Execution success is not semantic modelquality.",
+  "acceptance": [
+    "Persist revisioned opt-in/out taskclass policies for valid native interval triggers.",
+    "Derive bounded attributed evidence from actual typed FireResult/ExecutionJournal records, exclude infrastructure/unknown, pool only configured classes and matching bindings.",
+    "Actual scheduler timing changes with low success and restores on recovery/idleness/optout, without modifying raw journal/configured intervals.",
+    "HTTP/console/native mutate real policies and preserve conflicts, auth, invalid config behavior."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/cadence.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_cadence.py",
+    "runtime/gideon/automation/triggers/service.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Cadence.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_cadence.py",
+    "checks/runtime/capabilities/platform/cadence_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Cadence.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_cadence.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Cadence.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.14-checks-3efcwcp8/evidence.json",
+  "qualification": {
+    "runtime_tests": 8,
+    "ui_tests": 2,
+    "production_lines": 149,
+    "test_lines": 306,
+    "repair_cycles": 0,
+    "limitations": [
+      "Typed task execution outcomes are not semantic model-quality scores."
+    ]
+  }
+}

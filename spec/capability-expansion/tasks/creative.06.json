@@ -1,0 +1,39 @@
+{
+  "id": "creative.06",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "53ab9422",
+  "requires": [
+    "creative.05"
+  ],
+  "contract": "Work/exercise metadata and prompts with pinned author/universe revisions; immutable readonly canonical markdown artifacts hold manuscript text. Versioned work active draft pointer restores without deleting draft history. Deterministic request artifact recovery verifies persisted exact content and digest after SQLite rollback.",
+  "acceptance": [
+    "Actual HTTP/UI/native create/edit work and exercise prompt, pinned context and draft manuscript save/read/reopen/restore.",
+    "Draft text preserves whitespace in actual canonical readonly artifacts; no duplicate manuscript text in creative DB.",
+    "Atomic optimistic metadata/history plus retryable canonical writes: concurrent replay exactly once, recovery after real SQLite abort, collision preserves unrelated artifact.",
+    "Explicit missing sources, foreign runtime references denied, strict schema/text bounds,44 native tools with write approval metadata.",
+    "Search/paginate work/context; unsaved text survives metadata edits; stale write retains editor content."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/works.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Works.tsx",
+    "apps/console/src/features/capabilities/creative/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_works.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "checks/runtime/capabilities/creative/work_server.py",
+    "apps/console/src/features/capabilities/creative/Works.test.tsx",
+    "apps/console/src/features/capabilities/creative/UniverseGraph.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_works.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Works.test.tsx"
+  ],
+  "repair_cycles": 1
+}

@@ -16,6 +16,7 @@ from gideon.interfaces.dashboard.handlers._shared import (
 )
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import redact_for_display, restore_masked_spans
+from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,7 @@ async def api_prompt_detail(request: web.Request) -> web.Response:
             "content": content,
             "merged_variables": [v.to_dict() for v in merged],
             "includes": included_snippet_names(tpl.content),
+            "usage": prompt_usage(provider.name, bare),
         }
     )
 
@@ -326,6 +328,17 @@ async def api_prompt_delete(request: web.Request) -> web.Response:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
     if provider.get_prompt(bare) is None:
         return web.json_response({"error": "not found"}, status=404)
+    usage = prompt_usage(provider.name, bare)
+    if not usage["complete"]:
+        return web.json_response(
+            {"error": "Prompt dependencies could not be read", "code": "prompt_usage_unavailable", "usage": usage},
+            status=503,
+        )
+    if not usage["deletable"]:
+        return web.json_response(
+            {"error": "Prompt is in use", "code": "prompt_in_use", "usage": usage},
+            status=409,
+        )
     if not provider.delete_prompt(bare):
         return web.json_response({"error": "not found"}, status=404)
     return web.json_response({"ok": True})

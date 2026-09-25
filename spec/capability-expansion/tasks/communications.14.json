@@ -1,0 +1,50 @@
+{
+  "id": "communications.14",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "282a2824",
+  "requires": [
+    "communications.04"
+  ],
+  "contract": "Read-only Microsoft Graph Teams history acquisition from the signed-in customer represented by a named credential. Verify /me against the configured owner before discovering chats, joined teams and channels. Follow bounded same-origin Graph continuation URLs and persist stable chat/channel/reply provenance, edits, deletions, attachment references and unambiguous existing-person links in the canonical communications database. Never send Teams content.",
+  "acceptance": [
+    "Verified signed-in Microsoft identity precedes all history reads and owner mismatch records failure without acquiring messages",
+    "Actual Graph REST chat, team, channel and message endpoints use bearer authorization with bounded same-origin pagination",
+    "Conversation-scoped provenance prevents cross-chat message ID collisions and replay updates edits without duplicates",
+    "Existing people link only through an explicit Microsoft Graph identity handle; ambiguous or absent identity remains unlinked",
+    "HTTP 401/403 records revoked state, other transport/provider failures record failed state, and no token is persisted",
+    "Real HTTP service, persistence, handler and console source/sync/error journeys are independently asserted"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/teams.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/TeamsPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_teams.py",
+    "apps/console/src/features/capabilities/communications/TeamsPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_teams.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/TeamsPanel.test.tsx"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.14",
+  "limits": [
+    "Live Microsoft tenant qualification requires a customer-granted delegated Graph token and is separate from local protocol qualification.",
+    "History is bounded to 40 pages and 1000 normalized messages per sync; bounded results are labeled partial.",
+    "Person linking requires an existing handle identity formatted microsoft:<Graph user id>; Gideon does not auto-create people from tenant directory data.",
+    "Channel expanded reply continuation beyond the returned replies collection is not yet acquired."
+  ],
+  "qualification": {
+    "revision": "worktree pre-commit",
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.14",
+    "exit_code": 0,
+    "log": "/tmp/gideon-communications.14-checks-o_5z8n49",
+    "runtime": "8 passed",
+    "console": "3 passed",
+    "external_microsoft_tenant": "pending customer-granted delegated Graph token"
+  }
+}

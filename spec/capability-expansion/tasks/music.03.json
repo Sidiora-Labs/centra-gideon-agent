@@ -1,0 +1,115 @@
+{
+  "id": "music.03",
+  "status": "locally_qualified_external_unqualified",
+  "base_revision": "76494fc8",
+  "schema_version": 1,
+  "contract": "Documented ElevenLabs music composition adapter with named canonical credential, enabled/model configuration, persistent request-id jobs and actual canonical audio output. Output provenance comes only from an actual provider response. No synthetic provider execution.",
+  "sources": [
+    "https://elevenlabs.io/docs/api-reference/music/compose"
+  ],
+  "acceptance": [
+    "Persist/reopen bounded engine configuration without copying secrets and report credential versus remote readiness separately",
+    "Validate prompt/model/duration/instrumental inputs before external work",
+    "Persist queued/running/completed/failed/cancelled/interrupted job records; same request ID cannot double submit",
+    "Materialize actual provider audio in canonical artifacts and attach measured render with source/model/job provenance",
+    "Expose config/readiness/jobs/generation/cancel in console HTTP and native tools",
+    "External paid generation success remains unqualified without actual configured provider credentials; local tests must not fabricate that success"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/generation.py",
+    "runtime/gideon/workspace/capabilities/music/catalog.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_generation.py",
+    "apps/console/src/features/capabilities/music/GenerationPage.tsx",
+    "apps/console/src/features/capabilities/music/Page.tsx",
+    "runtime/gideon/workspace/capabilities/music/generation_tools.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_generation.py",
+    "apps/console/src/features/capabilities/music/GenerationPage.test.tsx",
+    "checks/runtime/capabilities/music/serve_generation.py",
+    "checks/runtime/capabilities/music/test_catalog.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_generation.py",
+    "checks/runtime/capabilities/music/test_catalog.py"
+  ],
+  "limits": [
+    "No provider key or account entitlement supplied; external compose/output/catalog journey unqualified",
+    "Hosted closed control plane currently has no managed music grant; OSS provider is not a hosted bypass"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-music-generation/app.json"
+  ],
+  "evidence": {
+    "task": "music.03",
+    "root": "/tmp/gideon-expansion-worktrees/music",
+    "started_at": 1790294998.6761706,
+    "production_lines": 328,
+    "test_lines": 334,
+    "ratio": 1.0182926829268293,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_generation.py",
+          "runtime/gideon/workspace/capabilities/music/catalog.py",
+          "runtime/gideon/workspace/capabilities/music/generation.py",
+          "runtime/gideon/workspace/capabilities/music/generation_tools.py",
+          "checks/runtime/capabilities/music/serve_generation.py",
+          "checks/runtime/capabilities/music/test_catalog.py",
+          "checks/runtime/capabilities/music/test_generation.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.03-checks-_gmzsews/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/music/checks/runtime/capabilities/music/test_generation.py",
+          "/tmp/gideon-expansion-worktrees/music/checks/runtime/capabilities/music/test_catalog.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.03-checks-_gmzsews/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/music/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/music/apps/console/src/features/capabilities/music/GenerationPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.03-checks-_gmzsews/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-music.03-checks-_gmzsews",
+    "completed_at": 1790295021.3703513,
+    "files": {
+      "apps/console/src/features/capabilities/music/GenerationPage.tsx": "ac6656ff7681093e5885352923e85a95fca4f464b71fc410fa6dc20ca5ecf0d4",
+      "apps/console/src/features/capabilities/music/Page.tsx": "9a69196b030fb583b3871086db94668416c38506b4018a8c5bae537a906ba017",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_generation.py": "39123ee039bd684fa7723b9211eb9886abcb932f67560ad88d539eceefe046e1",
+      "runtime/gideon/workspace/capabilities/music/catalog.py": "159e1c7aff11198e8c5c8a8a4fdc9e0107c02b8e65b556da817630314e3a8911",
+      "runtime/gideon/workspace/capabilities/music/generation.py": "b6e7fff40cdec37821b3884f9b5df439953fc75e374c1168b45fd08e7ea5753d",
+      "runtime/gideon/workspace/capabilities/music/generation_tools.py": "4cab8f10414896da4de068f7d17bd0986f8dcbd1ece0fb57da327595a3c8dfa8",
+      "apps/console/src/features/capabilities/music/GenerationPage.test.tsx": "4819806b0679dcee01f3fd681d208185b93317287219b4c55ded36b63c360f67",
+      "checks/runtime/capabilities/music/serve_generation.py": "aaa7c69dbe9dd10593f0f1647aa2c4c4bccb0c3e75682eba3202fbef8505750f",
+      "checks/runtime/capabilities/music/test_catalog.py": "72604466ca952001ac16e891ed7231d720a3ae034bf943dc5580e96e5482cdbb",
+      "checks/runtime/capabilities/music/test_generation.py": "9b016095681ace6bd9b162a8a415d945e068565872376df5b375354719bbe25d"
+    }
+  },
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.03",
+  "qualification_boundary": {
+    "local": "Configuration, validation, actual SQLite recovery, missing-credential refusal, MP3 measurement, HTTP/UI/native controls passed.",
+    "external": "No live provider credentials; actual compose response, completed generation and generated catalog attachment not exercised.",
+    "integration": "Root owns handler registration, durability inventory and full browser qualification."
+  }
+}

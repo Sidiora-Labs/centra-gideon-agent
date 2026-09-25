@@ -1,0 +1,11 @@
+{
+  "name": "gideon-music-tools",
+  "version": "1.0.0",
+  "displayName": "Music Repertoire and Catalog",
+  "description": "Author repertoire, record deterministic spaced practice, and manage artists, albums, canonical audio renders and provenance.",
+  "icon": "Music",
+  "author": "Gideon",
+  "tags": ["tool", "bundled", "music"],
+  "provider": {"type": "tool", "implementation": "gideon.workspace.capabilities.music.tools:create_provider", "capabilities": ["music-repertoire", "music-catalog"]},
+  "native": true
+}

@@ -1,0 +1,106 @@
+{
+  "id": "knowledge.05",
+  "status": "locally_qualified",
+  "base_revision": "d5be48a4",
+  "schema_version": 1,
+  "contract": "Tracked keyword topics persist queries, selected canonical domains and optimistic revisions in existing knowledge DB. Current evidence is projected from real note/journal/fleeting/memory/people/projects/tasks without copied source records or model calls.",
+  "acceptance": [
+    "Create/edit/delete durable topics with idempotent immutable mutation receipts and revision conflict detection; deleting topic never deletes source records.",
+    "Match every casefold query word in actual source title/text; return exact source identity/link, excerpts, matched terms and source availability.",
+    "Bound1000scanned records/source, bounded pagination and explicit truncated/incomplete totals. Missing memory is unavailable, empty canonical domains remain empty without creating defaults.",
+    "Refresh reflects actual source edits/archival/deletion; reads stay bound under home drift, new mutations refuse409 before foreign artifacts.",
+    "Real canonical7domain tests, native session/approval checks, HTTP isolation/redaction and realHTTPDOM create/edit/refresh/delete/error paths."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/topics.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_topics.py",
+    "apps/console/src/features/capabilities/knowledge/TopicsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_topics.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "apps/console/src/features/capabilities/knowledge/TopicsPage.test.tsx",
+    "checks/runtime/capabilities/knowledge/topics_ui_server.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_topics.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/TopicsPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Matching is literal keyword conjunction, not semantic/provider retrieval.",
+    "Current source projection scans at most1000records per selected domain and reports incomplete totals explicitly.",
+    "Root owns central navigation/native metadata and aggregate integrated journeys."
+  ],
+  "verification": {
+    "task": "knowledge.05",
+    "root": "/tmp/gideon-expansion-worktrees/knowledge",
+    "started_at": 1790297823.2807994,
+    "production_lines": 250,
+    "test_lines": 372,
+    "ratio": 1.488,
+    "stage": "all",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_topics.py",
+          "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+          "runtime/gideon/workspace/capabilities/knowledge/topics.py",
+          "checks/runtime/capabilities/knowledge/test_tools.py",
+          "checks/runtime/capabilities/knowledge/test_topics.py",
+          "checks/runtime/capabilities/knowledge/topics_ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.05-checks-kzjip6c_/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_topics.py",
+          "/tmp/gideon-expansion-worktrees/knowledge/checks/runtime/capabilities/knowledge/test_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.05-checks-kzjip6c_/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/knowledge/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/knowledge/apps/console/src/features/capabilities/knowledge/TopicsPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-knowledge.05-checks-kzjip6c_/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-knowledge.05-checks-kzjip6c_",
+    "completed_at": 1790297872.894861,
+    "files": {
+      "apps/console/src/features/capabilities/knowledge/TopicsPage.tsx": "90c8fe2c114c15e39aac426abe19cdf1daaaa4aaf836e219aa3685144d17aead",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_topics.py": "82e19ead24c3bc82ab84843deb9829466d8033b58b3edd2afd8fcb4e96cd61fe",
+      "runtime/gideon/workspace/capabilities/knowledge/tools.py": "091d8d34dc06fc9f3cbc8a537c658d264897e0ea205a4d3940573f8bd253c82a",
+      "runtime/gideon/workspace/capabilities/knowledge/topics.py": "cee2abc7a4cef6400f597a586f4656923b375c3573ec7e35f954184eacc8a925",
+      "apps/console/src/features/capabilities/knowledge/TopicsPage.test.tsx": "29fcff6d784c36d70b082318ac79b037e36e0a24fff1c2e688bdde522f1f1b18",
+      "checks/runtime/capabilities/knowledge/test_tools.py": "a4d1997d04f99dae9867b21371f4509f70c32a8dcf0235b82707813fabd5cad2",
+      "checks/runtime/capabilities/knowledge/test_topics.py": "f406b8467540f0b4ad50215b909c3da86394eac0aa9008d97af10834df393407",
+      "checks/runtime/capabilities/knowledge/topics_ui_server.py": "ea2d5b88d45a26b3b3504c167600f40ac126344707e814665f76e1cf3738744b"
+    }
+  },
+  "repair_history": [
+    "Firstgate39runtime+2DOMpassed. Added explicit paired update-id textvalidation and3 malformed-idcases beforefinalcheckpoint.",
+    "Scopedrepair1passed42runtime+2DOM."
+  ]
+}

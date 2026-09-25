@@ -1,0 +1,4 @@
+{
+  "name": "gideon-fal-video", "version": "1.0.0", "displayName": "FAL Video", "description": "Veo 3.1 video generation and last-frame continuation through FAL.", "author": "Gideon", "native": true,
+  "provider": {"type": "model", "implementation": "gideon.integrations.video_gen.fal_provider:create_provider", "capabilities": ["video_gen"], "settingsSchema": {"type": "object", "properties": {"api_key": {"type": "string", "format": "password"}}}}
+}

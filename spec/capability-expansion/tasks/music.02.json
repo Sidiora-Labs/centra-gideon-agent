@@ -1,0 +1,104 @@
+{
+  "id": "music.02",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "contract": "Artist id/name/bio/revision/archive; album id/title/artist_id/track_ids ordered/revision/archive; track id/title/artist_id/notes/renders/selected_render_id/revision/archive. Immutable render id/artifact_ref(slug,version)/measured duration_seconds/sha256/source(kind,label,license,model,job_id). Sources are explicitly imported or provenance-verified generated. Canonical bytes are never duplicated.",
+  "acceptance": [
+    "Create/edit/archive artists albums tracks through persisted API and console",
+    "Attach an actual canonical WAV artifact, measure duration from decoded header and bytes, preserve artifact version and immutable provenance, select among renders",
+    "Order existing tracks in albums; reject dangling refs, stale revisions, missing bytes, invalid audio, claimed durations and unverified generated sources",
+    "Filter catalog and reopen exact records; selected audio remains linked to canonical version",
+    "Generated-job linkage is explicitly unavailable without resolvable actual provider job/model provenance; imported recordings never appear generated"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/music/catalog.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_catalog.py",
+    "apps/console/src/features/capabilities/music/CatalogPage.tsx",
+    "runtime/gideon/workspace/artifacts/models.py",
+    "apps/console/src/features/capabilities/music/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/music/test_catalog.py",
+    "apps/console/src/features/capabilities/music/CatalogPage.test.tsx",
+    "checks/runtime/capabilities/music/serve_catalog.py",
+    "apps/console/src/features/capabilities/music/Page.test.tsx"
+  ],
+  "dependencies": [
+    "Canonical audio artifact kind/MIME support",
+    "NativeArtifactProvider scoped to current home",
+    "Actual generation job resolver required only for generated-source registration"
+  ],
+  "limits": [
+    "Initial catalog measures PCM WAV; other codecs explicitly unsupported",
+    "No actual music generation provider/job exists in this slice; generated-source registration remains unavailable rather than fabricated",
+    "Native agent consumer checkpoint follows; root integrated auth/nav/durability qualification pending."
+  ],
+  "base_revision": "e62b4496",
+  "runtime_test_files": [
+    "checks/runtime/capabilities/music/test_catalog.py"
+  ],
+  "evidence": {
+    "task": "music.02",
+    "root": "/tmp/gideon-expansion-worktrees/music",
+    "started_at": 1790294197.673329,
+    "production_lines": 306,
+    "test_lines": 352,
+    "ratio": 1.1503267973856208,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_catalog.py",
+          "runtime/gideon/workspace/artifacts/models.py",
+          "runtime/gideon/workspace/capabilities/music/catalog.py",
+          "checks/runtime/capabilities/music/serve_catalog.py",
+          "checks/runtime/capabilities/music/test_catalog.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.02-checks-no8d7_eo/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/music/checks/runtime/capabilities/music/test_catalog.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.02-checks-no8d7_eo/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/music/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/music/apps/console/src/features/capabilities/music/CatalogPage.test.tsx",
+          "/tmp/gideon-expansion-worktrees/music/apps/console/src/features/capabilities/music/Page.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-music.02-checks-no8d7_eo/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-music.02-checks-no8d7_eo",
+    "completed_at": 1790294226.662251,
+    "files": {
+      "apps/console/src/features/capabilities/music/CatalogPage.tsx": "aa0d4db12338fd577f0b7baa24c84ea9851319393618601ca958ac09176d7ebd",
+      "apps/console/src/features/capabilities/music/Page.tsx": "6d1751895cbff83ad6749f489aeba60eae9b8dd612f5548e6014bd30c1a39ca7",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_music_catalog.py": "be34c6f0ae2f4435026da367fa4ff4f0e316ff3f7a6b726b6c6d3bd015d81550",
+      "runtime/gideon/workspace/artifacts/models.py": "088f952e483524daaf2dc3d4980245e30ad1c21afc69eeab892c35de8d49a1d3",
+      "runtime/gideon/workspace/capabilities/music/catalog.py": "927edb4713ab64d720e2b1b550311cea199e19b89410cf2ae990d9a9703d7728",
+      "apps/console/src/features/capabilities/music/CatalogPage.test.tsx": "84fa4d5631e908e6544037f2dc459c97a8c5c86677b17c7064ceeceb9b8f6203",
+      "apps/console/src/features/capabilities/music/Page.test.tsx": "cd05cba910b6a0afc878c3c17784eb4c8049c825e770a041ba374f0b4f35375f",
+      "checks/runtime/capabilities/music/serve_catalog.py": "101fce0b57c57d7427dd6388d32c6568068137964fe384c1cb5462398fe9cd51",
+      "checks/runtime/capabilities/music/test_catalog.py": "72604466ca952001ac16e891ed7231d720a3ae034bf943dc5580e96e5482cdbb"
+    }
+  },
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify music.02"
+}

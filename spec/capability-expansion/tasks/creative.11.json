@@ -1,0 +1,45 @@
+{
+  "id": "creative.11",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "0c1f75e1",
+  "requires": [
+    "creative.10"
+  ],
+  "contract": "Deterministic Unicode prose metrics for full canonical series chapter drafts and pinned author sample versions. Persisted optimistic configuration with drafted/exemplar/blended centers, population draft spread, explicit eligibility/source gates and vocabulary term densities. Read-only report/export and native tools, console matrix. No quality/authorship claim or inference dependency.",
+  "acceptance": [
+    "Exact numerical fixtures validate sentence/paragraph rhythm, quoted words, emdash and English heuristic rates, Unicode vocabulary metrics.",
+    "Current canonical chapter drafts and pinned full author exemplars consumed with complete source inventory and no silent missing/thin fallback.",
+    "Three baseline modes and minimum sample gates agree with reported drift findings; zero-spread corpus differences remain explicit.",
+    "Real HTTP/native/UI configure/reopen/compare/export, immutable config history, optimistic conflicts and runtime isolation."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/voice.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Voice.tsx",
+    "apps/console/src/features/capabilities/creative/Series.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_voice.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Voice.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_voice.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Voice.test.tsx"
+  ],
+  "evidence": "/tmp/gideon-creative.11-checks-8d6lga_m/evidence.json",
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 37,
+    "ui_tests": 3,
+    "production_lines": 225,
+    "test_lines": 341,
+    "ratio": 1.5155555555555555,
+    "attempts": 1
+  }
+}

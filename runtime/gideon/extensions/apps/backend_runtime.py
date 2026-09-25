@@ -425,6 +425,8 @@ class BackendSupervisor:
             return [sys.executable, str(entry)]
         if kind == "node":
             return ["node", str(entry)]
+        if kind == "bun":
+            return ["bun", str(entry)]
         return None
 
 

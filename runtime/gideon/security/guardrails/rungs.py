@@ -136,7 +136,7 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
         key="action.notify",
         floor=RUNG_AUTONOMOUS,
         ceiling=RUNG_AUTONOMOUS,
-        providers=("notify",),
+        providers=("notify", "wellbeing-reminder"),
     ),
     ActionTypeSpec(
         key="action.knowledge_read",
@@ -189,6 +189,8 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
             "knowledge-consolidate",
             "knowledge-propose",
             "knowledge-report",
+            "knowledge-review",
+            "knowledge-ideas-sync",
             "source-digest",
         ),
     ),

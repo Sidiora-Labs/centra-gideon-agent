@@ -1,0 +1,69 @@
+{
+  "id": "communications.02",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "requires": [
+    "communications.01"
+  ],
+  "contract": "Bounded UTF-8 CSV (name,email,phone,handle,notes) and vCard 3/4 (FN,EMAIL,TEL,NOTE) preview; explicit create/update/skip decision per stable row. Update merges identities only and preserves existing person name/notes/ring/cadence; revision required. Any identity owned by another person is a conflict, never an automatic merge. Atomic commit stores source digest, parsed source rows, decisions and resulting person IDs; exact replay returns original receipt, changed decisions for the same source conflict.",
+  "acceptance": [
+    "Preview normalizes contacts without creating people",
+    "Commit selected rows to real SQLite people store atomically",
+    "Explicit update preserves notes and rejects stale revisions",
+    "Ambiguous identities remain conflicts without silent person merges",
+    "Exact source/decision replay returns same receipt without duplicate people",
+    "CSV quoting, vCard folding/escapes and malformed/oversize bounds exercised",
+    "Real HTTP and review UI preview/decision/commit/reload flow"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/imports.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/ImportPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_imports.py",
+    "checks/runtime/capabilities/communications/ui_server.py",
+    "apps/console/src/features/capabilities/communications/ImportPanel.test.tsx",
+    "checks/runtime/capabilities/communications/test_people.py",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx"
+  ],
+  "base_revision": "5a9c1071",
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_imports.py",
+    "checks/runtime/capabilities/communications/test_people.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/ImportPanel.test.tsx",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.02",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.02-checks-wk07woaw",
+  "production_lines": 232,
+  "test_lines": 385,
+  "ratio": 1.6594827586206897,
+  "files": {
+    "apps/console/src/features/capabilities/communications/ImportPanel.tsx": "21267229f6b7682090e89bf865423535564c30abd751690ea9541c9246954a94",
+    "apps/console/src/features/capabilities/communications/Page.tsx": "cda6f0bab65bac1a750ad6f1b83a6b18eb2d83874f0533e79ece55647405865c",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py": "7c153d9844d1d1253cf8f9e02ad6e9af3e94909cdd17a884d876acfcb068ce19",
+    "runtime/gideon/workspace/capabilities/communications/imports.py": "e9abbd4524766abafa77f6a94595aaa4cf221b67af8a399bad0b88881aadda8f",
+    "apps/console/src/features/capabilities/communications/ImportPanel.test.tsx": "b19f4877637e1291f356a01eb090ba92f35f958da4487aae9f1ad977921b682a",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx": "68f033a04de405226da23a2db0b4bd73a2563017ddd600764dbddbb1ffaafb70",
+    "checks/runtime/capabilities/communications/test_imports.py": "9f73e94060da6318c81dbc93955e24b9714fdbcf4a019c4a2ae75bb065014993",
+    "checks/runtime/capabilities/communications/test_people.py": "a44ba8586de22064c77073d4ca98dde8f076af0658cf6524df08bd57e8143ea4",
+    "checks/runtime/capabilities/communications/ui_server.py": "610182188b59eebf1e91aae34f2df1b24c8c332b281349f47d4c463b9aea0e4b"
+  },
+  "qualification": {
+    "compile": "passed",
+    "runtime": "79 passed including modified handler regressions",
+    "console_http": "7 passed including modified page regressions",
+    "integrated_browser": "pending root integration",
+    "native_tools": "pending native provider task"
+  },
+  "limits": [
+    "CSV import and UTF-8 vCard 3/4 text properties only; no automatic operating-system address book access.",
+    "Updates add identities and preserve existing person fields; conflicting people are never automatically merged.",
+    "No external messaging or provider calls."
+  ]
+}

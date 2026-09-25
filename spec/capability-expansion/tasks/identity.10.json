@@ -1,0 +1,155 @@
+{
+  "id": "identity.10",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Bind identity enable and route approval to one actual canonical autonomous loop without competing lifecycle state",
+    "Delegate start/resume/pause/stop and separate current-turn cancellation to existing engine; preserve queues and unrelated loops",
+    "Bound durable self-thinking requests by fixed presets, revision/route approval, retry identity, UTC daily quota and separation",
+    "Guard actual manager start and nudge delivery for bound identity even outside capability APIs",
+    "Expose real HTTP/native/console with honest unavailable deliverer receipts and no provider completion claim",
+    "Concurrent different-loop initial binding waits behind one state-scoped identity policy lock and rejects losing bind before its engine effects"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/lifecycle.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_lifecycle_concurrency.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_lifecycle_concurrency.py"
+  ],
+  "ui_test_files": [],
+  "baseline_dir": "/tmp/gideon-identity10-correctness-baseline",
+  "remaining_limits": [
+    "External model turn delivery and active-provider cancellation are unqualified; local tests exercise real engine arming and no-deliverer/idle paths",
+    "Self-thinking dispatch is explicit; regular autonomous cycles retain existing scheduling",
+    "Other loops and heartbeat maintenance are outside this identity binding",
+    "Existing stop may retain an inactive parallel trigger record; bound-loop delivery guard rejects it after terminal stop"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.10",
+  "repair_cycles": 0,
+  "qualification_checkpoints": [
+    {
+      "name": "initial lifecycle vertical slice",
+      "evidence": {
+        "task": "identity.10",
+        "root": "/tmp/gideon-expansion-worktrees/identity",
+        "started_at": 1790299459.9361336,
+        "production_lines": 287,
+        "test_lines": 412,
+        "ratio": 1.4355400696864111,
+        "stage": "all",
+        "commands": [
+          {
+            "name": "compile",
+            "argv": [
+              "/tmp/gideon-runtime-venv/bin/python",
+              "-c",
+              "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+              "runtime/gideon/automation/loop/manager.py",
+              "runtime/gideon/automation/triggers/nudge.py",
+              "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_lifecycle.py",
+              "runtime/gideon/workspace/capabilities/identity/lifecycle.py",
+              "runtime/gideon/workspace/capabilities/identity/lifecycle_route.py",
+              "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+              "runtime/gideon/workspace/capabilities/identity/tools.py",
+              "checks/runtime/capabilities/identity/lifecycle_ui_server.py",
+              "checks/runtime/capabilities/identity/test_lifecycle.py"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.10-checks-ukh234ne/compile.log"
+          },
+          {
+            "name": "runtime",
+            "argv": [
+              "/tmp/gideon-runtime-venv/bin/python",
+              "-m",
+              "pytest",
+              "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_lifecycle.py",
+              "-q"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.10-checks-ukh234ne/runtime.log"
+          },
+          {
+            "name": "ui",
+            "argv": [
+              "node",
+              "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+              "run",
+              "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/LifecyclePage.test.tsx"
+            ],
+            "exit_code": 0,
+            "log": "/tmp/gideon-identity.10-checks-ukh234ne/ui.log"
+          }
+        ],
+        "status": "locally_qualified",
+        "evidence_dir": "/tmp/gideon-identity.10-checks-ukh234ne",
+        "completed_at": 1790299503.098811,
+        "files": {
+          "apps/console/src/features/capabilities/identity/LifecyclePage.tsx": "316d2980c384d30dd9f925fed6dc54b89fbbf511ff7d3a5ad893551b639b6ed8",
+          "runtime/gideon/automation/loop/manager.py": "fe03582ec2c0c81f95bd90c7edc873b2e4cf73f439fa8a0f78fec1078f19dab4",
+          "runtime/gideon/automation/triggers/nudge.py": "8dc192bc08dfafbace0b5191ac4a01b7d9986df331eafd8c1fbb4b660921bb03",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_lifecycle.py": "658c6b843b399f9ddf85236e1f6bb49ce73054f81d67ec3274e0446fa4d09005",
+          "runtime/gideon/workspace/capabilities/identity/lifecycle.py": "76f0bf06f0f298c43c03fc5594f22c7048b62a6c499d0bf88f462614e93b3a2d",
+          "runtime/gideon/workspace/capabilities/identity/lifecycle_route.py": "68cc4fe7e820cf57782efec5417ee57263dc321c47057e71ed1fee49a6919ee0",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "eccae0ce2a37ac07fc3a6e9baa037835c29014e4f32b00888e546769090e53d5",
+          "runtime/gideon/workspace/capabilities/identity/tools.py": "99666ac68d48b749989aff4957ad7c31f5d905eb854911ac503b62af15215578",
+          "apps/console/src/features/capabilities/identity/LifecyclePage.test.tsx": "bd9cfdbb74ec57da6b7e950b2a37f5022a6dc1f01dfafc513a97f5ada62a7506",
+          "checks/runtime/capabilities/identity/lifecycle_ui_server.py": "5ddce8f5db293225814d3a58664354ba99cc54bb5a8bd80400f66df12914cc09",
+          "checks/runtime/capabilities/identity/test_lifecycle.py": "09215dedef566e2a34862ce01384e01361c476782227eddc086b4baaa7d2fef2"
+        }
+      },
+      "production_files": [
+        "runtime/gideon/workspace/capabilities/identity/lifecycle.py",
+        "runtime/gideon/workspace/capabilities/identity/lifecycle_route.py",
+        "runtime/gideon/workspace/capabilities/identity/tools.py",
+        "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+        "runtime/gideon/automation/loop/manager.py",
+        "runtime/gideon/automation/triggers/nudge.py",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_lifecycle.py",
+        "apps/console/src/features/capabilities/identity/LifecyclePage.tsx"
+      ],
+      "test_files": [
+        "checks/runtime/capabilities/identity/test_lifecycle.py",
+        "checks/runtime/capabilities/identity/lifecycle_ui_server.py",
+        "apps/console/src/features/capabilities/identity/LifecyclePage.test.tsx"
+      ],
+      "baseline_dir": "/tmp/gideon-identity10-baseline",
+      "repair_cycles": 2
+    }
+  ],
+  "continuation": "Authorized shared identity configure lock and concurrent real-engine binding correctness checkpoint",
+  "evidence": {
+    "task": "identity.10",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790299693.9416063,
+    "production_lines": 24,
+    "test_lines": 36,
+    "ratio": 1.5,
+    "stage": "runtime",
+    "commands": [
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_lifecycle_concurrency.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.10-checks-zi5d5kl4/runtime.log"
+      }
+    ],
+    "status": "stage_qualified",
+    "evidence_dir": "/tmp/gideon-identity.10-checks-zi5d5kl4",
+    "completed_at": 1790299709.222178,
+    "files": {
+      "runtime/gideon/workspace/capabilities/identity/lifecycle.py": "e421581c607ccf7bf312f30bb8f85d7c73f0a10ce1214286c45e7278d44e69b6",
+      "checks/runtime/capabilities/identity/test_lifecycle_concurrency.py": "9b2a35765c9ab87502b10d470fa683ebb14b95f8697ebd14eb3dd8b148a814b2"
+    }
+  },
+  "qualification_basis": "Prior full vertical gate plus authorized focused concurrency correction gate; no repeat unchanged UI"
+}

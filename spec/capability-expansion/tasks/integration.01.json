@@ -1,0 +1,37 @@
+{
+  "id": "integration.01",
+  "status": "runtime_locally_qualified",
+  "acceptance": [
+    "Register each currently integrated capability handler against the actual authenticated runtime state",
+    "Preserve declared SQLite WAL records through safe snapshots and fail closed for corrupt databases",
+    "Detect undeclared sqlite3 stores and omit journal sidecars from raw tree copies"
+  ],
+  "production_files": [
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities.py",
+    "runtime/gideon/interfaces/dashboard/server.py",
+    "runtime/gideon/operations/durability/inventory.py",
+    "runtime/gideon/workspace/snapshot.py"
+  ],
+  "test_files": [
+    "checks/runtime/test_capability_integration.py"
+  ],
+  "evidence": {
+    "assembled_routes_and_inventory": "/tmp/gideon-expansion-20260925/oss-backend-integration-final.log",
+    "snapshot_wal_and_corruption": "/tmp/gideon-expansion-20260925/oss-integration-snapshot-final.log",
+    "undeclared_store_and_sidecars": "/tmp/gideon-expansion-20260925/oss-integration-runtime.log",
+    "result": "All six runtime behaviors passed across their recorded focused runs",
+    "extended_routes_inventory_and_snapshots": "/tmp/gideon-expansion-20260925/oss-integration-next-repair1.log",
+    "ephemeral_desktop_exclusion_and_cadence_persistence": "/tmp/gideon-expansion-20260925/oss-snapshot-session-exclusion.log",
+    "lifecycle_journal_listening_forecast_routes": "/tmp/gideon-expansion-20260925/oss-integrated-emission-routes.log",
+    "exports_compositions_engine_routes": "/tmp/gideon-expansion-20260925/oss-compositions-export-routes.log",
+    "resume_state_enrollment": {
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-resume-integration.log",
+      "scope": "Sprite backup retention, listener settings preservation, peer authority export and generic-restore exclusion"
+    }
+  },
+  "remaining_limits": [
+    "Later task routes/stores require incremental registration",
+    "Hosted changes remain local and separately qualified"
+  ]
+}

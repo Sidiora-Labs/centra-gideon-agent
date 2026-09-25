@@ -1,0 +1,48 @@
+{
+  "id": "communications.12",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "e2e3ebf5",
+  "requires": [
+    "communications.11"
+  ],
+  "contract": "Persistent local platform account assignments reference authoritative AppConfig agent profiles and existing social registrations. Requested/active/paused/revoked lifecycle enforces current revisions, single active owner, dependency readiness and durable reason history. Existing approval and credential authority remain unchanged.",
+  "acceptance": [
+    "Real AppConfig profiles and registered social-account references, strict rejection of unknown identities",
+    "Idempotent request and optimistic transition provenance; terminal revoke and single active owner",
+    "Agent removal/account changes invalidate current readiness without losing audit records",
+    "Actual native/HTTP/Console lifecycle journeys and current-home isolation"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/lifecycle.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/LifecyclePanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_lifecycle.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/LifecyclePanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_lifecycle.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/LifecyclePanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.12",
+  "limits": [
+    "Local assignment metadata does not grant tool permission, provision external accounts or revoke external credentials.",
+    "External provisioning remains provider-specific residual; existing credential and destructive-action approval boundaries stay authoritative."
+  ],
+  "qualification": {
+    "runtime": "29 passed",
+    "console_http": "4 passed",
+    "external_provisioning": "not implemented; local assignment lifecycle only"
+  }
+}

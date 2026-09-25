@@ -1,0 +1,56 @@
+{
+  "id": "media.08",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "6d79cc34",
+  "contract": "Immutable captioned dataset revisions reference canonical image versions only. SQLite CAS/request replay protects edits; real imagefolder PNG/metadata/manifest ZIP derives on demand. Existing supervised media jobs execute the documented Diffusers text-to-image LoRA trainer from fixed operator-installed runtime paths, preserve checkpoint directories and resumable CLI arguments, bound child lifetime and cancellation, and promote structurally verified weight bytes into canonical model cache with dataset/job provenance. Training admission checked on submit and execution. No trainer installation performed.",
+  "acceptance": "Real image pixels/captions/source preservation, immutable export/reopen/CAS race, API/tools/UI, parameter/admission checks, actual missing-runtime job failure, actual child-process success/nonzero/cancel lifecycle (not a fake trainer), owned checkpoint discovery/command formation and genuine tensor-container publication. Actual installed trainer, GPU training, checkpoint resume/load and learned effect unavailable and not qualified.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/datasets.py",
+    "runtime/gideon/workspace/capabilities/media/datasets_http.py",
+    "runtime/gideon/workspace/capabilities/media/training.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/DatasetsPage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_datasets.py",
+    "checks/runtime/capabilities/media/test_training.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "checks/runtime/capabilities/media/test_jobs.py",
+    "apps/console/src/features/capabilities/media/DatasetsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_datasets.py",
+    "checks/runtime/capabilities/media/test_training.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "checks/runtime/capabilities/media/test_jobs.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/DatasetsPage.test.tsx"
+  ],
+  "durability_path": "capabilities/media/datasets.sqlite3",
+  "model_paths": [
+    "models/lora-training",
+    "models/loras"
+  ],
+  "external_status": "unavailable",
+  "upstream_contract": "https://huggingface.co/docs/diffusers/training/lora",
+  "remaining_limits": [
+    "No Diffusers training installation/GPU available; real training and checkpoint resume are not locally qualified",
+    "Existing checkpoint directories are observations, not verified resumable checkpoint states",
+    "Actual child lifecycle tests do not substitute for a real trainer or model-effect test",
+    "Hosted operator training admission is unavailable; managed factory rejects submission and execution",
+    "Full browser and supervised installation integration remain root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.08",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.08-checks-ougm3xla/evidence.json",
+  "production_lines": 378,
+  "test_lines": 397,
+  "ratio": 1.0502645502645502,
+  "repair_cycles": 0
+}

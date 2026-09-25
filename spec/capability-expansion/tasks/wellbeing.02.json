@@ -1,0 +1,58 @@
+{
+  "id": "wellbeing.02",
+  "status": "locally_qualified",
+  "base_revision": "db394b45",
+  "schema_version": 1,
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/labs.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/labs_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_labs.py",
+    "apps/console/src/features/capabilities/wellbeing/Labs.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_labs.py",
+    "apps/console/src/features/capabilities/wellbeing/Labs.test.tsx"
+  ],
+  "contract": "Lab records in capabilities/wellbeing.sqlite3; readonly original CSV/JSON artifact with slug/version/hash. Laboratory rows carry analyte, timestamp with offset, finite nonnegative value, explicit unit, nullable reference bounds, source, notes and optional source external ID. Preview is read-only; commit requires matching preview and request IDs; corrections retain provenance and append revisions; trends use exact analyte/unit groups.",
+  "acceptance_coverage": [
+    "real CSV and JSON parse",
+    "no mutation during preview",
+    "source artifact bytes preserved and readonly",
+    "duplicate-safe import and row IDs",
+    "source ID conflict refusal",
+    "immutable correction history",
+    "reopen and home isolation",
+    "UTC filters and unit-specific trends",
+    "native agent operations",
+    "real-network React preview/commit/correction flows"
+  ],
+  "remaining_limits": [
+    "Root registers labs handler and console route",
+    "No clinical interpretation or unit conversion",
+    "500000-byte source limit, 1000 rows per import, latest 500 observations per trend",
+    "Wave integration owns full console build and actual browser geometry"
+  ],
+  "source_revision": "db394b45",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.02",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.02-checks-7daez036/evidence.json",
+  "production_lines": 394,
+  "test_lines": 437,
+  "test_ratio": 1.1091370558375635,
+  "runtime_tests": 55,
+  "ui_tests": 2,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Labs.tsx": "e1a5b03005ff708fb3eef0c4e3d8c583ae3c4a325c4b7657c3aea77b6c11e298",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_labs.py": "5465c9d65488076d17e3227b856326f0e8016b48aee055f71d0491888b9f177c",
+    "runtime/gideon/workspace/capabilities/wellbeing/labs.py": "32d060ca4e6e2887af822339c96587aab17a400de7abfd44f741a2bfe8b79932",
+    "runtime/gideon/workspace/capabilities/wellbeing/labs_provider.py": "e766b655be170905daa83f689ac22acc9c04b54dd30f1eb98149de0e04de6d34",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "868118f0df31cf68a2ed77d95dc20ab39be6aba65b26e3846b03031c2231bb41",
+    "apps/console/src/features/capabilities/wellbeing/Labs.test.tsx": "ffc45a7b72bf761489cea457a57fb375706a3f74288054cdcaf3c9ca1cb7ebef",
+    "checks/runtime/capabilities/wellbeing/test_labs.py": "f59649a1036fc955005a7e9971a5969b732de8e4d6ba330fb26b6a84d32e0ee2"
+  },
+  "repair_cycles": 1,
+  "qualification_notes": [
+    "Original source bytes are retained as a canonical artifact content-addressed companion; text artifact reads normalize line endings. Source download validates SHA256."
+  ]
+}

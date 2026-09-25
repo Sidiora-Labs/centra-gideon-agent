@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "task": "platform.13",
+  "status": "locally_qualified_external_pending",
+  "base_revision": "9d0c4949",
+  "contract": "Fixed GitHub REST adapter captures complete bounded PR metadata/files/commit messages, pins content fingerprint, two independent direct API no-tool model gates, initiating user/current revision authorization, current content revalidation and uncertain submission reconciliation. COMMENT/REQUEST_CHANGES only. Local qualification covers transition primitives and real HTTP/UI failure paths; model and authenticated forge disposition remain externally unqualified.",
+  "acceptance": [
+    "Persist complete content fingerprints and reject omitted/binary/oversized PR content.",
+    "Strict model decisions cannot approve/merge; direct API completion supplies no tools; failures block disposition.",
+    "Explicit requester/revision gates submission; re-fetch content before posting; persist intent and reconcile exact body/commit/event/actor with no blind repost.",
+    "Actual CredentialStore, native capture/read tools and HTTP-backed console preserve blocked state and inputs."
+  ],
+  "external_acceptance_pending": [
+    "Real authenticated GitHub capture, successful direct model screening and explicitly authorized review submission against designated test PR."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/pr_screening.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_pr_screening.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/PrScreening.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_pr_screening.py",
+    "checks/runtime/capabilities/platform/pr_screening_ui_server.py",
+    "apps/console/src/features/capabilities/platform/PrScreening.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_pr_screening.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/PrScreening.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.13-checks-u_upfvy3/evidence.json",
+  "qualification": {
+    "runtime_tests": 20,
+    "ui_tests": 2,
+    "production_lines": 237,
+    "test_lines": 294,
+    "repair_cycles": 0,
+    "limitations": [
+      "Real authenticated GitHub capture, successful direct model screening and explicitly authorized review submission against designated test PR."
+    ]
+  }
+}

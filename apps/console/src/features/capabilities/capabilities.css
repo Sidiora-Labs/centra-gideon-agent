@@ -1,0 +1,18 @@
+.capabilities-shell { display:flex; flex-direction:column; height:100%; min-height:0; min-width:0; }
+.capabilities-nav { display:flex; flex-wrap:wrap; gap:.4rem; padding:.75rem; border-bottom:1px solid var(--outline-variant, #8884); }
+.capabilities-nav a { color:inherit; padding:.35rem .65rem; border:1px solid transparent; border-radius:.5rem; text-decoration:none; }
+.capabilities-nav a[aria-current] { border-color:currentColor; font-weight:600; }
+.capabilities-nav a:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+.capabilities-content { flex:1; min-height:0; min-width:0; overflow:auto; }
+.capabilities-intro { padding:1.5rem; }
+@media(max-width:640px) { .capabilities-nav { flex-wrap:nowrap; overflow-x:auto; flex-shrink:0; } .capabilities-nav a { white-space:nowrap; } }
+
+.capabilities-content label { display:inline-flex; flex-direction:column; gap:.375rem; max-width:100%; }
+.capabilities-content input:not([type="checkbox"]):not([type="radio"]), .capabilities-content textarea, .capabilities-content select { min-height:2.5rem; max-width:100%; padding:.5rem .75rem; border:1px solid var(--color-outline-variant); border-radius:.5rem; background:var(--color-surface-high); color:var(--color-on-surface); }
+.capabilities-content input:focus-visible, .capabilities-content select:focus-visible, .capabilities-content textarea:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
+.capabilities-content h1 { font-size:1.4rem; font-weight:600; }
+.capabilities-content h2 { font-size:1.1rem; font-weight:600; }
+.capabilities-content a { color:var(--color-primary); }
+
+.gideon-workspace .capabilities-shell { padding-block-start:var(--shell-corner-rh, 44px); box-sizing:border-box; }
+.capabilities-content nav { display:flex; flex-wrap:wrap; gap:.5rem 1rem; }

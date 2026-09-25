@@ -1,0 +1,95 @@
+{
+  "task": "platform.01",
+  "root": "/tmp/gideon-expansion-worktrees/platform",
+  "started_at": 1790293477.3707848,
+  "production_lines": 163,
+  "test_lines": 284,
+  "ratio": 1.7423312883435582,
+  "commands": [
+    {
+      "name": "compile",
+      "argv": [
+        "/tmp/gideon-runtime-venv/bin/python",
+        "-c",
+        "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+        "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform.py",
+        "runtime/gideon/workspace/capabilities/platform/catalog.py",
+        "checks/runtime/capabilities/platform/test_catalog.py",
+        "checks/runtime/capabilities/platform/ui_server.py"
+      ],
+      "exit_code": 0,
+      "log": "/tmp/gideon-platform.01-checks-jyrqpeq2/compile.log"
+    },
+    {
+      "name": "runtime",
+      "argv": [
+        "/tmp/gideon-runtime-venv/bin/python",
+        "-m",
+        "pytest",
+        "/tmp/gideon-expansion-worktrees/platform/checks/runtime/capabilities/platform",
+        "-q"
+      ],
+      "exit_code": 0,
+      "log": "/tmp/gideon-platform.01-checks-jyrqpeq2/runtime.log"
+    },
+    {
+      "name": "ui",
+      "argv": [
+        "node",
+        "/tmp/gideon-expansion-worktrees/platform/node_modules/vitest/vitest.mjs",
+        "run",
+        "/tmp/gideon-expansion-worktrees/platform/apps/console/src/features/capabilities/platform/Page.test.tsx"
+      ],
+      "exit_code": 0,
+      "log": "/tmp/gideon-platform.01-checks-jyrqpeq2/ui.log"
+    }
+  ],
+  "status": "locally_qualified",
+  "evidence_dir": "/tmp/gideon-platform.01-checks-jyrqpeq2",
+  "completed_at": 1790293517.9312947,
+  "files": {
+    "apps/console/src/features/capabilities/platform/Page.tsx": "a3840dd43a4d1fe5ba083fddbad12fdea70a289c670954cd2e26179c9fa30f06",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform.py": "1fa1717b717bbfd5c9646aa0c59960330f5e14e0b8b5c5af99286c13a7f676d4",
+    "runtime/gideon/workspace/capabilities/platform/catalog.py": "d5511ca33c665b1a5dc87287577b96eeac551e1260d1e5e8f4bbaa4a4d38c37b",
+    "apps/console/src/features/capabilities/platform/Page.test.tsx": "8fc3a4468184c3339024850da61759e6789c09212a2cf3d7d10e96ce2bff13b5",
+    "checks/runtime/capabilities/platform/test_catalog.py": "008fbe11cd4ef8a899cbae195050ea4f49644eeb5893b9300f1d074b48d3484d",
+    "checks/runtime/capabilities/platform/ui_server.py": "96e605d519856d350e48f3b662865f51c28eccd24c53aaa373739e7dfd8e2de7"
+  },
+  "schema_version": 1,
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify platform.01",
+  "acceptance_coverage": [
+    "Authenticated real aiohttp routes and dynamic templates",
+    "App-scoped tokens denied; missing middleware fails closed",
+    "Bounded pagination, live registration changes, static path and credential omission",
+    "Declared platform event keys without invented schemas",
+    "Real HTTP component filtering, URL selection, harmless execution and errors"
+  ],
+  "integration_hooks": {
+    "server": "gideon.interfaces.dashboard.handlers.capabilities_platform.register(app)",
+    "console": "features/capabilities/platform/Page.tsx default export",
+    "http": "GET /api/capabilities/platform/catalog"
+  },
+  "remaining_limits": [
+    "Root must register handler and console navigation in assembled product",
+    "No integrated browser or production deployment qualification",
+    "Event payload value schemas are partial because registry declares keys only",
+    "HTTP request schemas remain unknown when no explicit registration schema exists"
+  ],
+  "integration_repair": {
+    "problem": "API explorer used a router context absent from the real console.",
+    "change": "Use the actual useHashRoute navigation store; render tests directly with real hash state and actual registered HTTP handlers.",
+    "command": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python node ../../node_modules/vitest/vitest.mjs run src/features/capabilities/platform/Page.test.tsx",
+    "cwd": "apps/console",
+    "exit_code": 0,
+    "tests": 5,
+    "log": "/tmp/gideon-platform-hash-repair.log",
+    "coverage": [
+      "Real hash filter and route selection",
+      "Selection survives unmount/remount",
+      "External hash navigation updates controls",
+      "Harmless HTTP read and server rejection"
+    ],
+    "limitation": "Parent assembled browser journey will confirm full shell integration."
+  }
+}

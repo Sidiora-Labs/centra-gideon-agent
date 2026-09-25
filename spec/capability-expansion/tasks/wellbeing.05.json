@@ -1,0 +1,52 @@
+{
+  "id": "wellbeing.05",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "ba856a3f",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/genome.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/genome_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_genome.py",
+    "apps/console/src/features/capabilities/wellbeing/Genome.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_genome.py",
+    "apps/console/src/features/capabilities/wellbeing/Genome.test.tsx"
+  ],
+  "contract": "Bounded user-supplied TSV/VCF genome source preview/commit with declared GRCh37/GRCh38 assembly, named multisample selection, source-specific variant identities, canonical artifact metadata and exact original bytes, append-only authored annotations with immutable genotype/provenance. Native agent and HTTP/console consumers.",
+  "remaining_limits": [
+    "8 MiB UTF8; at most100000 variants/source; source catalog1000; pages500 and preview100",
+    "Explicit sequence VCF alleles and GT only; symbolic variants rejected, no clinical interpretation",
+    "Root registers genome handler, route and updated tool metadata"
+  ],
+  "source_revision": "ba856a3f",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.05",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.05-checks-bz3kva8s/evidence.json",
+  "production_lines": 336,
+  "test_lines": 408,
+  "test_ratio": 1.2142857142857142,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Genome.tsx": "1ec139e569d1f233d1e84018c373b7da531bc41ce55b410e6d82c02b59deb6a5",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_genome.py": "0a6eedaa9cb385153f3e08d2ba4753626706e286adb4e6a0e33d8cb74834f42c",
+    "runtime/gideon/workspace/capabilities/wellbeing/genome.py": "9a76c17549cbc213393f7825caf99e86fd96f4dfde93f7a9b9bda85e9609aada",
+    "runtime/gideon/workspace/capabilities/wellbeing/genome_provider.py": "96076cd38f1ad4e681d4b2654faa4d34ef03506274d0028145cb34080e1907cc",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "3a9badf802aa0dafde3cfdd728ff4f842c171411b438fec8b1453362b8f25087",
+    "apps/console/src/features/capabilities/wellbeing/Genome.test.tsx": "c9b1d3c1b058dc04d6c852dee795251915683c5aeb4cb264c9ed8cfee2f5491e",
+    "checks/runtime/capabilities/wellbeing/test_genome.py": "b14e01ca461acb2b598d99b9b59630261a03897af05bd675601679bd994cdd77"
+  },
+  "repair_cycles": 0,
+  "acceptance_coverage": [
+    "TSV BOM and CRLF original preservation",
+    "explicit assembly and VCF sample selection",
+    "phase missing calls and sequence alleles",
+    "atomic duplicate-safe imports and request conflicts",
+    "canonical metadata and >1MiB original companion",
+    "source catalog and filtered variant pages",
+    "annotation revisions and immutable genotypes",
+    "reopen and isolated homes",
+    "native provider and actual HTTP",
+    "real-network React import original download annotation history and filters"
+  ]
+}

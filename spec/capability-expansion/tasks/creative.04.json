@@ -1,0 +1,37 @@
+{
+  "id": "creative.04",
+  "schema_version": 1,
+  "status": "in_progress",
+  "base_revision": "5a37464f",
+  "requires": [
+    "creative.03"
+  ],
+  "contract": "Live relationship graph projects canonical ingredient relationships with missing/external nodes. Merge preview resolves canon ID and visual identity conflicts explicitly. Atomic apply checks both revisions, records durable provenance, supports idempotent retries, preserves source/history and links.",
+  "acceptance": [
+    "Actual graph projects directed typed relationships and missing/external nodes from current-home catalog.",
+    "Preview real source/target conflicts; UI selects explicit canon and identity resolutions, applies atomic merge and reloads target revision.",
+    "Source and prior target exports unchanged; history restoration and durable merge provenance visible.",
+    "Reject stale source/target, unresolved choices, scope overrides and capacity failures without partial writes; concurrent replay exactly once.",
+    "Real HTTP/native/UI paths, searchable source picker, unique24-tool native registration with approval-bearing merge."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/graph.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/UniverseGraph.tsx",
+    "apps/console/src/features/capabilities/creative/Universes.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_graph.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/UniverseGraph.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_graph.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/UniverseGraph.test.tsx"
+  ],
+  "repair_cycles": 1
+}

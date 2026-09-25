@@ -1,0 +1,57 @@
+{
+  "id": "communications.08",
+  "status": "in_progress",
+  "schema_version": 1,
+  "base_revision": "af76658a",
+  "requires": [
+    "communications.07"
+  ],
+  "contract": "Authoritative local calendar mirror sources accept bounded actual ICS exports or real Google/Outlook read-only calendar-window adapters using existing credential references. Preserve source identities, all-day exclusive dates, UTC/IANA times, snapshots, configuration revisions and durable sync failures. Shared daily projection exposes overlap events and freshness/window/recurrence coverage, consumed by native tools and Console.",
+  "acceptance": [
+    "Actual ICS original source persistence/replay/replacement/source isolation",
+    "All-day exclusive ends/local-day overlap/IANA timezone/DST gap-fold correctness",
+    "Unsupported recurrence explicitly partial; cancellation/stale/failed window coverage honest",
+    "Real Google/Outlook event normalizers and actual client source; missing credential failure retains prior events",
+    "Real native tools and HTTP-backed Console create/edit/import/daily/error journeys"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/calendar.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/CalendarPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_calendar.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "apps/console/src/features/capabilities/communications/CalendarPanel.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_calendar.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/CalendarPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.08",
+  "sources": [
+    "https://developers.google.com/calendar/api/v3/reference/events/list",
+    "https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0"
+  ],
+  "limits": [
+    "Live Google/Outlook calendar sync pending actual authorized connection credentials.",
+    "ICS RRULE/RDATE/EXDATE/DURATION are retained as unsupported warnings; occurrences are not expanded. Remote calendar-window APIs request expanded instances.",
+    "ICS local timestamps during DST folds/gaps are rejected; UTC exports supported.",
+    "Remote window bounded366days/5000events; ICS1MiB/1000events.",
+    "Ambient consumer integration owned by experience lane."
+  ],
+  "qualification": {
+    "runtime": "43 passed",
+    "console_http": "4 passed",
+    "remote_google_outlook": "pending authorized credentials",
+    "ambient_integration": "projection supplied to experience lane"
+  }
+}

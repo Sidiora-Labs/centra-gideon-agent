@@ -1,0 +1,56 @@
+{
+  "id": "wellbeing.09",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "a794356e",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/wellbeing/life_calendar.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/life_provider.py",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_life.py",
+    "runtime/gideon/security/guardrails/rungs.py",
+    "apps/console/src/features/capabilities/wellbeing/LifeCalendar.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/wellbeing/test_life_calendar.py",
+    "apps/console/src/features/capabilities/wellbeing/LifeCalendar.test.tsx"
+  ],
+  "contract": "User-declared horizon/sleep/activity lifetime projection and revisioned milestones; optional completion-aware local inbox reminder through canonical armed timezone TriggerStore, ActionProvider, actual clock dispatch, ExecutionJournal and durable InboxStore. Canonical completed cognitive sessions suppress reminders, durable localday claims prevent redelivery, no external delivery.",
+  "remaining_limits": [
+    "Horizon is a user planning assumption, never a clinical lifespan prediction",
+    "Budgets30/events500;timezones and horizon1..120years bounded",
+    "Native action provider registration is lane-owned; root integrates route and durability",
+    "No external calendar sync or external notification delivery"
+  ],
+  "source_revision": "a794356e",
+  "verify_cmd": "python3 tooling/capability_workflow.py verify wellbeing.09",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-wellbeing.09-checks-ac3qx5a5/evidence.json",
+  "initial_evidence_log": "/tmp/gideon-wellbeing.09-checks-v7yhs_cn/evidence.json",
+  "production_lines": 368,
+  "test_lines": 381,
+  "test_ratio": 1.0353260869565217,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/LifeCalendar.tsx": "1eedabe4070004415210dc47fab7ad91fd49a2550bfa688a854bc61173cc190a",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_wellbeing_life.py": "bbef981863feb45ab7eb241b8a4d9ff692432031e2a980de11c38d8a6d6ba760",
+    "runtime/gideon/security/guardrails/rungs.py": "8318b3d6b18efdd2677b3edc4d0f2b52d337364febe0151196630de08367048a",
+    "runtime/gideon/workspace/capabilities/wellbeing/life_calendar.py": "5ebd0a3e949f3aaf758437ad82a46fcb018bee457b50cf7999da40549a3aa542",
+    "runtime/gideon/workspace/capabilities/wellbeing/life_provider.py": "1fcd1014a5468682817c67fc0ec62b15599c8fdd1d875364bf66fa26c4413440",
+    "runtime/gideon/workspace/capabilities/wellbeing/provider.py": "f768be2d383637b0e6fd3b4fafebadd69740e64a10a1323597ff26e934b8a5e9",
+    "apps/console/src/features/capabilities/wellbeing/LifeCalendar.test.tsx": "13f5c2f0f869ce80300751daac2484b897b81a0a042a3b6b86dc53db2fd954df",
+    "checks/runtime/capabilities/wellbeing/test_life_calendar.py": "900bc69d65767267c475e941d73ab93500b17a8db30f5a437811a1ee101441e8"
+  },
+  "repair_cycles": 1,
+  "acceptance_coverage": [
+    "userdeclared horizon leapday timezone arithmetic",
+    "sleep and weekly budget projection",
+    "config/event revisions and source",
+    "real armed canonical cron trigger",
+    "actual clock tick RuntimeCoordinator dispatch ExecutionJournal success",
+    "persisted canonical inbox proof",
+    "completion-aware suppression and localday claims",
+    "closed-item crash recovery dedup",
+    "restart concurrency and wrong-home refusal",
+    "native HTTP actualhash UI lifegrid milestones reminders"
+  ]
+}

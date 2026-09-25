@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "task": "platform.15",
+  "status": "locally_qualified",
+  "base_revision": "278fb0ea",
+  "contract": "Read-only bounded cross-trigger forecast from actual native and registered stores, canonical clock/timezone/calendar rules and opt-in cadence. Current admission evaluates actual rate/claim/capability/budget context without firing; future events remain conditional. Actual maintenance child/pending-issue dependencies have unknown future times; no invented durations. Links open canonical trigger editor.",
+  "acceptance": [
+    "Actual persisted next-fire and interval/cron/timezone/calendar/once/expiry rules produce chronological bounded forecast.",
+    "Disabled/parked/event-driven triggers and current admission are explicit; expired retry projects resume on cloned state only.",
+    "Registered provider stores and real maintenance child/native task dependencies appear without schedule/journal/claim mutations.",
+    "HTTP/native/console use same real sources and editor deep links, refresh source changes and expose truncation/unknown timing."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/forecast.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_forecast.py",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Forecast.tsx",
+    "apps/console/src/features/capabilities/platform/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_forecast.py",
+    "checks/runtime/capabilities/platform/forecast_ui_server.py",
+    "apps/console/src/features/capabilities/platform/Forecast.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_forecast.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Forecast.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": "/tmp/gideon-platform.15-checks-qdc2v8he/evidence.json",
+  "qualification": {
+    "runtime_tests": 8,
+    "ui_tests": 2,
+    "production_lines": 95,
+    "test_lines": 252,
+    "repair_cycles": 0,
+    "limitations": [
+      "Future runtime admission and durations remain unknown; clock occurrences are conditional."
+    ]
+  }
+}

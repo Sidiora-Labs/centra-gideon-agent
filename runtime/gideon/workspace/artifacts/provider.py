@@ -121,6 +121,7 @@ class ArtifactProvider(ABC):
         tags: list[str] | None = None,  # type: ignore[valid-type]  # CI-1
         collection: str | None = None,
         event_metadata: dict | None = None,
+        expect_updated_at: str | None = None,
     ) -> Artifact | None: ...
 
     def revert(

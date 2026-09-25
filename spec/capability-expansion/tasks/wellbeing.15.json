@@ -1,0 +1,92 @@
+{
+  "id": "wellbeing.15",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "ef4df0fe",
+  "production_files": [
+    "apps/console/src/features/capabilities/wellbeing/Page.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Labs.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Substances.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Genome.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.tsx"
+  ],
+  "test_files": [
+    "apps/console/src/features/capabilities/wellbeing/Page.test.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Labs.test.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Genome.test.tsx",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.test.tsx"
+  ],
+  "contract": "Use actual console useHashRoute instead of unavailable ReactRouter; preserve shell subroute and unrelated query keys, clear replaced page-owned selection keys. Real HTTP mutation, history and reload tests render without invented router wrapper.",
+  "remaining_limits": [
+    "Root integrated browser requalification remains separate; runtime source unchanged and prior backend evidence retained"
+  ],
+  "source_revision": "ef4df0fe",
+  "production_lines": 23,
+  "test_lines": 37,
+  "test_ratio": 1.608695652173913,
+  "repair_cycles": 1,
+  "exit_code": 0,
+  "commands": [
+    {
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--project",
+        "/tmp/gideon-wellbeing-routing/tsconfig.json"
+      ],
+      "initial_exit_code": 2,
+      "exit_code": 0,
+      "log": "/tmp/gideon-wellbeing-routing/types-repair1.log"
+    },
+    {
+      "argv": [
+        "node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "src/features/capabilities/wellbeing/Page.test.tsx",
+        "src/features/capabilities/wellbeing/Labs.test.tsx",
+        "src/features/capabilities/wellbeing/Substances.test.tsx",
+        "src/features/capabilities/wellbeing/Genome.test.tsx",
+        "src/features/capabilities/wellbeing/Interventions.test.tsx"
+      ],
+      "exit_code": 1,
+      "log": "/tmp/gideon-wellbeing-routing/ui.log",
+      "result": "9 passed;1 asynchronous loading fixture failure"
+    },
+    {
+      "argv": [
+        "node",
+        "../../node_modules/vitest/vitest.mjs",
+        "run",
+        "src/features/capabilities/wellbeing/Substances.test.tsx",
+        "src/features/capabilities/wellbeing/Interventions.test.tsx"
+      ],
+      "exit_code": 0,
+      "log": "/tmp/gideon-wellbeing-routing/ui-repair1.log",
+      "result": "4 passed; other3 files retain first-run pass"
+    }
+  ],
+  "acceptance_coverage": [
+    "all5 pages render without ReactRouter",
+    "actual hash selection and reload",
+    "real HTTP mutations/history",
+    "unrelated shell query preserved",
+    "capability subroute preserved",
+    "owned selection reset",
+    "shared input prop type correctness"
+  ],
+  "file_hashes": {
+    "apps/console/src/features/capabilities/wellbeing/Page.tsx": "65d0d61e0182184af4e4c4a5f276c9512335bf7b23322d39672aee94f7cd4cbc",
+    "apps/console/src/features/capabilities/wellbeing/Labs.tsx": "b3376930d5023eea5e8ee3bc5debba15d1aed1d82437d857ea596c7c09104a9a",
+    "apps/console/src/features/capabilities/wellbeing/Substances.tsx": "5ef99fd953dce02d314b8e0bf9b82e720a29396004a44cfd413b3a28e5326dca",
+    "apps/console/src/features/capabilities/wellbeing/Genome.tsx": "86a04730c2b128b20f41f68d91df3e6ea82ba003a43ddd3f7979f7642dbaee8d",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.tsx": "d1ec3d1fe435160eec75b81e742ec59ddc8024739ce2ab41e7c17f720b3a429d",
+    "apps/console/src/features/capabilities/wellbeing/Page.test.tsx": "c220506d8897efcb27175bd893a718134377a7d29b8107b42f57e22ea2c005e0",
+    "apps/console/src/features/capabilities/wellbeing/Labs.test.tsx": "70d7a1efc389b2c18bd4c14464a302b664227cbc6a3c214149b82753e9741d9a",
+    "apps/console/src/features/capabilities/wellbeing/Substances.test.tsx": "0a3cbb65723a447bd8a5fcc2d25692dc5808118335636e26f5c1883ca90593c3",
+    "apps/console/src/features/capabilities/wellbeing/Genome.test.tsx": "cf7151f09b00266db9f1c8ec4e46fb88c502de9349f0f40b9e78e425b9d8bbab",
+    "apps/console/src/features/capabilities/wellbeing/Interventions.test.tsx": "5ef3db98827edf68917d4cd52d16c387a75ed0f0eb34dda3f32035c70f18422b"
+  },
+  "evidence_log": "/tmp/gideon-wellbeing-routing/evidence.json"
+}

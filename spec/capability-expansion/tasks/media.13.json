@@ -1,0 +1,47 @@
+{
+  "id": "media.13",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "a1451d32",
+  "contract": "Actual selected image-provider sprite frame generation retains canonical frame checkpoints with animation/direction labels. Separate atlas jobs require explicit approval of each pinned source SHA256 and revalidate it before packing. Deterministic Pillow alpha trimming, transparent padding and grid packing never implicitly resize. Publish canonical PNG plus versioned JSON frame/source geometry/hash manifest, expose preview animation/directional tracks and export links through API/native tools/console.",
+  "acceptance": "Actual pixel/alpha/trim/padding/source geometry and full-transparent frames; manifest hashes and provenance, approval/hash/reference/bounds/collision rejection, unchanged originals, idempotent canonical publication, real cancellation and HTTP/native consumers. Actual missing-provider generation fails honestly; console reference changes revoke approval and source image must load for review.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/sprites.py",
+    "runtime/gideon/workspace/capabilities/media/sprites_http.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/SpritePage.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_sprites.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/SpritePage.test.tsx",
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_sprites.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/SpritePage.test.tsx",
+    "apps/console/src/features/capabilities/media/TimelinePage.test.tsx"
+  ],
+  "remaining_limits": [
+    "External image inference and directional/temporal visual consistency unavailable without actual provider credentials",
+    "Local canonical atlas publication qualified; external deployment destination bindings are not implemented",
+    "Completed generated frame checkpoints retained; interrupted uncheckpointed provider call may require regeneration",
+    "Atlas max4096pixels per side64frames, no implicit resizing",
+    "Live browser playback/review journey remains root qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.13",
+  "evidence": "/tmp/gideon-media.13-checks-xl2_jpwa/evidence.json",
+  "production_lines": 248,
+  "test_lines": 273,
+  "ratio": 1.1008064516129032,
+  "repair_cycles": 1,
+  "repair_detail": "Validate typed canonical sprite IDs before legacy image service; correct duplicate frames argument in malformed-input test fixture",
+  "exit_code": 0
+}

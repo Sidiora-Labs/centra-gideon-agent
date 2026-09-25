@@ -1,0 +1,41 @@
+{
+  "name": "gideon-platform",
+  "version": "1.0.0",
+  "displayName": "Platform Tools",
+  "description": "Inspect registered APIs, prompt dependencies and shared provider bindings.",
+  "icon": "Wrench",
+  "author": "Gideon",
+  "tags": [
+    "tool",
+    "bundled"
+  ],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.platform.tools:create_provider",
+    "capabilities": [
+      "platform_api_catalog",
+      "prompt_dependency_usage",
+      "provider_connections_get",
+      "platform_harness_inventory",
+      "platform_model_comparisons",
+      "platform_reference_repositories",
+      "platform_feature_ownership",
+      "platform_feature_claim",
+      "platform_gsd_project",
+      "platform_gsd_phase_task",
+      "platform_maintenance",
+      "platform_maintenance_control",
+      "platform_pr_screening",
+      "platform_pr_capture",
+      "platform_task_cadence",
+      "platform_task_cadence_set",
+      "platform_schedule_forecast",
+      "platform_dashboard_compositions",
+      "platform_dashboard_select",
+      "platform_usage_accounting",
+      "platform_personal_scorecard",
+      "platform_inference_host"
+    ]
+  },
+  "native": true
+}

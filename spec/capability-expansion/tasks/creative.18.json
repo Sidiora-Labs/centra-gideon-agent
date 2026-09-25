@@ -1,0 +1,50 @@
+{
+  "id": "creative.18",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "d3a90dde",
+  "requires": [
+    "creative.17"
+  ],
+  "contract": "Eight canonical context families bind validated schema-versioned JSON to immutable artifact ID/version records. Editorial runs pin those bindings, expose missing/invalid/stale sources, execute grounded deterministic families, and use only the configured reasoning adapter for typed model findings with exact Unicode manuscript anchors. No caller routing or credential override and no invented external success.",
+  "acceptance": [
+    "Canon, cast, scene, POV, arc, world, research and comic inputs persist as immutable versioned JSON artifact bindings with idempotent requests and optimistic work revision checks.",
+    "Original contextual catalog families run against the required bound source; missing, invalid, deleted and superseded bindings remain explicit and cannot produce a clear result.",
+    "Model checks use the existing configured provider, validate bounded typed output and exact manuscript quote offsets, and record unavailable or invalid external output without findings.",
+    "Real HTTP, native tool and console journeys bind context and execute editorial runs without provider, model, credentials, home or runtime overrides."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/editorial_context.py",
+    "runtime/gideon/workspace/capabilities/creative/context_checks.py",
+    "runtime/gideon/workspace/capabilities/creative/editorial.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Editorial.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_editorial_context.py",
+    "checks/runtime/capabilities/creative/test_editorial.py",
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_editorial_context.py",
+    "checks/runtime/capabilities/creative/test_editorial.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Editorial.test.tsx"
+  ],
+  "evidence": "/tmp/gideon-creative.18-checks-hxhandfg/evidence.json",
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 98,
+    "ui_tests": 5,
+    "production_lines": 389,
+    "test_lines": 450,
+    "ratio": 1.1568123393316196,
+    "attempts": 1
+  },
+  "limits": [
+    "A configured external model was unavailable in isolated local qualification, so successful provider inference remains an external qualification gap.",
+    "Parent creative.12 remains incomplete until creative.19 implements overrides, custom checks, panels, ranking, reviewed cuts and undo."
+  ]
+}

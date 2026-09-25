@@ -61,6 +61,8 @@ def config_dir() -> Path:
 
 
 logger = logging.getLogger(__name__)
+_ROOT_LOCKS: dict[str, threading.RLock] = {}
+_ROOT_LOCKS_GUARD = threading.Lock()
 
 _MEDIA_NAME_RE = re.compile(r"[\w.\-]+@[0-9a-f]{6,64}(\.[A-Za-z0-9]{1,12})?")
 
@@ -93,7 +95,12 @@ class NativeArtifactProvider(ArtifactProvider):
 
     def __init__(self, root: Path | str | None = None) -> None:
         self._root = Path(root) if root else (config_dir() / "artifacts")
-        self._lock = threading.RLock()
+        with _ROOT_LOCKS_GUARD:
+            self._lock = _ROOT_LOCKS.setdefault(str(self._root.resolve()), threading.RLock())
+
+    @property
+    def mutation_lock(self):
+        return self._lock
 
     @property
     def name(self) -> str:
@@ -773,6 +780,7 @@ class NativeArtifactProvider(ArtifactProvider):
         tags: list[str] | None = None,  # type: ignore[valid-type]  # CI-1
         collection: str | None = None,
         event_metadata: dict | None = None,
+        expect_updated_at: str | None = None,
     ) -> Artifact | None:
         if event_type == "reverted":
             raise ValueError("use revert() to restore a version, not update()")
@@ -782,6 +790,8 @@ class NativeArtifactProvider(ArtifactProvider):
             art = self._read_meta(slug)
             if art is None:
                 return None
+            if expect_updated_at is not None and art.updated_at != expect_updated_at:
+                raise ValueError("Artifact metadata changed; reload before saving")
             _refuse_if_readonly(art)
 
             meta_changed = False

@@ -15,6 +15,7 @@ import { RemoteModelProviders } from './ModelBackends'
 import { LocalModelManager } from './LocalModelManager'
 import type { ProviderModels } from '../../shared/data/api'
 import { fvs } from '../../shared/theme/fontWeight'
+import { ProviderConnections } from '../capabilities/platform/ProviderConnections'
 
 const ENTITY_META: Record<string, { label: string; icon: LucideIcon; hint: string }> = {
   agent: { label: 'Agent providers', icon: Bot, hint: 'Runtimes that drive a chat — the in-process native agent and external agent CLIs (Claude Code, Codex). Enable one, then sign in to any CLI that needs it.' },
@@ -43,6 +44,7 @@ const ACTION_ENTITY_ORDER = ['task', 'agent', 'comms', 'notification', 'shell', 
 
 export function ProvidersPanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQuery'>) {
   const [openProvider, setOpenProvider] = useQueryParam(query, setQuery, 'open', '')
+  const [connection, setConnection] = useQueryParam(query, setQuery, 'connection', '')
   const openCfg = (name: string) => (v: boolean) => setOpenProvider(v ? name : '')
 
   const { data: providers, status: providersStatus, error: providersError, refresh: refreshProviders } = useQuery(
@@ -114,6 +116,7 @@ export function ProvidersPanel({ query, setQuery }: Pick<RouteProps, 'query' | '
   return (
     <div>
       <PanelHeader title="Providers" hint="Everything pluggable in the system, organized by the entity each provider plugs into. Enable a provider and configure it inline; a provider that serves two entities appears under each." />
+      <ProviderConnections selected={connection} onSelect={setConnection} />
       {orderedTypes.map((type) => {
         const meta = ENTITY_META[type] ?? { label: `${type} providers`, icon: Wrench, hint: '' }
         const exts = byType.get(type) ?? []

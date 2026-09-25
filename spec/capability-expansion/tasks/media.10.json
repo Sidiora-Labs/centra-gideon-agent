@@ -1,0 +1,55 @@
+{
+  "id": "media.10",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "b6ee0793",
+  "contract": "Durable video generation jobs with selected-provider pinning, advertised bounded controls and first/last frame or continuation references. Concrete documented FAL Veo 3.1 queue adapter supports 4/6/8 second clips, seed and image conditioning; continuation explicitly uses only extracted final frame. Preserve existing provider defaults. Real FFmpeg validates pinned videos, extracts final frames and checks generated output containers before canonical artifact publication. HTTP, native tools and console consume the same service.",
+  "acceptance": "Real FFmpeg clips and Pillow frames exercise pinned references, extraction, original preservation, decoding, canonical provenance and replay. Real worker unavailable-provider failures plus actual HTTP/tool queue sharing; documented FAL payloads and actual adapter missing-credential rejection, no simulated model inference.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/videos.py",
+    "runtime/gideon/workspace/capabilities/media/jobs.py",
+    "runtime/gideon/workspace/capabilities/media/images_http.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/integrations/video_gen/provider.py",
+    "runtime/gideon/integrations/video_gen/fal_provider.py",
+    "runtime/gideon/sdk/video.py",
+    "apps/console/src/features/capabilities/media/VideoPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx",
+    "apps/console/src/features/capabilities/media/JobsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_videos.py",
+    "checks/runtime/capabilities/media/test_fal_video.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/VideoPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_videos.py",
+    "checks/runtime/capabilities/media/test_fal_video.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/VideoPage.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-fal-video/app.json"
+  ],
+  "remaining_limits": [
+    "No external FAL or other video inference performed; requires actual credentials and provider availability",
+    "FAL continuation conditions on final frame only; last-frame constraint remains unsupported by this adapter",
+    "Cooperative cancellation retains completed outputs; remote inference may continue until response or bounded timeout",
+    "Live browser and aggregate supervisor/provider registry integration remain root qualification"
+  ],
+  "provider_docs": [
+    "https://fal.ai/models/fal-ai/veo3.1/api",
+    "https://fal.ai/models/fal-ai/veo3.1/image-to-video/api",
+    "https://fal.ai/docs/documentation/model-apis/inference/queue"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.10",
+  "evidence": "/tmp/gideon-media.10-checks-3znga0z5/evidence.json",
+  "production_lines": 318,
+  "test_lines": 365,
+  "ratio": 1.1477987421383649,
+  "repair_cycles": 0,
+  "exit_code": 0
+}

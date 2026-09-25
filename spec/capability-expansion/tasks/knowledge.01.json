@@ -1,0 +1,50 @@
+{
+  "id": "knowledge.01",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "source_revision": "b028287ab250030c9d7e08e8b799c9f88720ca48",
+  "contract": "Read-only anniversary projection over active, unarchived Knowledge note/journal/fleeting items and already-bound episodic MemoryService records; no new datastore or provider calls.",
+  "date_policy": "Original file_metadata.original_at then source_created_at then created_at. Date-only and legacy naive stamps preserve local wall-clock date; offset timestamps convert to requested IANA timezone. Exact February 29 only. Invalid original dates are reported and skipped rather than replaced by import dates.",
+  "api": ["GET /api/capabilities/knowledge/anniversaries", "GET /api/capabilities/knowledge/sources/{source_type}/{source_id}"],
+  "console_route": "#/capabilities/knowledge",
+  "changed_paths": [
+    "runtime/gideon/workspace/capabilities/knowledge/__init__.py",
+    "runtime/gideon/workspace/capabilities/knowledge/anniversaries.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge.py",
+    "apps/console/src/features/capabilities/knowledge/Page.tsx",
+    "apps/console/src/features/capabilities/knowledge/Page.test.tsx",
+    "checks/runtime/capabilities/knowledge/test_anniversaries.py",
+    "checks/runtime/capabilities/knowledge/ui_server.py",
+    "spec/capability-expansion/tasks/knowledge.01.json"
+  ],
+  "acceptance_coverage": [
+    "Actual KnowledgeStore writes, historical source timestamps, active-source filtering and reopen persistence",
+    "Timezone calendar boundary, local legacy timestamps, original-date precedence, exact leap-day and invalid-date disclosure",
+    "Stable bounded pagination, canonical source identity and full exact-source reads",
+    "Actual SemanticArchive and MemoryService reads, deleted-memory exclusion and no embedding calls",
+    "Real aiohttp requests, two isolated stores, rejected query selectors and read-only method boundary",
+    "Actual HTTP-backed console DOM journey: source links, pagination, error recovery, empty date and URL selection"
+  ],
+  "verification": {
+    "command": "python3 tooling/capability_workflow.py verify knowledge.01",
+    "exit_code": 0,
+    "evidence": "/tmp/gideon-knowledge.01-checks-gfhull7n/evidence.json",
+    "compile_log": "/tmp/gideon-knowledge.01-checks-gfhull7n/compile.log",
+    "runtime_log": "/tmp/gideon-knowledge.01-checks-gfhull7n/runtime.log",
+    "ui_log": "/tmp/gideon-knowledge.01-checks-gfhull7n/ui.log",
+    "runtime_tests": 26,
+    "ui_tests": 2,
+    "production_lines": 197,
+    "test_lines": 352,
+    "ratio": 1.7868020304568528
+  },
+  "remaining_limits": [
+    "Root-owned dashboard registration, navigation, agent metadata and merged browser qualification remain integration work.",
+    "Memory availability is explicit; only an already-bound episodic memory archive is read. Semantic facts do not have anniversary chronology in this slice.",
+    "Root startup should resolve state.knowledge_store before accepting requests to bind its existing lazy store to runtime home.",
+    "Projection scans existing authoritative records and does not create a competing date index. Pagination bounds returned records, not scan volume.",
+    "Legacy naive timestamps cannot reconstruct a historical capture timezone; their wall-clock policy is disclosed.",
+    "No production deployment or external/native qualification was performed."
+  ],
+  "next_task": "knowledge.02"
+}

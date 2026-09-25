@@ -1,0 +1,57 @@
+{
+  "id": "creative.10",
+  "schema_version": 1,
+  "status": "implemented_inference_unqualified",
+  "base_revision": "69a046c7",
+  "requires": [
+    "creative.09"
+  ],
+  "contract": "Work-scoped immutable reverse-outline and continuity proposals with exact Unicode codepoint canonical draft spans, explicit authored/model provenance and coverage, optimistic explicit acceptance, immutable receipts, missing/stale evidence and deterministic conflicting recorded values. No manuscript duplication or canon mutation. Actual configured model extraction bounded and separately qualified.",
+  "acceptance": [
+    "Real canonical quote/Unicode offset validation, ordered reverse outline and source-pinned facts; partial coverage explicit.",
+    "Actual HTTP/native/UI propose, review, accept, reopen/export; exact retry receipts and optimistic ledger/work conflicts.",
+    "Immutable accepted evidence remains readable with missing/old source statuses; deterministic fact conflicts show both sources.",
+    "Actual configured model extraction adapter rejects ungrounded anchors and caller provider overrides; actual inference recorded independently."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/creative/continuity.py",
+    "runtime/gideon/workspace/capabilities/creative/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_creative.py",
+    "apps/console/src/features/capabilities/creative/Continuity.tsx",
+    "apps/console/src/features/capabilities/creative/Works.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/creative/test_continuity.py",
+    "checks/runtime/capabilities/creative/test_tools.py",
+    "apps/console/src/features/capabilities/creative/Continuity.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/creative/test_continuity.py",
+    "checks/runtime/capabilities/creative/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/creative/Continuity.test.tsx"
+  ],
+  "evidence": [
+    "/tmp/gideon-creative.10-checks-x5y_7ghv/evidence.json",
+    "/tmp/gideon-creative.10-checks-9o_yj9xo/evidence.json"
+  ],
+  "qualification": {
+    "compile": "passed",
+    "runtime_tests": 40,
+    "ui_tests": 3,
+    "repair": "UI helper corrected real work-create201 expectation; retained unchanged runtime success",
+    "production_lines": 257,
+    "test_lines": 390,
+    "ratio": 1.517509727626459
+  },
+  "inference_observation": {
+    "task": "creative.10",
+    "actual_provider_attempt": true,
+    "inference_qualified": false,
+    "error": "Configured continuity model unavailable"
+  },
+  "pending_acceptance": [
+    "Successful actual configured model extraction with grounded quotes and explicit ledger acceptance."
+  ]
+}

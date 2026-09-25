@@ -1,0 +1,52 @@
+{
+  "task": "platform.03",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "6d4bff4a",
+  "contract": "Versioned provider_connections in existing config document; endpoint and CredentialStore reference shared by provider binding. Optimistic mutations; declared model access applied on catalog reads and actual registry build, full catalog retained. No new credential storage.",
+  "acceptance": [
+    "Create shared connection and bind two real registered provider instances through authenticated HTTP",
+    "Shared endpoint and credential-reference rotation affect subsequent real provider construction; restart registry from config retains bindings",
+    "Declared allow/deny policy scopes existing catalog without destroying full model list and rejects disallowed execution",
+    "Clear policy restores catalog; stale writes and deletion with bindings fail; unbind preserves original provider settings",
+    "Console creates/edits connections and bindings, shows errors and references without secrets",
+    "Load real native gideon-platform manifest factory, register native provider, invoke API catalog, prompt dependency and connection introspection tools with truthful failures"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/connections.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_connections.py",
+    "runtime/gideon/integrations/llm/registry.py",
+    "runtime/gideon/interfaces/dashboard/handlers/providers.py",
+    "apps/console/src/features/capabilities/platform/ProviderConnections.tsx",
+    "apps/console/src/features/settings/ProvidersPanel.tsx",
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "runtime/gideon/workspace/capabilities/platform/catalog.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_connections.py",
+    "checks/runtime/capabilities/platform/connections_ui_server.py",
+    "apps/console/src/features/capabilities/platform/ProviderConnections.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_connections.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/ProviderConnections.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "evidence": {
+    "path": "/tmp/gideon-platform.03-checks-g3s5ndr2/evidence.json",
+    "runtime_tests": 14,
+    "ui_tests": 2,
+    "production_lines": 294,
+    "test_lines": 295,
+    "gate_runs": 1,
+    "limitations": [
+      "Real provider construction and catalog execution proved; external model inference not exercised.",
+      "Full integrated dashboard browser journey remains integration acceptance."
+    ]
+  }
+}
