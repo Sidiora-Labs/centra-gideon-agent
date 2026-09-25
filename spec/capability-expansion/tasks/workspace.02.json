@@ -1,0 +1,122 @@
+{
+  "id": "workspace.02",
+  "status": "locally_qualified",
+  "mode": "BUILD",
+  "base_revision": "ad67ec0306081a5e186e906ffb3c90dae013a157",
+  "schema_version": 1,
+  "scope": "Allocation-owned managed subprocess registry and console/native tool lifecycle",
+  "acceptance": [
+    "Real screened subprocess launch in allowed cwd with constrained environment; status and bounded stdout/stderr logs",
+    "Idempotent launch; stale stop refusal; group-aware termination only through owned process handles",
+    "Exclusive registry owner; durable record reload; actual registry crash becomes interrupted without stale PID signals",
+    "Actual production-auth HTTP and Chromium UI start/log/stop/error/reload",
+    "Native ToolProvider shares registry and snapshots, approval metadata for destructive operations, actual invocation tests"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/processes.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/Processes.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_processes.py",
+    "checks/runtime/capabilities/workspace/process_worker.py",
+    "checks/runtime/capabilities/workspace/ui_server.py",
+    "checks/runtime/capabilities/workspace/entry.tsx",
+    "apps/console/src/features/capabilities/workspace/Processes.test.ts"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/workspace/test_processes.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/workspace/Processes.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.02",
+  "integration_hooks": {
+    "handler": "existing capabilities_workspace.register(app) includes /processes routes",
+    "page": "existing Page.tsx includes Processes",
+    "native_app": "runtime/gideon/extensions/apps/native/gideon-workspace/app.json",
+    "durability": [
+      "capabilities/workspace/processes.sqlite3"
+    ],
+    "machine_local_exclude": [
+      "capabilities/workspace/processes.lock"
+    ]
+  },
+  "limits": [
+    "Restart recovery marks abandoned running records interrupted; never adopts or signals stored PIDs",
+    "POSIX process host required; no production service/native deployment claimed",
+    "Root owns final route/navigation/provider/durability integration",
+    "Snapshot capture/reconcile use console runtime inventory; standalone tools provide snapshot read/delete only"
+  ],
+  "evidence": {
+    "task": "workspace.02",
+    "root": "/tmp/gideon-expansion-worktrees/workspace",
+    "started_at": 1790294589.0691333,
+    "production_lines": 346,
+    "test_lines": 417,
+    "ratio": 1.2052023121387283,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+          "runtime/gideon/workspace/capabilities/workspace/processes.py",
+          "runtime/gideon/workspace/capabilities/workspace/tools.py",
+          "checks/runtime/capabilities/workspace/process_worker.py",
+          "checks/runtime/capabilities/workspace/test_processes.py",
+          "checks/runtime/capabilities/workspace/ui_server.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.02-checks-s4evpo9n/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/workspace/checks/runtime/capabilities/workspace/test_processes.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.02-checks-s4evpo9n/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/workspace/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/workspace/apps/console/src/features/capabilities/workspace/Processes.test.ts"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-workspace.02-checks-s4evpo9n/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-workspace.02-checks-s4evpo9n",
+    "completed_at": 1790294628.2538207,
+    "files": {
+      "apps/console/src/features/capabilities/workspace/Page.tsx": "b484719612f997052b534a8d293b24c6de4ecde90bb2ec4936f3bad25d29174f",
+      "apps/console/src/features/capabilities/workspace/Processes.tsx": "97074b5123a1574f0f4fdd006a5d722581bcae4eb565ff377150dcf1b0cd9ded",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py": "f1db6a0668a7491f9811f0976d887e78fc6da13f0b76a72375a066fb7456948b",
+      "runtime/gideon/workspace/capabilities/workspace/processes.py": "c541de37bde1100169d2652730a5038264d5533264d11b21f75768c38ddac4ab",
+      "runtime/gideon/workspace/capabilities/workspace/tools.py": "dc4e430c7514e50411e63d47b9fcd57c3059f6c25eee6978d3d8e82ccbf2acec",
+      "apps/console/src/features/capabilities/workspace/Processes.test.ts": "fdca1f909d582dbab7fd376ac6df8bc4f6ae9faadfb684e583938bb07ca2820b",
+      "checks/runtime/capabilities/workspace/entry.tsx": "4fcd409938842320b02a92b686c9c0c358942d06ee163e76f4d33ac4224cd39c",
+      "checks/runtime/capabilities/workspace/process_worker.py": "fd2067c037f9ed2fa623697b56067aaebb610f04027be375cfc5e88f8c0f6d13",
+      "checks/runtime/capabilities/workspace/test_processes.py": "12a4757dce1043eeffc98b48ecef754ec18ee1139e1a7b086f2b78fc37ffe3a2",
+      "checks/runtime/capabilities/workspace/ui_server.py": "ea626a87c2a34380a27b23f87168afb4fd3bfd205553277de20d6cf9e85b4576"
+    }
+  },
+  "exit_code": 0,
+  "repair_cycles": 1
+}

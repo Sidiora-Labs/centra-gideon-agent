@@ -1,0 +1,15 @@
+{
+  "name": "gideon-workspace",
+  "version": "1.0.0",
+  "displayName": "Workspace Operations",
+  "description": "Read saved workspace contexts and operate approved project processes with durable status and bounded logs.",
+  "icon": "FolderTerminal",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.workspace.tools:create_provider",
+    "capabilities": ["workspace_contexts", "managed_processes"]
+  },
+  "native": true
+}

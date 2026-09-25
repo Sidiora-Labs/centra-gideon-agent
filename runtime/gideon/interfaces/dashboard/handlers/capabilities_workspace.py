@@ -54,10 +54,61 @@ async def endpoint(request):
         return web.json_response({"error": "Workspace context temporarily unavailable"}, status=503)
 
 
+def processes(request):
+    from gideon.workspace.capabilities.workspace.processes import get_registry
+    from .files import _dashboard_roots
+    registry = request.app.get("workspace_process_registry")
+    if registry is None:
+        registry = get_registry(config_dir() / "capabilities" / "workspace", allowed_roots=[p for _, p in _dashboard_roots()])
+        request.app["workspace_process_registry"] = registry
+    return registry
+
+
+async def process_endpoint(request):
+    if not request.get("user") or request.get("app"):
+        return web.json_response({"error": "Owner authentication required"}, status=403)
+    try:
+        registry = processes(request)
+        process_id = request.match_info.get("id")
+        operation = request.match_info.get("operation")
+        if request.method == "GET":
+            if operation == "logs":
+                result = registry.logs(process_id, limit=int(request.query.get("limit", 65536)))
+            else:
+                result = registry.get(process_id) if process_id else registry.list(offset=int(request.query.get("offset", 0)))
+        elif operation == "stop":
+            body = await read_json_body(request)
+            result = await registry.stop(process_id, body.get("revision"))
+        else:
+            result = await registry.start(await read_json_body(request))
+        return web.json_response(result)
+    except ConflictError as error:
+        return web.json_response({"error": str(error)}, status=409)
+    except FileNotFoundError:
+        return web.json_response({"error": "Process or workspace not found"}, status=404)
+    except PermissionError as error:
+        return web.json_response({"error": str(error)}, status=403)
+    except (ValueError, TypeError, AttributeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except OSError:
+        return web.json_response({"error": "Process launch unavailable"}, status=503)
+
+
+async def close_processes(app):
+    from gideon.workspace.capabilities.workspace.processes import close_registry
+    await close_registry(config_dir() / "capabilities" / "workspace")
+
+
 def register(app):
     prefix = "/api/capabilities/workspace"
     app.router.add_get(prefix, endpoint)
     app.router.add_post(prefix, endpoint)
+    app.router.add_get(prefix + "/processes", process_endpoint)
+    app.router.add_post(prefix + "/processes", process_endpoint)
+    app.router.add_get(prefix + "/processes/{id}", process_endpoint)
+    app.router.add_get(prefix + "/processes/{id}/{operation:logs}", process_endpoint)
+    app.router.add_post(prefix + "/processes/{id}/{operation:stop}", process_endpoint)
+    app.on_cleanup.append(close_processes)
     app.router.add_get(prefix + "/{id}", endpoint)
     app.router.add_delete(prefix + "/{id}", endpoint)
     app.router.add_post(prefix + "/{id}/reconcile", endpoint)

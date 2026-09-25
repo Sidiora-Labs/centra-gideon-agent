@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Processes from './Processes'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
@@ -64,5 +65,6 @@ export default function Page() {
       {comparison && <div aria-live="polite"><p>Live branch: {comparison.live.branch || 'Detached'} · {comparison.branch_matches === null ? 'No saved branch' : comparison.branch_matches ? 'Branch matches' : 'Branch changed'} · {comparison.live.dirty ? 'Uncommitted changes' : 'Clean'}</p>
         {(['surviving_terminal_ids', 'missing_terminal_ids', 'surviving_task_ids', 'missing_task_ids'] as const).map(key => <p key={key}>{key.replaceAll('_', ' ')}: {comparison[key].join(', ') || 'None'}</p>)}</div>}
     </article>}
+    <Processes />
   </section>
 }
