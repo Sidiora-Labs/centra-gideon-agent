@@ -140,7 +140,7 @@ export function useAgentActivity(): AgentActivityFeed {
   const [sources, setSources] = useState<AgentActivitySources | null>(null)
   const [error, setError] = useState<unknown>(null)
   const alive = useRef(true)
-  useEffect(() => () => { alive.current = false }, [])
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
 
   const load = useCallback(() => {
     Promise.all([

@@ -3,6 +3,7 @@ import { Button } from '../../../shared/ui/Button'
 import './experience.css'
 import Narration from './Narration'
 import AmbientDisplay from './AmbientDisplay'
+import AvatarPanel from './AvatarPanel'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 
 type Choice = { id: string; label: string; target: string }
@@ -70,6 +71,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
   return <main className="experience-page p-4 max-w-4xl mx-auto space-y-4" aria-label="Interactive stories">
     <h1>Interactive stories</h1>
     <Button onClick={() => { location.hash = '/capabilities/experience?ambient=1' }}>Open ambient display</Button>
+    <AvatarPanel baseUrl={baseUrl} />
     <p>Author connected scenes and play choices into different endings.</p>
     {loading && <p role="status">Loading stories…</p>}
     {error && <p role="alert">{error}</p>}

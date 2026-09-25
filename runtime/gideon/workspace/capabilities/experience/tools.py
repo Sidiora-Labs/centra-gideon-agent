@@ -7,12 +7,18 @@ from .narration import get_narration_jobs
 from .navigation import NavigationReceipts
 from .speech_owner import SpeechOwner
 from .ambient import AmbientDisplay
+from .avatar import AvatarStore
 from .store import Conflict, ExperienceStore, NotFound
 
 STRING = {"type": "string", "minLength": 1, "maxLength": 80}
 REVISION = {"type": "integer", "minimum": 1}
 STORY = {"type": "object", "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit", "required": ["title", "start_node", "nodes"]}
 OPERATIONS = {
+    "avatar_list": ({}, False, "Read published avatar variants and actual source availability."),
+    "avatar_bundled": ({}, True, "Install the original authored robot asset and clip mapping."),
+    "avatar_publish": ({"title": STRING, "artifact_slug": STRING, "artifact_version": REVISION, "clips": {"type":"object","description":"idle required; optional working, needs_input, waiting_approval, error, speaking; values must be real asset clip names"}}, True, "Publish an existing animated canonical model as an avatar variant."),
+    "avatar_selection_get": ({}, False, "Read selected avatar and observed activity entity binding."),
+    "avatar_select": ({"revision": REVISION,"avatar_id":{"type":["string","null"]},"entity_id":{"type":"string","maxLength":300}}, True, "Select a ready avatar and actual activity identity with expected revision."),
     "ambient_get": ({}, False, "Read current ambient projections, unavailable sources and display preferences."),
     "ambient_update": ({"revision": REVISION, "show_clock": {"type":"boolean"}, "font_scale": {"type":"integer","minimum":1,"maximum":3}, "idle_seconds": {"type":"integer","minimum":10,"maximum":300}}, True, "Save ambient presentation preferences with expected revision."),
     "speech_state": ({}, False, "Read proactive opt-in and audible owner expiry without lease credentials."),
@@ -35,7 +41,7 @@ OPERATIONS = {
 
 class ExperienceTools(ToolProvider):
     name = "gideon-experience"
-    display_name = "Interactive Stories"
+    display_name = "Experience"
 
     def __init__(self, store=None):
         self._store = store
@@ -68,7 +74,12 @@ class ExperienceTools(ToolProvider):
         args = dict(arguments)
         key = args.pop("id", None)
         try:
-            if operation == "ambient_get": result = await AmbientDisplay(self.store).snapshot()
+            if operation == "avatar_list": result = {"avatars": AvatarStore(self.store).list()}
+            elif operation == "avatar_bundled": result = {"avatar": AvatarStore(self.store).bundled()}
+            elif operation == "avatar_publish": result = {"avatar": AvatarStore(self.store).publish(args)}
+            elif operation == "avatar_selection_get": result = {"selection": AvatarStore(self.store).selection()}
+            elif operation == "avatar_select": result = {"selection": AvatarStore(self.store).select(args)}
+            elif operation == "ambient_get": result = await AmbientDisplay(self.store).snapshot()
             elif operation == "ambient_update": result = {"preferences": AmbientDisplay(self.store).save(args)}
             elif operation == "speech_state": result = {"owner": SpeechOwner(self.store).state()}
             elif operation == "story_list": result = {"stories": self.store.stories()}
