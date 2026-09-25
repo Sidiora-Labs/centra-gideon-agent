@@ -1,0 +1,15 @@
+{
+  "name": "gideon-experience",
+  "version": "1.0.0",
+  "displayName": "Interactive Stories",
+  "description": "Author branching stories, resume durable playthroughs and request source-bound narration.",
+  "icon": "BookOpen",
+  "author": "Gideon",
+  "tags": ["tool", "bundled"],
+  "provider": {
+    "type": "tool",
+    "implementation": "gideon.workspace.capabilities.experience.tools:create_provider",
+    "capabilities": ["experience"]
+  },
+  "native": true
+}

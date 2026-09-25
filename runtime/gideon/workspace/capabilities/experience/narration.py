@@ -6,11 +6,23 @@ import json
 import tempfile
 from pathlib import Path
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from gideon.integrations.tts.registry import active_voice_params, route_synthesis
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from .graph import identifier, revision
 from .store import Conflict, NotFound
+
+_services = WeakValueDictionary()
+
+
+def get_narration_jobs(store):
+    key = str(store.path.resolve())
+    if key not in _services:
+        service = NarrationJobs(store)
+        _services[key] = service
+        return service
+    return _services[key]
 
 
 def digest(value):
