@@ -129,7 +129,7 @@ def _declared_db_paths() -> tuple[str, ...]:
 
 def _safe_copy_db(src: Path, dst: Path) -> bool:
     """Copy one sqlite file consistently via the backup API. False if it isn't a
-    readable database (caller falls back to a plain copy)."""
+    readable database; callers decide whether to abort the operation."""
     from contextlib import closing
 
     try:
@@ -142,7 +142,7 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
         return True
     except Exception as exc:  # noqa: BLE001
         print(
-            f"⚠️  sqlite backup failed for {src.name} ({exc}); falling back to a file copy"
+            f"⚠️  sqlite backup failed for {src.name} ({exc})"
         )
         return False
 
@@ -153,7 +153,7 @@ def _tree_ignore_dbs(db_names: set[str]):
 
     def _ignore(directory: str, contents: list[str]) -> set[str]:
         return {
-            n for n in contents if n in db_names or n.endswith((".db-wal", ".db-shm"))
+            n for n in contents if n in db_names or any(n == db + suffix for db in db_names for suffix in ("-wal", "-shm"))
         }
 
     return _ignore
@@ -504,8 +504,7 @@ def snapshot_main(
             if not _src_db.is_file() or os.path.islink(_src_db):
                 continue
             if not _safe_copy_db(_src_db, stage / _db):
-                (stage / _db).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(_src_db), str(stage / _db))
+                raise RuntimeError(f"Could not safely snapshot database: {_db}")
 
         if (pc / "workspace").is_dir():
             _pattern_ignore = shutil.ignore_patterns("hygiene_data", "insert_facts*.py")
@@ -527,6 +526,9 @@ def snapshot_main(
 
         staged_extra: list[str] = []
         for rel in _everything_paths(pc):
+            if rel in _db_paths:
+                staged_extra.append(rel)
+                continue
             src = pc / rel
             if os.path.islink(src):
                 print(f"⚠️  Skipping symlinked state path: {rel}")
