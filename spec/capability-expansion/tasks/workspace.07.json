@@ -1,0 +1,58 @@
+{
+  "id": "workspace.07",
+  "schema_version": 1,
+  "status": "implemented_native_qualification_pending",
+  "mode": "BUILD",
+  "scope": "Mirror existing external iTerm panes without taking ownership of their lifecycle",
+  "base_revision": "41f32ce5e645d5e9441aaa7d12dd422cdf6cd260",
+  "acceptance": [
+    "Discover existing real iTerm split panes through authenticated native API",
+    "Mirror output and native pane resizing without creating,closing or resizing native sessions",
+    "Browser disconnect leaves native sessions alive; missing pane updates truthfully"
+  ],
+  "blockers": [
+    "No macOS/iTerm runtime or authenticated native endpoint is available for native success/resize/disconnect qualification"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify workspace.07",
+  "gates_run": [],
+  "qualification_notes": [
+    "Source implements official iTerm SDK read-only inventory and visible text via fixed bounded subprocess, owner HTTP, native tool and opt-in polling console",
+    "Native test is explicitly skipped without Mac SDK and existing pane/text environment; portable rejection coverage is not native qualification",
+    "ANSI styles, exact split geometry, native resize and pane disappearance live journeys remain pending"
+  ],
+  "source_evidence": [
+    "runtime/gideon/interfaces/dashboard/handlers/terminal.py:98",
+    "runtime/gideon/interfaces/dashboard/handlers/terminal.py:107"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/workspace/iterm.py",
+    "runtime/gideon/workspace/capabilities/workspace/iterm_worker.py",
+    "runtime/gideon/workspace/capabilities/workspace/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_workspace.py",
+    "apps/console/src/features/capabilities/workspace/ExternalTerminals.tsx",
+    "apps/console/src/features/capabilities/workspace/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/workspace/test_iterm.py",
+    "apps/console/src/features/capabilities/workspace/ExternalTerminals.test.ts"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-workspace/app.json"
+  ],
+  "sources": [
+    "https://iterm2.com/python-api/session.html",
+    "https://iterm2.com/python-api/connection.html",
+    "https://iterm2.com/python-api/screen.html"
+  ],
+  "evidence": {
+    "portable_status": "locally_qualified",
+    "native_status": "pending",
+    "compile_runtime": "/tmp/gideon-workspace.07-checks-qgittidu/evidence.json",
+    "ui": "/tmp/gideon-workspace.07-checks-5ebq5zxl/evidence.json",
+    "runtime_result": "6 passed,10 subtests passed,1 native test skipped",
+    "ui_result": "2 actual HTTP Chromium tests passed",
+    "ratio": 1.3433734939759037,
+    "repair_cycles": 1,
+    "repair": "Second browser case now loads its own document instead of retaining earlier hash-navigation state; only UI stage rerun"
+  }
+}
