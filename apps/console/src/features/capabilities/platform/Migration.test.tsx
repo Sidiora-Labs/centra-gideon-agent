@@ -77,6 +77,18 @@ function adminFixture() {
   return tarFile({ 'snapshot-admin/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-admin/data/${name}`, value])) })
 }
 
+function songFixture() {
+  const id = 'song-ui'
+  const score = Buffer.from('%PDF-1.7\nUI score')
+  const data: Record<string, Buffer> = {
+    'brain/songs/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'songs', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
+    [`brain/songs/${id}/index.json`]: Buffer.from(JSON.stringify({ id, title: 'UI imported song', artist: 'UI Band', instrument: 'guitar', stage: 'learning', tags: ['live'], key: 'C', capo: 1, tuning: 'standard', sourceUrl: 'https://example.test/song', links: [], content: { format: 'chordpro', text: '[C]Hello' }, notes: 'Real repertoire import', scrollDurationSec: 60, attachments: [{ filename: 'ui-score.pdf', label: 'UI score', mime: 'application/pdf', size: score.length, sha256: createHash('sha256').update(score).digest('hex') }], createdAt: '2026-01-01T00:00:00+00:00', updatedAt: '2026-09-25T00:00:00+00:00' })),
+    'brain/songbook/ui-score.pdf': score,
+  }
+  const manifest = { generatedAt: '2026-09-25T00:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
+  return tarFile({ 'snapshot-song/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-song/data/${name}`, value])) })
+}
+
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
@@ -136,7 +148,7 @@ it('imports a checksummed memory into canonical knowledge and reports its durabl
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
   expect(await screen.findByText(/1 memories ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
-  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links', 'buckets', 'inbox', 'admin', 'threads'])
+  expect(state.supported_domains).toEqual(['people', 'projects', 'ideas', 'journals', 'memories', 'links', 'buckets', 'inbox', 'admin', 'threads', 'songs'])
   expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.memories === 1)).toBe(true)
 })
 
@@ -165,4 +177,21 @@ it('imports one admin action through the API into the canonical task surface', a
   expect(await screen.findByText(/1 admin ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
   expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.admin === 1)).toBe(true)
+})
+
+it('imports a verified song and attachment through the API into the canonical repertoire', async () => {
+  render(<Migration baseUrl={baseUrl} />)
+  const file = new File([songFixture()], 'song.tar.gz', { type: 'application/gzip' })
+  fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
+  expect(await screen.findByText('Domains: songs')).toBeVisible()
+  expect(screen.getByText('songs: UI imported song')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
+  expect(await screen.findByText(/1 songs ·/)).toBeVisible()
+  const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
+  expect(state.receipts.some((row: { domains: Record<string, number> }) => row.domains.songs === 1)).toBe(true)
+  const repertoire = await (await fetch(`${baseUrl}/api/capabilities/music/items/song-ui`)).json()
+  expect(repertoire.item.artist).toBe('UI Band')
+  expect(repertoire.item.attachment_availability[0]).toMatchObject({ available: true, kind: 'pdf', mime: 'application/pdf' })
 })

@@ -11,6 +11,8 @@ import pytest
 from gideon.workspace.capabilities.communications import PeopleStore
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
+from gideon.workspace.artifacts.native import NativeArtifactProvider
+from gideon.workspace.capabilities.music.store import RepertoireStore
 from gideon.workspace.capabilities.platform.migration import FORMAT, MigrationError, commit, preview, receipts
 
 
@@ -60,6 +62,38 @@ def domains_archive(collections, *, schema=1):
         for name, value in {"snapshot-domains/manifest.json": json.dumps(manifest).encode(), **{f"snapshot-domains/data/{name}": value for name, value in files.items()}}.items():
             info = tarfile.TarInfo(name); info.size = len(value); tar.addfile(info, io.BytesIO(value))
     return {"format": FORMAT, "content": base64.b64encode(output.getvalue()).decode()}
+
+
+def song_archive(song, binaries=None, *, schema=1):
+    files = {
+        "brain/songs/index.json": json.dumps({"schemaVersion": schema, "type": "songs", "updatedAt": "2026-09-25T00:00:00Z", "config": {}}).encode(),
+        f"brain/songs/{song['id']}/index.json": json.dumps(song).encode(),
+        **{f"brain/songbook/{name}": value for name, value in (binaries or {}).items()},
+    }
+    manifest = {"generatedAt": "2026-09-25T00:00:00.000Z", "fileCount": len(files),
+                "files": {name: hashlib.sha256(value).hexdigest() for name, value in files.items()}}
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as tar:
+        for name, value in {"snapshot-song/manifest.json": json.dumps(manifest).encode(),
+                            **{f"snapshot-song/data/{name}": value for name, value in files.items()}}.items():
+            info = tarfile.TarInfo(name); info.size = len(value); tar.addfile(info, io.BytesIO(value))
+    return {"format": FORMAT, "content": base64.b64encode(output.getvalue()).decode()}
+
+
+def song_record(identity="song-1", attachments=None, **overrides):
+    record = {
+        "id": identity, "title": "Midnight Train", "artist": "The Testers", "instrument": "guitar",
+        "stage": "learning", "tags": ["setlist", "acoustic"], "key": "Am", "capo": 2,
+        "tuning": "E A D G B E", "sourceUrl": "https://example.test/song", "links": [
+            {"type": "project", "id": "tour-set", "label": "Tour set"}],
+        "content": {"format": "chordpro", "text": "{title: Midnight Train}\n[Am]All aboard"},
+        "notes": "Keep the bridge quiet", "scrollDurationSec": 90, "attachments": attachments or [],
+        "practice": {"ease": 2.7, "intervalDays": 6, "nextReview": "2026-10-01T12:00:00+00:00",
+                     "lastReviewed": "2026-09-25T12:00:00+00:00", "sessions": 4, "lastQuality": 4},
+        "createdAt": "2026-01-01T00:00:00+00:00", "updatedAt": "2026-09-25T12:00:00+00:00",
+    }
+    record.update(overrides)
+    return record
 
 
 def test_preview_verifies_manifest_and_maps_explicit_coverage():
@@ -557,12 +591,255 @@ def test_threads_fail_closed_for_unknown_refs_invalid_urls_and_future_fields():
         preview(domains_archive({"threads": [{**base, "refs": [], "future": True}]}))
 
 
-def test_song_records_and_unmanifested_binary_paths_remain_explicitly_unsupported():
-    song_id = "34343434-3434-4434-8434-343434343434"
-    song = {"id": song_id, "title": "A song", "artist": "Artist", "instrument": "guitar", "stage": "new",
-            "tags": [], "content": {"format": "tab", "text": "Am C"}, "attachments": [],
-            "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
-    with pytest.raises(MigrationError, match="unsupported domains"):
-        preview(domains_archive({"songs": [song]}))
-    with pytest.raises(MigrationError, match="unsupported domains"):
-        preview(archive(extra={f"brain/songs/{song_id}/attachments/score.pdf": b"%PDF"}))
+def test_song_restore_materializes_real_artifacts_and_survives_restart(tmp_path):
+    score, chart = b"%PDF-1.7\nreal score", b"# Chart\nAm C G"
+    attachments = [
+        {"filename": "score.pdf", "label": "Lead sheet", "mime": "application/pdf", "size": len(score),
+         "sha256": hashlib.sha256(score).hexdigest()},
+        {"filename": "chart.md", "label": "Working chart", "mime": "text/markdown", "size": len(chart),
+         "sha256": hashlib.sha256(chart).hexdigest()},
+    ]
+    source = song_archive(song_record(attachments=attachments), {"score.pdf": score, "chart.md": chart})
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["songs"]
+    assert checked["records"] == [{"source_id": "song-1", "domain": "songs", "name": "Midnight Train"}]
+
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, created = commit(people, payload, repertoire=repertoire, artifacts=artifacts)
+    assert created is True and receipt["domains"] == {"songs": 1}
+    item = repertoire.get("song-1")
+    assert {key: item[key] for key in ("title", "artist", "instrument", "key", "capo", "tuning")} == {
+        "title": "Midnight Train", "artist": "The Testers", "instrument": "guitar", "key": "Am", "capo": 2,
+        "tuning": "E A D G B E"}
+    assert item["notation"] == {"format": "chordpro", "text": "{title: Midnight Train}\n[Am]All aboard"}
+    assert item["body"] == "Keep the bridge quiet" and item["tags"] == ["setlist", "acoustic"]
+    assert item["stage"] == "learning" and item["interval"] == 6 and item["repetitions"] == 4
+    assert item["due_at"] == "2026-10-01T12:00:00+00:00" and item["last_grade"] == 4
+    assert all(row["available"] for row in item["attachment_availability"])
+    pdf_ref, markdown_ref = item["attachment_refs"]
+    assert artifacts.raw_bytes(pdf_ref["slug"], version=1) == (score, "application/pdf")
+    assert artifacts.get(markdown_ref["slug"], version=1).content == chart.decode()
+
+    replayed, replay_created = commit(people, payload, repertoire=repertoire, artifacts=artifacts)
+    assert replay_created is False and replayed == receipt
+    reopened_artifacts = NativeArtifactProvider(home / "artifacts")
+    reopened_repertoire = RepertoireStore(home / "capabilities" / "music", reopened_artifacts)
+    assert reopened_repertoire.get("song-1")["attachment_refs"] == item["attachment_refs"]
+    assert receipts(people, repertoire=reopened_repertoire, artifacts=reopened_artifacts) == [receipt]
+
+
+@pytest.mark.parametrize("mutation,message", [
+    (lambda meta, blobs: blobs.clear(), "bytes are missing"),
+    (lambda meta, blobs: meta.update(size=meta["size"] + 1), "size or checksum"),
+    (lambda meta, blobs: meta.update(sha256="0" * 64), "size or checksum"),
+    (lambda meta, blobs: meta.update(mime="text/plain"), "type is unsupported"),
+])
+def test_song_preview_rejects_missing_or_mismatched_attachment_material(mutation, message):
+    raw = b"%PDF-1.7\nsource"
+    meta = {"filename": "score.pdf", "label": "Score", "mime": "application/pdf", "size": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest()}
+    blobs = {"score.pdf": raw}
+    mutation(meta, blobs)
+    with pytest.raises(MigrationError, match=message):
+        preview(song_archive(song_record(attachments=[meta]), blobs))
+
+
+def test_song_preview_rejects_unsafe_unreferenced_and_invalid_text_assets():
+    raw = b"not utf8 \xff"
+    metadata = {"filename": "chart.md", "label": "Chart", "mime": "text/markdown", "size": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+    with pytest.raises(MigrationError, match="valid UTF-8"):
+        preview(song_archive(song_record(attachments=[metadata]), {"chart.md": raw}))
+    with pytest.raises(MigrationError, match="unreferenced"):
+        preview(song_archive(song_record(attachments=[]), {"orphan.pdf": b"%PDF"}))
+    with pytest.raises(MigrationError, match="unsafe path"):
+        preview(archive(extra={"brain/songbook/../escape.pdf": b"%PDF"}))
+
+
+@pytest.mark.parametrize("override,message", [
+    ({"instrument": "theremin"}, "core fields"),
+    ({"content": {"format": "future", "text": "notes"}}, "core fields"),
+    ({"sourceUrl": "https://user:secret@example.test/song"}, "musical fields"),
+    ({"practice": {"ease": 1.0, "intervalDays": 0, "nextReview": "2026-01-01T00:00:00Z",
+                   "lastReviewed": "2026-01-01T00:00:00Z", "sessions": 0, "lastQuality": 0}}, "practice history"),
+])
+def test_song_preview_matches_canonical_repertoire_constraints(override, message):
+    with pytest.raises(MigrationError, match=message):
+        preview(song_archive(song_record(**override)))
+
+
+def test_song_preview_rejects_duplicate_attachment_identity():
+    raw = b"%PDF duplicate"
+    metadata = {"filename": "same.pdf", "label": "Same", "mime": "application/pdf", "size": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+    with pytest.raises(MigrationError, match="filenames must be unique"):
+        preview(song_archive(song_record(attachments=[metadata, dict(metadata)]), {"same.pdf": raw}))
+
+
+def test_song_commit_rolls_back_new_artifacts_when_canonical_identity_collides(tmp_path):
+    raw = b"%PDF collision"
+    metadata = {"filename": "score.pdf", "label": "Score", "mime": "application/pdf", "size": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+    source = song_archive(song_record(attachments=[metadata]), {"score.pdf": raw})
+    checked = preview(source)
+    home = tmp_path / "home"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    existing = repertoire.create({"title": "Existing item"})
+    with repertoire._db() as db:
+        payload = dict(existing, id="song-1")
+        payload.pop("attachment_availability", None)
+        repertoire._write(db, payload)
+    with pytest.raises(Exception, match="already exists"):
+        commit(PeopleStore(home / "people"), {**source, "archive_digest": checked["archive_digest"],
+               "review_token": checked["review_token"]}, repertoire=repertoire, artifacts=artifacts)
+    slug = "legacy-song-" + hashlib.sha256(b"song-1:score.pdf").hexdigest()[:32]
+    assert artifacts.get(slug) is None
+    assert list((home / "capabilities" / "platform" / "migration-journals").glob("*.json")) == []
+
+
+def test_song_failed_import_preserves_preexisting_identical_attachment(tmp_path):
+    raw = b"%PDF shared"
+    metadata = {"filename": "shared.pdf", "label": "Shared", "mime": "application/pdf", "size": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest()}
+    source = song_archive(song_record(attachments=[metadata]), {"shared.pdf": raw})
+    checked = preview(source)
+    home = tmp_path / "home"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    existing = repertoire.create({"title": "Existing item"})
+    with repertoire._db() as db:
+        payload = dict(existing, id="song-1")
+        payload.pop("attachment_availability", None)
+        repertoire._write(db, payload)
+    slug = "legacy-song-" + hashlib.sha256(b"song-1:shared.pdf").hexdigest()[:32]
+    artifacts.create_binary(name="Shared", slug=slug, data=raw, mime="application/pdf", kind="pdf", source="manual")
+    with pytest.raises(MigrationError, match="already exists"):
+        commit(PeopleStore(home / "people"), {**source, "archive_digest": checked["archive_digest"],
+               "review_token": checked["review_token"]}, repertoire=repertoire, artifacts=artifacts)
+    assert artifacts.raw_bytes(slug, version=1) == (raw, "application/pdf")
+    assert list((home / "capabilities" / "platform" / "migration-journals").glob("*.json")) == []
+
+
+def test_song_restart_recovers_incomplete_import_and_owned_attachment(tmp_path):
+    home = tmp_path / "home"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    raw = b"%PDF interrupted"
+    slug = "legacy-song-" + hashlib.sha256(b"song-recovery:score.pdf").hexdigest()[:32]
+    artifacts.create_binary(name="Score", slug=slug, data=raw, mime="application/pdf", kind="pdf", source="import")
+    token, digest, import_id = "a" * 64, "b" * 64, "platform-song-" + "b" * 64
+    repertoire.import_song(import_id=import_id, source_fingerprint=token, item_id="song-recovery",
+        created_at="2026-01-01T00:00:00+00:00", updated_at="2026-01-02T00:00:00+00:00",
+        data={"title": "Interrupted", "attachment_refs": [{"slug": slug, "version": 1}]},
+        schedule={"stage": "new", "ease": 2.5, "interval": 0, "repetitions": 0, "due_at": None,
+                  "last_practiced_at": None, "last_grade": None})
+    journal_root = home / "capabilities" / "platform" / "migration-journals"
+    journal_root.mkdir(parents=True)
+    journal = {"schema": 1, "status": "artifacts_ready", "archive_digest": digest, "review_token": token,
+               "import_id": import_id, "song_id": "song-recovery", "artifacts": [{"slug": slug, "version": 1,
+               "kind": "pdf", "mime": "application/pdf", "sha256": hashlib.sha256(raw).hexdigest(), "owned": True}]}
+    (journal_root / f"{digest}.json").write_text(json.dumps(journal))
+    assert receipts(PeopleStore(home / "people"), repertoire=RepertoireStore(home / "capabilities" / "music", artifacts),
+                    artifacts=NativeArtifactProvider(home / "artifacts")) == []
+    with pytest.raises(Exception, match="not found"):
+        repertoire.get("song-recovery")
+    assert artifacts.get(slug) is None and not (journal_root / f"{digest}.json").exists()
+
+
+def test_song_restart_refuses_recovery_after_user_edit(tmp_path):
+    home = tmp_path / "home"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    token, digest, import_id = "c" * 64, "d" * 64, "platform-song-" + "d" * 64
+    repertoire.import_song(import_id=import_id, source_fingerprint=token, item_id="changed-song",
+        created_at="2026-01-01T00:00:00+00:00", updated_at="2026-01-02T00:00:00+00:00",
+        data={"title": "Original"}, schedule={"stage": "new", "ease": 2.5, "interval": 0, "repetitions": 0,
+        "due_at": None, "last_practiced_at": None, "last_grade": None})
+    repertoire.update("changed-song", {"title": "User edit", "revision": 1})
+    journal_root = home / "capabilities" / "platform" / "migration-journals"
+    journal_root.mkdir(parents=True)
+    journal = {"schema": 1, "status": "artifacts_ready", "archive_digest": digest, "review_token": token,
+               "import_id": import_id, "song_id": "changed-song", "artifacts": []}
+    (journal_root / f"{digest}.json").write_text(json.dumps(journal))
+    with pytest.raises(MigrationError, match="changed and cannot be rolled back"):
+        receipts(PeopleStore(home / "people"), repertoire=repertoire, artifacts=artifacts)
+    assert repertoire.get("changed-song")["title"] == "User edit"
+    assert (journal_root / f"{digest}.json").exists()
+
+
+def test_song_restart_fails_closed_on_malformed_recovery_journal(tmp_path):
+    home = tmp_path / "home"
+    artifacts = NativeArtifactProvider(home / "artifacts")
+    repertoire = RepertoireStore(home / "capabilities" / "music", artifacts)
+    journal_root = home / "capabilities" / "platform" / "migration-journals"
+    journal_root.mkdir(parents=True)
+    path = journal_root / ("e" * 64 + ".json")
+    path.write_text(json.dumps({"schema": 1, "status": "artifacts_ready", "archive_digest": "e" * 64}))
+    with pytest.raises(MigrationError, match="unsupported shape"):
+        receipts(PeopleStore(home / "people"), repertoire=repertoire, artifacts=artifacts)
+    assert path.exists()
+
+
+def test_song_archives_reject_multiple_records_and_cross_store_mixes(tmp_path):
+    two = domains_archive({"songs": [song_record("song-one"), song_record("song-two")]})
+    checked = preview(two)
+    artifacts = NativeArtifactProvider(tmp_path / "artifacts")
+    with pytest.raises(MigrationError, match="exactly one song"):
+        commit(PeopleStore(tmp_path / "people"), {**two, "archive_digest": checked["archive_digest"],
+               "review_token": checked["review_token"]}, repertoire=RepertoireStore(tmp_path / "music", artifacts),
+               artifacts=artifacts)
+    mixed = domains_archive({"songs": [song_record()], "ideas": [{"id": "39393939-3939-4939-8939-393939393939",
+        "title": "Mixed", "status": "active", "oneLiner": "Mixed", "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"}]})
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(mixed)
+
+
+def test_supported_domains_restore_into_a_fresh_home_and_survive_reopen(tmp_path):
+    home = tmp_path / "fresh-home"
+    people = PeopleStore(home / "capabilities/communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    person_source = archive([{"id": "fresh-person", "name": "Fresh Person", "context": "Restored contact",
+                              "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"}])
+    person_preview = preview(person_source)
+    person_receipt, _ = commit(people, {**person_source, "archive_digest": person_preview["archive_digest"],
+                                        "review_token": person_preview["review_token"]}, knowledge, projects, tasks)
+    memory_id = "36363636-3636-4636-8636-363636363636"
+    knowledge_source = domains_archive({"memories": [{"id": memory_id, "title": "Fresh memory", "content": "Restored content",
+        "createdAt": "2026-02-01T00:00:00Z", "updatedAt": "2026-02-02T00:00:00Z"}]})
+    knowledge_preview = preview(knowledge_source)
+    knowledge_receipt, _ = commit(people, {**knowledge_source, "archive_digest": knowledge_preview["archive_digest"],
+                                           "review_token": knowledge_preview["review_token"]}, knowledge, projects, tasks)
+    project_id = "37373737-3737-4737-8737-373737373737"
+    project_source = domains_archive({"projects": [{"id": project_id, "name": "Fresh project", "status": "active",
+        "nextAction": "Continue", "createdAt": "2026-03-01T00:00:00Z", "updatedAt": "2026-03-02T00:00:00Z"}]})
+    project_preview = preview(project_source)
+    project_receipt, _ = commit(people, {**project_source, "archive_digest": project_preview["archive_digest"],
+                                         "review_token": project_preview["review_token"]}, knowledge, projects, tasks)
+    task_id = "38383838-3838-4838-8838-383838383838"
+    task_source = domains_archive({"admin": [{"id": task_id, "title": "Fresh action", "status": "open", "nextAction": "Act",
+        "createdAt": "2026-04-01T00:00:00Z", "updatedAt": "2026-04-02T00:00:00Z"}]})
+    task_preview = preview(task_source)
+    task_receipt, _ = commit(people, {**task_source, "archive_digest": task_preview["archive_digest"],
+                                      "review_token": task_preview["review_token"]}, knowledge, projects, tasks)
+    knowledge.close()
+
+    reopened_people = PeopleStore(home / "capabilities/communications")
+    reopened_knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    reopened_projects, reopened_tasks = BoundHierarchy(home), BoundTasks(home)
+    assert reopened_people.people()[0]["name"] == "Fresh Person"
+    assert reopened_knowledge.get_item(memory_id)["content"] == "Restored content"
+    assert reopened_projects.get_project(project_id).name == "Fresh project"
+    assert reopened_tasks._read_task(reopened_tasks._task_path(task_id)).title == "Fresh action"
+    restored_receipts = receipts(reopened_people, reopened_knowledge, reopened_projects, reopened_tasks)
+    assert {row["archive_digest"] for row in restored_receipts} == {
+        person_receipt["archive_digest"], knowledge_receipt["archive_digest"],
+        project_receipt["archive_digest"], task_receipt["archive_digest"],
+    }
+    reopened_knowledge.close()
