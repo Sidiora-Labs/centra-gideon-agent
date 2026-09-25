@@ -1,0 +1,41 @@
+{
+  "id": "media.05",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "ed59aa6d",
+  "contract": "Bounded selected-provider availability and typed model catalog observations reuse existing image/video registries and local management registry. Durable sanitized SQLite observation is cached separately from explicit refresh. Status distinguishes missing selection/provider/model/download and availability errors; configured never claims inference, valid credentials, remote reachability or GPU capacity. Existing settings remain authoritative for model install and selection. HTTP/tools/UI consume same observation.",
+  "acceptance": "Real provider adapter configuration/catalog checks without external generation, actual typed image/video catalog metadata, SQLite reopen/update, real empty-registry subprocess refresh, HTTP/tool scope validation and UI rendering with stale/inference boundaries. No fake provider or GPU result. External configured provider inference requires future operator qualification.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/readiness.py",
+    "runtime/gideon/workspace/capabilities/media/readiness_http.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/Readiness.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_readiness.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/Readiness.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_readiness.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/Readiness.test.tsx"
+  ],
+  "durability_path": "capabilities/media/readiness.sqlite3",
+  "remaining_limits": [
+    "Availability semantics are provider-defined; all responses explicitly leave inference_verified false",
+    "Remote inference, GPU fitness, model installation and live browser are not qualified by this task",
+    "Hosted uses a separately bound captured-grant observation adapter instead of global registries"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.05",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.05-checks-zxyyusfk/evidence.json",
+  "production_lines": 146,
+  "test_lines": 222,
+  "ratio": 1.5205479452054795,
+  "repair_cycles": 1
+}

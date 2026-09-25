@@ -1,0 +1,44 @@
+{
+  "id": "media.02",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "2125fbc0",
+  "contract": "Canonical image/video artifact projection with query-wide kind/tag/collection facets, search and offset/limit pagination; canonical name/tags/single collection metadata CAS; validated original image import preserving bytes with filename and SHA256 provenance and idempotent request ID. Existing videos are projected; video upload is not this task.",
+  "acceptance": "Import actual PNG/JPEG/WebP through HTTP, inspect original bytes and provenance, retry same request, reject conflicting or invalid imports; browse mixed existing image/video artifacts using filters/facets/pagination; edit canonical metadata with stale/concurrent rejection and unchanged original bytes; reopen provider and preserve results; isolated roots cannot access each other; real console cards and entry controls render, with integrated browser interactions recorded separately.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/library.py",
+    "runtime/gideon/workspace/capabilities/media/library_http.py",
+    "runtime/gideon/workspace/artifacts/native.py",
+    "runtime/gideon/workspace/artifacts/provider.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/LibraryPage.tsx",
+    "apps/console/src/features/capabilities/media/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_library.py",
+    "apps/console/src/features/capabilities/media/LibraryPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_library.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/LibraryPage.test.tsx"
+  ],
+  "dependencies": [
+    "Canonical artifact provider, metadata lock and versioned bytes",
+    "Pillow image validation",
+    "Real FFmpeg fixture encoder for existing video projection test"
+  ],
+  "remaining_limits": [
+    "Browser interaction and integrated TypeScript/build qualification pending",
+    "Artifact locking protects cooperating writers within one runtime process, not independent processes",
+    "Existing collection metadata supports one collection per artifact"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.02",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.02-checks-6ih8iy6s/evidence.json",
+  "production_lines": 248,
+  "test_lines": 290,
+  "ratio": 1.1693548387096775,
+  "repair_cycles": 1
+}
