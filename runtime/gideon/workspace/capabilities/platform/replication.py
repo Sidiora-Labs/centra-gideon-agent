@@ -18,6 +18,7 @@ from gideon.workspace.capabilities.platform import replication_creative_directio
 from gideon.workspace.capabilities.platform import replication_experience_stories
 from gideon.workspace.capabilities.platform import replication_identity_stories
 from gideon.workspace.capabilities.platform import replication_knowledge_collections
+from gideon.workspace.capabilities.platform import replication_memory
 from gideon.workspace.capabilities.platform import replication_music_video
 from gideon.workspace.capabilities.platform import replication_video
 
@@ -42,6 +43,7 @@ DOMAINS = {
     "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
     replication_identity_stories.SCOPE: Domain(replication_identity_stories.SCOPE, replication_identity_stories.ENTRIES),
     replication_experience_stories.SCOPE: Domain(replication_experience_stories.SCOPE, replication_experience_stories.ENTRIES),
+    replication_memory.SCOPE: Domain(replication_memory.SCOPE, replication_memory.ENTRIES),
     "communications.contacts": Domain("communications.contacts", tuple(replication_adapters.COMMUNICATION_TABLES)),
     "music.library": Domain("music.library", replication_adapters.MUSIC_ENTRIES),
     "media.assets": Domain("media.assets", replication_adapters.MEDIA_ENTRIES),
@@ -104,6 +106,8 @@ class ReplicationService:
             return replication_experience_stories.read_rows(self.home, entry_id)
         if entry_id in replication_commissions.ENTRIES:
             return replication_commissions.read_rows(self.home, entry_id)
+        if entry_id in replication_memory.ENTRIES:
+            return replication_memory.read_rows(self.home, entry_id)
         if entry_id in replication_creative_direction.ENTRIES:
             return replication_creative_direction.read_rows(self.home, entry_id)
         if entry_id in replication_video.ENTRIES:
@@ -172,6 +176,8 @@ class ReplicationService:
                 replication_experience_stories.validate_entries(entries)
             if scope == replication_commissions.SCOPE:
                 replication_commissions.validate_entries(entries)
+            if scope == replication_memory.SCOPE:
+                replication_memory.validate_entries(entries)
             if scope == replication_creative_direction.SCOPE:
                 replication_creative_direction.validate_entries(entries)
             if scope == replication_video.SCOPE:
@@ -226,6 +232,11 @@ class ReplicationService:
                 elif entry_id in replication_commissions.ENTRIES:
                     try:
                         result = replication_commissions.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
+                    except ValueError as error:
+                        raise ReplicationError(str(error), 422) from error
+                elif entry_id in replication_memory.ENTRIES:
+                    try:
+                        result = replication_memory.apply_rows(self.home, entry_id, item["rows"], self._ancestors(connection, peer_id, entry_id), queue, now)
                     except ValueError as error:
                         raise ReplicationError(str(error), 422) from error
                 elif entry_id in replication_creative_direction.ENTRIES:
@@ -292,6 +303,8 @@ class ReplicationService:
                 return replication_experience_stories.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_commissions.ENTRIES:
                 return replication_commissions.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
+            if record is not None and record.entry_id in replication_memory.ENTRIES:
+                return replication_memory.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_creative_direction.ENTRIES:
                 return replication_creative_direction.restore_fields(self.home, conflict_id, fields, datetime.now(timezone.utc).isoformat())
             if record is not None and record.entry_id in replication_video.ENTRIES:
