@@ -7,6 +7,7 @@ from gideon.core.config import config_dir
 from gideon.engine import session_restrictions
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.integrations.tool_providers.base import ToolProvider, ToolResult
+from gideon.workspace.capabilities.identity.bundles import BundleService
 from gideon.workspace.capabilities.identity.continuity import ContinuityStore
 from gideon.workspace.capabilities.identity.progress import ProgressStore
 from gideon.workspace.capabilities.identity.goals import GoalStore
@@ -79,6 +80,8 @@ class IdentityToolProvider(ToolProvider):
 
     def _execute(self, name, arguments):
         directory = self.home / "capabilities/identity"
+        if name == "identity_bundle_inventory":
+            return BundleService(self.home).inventory()
         if name.startswith("identity_continuity_"):
             if name == "identity_continuity_append_anchor":
                 arguments["source"] = "agent_explicit"

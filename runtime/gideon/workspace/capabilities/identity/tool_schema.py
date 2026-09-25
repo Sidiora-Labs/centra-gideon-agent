@@ -81,6 +81,9 @@ CONTRACTS.update({
 })
 
 
+CONTRACTS["identity_bundle_inventory"] = ({}, [], "List transferable continuity groups and exclusions; passphrase operations remain in human console", False)
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},
