@@ -6,6 +6,7 @@ from gideon.interfaces.dashboard.handlers.prompts import api_prompt_syntax
 from gideon.interfaces.dashboard.handlers.capabilities_harnesses import register as register_harnesses
 from gideon.interfaces.dashboard.handlers.capabilities_comparisons import register as register_comparisons
 from gideon.interfaces.dashboard.handlers.capabilities_references import register as register_references
+from gideon.interfaces.dashboard.handlers.capabilities_ownership import register as register_ownership
 from gideon.interfaces.dashboard.token_auth import token_auth_middleware
 
 
@@ -15,6 +16,7 @@ async def main():
     register_harnesses(app)
     register_comparisons(app)
     register_references(app)
+    register_ownership(app)
     app.router.add_get("/api/prompts/syntax", api_prompt_syntax)
     runner = web.AppRunner(app)
     await runner.setup()
