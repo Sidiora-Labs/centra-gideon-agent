@@ -1,0 +1,51 @@
+{
+  "id": "platform.09",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "base_revision": "8424b880",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/platform/quotas.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform_quotas.py",
+    "apps/console/src/features/capabilities/platform/Quotas.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/platform/test_quotas.py",
+    "apps/console/src/features/capabilities/platform/Quotas.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/platform/test_quotas.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/platform/Quotas.test.tsx"
+  ],
+  "contract": "Revisioned owner-configured subscription quota plans bind exact provider names, cycle windows and optional token/dollar ceilings. Summaries reuse canonical local TurnUsage evidence and atomically subtract active local-planning reservations. Provider-reported percentages remain separate typed adapter evidence and never create ceilings, entitlement or runtime admission. HTTP/UI can configure, inspect, reserve and release planning capacity but cannot write provider evidence or grant provider capacity.",
+  "remaining_limits": [
+    "No provider account adapter is wired in this slice, so live provider quota evidence remains absent rather than inferred",
+    "Configured availability and reservations are local planning controls; they do not grant provider entitlement or enforce runtime admission",
+    "Historical canonical usage without matching provider identity is not attributed to a plan",
+    "Dashboard registration, Platform page composition, native tool registration and durability inventory enrollment for capabilities/platform_quotas.sqlite3 remain root-owned integration hooks"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify platform.09",
+  "exit_code": 0,
+  "evidence_log": "/tmp/gideon-platform.09-checks-tsr4pa9k/evidence.json",
+  "repair_cycles": 0,
+  "production_lines": 354,
+  "test_lines": 372,
+  "test_ratio": 1.0508474576271187,
+  "file_hashes": {
+    "apps/console/src/features/capabilities/platform/Quotas.tsx": "71ffc07125d3fac84892386954783deb86736f651588b6c34205f8627ed6b62d",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform_quotas.py": "12bd2de6f8e0fb2f4fabdf3447a6fe2cecd45f9b3e9b8727a1ff4300e84946b8",
+    "runtime/gideon/workspace/capabilities/platform/quotas.py": "8299289e74263e5cc5957deac5fd86fa69ae078803b6a6b111eedf3b862c1711",
+    "apps/console/src/features/capabilities/platform/Quotas.test.tsx": "310c1fa22b5f2b3e968084d9f481a19222756ea17adc2b3c89438fc0e92483b7",
+    "checks/runtime/capabilities/platform/test_quotas.py": "1d4032b71824c7684a0fa3b20d04fb0797ba2a71fe87edeab963678f6af5944c"
+  },
+  "acceptance_coverage": [
+    "revisioned owner-configured plan terms with explicit source and bounded cycle",
+    "canonical provider-matched local usage projection with unpriced evidence retained",
+    "atomic token/dollar reservations prevent concurrent overbooking and expose expiry",
+    "idempotent release returns configured planning capacity and preserves history",
+    "typed provider evidence remains read-only through HTTP and does not alter configured availability",
+    "home isolation, no-store HTTP responses, conflict handling and no entitlement/admission routes",
+    "real HTTP React plan, usage, reserve, release, overbooking error and missing-provider-evidence workflow"
+  ]
+}
