@@ -1,0 +1,59 @@
+{
+  "id": "knowledge.09",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "96c33d90",
+  "contract": "Reviewed user-supplied captions and guarded public YouTube acquisition converge on one durable job, canonical source and timestamped transcript. Optional bounded audio/video artifacts use the same per-hop session egress guard, fixed host validation, progress and cancellation state.",
+  "acceptance": [
+    "Accept one canonical HTTPS YouTube video identity; reject credentials, alternate ports, playlists, malformed IDs, private destinations and redirects outside fixed public video endpoints.",
+    "Preview VTT, SRT or timed JSON captions without mutation; persist only the unchanged reviewed content with language, user-supplied/manual/automatic provenance and exact timestamp source links.",
+    "Retrieve actual public metadata and selected caption/audio/video artifacts through the pinned-IP egress client and optional pinned yt-dlp adapter; no downloader subprocess or unguarded network path.",
+    "Durable jobs expose ordered stage events, restart interruption, progress, cancellation, errors and independently landed transcript/artifact state; late failure does not erase completed output.",
+    "Canonical video source, original caption source and transcript deduplicate by video ID; immutable request replay returns the original result and changed reuse conflicts.",
+    "Captured allocation home, restricted sessions, byte/duration/redirect caps, artifact hashes, native approval policy, actual HTTP and DOM consumers are enforced."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/transcript_format.py",
+    "runtime/gideon/workspace/capabilities/knowledge/video_fetch.py",
+    "runtime/gideon/workspace/capabilities/knowledge/videos.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_videos.py",
+    "runtime/gideon/security/net/client.py",
+    "apps/console/src/features/capabilities/knowledge/VideosPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_videos.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/videos_ui_server.py",
+    "apps/console/src/features/capabilities/knowledge/VideosPage.test.tsx"
+  ],
+  "extra_files": [
+    "pyproject.toml"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_videos.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/knowledge/VideosPage.test.tsx"
+  ],
+  "remaining_limits": [
+    "Live success depends on the optional pinned yt-dlp package and public YouTube availability; unavailable or blocked access is recorded as a failed durable job, never provider success.",
+    "Acquisition is capped at six hours, 1 MiB per caption response, 32 MiB per selected single-file media artifact and 64 MiB aggregate guarded response bytes.",
+    "The adapter selects a bounded direct HTTPS stream; multi-stream muxing, DRM, private/authenticated videos, playlists and arbitrary video sites are outside this task.",
+    "Central dashboard registration and shared capability navigation are integrated by the root lane."
+  ],
+  "verification": {
+    "task": "knowledge.09",
+    "command": "python3 tooling/capability_workflow.py verify knowledge.09",
+    "exit_code": 0,
+    "log": "/tmp/gideon-knowledge.09-checks-x6_dfixl/evidence.json",
+    "status": "locally_qualified",
+    "production_lines": 902,
+    "test_lines": 909
+  },
+  "repair_history": [
+    "First gate compile and 120 runtime tests passed; UI had an ambiguous scoped-text assertion and selected-job state could remain stale after the list observed terminal progress.",
+    "Repair1 scoped the assertion to caption review and synchronized selected job state from durable list refresh; compile, 120 runtime tests and 4 real HTTP DOM tests passed."
+  ]
+}
