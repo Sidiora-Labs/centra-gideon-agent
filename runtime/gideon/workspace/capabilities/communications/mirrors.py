@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import imaplib
 import json
@@ -7,6 +8,7 @@ import mailbox
 import re
 import ssl
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timezone
 from email import policy
@@ -16,6 +18,10 @@ from uuid import uuid4
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.credentials import get_credential
+from gideon.security.net import EgressBlocked, STRICT
+from gideon.security.net.client import fetch
+from gideon.workspace.artifacts.models import kind_for_mime
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 from .evidence import ingest
 from .store import PeopleError, fields, person_values, text
 
@@ -23,6 +29,8 @@ ACCOUNT_FIELDS = {'name', 'kind', 'owner_email', 'alias', 'host', 'username', 'c
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_MESSAGES = 1000
 MAX_SCAN_BYTES = 16 * 1024 * 1024
+MAX_ATTACHMENTS = 20
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 _SYNC_LOCK = threading.Lock()
 COVERAGE = [
     {'adapter': 'maildir', 'implemented': True, 'qualification': 'local_files'},
@@ -30,7 +38,7 @@ COVERAGE = [
     {'adapter': 'imap', 'implemented': True, 'qualification': 'external_credentials_required'},
     {'adapter': 'gmail', 'implemented': True, 'transport': 'imap_tls', 'qualification': 'external_credentials_required'},
     {'adapter': 'outlook', 'implemented': True, 'transport': 'imap_tls', 'qualification': 'external_credentials_required'},
-    {'adapter': 'teams', 'implemented': False, 'qualification': 'connector_not_available_in_native_source'},
+    {'adapter': 'teams', 'implemented': True, 'integration': 'communications.14', 'qualification': 'separate_connector'},
 ]
 
 
@@ -144,7 +152,86 @@ def upload(store, account_id, data):
     return {'source_digest': hashlib.sha256(raw).hexdigest(), 'changed': not same, 'bytes': len(raw)}
 
 
-def normalize_message(raw, owner, fallback):
+def _fetch_attachment(url, content_type, policy):
+    bounded = policy.with_overrides(max_redirects=0, max_bytes=MAX_ATTACHMENT_BYTES + 1, timeout_s=10)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            response = executor.submit(lambda: asyncio.run(fetch(str(url).strip(), policy=bounded,
+                headers={'Accept': content_type, 'User-Agent': 'Gideon-Mail-Mirror/1'}))).result()
+    except (EgressBlocked, OSError, ValueError):
+        raise PeopleError('Attachment retrieval failed', 503) from None
+    if response.status != 200:
+        raise PeopleError('Attachment retrieval returned an unsuccessful status', 503)
+    declared = response.headers.get('Content-Length')
+    if declared is not None and (not declared.isdigit() or int(declared) > MAX_ATTACHMENT_BYTES):
+        raise PeopleError('Attachment response exceeds the size limit', 503)
+    received_type = response.headers.get('Content-Type', '').split(';', 1)[0].strip().casefold()
+    if received_type != content_type.casefold():
+        raise PeopleError('Attachment response content type does not match the message', 503)
+    data = response.body
+    if response.truncated or len(data) > MAX_ATTACHMENT_BYTES:
+        raise PeopleError('Attachment response exceeds the size limit', 503)
+    return data
+
+
+def _valid_content(data, content_type):
+    signatures = {
+        'application/pdf': (b'%PDF-',),
+        'image/png': (b'\x89PNG\r\n\x1a\n',),
+        'image/jpeg': (b'\xff\xd8\xff',),
+        'image/gif': (b'GIF87a', b'GIF89a'),
+        'image/webp': (b'RIFF',),
+        'video/mp4': (b'\x00\x00\x00',),
+        'video/webm': (b'\x1aE\xdf\xa3',),
+        'video/quicktime': (b'\x00\x00\x00',),
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': (b'PK\x03\x04',),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': (b'PK\x03\x04',),
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': (b'PK\x03\x04',),
+    }
+    expected = signatures.get(content_type)
+    if not data or expected is None or not any(data.startswith(prefix) for prefix in expected):
+        return False
+    if content_type == 'image/webp' and data[8:12] != b'WEBP':
+        return False
+    if content_type in ('video/mp4', 'video/quicktime') and data[4:8] != b'ftyp':
+        return False
+    return True
+
+
+def _artifact_provider(store):
+    root = store.path.parent
+    if root.name == 'communications' and root.parent.name == 'capabilities':
+        root = root.parent.parent
+    return NativeArtifactProvider(root / 'artifacts')
+
+
+def _materialize_attachment(store, account_id, external_id, index, attachment):
+    data = attachment.pop('_data')
+    digest = hashlib.sha256(data).hexdigest()
+    source_id = hashlib.sha256(f'{account_id}\0{external_id}\0{index}'.encode()).hexdigest()
+    attachment.update(source_id=source_id, sha256=digest, size=len(data))
+    kind = kind_for_mime(attachment['content_type'])
+    if not kind or not _valid_content(data, attachment['content_type']):
+        attachment.update(state='unsupported_content', artifact_id=None)
+        return
+    slug = f'mail-{account_id[:12]}-{source_id[:16]}-{digest[:16]}'
+    provider = _artifact_provider(store)
+    existing = provider.get(slug)
+    if existing is None:
+        artifact = provider.create_binary(name=attachment['filename'] or 'Mail attachment', data=data,
+                                          mime=attachment['content_type'], kind=kind, source='import', slug=slug,
+                                          description=f'Mail attachment from {external_id[:500]}',
+                                          tags=['mail-attachment', account_id], actor='system',
+                                          event_metadata={'source_id': source_id, 'sha256': digest})
+    else:
+        raw = provider.raw_bytes(slug)
+        if raw is None or raw[1] != attachment['content_type'] or hashlib.sha256(raw[0]).hexdigest() != digest:
+            raise PeopleError('Attachment artifact identity conflicts with stored bytes', 409)
+        artifact = existing
+    attachment.update(state='materialized', artifact_id=artifact.slug, artifact_uri=artifact.content)
+
+
+def normalize_message(raw, owner, fallback, attachment_policy=STRICT):
     message = BytesParser(policy=policy.default).parsebytes(raw)
     external_id = str(message.get('Message-ID', '')).strip() or fallback
     references = str(message.get('References', '')).split() or str(message.get('In-Reply-To', '')).split()
@@ -159,11 +246,25 @@ def normalize_message(raw, owner, fallback):
     except (ValueError, TypeError, OverflowError):
         pass
     bodies, attachments = [], []
-    for part in message.walk():
+    for part_index, part in enumerate(message.walk()):
         if part.is_multipart():
             continue
         if part.get_content_disposition() == 'attachment':
-            attachments.append({'filename': part.get_filename() or '', 'content_type': part.get_content_type(), 'size': len(part.get_payload(decode=True) or b'')})
+            if len(attachments) >= MAX_ATTACHMENTS:
+                raise PeopleError('Message has too many attachments')
+            content_type = part.get_content_type().casefold()
+            data = part.get_payload(decode=True) or b''
+            location = part.get('Content-Location', '')
+            if location:
+                if data:
+                    raise PeopleError('Attachment cannot contain bytes and a remote URL')
+                data = _fetch_attachment(location, content_type, attachment_policy)
+            if len(data) > MAX_ATTACHMENT_BYTES:
+                raise PeopleError('Attachment exceeds the size limit')
+            filename = part.get_filename() or ''
+            if len(filename) > 500 or '\x00' in filename or '/' in filename or '\\' in filename:
+                raise PeopleError('Attachment filename is invalid')
+            attachments.append({'filename': filename, 'content_type': content_type, 'part_index': part_index, '_data': data})
         elif part.get_content_type() == 'text/plain':
             try:
                 bodies.append(part.get_content())
@@ -272,26 +373,29 @@ def messages(store, account_id):
         return [json.loads(body) for body, in db.execute('SELECT body FROM mirror_messages WHERE account_id=? ORDER BY external_id', (account_id,))]
 
 
-def sync(store, account_id):
+def sync(store, account_id, *, attachment_policy=STRICT):
     if not _SYNC_LOCK.acquire(blocking=False):
         raise PeopleError("A mail sync is already running; retry after it completes", 409)
     try:
-        return _sync(store, account_id)
+        return _sync(store, account_id, attachment_policy=attachment_policy)
     finally:
         _SYNC_LOCK.release()
 
 
-def _sync(store, account_id):
+def _sync(store, account_id, *, attachment_policy=STRICT):
     account = get_account(store, account_id)
     captured = datetime.now(timezone.utc).isoformat()
     try:
         payloads, complete = imap_messages(account) if account['kind'] == 'imap' else local_messages(store, account)
         normalized = {}
         for raw in payloads:
-            row = normalize_message(raw, account['owner_email'], hashlib.sha256(raw).hexdigest())
+            row = normalize_message(raw, account['owner_email'], hashlib.sha256(raw).hexdigest(), attachment_policy)
             if row['external_id'] in normalized and normalized[row['external_id']] != row:
                 raise PeopleError('Conflicting messages share the same Message-ID', 409)
             normalized[row['external_id']] = row
+        for row in normalized.values():
+            for attachment in row['attachments']:
+                _materialize_attachment(store, account_id, row['external_id'], attachment.pop('part_index'), attachment)
         people = store.people()
         events = []
         for row in normalized.values():

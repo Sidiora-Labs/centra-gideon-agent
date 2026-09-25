@@ -3,13 +3,17 @@ import hashlib
 import json
 import mailbox
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import format_datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from aiohttp import ClientSession, web
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
+from gideon.security.net import LOOPBACK_INTERNAL
+from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore
 from gideon.workspace.capabilities.communications import mirrors
 from gideon.workspace.capabilities.communications.evidence import report
@@ -28,8 +32,59 @@ def mail(identifier='question', sender='friend@example.com', recipient='owner@ex
         message['References'] = f'<{reply}@example.com>'
     message.set_content('Plain body with café and source evidence\n')
     if attachment:
-        message.add_attachment(b'actual bytes', maintype='application', subtype='octet-stream', filename='report.bin')
+        message.add_attachment(b'%PDF-1.4\nactual bytes', maintype='application', subtype='pdf', filename='report.pdf')
     return message.as_string()
+
+
+def remote_mail(url, content_type='application/pdf'):
+    message = EmailMessage()
+    message['From'] = 'friend@example.com'
+    message['To'] = 'owner@example.com'
+    message['Message-ID'] = '<remote@example.com>'
+    message['Subject'] = 'Remote attachment'
+    message['Date'] = format_datetime(datetime.now(timezone.utc) - timedelta(minutes=1))
+    message.set_content('Remote attachment body')
+    maintype, subtype = content_type.split('/', 1)
+    message.add_attachment(b'', maintype=maintype, subtype=subtype, filename='remote.pdf')
+    message.get_payload()[-1]['Content-Location'] = url
+    return message.as_string()
+
+
+class AttachmentServer:
+    def __init__(self):
+        self.status = 200
+        self.body = b'%PDF-1.4\nremote bytes'
+        self.content_type = 'application/pdf'
+        self.location = ''
+        self.requests = 0
+
+        owner = self
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                owner.requests += 1
+                self.send_response(owner.status)
+                self.send_header('Content-Type', owner.content_type)
+                if owner.location:
+                    self.send_header('Location', owner.location)
+                self.send_header('Content-Length', str(len(owner.body)))
+                self.end_headers()
+                self.wfile.write(owner.body)
+
+            def log_message(self, *_args):
+                pass
+
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    @property
+    def url(self):
+        return f'http://127.0.0.1:{self.server.server_port}/attachment'
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
 
 
 def account(store, kind='maildir', **extra):
@@ -99,7 +154,15 @@ def test_maildir_original_upload_dedup_and_sync(tmp_path):
     assert len(rows) == 1
     assert rows[0]['source_digest'] == result['source_digest']
     assert rows[0]['body'].startswith('Plain body with café')
-    assert rows[0]['attachments'] == [{'filename': 'report.bin', 'content_type': 'application/octet-stream', 'size': 12}]
+    attachment = rows[0]['attachments'][0]
+    assert attachment['filename'] == 'report.pdf'
+    assert attachment['content_type'] == 'application/pdf'
+    assert attachment['size'] == len(b'%PDF-1.4\nactual bytes')
+    assert attachment['sha256'] == hashlib.sha256(b'%PDF-1.4\nactual bytes').hexdigest()
+    assert attachment['state'] == 'materialized'
+    assert attachment['artifact_id'].startswith('mail-' + row['id'][:12])
+    provider = NativeArtifactProvider(tmp_path / 'artifacts')
+    assert provider.raw_bytes(attachment['artifact_id']) == (b'%PDF-1.4\nactual bytes', 'application/pdf')
     assert rows[0]['direction'] == 'inbound'
     assert rows[0]['sender'] == ['friend@example.com']
     assert rows[0]['recipients'] == ['owner@example.com']
@@ -110,6 +173,71 @@ def test_maildir_original_upload_dedup_and_sync(tmp_path):
     assert threads[0]['qualification'] == 'recorded_evidence_only'
     assert mirrors.sync(store, row['id'])['seen'] == 1
     assert len(report(store)['threads']) == 1
+    assert provider.get(attachment['artifact_id']).version == 1
+
+
+def test_remote_attachment_real_guarded_protocol_and_restart_idempotence(tmp_path):
+    remote = AttachmentServer()
+    try:
+        store = PeopleStore(tmp_path)
+        row = account(store)
+        put(store, row, remote_mail(remote.url))
+        with pytest.raises(PeopleError, match='retrieval failed'):
+            mirrors.sync(store, row['id'])
+        assert remote.requests == 0
+        first = mirrors.sync(store, row['id'], attachment_policy=LOOPBACK_INTERNAL)
+        assert first['seen'] == 1
+        attachment = mirrors.messages(store, row['id'])[0]['attachments'][0]
+        assert attachment['state'] == 'materialized'
+        assert attachment['sha256'] == hashlib.sha256(remote.body).hexdigest()
+        restarted = PeopleStore(tmp_path)
+        mirrors.sync(restarted, row['id'], attachment_policy=LOOPBACK_INTERNAL)
+        persisted = mirrors.messages(restarted, row['id'])[0]['attachments'][0]
+        assert persisted == attachment
+        provider = NativeArtifactProvider(tmp_path / 'artifacts')
+        assert provider.raw_bytes(attachment['artifact_id']) == (remote.body, 'application/pdf')
+        assert provider.get(attachment['artifact_id']).version == 1
+    finally:
+        remote.close()
+
+
+@pytest.mark.parametrize('failure', ['redirect', 'type', 'oversize'])
+def test_remote_attachment_rejects_redirect_type_and_size(tmp_path, failure):
+    remote = AttachmentServer()
+    try:
+        if failure == 'redirect':
+            remote.status, remote.location = 302, remote.url
+        elif failure == 'type':
+            remote.content_type = 'text/plain'
+        else:
+            remote.body = b'x' * (mirrors.MAX_ATTACHMENT_BYTES + 1)
+        store = PeopleStore(tmp_path)
+        row = account(store)
+        put(store, row, remote_mail(remote.url))
+        with pytest.raises(PeopleError):
+            mirrors.sync(store, row['id'], attachment_policy=LOOPBACK_INTERNAL)
+        assert mirrors.messages(store, row['id']) == []
+        assert mirrors.get_account(store, row['id'])['sync']['state'] == 'failed'
+    finally:
+        remote.close()
+
+
+def test_unsupported_attachment_bytes_are_honest_and_hashed(tmp_path):
+    store = PeopleStore(tmp_path)
+    row = account(store)
+    message = EmailMessage()
+    message['From'] = 'friend@example.com'
+    message['To'] = 'owner@example.com'
+    message['Message-ID'] = '<opaque@example.com>'
+    message['Date'] = format_datetime(datetime.now(timezone.utc) - timedelta(minutes=1))
+    message.set_content('body')
+    message.add_attachment(b'opaque bytes', maintype='application', subtype='octet-stream', filename='data.bin')
+    put(store, row, message.as_string())
+    mirrors.sync(store, row['id'])
+    attachment = mirrors.messages(store, row['id'])[0]['attachments'][0]
+    assert attachment['state'] == 'unsupported_content'
+    assert attachment['artifact_id'] is None
+    assert attachment['sha256'] == hashlib.sha256(b'opaque bytes').hexdigest()
 
 
 def test_reply_and_equal_date_ambiguity(tmp_path):
@@ -277,7 +405,8 @@ def test_missing_remote_secret_is_honest_failure(tmp_path):
     with pytest.raises(PeopleError):
         put(store, row)
     providers = {value['adapter']: value for value in mirrors.COVERAGE}
-    assert providers['teams']['implemented'] is False
+    assert providers['teams']['implemented'] is True
+    assert providers['teams']['integration'] == 'communications.14'
     assert providers['gmail']['qualification'] == 'external_credentials_required'
     assert providers['outlook']['transport'] == 'imap_tls'
 
