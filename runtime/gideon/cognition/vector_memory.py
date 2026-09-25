@@ -15,6 +15,7 @@ import math
 import os
 import re
 import struct
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from fnmatch import fnmatch
@@ -96,6 +97,13 @@ class SemanticRejectCode(str, Enum):
     INJECTION = "injection_blocked"
     CONFLICT = "conflict_skip"
     SLOT_CAP = "slot_cap"
+
+
+@dataclass(frozen=True)
+class SemanticImportResult:
+    accepted: bool
+    code: str
+    message: str = ""
 
 
 _AUDITABLE_REJECT_CODES = {
@@ -724,6 +732,12 @@ class SemanticArchive(MemoryProvider):
             return
         payload = str(value) if value_json is None else value_json
         self._log_event(code.value, "semantic", key, None, payload[:200], source)
+
+    def import_semantic(self, record: "MemoryRecord") -> SemanticImportResult:
+        """Import one policy-screened semantic record with exact lifecycle state."""
+        from gideon.cognition.archive_semantics import SemanticImport
+
+        return SemanticImport(self).apply(record)
 
     def get_semantic(self, key: str) -> dict | None:
         from gideon.cognition.archive_semantics import RecordProjection
