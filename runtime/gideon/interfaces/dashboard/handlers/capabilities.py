@@ -12,6 +12,10 @@ def register(app):
         module = import_module(f"gideon.interfaces.dashboard.handlers.capabilities_{lane}")
         module.register(app)
     additional = (
+        ('/api/capabilities/identity/guarded-recipes', 'identity_guarded_recipes'),
+        ('/api/capabilities/wellbeing/privacy/{scope}', 'wellbeing_privacy'),
+        ('/api/capabilities/wellbeing/privacy/subjects/{subject}/organizations', 'wellbeing_holdings'),
+        ('/api/capabilities/platform/inference-host', 'inference_host'),
         ('/api/capabilities/platform/insights', 'insights'),
         ('/api/capabilities/knowledge/ideas', 'knowledge_ideas'),
         ('/api/capabilities/platform/accounting', 'accounting'),

@@ -23,7 +23,12 @@
     "extended_routes_inventory_and_snapshots": "/tmp/gideon-expansion-20260925/oss-integration-next-repair1.log",
     "ephemeral_desktop_exclusion_and_cadence_persistence": "/tmp/gideon-expansion-20260925/oss-snapshot-session-exclusion.log",
     "lifecycle_journal_listening_forecast_routes": "/tmp/gideon-expansion-20260925/oss-integrated-emission-routes.log",
-    "exports_compositions_engine_routes": "/tmp/gideon-expansion-20260925/oss-compositions-export-routes.log"
+    "exports_compositions_engine_routes": "/tmp/gideon-expansion-20260925/oss-compositions-export-routes.log",
+    "resume_state_enrollment": {
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-resume-integration.log",
+      "scope": "Sprite backup retention, listener settings preservation, peer authority export and generic-restore exclusion"
+    }
   },
   "remaining_limits": [
     "Later task routes/stores require incremental registration",

@@ -95,6 +95,10 @@ class StateEntry:
 
 
 INVENTORY: tuple[StateEntry, ...] = (
+    StateEntry(id="capability_media_sprites", kind=KIND_SQLITE, path="capabilities/media/sprites.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_inference_host", kind=KIND_JSON_FILE, path="capabilities/platform/inference_host.json", domain=DOMAIN_CONFIG, merge=MERGE_REPLACE_ONLY),
+    StateEntry(id="capability_peer_identity", kind=KIND_TREE, path="capabilities/platform/peers/identity.key", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
+    StateEntry(id="capability_peer_policy", kind=KIND_SQLITE, path="capabilities/platform/peers/peers.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
     StateEntry(id="capability_wellbeing_shared", kind=KIND_JSON_FILE, path="shared/wellbeing.json", domain=DOMAIN_KNOWLEDGE, merge=MERGE_REPLACE_ONLY),
     StateEntry(id="capability_privacy", kind=KIND_SQLITE, path="capabilities/privacy.sqlite3", domain=DOMAIN_SECURITY, merge=MERGE_REPLACE_ONLY, secret=True),
     StateEntry(id="capability_workspace_native_paired_devices", kind=KIND_SQLITE, path="capabilities/workspace/native/paired-devices.sqlite3", domain=DOMAIN_WORK, merge=MERGE_REPLACE_ONLY),
