@@ -5,6 +5,9 @@ import hashlib
 import io
 import json
 import sqlite3
+import subprocess
+import tempfile
+import math
 import wave
 from contextlib import contextmanager
 from pathlib import Path
@@ -134,6 +137,9 @@ class MusicCatalog:
         source = {'kind': 'imported', 'label': text(source['label'], 'source label', 500, True),
                   'license': text(source['license'], 'license', 500, True), 'model': None, 'job_id': None,
                   'attestation': 'user_supplied'}
+        return self._attach_verified(track_id, data['revision'], ref, source)
+
+    def _attach_verified(self, track_id, revision, ref, source):
         if not isinstance(ref, dict) or set(ref) != {'slug', 'version'}:
             raise DomainError('Canonical artifact slug and version required')
         slug = text(ref['slug'], 'artifact slug', 200, True)
@@ -142,17 +148,28 @@ class MusicCatalog:
         raw = self.artifacts.raw_bytes(slug, version=version) if artifact else None
         if artifact is None or raw is None:
             raise DomainError('Audio artifact version or bytes missing', 404, 'artifact_not_found')
-        if artifact.kind != 'audio' or raw[1] != 'audio/wav':
+        if artifact.kind != 'audio' or raw[1] not in ('audio/wav', 'audio/mpeg'):
             raise DomainError('Catalog measurement currently supports PCM WAV audio artifacts', 422, 'unsupported_audio')
-        try:
-            with wave.open(io.BytesIO(raw[0]), 'rb') as audio:
-                frames, rate = audio.getnframes(), audio.getframerate()
-                decoded = audio.readframes(frames)
-                if frames <= 0 or rate <= 0 or len(decoded) != frames * audio.getsampwidth() * audio.getnchannels():
-                    raise ValueError('Truncated or empty WAV')
-                duration = frames / rate
-        except (wave.Error, EOFError, ValueError) as exc:
-            raise DomainError('Invalid or truncated PCM WAV', 422, 'invalid_audio') from exc
+        if raw[1] == 'audio/mpeg':
+            try:
+                with tempfile.NamedTemporaryFile(suffix='.mp3') as file:
+                    file.write(raw[0]); file.flush()
+                    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', file.name], capture_output=True, timeout=15, check=True)
+                    duration = float(json.loads(probe.stdout)['format']['duration'])
+                    if not math.isfinite(duration) or duration <= 0:
+                        raise ValueError('Invalid duration')
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+                raise DomainError('MP3 measurement requires ffprobe and valid audio', 422, 'invalid_audio') from exc
+        else:
+            try:
+                with wave.open(io.BytesIO(raw[0]), 'rb') as audio:
+                    frames, rate = audio.getnframes(), audio.getframerate()
+                    decoded = audio.readframes(frames)
+                    if frames <= 0 or rate <= 0 or len(decoded) != frames * audio.getsampwidth() * audio.getnchannels():
+                        raise ValueError('Truncated or empty WAV')
+                    duration = frames / rate
+            except (wave.Error, EOFError, ValueError) as exc:
+                raise DomainError('Invalid or truncated PCM WAV', 422, 'invalid_audio') from exc
         with self._db() as db:
             track = self._read(db, 'tracks', track_id)
             for prior in track['renders']:
@@ -160,7 +177,7 @@ class MusicCatalog:
                     if prior['source'] == source:
                         return track
                     raise DomainError('This artifact version already has immutable provenance', 409, 'render_conflict')
-            self._revision(track, data)
+            self._revision(track, {'revision': revision})
             render = {'id': str(uuid4()), 'artifact_ref': ref, 'duration_seconds': duration,
                       'sha256': hashlib.sha256(raw[0]).hexdigest(), 'source': source}
             track['renders'].append(render)
