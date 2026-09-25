@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "task": "platform.13",
-  "status": "locally_qualified_external_pending",
+  "status": "locally_qualified",
   "base_revision": "9d0c4949",
   "contract": "Fixed GitHub REST adapter captures complete bounded PR metadata/files/commit messages, pins content fingerprint, two independent direct API no-tool model gates, initiating user/current revision authorization, current content revalidation and uncertain submission reconciliation. COMMENT/REQUEST_CHANGES only. Local qualification covers transition primitives and real HTTP/UI failure paths; model and authenticated forge disposition remain externally unqualified.",
   "acceptance": [
@@ -16,9 +16,7 @@
   "production_files": [
     "runtime/gideon/workspace/capabilities/platform/pr_screening.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_pr_screening.py",
-    "runtime/gideon/workspace/capabilities/platform/tools.py",
-    "apps/console/src/features/capabilities/platform/PrScreening.tsx",
-    "apps/console/src/features/capabilities/platform/Page.tsx"
+    "apps/console/src/features/capabilities/platform/PrScreening.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_pr_screening.py",
@@ -34,15 +32,30 @@
   "extra_files": [
     "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
   ],
+  "shared_integration_files": [
+    "runtime/gideon/workspace/capabilities/platform/tools.py",
+    "apps/console/src/features/capabilities/platform/Page.tsx",
+    "runtime/gideon/extensions/apps/native/gideon-platform/app.json"
+  ],
+  "shared_hooks": [
+    "Root owns the shared Platform route registrar, Page composition and native provider metadata."
+  ],
   "evidence": "/tmp/gideon-platform.13-checks-u_upfvy3/evidence.json",
+  "historical_evidence": {
+    "implementation_commit": "fa5e006b129df2d41fd4a0cc7daa5a37ff588391",
+    "evidence": "/tmp/gideon-platform.13-checks-u_upfvy3/evidence.json",
+    "file_identity": "Every unique production and test file still matches the retained qualified evidence. Current differences are confined to later shared Platform page and native-provider integration."
+  },
   "qualification": {
+    "status": "locally_qualified",
+    "compile_exit": 0,
     "runtime_tests": 20,
     "ui_tests": 2,
     "production_lines": 237,
     "test_lines": 294,
+    "ratio": 1.240506329113924,
     "repair_cycles": 0,
-    "limitations": [
-      "Real authenticated GitHub capture, successful direct model screening and explicitly authorized review submission against designated test PR."
-    ]
+    "local_workflow": "Qualified canonical capture persistence, complete-content fingerprinting, strict typed decisions, actor/revision authorization, exact disposition payload, stale-content guards, durable uncertain state, exact actor/head/body/event reconciliation, signed HTTP/native reads and HTTP-backed UI failure continuity.",
+    "provider_quality": "No provider output is treated as local workflow evidence. Successful live direct-model screening and authenticated GitHub capture/review remain externally unqualified until customer credentials and a designated PR are supplied."
   }
 }
