@@ -4,7 +4,7 @@
   "mode": "QUALIFY",
   "owner_lane": "platform",
   "status": "locally_qualified_partial",
-  "scope": "Checksummed bounded legacy snapshot preview and canonical restore for people, projects, tasks, knowledge, inbox, repertoire songs and verified song attachments",
+  "scope": "Checksummed bounded legacy snapshot preview, canonical domain restore and journalled project plus task coordination",
   "requires": [
     "platform.24"
   ],
@@ -38,24 +38,27 @@
     "One version-1 song retains its stable identity, typed repertoire metadata and practice schedule through the canonical RepertoireStore import transaction",
     "Every declared song attachment must be present under the archive songbook path with matching path, type, size and SHA-256; text is validated as UTF-8 and binary bytes are materialized as immutable version-1 native artifacts",
     "A durable prepared, artifacts_ready and complete journal coordinates the repertoire transaction with owned artifact publication, exact replay and restart rollback while preserving pre-existing identical artifacts",
-    "A fresh home reopens restored canonical people, knowledge, project, task, repertoire, artifact and receipt state through their production stores"
+    "A fresh home reopens restored canonical people, knowledge, project, task, repertoire, artifact and receipt state through their production stores",
+    "A mixed archive containing exactly one project and one admin action or tracked thread publishes through a bounded prepared, project_ready and complete recovery journal",
+    "Same-archive thread references bind to the restored stable project ID; caught failures compensate only unchanged coordinator-owned project and task records through canonical delete operations",
+    "Restart recovery rolls forward an unchanged interrupted coordinator plan, exact replay deduplicates its receipt, and edited or replaced canonical targets fail closed while preserving the journal",
+    "Standalone project and task receipts created before record fingerprints remain replay-compatible only when archive identity, review token and freshly derived canonical body all match"
   ],
   "limits": [
     "This sub-slice supports only version-1 people, projects, admin, threads, ideas, journals, memories, links, buckets, inbox and songs collection records; every other archive domain, relational dump and future schema is rejected.",
-    "People, project, task, song and knowledge archive families require separate imports so each authoritative store has explicit publication semantics; project, task and song archives are limited to one record.",
-    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal, but arbitrary mixed authoritative-store archives remain rejected rather than claiming unsupported global atomicity."
+    "People, song and knowledge archive families remain separate; projects may be coordinated only with exactly one admin action or tracked thread, and project, task and song families remain limited to one record.",
+    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal; every mixed authoritative-store matrix other than project plus task remains rejected."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
   "verification": {
-    "previous_increment_evidence": "/tmp/gideon-platform.25-checks-25amqi5m/evidence.json",
-    "failed_attempt": "/tmp/gideon-platform.25-checks-p3419b7_/evidence.json",
-    "evidence": "/tmp/gideon-platform.25-checks-1iluza_n/evidence.json",
+    "previous_increment_evidence": "/tmp/gideon-platform.25-checks-1iluza_n/evidence.json",
+    "evidence": "/tmp/gideon-platform.25-checks-mih5oau6/evidence.json",
     "compile_exit": 0,
-    "runtime_passed": 62,
-    "ui_passed": 6,
-    "production_lines": 916,
-    "test_lines": 934,
-    "repair_cycles": 1
+    "runtime_passed": 70,
+    "ui_passed": 7,
+    "production_lines": 1067,
+    "test_lines": 1125,
+    "repair_cycles": 0
   },
   "packaged_song_restore": {
     "test": "checks/runtime/capabilities/platform/test_migration_journal_durability.py",

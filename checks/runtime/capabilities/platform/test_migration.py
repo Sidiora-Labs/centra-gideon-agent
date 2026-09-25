@@ -8,11 +8,13 @@ from contextlib import closing
 
 import pytest
 
+from gideon.engine.tasks.models import Task
 from gideon.workspace.capabilities.communications import PeopleStore
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.music.store import RepertoireStore
+from gideon.workspace.capabilities.platform import migration
 from gideon.workspace.capabilities.platform.migration import FORMAT, MigrationError, commit, preview, receipts
 
 
@@ -94,6 +96,17 @@ def song_record(identity="song-1", attachments=None, **overrides):
     }
     record.update(overrides)
     return record
+
+
+def project_task_records(project_id="40404040-4040-4040-8040-404040404040", task_id="thread-mixed", refs=None):
+    project = {"id": project_id, "name": "Mixed restore", "status": "active", "nextAction": "Ship it",
+               "notes": "Coordinated project", "tags": ["migration"],
+               "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-02-01T00:00:00Z"}
+    thread = {"id": task_id, "title": "Coordinate restore", "status": "open", "priority": "high",
+              "nextAction": "Verify canonical IDs", "notes": "Coordinated task", "tags": ["migration"], "pinned": False,
+              "refs": refs if refs is not None else [{"kind": "brain.project", "id": project_id, "label": "Mixed restore"}],
+              "createdAt": "2026-02-02T00:00:00Z", "updatedAt": "2026-02-03T00:00:00Z"}
+    return project, thread
 
 
 def test_preview_verifies_manifest_and_maps_explicit_coverage():
@@ -385,6 +398,177 @@ def test_project_archive_refuses_multiple_records_and_mixed_store_domains(tmp_pa
     mixed = domains_archive({"projects": [project("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "Mixed")], "ideas": [{"id": "ffffffff-ffff-4fff-8fff-ffffffffffff", "title": "Idea", "status": "active", "oneLiner": "Idea", "createdAt": "2025-01-01T00:00:00Z", "updatedAt": "2025-01-01T00:00:00Z"}]})
     with pytest.raises(MigrationError, match="separate atomic imports"):
         preview(mixed)
+
+
+def test_project_and_thread_commit_with_same_archive_reference_and_exact_replay(tmp_path):
+    project, thread = project_task_records()
+    source = domains_archive({"projects": [project], "threads": [thread]})
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["projects", "threads"]
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, created = commit(people, payload, knowledge, projects, tasks)
+    assert created is True and receipt["domains"] == {"projects": 1, "threads": 1}
+    assert projects.get_project(project["id"]).name == "Mixed restore"
+    restored = tasks._read_task(tasks._task_path(thread["id"]))
+    assert restored.evidence[0]["references"] == [{"kind": "brain.project", "id": project["id"],
+                                                     "label": "Mixed restore", "canonical_id": project["id"]}]
+    replay, replay_created = commit(people, payload, knowledge, projects, tasks)
+    assert replay_created is False and replay == receipt
+    assert receipts(people, knowledge, projects, tasks) == [receipt]
+    knowledge.close()
+
+
+def _crashed_project_task_restore(tmp_path, *, edit_project=False):
+    project, thread = project_task_records(project_id="41414141-4141-4141-8141-414141414141", task_id="thread-restart")
+    source = domains_archive({"projects": [project], "threads": [thread]})
+    digest, token, records, generated, _ = migration._inspect(source)
+    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
+               "committed_at": "2026-09-25T12:00:00+00:00", "domains": {"projects": 1, "threads": 1},
+               "records": [{"source_id": project["id"], "project_id": project["id"], "domain": "projects"},
+                           {"source_id": thread["id"], "task_id": thread["id"], "domain": "threads"}]}
+    journal = {"schema": 1, "kind": "project_task", "status": "prepared", "archive_digest": digest,
+               "review_token": token, "generated_at": generated, "records": records,
+               "records_hash": hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest(), "receipt": receipt}
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    path = migration._coordinator_root(tasks) / f"{digest}.json"
+    migration._write_journal(path, journal)
+    migration._commit_project(projects, digest, token, [row for row in records if row["domain"] == "projects"],
+                              generated, receipt, require_fingerprint=True)
+    if edit_project:
+        project_path = home / "projects" / project["id"] / "project.json"
+        body = json.loads(project_path.read_text())
+        body["name"] = "Edited after interrupted restore"
+        project_path.write_text(json.dumps(body))
+    return source, receipt, people, knowledge, projects, tasks, path, project, thread
+
+
+def test_restart_rolls_forward_project_ready_journal_and_deduplicates_receipt(tmp_path):
+    source, receipt, people, knowledge, projects, tasks, path, project, thread = _crashed_project_task_restore(tmp_path)
+    assert not tasks._task_path(thread["id"]).exists()
+    assert receipts(people, knowledge, BoundHierarchy(projects.home), BoundTasks(tasks.home)) == [receipt]
+    assert BoundTasks(tasks.home)._task_path(thread["id"]).exists()
+    assert json.loads(path.read_text())["status"] == "complete"
+    checked = preview(source)
+    replay, created = commit(people, {**source, "archive_digest": checked["archive_digest"],
+                              "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert created is False and replay == receipt
+    knowledge.close()
+
+
+def test_caught_failure_after_project_publication_compensates_owned_project(tmp_path):
+    project, thread = project_task_records(refs=[{"kind": "brain.person", "id": "missing-person", "label": "Missing"}])
+    source = domains_archive({"projects": [project], "threads": [thread]})
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    with pytest.raises(MigrationError, match="does not resolve uniquely"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               knowledge, projects, tasks)
+    assert projects.get_project(project["id"]) is None and not tasks._task_path(thread["id"]).exists()
+    assert list(migration._coordinator_root(tasks).glob("*.json")) == []
+    knowledge.close()
+
+
+def test_restart_refuses_compensation_after_owned_project_was_edited(tmp_path):
+    _, _, people, knowledge, projects, tasks, path, project, thread = _crashed_project_task_restore(tmp_path, edit_project=True)
+    with pytest.raises(MigrationError, match="automatic compensation refused"):
+        receipts(people, knowledge, projects, tasks)
+    assert projects.get_project(project["id"]).name == "Edited after interrupted restore"
+    assert not tasks._task_path(thread["id"]).exists() and path.exists()
+    knowledge.close()
+
+
+def test_completed_coordinator_refuses_task_drift_and_preserves_journal(tmp_path):
+    project, thread = project_task_records(project_id="46464646-4646-4646-8646-464646464646", task_id="thread-drift")
+    source = domains_archive({"projects": [project], "threads": [thread]})
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+           knowledge, projects, tasks)
+    task_path = tasks._task_path(thread["id"])
+    body = json.loads(task_path.read_text()); body["title"] = "Edited after completion"; task_path.write_text(json.dumps(body))
+    journal = migration._coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    with pytest.raises(MigrationError, match="canonical identity drift"):
+        receipts(people, knowledge, projects, tasks)
+    assert json.loads(task_path.read_text())["title"] == "Edited after completion" and journal.exists()
+    knowledge.close()
+
+
+def test_coordinator_journal_record_hash_and_size_are_bounded(tmp_path):
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    root = migration._coordinator_root(tasks)
+    changed = root / ("a" * 64 + ".json")
+    changed.write_text(json.dumps({"schema": 1, "kind": "project_task", "status": "prepared",
+        "archive_digest": "a" * 64, "review_token": "b" * 64, "generated_at": "2026-01-01T00:00:00Z",
+        "records": [], "records_hash": "c" * 64, "receipt": {"archive_digest": "a" * 64}}))
+    with pytest.raises(MigrationError, match="record plan changed"):
+        receipts(people, knowledge, projects, tasks)
+    changed.unlink()
+    oversized = root / ("d" * 64 + ".json")
+    oversized.write_bytes(b" " * (2 * 1024 * 1024 + 1))
+    with pytest.raises(MigrationError, match="exceeds 2 MiB"):
+        receipts(people, knowledge, projects, tasks)
+    assert oversized.exists()
+    knowledge.close()
+
+
+def test_coordinator_target_collision_is_rejected_before_any_publication(tmp_path):
+    project, thread = project_task_records()
+    source = domains_archive({"projects": [project], "threads": [thread]})
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    tasks._write_task(Task(id=thread["id"], title="Existing task"))
+    with pytest.raises(MigrationError, match="target identity already exists"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               knowledge, projects, tasks)
+    assert projects.get_project(project["id"]) is None
+    assert tasks._read_task(tasks._task_path(thread["id"])).title == "Existing task"
+    assert list(migration._coordinator_root(tasks).glob("*.json")) == []
+    knowledge.close()
+
+
+def test_standalone_legacy_markers_without_fingerprint_replay_when_body_is_exact(tmp_path):
+    project_id = "42424242-4242-4242-8242-424242424242"
+    source = domains_archive({"projects": [{"id": project_id, "name": "Legacy marker", "status": "active",
+        "nextAction": "Replay", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    checked = preview(source)
+    people = PeopleStore(tmp_path / "people"); knowledge = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    projects = BoundHierarchy(tmp_path / "home")
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, _ = commit(people, payload, knowledge, projects)
+    marker = tmp_path / "home" / "projects" / project_id / ".migration-receipt.json"
+    legacy = json.loads(marker.read_text()); legacy.pop("record_fingerprint"); marker.write_text(json.dumps(legacy))
+    assert commit(people, payload, knowledge, projects) == (receipt, False)
+    task_id = "43434343-4343-4343-8343-434343434343"
+    task_source = domains_archive({"admin": [{"id": task_id, "title": "Legacy task marker", "status": "open",
+        "nextAction": "Replay", "notes": "", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}]})
+    task_checked = preview(task_source); tasks = BoundTasks(tmp_path / "home")
+    task_payload = {**task_source, "archive_digest": task_checked["archive_digest"], "review_token": task_checked["review_token"]}
+    task_receipt, _ = commit(people, task_payload, knowledge, projects, tasks)
+    task_path = tasks._task_path(task_id)
+    task_body = json.loads(task_path.read_text())
+    task_body["evidence"][0].pop("record_fingerprint")
+    task_path.write_text(json.dumps(task_body))
+    assert commit(people, task_payload, knowledge, projects, tasks) == (task_receipt, False)
+    knowledge.close()
 
 
 def test_journal_date_segments_and_idea_fields_fail_closed():

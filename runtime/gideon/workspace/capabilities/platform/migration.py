@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
 from gideon.engine.tasks.models import Project, Task, TaskPriority, TaskStatus
+from gideon.engine.tasks.native import TaskMutation
 from gideon.workspace.artifacts.models import kind_for_mime
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
@@ -147,7 +148,9 @@ def _inspect(data):
     domains = [domain for domain in ("people", "projects", "ideas", "journals", "memories", "links", "buckets", "inbox", "admin", "threads", "songs") if f"brain/{domain}/index.json" in data_files]
     if not domains:
         raise MigrationError("Archive contains no supported collection index")
-    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1:
+    coordinated_project_task = (set(domains) in ({"projects", "admin"}, {"projects", "threads"})
+                                and len(domains) == 2)
+    if any(domain in domains for domain in ("people", "projects", "admin", "threads", "songs")) and len(domains) > 1 and not coordinated_project_task:
         raise MigrationError("People, projects, tasks, songs and knowledge domains require separate atomic imports")
     for domain in domains:
         index = _json(data_files[f"brain/{domain}/index.json"], f"{domain.title()} collection index")
@@ -503,6 +506,10 @@ def commit(store: PeopleStore, data, knowledge: KnowledgeStore | None = None, pr
     digest, token, records, generated, domains = _inspect({"format": data["format"], "content": data["content"]})
     if data["archive_digest"] != digest or data["review_token"] != token:
         raise MigrationError("Archive changed since preview", 409)
+    if set(domains) in ({"projects", "admin"}, {"projects", "threads"}):
+        if projects is None or tasks is None:
+            raise MigrationError("Canonical project and task stores are unavailable", 503)
+        return _commit_coordinated_project_task(tasks, store, knowledge, projects, digest, token, records, generated)
     if domains == ["projects"]:
         if projects is None:
             raise MigrationError("Canonical project store is unavailable", 503)
@@ -607,34 +614,40 @@ def _commit_knowledge(store: KnowledgeStore, digest, token, records, generated):
     return receipt, True
 
 
-def _commit_project(store: BoundHierarchy, digest, token, records, generated):
+def _commit_project(store: BoundHierarchy, digest, token, records, generated, receipt=None, require_fingerprint=False):
     if len(records) != 1:
         raise MigrationError("Project archives must contain exactly one project for atomic publication")
     row = records[0]["values"]
     root = store._projects_dir()
     target = root / row["id"]
     receipt_path = target / ".migration-receipt.json"
+    project = Project(id=row["id"], name=row["name"], status=row["status"], brief=row["brief"], created_at=row["created_at"], updated_at=row["updated_at"])
+    project_body = project.to_dict()
+    record_fingerprint = hashlib.sha256(json.dumps(project_body, sort_keys=True).encode()).hexdigest()
     if target.exists():
         try:
             prior = json.loads(receipt_path.read_text())
+            actual_fingerprint = hashlib.sha256(json.dumps(json.loads((target / "project.json").read_text()), sort_keys=True).encode()).hexdigest()
         except (OSError, json.JSONDecodeError):
             raise MigrationError("Migration target identity already exists", 409) from None
-        if prior.get("archive_digest") != digest or prior.get("review_token") != token:
+        marker_fingerprint = prior.get("record_fingerprint")
+        if (prior.get("archive_digest") != digest or prior.get("review_token") != token
+                or actual_fingerprint != record_fingerprint
+                or marker_fingerprint not in ((record_fingerprint,) if require_fingerprint else (None, record_fingerprint))):
             raise MigrationError("Migration target identity already exists", 409)
         return prior["receipt"], False
     if store.get_project_by_name(row["name"]):
         raise MigrationError("A canonical project with this name already exists", 409)
-    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated, "committed_at": datetime.now(timezone.utc).isoformat(),
-               "domains": {"projects": 1}, "records": [{"source_id": row["id"], "project_id": row["id"], "domain": "projects"}]}
+    receipt = receipt or {"archive_digest": digest, "format": FORMAT, "generated_at": generated, "committed_at": datetime.now(timezone.utc).isoformat(),
+                          "domains": {"projects": 1}, "records": [{"source_id": row["id"], "project_id": row["id"], "domain": "projects"}]}
     staging = tempfile.mkdtemp(prefix=".migration-", dir=root)
     try:
         stage = os.path.join(staging)
         os.mkdir(os.path.join(stage, "context"))
-        project = Project(id=row["id"], name=row["name"], status=row["status"], brief=row["brief"], created_at=row["created_at"], updated_at=row["updated_at"])
         with open(os.path.join(stage, "project.json"), "w", encoding="utf-8") as stream:
-            json.dump(project.to_dict(), stream, indent=2)
+            json.dump(project_body, stream, indent=2)
         with open(os.path.join(stage, ".migration-receipt.json"), "w", encoding="utf-8") as stream:
-            json.dump({"archive_digest": digest, "review_token": token, "receipt": receipt}, stream)
+            json.dump({"archive_digest": digest, "review_token": token, "record_fingerprint": record_fingerprint, "receipt": receipt}, stream)
         os.rename(stage, target)
     except FileExistsError:
         raise MigrationError("Migration target identity already exists", 409) from None
@@ -671,31 +684,36 @@ def _resolve_task_refs(refs, people, knowledge, projects, tasks):
     return resolved
 
 
-def _commit_task(tasks, people, knowledge, projects, digest, token, records, generated):
+def _commit_task(tasks, people, knowledge, projects, digest, token, records, generated, receipt=None, require_fingerprint=False):
     if len(records) != 1:
         raise MigrationError("Task archives must contain exactly one record for atomic publication")
     row, values = records[0], records[0]["values"]
     target = tasks._task_path(values["id"])
+    receipt = receipt or {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
+                          "committed_at": datetime.now(timezone.utc).isoformat(), "domains": {row["domain"]: 1},
+                          "records": [{"source_id": row["source_id"], "task_id": values["id"], "domain": row["domain"]}]}
+    task = Task(id=values["id"], title=values["title"], status=TaskStatus(values["status"]), description=values["description"],
+                provider="native", priority=TaskPriority(values["priority"]), labels=values["labels"], due=values["due"],
+                action_plan=values["action_plan"], notes=values["notes"], blocked_reason_kind=values["blocked_reason_kind"],
+                evidence=[], created_at=values["created_at"], updated_at=values["updated_at"])
+    record_fingerprint = hashlib.sha256(json.dumps(task.to_dict(), sort_keys=True).encode()).hexdigest()
     if target.exists():
         try:
             body = json.loads(target.read_text())
             marker = next(item for item in body.get("evidence", []) if item.get("type") == "platform_migration")
         except (OSError, json.JSONDecodeError, StopIteration, AttributeError):
             raise MigrationError("Migration target identity already exists", 409) from None
-        if marker.get("archive_digest") != digest or marker.get("review_token") != token:
+        actual_fingerprint = hashlib.sha256(json.dumps({**body, "evidence": []}, sort_keys=True).encode()).hexdigest()
+        marker_fingerprint = marker.get("record_fingerprint")
+        if (marker.get("archive_digest") != digest or marker.get("review_token") != token
+                or actual_fingerprint != record_fingerprint
+                or marker_fingerprint not in ((record_fingerprint,) if require_fingerprint else (None, record_fingerprint))):
             raise MigrationError("Migration target identity already exists", 409)
         return marker["receipt"], False
     resolved_refs = _resolve_task_refs(values["refs"], people, knowledge, projects, tasks)
-    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
-               "committed_at": datetime.now(timezone.utc).isoformat(), "domains": {row["domain"]: 1},
-               "records": [{"source_id": row["source_id"], "task_id": values["id"], "domain": row["domain"]}]}
-    evidence = {"type": "platform_migration", "archive_digest": digest, "review_token": token, "receipt": receipt,
-                "source_collection": row["domain"], "source_record_id": row["source_id"], "references": resolved_refs,
-                "source_state": values["source_state"]}
-    task = Task(id=values["id"], title=values["title"], status=TaskStatus(values["status"]), description=values["description"],
-                provider="native", priority=TaskPriority(values["priority"]), labels=values["labels"], due=values["due"],
-                action_plan=values["action_plan"], notes=values["notes"], blocked_reason_kind=values["blocked_reason_kind"],
-                evidence=[evidence], created_at=values["created_at"], updated_at=values["updated_at"])
+    task.evidence = [{"type": "platform_migration", "archive_digest": digest, "review_token": token, "receipt": receipt,
+                      "source_collection": row["domain"], "source_record_id": row["source_id"], "references": resolved_refs,
+                      "source_state": values["source_state"], "record_fingerprint": record_fingerprint}]
     root = tasks._ensure_dir()
     descriptor, staging = tempfile.mkstemp(prefix=".migration-", suffix=".json", dir=root)
     try:
@@ -717,6 +735,149 @@ def _commit_task(tasks, people, knowledge, projects, digest, token, records, gen
         except FileNotFoundError:
             pass
     return receipt, True
+
+
+def _coordinator_root(tasks):
+    root = tasks.home / "capabilities" / "platform" / "migration-journals" / "coordinated"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _read_coordinator_journal(path):
+    try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            raise MigrationError("A coordinated migration recovery journal exceeds 2 MiB", 409)
+        journal = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise MigrationError("A coordinated migration recovery journal is unreadable", 409) from None
+    expected = {"schema", "kind", "status", "archive_digest", "review_token", "generated_at", "records", "records_hash", "receipt"}
+    if (not isinstance(journal, dict) or set(journal) != expected or journal.get("schema") != 1
+            or journal.get("kind") != "project_task" or journal.get("status") not in ("prepared", "project_ready", "complete")
+            or not SHA256.fullmatch(str(journal.get("archive_digest", "")))
+            or not SHA256.fullmatch(str(journal.get("review_token", "")))
+            or not isinstance(journal.get("generated_at"), str) or not isinstance(journal.get("records"), list)
+            or not SHA256.fullmatch(str(journal.get("records_hash", "")))
+            or not isinstance(journal.get("receipt"), dict)):
+        raise MigrationError("A coordinated migration recovery journal has an unsupported shape", 409)
+    observed_hash = hashlib.sha256(json.dumps(journal["records"], sort_keys=True).encode()).hexdigest()
+    if observed_hash != journal["records_hash"]:
+        raise MigrationError("A coordinated migration recovery journal record plan changed", 409)
+    domains = [row.get("domain") for row in journal["records"] if isinstance(row, dict)]
+    if (len(journal["records"]) != 2 or domains.count("projects") != 1
+            or sum(domain in ("admin", "threads") for domain in domains) != 1
+            or journal["receipt"].get("archive_digest") != journal["archive_digest"]):
+        raise MigrationError("A coordinated migration recovery journal has an unsupported plan", 409)
+    return journal
+
+
+def _project_state(projects, row, journal):
+    target = projects._projects_dir() / row["values"]["id"]
+    if not target.exists():
+        return "absent"
+    marker = target / ".migration-receipt.json"
+    try:
+        body = json.loads(marker.read_text())
+        actual = json.loads((target / "project.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return "drift"
+    actual_hash = hashlib.sha256(json.dumps(actual, sort_keys=True).encode()).hexdigest()
+    return "owned" if (body.get("archive_digest") == journal["archive_digest"]
+                         and body.get("review_token") == journal["review_token"]
+                         and body.get("record_fingerprint") == actual_hash) else "drift"
+
+
+def _task_state(tasks, row, journal):
+    path = tasks._task_path(row["values"]["id"])
+    if not path.exists():
+        return "absent"
+    try:
+        body = json.loads(path.read_text())
+        marker = next(item for item in body.get("evidence", []) if item.get("type") == "platform_migration")
+    except (OSError, json.JSONDecodeError, StopIteration, AttributeError):
+        return "drift"
+    actual_hash = hashlib.sha256(json.dumps({**body, "evidence": []}, sort_keys=True).encode()).hexdigest()
+    return "owned" if (marker.get("archive_digest") == journal["archive_digest"]
+                         and marker.get("review_token") == journal["review_token"]
+                         and marker.get("record_fingerprint") == actual_hash) else "drift"
+
+
+def _compensate_project_task(journal, tasks, projects):
+    project = next(row for row in journal["records"] if row["domain"] == "projects")
+    task = next(row for row in journal["records"] if row["domain"] in ("admin", "threads"))
+    task_id, project_id = task["values"]["id"], project["values"]["id"]
+    task_state, project_state = _task_state(tasks, task, journal), _project_state(projects, project, journal)
+    if "drift" in (task_state, project_state):
+        raise MigrationError("Coordinated migration identity changed; automatic compensation refused", 409)
+    if task_state == "owned":
+        if not TaskMutation(tasks).delete(task_id):
+            raise MigrationError("Coordinated task compensation could not be completed", 409)
+    if project_state == "owned":
+        if not projects.delete_project(project_id):
+            raise MigrationError("Coordinated project compensation could not be completed", 409)
+
+
+def _resume_coordinated_project_task(path, journal, tasks, people, knowledge, projects):
+    project_records = [row for row in journal["records"] if row["domain"] == "projects"]
+    task_records = [row for row in journal["records"] if row["domain"] in ("admin", "threads")]
+    try:
+        _commit_project(projects, journal["archive_digest"], journal["review_token"], project_records,
+                        journal["generated_at"], journal["receipt"], require_fingerprint=True)
+        journal["status"] = "project_ready"
+        _write_journal(path, journal)
+        _commit_task(tasks, people, knowledge, projects, journal["archive_digest"], journal["review_token"],
+                     task_records, journal["generated_at"], journal["receipt"], require_fingerprint=True)
+        journal["status"] = "complete"
+        _write_journal(path, journal)
+        return journal["receipt"]
+    except Exception:
+        _compensate_project_task(journal, tasks, projects)
+        if path.exists():
+            path.unlink()
+        raise
+
+
+def _recover_coordinated_journals(tasks, people, knowledge, projects):
+    for path in _coordinator_root(tasks).glob("*.json"):
+        journal = _read_coordinator_journal(path)
+        if journal["status"] == "complete":
+            project = next(row for row in journal["records"] if row["domain"] == "projects")
+            task = next(row for row in journal["records"] if row["domain"] in ("admin", "threads"))
+            if _project_state(projects, project, journal) != "owned" or _task_state(tasks, task, journal) != "owned":
+                raise MigrationError("A completed coordinated migration has canonical identity drift", 409)
+        else:
+            _resume_coordinated_project_task(path, journal, tasks, people, knowledge, projects)
+
+
+def _commit_coordinated_project_task(tasks, people, knowledge, projects, digest, token, records, generated):
+    project_records = [row for row in records if row["domain"] == "projects"]
+    task_records = [row for row in records if row["domain"] in ("admin", "threads")]
+    if len(project_records) != 1 or len(task_records) != 1 or len(records) != 2:
+        raise MigrationError("Coordinated project and task archives require exactly one record from each family")
+    _recover_coordinated_journals(tasks, people, knowledge, projects)
+    path = _coordinator_root(tasks) / (digest + ".json")
+    if path.exists():
+        prior = _read_coordinator_journal(path)
+        if prior["review_token"] != token:
+            raise MigrationError("Archive was already imported with different content", 409)
+        if prior["status"] != "complete":
+            _resume_coordinated_project_task(path, prior, tasks, people, knowledge, projects)
+        return prior["receipt"], False
+    project, task = project_records[0], task_records[0]
+    if ((projects._projects_dir() / project["values"]["id"]).exists()
+            or projects.get_project_by_name(project["values"]["name"])):
+        raise MigrationError("Migration target identity already exists", 409)
+    if tasks._task_path(task["values"]["id"]).exists():
+        raise MigrationError("Migration target identity already exists", 409)
+    receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
+               "committed_at": datetime.now(timezone.utc).isoformat(),
+               "domains": {"projects": 1, task["domain"]: 1},
+               "records": [{"source_id": project["source_id"], "project_id": project["values"]["id"], "domain": "projects"},
+                           {"source_id": task["source_id"], "task_id": task["values"]["id"], "domain": task["domain"]}]}
+    journal = {"schema": 1, "kind": "project_task", "status": "prepared", "archive_digest": digest,
+               "review_token": token, "generated_at": generated, "records": records,
+               "records_hash": hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest(), "receipt": receipt}
+    _write_journal(path, journal)
+    return _resume_coordinated_project_task(path, journal, tasks, people, knowledge, projects), True
 
 
 def _journal_root(repertoire):
@@ -882,6 +1043,8 @@ def _commit_song(repertoire, artifacts, digest, token, records, generated):
 def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projects: BoundHierarchy | None = None,
              tasks: BoundTasks | None = None, repertoire: RepertoireStore | None = None,
              artifacts: NativeArtifactProvider | None = None):
+    if tasks is not None and projects is not None:
+        _recover_coordinated_journals(tasks, store, knowledge, projects)
     with closing(store.connect()) as db:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_migrations'").fetchone()
         result = [] if not exists else [json.loads(row[0]) for row in db.execute("SELECT receipt FROM platform_migrations ORDER BY rowid DESC LIMIT 20")]
@@ -906,4 +1069,8 @@ def receipts(store: PeopleStore, knowledge: KnowledgeStore | None = None, projec
                     result.append(journal["receipt"])
             except KeyError:
                 raise MigrationError("A song migration recovery journal has an unsupported shape", 409) from None
-    return sorted(result, key=lambda row: row["committed_at"], reverse=True)[:20]
+    ordered = sorted(result, key=lambda row: row["committed_at"], reverse=True)
+    unique = {}
+    for row in ordered:
+        unique.setdefault(row["archive_digest"], row)
+    return list(unique.values())[:20]
