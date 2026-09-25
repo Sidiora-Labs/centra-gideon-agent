@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
+import Annotations from './Annotations'
 
 export type MediaItem = { id: string; name: string; kind: string; mime: string; version: number; updated_at: string; tags: string[]; collection: string; readonly: boolean; raw_url: string; provenance: Record<string, string | number> }
 type Result = { items: MediaItem[]; total: number; offset: number; limit: number; facets: { kinds: Record<string, number>; tags: Record<string, number>; collections: Record<string, number> } }
@@ -84,6 +85,7 @@ export default function LibraryPage() {
       {dirty && <p>Unsaved changes. Save or discard before selecting another artifact.</p>}
       {selected.readonly && <p>This artifact is read-only.</p>}
       <dl>{Object.entries(selected.provenance).map(([key, value]) => <div key={key}><dt>{key}</dt><dd className="break-all">{String(value)}</dd></div>)}</dl>
+      <Annotations key={selected.id + ':' + selected.version} artifactId={selected.id} version={selected.version} />
     </section>}
   </section>
 }

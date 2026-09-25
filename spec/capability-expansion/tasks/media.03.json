@@ -1,0 +1,40 @@
+{
+  "id": "media.03",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "b392d6dc",
+  "contract": "Revisioned annotation documents reference canonical artifact IDs and exact binary versions. Each contains stable note IDs/text, optional contained normalized image rectangles or bounded video time marks, and creator/license/HTTP source attribution. SQLite stores annotations and immutable revision history only; original media/import provenance remains canonical and unchanged. Atomic optimistic revisions and request-id replay protect edits. Deleted sources preserve readable notes with unavailable status. History summaries paginate and exact revision reads support restoration as new revisions.",
+  "acceptance": "Save/edit/replay/conflict/read historical and restore notes through real SQLite, HTTP and native tools; use actual image/video bytes, verify source version isolation and unchanged bytes/provenance; reject malformed note shapes/regions/times/URLs and caller scope overrides; retain notes on deleted source; page history; render real annotation entry/list UI with honest unavailable/loading/duration states. Browser interactions remain integrated qualification.",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/media/annotations.py",
+    "runtime/gideon/workspace/capabilities/media/annotations_http.py",
+    "runtime/gideon/workspace/capabilities/media/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_media.py",
+    "apps/console/src/features/capabilities/media/Annotations.tsx",
+    "apps/console/src/features/capabilities/media/LibraryPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/media/test_annotations.py",
+    "checks/runtime/capabilities/media/test_tools.py",
+    "apps/console/src/features/capabilities/media/Annotations.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/media/test_annotations.py",
+    "checks/runtime/capabilities/media/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/media/Annotations.test.tsx"
+  ],
+  "durability_path": "capabilities/media/annotations.sqlite3",
+  "remaining_limits": [
+    "Video duration is explicitly unverified; timestamps are bounded but not compared with decoded duration",
+    "Actual browser annotation editing/restoration/preview journey pending root integration",
+    "Central tool metadata enrollment and durability registration owned by root"
+  ],
+  "verify_cmd": "python3 tooling/capability_workflow.py verify media.03",
+  "exit_code": 0,
+  "evidence": "/tmp/gideon-media.03-checks-uqvyhac1/evidence.json",
+  "production_lines": 236,
+  "test_lines": 262,
+  "ratio": 1.1101694915254237
+}

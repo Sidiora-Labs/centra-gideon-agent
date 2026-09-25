@@ -46,3 +46,6 @@ def register(app):
     app.router.add_post(prefix + "/{id}/export", dispatch)
     from gideon.workspace.capabilities.media.library_http import register_library
     register_library(app, app[STORE_KEY].artifacts)
+    from gideon.workspace.capabilities.media.annotations import AnnotationStore
+    from gideon.workspace.capabilities.media.annotations_http import register_annotations
+    register_annotations(app, AnnotationStore(app[STORE_KEY].path.parent / 'annotations.sqlite3', app[STORE_KEY].artifacts))

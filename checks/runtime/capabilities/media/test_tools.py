@@ -33,8 +33,8 @@ async def test_manifest_and_discovery_are_executable(provider):
     assert manifest['provider']['implementation'] == 'gideon.workspace.capabilities.media.tools:create_provider'
     assert manifest['native'] is True
     tools = await provider.list_tools()
-    assert len(tools) == 8
-    assert len({tool.name for tool in tools}) == 8
+    assert len(tools) == 11
+    assert len({tool.name for tool in tools}) == 11
     assert provider.display_name == 'Gideon Media'
     for tool in tools:
         Draft202012Validator.check_schema(tool.parameters)
@@ -42,7 +42,7 @@ async def test_manifest_and_discovery_are_executable(provider):
         assert tool.parameters['additionalProperties'] is False
         assert tool.description
         assert not tool.requires_approval
-        if tool.name.endswith(('_get', '_list')):
+        if tool.name.endswith(('_get', '_list', '_history')):
             assert tool.risk_level == RiskLevel.SAFE
         else:
             assert tool.risk_level == RiskLevel.CAUTION
