@@ -33,6 +33,7 @@ it('pushes the actual canonical domain through signed self-peer HTTP and reloads
   expect(screen.getByText('creative.direction: creative.direction_projects')).toBeVisible()
   expect(screen.getByText(/identity.goals: identity.goals/)).toBeVisible()
   expect(screen.getByText(/identity.profile: identity.progress_profile/)).toBeVisible()
+  expect(screen.getByText('memory.records: memory.semantic_records')).toBeVisible()
   expect(screen.getByText('communications.contacts: communications.people, communications.touchpoints')).toBeVisible()
   expect(screen.getByText(/music.library: music.artists, music.tracks, music.albums/)).toBeVisible()
   expect(screen.getByText('media.assets: media.library_metadata')).toBeVisible()

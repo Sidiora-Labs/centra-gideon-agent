@@ -27,6 +27,7 @@ CATEGORIES = (
     "experience.stories",
     "knowledge.records",
     "knowledge.collections",
+    "memory.records",
     "media.assets",
     "media.video_projects",
     "media.remote_execution",
