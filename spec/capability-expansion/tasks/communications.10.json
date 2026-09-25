@@ -1,54 +1,112 @@
 {
   "id": "communications.10",
-  "status": "in_progress",
+  "status": "locally_qualified",
   "schema_version": 1,
-  "base_revision": "eeabfdb0",
+  "base_revision": "cd9b3bf20a8c65a9b16bf91f39369df039a3c89b",
   "requires": [
     "communications.09"
   ],
   "contract": "Registered active X identities support real read-only API user and post-page lookup via canonical credential references, captured coverage, and durable local drafts with explicit revision-bound browser compose review. No API posting.",
   "acceptance": [
-    "Real bounded provider adapter and normalized paginated post data with explicit unknown failures",
-    "Persistent idempotent draft/edit/review and revision-bound account change invalidation",
-    "Native tools plus real HTTP Console reading failure and compose handoff journey",
-    "No external posted claim and browser account selection limitation visible"
+    "The real aiohttp X read adapter resolves only the registered named credential and performs bounded non-redirecting user and paginated post reads",
+    "Normalized captured pages record explicit available-page, partial or unknown coverage; malformed, redirected, oversized and failed responses never fabricate posts",
+    "Persistent idempotent draft/edit/review and registration-revision invalidation retain exact reviewed text",
+    "Existing native tool and real HTTP Console journeys expose read failure and reviewed browser compose handoff without API posting"
   ],
   "production_files": [
     "runtime/gideon/workspace/capabilities/communications/xreading.py",
-    "runtime/gideon/workspace/capabilities/communications/tools.py",
-    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
-    "apps/console/src/features/capabilities/communications/XPanel.tsx",
-    "apps/console/src/features/capabilities/communications/Page.tsx"
+    "apps/console/src/features/capabilities/communications/XPanel.tsx"
   ],
   "test_files": [
     "checks/runtime/capabilities/communications/test_xreading.py",
-    "checks/runtime/capabilities/communications/test_tools.py",
     "apps/console/src/features/capabilities/communications/XPanel.test.tsx"
   ],
   "runtime_test_files": [
-    "checks/runtime/capabilities/communications/test_xreading.py",
-    "checks/runtime/capabilities/communications/test_tools.py"
+    "checks/runtime/capabilities/communications/test_xreading.py"
   ],
   "ui_test_files": [
     "apps/console/src/features/capabilities/communications/XPanel.test.tsx"
   ],
-  "extra_files": [
-    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
-  ],
   "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.10",
   "limits": [
-    "Live successful X read pending authorized credential and API access.",
-    "Browser compose handoff does not select the signed-in account or prove posting.",
-    "Local draft limit280characters; browser applies final X validation."
+    "Live successful X read remains pending explicit authorized credential and X API access; local qualification uses a read-only loopback HTTP provider harness with real aiohttp transport.",
+    "Browser compose handoff does not select the signed-in account, send a request to X, or prove publication.",
+    "Local drafts are limited to 280 characters; the browser applies final X validation.",
+    "communications.09 owns social registry persistence and shared handler, Page, native tool and manifest integration; this closure changes only unique X files and its task record."
   ],
   "sources": [
     "https://docs.x.com/x-api/users/get-user-by-username",
     "https://docs.x.com/x-api/users/get-posts"
   ],
-  "qualification": {
+  "prior_qualification": {
     "runtime": "41 passed",
     "console_http": "4 passed",
     "live_x_reads": "pending authorized API access",
     "external_posts": "none; browser handoff only"
+  },
+  "closure": "Adds missing success-path transport proof against a local read-only API while preserving the fixed production X endpoint and server-side credential resolution.",
+  "repair_cycles": 0,
+  "qualification": {
+    "runtime": "26 passed, including real loopback aiohttp adapter success, pagination, redirect refusal and 2 MiB response cap",
+    "console_http": "4 passed against the real local communications service",
+    "compile": "passed",
+    "test_to_production_ratio": 37.5,
+    "live_x_reads": "pending explicit authorized X credential and API access",
+    "external_posts": "none; reviewed browser handoff only"
+  },
+  "evidence": {
+    "task": "communications.10",
+    "root": "/tmp/gideon-expansion-worktrees/communications10-x",
+    "started_at": 1790310222.4737895,
+    "production_lines": 2,
+    "test_lines": 75,
+    "ratio": 37.5,
+    "stage": "all",
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/communications/xreading.py",
+          "checks/runtime/capabilities/communications/test_xreading.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-communications.10-checks-b2lgouaf/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/communications10-x/checks/runtime/capabilities/communications/test_xreading.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-communications.10-checks-b2lgouaf/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/communications10-x/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/communications10-x/apps/console/src/features/capabilities/communications/XPanel.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-communications.10-checks-b2lgouaf/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-communications.10-checks-b2lgouaf",
+    "completed_at": 1790310311.8711534,
+    "files": {
+      "apps/console/src/features/capabilities/communications/XPanel.tsx": "93e0b4d5112d412fedba4e0ee1cc5e55ebd8c26c09a9d5188636acc7ea70793d",
+      "runtime/gideon/workspace/capabilities/communications/xreading.py": "07776c7ec2d7705e2004fb5f4d27d8e68ba76a5ef7d33e47452c0d262e78bda4",
+      "apps/console/src/features/capabilities/communications/XPanel.test.tsx": "130cf7e9d4281ee0cfab42e3ea2bd7d9a6d99939d813355fae67d5048b41743b",
+      "checks/runtime/capabilities/communications/test_xreading.py": "44407e360e98e2d473280f3363ca91202330c61f881563cdcdd6a54eb05194f7"
+    }
   }
 }

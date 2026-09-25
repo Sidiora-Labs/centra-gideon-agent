@@ -50,13 +50,13 @@ def normalize_page(user, page):
     return {'user_id': profile['id'], 'username': profile['username'], 'posts': posts, 'next_token': token, 'coverage': 'partial' if user.get('errors') or page.get('errors') else 'available_page_only'}
 
 
-async def remote(row, token=None):
+async def remote(row, token=None, *, _api_root='https://api.x.com/2/'):
     credential = get_credential(row['credential_ref']) if row['credential_ref'] else None
     if not credential:
         raise PeopleError('X credential is unavailable', 409)
     async with ClientSession(timeout=ClientTimeout(total=20), headers={'Authorization': 'Bearer ' + credential}) as client:
         async def read(path, params=None):
-            async with client.get('https://api.x.com/2/' + path, params=params, allow_redirects=False) as response:
+            async with client.get(_api_root + path, params=params, allow_redirects=False) as response:
                 if response.status != 200:
                     raise PeopleError(f'X read failed (HTTP {response.status})', 502)
                 data = bytearray()
