@@ -28,6 +28,8 @@ DOMAINS = {
     "workspace.records": Domain("workspace.records", ("projects", "tasks")),
     "knowledge.records": Domain("knowledge.records", ("knowledge.items",)),
     "creative.catalog": Domain("creative.catalog", tuple(replication_adapters.CREATIVE_TABLES)),
+    "identity.goals": Domain("identity.goals", tuple(replication_adapters.IDENTITY_TABLES)),
+    "identity.profile": Domain("identity.profile", ("identity.progress_profile", "identity.twin_profile", "identity.twin_documents")),
 }
 _INVENTORY = {entry.id: entry for entry in inventory.INVENTORY}
 _DOMAIN_MERGES = {"projects": inventory.MERGE_LWW, "tasks": inventory.MERGE_LWW}

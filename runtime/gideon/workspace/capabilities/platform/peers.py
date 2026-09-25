@@ -27,6 +27,8 @@ CATEGORIES = (
     "knowledge.records",
     "media.assets",
     "creative.catalog",
+    "identity.goals",
+    "identity.profile",
     "music.library",
     "platform.usage",
 )

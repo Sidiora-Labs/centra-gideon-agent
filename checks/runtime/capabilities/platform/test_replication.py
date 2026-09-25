@@ -16,6 +16,10 @@ from gideon.workspace.capabilities.platform.replication import DOMAINS, Replicat
 from gideon.workspace.capabilities.platform.replication_tools import create_provider
 from gideon.workspace.capabilities.platform.replication_adapters import CREATIVE_TABLES
 from gideon.workspace.capabilities.creative.store import IngredientStore
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
+from gideon.workspace.capabilities.identity.goals import GoalStore
+from gideon.workspace.capabilities.identity.progress import ProgressStore
+from gideon.workspace.capabilities.identity.twin import TwinStore
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -304,11 +308,13 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": SCOPE, "entries": ["projects", "tasks"]},
         {"scope": "knowledge.records", "entries": ["knowledge.items"]},
         {"scope": "creative.catalog", "entries": ["creative.ingredients", "creative.moodboards", "creative.universes", "creative.authors", "creative.works", "creative.stories", "creative.series"]},
+        {"scope": "identity.goals", "entries": ["identity.goals", "identity.sessions", "identity.goal_plans", "identity.goal_checkins"]},
+        {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -436,3 +442,99 @@ async def test_field_restore_http_requires_dashboard_auth_and_refuses_unsafe_fie
     merged = get_domain_record(a_home, "creative.catalog", identity)
     assert merged["title"] == "remote"
     assert merged["body"] == "keep"
+
+
+def test_identity_goals_two_home_full_rows_conflict_restore_delete_restart_and_policy(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "identity.goals")
+    path_a = a_home / "capabilities/identity/goals.sqlite3"
+    goals_a = GoalStore(path_a)
+    goal = goals_a.save_goal(title="Shared goal", description="base", request_id="goal-create")
+    session = goals_a.save_session(goal_id=goal["id"], title="Focus", start_at="2026-10-01T10:00:00+00:00", end_at="2026-10-01T11:00:00+00:00", request_id="session-create")
+    plans_a = GoalPlanStore(path_a)
+    plans_a.configure(goal_id=goal["id"], parent_id=None, horizon="long_term", milestones=[], links=[{"kind": "session", "id": session["id"]}], unit="pages", target_value=100, expected_revision=0, request_id="plan-create")
+    checkin = plans_a.checkin(goal_id=goal["id"], value=10, observed_at="2026-10-01T12:00:00+00:00", notes="Started", request_id="checkin-create")
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "identity.goals")
+    assert [len(item["rows"]) for item in baseline["entries"]] == [1, 1, 1, 1]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    remote = GoalPlanStore(b_home / "capabilities/identity/goals.sqlite3").get(goal["id"])
+    assert remote["goal"]["title"] == "Shared goal"
+    assert remote["checkins"][0]["id"] == checkin["id"]
+
+    goals_b = GoalStore(b_home / "capabilities/identity/goals.sqlite3")
+    goals_a.save_goal(id=goal["id"], title="Local title", description="keep local", status="active", target_date=None, expected_revision=1, request_id="local-edit")
+    goals_b.save_goal(id=goal["id"], title="Peer title", description="peer body", status="active", target_date=None, expected_revision=1, request_id="peer-edit")
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "identity.goals")
+    result = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert result["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "identity.goals")
+    ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    merged = GoalStore(path_a).get_goal(goal["id"])
+    assert merged["title"] == "Peer title"
+    assert merged["description"] == "keep local"
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "identity.goals")
+    c_path = c_home / "capabilities/identity/goals.sqlite3"
+    doomed = GoalStore(c_path).save_goal(title="Delete me", request_id="delete-create")
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "identity.goals")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    with sqlite3.connect(c_path) as db: db.execute("DELETE FROM goals WHERE id=?", (doomed["id"],))
+    removal = ReplicationService(c_home).export_batch(did["peer_id"], "identity.goals")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], removal)["entries"][0]["removed"] == 1
+    with pytest.raises(KeyError): GoalStore(d_home / "capabilities/identity/goals.sqlite3").get_goal(doomed["id"])
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "identity.goals")
+
+
+def test_identity_profile_explicit_scope_excludes_private_and_syncs_public_conflicts_and_delete(home):
+    a_home, b_home = home / "a", home / "b"
+    aid, bid = pair_for(a_home, b_home, "identity.profile")
+    twin_a = TwinStore(a_home / "capabilities/identity/twin.sqlite3")
+    public = twin_a.save_document(title="Public identity", text="shareable", expected_revision=0)
+    public_id = public["documents"][0]["id"]
+    private = twin_a.save_document(title="Private identity", text="never-export-this", private=True, expected_revision=1)
+    twin_a.configure(expected_revision=2, enabled=True, traits={"openness": 0.8}, personas=[], active_persona_id=None)
+    ProgressStore(a_home / "capabilities/identity/progress.sqlite3").configure(birth_date="1990-01-01", timezone="UTC", tracked_task_ids=[], expected_revision=0, request_id="profile-create")
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "identity.profile")
+    wire = json.dumps(baseline)
+    assert "never-export-this" not in wire
+    assert [item["entry_id"] for item in baseline["entries"]] == ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    twin_b = TwinStore(b_home / "capabilities/identity/twin.sqlite3")
+    assert [item["title"] for item in twin_b.snapshot()["documents"]] == ["Public identity"]
+    assert ProgressStore(b_home / "capabilities/identity/progress.sqlite3").profile()["birth_date"] == "1990-01-01"
+
+    twin_a.save_document(id=public_id, title="Local identity", text="local kept", expected_revision=3)
+    twin_b.save_document(id=public_id, title="Peer identity", text="peer text", expected_revision=twin_b.snapshot()["revision"])
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "identity.profile")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][2]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "identity.twin_documents")
+    ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    state = TwinStore(a_home / "capabilities/identity/twin.sqlite3").snapshot()
+    restored = next(item for item in state["documents"] if item["id"] == public_id)
+    assert restored["title"] == "Peer identity" and restored["text"] == "local kept"
+    assert any(item["private"] and item["text"] == "never-export-this" for item in state["documents"])
+
+    c_home, d_home = home / "c", home / "d"
+    cid, did = pair_for(c_home, d_home, "identity.profile")
+    twin_c = TwinStore(c_home / "capabilities/identity/twin.sqlite3")
+    created = twin_c.save_document(title="Temporary", text="delete", expected_revision=0)
+    doomed = created["documents"][0]["id"]
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "identity.profile")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    twin_c.delete_document(doomed, expected_revision=1)
+    deletion = ReplicationService(c_home).export_batch(did["peer_id"], "identity.profile")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], deletion)["entries"][2]["removed"] == 1
+    assert TwinStore(d_home / "capabilities/identity/twin.sqlite3").snapshot()["documents"] == []
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "identity.profile")

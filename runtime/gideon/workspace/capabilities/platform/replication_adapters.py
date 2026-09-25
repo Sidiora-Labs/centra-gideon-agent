@@ -16,6 +16,9 @@ from gideon.workspace.capabilities.creative.store import IngredientStore
 from gideon.workspace.capabilities.creative.stories import StoryStore
 from gideon.workspace.capabilities.creative.universes import UniverseStore
 from gideon.workspace.capabilities.creative.works import WorkStore
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
+from gideon.workspace.capabilities.identity.progress import ProgressStore
+from gideon.workspace.capabilities.identity.twin import TwinStore
 
 
 @dataclass(frozen=True)
@@ -40,7 +43,14 @@ CREATIVE_TABLES = {
     "creative.stories": "stories",
     "creative.series": "series",
 }
-SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES})
+IDENTITY_TABLES = {
+    "identity.goals": "goals",
+    "identity.sessions": "sessions",
+    "identity.goal_plans": "goal_plans",
+    "identity.goal_checkins": "goal_checkins",
+}
+IDENTITY_ENTRIES = frozenset({*IDENTITY_TABLES, "identity.progress_profile", "identity.twin_profile", "identity.twin_documents"})
+SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES})
 
 
 def _knowledge(home: Path) -> KnowledgeStore:
@@ -53,6 +63,13 @@ def _creative_path(home: Path) -> Path:
     return home / "capabilities/creative/catalog.sqlite3"
 
 
+def _identity_paths(home: Path) -> tuple[Path, Path, Path]:
+    root = home / "capabilities/identity"
+    goals, progress, twin = root / "goals.sqlite3", root / "progress.sqlite3", root / "twin.sqlite3"
+    GoalPlanStore(goals); ProgressStore(progress); TwinStore(twin)
+    return goals, progress, twin
+
+
 def read_rows(home: Path, entry_id: str) -> list[dict]:
     if entry_id == "knowledge.items":
         store = _knowledge(home)
@@ -61,6 +78,21 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
             return [{"id": row["id"], "data": store.get_item(row["id"])} for row in rows]
         finally:
             store.db.close()
+    if entry_id in IDENTITY_ENTRIES:
+        goals, progress, twin = _identity_paths(home)
+        if entry_id in IDENTITY_TABLES:
+            table = IDENTITY_TABLES[entry_id]
+            with sqlite3.connect(goals) as db:
+                return [{"id": row[0], "data": json.loads(row[1])} for row in db.execute(f"SELECT id,body FROM {table} ORDER BY id")]
+        if entry_id == "identity.progress_profile":
+            with sqlite3.connect(progress) as db:
+                row = db.execute("SELECT body FROM profile WHERE id=1").fetchone()
+            return [{"id": "profile", "data": json.loads(row[0])}] if row else []
+        state = TwinStore(twin).snapshot()
+        if entry_id == "identity.twin_profile":
+            data = {key: state[key] for key in ("schema_version", "enabled", "traits", "personas", "active_persona_id")}
+            return [{"id": "profile", "data": data}]
+        return [{"id": row["id"], "data": row} for row in sorted(state["documents"], key=lambda row: row["id"]) if not row["private"]]
     table = CREATIVE_TABLES[entry_id]
     path = _creative_path(home)
     with sqlite3.connect(path) as db:
@@ -112,15 +144,56 @@ def _write_creative(home: Path, entry_id: str, row: dict | None, entity_id: str)
             db.execute(f"INSERT INTO {table}(id,record) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record", (entity_id, json.dumps(data, sort_keys=True)))
 
 
+def _write_identity(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
+    goals, progress, twin = _identity_paths(home)
+    if entry_id in IDENTITY_TABLES:
+        table = IDENTITY_TABLES[entry_id]
+        with sqlite3.connect(goals) as db:
+            if row is None:
+                db.execute(f"DELETE FROM {table} WHERE id=?", (entity_id,))
+            elif table == "goal_checkins":
+                data = row["data"]
+                db.execute("INSERT INTO goal_checkins(id,goal_id,observed_at,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET goal_id=excluded.goal_id,observed_at=excluded.observed_at,body=excluded.body", (entity_id, data["goal_id"], data["observed_at"], json.dumps(data, sort_keys=True)))
+            else:
+                db.execute(f"INSERT INTO {table}(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", (entity_id, json.dumps(row["data"], sort_keys=True)))
+        return
+    if entry_id == "identity.progress_profile":
+        with sqlite3.connect(progress) as db:
+            if row is None:
+                db.execute("DELETE FROM profile WHERE id=1")
+            else:
+                db.execute("INSERT INTO profile(id,body) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", (json.dumps(row["data"], sort_keys=True),))
+        return
+    with sqlite3.connect(twin) as db:
+        state = json.loads(db.execute("SELECT body FROM twin WHERE id=1").fetchone()[0])
+        if entry_id == "identity.twin_profile":
+            if row is None:
+                state.update(enabled=False, traits={}, personas=[], active_persona_id=None)
+            else:
+                state.update({key: row["data"][key] for key in ("enabled", "traits", "personas", "active_persona_id")})
+        else:
+            existing = next((item for item in state["documents"] if item["id"] == entity_id), None)
+            if existing and existing["private"]:
+                raise ValueError("Private identity documents are local and cannot be overwritten by replication")
+            state["documents"] = [item for item in state["documents"] if item["id"] != entity_id]
+            if row is not None:
+                document = dict(row["data"]); document["id"] = entity_id; document["private"] = False
+                state["documents"].append(document)
+        state["revision"] += 1
+        db.execute("UPDATE twin SET body=? WHERE id=1", (json.dumps(state, sort_keys=True),))
+
+
 def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
     if entry_id == "knowledge.items":
         _write_knowledge(home, row, entity_id)
-    else:
+    elif entry_id in CREATIVE_TABLES:
         _write_creative(home, entry_id, row, entity_id)
+    else:
+        _write_identity(home, entry_id, row, entity_id)
 
 
 def _conflict(entry_id: str, entity_id: str, ancestor: str, local: dict, remote: dict, now: str) -> conflicts.ConflictRecord:
-    domain = inventory.DOMAIN_KNOWLEDGE if entry_id == "knowledge.items" else inventory.DOMAIN_WORK
+    domain = inventory.DOMAIN_KNOWLEDGE if entry_id == "knowledge.items" else inventory.DOMAIN_MEMORY if entry_id in IDENTITY_ENTRIES else inventory.DOMAIN_WORK
     return conflicts.ConflictRecord(entry_id=entry_id, entity_id=entity_id, domain=domain,
         surface=conflicts.surface_for_domain(domain), ancestor_sha=ancestor,
         local_sha=conflicts.row_sha(local), remote_sha=conflicts.row_sha(remote),
