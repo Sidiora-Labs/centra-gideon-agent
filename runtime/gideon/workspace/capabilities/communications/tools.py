@@ -10,7 +10,7 @@ from . import PeopleError, PeopleStore, care
 from .evidence import ingest, report
 from .imports import commit, preview
 from .store import fields
-from . import mirrors, desktop
+from . import mirrors, desktop, beeper
 
 
 def obj(properties, required=()):
@@ -37,7 +37,20 @@ BATCH = obj({'source': STRING, 'source_account_id': STRING, 'captured_at': STRIN
             ('source', 'source_account_id', 'captured_at', 'coverage_start', 'coverage_end', 'incoming_complete', 'outgoing_complete', 'messages'))
 ACCOUNT = obj({key: STRING for key in mirrors.ACCOUNT_FIELDS}, ('name', 'kind', 'owner_email'))
 DESKTOP = {'source': {'enum': ['imessage', 'signal']}, 'source_account_id': STRING, 'content_base64': {'type': 'string', 'maxLength': 11184812}}
+OUTBOX_ACTION = {'outbox_id': STRING, 'revision': {'type': 'integer', 'minimum': 1}}
 SPECS = {
+    'people_beeper_settings': ('Read Beeper connection references.', obj({}), False),
+    'people_beeper_configure': ('Configure an existing Beeper Desktop connection.', obj({'base_url': STRING, 'credential_ref': STRING, 'revision': {'type': 'integer', 'minimum': 0}}, ('base_url', 'credential_ref', 'revision')), True),
+    'people_beeper_page': ('Read cached conversations or a chat message page.', obj({'chat_id': STRING}), False),
+    'people_beeper_refresh': ('Fetch a real Beeper chat or message page; history may be incomplete.', obj({'chat_id': STRING, 'cursor': STRING}), True),
+    'people_beeper_asset_fetch': ('Fetch a mirrored attachment by its Beeper media identity.', obj({'chat_id': STRING, 'asset_id': STRING}, ('chat_id', 'asset_id')), True),
+    'people_beeper_asset': ('Read cached attachment bytes.', obj({'asset_id': STRING}, ('asset_id',)), False),
+    'people_beeper_outbox': ('Read durable outbox states; pending is not delivery.', obj({}), False),
+    'people_beeper_draft': ('Queue a reviewed text draft without sending.', obj({'request_key': STRING, 'chat_id': STRING, 'text': STRING}, ('request_key', 'chat_id', 'text')), True),
+    'people_beeper_send': ('Send one explicitly approved queued message once. Unknown outcomes never retry automatically.', obj({**OUTBOX_ACTION, 'confirm_send': {'const': True}}, (*OUTBOX_ACTION, 'confirm_send')), True),
+    'people_beeper_reconcile': ('Read Beeper status for a pending ID without resending.', obj(OUTBOX_ACTION, OUTBOX_ACTION), True),
+    'people_beeper_discard': ('Discard a draft or unresolved item without retracting remote messages.', obj(OUTBOX_ACTION, OUTBOX_ACTION), True),
+    'people_beeper_recover': ('Mark an interrupted sending item unknown after one minute; never resend.', obj(OUTBOX_ACTION, OUTBOX_ACTION), True),
     'people_desktop_preview': ('Preview a plain desktop SQLite snapshot; encrypted databases require a local export.', obj(DESKTOP, DESKTOP), False),
     'people_desktop_commit': ('Commit a reviewed snapshot and incomplete-coverage evidence atomically.', obj({**DESKTOP, 'source_digest': STRING, 'review_token': STRING}, (*DESKTOP, 'source_digest', 'review_token')), True),
     'people_desktop_imports': ('Read durable desktop import receipts.', obj({}), False),
@@ -67,7 +80,7 @@ class PeopleTools(ToolProvider):
 
     async def list_tools(self):
         return [ToolDefinition(name=name, description=description, provider=self.name, parameters=schema,
-                               requires_approval=write, risk_level=RiskLevel.CAUTION if write else RiskLevel.SAFE)
+                               requires_approval=write, risk_level=RiskLevel.DESTRUCTIVE if name == 'people_beeper_send' else RiskLevel.CAUTION if write else RiskLevel.SAFE)
                 for name, (description, schema, write) in SPECS.items()]
 
     async def invoke(self, tool_name, arguments):
@@ -88,7 +101,32 @@ class PeopleTools(ToolProvider):
                 ZoneInfo(zone)
             except (ZoneInfoNotFoundError, TypeError, ValueError):
                 raise PeopleError('Unknown timezone') from None
-            if tool_name == 'people_desktop_preview':
+            if tool_name.startswith('people_beeper_'):
+                action = tool_name.removeprefix('people_beeper_')
+                if action == 'settings':
+                    result = {'settings': beeper.settings(store)}
+                elif action == 'configure':
+                    result = {'settings': beeper.configure(store, arguments)}
+                elif action == 'page':
+                    result = beeper.stored_page(store, arguments.get('chat_id'))
+                elif action == 'refresh':
+                    result = await beeper.refresh(store, arguments.get('chat_id'), arguments.get('cursor'))
+                elif action == 'asset_fetch':
+                    result = await beeper.fetch_asset(store, arguments['chat_id'], arguments['asset_id'])
+                elif action == 'asset':
+                    result = beeper.asset(store, arguments['asset_id'])
+                elif action == 'outbox':
+                    result = {'outbox': beeper.outbox(store)}
+                elif action == 'draft':
+                    row, created = beeper.draft(store, arguments)
+                    result = {'item': row, 'created': created}
+                elif action == 'send':
+                    result = {'item': await beeper.send(store, arguments['outbox_id'], {k: v for k, v in arguments.items() if k != 'outbox_id'})}
+                else:
+                    operation = getattr(beeper, action)
+                    row = await operation(store, arguments['outbox_id'], arguments['revision']) if action == 'reconcile' else operation(store, arguments['outbox_id'], arguments['revision'])
+                    result = {'item': row}
+            elif tool_name == 'people_desktop_preview':
                 result = desktop.preview(store, arguments)
             elif tool_name == 'people_desktop_commit':
                 receipt, created = desktop.commit(store, arguments)

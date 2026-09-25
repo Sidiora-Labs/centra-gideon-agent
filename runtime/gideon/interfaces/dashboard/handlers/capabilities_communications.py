@@ -8,12 +8,41 @@ from gideon.core.config.loader import AppConfig
 from gideon.workspace.capabilities.communications import PeopleError, PeopleStore, care
 from gideon.workspace.capabilities.communications.imports import commit, preview
 from gideon.workspace.capabilities.communications.evidence import ingest, report
-from gideon.workspace.capabilities.communications import mirrors, desktop
+from gideon.workspace.capabilities.communications import mirrors, desktop, beeper
 
 
 async def handle(request):
     try:
         store = PeopleStore()
+        if '/beeper/' in request.path:
+            route = request.path.rsplit('/', 1)[-1]
+            if route == 'settings':
+                return web.json_response({'settings': beeper.settings(store) if request.method == 'GET' else beeper.configure(store, await request.json())})
+            if route in ('chats', 'messages'):
+                return web.json_response(beeper.stored_page(store, request.query.get('chat_id') if route == 'messages' else None))
+            if route == 'refresh':
+                data = await request.json()
+                beeper.fields(data, {'chat_id', 'cursor'})
+                return web.json_response(await beeper.refresh(store, data.get('chat_id'), data.get('cursor')))
+            if route == 'assets':
+                if request.method == 'GET':
+                    return web.json_response(beeper.asset(store, request.query.get('id', '')))
+                data = await request.json()
+                beeper.fields(data, {'chat_id', 'asset_id'})
+                return web.json_response(await beeper.fetch_asset(store, data.get('chat_id', ''), data.get('asset_id', '')))
+            if route == 'outbox':
+                if request.method == 'GET':
+                    return web.json_response({'outbox': beeper.outbox(store)})
+                row, created = beeper.draft(store, await request.json())
+                return web.json_response({'item': row, 'created': created}, status=201 if created else 200)
+            data = await request.json()
+            item_id = request.match_info['outbox_id']
+            if route == 'send':
+                return web.json_response({'item': await beeper.send(store, item_id, data)})
+            beeper.fields(data, {'revision'})
+            operation = getattr(beeper, route)
+            row = await operation(store, item_id, data.get('revision')) if route == 'reconcile' else operation(store, item_id, data.get('revision'))
+            return web.json_response({'item': row})
         if '/desktop/' in request.path:
             if request.path.endswith('/imports'):
                 return web.json_response({'imports': desktop.imports(store)})
@@ -76,6 +105,14 @@ async def handle(request):
 
 
 def register(app):
+    beeper_base = "/api/capabilities/communications/beeper"
+    for route in ("settings", "chats", "messages", "assets", "outbox"):
+        app.router.add_get(beeper_base + "/" + route, handle)
+    app.router.add_put(beeper_base + "/settings", handle)
+    for route in ("refresh", "assets", "outbox"):
+        app.router.add_post(beeper_base + "/" + route, handle)
+    for route in ("send", "reconcile", "discard", "recover"):
+        app.router.add_post(beeper_base + "/outbox/{outbox_id}/" + route, handle)
     desktop_base = "/api/capabilities/communications/desktop"
     app.router.add_get(desktop_base + "/imports", handle)
     app.router.add_get(desktop_base + "/history", handle)
