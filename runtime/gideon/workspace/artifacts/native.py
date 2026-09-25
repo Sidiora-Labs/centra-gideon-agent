@@ -15,8 +15,10 @@ layer over a single on-disk file, not a copy. Every read/write is gated by
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -896,6 +898,69 @@ class NativeArtifactProvider(ArtifactProvider):
                 shutil.rmtree(d)
             except OSError:
                 logger.warning("artifact delete failed: %s", d, exc_info=True)
+                return False
+        changes.emit(changes.DELETE, slug)
+        return True
+
+    def _state_fingerprint_unlocked(self, slug: str) -> str | None:
+        """Hash the complete persisted artifact tree while the provider lock is held."""
+        if not is_valid_slug(slug):
+            raise ValueError(f"invalid slug: {slug!r}")
+        directory = self._ensure_root() / slug
+        if not os.path.lexists(directory):
+            return None
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError("artifact state is not a safe directory")
+        digest = hashlib.sha256()
+        try:
+            paths = sorted(directory.rglob("*"), key=lambda candidate: candidate.relative_to(directory).as_posix())
+        except OSError as exc:
+            raise ValueError("artifact state is unreadable") from exc
+        for path in paths:
+            relative = path.relative_to(directory).as_posix().encode()
+            if path.is_symlink():
+                raise ValueError("artifact state contains a symlink")
+            if path.is_dir():
+                digest.update(b"D")
+                digest.update(len(relative).to_bytes(4, "big"))
+                digest.update(relative)
+                continue
+            if not path.is_file():
+                raise ValueError("artifact state contains a special entry")
+            digest.update(b"F")
+            digest.update(len(relative).to_bytes(4, "big"))
+            digest.update(relative)
+            try:
+                with path.open("rb") as stream:
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+            except OSError:
+                raise ValueError("artifact state is unreadable") from None
+        return digest.hexdigest()
+
+    def state_fingerprint(self, slug: str) -> str | None:
+        """Return an exact fingerprint of metadata, events, current content and every version."""
+        with self._lock:
+            return self._state_fingerprint_unlocked(slug)
+
+    def delete_if_state(self, slug: str, expected_fingerprint: str) -> bool:
+        """Delete only when the complete artifact tree still matches a recorded state."""
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint or ""):
+            return False
+        with self._lock:
+            try:
+                observed = self._state_fingerprint_unlocked(slug)
+            except ValueError:
+                return False
+            if observed != expected_fingerprint:
+                return False
+            try:
+                directory = self._artifact_dir(slug)
+                import shutil
+
+                shutil.rmtree(directory)
+            except (OSError, ValueError):
+                logger.warning("conditional artifact delete failed: %s", slug, exc_info=True)
                 return False
         changes.emit(changes.DELETE, slug)
         return True

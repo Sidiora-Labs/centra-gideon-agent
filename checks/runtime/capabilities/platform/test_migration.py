@@ -1164,7 +1164,8 @@ def test_song_restart_recovers_incomplete_import_and_owned_attachment(tmp_path):
     journal_root.mkdir(parents=True)
     journal = {"schema": 1, "status": "artifacts_ready", "archive_digest": digest, "review_token": token,
                "import_id": import_id, "song_id": "song-recovery", "artifacts": [{"slug": slug, "version": 1,
-               "kind": "pdf", "mime": "application/pdf", "sha256": hashlib.sha256(raw).hexdigest(), "owned": True}]}
+               "kind": "pdf", "mime": "application/pdf", "sha256": hashlib.sha256(raw).hexdigest(), "owned": True,
+               "ownership_fingerprint": artifacts.state_fingerprint(slug)}]}
     (journal_root / f"{digest}.json").write_text(json.dumps(journal))
     assert receipts(PeopleStore(home / "people"), repertoire=RepertoireStore(home / "capabilities" / "music", artifacts),
                     artifacts=NativeArtifactProvider(home / "artifacts")) == []

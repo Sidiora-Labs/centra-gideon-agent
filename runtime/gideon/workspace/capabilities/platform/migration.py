@@ -1344,6 +1344,12 @@ def _read_song_journal(path):
         if (not isinstance(plan, dict) or not isinstance(plan.get("slug"), str)
                 or not SHA256.fullmatch(str(plan.get("sha256", ""))) or type(plan.get("owned")) is not bool):
             raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
+        fingerprint = plan.get("ownership_fingerprint")
+        if (journal["status"] == "artifacts_ready" and plan["owned"]
+                and not SHA256.fullmatch(str(fingerprint or ""))):
+            raise MigrationError("A song migration recovery journal has ambiguous artifact ownership", 409)
+        if fingerprint is not None and not SHA256.fullmatch(str(fingerprint)):
+            raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
     if journal["status"] == "complete" and not isinstance(journal["receipt"], dict):
         raise MigrationError("A song migration recovery journal has an unsupported shape", 409)
     return journal
@@ -1355,20 +1361,34 @@ def _recover_song_journals(repertoire, artifacts):
         journal = _read_song_journal(path)
         if journal.get("status") == "complete":
             continue
+        _rollback_song_state(repertoire, artifacts, journal["import_id"], journal["review_token"], journal["artifacts"])
+        path.unlink()
+
+
+def _rollback_song_state(repertoire, artifacts, import_id, token, plans):
+    """Preflight every owned artifact, then retain that exact state lock through rollback."""
+    with artifacts.mutation_lock:
+        for plan in plans:
+            if not plan.get("owned"):
+                continue
+            expected = plan.get("ownership_fingerprint")
+            try:
+                observed = artifacts.state_fingerprint(plan["slug"])
+            except (OSError, ValueError) as exc:
+                raise MigrationError("Interrupted song attachment cannot be rolled back safely", 409) from exc
+            if expected is None and observed is None:
+                continue
+            if (not SHA256.fullmatch(str(expected or "")) or observed != expected):
+                raise MigrationError("Interrupted song attachment cannot be rolled back safely", 409)
         try:
-            repertoire.rollback_import(journal["import_id"], journal["review_token"])
+            repertoire.rollback_import(import_id, token)
         except DomainError as exc:
             if exc.code != "import_not_found":
                 raise MigrationError("Interrupted song import changed and cannot be rolled back automatically", 409) from exc
-        for plan in journal["artifacts"]:
-            if not plan.get("owned"):
-                continue
-            observed = _artifact_digest(artifacts, plan)
-            if observed is None:
-                continue
-            if observed != plan["sha256"] or not artifacts.delete(plan["slug"]):
+        for plan in plans:
+            expected = plan.get("ownership_fingerprint")
+            if plan.get("owned") and expected is not None and not artifacts.delete_if_state(plan["slug"], expected):
                 raise MigrationError("Interrupted song attachment cannot be rolled back safely", 409)
-        path.unlink()
 
 
 def _materialize_attachment(artifacts, plan, archive_digest):
@@ -1407,15 +1427,19 @@ def _commit_song(repertoire, artifacts, digest, token, records, generated):
         if existing is not None and _artifact_digest(artifacts, plan) != plan["sha256"]:
             raise MigrationError("Canonical attachment slug already contains different bytes", 409)
         plan["owned"] = existing is None
+        plan["ownership_fingerprint"] = artifacts.state_fingerprint(plan["slug"]) if existing is not None else None
         plans.append(plan)
     import_id = "platform-song-" + digest
     journal = {"schema": 1, "status": "prepared", "archive_digest": digest, "review_token": token,
                "import_id": import_id, "song_id": values["id"], "artifacts": plans}
     _write_journal(journal_path, journal)
-    imported = False
     try:
-        for attachment in values["attachments"]:
+        for attachment, plan in zip(values["attachments"], plans, strict=True):
             _materialize_attachment(artifacts, attachment, digest)
+            if plan["owned"]:
+                plan["ownership_fingerprint"] = artifacts.state_fingerprint(plan["slug"])
+                if not SHA256.fullmatch(str(plan["ownership_fingerprint"] or "")):
+                    raise MigrationError("Canonical attachment ownership could not be recorded", 409)
         journal["status"] = "artifacts_ready"
         _write_journal(journal_path, journal)
         practice = values["practice"]
@@ -1433,7 +1457,6 @@ def _commit_song(repertoire, artifacts, digest, token, records, generated):
                       "attachment_refs": [{"slug": plan["slug"], "version": 1} for plan in plans]})
         except DomainError as exc:
             raise MigrationError(str(exc), exc.status) from exc
-        imported = True
         receipt = {"archive_digest": digest, "format": FORMAT, "generated_at": generated,
                    "committed_at": datetime.now(timezone.utc).isoformat(), "domains": {"songs": 1},
                    "records": [{"source_id": row["source_id"], "song_id": values["id"], "domain": "songs",
@@ -1442,13 +1465,8 @@ def _commit_song(repertoire, artifacts, digest, token, records, generated):
         _write_journal(journal_path, journal)
         return receipt, True
     except Exception:
-        if imported:
-            repertoire.rollback_import(import_id, token)
-        for plan in plans:
-            if plan["owned"] and _artifact_digest(artifacts, plan) == plan["sha256"]:
-                artifacts.delete(plan["slug"])
-        if journal_path.exists():
-            journal_path.unlink()
+        _rollback_song_state(repertoire, artifacts, import_id, token, plans)
+        journal_path.unlink(missing_ok=True)
         raise
 
 
