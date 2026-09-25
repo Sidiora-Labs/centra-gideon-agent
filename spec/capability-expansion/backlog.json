@@ -1951,7 +1951,7 @@
       "status": "pending",
       "wave": 14,
       "requires": [
-        "creative.13"
+        "creative.06"
       ],
       "product": "oss",
       "touches": [
@@ -3072,7 +3072,8 @@
       "status": "pending",
       "wave": 23,
       "requires": [
-        "platform.22"
+        "platform.21",
+        "media.04"
       ],
       "product": "oss",
       "touches": [
@@ -3095,7 +3096,8 @@
       "status": "pending",
       "wave": 24,
       "requires": [
-        "platform.23"
+        "platform.21",
+        "media.02"
       ],
       "product": "oss",
       "touches": [

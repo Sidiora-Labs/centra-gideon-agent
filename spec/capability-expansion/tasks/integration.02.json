@@ -28,6 +28,10 @@
       "exit_code": 0,
       "evidence": "/tmp/gideon-full-console-browser-iic3Qo/evidence.json",
       "log": "/tmp/gideon-expansion-20260925/oss-full-app-browser-layout-fixed.log"
+    },
+    "resume_console_types": {
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-resume-console-types-repair1.log"
     }
   },
   "acceptance_coverage": [

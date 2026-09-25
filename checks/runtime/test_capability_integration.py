@@ -76,6 +76,7 @@ async def test_all_capability_routes_share_the_actual_authenticated_application(
                 '/api/capabilities/identity/guarded-recipes',
                 '/api/capabilities/wellbeing/privacy/subjects',
                 '/api/capabilities/platform/inference-host',
+                '/api/capabilities/knowledge/videos',
                 '/api/capabilities/knowledge/ideas',
                 '/api/capabilities/platform/insights',
                 '/api/capabilities/wellbeing/shared',

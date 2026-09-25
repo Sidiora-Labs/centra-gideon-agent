@@ -28,6 +28,14 @@
       "exit_code": 0,
       "log": "/tmp/gideon-expansion-20260925/oss-resume-integration.log",
       "scope": "Sprite backup retention, listener settings preservation, peer authority export and generic-restore exclusion"
+    },
+    "video_route_and_asset_retention": {
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-resume-videos-integration.log"
+    },
+    "canonical_peer_inventory": {
+      "exit_code": 0,
+      "log": "/tmp/gideon-expansion-20260925/oss-canonical-peer-inventory.log"
     }
   },
   "remaining_limits": [

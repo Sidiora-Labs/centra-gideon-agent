@@ -45,7 +45,6 @@ afterAll(async () => {
   if (server?.exitCode === null) await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   rmSync(home, { recursive: true, force: true })
 })
-const base = '/api/capabilities/wellbeing/shared'
 const source = { schema: 'gideon.wellbeing-shared', version: 1, store_id: '11111111-1111-4111-8111-111111111111', records: [{ id: '22222222-2222-4222-8222-222222222222', revision: 1, kind: 'body_weight', observed_at: '2026-09-25T09:00:00Z', unit: 'kg', values: { weight: 72 }, source: 'native scale', notes: 'first reading' }] }
 
 test('native document import and actual shared file correction preserve canonical history after reload', async () => {

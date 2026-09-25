@@ -10,8 +10,8 @@ from gideon.workspace.snapshot import snapshot_main, _extra_restore_paths_for_te
 
 
 @pytest.mark.parametrize("path,kind", [
-    ("capabilities/platform/peers/identity.key", inventory.KIND_TREE),
-    ("capabilities/platform/peers/peers.sqlite3", inventory.KIND_SQLITE),
+    ("capabilities/platform/identity.key", inventory.KIND_TREE),
+    ("capabilities/platform/peers.sqlite3", inventory.KIND_SQLITE),
 ])
 def test_peer_authority_cannot_be_exported_or_restored_as_domain_data(path, kind):
     entry = inventory.claim_for(path)
@@ -42,12 +42,17 @@ def test_new_media_database_and_listener_settings_survive_snapshot(tmp_path, mon
         connection.execute("INSERT INTO retained VALUES (?, ?)", ("approved", "sha-bound-atlas"))
     assert inventory.claim_for(str(media.relative_to(home))).kind == inventory.KIND_SQLITE
     assert not inventory.audit_home(home).undeclared_dbs
+    video = home / "capabilities/knowledge/videos/source/captions.txt"
+    video.parent.mkdir(parents=True)
+    video.write_text("Retained original source captions")
     output = tmp_path / "backups"
     assert snapshot_main([str(output)]) == 0
     archives = list(output.glob("gideon-snapshot-*.tar.gz"))
     assert len(archives) == 1
     with tarfile.open(archives[0]) as archive:
         names = archive.getnames()
+        video_member = next(name for name in names if name.endswith("/capabilities/knowledge/videos/source/captions.txt"))
+        assert archive.extractfile(video_member).read() == video.read_bytes()
         database_member = next(name for name in names if name.endswith("/capabilities/media/sprites.sqlite3"))
         config_member = next(name for name in names if name.endswith("/capabilities/platform/inference_host.json"))
         assert archive.extractfile(config_member).read() == settings.read_bytes()

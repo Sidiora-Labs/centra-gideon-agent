@@ -92,7 +92,7 @@ it('creates an honest durable acquisition job and exposes its terminal adapter o
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }))
   await waitFor(() => expect(screen.getByRole('region', { name: 'Selected video ingest' })).toHaveTextContent(/Status: (failed|completed)/))
   const jobs = await fetch('/api/capabilities/knowledge/videos').then(response => response.json())
-  const acquired = jobs.items.find((item: { request_id: string }) => item.request_id !== undefined && item.title === 'Public video') || jobs.items[0]
+  const acquired = jobs.items.find((item: { request_id: string; title: string }) => item.request_id !== undefined && item.title === 'Public video') || jobs.items[0]
   expect(acquired.events.length).toBeGreaterThanOrEqual(2)
 })
 
