@@ -9,6 +9,7 @@ from contextlib import closing
 import pytest
 
 from gideon.engine.tasks.models import Task
+from gideon.engine.tasks.native import TaskMutation
 from gideon.workspace.capabilities.communications import PeopleStore
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
@@ -107,6 +108,30 @@ def project_task_records(project_id="40404040-4040-4040-8040-404040404040", task
               "refs": refs if refs is not None else [{"kind": "brain.project", "id": project_id, "label": "Mixed restore"}],
               "createdAt": "2026-02-02T00:00:00Z", "updatedAt": "2026-02-03T00:00:00Z"}
     return project, thread
+
+
+def multi_canonical_archive(*, broken_ref=False):
+    project_one = {"id": "50505050-5050-4050-8050-505050505050", "name": "Alpha restore", "status": "active",
+                   "nextAction": "Coordinate", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-02-01T00:00:00Z"}
+    project_two = {"id": "51515151-5151-4151-8151-515151515151", "name": "Beta restore", "status": "waiting",
+                   "nextAction": "Link records", "createdAt": "2026-01-02T00:00:00Z", "updatedAt": "2026-02-02T00:00:00Z"}
+    admin = {"id": "52525252-5252-4252-8252-525252525252", "title": "Prepare restore", "status": "open",
+             "nextAction": "Publish projects", "notes": "First task", "createdAt": "2026-02-03T00:00:00Z",
+             "updatedAt": "2026-02-04T00:00:00Z"}
+    first_thread = {"id": "thread-alpha", "title": "Link alpha", "status": "open", "priority": "high",
+                    "nextAction": "Verify links", "notes": "Depends on project and admin", "tags": [], "pinned": False,
+                    "refs": [{"kind": "brain.project", "id": project_one["id"], "label": "Alpha restore"},
+                             {"kind": "brain.admin", "id": admin["id"], "label": "Prepare restore"}],
+                    "createdAt": "2026-02-05T00:00:00Z", "updatedAt": "2026-02-06T00:00:00Z"}
+    final_refs = ([{"kind": "brain.person", "id": "missing-person", "label": "Missing"}] if broken_ref else
+                  [{"kind": "brain.project", "id": project_two["id"], "label": "Beta restore"},
+                   {"kind": "cos.task", "id": first_thread["id"], "label": "Link alpha"}])
+    final_thread = {"id": "thread-beta", "title": "Link beta", "status": "open", "priority": "normal",
+                    "nextAction": "Finish", "notes": "Final task", "tags": [], "pinned": False, "refs": final_refs,
+                    "createdAt": "2026-02-07T00:00:00Z", "updatedAt": "2026-02-08T00:00:00Z"}
+    source = domains_archive({"projects": [project_two, project_one], "admin": [admin],
+                              "threads": [final_thread, first_thread]})
+    return source, (project_one, project_two), (admin, first_thread, final_thread)
 
 
 def test_preview_verifies_manifest_and_maps_explicit_coverage():
@@ -499,8 +524,8 @@ def test_completed_coordinator_refuses_task_drift_and_preserves_journal(tmp_path
            knowledge, projects, tasks)
     task_path = tasks._task_path(thread["id"])
     body = json.loads(task_path.read_text()); body["title"] = "Edited after completion"; task_path.write_text(json.dumps(body))
-    journal = migration._coordinator_root(tasks) / f"{checked['archive_digest']}.json"
-    with pytest.raises(MigrationError, match="canonical identity drift"):
+    journal = migration._canonical_coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    with pytest.raises(MigrationError, match="canonical migration has identity drift"):
         receipts(people, knowledge, projects, tasks)
     assert json.loads(task_path.read_text())["title"] == "Edited after completion" and journal.exists()
     knowledge.close()
@@ -568,6 +593,219 @@ def test_standalone_legacy_markers_without_fingerprint_replay_when_body_is_exact
     task_body["evidence"][0].pop("record_fingerprint")
     task_path.write_text(json.dumps(task_body))
     assert commit(people, task_payload, knowledge, projects, tasks) == (task_receipt, False)
+    knowledge.close()
+
+
+def test_common_coordinator_imports_multiple_projects_admin_and_ordered_threads(tmp_path):
+    source, project_rows, task_rows = multi_canonical_archive()
+    checked = preview(source)
+    assert checked["coverage"]["supported"] == ["projects", "admin", "threads"]
+    assert len(checked["records"]) == 5
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, created = commit(people, payload, knowledge, projects, tasks)
+    assert created is True and receipt["domains"] == {"admin": 1, "projects": 2, "threads": 2}
+    assert [projects.get_project(row["id"]).name for row in project_rows] == ["Alpha restore", "Beta restore"]
+    admin, first_thread, final_thread = task_rows
+    first = tasks._read_task(tasks._task_path(first_thread["id"]))
+    final = tasks._read_task(tasks._task_path(final_thread["id"]))
+    assert [ref["canonical_id"] for ref in first.evidence[0]["references"]] == [project_rows[0]["id"], admin["id"]]
+    assert [ref["canonical_id"] for ref in final.evidence[0]["references"]] == [project_rows[1]["id"], first_thread["id"]]
+    journal_path = migration._canonical_coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    journal = json.loads(journal_path.read_text())
+    assert journal["status"] == "complete"
+    assert [step["key"] for step in journal["steps"]] == [
+        f"projects:{project_rows[0]['id']}", f"projects:{project_rows[1]['id']}", f"admin:{admin['id']}",
+        f"threads:{first_thread['id']}", f"threads:{final_thread['id']}"]
+    assert all(step["state"] == "applied" for step in journal["steps"])
+    replay, replay_created = commit(people, payload, knowledge, BoundHierarchy(home), BoundTasks(home))
+    assert replay_created is False and replay == receipt
+    assert receipts(people, knowledge, BoundHierarchy(home), BoundTasks(home)) == [receipt]
+    knowledge.close()
+
+
+def test_common_coordinator_restart_resumes_each_pending_step_in_order(tmp_path):
+    source, project_rows, task_rows = multi_canonical_archive()
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, _ = commit(people, payload, knowledge, projects, tasks)
+    final_id = task_rows[-1]["id"]
+    assert TaskMutation(tasks).delete(final_id)
+    path = migration._canonical_coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    journal = json.loads(path.read_text())
+    journal["status"] = "applying"; journal["steps"][-1]["state"] = "pending"
+    migration._write_journal(path, journal)
+    reopened_tasks = BoundTasks(home)
+    assert receipts(people, knowledge, BoundHierarchy(home), reopened_tasks) == [receipt]
+    restored = reopened_tasks._read_task(reopened_tasks._task_path(final_id))
+    assert restored.evidence[0]["references"][1]["canonical_id"] == task_rows[1]["id"]
+    assert json.loads(path.read_text())["status"] == "complete"
+    knowledge.close()
+
+
+def test_common_coordinator_restart_adopts_owned_record_written_before_step_checkpoint(tmp_path):
+    source, _, task_rows = multi_canonical_archive()
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    payload = {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]}
+    receipt, _ = commit(people, payload, knowledge, projects, tasks)
+    path = migration._canonical_coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    journal = json.loads(path.read_text())
+    final_step = journal["steps"][-1]
+    assert final_step["record"]["values"]["id"] == task_rows[-1]["id"]
+    final_step["state"] = "pending"; journal["status"] = "applying"
+    migration._write_journal(path, journal)
+    before = tasks._task_path(task_rows[-1]["id"]).read_bytes()
+    assert receipts(people, knowledge, BoundHierarchy(home), BoundTasks(home)) == [receipt]
+    assert tasks._task_path(task_rows[-1]["id"]).read_bytes() == before
+    assert json.loads(path.read_text())["steps"][-1]["state"] == "applied"
+    knowledge.close()
+
+
+def test_common_coordinator_compensates_all_owned_records_in_reverse_on_late_failure(tmp_path):
+    source, project_rows, task_rows = multi_canonical_archive(broken_ref=True)
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    with pytest.raises(MigrationError, match="does not resolve uniquely"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               knowledge, projects, tasks)
+    assert all(projects.get_project(row["id"]) is None for row in project_rows)
+    assert all(not tasks._task_path(row["id"]).exists() for row in task_rows)
+    assert list(migration._canonical_coordinator_root(tasks).glob("*.json")) == []
+    knowledge.close()
+
+
+def test_common_coordinator_preserves_all_records_and_journal_when_one_applied_target_drifts(tmp_path):
+    source, project_rows, task_rows = multi_canonical_archive()
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    receipt, _ = commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+                        knowledge, projects, tasks)
+    path = migration._canonical_coordinator_root(tasks) / f"{checked['archive_digest']}.json"
+    journal = json.loads(path.read_text()); journal["status"] = "applying"; journal["steps"][-1]["state"] = "pending"
+    assert TaskMutation(tasks).delete(task_rows[-1]["id"])
+    first_path = tasks._task_path(task_rows[1]["id"])
+    changed = json.loads(first_path.read_text()); changed["title"] = "User changed title"; first_path.write_text(json.dumps(changed))
+    migration._write_journal(path, journal)
+    with pytest.raises(MigrationError, match="identity drift|compensation refused"):
+        receipts(people, knowledge, projects, tasks)
+    assert all(projects.get_project(row["id"]) is not None for row in project_rows)
+    assert tasks._task_path(task_rows[0]["id"]).exists() and first_path.exists() and path.exists()
+    assert receipt["domains"]["threads"] == 2
+    knowledge.close()
+
+
+def test_common_coordinator_rejects_cycles_and_unrelated_cross_store_families():
+    source, projects, tasks = multi_canonical_archive()
+    data = {"projects": list(projects), "admin": [tasks[0]], "threads": [
+        {**tasks[1], "refs": [{"kind": "cos.task", "id": tasks[2]["id"], "label": "Beta"}]},
+        {**tasks[2], "refs": [{"kind": "cos.task", "id": tasks[1]["id"], "label": "Alpha"}]},
+    ]}
+    with pytest.raises(MigrationError, match="cycle"):
+        preview(domains_archive(data))
+    song = song_record("song-mixed")
+    with pytest.raises(MigrationError, match="separate atomic imports"):
+        preview(domains_archive({"projects": [projects[0]], "songs": [song]}))
+
+
+def test_common_coordinator_supports_multiple_task_families_without_a_project(tmp_path):
+    _, _, task_rows = multi_canonical_archive()
+    admin, first_thread, final_thread = task_rows
+    source = domains_archive({"admin": [admin], "threads": [first_thread, final_thread]})
+    checked = preview(source)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "capabilities" / "communications")
+    knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    with pytest.raises(MigrationError, match="missing canonical project"):
+        commit(people, {**source, "archive_digest": checked["archive_digest"], "review_token": checked["review_token"]},
+               knowledge, projects, tasks)
+    assert all(not tasks._task_path(row["id"]).exists() for row in task_rows)
+    assert list(migration._canonical_coordinator_root(tasks).glob("*.json")) == []
+    no_project_refs = [{**first_thread, "refs": [{"kind": "brain.admin", "id": admin["id"], "label": "Admin"}]},
+                       {**final_thread, "refs": [{"kind": "cos.task", "id": first_thread["id"], "label": "First"}]}]
+    valid = domains_archive({"admin": [admin], "threads": no_project_refs})
+    reviewed = preview(valid)
+    receipt, created = commit(people, {**valid, "archive_digest": reviewed["archive_digest"],
+                               "review_token": reviewed["review_token"]}, knowledge, projects, tasks)
+    assert created and receipt["domains"] == {"admin": 1, "threads": 2}
+    assert tasks._read_task(tasks._task_path(final_thread["id"])).evidence[0]["references"][0]["canonical_id"] == first_thread["id"]
+    knowledge.close()
+
+
+def test_common_coordinator_preflights_duplicate_project_names_before_journaling(tmp_path):
+    source, project_rows, task_rows = multi_canonical_archive()
+    duplicate = {**project_rows[1], "name": project_rows[0]["name"]}
+    collision = domains_archive({"projects": [project_rows[0], duplicate], "admin": [task_rows[0]]})
+    checked = preview(collision)
+    home = tmp_path / "home"
+    people = PeopleStore(home / "people"); knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    with pytest.raises(MigrationError, match="target identity already exists"):
+        commit(people, {**collision, "archive_digest": checked["archive_digest"],
+               "review_token": checked["review_token"]}, knowledge, projects, tasks)
+    assert all(projects.get_project(row["id"]) is None for row in project_rows)
+    assert not tasks._task_path(task_rows[0]["id"]).exists()
+    assert list(migration._canonical_coordinator_root(tasks).glob("*.json")) == []
+    knowledge.close()
+
+
+def test_common_coordinator_rejects_duplicate_targets_and_more_than_one_hundred_records(tmp_path):
+    _, project_rows, task_rows = multi_canonical_archive()
+    duplicate_task_id = task_rows[0]["id"]
+    duplicate_thread = {**task_rows[1], "id": duplicate_task_id, "refs": []}
+    source = domains_archive({"admin": [task_rows[0]], "threads": [duplicate_thread]})
+    with pytest.raises(MigrationError, match="duplicate canonical identity"):
+        preview(source)
+    projects = []
+    for index in range(100):
+        identity = f"{index:08x}-0000-4000-8000-{index:012x}"
+        projects.append({"id": identity, "name": f"Project {index}", "status": "active", "nextAction": "Continue",
+                         "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"})
+    too_many = domains_archive({"projects": projects, "admin": [task_rows[0]]})
+    with pytest.raises(MigrationError, match="between 2 and 100"):
+        preview(too_many)
+    home = tmp_path / "home"
+    assert list(migration._canonical_coordinator_root(BoundTasks(home)).glob("*.json")) == []
+
+
+def test_common_coordinator_journal_rejects_tampered_step_and_oversized_bytes(tmp_path):
+    home = tmp_path / "home"
+    people = PeopleStore(home / "people"); knowledge = KnowledgeStore(str(home / "knowledge.db"))
+    projects, tasks = BoundHierarchy(home), BoundTasks(home)
+    root = migration._canonical_coordinator_root(tasks)
+    bad = root / ("a" * 64 + ".json")
+    bad_receipt = {"archive_digest": "a" * 64}
+    bad.write_text(json.dumps({"schema": 2, "kind": "canonical_records", "status": "prepared",
+        "archive_digest": "a" * 64, "review_token": "b" * 64, "generated_at": "2026-01-01T00:00:00Z",
+        "steps": [{"key": "projects:x", "adapter": "project", "domain": "projects", "state": "pending",
+                   "record": {"domain": "projects"}, "record_hash": "c" * 64},
+                  {"key": "admin:y", "adapter": "task", "domain": "admin", "state": "pending",
+                   "record": {"domain": "admin"}, "record_hash": "d" * 64}],
+        "receipt": bad_receipt, "receipt_hash": hashlib.sha256(json.dumps(bad_receipt, sort_keys=True).encode()).hexdigest()}))
+    with pytest.raises(MigrationError, match="unsupported step"):
+        receipts(people, knowledge, projects, tasks)
+    bad.unlink()
+    huge = root / ("e" * 64 + ".json"); huge.write_bytes(b" " * (2 * 1024 * 1024 + 1))
+    with pytest.raises(MigrationError, match="exceeds 2 MiB"):
+        receipts(people, knowledge, projects, tasks)
+    assert huge.exists()
     knowledge.close()
 
 

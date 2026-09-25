@@ -91,12 +91,18 @@ function songFixture() {
 
 function coordinatedFixture() {
   const projectId = '45454545-4545-4545-8545-454545454545'
+  const secondProjectId = '47474747-4747-4747-8747-474747474747'
+  const adminId = '48484848-4848-4848-8848-484848484848'
   const taskId = 'thread-ui-coordinated'
   const data: Record<string, Buffer> = {
     'brain/projects/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'projects', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
     [`brain/projects/${projectId}/index.json`]: Buffer.from(JSON.stringify({ id: projectId, name: 'UI coordinated project', status: 'active', nextAction: 'Verify task', notes: 'Published first', tags: ['migration'], createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-02-01T00:00:00Z' })),
+    [`brain/projects/${secondProjectId}/index.json`]: Buffer.from(JSON.stringify({ id: secondProjectId, name: 'UI second project', status: 'active', nextAction: 'Verify final task', notes: 'Published second', tags: ['migration'], createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-02-02T00:00:00Z' })),
+    'brain/admin/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'admin', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
+    [`brain/admin/${adminId}/index.json`]: Buffer.from(JSON.stringify({ id: adminId, title: 'UI coordinated admin', status: 'open', nextAction: 'Prepare thread', notes: 'Task dependency', createdAt: '2026-02-02T00:00:00Z', updatedAt: '2026-02-03T00:00:00Z' })),
     'brain/threads/index.json': Buffer.from(JSON.stringify({ schemaVersion: 1, type: 'threads', updatedAt: '2026-09-25T00:00:00Z', config: {} })),
-    [`brain/threads/${taskId}/index.json`]: Buffer.from(JSON.stringify({ id: taskId, title: 'UI coordinated task', status: 'open', priority: 'high', nextAction: 'Verify project link', notes: 'Published second', tags: ['migration'], pinned: false, refs: [{ kind: 'brain.project', id: projectId, label: 'UI coordinated project' }], createdAt: '2026-02-02T00:00:00Z', updatedAt: '2026-02-03T00:00:00Z' })),
+    [`brain/threads/${taskId}/index.json`]: Buffer.from(JSON.stringify({ id: taskId, title: 'UI coordinated task', status: 'open', priority: 'high', nextAction: 'Verify project link', notes: 'Published after admin', tags: ['migration'], pinned: false, refs: [{ kind: 'brain.project', id: projectId, label: 'UI coordinated project' }, { kind: 'brain.admin', id: adminId, label: 'UI coordinated admin' }], createdAt: '2026-02-04T00:00:00Z', updatedAt: '2026-02-05T00:00:00Z' })),
+    'brain/threads/thread-ui-final/index.json': Buffer.from(JSON.stringify({ id: 'thread-ui-final', title: 'UI final task', status: 'open', priority: 'normal', nextAction: 'Finish', notes: 'Published last', tags: [], pinned: false, refs: [{ kind: 'brain.project', id: secondProjectId, label: 'UI second project' }, { kind: 'cos.task', id: taskId, label: 'UI coordinated task' }], createdAt: '2026-02-06T00:00:00Z', updatedAt: '2026-02-07T00:00:00Z' })),
   }
   const manifest = { generatedAt: '2026-09-25T00:00:00.000Z', fileCount: Object.keys(data).length, files: Object.fromEntries(Object.entries(data).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }
   return tarFile({ 'snapshot-coordinated/manifest.json': Buffer.from(JSON.stringify(manifest)), ...Object.fromEntries(Object.entries(data).map(([name, value]) => [`snapshot-coordinated/data/${name}`, value])) })
@@ -215,12 +221,13 @@ it('coordinates a project and referencing thread through the actual API', async 
   fireEvent.change(screen.getByLabelText('Snapshot archive'), { target: { files: [file] } })
   await waitFor(() => expect(screen.getByRole('button', { name: 'Preview verified archive' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Preview verified archive' }))
-  expect(await screen.findByText('Domains: projects, threads')).toBeVisible()
+  expect(await screen.findByText('Domains: projects, admin, threads')).toBeVisible()
   expect(screen.getByText('projects: UI coordinated project')).toBeVisible()
+  expect(screen.getByText('admin: UI coordinated admin')).toBeVisible()
   expect(screen.getByText('threads: UI coordinated task')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Import reviewed records' }))
-  expect(await screen.findByText(/1 projects, 1 threads ·/)).toBeVisible()
+  expect(await screen.findByText(/1 admin, 2 projects, 2 threads ·/)).toBeVisible()
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/migration`)).json()
-  const receipt = state.receipts.find((row: { domains: Record<string, number> }) => row.domains.projects === 1 && row.domains.threads === 1)
+  const receipt = state.receipts.find((row: { domains: Record<string, number> }) => row.domains.projects === 2 && row.domains.threads === 2)
   expect(receipt).toBeTruthy()
 })

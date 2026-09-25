@@ -4,7 +4,7 @@
   "mode": "QUALIFY",
   "owner_lane": "platform",
   "status": "locally_qualified_partial",
-  "scope": "Checksummed bounded legacy snapshot preview, canonical domain restore and journalled project plus task coordination",
+  "scope": "Checksummed bounded legacy snapshot preview, canonical domain restore and reusable journalled record coordination",
   "requires": [
     "platform.24"
   ],
@@ -42,23 +42,31 @@
     "A mixed archive containing exactly one project and one admin action or tracked thread publishes through a bounded prepared, project_ready and complete recovery journal",
     "Same-archive thread references bind to the restored stable project ID; caught failures compensate only unchanged coordinator-owned project and task records through canonical delete operations",
     "Restart recovery rolls forward an unchanged interrupted coordinator plan, exact replay deduplicates its receipt, and edited or replaced canonical targets fail closed while preserving the journal",
-    "Standalone project and task receipts created before record fingerprints remain replay-compatible only when archive identity, review token and freshly derived canonical body all match"
+    "Standalone project and task receipts created before record fingerprints remain replay-compatible only when archive identity, review token and freshly derived canonical body all match",
+    "A reusable ordered-step coordinator restores 2 to 100 project, admin and tracked-thread records across multiple collection families, with a per-record hash and applied state",
+    "All projects publish before dependency-ordered tasks so same-archive project, admin and task references retain their stable canonical IDs; task-reference cycles are refused during preview",
+    "Common-coordinator restart resumes the first pending record, late failure compensates every unchanged owned record in reverse order, and any applied-record drift preserves the complete journal and all remaining targets"
   ],
   "limits": [
     "This sub-slice supports only version-1 people, projects, admin, threads, ideas, journals, memories, links, buckets, inbox and songs collection records; every other archive domain, relational dump and future schema is rejected.",
-    "People, song and knowledge archive families remain separate; projects may be coordinated only with exactly one admin action or tracked thread, and project, task and song families remain limited to one record.",
-    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal; every mixed authoritative-store matrix other than project plus task remains rejected."
+    "People, song and knowledge archive families remain separate; the reusable multi-record coordinator currently accepts only projects, admin actions and tracked threads.",
+    "A song archive is recoverable across its authoritative SQLite and artifact stores through a durable rollback journal; settings, logs, database backends and every mixed authoritative-store matrix outside the declared coordinator remain rejected.",
+    "Shared durability inventory, packaged backup inclusion and the final aggregate fresh-home restore journey remain owned by the root integration slice."
   ],
   "verify_cmd": "python3 tooling/capability_workflow.py verify platform.25",
   "verification": {
-    "previous_increment_evidence": "/tmp/gideon-platform.25-checks-1iluza_n/evidence.json",
-    "evidence": "/tmp/gideon-platform.25-checks-mih5oau6/evidence.json",
+    "previous_increment_evidence": "/tmp/gideon-platform.25-checks-mih5oau6/evidence.json",
+    "failed_attempts": [
+      "/tmp/gideon-platform.25-checks-fa1incb7/evidence.json",
+      "/tmp/gideon-platform.25-checks-b5tp5nyt/evidence.json"
+    ],
+    "evidence": "/tmp/gideon-platform.25-checks-mtj1tfdb/evidence.json",
     "compile_exit": 0,
-    "runtime_passed": 70,
+    "runtime_passed": 80,
     "ui_passed": 7,
-    "production_lines": 1067,
-    "test_lines": 1125,
-    "repair_cycles": 0
+    "production_lines": 1227,
+    "test_lines": 1348,
+    "repair_cycles": 2
   },
   "packaged_song_restore": {
     "test": "checks/runtime/capabilities/platform/test_migration_journal_durability.py",
