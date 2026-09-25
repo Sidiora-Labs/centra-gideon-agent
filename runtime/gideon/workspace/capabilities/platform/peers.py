@@ -28,6 +28,7 @@ CATEGORIES = (
     "knowledge.records",
     "knowledge.collections",
     "memory.records",
+    "memory.episodes",
     "media.assets",
     "media.video_projects",
     "media.remote_execution",

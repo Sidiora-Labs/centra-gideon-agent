@@ -47,11 +47,16 @@ def pair(first_home, second_home):
     first_home.mkdir(parents=True, exist_ok=True)
     second_home.mkdir(parents=True, exist_ok=True)
     first, second = PeerStore(first_home), PeerStore(second_home)
-    first.create({"label": "Second", "endpoint": "https://second.example",
-                  "public_key": second.identity["public_key"], "credential": "PEER_CONNECTION"})
-    second.create({"label": "First", "endpoint": "https://first.example",
-                   "public_key": first.identity["public_key"], "credential": "PEER_CONNECTION"})
-    return first.identity, second.identity
+    first_id, second_id = first.snapshot()["self"], second.snapshot()["self"]
+    first.put(second_id["peer_id"], {
+        "label": "Second", "endpoint": "https://second.example", "public_key": second_id["public_key"],
+        "enabled": True, "send_categories": [], "receive_categories": [], "revision": 0,
+    })
+    second.put(first_id["peer_id"], {
+        "label": "First", "endpoint": "https://first.example", "public_key": first_id["public_key"],
+        "enabled": True, "send_categories": [], "receive_categories": [], "revision": 0,
+    })
+    return first_id, second_id
 
 
 def application():
@@ -147,11 +152,17 @@ async def test_default_denied_then_authenticated_two_home_receive_uses_canonical
         sender.export_batch(target_id["peer_id"], adapter.SCOPE)
     policy = {"revision": 1, "enabled": True, "send_categories": [adapter.SCOPE],
               "receive_categories": [adapter.SCOPE]}
-    PeerStore(source).policy(target_id["peer_id"], policy)
-    PeerStore(target).policy(source_id["peer_id"], policy)
+    source_peer = PeerStore(source).get(target_id["peer_id"])
+    target_peer = PeerStore(target).get(source_id["peer_id"])
+    PeerStore(source).put(target_id["peer_id"], {**policy, "label": source_peer["label"],
+                                                  "endpoint": source_peer["endpoint"],
+                                                  "public_key": source_peer["public_key"]})
+    PeerStore(target).put(source_id["peer_id"], {**policy, "label": target_peer["label"],
+                                                  "endpoint": target_peer["endpoint"],
+                                                  "public_key": target_peer["public_key"]})
     batch = sender.export_batch(target_id["peer_id"], adapter.SCOPE)
-    envelope = PeerStore(source).signed(target_id["peer_id"], adapter.SCOPE)
-    envelope["payload"] = batch
+    envelope = {"proof": PeerStore(source).create_proof(target_id["peer_id"], adapter.SCOPE),
+                "payload": batch}
     body = json.dumps(envelope)
     monkeypatch.setenv("GIDEON_HOME", str(target))
     monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)

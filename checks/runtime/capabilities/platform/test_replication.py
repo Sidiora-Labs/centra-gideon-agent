@@ -373,6 +373,8 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "identity.stories", "entries": ["identity.life_stories"]},
         {"scope": "experience.stories", "entries": ["experience.story_graphs"]},
         {"scope": "memory.records", "entries": ["memory.semantic_records"]},
+        {"scope": "memory.episodes", "entries": ["memory.episodic_records"]},
+        {"scope": "platform.usage", "entries": ["usage.imported_events"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
         {"scope": "media.assets", "entries": ["media.library_metadata"]},
@@ -388,7 +390,7 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "knowledge.collections", "creative.catalog", "creative.commissions", "creative.direction", "identity.goals", "identity.profile", "identity.stories", "experience.stories", "memory.records", "communications.contacts", "music.library", "media.assets", "media.video_projects", "music.video", "wellbeing.clinical_records", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "knowledge.collections", "creative.catalog", "creative.commissions", "creative.direction", "identity.goals", "identity.profile", "identity.stories", "experience.stories", "memory.records", "memory.episodes", "platform.usage", "communications.contacts", "music.library", "media.assets", "media.video_projects", "music.video", "wellbeing.clinical_records", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded

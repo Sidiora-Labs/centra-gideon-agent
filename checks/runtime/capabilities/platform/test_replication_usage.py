@@ -4,16 +4,23 @@ import os
 from contextlib import contextmanager
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
+from gideon.interfaces.dashboard.handlers.capabilities_replication import register
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware, use_ephemeral_secret
 from gideon.operations.durability import conflicts
 from gideon.operations.durability.shards import machine_id
 from gideon.operations.usage_ledger import TurnUsage, UsageJournal
 from gideon.workspace.capabilities.platform import replication_usage as adapter
+from gideon.workspace.capabilities.platform.peers import PeerStore
+from gideon.workspace.capabilities.platform.replication import ReplicationError, ReplicationService
 
 
 WHEN = "2026-09-25T12:00:00+00:00"
 EVENT = "1" * 64
 FILE_SHA = "2" * 64
+PREFIX = "/api/capabilities/platform/replication"
 
 
 @contextmanager
@@ -49,6 +56,74 @@ def imported(instance_id, *, event_id=EVENT, tokens=7, source_name="history.json
 
 def append(home, row):
     UsageJournal(home / "usage" / "turns.jsonl").append(row)
+
+
+def pair(first_home, second_home):
+    first_home.mkdir(parents=True, exist_ok=True)
+    second_home.mkdir(parents=True, exist_ok=True)
+    first, second = PeerStore(first_home), PeerStore(second_home)
+    first_id, second_id = first.snapshot()["self"], second.snapshot()["self"]
+    first.put(second_id["peer_id"], {
+        "label":"Second", "endpoint":"https://second.example", "public_key":second_id["public_key"],
+        "enabled":True, "send_categories":[], "receive_categories":[], "revision":0,
+    })
+    second.put(first_id["peer_id"], {
+        "label":"First", "endpoint":"https://first.example", "public_key":first_id["public_key"],
+        "enabled":True, "send_categories":[], "receive_categories":[], "revision":0,
+    })
+    return first_id, second_id
+
+
+def application():
+    app = web.Application(middlewares=[token_auth_middleware(port=8014)])
+    register(app)
+    return app
+
+
+@pytest.mark.asyncio
+async def test_default_denied_then_signed_central_receive_imports_unpriced_local_attribution(tmp_path, monkeypatch):
+    source, target = tmp_path / "source", tmp_path / "target"
+    source_id, target_id = pair(source, target)
+    with workspace(source) as (_, source_instance):
+        append(source, imported(source_instance))
+        sender = ReplicationService(source)
+        with pytest.raises(ReplicationError, match="policy denies"):
+            sender.export_batch(target_id["peer_id"], adapter.SCOPE)
+        source_peer = PeerStore(source).get(target_id["peer_id"])
+        PeerStore(source).put(target_id["peer_id"], {
+            **{key:source_peer[key] for key in ("label","endpoint","public_key","enabled","revision")},
+            "send_categories":[adapter.SCOPE], "receive_categories":[adapter.SCOPE],
+        })
+        target_peer = PeerStore(target).get(source_id["peer_id"])
+        PeerStore(target).put(source_id["peer_id"], {
+            **{key:target_peer[key] for key in ("label","endpoint","public_key","enabled","revision")},
+            "send_categories":[adapter.SCOPE], "receive_categories":[adapter.SCOPE],
+        })
+        batch = sender.export_batch(target_id["peer_id"], adapter.SCOPE)
+        envelope = {"proof":PeerStore(source).create_proof(target_id["peer_id"], adapter.SCOPE),
+                    "payload":batch}
+    monkeypatch.setenv("GIDEON_HOME", str(target))
+    monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)
+    use_ephemeral_secret()
+    body = json.dumps(envelope)
+    async with TestClient(TestServer(application())) as client:
+        denied = await client.post(PREFIX + "/receive", data=body, headers={"Content-Type":"application/json"})
+        assert denied.status == 403
+        accepted = await client.post(
+            PREFIX + "/receive", data=body,
+            headers={"Content-Type":"application/json",
+                     "Cookie":"gideon_token_8014=" + generate_token("dashboard:usage-replication")},
+        )
+        assert accepted.status == 200
+        response = await accepted.json()
+        assert response["entries"] == [{"entry_id":adapter.ENTRY_ID, "added":1, "updated":0,
+                                         "removed":0, "conflicts":0}]
+    with workspace(target) as (_, target_instance):
+        replicated = UsageJournal(target / "usage" / "turns.jsonl").rows()
+        assert len(replicated) == 1
+        assert replicated[0]["instance_id"] == target_instance
+        assert replicated[0]["provider_instance"] == "claude-cli-import"
+        assert replicated[0]["credential_ref"] is None
 
 
 def test_two_workspace_append_only_replication_preserves_event_identity(tmp_path):
