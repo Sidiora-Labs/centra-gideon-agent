@@ -24,6 +24,10 @@ from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.music.catalog import MusicCatalog
 from gideon.workspace.capabilities.music.listening import ListeningStore
 from gideon.workspace.capabilities.music.store import RepertoireStore
+from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
+from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
+from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
+from gideon.workspace.capabilities.wellbeing.store import instant
 
 
 @dataclass(frozen=True)
@@ -57,7 +61,10 @@ IDENTITY_TABLES = {
 IDENTITY_ENTRIES = frozenset({*IDENTITY_TABLES, "identity.progress_profile", "identity.twin_profile", "identity.twin_documents"})
 COMMUNICATION_TABLES = {"communications.people": "people", "communications.touchpoints": "touchpoints"}
 MUSIC_ENTRIES = ("music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks")
-SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES})
+WELLBEING_HEALTH_ENTRIES = ("wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics")
+WELLBEING_ROUTINE_ENTRIES = ("wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records")
+WELLBEING_ENTRIES = {*WELLBEING_HEALTH_ENTRIES, *WELLBEING_ROUTINE_ENTRIES}
+SQLITE_ENTRIES = frozenset({"knowledge.items", *CREATIVE_TABLES, *IDENTITY_ENTRIES, *COMMUNICATION_TABLES, *MUSIC_ENTRIES, *WELLBEING_ENTRIES})
 
 
 def _knowledge(home: Path) -> KnowledgeStore:
@@ -91,6 +98,13 @@ def _music_paths(home: Path) -> tuple[Path, Path, Path, Path]:
     with sqlite3.connect(decks) as db:
         db.execute("CREATE TABLE IF NOT EXISTS decks(id TEXT PRIMARY KEY,payload TEXT)")
     return catalog, songs, playlists, decks
+
+
+def _wellbeing_path(home: Path) -> Path:
+    AppleHealthStore(home)
+    ConsumptionStore(home)
+    InterventionStore(home)
+    return home / "capabilities/wellbeing.sqlite3"
 
 
 def _pinned(ref: object) -> bool:
@@ -168,6 +182,33 @@ def validate_music_entries(entries: list[dict]) -> None:
             raise ValueError("Deck media references must pin artifact versions")
 
 
+def validate_wellbeing_entries(scope: str, entries: list[dict]) -> None:
+    rows = {item["entry_id"]: item["rows"] for item in entries}
+    forbidden = {"credential", "credential_ref", "access_grant", "access_token", "refresh_token", "client_secret", "private_key", "password", "secret", "native_helper"}
+    for item in entries:
+        identities = set()
+        for row in item["rows"]:
+            data = row.get("data")
+            if not isinstance(row.get("id"), str) or row["id"] in identities or not isinstance(data, dict) or data.get("id") != row["id"] or _contains_keys(data, forbidden):
+                raise ValueError("Invalid, duplicate or private wellbeing record")
+            identities.add(row["id"])
+            artifact = data.get("artifact")
+            if artifact is not None and (not isinstance(artifact, dict) or not {"slug", "version"} <= set(artifact) or not _pinned({"slug": artifact["slug"], "version": artifact["version"]})):
+                raise ValueError("Wellbeing artifact references must pin exact versions")
+    if scope == "wellbeing.routines":
+        plans = {row["id"] for row in rows["wellbeing.intervention_plans"]}
+        if any(row["data"].get("plan_id") not in plans for row in rows["wellbeing.intervention_records"]):
+            raise ValueError("Intervention observation references a missing plan")
+
+
+def _contains_keys(value: object, forbidden: set[str]) -> bool:
+    if isinstance(value, dict):
+        return bool(forbidden & set(value)) or any(_contains_keys(item, forbidden) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_keys(item, forbidden) for item in value)
+    return False
+
+
 def read_rows(home: Path, entry_id: str) -> list[dict]:
     if entry_id == "knowledge.items":
         store = _knowledge(home)
@@ -193,6 +234,18 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
                 for row in rows:
                     row["data"]["exports"] = []
             return rows
+    if entry_id in WELLBEING_ENTRIES:
+        table = {
+            "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
+            "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
+            "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
+        }[entry_id]
+        revisioned = entry_id != "wellbeing.metrics"
+        where = " WHERE revision=(SELECT max(s.revision) FROM {table} s WHERE s.id={table}.id)".format(table=table) if revisioned else ""
+        if entry_id.startswith("wellbeing.substance_"):
+            where += " AND json_extract(data,'$.deleted')=0"
+        with sqlite3.connect(_wellbeing_path(home)) as db:
+            return [{"id": row[0], "data": json.loads(row[1])} for row in db.execute(f"SELECT id,data FROM {table}{where} ORDER BY id")]
     if entry_id in COMMUNICATION_TABLES:
         store, table = _people(home), COMMUNICATION_TABLES[entry_id]
         with store.connect() as db:
@@ -353,6 +406,33 @@ def _write_music(home: Path, entry_id: str, row: dict | None, entity_id: str) ->
             db.execute(f"INSERT INTO {table}(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", (entity_id, json.dumps(data, sort_keys=True)))
 
 
+def _write_wellbeing(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
+    table = {
+        "wellbeing.measurements": "revisions", "wellbeing.labs": "lab_revisions", "wellbeing.metrics": "apple_metrics",
+        "wellbeing.substance_entries": "substance_entries", "wellbeing.substance_presets": "substance_presets",
+        "wellbeing.intervention_plans": "intervention_plans", "wellbeing.intervention_records": "intervention_records",
+    }[entry_id]
+    with sqlite3.connect(_wellbeing_path(home)) as db:
+        if row is None:
+            db.execute(f"DELETE FROM {table} WHERE id=?", (entity_id,))
+            if entry_id == "wellbeing.intervention_records": db.execute("DELETE FROM intervention_dates WHERE record_id=?", (entity_id,))
+            return
+        data = row["data"]
+        if entry_id == "wellbeing.measurements":
+            db.execute("INSERT INTO revisions VALUES(?,?,?,?,?)", (entity_id, data["revision"], instant(data["observed_at"]), data["kind"], json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.labs":
+            db.execute("INSERT INTO lab_revisions VALUES(?,?,?,?,?,?)", (entity_id, data["revision"], instant(data["observed_at"]), data["analyte"], data["unit"], json.dumps(data, sort_keys=True)))
+        elif entry_id == "wellbeing.metrics":
+            db.execute("INSERT OR REPLACE INTO apple_metrics VALUES(?,?,?,?,?)", (entity_id, data["metric"], data["unit"], instant(data["observed_at"]), json.dumps(data, sort_keys=True)))
+        elif entry_id.startswith("wellbeing.substance_"):
+            observed = instant(data["observed_at"]) if data.get("observed_at") else ""
+            db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], data["kind"], observed, json.dumps(data, sort_keys=True)))
+        else:
+            parent, day = (data["plan_id"], data["date"]) if entry_id.endswith("records") else ("", "")
+            db.execute(f"INSERT INTO {table} VALUES(?,?,?,?,?)", (entity_id, data["revision"], parent, day, json.dumps(data, sort_keys=True)))
+            if entry_id.endswith("records"): db.execute("INSERT OR REPLACE INTO intervention_dates VALUES(?,?,?)", (parent, day, entity_id))
+
+
 def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> None:
     if entry_id == "knowledge.items":
         _write_knowledge(home, row, entity_id)
@@ -362,8 +442,10 @@ def write_row(home: Path, entry_id: str, row: dict | None, entity_id: str) -> No
         _write_identity(home, entry_id, row, entity_id)
     elif entry_id in COMMUNICATION_TABLES:
         _write_communications(home, entry_id, row, entity_id)
-    else:
+    elif entry_id in MUSIC_ENTRIES:
         _write_music(home, entry_id, row, entity_id)
+    else:
+        _write_wellbeing(home, entry_id, row, entity_id)
 
 
 def _conflict(entry_id: str, entity_id: str, ancestor: str, local: dict, remote: dict, now: str) -> conflicts.ConflictRecord:

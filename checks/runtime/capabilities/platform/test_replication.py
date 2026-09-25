@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import base64
 
 import pytest
 from aiohttp import web
@@ -28,6 +29,11 @@ from gideon.workspace.capabilities.music.decks import DeckStore
 from gideon.workspace.capabilities.music.listening import ListeningStore
 from gideon.workspace.capabilities.music.spotify import SpotifyBridge
 from gideon.workspace.capabilities.music.store import RepertoireStore
+from gideon.workspace.capabilities.wellbeing.apple_health import AppleHealthStore
+from gideon.workspace.capabilities.wellbeing.intervention import InterventionStore
+from gideon.workspace.capabilities.wellbeing.labs import LabStore
+from gideon.workspace.capabilities.wellbeing.store import MeasurementStore
+from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
 
 SCOPE = "workspace.records"
 PREFIX = "/api/capabilities/platform/replication"
@@ -320,11 +326,13 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "identity.profile", "entries": ["identity.progress_profile", "identity.twin_profile", "identity.twin_documents"]},
         {"scope": "communications.contacts", "entries": ["communications.people", "communications.touchpoints"]},
         {"scope": "music.library", "entries": ["music.artists", "music.tracks", "music.albums", "music.songs", "music.playlists", "music.decks"]},
+        {"scope": "wellbeing.health", "entries": ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]},
+        {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -695,3 +703,82 @@ def test_music_library_two_home_refs_conflict_restore_tombstones_credentials_and
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "music.library")
+
+
+def seed_wellbeing(home):
+    measurement = MeasurementStore(home).create({"request_id": "measure", "kind": "body_weight", "observed_at": "2026-09-25T08:00:00+02:00", "unit": "kg", "values": {"weight": 80}, "source": "manual", "notes": "baseline"})
+    labs = LabStore(home)
+    lab_input = {"filename": "labs.json", "format": "json", "content": json.dumps([{"analyte": "Glucose", "observed_at": "2026-09-25T08:30:00+02:00", "value": 92, "unit": "mg/dL", "reference_low": 70, "reference_high": 100, "notes": "fasting", "external_id": "lab-1"}]), "source": "clinic export"}
+    lab = labs.commit({**lab_input, "preview_id": labs.preview(lab_input)["preview_id"], "request_id": "lab-import"})["records"][0]
+    raw = b'<HealthData><Record type="HKQuantityTypeIdentifierStepCount" sourceName="Watch" unit="count" value="125" startDate="2026-09-25 09:00:00 +0200" endDate="2026-09-25 09:05:00 +0200"/></HealthData>'
+    apple = AppleHealthStore(home)
+    apple_input = {"filename": "export.xml", "format": "xml", "content_base64": base64.b64encode(raw).decode(), "source": "personal export"}
+    apple.commit({**apple_input, "preview_id": apple.preview(apple_input)["preview_id"], "request_id": "apple-import"})
+    metric = apple.list_metrics()[0]
+    habits = ConsumptionStore(home)
+    preset = habits.create_preset({"request_id": "preset", "kind": "alcohol", "name": "Recorded serving", "details": {"volume_ml": 330, "abv_percent": 5}})
+    entry = habits.create_entry({"request_id": "entry", "preset_id": preset["id"], "count": 1, "observed_at": "2026-09-25T18:00:00+02:00", "source": "manual", "notes": "recorded"})
+    interventions = InterventionStore(home)
+    plan = interventions.create_plan({"request_id": "plan", "name": "Evening walk", "kind": "activity", "instructions": "Walk outside", "source": "personal plan", "timezone": "Europe/Berlin", "start_date": "2026-09-20", "end_date": None, "weekdays": [0, 1, 2, 3, 4, 5, 6]})
+    observation = interventions.record(plan["id"], {"request_id": "observation", "date": "2026-09-24", "status": "completed", "observed_at": "2026-09-24T20:00:00+02:00", "notes": "done"})
+    with sqlite3.connect(home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("INSERT INTO requests VALUES(?,?,?)", ("private-ledger", '{"access_token":"health-private-token","client_secret":"never-share","native_helper":"local-only"}', "{}"))
+    return {"measurement": measurement, "lab": lab, "metric": metric, "preset": preset, "entry": entry, "plan": plan, "observation": observation}
+
+
+def test_wellbeing_opt_in_scopes_current_refs_conflicts_tombstones_and_private_exclusions(home):
+    none_a, none_b = home / "none-a", home / "none-b"
+    _, none_peer = pair(none_a, none_b)
+    seed_wellbeing(none_a)
+    with pytest.raises(ReplicationError, match="policy denies"): ReplicationService(none_a).export_batch(none_peer["peer_id"], "wellbeing.health")
+
+    a_home, b_home = home / "health-a", home / "health-b"
+    aid, bid = pair_for(a_home, b_home, "wellbeing.health")
+    records = seed_wellbeing(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    batch = a.export_batch(bid["peer_id"], "wellbeing.health")
+    assert [item["entry_id"] for item in batch["entries"]] == ["wellbeing.measurements", "wellbeing.labs", "wellbeing.metrics"]
+    wire = json.dumps(batch)
+    assert "health-private-token" not in wire and "never-share" not in wire and "native_helper" not in wire and "requests" not in wire
+    assert b.apply_batch(aid["peer_id"], batch)["accepted"] is True
+    a._record_sent(bid["peer_id"], batch)
+    assert MeasurementStore(b_home).get(records["measurement"]["id"])["values"] == {"weight": 80.0}
+    assert LabStore(b_home).get(records["lab"]["id"])["analyte"] == "Glucose"
+    assert AppleHealthStore(b_home).list_metrics()[0]["metric"] == "HKQuantityTypeIdentifierStepCount"
+    assert LabStore(b_home).artifacts.get(records["lab"]["artifact"]["slug"], version=1) is None
+
+    MeasurementStore(a_home).correct(records["measurement"]["id"], {"request_id": "local-health", "revision": 1, "values": {"weight": 79}, "notes": "keep local value"})
+    MeasurementStore(b_home).correct(records["measurement"]["id"], {"request_id": "peer-health", "revision": 1, "notes": "peer note"})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "wellbeing.health")
+    result = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert result["entries"][0]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "wellbeing.measurements")
+    ReplicationService(a_home).restore_fields(conflict.id, ["notes"])
+    merged = MeasurementStore(a_home).get(records["measurement"]["id"])
+    assert merged["notes"] == "peer note" and merged["values"] == {"weight": 79.0} and merged["revision"] == 3
+    with sqlite3.connect(a_home / "capabilities/wellbeing.sqlite3") as db: db.execute("DELETE FROM lab_revisions WHERE id=?", (records["lab"]["id"],))
+    deletion = ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.health")
+    assert ReplicationService(b_home).apply_batch(aid["peer_id"], deletion)["entries"][1]["removed"] == 1
+
+    c_home, d_home = home / "routine-c", home / "routine-d"
+    cid, did = pair_for(c_home, d_home, "wellbeing.routines")
+    routines = seed_wellbeing(c_home)
+    initial = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.routines")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], initial)["accepted"] is True
+    ReplicationService(c_home)._record_sent(did["peer_id"], initial)
+    assert ConsumptionStore(d_home).get_entry(routines["entry"]["id"])["preset_id"] == routines["preset"]["id"]
+    assert InterventionStore(d_home).get_record(routines["observation"]["id"])["plan_id"] == routines["plan"]["id"]
+    ConsumptionStore(c_home).delete_entry(routines["entry"]["id"], {"request_id": "delete-entry", "revision": 1})
+    tombstone = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.routines")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], tombstone)["entries"][0]["removed"] == 1
+
+    bad_home, target_home = home / "routine-bad", home / "routine-target"
+    bad_id, target_id = pair_for(bad_home, target_home, "wellbeing.routines")
+    seed_wellbeing(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "wellbeing.routines")
+    malformed["entries"][3]["rows"][0]["data"]["plan_id"] = "missing-plan"
+    with pytest.raises(ReplicationError, match="missing plan") as rejected: ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422 and InterventionStore(target_home).list_plans(include_archived=True) == []
+    peer = PeerStore(c_home).get(did["peer_id"])
+    PeerStore(c_home).put(did["peer_id"], peer_record(did, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.routines")
