@@ -1,0 +1,54 @@
+{
+  "id": "knowledge.12",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "b421968a",
+  "contract": "Optional RSVP playback reads the existing canonical Knowledge item body and persists only per-item canonical word offset, WPM, chunk size and bookmark state. Playback is browser-local, content revision guards prevent stale writes, and ordinary reading plus annotations remain authoritative.",
+  "acceptance": [
+    "Open an actual active canonical Knowledge item through guarded HTTP or native tools; refuse missing, archived or textless items without creating a second content library.",
+    "Tokenize Unicode text with source offsets, attach standalone opening and closing punctuation to neighboring words, and apply sentence, clause, long-token and chunk-aware timing.",
+    "Persist canonical word offset independently of one- or two-word presentation so changing chunk size never jumps or reinterprets position.",
+    "Pause and resume browser playback, bound WPM to 100 through 1000, bound chunks to one or two words, and persist position plus settings across service reconstruction.",
+    "Bookmark an exact word offset, move elsewhere, restore that bookmark after reload, and reject stale content revisions before overwriting state.",
+    "When canonical content changes, clamp prior offsets and bookmarks to the current token range, disclose reconciliation once, and require the new revision for subsequent writes.",
+    "Return from RSVP to the existing ordinary reader with current annotation highlights intact; actual HTTP and DOM consumers exercise the real store and state endpoints."
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/knowledge/rsvp.py",
+    "runtime/gideon/workspace/capabilities/knowledge/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_knowledge_rsvp.py",
+    "apps/console/src/shared/data/api.ts",
+    "apps/console/src/features/knowledge/RsvpReader.tsx",
+    "apps/console/src/features/knowledge/ReadingView.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/knowledge/test_rsvp.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py",
+    "checks/runtime/capabilities/knowledge/rsvp_ui_server.py",
+    "apps/console/src/features/knowledge/RsvpReader.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/knowledge/test_rsvp.py",
+    "checks/runtime/capabilities/knowledge/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/knowledge/RsvpReader.test.tsx"
+  ],
+  "remaining_limits": [
+    "Playback timers run only while the reader is mounted; durable state records position and settings, not a claim that playback continued while the console was closed.",
+    "Content-change reconciliation safely clamps offsets but does not semantically relocate edited passages; the content_changed disclosure tells the reader to confirm the new position.",
+    "One explicit bookmark per canonical item is in scope; annotation/highlight collections remain the existing mechanism for multiple anchored passages.",
+    "Central dashboard handler registration is integrated by the root lane; RSVP is embedded in the existing Knowledge reading surface and needs no duplicate navigation destination."
+  ],
+  "verification": {
+    "task": "knowledge.12",
+    "command": "python3 tooling/capability_workflow.py verify knowledge.12",
+    "evidence": "/tmp/gideon-knowledge.12-checks-rib5tw1y/evidence.json",
+    "status": "locally_qualified",
+    "production_lines": 399,
+    "test_lines": 410,
+    "runtime_tests": 54,
+    "ui_tests": 8,
+    "note": "One serialized promise queue orders position writes; click-time snapshots and state generations prevent delayed saves or responses from replacing newer pause, bookmark or restore state."
+  }
+}
