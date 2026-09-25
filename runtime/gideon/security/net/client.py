@@ -14,6 +14,7 @@ than as an opaque stall.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -117,6 +118,7 @@ async def fetch(
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
     resolver=None,
+    validate_url: Callable[[str], None] | None = None,
 ) -> FetchResponse:
     """Perform a guarded outbound HTTP request. Raises :class:`EgressBlocked` if the
     URL (or any redirect hop) is denied. ``resolver`` is injectable for testing the
@@ -135,6 +137,8 @@ async def fetch(
 
                 raise LiveWriteDisabled(f"{method} {url}")
 
+    if validate_url is not None:
+        validate_url(url)
     guard_kw = {"resolver": resolver} if resolver is not None else {}
     decision = evaluate(url, policy, **guard_kw)
     if not decision.allow:
@@ -168,6 +172,8 @@ async def fetch(
                 ):
                     nxt = str(resp.headers["Location"])
                     nxt = _absolutize(cur_url, nxt)
+                    if validate_url is not None:
+                        validate_url(nxt)
                     hop_decision = evaluate(nxt, policy, **guard_kw)
                     if not hop_decision.allow:
                         _audit(

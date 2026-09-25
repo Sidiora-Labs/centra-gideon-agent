@@ -306,10 +306,12 @@ async def editorial(request):
         id = request.match_info['id']
         if request.method == 'GET':
             result = store.get(id)
+        elif request.path.endswith('/context'):
+            result = store.context.bind(id, await request.json())
         elif 'finding_id' in request.match_info:
             result = await store.repair(id, request.match_info['run_id'], request.match_info['finding_id'], await request.json())
         else:
-            result = store.run(id, await request.json())
+            result = await store.run_async(id, await request.json())
         return web.json_response(result)
     except (CatalogError, ValueError, TypeError) as exc:
         return web.json_response({"error": str(exc), "code": "creative_invalid"}, status=getattr(exc, "status", 400))
@@ -348,6 +350,7 @@ def register(app):
     app[WORKS] = WorkStore(app[STORE].home)
     app[EDITORIAL] = EditorialStore(app[WORKS])
     app.router.add_get("/api/capabilities/creative/works/{id}/editorial", editorial)
+    app.router.add_post("/api/capabilities/creative/works/{id}/editorial/context", editorial)
     app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs", editorial)
     app.router.add_post("/api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/repair", editorial)
     app[CONTINUITY] = ContinuityStore(app[WORKS])

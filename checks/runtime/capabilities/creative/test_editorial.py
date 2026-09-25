@@ -111,7 +111,7 @@ def payload(source, **changes):
     return {'request_id': str(uuid4()), 'work_revision': 2, 'start': 0, 'end': len(source), 'check_ids': ['prose.cliches', 'prose.filter-words', 'prose.word-echoes'], **changes}
 
 
-def test_registry_all_eighty_and_actual_runs_are_separate_from_pending_families(tmp_path):
+def test_registry_all_eighty_and_missing_context_are_explicit(tmp_path):
     works, editorial, work, source = fixture(tmp_path)
     catalog = editorial.catalog()
     assert len(catalog) == 80
@@ -119,11 +119,12 @@ def test_registry_all_eighty_and_actual_runs_are_separate_from_pending_families(
     assert {c['kind'] for c in catalog} == {'deterministic', 'llm'}
     assert next(c for c in catalog if c['id'] == 'chekhov.setups-payoffs')['label'] != 'Max findings per run'
     assert next(c for c in catalog if c['id'] == 'prose.cliches')['availability'] == 'available'
-    assert next(c for c in catalog if c['id'] == 'visual.eyeline-match')['availability'] == 'pending_family'
+    assert next(c for c in catalog if c['id'] == 'visual.eyeline-match')['availability'] == 'requires_context'
+    assert next(c for c in catalog if c['id'] == 'visual.eyeline-match')['context_family'] == 'scene'
     run = editorial.run(work['id'], payload(source, check_ids=['prose.cliches', 'visual.eyeline-match']))
-    assert run['kind'] == 'deterministic'
+    assert run['kind'] == 'mixed'
     assert run['results'][0]['status'] == 'completed'
-    assert run['results'][1] == {'check_id': 'visual.eyeline-match', 'status': 'skipped', 'reason': 'pending_family'}
+    assert run['results'][1] == {'check_id': 'visual.eyeline-match', 'status': 'skipped', 'reason': 'scene_context_missing'}
     assert run['findings'][0]['quote'] == 'Time stood still'
     assert run['findings'][0]['start'] == 2
     assert run['readiness'] == 'review_required'
@@ -147,9 +148,9 @@ def test_run_replay_partial_coverage_empty_clear_and_caps(tmp_path):
     assert partial['readiness'] == 'incomplete'
     clean = editorial.run(work['id'], payload(source, check_ids=['prose.italic-thoughts']))
     assert clean['readiness'] == 'selected_checks_clear'
-    pending = editorial.run(work['id'], payload(source, check_ids=['pov.head-hopping']))
-    assert pending['readiness'] == 'incomplete'
-    assert pending['findings'] == []
+    missing_context = editorial.run(work['id'], payload(source, check_ids=['pov.head-hopping']))
+    assert missing_context['readiness'] == 'incomplete'
+    assert missing_context['findings'] == []
     many = works.draft(work['id'], {'request_id': 'many', 'revision': 2, 'text': 'really ' * 150})['work']
     capped = editorial.run(work['id'], payload('really ' * 150, work_revision=many['revision'], check_ids=['prose.crutch-words']))
     assert capped['results'][0]['finding_count'] == 150
@@ -160,7 +161,7 @@ def test_run_replay_partial_coverage_empty_clear_and_caps(tmp_path):
 
 async def test_exact_repair_review_promote_restore_and_replay(tmp_path):
     works, editorial, work, source = fixture(tmp_path)
-    run = editorial.run(work['id'], payload(source))
+    run = await editorial.run_async(work['id'], payload(source))
     finding = run['findings'][0]
     data = {'request_id': 'repair', 'work_revision': 2, 'replacement': 'The clock stopped'}
     receipt = await editorial.repair(work['id'], run['id'], finding['id'], data)
@@ -196,7 +197,7 @@ def test_invalid_run_no_writes(tmp_path, changes):
 
 async def test_missing_source_and_foreign_finding_cannot_create_repair(tmp_path):
     works, editorial, work, source = fixture(tmp_path)
-    run = editorial.run(work['id'], payload(source))
+    run = await editorial.run_async(work['id'], payload(source))
     data = {'request_id': 'repair', 'work_revision': 2, 'replacement': 'Changed'}
     with pytest.raises(CatalogError) as unknown:
         await editorial.repair(work['id'], run['id'], 'missing', data)

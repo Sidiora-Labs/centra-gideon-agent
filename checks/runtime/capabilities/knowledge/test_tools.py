@@ -55,7 +55,7 @@ def test_manifest_loads_real_native_provider(runtime):
 def test_discovery_declares_risk_and_strict_input_shapes(runtime):
     provider = create_provider()
     tools = asyncio.run(provider.list_tools())
-    assert len(tools) == 31
+    assert len(tools) == 38
     assert len({tool.name for tool in tools}) == len(tools)
     by_name = {tool.name: tool for tool in tools}
     for name in ("knowledge_anniversaries", "knowledge_anniversary_source", "knowledge_capture_list", "knowledge_capture_get"):
@@ -69,6 +69,46 @@ def test_discovery_declares_risk_and_strict_input_shapes(runtime):
         assert "home" not in tool.parameters["properties"]
         assert "provider" not in tool.parameters["properties"]
         assert tool.provider == provider.name
+
+
+def test_native_video_review_import_and_exact_transcript(runtime):
+    provider = create_provider()
+    body = {"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Native video source", "format": "vtt", "content": "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nGrounded segment\n", "language": "en"}
+    reviewed = invoke(provider, "knowledge_video_preview", body)
+    assert reviewed.success
+    preview = json.loads(reviewed.output)
+    assert preview["segments"][0]["source_link"].endswith("&t=1s")
+    imported = invoke(provider, "knowledge_video_import", {"request_id": "native-video-request", **body, "preview_id": preview["preview_id"]})
+    assert imported.success
+    job = json.loads(imported.output)
+    assert job["status"] == "completed"
+    assert job["source_id"] and job["transcript_id"] and job["original_source_id"]
+    listing = invoke(provider, "knowledge_video_list", {"limit": 1})
+    assert listing.success
+    assert json.loads(listing.output)["items"][0]["id"] == job["id"]
+    detail = invoke(provider, "knowledge_video_get", {"id": job["id"]})
+    assert json.loads(detail.output)["video_id"] == "dQw4w9WgXcQ"
+    transcript = invoke(provider, "knowledge_video_transcript", {"id": job["id"]})
+    assert transcript.success
+    assert "Grounded segment" in json.loads(transcript.output)["content"]
+    repeated = invoke(provider, "knowledge_video_import", {"request_id": "native-video-request", **body, "preview_id": preview["preview_id"]})
+    assert json.loads(repeated.output) == job
+
+
+@pytest.mark.parametrize("name,args", [
+    ("knowledge_video_preview", {"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Title", "format": "text", "content": "one", "language": "en"}),
+    ("knowledge_video_import", {"request_id": "native-video-bad", "url": "https://youtu.be/dQw4w9WgXcQ", "title": "Title", "format": "vtt", "content": "one", "language": "en"}),
+    ("knowledge_video_fetch", {"request_id": "native-video-fetch", "url": "https://youtu.be/dQw4w9WgXcQ", "language": "en", "transcript": True, "video": False, "audio": False, "provider": "unsafe"}),
+    ("knowledge_video_get", {"id": "one", "home": "/other"}),
+    ("knowledge_video_cancel", {}),
+    ("knowledge_video_transcript", {"id": "one", "raw": True}),
+])
+def test_native_video_schemas_refuse_incomplete_or_extra_arguments(runtime, name, args):
+    result = invoke(create_provider(), name, args)
+    assert not result.success
+    assert "Invalid tool arguments" in result.error
+    table = runtime.state.knowledge_store.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='capability_knowledge_video_jobs'").fetchone()
+    assert table is None or runtime.state.knowledge_store.db.execute("SELECT count(*) FROM capability_knowledge_video_jobs").fetchone()[0] == 0
 
 
 def test_native_anniversary_and_exact_source(runtime):

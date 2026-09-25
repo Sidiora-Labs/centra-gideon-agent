@@ -6,19 +6,34 @@ from .store import CatalogError, identifier, integer, keys
 from .works import WorkStore
 from .polishing import PolishingStore
 from .prose_checks import CATALOG, SUPPORTED, scan
+from .editorial_context import EditorialContextStore, family_for
+from .context_checks import deterministic, model
 
 
 class EditorialStore:
     def __init__(self, works: WorkStore):
         self.works = works
         self.polishing = PolishingStore(works)
+        self.context = EditorialContextStore(works)
         with works.connection() as db:
             db.execute('CREATE TABLE IF NOT EXISTS editorial_repairs(id TEXT PRIMARY KEY, payload_hash TEXT, record TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS editorial_runs(id TEXT PRIMARY KEY, work_id TEXT, payload_hash TEXT, record TEXT)')
 
-    def catalog(self):
-        return [{**check, 'availability': 'available' if check['id'] in SUPPORTED else 'pending_family',
-                 'language': 'English heuristics; Unicode source offsets'} for check in CATALOG['checks']]
+    def catalog(self, work_id=None):
+        result = []
+        for check in CATALOG['checks']:
+            family = family_for(check['id'])
+            if check['id'] in SUPPORTED:
+                availability = 'available'
+            elif family and work_id and self.context.current(work_id, family)['status'] == 'available':
+                availability = 'available'
+            elif family:
+                availability = 'requires_context'
+            else:
+                availability = 'configured_model_required'
+            result.append({**check, 'availability': availability, 'context_family': family,
+                           'language': 'English heuristics or configured model; Unicode source offsets'})
+        return result
 
     def _run(self, db, id, run_id):
         self.works._work(db, id)
@@ -33,10 +48,21 @@ class EditorialStore:
             records = [json.loads(row[0]) for row in db.execute('SELECT record FROM editorial_runs WHERE work_id=? ORDER BY rowid DESC', (id,))]
         for run in records:
             artifact = self.works.artifacts.get(run['artifact_id'], version=run['artifact_version'])
-            run.update(missing=artifact is None, stale=work['active_draft_id'] != run['draft_id'] or work['revision'] != run['work_revision'])
-        return {'work_id': id, 'catalog': self.catalog(), 'runs': records, 'formula_version': 'editorial-prose-v1'}
+            context_stale = []
+            for binding in run.get('context_bindings', []):
+                state = self.context.current(id, binding['family'])
+                if state.get('status') != 'available' or state.get('revision') != binding['revision']:
+                    context_stale.append(binding['family'])
+            run.update(missing=artifact is None, stale=work['active_draft_id'] != run['draft_id'] or work['revision'] != run['work_revision'] or bool(context_stale),
+                       stale_context_families=context_stale)
+        return {'work_id': id, 'catalog': self.catalog(id), 'contexts': self.context.list(id)['families'],
+                'runs': records, 'formula_version': 'editorial-context-v1'}
 
     def run(self, id, payload):
+        import asyncio
+        return asyncio.run(self.run_async(id, payload))
+
+    async def run_async(self, id, payload):
         keys(payload, {'request_id', 'work_revision', 'check_ids', 'start', 'end'})
         request = identifier(payload.get('request_id'))
         run_id = hashlib.sha256((identifier(id) + ':' + request).encode()).hexdigest()
@@ -65,20 +91,39 @@ class EditorialStore:
         known = {c['id'] for c in CATALOG['checks']}
         if not isinstance(selected, list) or not 1 <= len(selected) <= 80 or any(not isinstance(c, str) or c not in known for c in selected) or len(selected) != len(set(selected)):
             raise CatalogError('Choose unique known editorial check IDs')
-        results, findings = [], []
+        results, findings, bindings = [], [], []
+        catalog = {item['id']: item for item in CATALOG['checks']}
         for check in selected:
-            if check not in SUPPORTED:
-                results.append({'check_id': check, 'status': 'skipped', 'reason': 'pending_family'})
+            definition = catalog[check]
+            family = family_for(check)
+            context = self.context.current(id, family) if family else {'status': 'not_required'}
+            if family and context['status'] != 'available':
+                results.append({'check_id': check, 'status': 'skipped', 'reason': f'{family}_context_{context["status"]}'})
                 continue
-            hits = scan(check, source[start:end])
+            if family:
+                binding = {key: context[key] for key in ('family', 'revision', 'schema_version', 'artifact_id', 'artifact_version')}
+                if binding not in bindings:
+                    bindings.append(binding)
+            if check in SUPPORTED:
+                hits = scan(check, source[start:end])
+                for hit in hits:
+                    hit['start'], hit['end'] = start + hit['start'], start + hit['end']
+            elif definition['kind'] == 'deterministic':
+                hits = [hit for hit in deterministic(check, source, context) if start <= hit['start'] < hit['end'] <= end]
+            else:
+                outcome = await model(definition, source, {'start': start, 'end': end}, context)
+                if outcome['status'] != 'completed':
+                    results.append({'check_id': check, 'status': outcome['status'], 'reason': outcome['reason']})
+                    continue
+                hits = outcome['findings']
             count = len(hits)
             for index, hit in enumerate(hits[:100]):
                 findings.append({**hit, 'id': hashlib.sha256(f'{run_id}:{check}:{index}'.encode()).hexdigest(), 'check_id': check,
-                                 'start': start + hit['start'], 'end': start + hit['end'], 'severity': next(c['severity'] for c in CATALOG['checks'] if c['id'] == check)})
+                                 'severity': definition['severity']})
             results.append({'check_id': check, 'status': 'completed', 'finding_count': count, 'truncated': count > 100})
         record = {'id': run_id, 'work_id': id, 'work_revision': revision, 'draft_id': draft['id'], 'artifact_id': draft['artifact_id'],
                   'artifact_version': draft['artifact_version'], 'coverage': {'start': start, 'end': end, 'total_characters': len(source)},
-                  'created_at': datetime.now(timezone.utc).isoformat(), 'kind': 'deterministic', 'results': results, 'findings': findings,
+                  'context_bindings': bindings, 'created_at': datetime.now(timezone.utc).isoformat(), 'kind': 'mixed', 'results': results, 'findings': findings,
                   'readiness': 'review_required' if findings else 'incomplete' if any(r['status'] != 'completed' for r in results) or start != 0 or end != len(source) else 'selected_checks_clear'}
         with self.works.connection() as db:
             current = self.works._work(db, id)

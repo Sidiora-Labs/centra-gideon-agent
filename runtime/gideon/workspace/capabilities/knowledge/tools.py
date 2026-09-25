@@ -11,6 +11,8 @@ from gideon.workspace.capabilities.knowledge.topics import TrackedTopics, SOURCE
 from gideon.workspace.capabilities.knowledge.idea_format import preview as idea_preview
 from gideon.workspace.capabilities.knowledge.ideas import IdeaLists
 from gideon.workspace.capabilities.knowledge.idea_schedule import IdeaSchedules, IdeaSyncActionProvider
+from gideon.workspace.capabilities.knowledge.transcript_format import preview as transcript_preview
+from gideon.workspace.capabilities.knowledge.videos import VideoIngests
 from gideon.workspace.capabilities.knowledge.journals import DateJournals
 from gideon.workspace.capabilities.knowledge.reviews import ReviewService
 from gideon.workspace.capabilities.knowledge.review_schedule import ReviewSchedules, ReviewActionProvider
@@ -32,7 +34,15 @@ _ARCHIVE_FIELDS = {"format": {"enum": ["chatgpt"]}, "content": {"type": "string"
 _REVIEW_FIELDS = {"period": {"enum": ["daily", "weekly"]}, "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "timezone": {"type": "string", "maxLength": 100}}
 _JOURNAL_FIELDS = {key: value for key, value in _REVIEW_FIELDS.items() if key != "period"}
 _IDEA_CONTENT = {"type": "string", "minLength": 1, "maxLength": 262144}
+_VIDEO_PREVIEW = {"url": {"type": "string", "maxLength": 2048}, "title": {"type": "string", "minLength": 1, "maxLength": 300}, "format": {"enum": ["vtt", "srt", "json"]}, "content": {"type": "string", "minLength": 1, "maxLength": 1048576}, "language": {"type": "string", "minLength": 1, "maxLength": 30}}
 _TOOLS = {
+    "knowledge_video_list": ("List durable public-video ingest jobs, progress and caption-reader availability.", False, _PAGING, []),
+    "knowledge_video_get": ("Read one durable video ingest and its ordered progress events.", False, {"id": _ID}, ["id"]),
+    "knowledge_video_preview": ("Parse user-supplied timed captions for review without fetching or writing.", False, _VIDEO_PREVIEW, list(_VIDEO_PREVIEW)),
+    "knowledge_video_import": ("Save an unchanged reviewed supplied transcript with timestamp links and explicit user-supplied provenance.", True, {**_VIDEO_PREVIEW, "request_id": _REQUEST, "preview_id": _ID}, ["request_id", *_VIDEO_PREVIEW, "preview_id"]),
+    "knowledge_video_fetch": ("Start guarded public YouTube caption or bounded artifact acquisition. This performs external reads and returns a durable job.", True, {"request_id": _REQUEST, "url": _VIDEO_PREVIEW["url"], "language": _VIDEO_PREVIEW["language"], "transcript": {"type": "boolean"}, "video": {"type": "boolean"}, "audio": {"type": "boolean"}}, ["request_id", "url", "language", "transcript", "video", "audio"]),
+    "knowledge_video_cancel": ("Request cancellation of a running video acquisition.", True, {"id": _ID}, ["id"]),
+    "knowledge_video_transcript": ("Read the stored canonical Markdown transcript for a completed or partial ingest.", False, {"id": _ID}, ["id"]),
     "knowledge_idea_list": ("List canonical idea lists and owned-vault availability.", False, {}, []),
     "knowledge_idea_preview": ("Review portable idea-list Markdown, preserving ordered ideas and reporting extra metadata.", False, {"content": _IDEA_CONTENT}, ["content"]),
     "knowledge_idea_import": ("Import reviewed idea-list Markdown into canonical collection/fleeting records with current expected_hash; use empty hash for a new list.", True, {"request_id": _REQUEST, "content": _IDEA_CONTENT, "preview_id": _ID, "expected_hash": {"type": "string", "maxLength": 128}}, ["request_id", "content", "preview_id", "expected_hash"]),
@@ -98,6 +108,7 @@ class KnowledgeCapabilityTools(ToolProvider):
         self._archive = None
         self._topics = None
         self._ideas = None
+        self._videos = None
         self._idea_schedules = None
         self._journals = None
         self._reviews = None
@@ -148,7 +159,24 @@ class KnowledgeCapabilityTools(ToolProvider):
             memory = builder.memory if builder else getattr(state, "_standalone_memory", None)
             archive = getattr(memory, "vector_store", None)
             service = MemoryService.over_vector_store(archive) if archive is not None else None
-            if tool_name.startswith("knowledge_idea_"):
+            if tool_name.startswith("knowledge_video_"):
+                if self._videos is None:
+                    self._videos = VideoIngests(self._store, self._home)
+                if tool_name == "knowledge_video_list":
+                    result = self._videos.list(**arguments)
+                elif tool_name == "knowledge_video_get":
+                    result = self._videos.get(arguments["id"])
+                elif tool_name == "knowledge_video_preview":
+                    result = transcript_preview(arguments)
+                elif tool_name == "knowledge_video_import":
+                    result = self._videos.import_preview(arguments)
+                elif tool_name == "knowledge_video_fetch":
+                    result = self._videos.start_fetch(arguments, get_current_session_key())
+                elif tool_name == "knowledge_video_cancel":
+                    result = self._videos.cancel(arguments["id"])
+                else:
+                    result = self._videos.transcript(arguments["id"])
+            elif tool_name.startswith("knowledge_idea_"):
                 if self._ideas is None:
                     self._ideas = IdeaLists(self._store, self._home)
                     self._idea_schedules = IdeaSchedules(self._ideas)
