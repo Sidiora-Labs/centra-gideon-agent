@@ -34,6 +34,7 @@ from gideon.workspace.capabilities.wellbeing.intervention import InterventionSto
 from gideon.workspace.capabilities.wellbeing.genome import GenomeStore
 from gideon.workspace.capabilities.wellbeing.cognition import CognitiveStore
 from gideon.workspace.capabilities.wellbeing.memory_practice import MemoryPracticeStore
+from gideon.workspace.capabilities.wellbeing.life_calendar import LifeCalendarStore
 from gideon.workspace.capabilities.wellbeing.labs import LabStore
 from gideon.workspace.capabilities.wellbeing.store import MeasurementStore
 from gideon.workspace.capabilities.wellbeing.substances import ConsumptionStore
@@ -333,11 +334,12 @@ def test_status_reports_declared_coverage_cursor_and_conflict_only(home, tmp_pat
         {"scope": "wellbeing.routines", "entries": ["wellbeing.substance_entries", "wellbeing.substance_presets", "wellbeing.intervention_plans", "wellbeing.intervention_records"]},
         {"scope": "wellbeing.genome", "entries": ["wellbeing.genome_sources", "wellbeing.genome_variants"]},
         {"scope": "wellbeing.practice", "entries": ["wellbeing.cognitive_sessions", "wellbeing.memory_cards"]},
+        {"scope": "wellbeing.life_calendar", "entries": ["wellbeing.life_config", "wellbeing.life_events"]},
     ]
     assert value["cursors"] == []
     assert value["conflicts"] == []
     assert value["peers"][0]["id"] == remote_id["peer_id"]
-    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice"}
+    assert set(DOMAINS) == {SCOPE, "knowledge.records", "creative.catalog", "identity.goals", "identity.profile", "communications.contacts", "music.library", "wellbeing.health", "wellbeing.routines", "wellbeing.genome", "wellbeing.practice", "wellbeing.life_calendar"}
     encoded = json.dumps(value)
     assert "private_key" not in encoded
     assert "identity.key" not in encoded
@@ -926,3 +928,66 @@ def test_practice_scope_terminal_results_memory_conflicts_tombstones_and_privacy
     peer = PeerStore(a_home).get(bid["peer_id"])
     PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
     with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.practice")
+
+
+def seed_life_calendar(home):
+    store = LifeCalendarStore(home)
+    config = store.configure({"request_id": "calendar-config", "revision": 0, "birth_date": "1990-01-01", "horizon_years": 90, "sleep_hours": 8, "timezone": "Europe/Berlin", "budgets": [{"name": "creative work", "hours_per_week": 20}], "source": "user declaration", "reminder": {"enabled": False, "time": "20:00"}})
+    event = store.create_event({"request_id": "calendar-event", "date": "2026-09-25", "title": "Health review", "notes": "baseline", "kind": "planned", "source": "personal plan"})
+    with sqlite3.connect(home / "capabilities/wellbeing.sqlite3") as db:
+        db.execute("INSERT INTO requests VALUES(?,?,?)", ("calendar-private", '{"secret":"calendar-private-secret","access_grant":"local-only"}', "{}"))
+        db.execute("INSERT INTO life_reminder_claims VALUES(?,?,?)", ("2026-09-25", "Europe/Berlin", "private-inbox-item"))
+    return config, event
+
+
+def test_life_calendar_scope_config_events_conflict_tombstone_and_private_state(home):
+    none_a, none_b = home / "calendar-none-a", home / "calendar-none-b"
+    _, none_peer = pair(none_a, none_b)
+    seed_life_calendar(none_a)
+    with pytest.raises(ReplicationError, match="policy denies"): ReplicationService(none_a).export_batch(none_peer["peer_id"], "wellbeing.life_calendar")
+
+    a_home, b_home = home / "calendar-a", home / "calendar-b"
+    aid, bid = pair_for(a_home, b_home, "wellbeing.life_calendar")
+    config, event = seed_life_calendar(a_home)
+    a, b = ReplicationService(a_home), ReplicationService(b_home)
+    baseline = a.export_batch(bid["peer_id"], "wellbeing.life_calendar")
+    assert [item["entry_id"] for item in baseline["entries"]] == ["wellbeing.life_config", "wellbeing.life_events"]
+    wire = json.dumps(baseline)
+    assert "trigger_id" not in wire and "calendar-private-secret" not in wire and "private-inbox-item" not in wire and "life_reminder_claims" not in wire
+    assert b.apply_batch(aid["peer_id"], baseline)["accepted"] is True
+    a._record_sent(bid["peer_id"], baseline)
+    calendar_b = LifeCalendarStore(b_home)
+    assert calendar_b.get_config()["birth_date"] == config["birth_date"] and "trigger_id" not in calendar_b.get_config()
+    assert calendar_b.list_events()[0]["id"] == event["id"]
+    assert calendar_b.projection("2026-09-25T12:00:00Z")["events"][0]["title"] == "Health review"
+
+    local = LifeCalendarStore(a_home).update_event(event["id"], {"request_id": "local-event", "revision": 1, "title": "Local health review", "notes": "keep local notes"})
+    calendar_b.update_event(event["id"], {"request_id": "peer-event", "revision": 1, "title": "Peer health review", "notes": "peer notes"})
+    incoming = ReplicationService(b_home).export_batch(aid["peer_id"], "wellbeing.life_calendar")
+    outcome = ReplicationService(a_home).apply_batch(bid["peer_id"], incoming)
+    assert outcome["entries"][1]["conflicts"] == 1
+    conflict = next(item for item in ConflictQueue(a_home).items(status=STATUS_NEEDS_REVIEW) if item.entry_id == "wellbeing.life_events")
+    ReplicationService(a_home).restore_fields(conflict.id, ["title"])
+    merged = LifeCalendarStore(a_home).list_events()[0]
+    assert merged["title"] == "Peer health review" and merged["notes"] == local["notes"] and merged["revision"] == 3
+
+    c_home, d_home = home / "calendar-c", home / "calendar-d"
+    cid, did = pair_for(c_home, d_home, "wellbeing.life_calendar")
+    _, doomed = seed_life_calendar(c_home)
+    first = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.life_calendar")
+    ReplicationService(d_home).apply_batch(cid["peer_id"], first)
+    ReplicationService(c_home)._record_sent(did["peer_id"], first)
+    LifeCalendarStore(c_home).update_event(doomed["id"], {"request_id": "delete-event", "revision": 1, "deleted": True})
+    tombstone = ReplicationService(c_home).export_batch(did["peer_id"], "wellbeing.life_calendar")
+    assert ReplicationService(d_home).apply_batch(cid["peer_id"], tombstone)["entries"][1]["removed"] == 1
+
+    bad_home, target_home = home / "calendar-bad", home / "calendar-target"
+    bad_id, target_id = pair_for(bad_home, target_home, "wellbeing.life_calendar")
+    seed_life_calendar(bad_home)
+    malformed = ReplicationService(bad_home).export_batch(target_id["peer_id"], "wellbeing.life_calendar")
+    malformed["entries"][0]["rows"][0]["data"]["trigger_id"] = "remote-trigger"
+    with pytest.raises(ReplicationError, match="local automation state") as rejected: ReplicationService(target_home).apply_batch(bad_id["peer_id"], malformed)
+    assert rejected.value.status == 422 and LifeCalendarStore(target_home).get_config() is None
+    peer = PeerStore(a_home).get(bid["peer_id"])
+    PeerStore(a_home).put(bid["peer_id"], peer_record(bid, peer["endpoint"], revision=peer["revision"], send=[]))
+    with pytest.raises(ReplicationError, match="export"): ReplicationService(a_home).export_batch(bid["peer_id"], "wellbeing.life_calendar")
