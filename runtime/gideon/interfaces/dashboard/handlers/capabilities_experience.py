@@ -46,7 +46,9 @@ def register(app):
     if STORE not in app:
         app[STORE] = ExperienceStore()
     from gideon.workspace.capabilities.experience.narration_http import register_narration
+    from gideon.workspace.capabilities.experience.navigation_http import register_navigation
     register_narration(app, app[STORE])
+    register_navigation(app, app[STORE])
     for resource in ("stories", "sessions"):
         path = PREFIX + "/" + resource
         app.router.add_get(path, handle)
