@@ -6,12 +6,14 @@ import json
 import re
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from io import StringIO
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from dateutil.rrule import rrulestr
+from dateutil.tz import tzical
 from gideon.core.config.credentials import get_credential
 from .store import PeopleError, fields, instant, text
 
@@ -75,13 +77,14 @@ def save_source(store, data, source_id=None):
     return {**body, 'revision': next_revision}
 
 
-def _local_time(value, params, default_zone):
+def _local_time(value, params, default_zone, custom_zones=None):
     if params.get('VALUE') == 'DATE' or re.fullmatch(r'\d{8}', value):
         return datetime.strptime(value, '%Y%m%d').date(), True
     if value.endswith('Z'):
         return datetime.strptime(value, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc), False
     observed = datetime.strptime(value, '%Y%m%dT%H%M%S')
-    tz = zone(params.get('TZID', default_zone))
+    name = params.get('TZID', default_zone)
+    tz = (custom_zones or {}).get(name) or zone(name)
     aware = observed.replace(tzinfo=tz)
     if aware.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None) != observed or aware.utcoffset() != observed.replace(tzinfo=tz, fold=1).utcoffset():
         raise PeopleError('Ambiguous or nonexistent local calendar time; export UTC instants')
@@ -101,12 +104,12 @@ def _duration(value, all_day=False):
     return duration
 
 
-def _local_event_times(raw, default_zone):
-    start, all_day = _local_time(*raw['DTSTART'], default_zone)
+def _local_event_times(raw, default_zone, custom_zones=None):
+    start, all_day = _local_time(*raw['DTSTART'], default_zone, custom_zones)
     if 'DTEND' in raw and 'DURATION' in raw:
         raise PeopleError('Event cannot contain both DTEND and DURATION')
     if 'DTEND' in raw:
-        end, end_all_day = _local_time(*raw['DTEND'], default_zone)
+        end, end_all_day = _local_time(*raw['DTEND'], default_zone, custom_zones)
         if end_all_day != all_day:
             raise PeopleError('Event start and end value types differ')
     elif 'DURATION' in raw:
@@ -118,11 +121,11 @@ def _local_event_times(raw, default_zone):
     return start, end, all_day
 
 
-def _event(raw, default_zone, identity=None):
+def _event(raw, default_zone, identity=None, custom_zones=None):
     uid = text(raw.get('UID', ('', {}))[0], 'UID', 500, True)
     if 'DTSTART' not in raw:
         raise PeopleError('Event DTSTART is required')
-    local_start, local_end, all_day = _local_event_times(raw, default_zone)
+    local_start, local_end, all_day = _local_event_times(raw, default_zone, custom_zones)
     start = local_start.isoformat() if all_day else local_start.astimezone(timezone.utc).isoformat()
     end = local_end.isoformat() if all_day else local_end.astimezone(timezone.utc).isoformat()
     unescape = lambda value: value.replace('\\n', '\n').replace('\\N', '\n').replace('\\,', ',').replace('\\;', ';').replace('\\\\', '\\')
@@ -191,9 +194,22 @@ def _expand_rule(value, anchor, all_day, lower, upper):
     return candidates
 
 
-def _occurrence(master, raw, start_local, original_key, default_zone, period_end=None):
-    base_start, base_end, all_day = _local_event_times(raw, default_zone)
-    duration = base_end - base_start
+def _recurrence_order(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    return datetime.combine(value, datetime.min.time(), timezone.utc)
+
+
+def _starts_in_window(item, lower, upper):
+    value = (datetime.combine(date.fromisoformat(item['start']), datetime.min.time(), timezone.utc)
+             if item['all_day'] else datetime.fromisoformat(item['start']).astimezone(timezone.utc))
+    return lower <= value < upper
+
+
+def _occurrence(master, raw, start_local, original_key, default_zone, period_end=None,
+                custom_zones=None, duration=None):
+    base_start, base_end, all_day = _local_event_times(raw, default_zone, custom_zones)
+    duration = duration if duration is not None else base_end - base_start
     if all_day:
         start = start_local.isoformat()
         end = (start_local + duration).isoformat()
@@ -214,6 +230,11 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
         raise PeopleError('A complete VCALENDAR export is required')
     if 'VERSION:2.0' not in lines:
         raise PeopleError('Calendar VERSION:2.0 is required')
+    try:
+        calendar_zones = tzical(StringIO('\n'.join(lines)))
+        custom_zones = {name: calendar_zones.get(name) for name in calendar_zones.keys()}
+    except (TypeError, ValueError, OverflowError):
+        raise PeopleError('Invalid embedded VTIMEZONE definition') from None
     rows, current, nested = [], None, 0
     for line in lines[1:-1]:
         if line == 'BEGIN:VEVENT':
@@ -259,14 +280,14 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
             if len(masters) != 1:
                 raise PeopleError('Each recurring UID requires exactly one master event')
             raw = masters[0]
-            master = _event(raw, default_zone)
+            master = _event(raw, default_zone, custom_zones=custom_zones)
             if not any(key in raw for key in ('RRULE', 'RDATE', 'EXDATE')):
                 if master['id'] in seen:
                     raise PeopleError('Duplicate calendar event identity')
                 seen.add(master['id'])
                 events.append(master)
                 continue
-            base_local, all_day = _local_time(*raw['DTSTART'], default_zone)
+            base_local, all_day = _local_time(*raw['DTSTART'], default_zone, custom_zones)
             anchor = datetime.combine(base_local, datetime.min.time(), timezone.utc) if all_day else base_local
             lower, upper = _window(window_start, window_end, anchor.astimezone(timezone.utc))
             exclusions = set()
@@ -279,13 +300,13 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                             if '/' not in part:
                                 raise PeopleError('RDATE period requires a start and end or duration')
                             start_value, end_value = part.split('/', 1)
-                            local_value, value_all_day = _local_time(start_value, params, default_zone)
+                            local_value, value_all_day = _local_time(start_value, params, default_zone, custom_zones)
                             if value_all_day or all_day:
                                 raise PeopleError('RDATE period requires a date-time start')
                             if end_value.startswith('P'):
                                 period_end = local_value + _duration(end_value)
                             else:
-                                period_end, end_all_day = _local_time(end_value, params, default_zone)
+                                period_end, end_all_day = _local_time(end_value, params, default_zone, custom_zones)
                                 if end_all_day:
                                     raise PeopleError('RDATE period requires a date-time end')
                             if period_end <= local_value:
@@ -293,26 +314,50 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                             period_ends[local_value.isoformat()] = period_end
                             additions.append(local_value)
                             continue
-                        local_value, value_all_day = _local_time(part, params, default_zone)
+                        local_value, value_all_day = _local_time(part, params, default_zone, custom_zones)
                         if value_all_day != all_day:
                             raise PeopleError(name + ' value type differs from DTSTART')
                         target.add(local_value.isoformat()) if name == 'EXDATE' else target.append(local_value)
-            overrides = {}
+            overrides, ranges, override_keys = {}, [], set()
             for override in (item for item in group if 'RECURRENCE-ID' in item):
-                recurrence_value, recurrence_all_day = _local_time(*override['RECURRENCE-ID'], default_zone)
+                recurrence_value, recurrence_all_day = _local_time(*override['RECURRENCE-ID'], default_zone, custom_zones)
                 if recurrence_all_day != all_day:
                     raise PeopleError('RECURRENCE-ID value type differs from DTSTART')
                 key = recurrence_value.isoformat()
-                if key in overrides:
+                if key in override_keys:
                     raise PeopleError('Duplicate recurrence override identity')
-                overrides[key] = override
+                override_keys.add(key)
+                range_value = override['RECURRENCE-ID'][1].get('RANGE')
+                if range_value and range_value != 'THISANDFUTURE':
+                    raise PeopleError('Unsupported RECURRENCE-ID RANGE value')
+                if not range_value:
+                    overrides[key] = override
+                    continue
+                cancelled = override.get('STATUS', ('', {}))[0].upper() == 'CANCELLED'
+                if cancelled:
+                    shift, range_duration, range_master = timedelta(0), None, master
+                else:
+                    range_start, range_end, range_all_day = _local_event_times(override, default_zone, custom_zones)
+                    if range_all_day != all_day:
+                        raise PeopleError('RANGE override value type differs from DTSTART')
+                    shift = range_start - recurrence_value
+                    range_duration = range_end - range_start
+                    range_master = _event(override, default_zone, custom_zones=custom_zones)
+                ranges.append((_recurrence_order(recurrence_value), key, shift,
+                               range_duration, range_master, cancelled))
+            ranges.sort(key=lambda item: item[0])
             candidates = []
             if 'RRULE' in raw:
-                candidates.extend(_expand_rule(raw['RRULE'][0], anchor, all_day, lower, upper))
+                forward = max((entry[2] for entry in ranges), default=timedelta(0))
+                backward = min((entry[2] for entry in ranges), default=timedelta(0))
+                candidates.extend(_expand_rule(raw['RRULE'][0], anchor, all_day,
+                                               lower - max(forward, timedelta(0)),
+                                               upper - min(backward, timedelta(0))))
             else:
                 candidates.append(base_local)
             candidates.extend(additions)
             unique = {candidate.isoformat(): candidate for candidate in candidates}
+            matched_ranges = set()
             for original_key, occurrence in sorted(unique.items()):
                 if original_key in exclusions:
                     continue
@@ -320,20 +365,34 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                 if override:
                     if override.get('STATUS', ('', {}))[0].upper() == 'CANCELLED':
                         continue
-                    item = _event(override, default_zone, uid + '#' + original_key)
+                    item = _event(override, default_zone, uid + '#' + original_key, custom_zones)
                     item.update(recurring=True, recurrence_id=original_key, overridden=True)
                 else:
-                    item = _occurrence(master, raw, occurrence, original_key, default_zone,
-                                       period_ends.get(original_key))
+                    applicable = [entry for entry in ranges if entry[0] <= _recurrence_order(occurrence)]
+                    if applicable:
+                        _, range_key, shift, range_duration, range_master, cancelled = applicable[-1]
+                        matched_ranges.add(range_key)
+                        if cancelled:
+                            continue
+                        occurrence = occurrence + shift
+                        item = _occurrence(range_master, raw, occurrence, original_key, default_zone,
+                                           custom_zones=custom_zones, duration=range_duration)
+                        item.update(range_applied=range_key, overridden=True)
+                    else:
+                        item = _occurrence(master, raw, occurrence, original_key, default_zone,
+                                           period_ends.get(original_key), custom_zones)
+                if not _starts_in_window(item, lower, upper):
+                    continue
                 if item['id'] in seen:
                     raise PeopleError('Duplicate calendar occurrence identity')
                 seen.add(item['id'])
                 events.append(item)
-            if overrides:
-                warnings.append({'uid': uid, 'unmatched_overrides': sorted(overrides)})
+            unmatched = sorted(list(overrides) + [entry[1] for entry in ranges if entry[1] not in matched_ranges])
+            if unmatched:
+                warnings.append({'uid': uid, 'unmatched_overrides': unmatched})
     except PeopleError:
         raise
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         raise PeopleError('Invalid calendar date or property') from None
     return events, warnings
 

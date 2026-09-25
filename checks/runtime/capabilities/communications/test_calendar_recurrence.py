@@ -296,6 +296,115 @@ def test_rdate_period_cannot_change_an_all_day_series_value_type():
         calendar.parse_ics(content, 'UTC', '2026-01-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00')
 
 
+def custom_eastern_timezone():
+    return '\r\n'.join([
+        'BEGIN:VTIMEZONE', 'TZID:Custom/Eastern',
+        'BEGIN:DAYLIGHT', 'DTSTART:19700308T020000',
+        'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU',
+        'TZOFFSETFROM:-0500', 'TZOFFSETTO:-0400', 'TZNAME:EDT', 'END:DAYLIGHT',
+        'BEGIN:STANDARD', 'DTSTART:19701101T020000',
+        'RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU',
+        'TZOFFSETFROM:-0400', 'TZOFFSETTO:-0500', 'TZNAME:EST', 'END:STANDARD',
+        'END:VTIMEZONE',
+    ]) + '\r\n'
+
+
+def test_embedded_vtimezone_expands_forward_and_backward_dst_transitions():
+    spring = item('spring-custom', 'DTSTART;TZID=Custom/Eastern:20260307T090000',
+                  'DTEND;TZID=Custom/Eastern:20260307T100000', 'RRULE:FREQ=DAILY;COUNT=3')
+    autumn = item('autumn-custom', 'DTSTART;TZID=Custom/Eastern:20261031T090000',
+                  'DTEND;TZID=Custom/Eastern:20261031T100000', 'RRULE:FREQ=DAILY;COUNT=3')
+    content = envelope(custom_eastern_timezone(), spring, autumn)
+    events, warnings = calendar.parse_ics(content, 'UTC',
+                                         '2026-03-01T00:00:00+00:00', '2027-03-01T00:00:00+00:00')
+    assert warnings == []
+    spring_rows = [row for row in events if row['uid'] == 'spring-custom']
+    autumn_rows = [row for row in events if row['uid'] == 'autumn-custom']
+    assert [row['start'] for row in spring_rows] == [
+        '2026-03-07T14:00:00+00:00', '2026-03-08T13:00:00+00:00',
+        '2026-03-09T13:00:00+00:00']
+    assert [row['end'] for row in spring_rows] == [
+        '2026-03-07T15:00:00+00:00', '2026-03-08T14:00:00+00:00',
+        '2026-03-09T14:00:00+00:00']
+    assert [row['start'] for row in autumn_rows] == [
+        '2026-10-31T13:00:00+00:00', '2026-11-01T14:00:00+00:00',
+        '2026-11-02T14:00:00+00:00']
+    assert [row['recurrence_id'] for row in autumn_rows] == [
+        '2026-10-31T09:00:00-04:00', '2026-11-01T09:00:00-05:00',
+        '2026-11-02T09:00:00-05:00']
+
+
+def test_thisandfuture_shifts_times_and_durations_with_exact_override_precedence():
+    master = item('range-series', 'DTSTART;TZID=America/New_York:20260307T090000',
+                  'DTEND;TZID=America/New_York:20260307T100000', 'SUMMARY:Original',
+                  'RRULE:FREQ=DAILY;COUNT=6')
+    shifted = item('range-series', 'DTSTART;TZID=America/New_York:20260308T110000', None,
+                   'DURATION:PT2H', 'SUMMARY:Shifted range',
+                   'RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20260308T090000')
+    exact = item('range-series', 'DTSTART;TZID=America/New_York:20260309T080000', None,
+                 'DURATION:PT30M', 'SUMMARY:Exact exception',
+                 'RECURRENCE-ID;TZID=America/New_York:20260309T090000')
+    cancelled = item('range-series', 'DTSTART;TZID=America/New_York:20260311T090000', None,
+                     'STATUS:CANCELLED',
+                     'RECURRENCE-ID;TZID=America/New_York;RANGE=THISANDFUTURE:20260311T090000')
+    revived = item('range-series', 'DTSTART;TZID=America/New_York:20260312T070000', None,
+                   'DURATION:PT20M', 'SUMMARY:Exact after cancellation',
+                   'RECURRENCE-ID;TZID=America/New_York:20260312T090000')
+    events, warnings = calendar.parse_ics(envelope(master, shifted, exact, cancelled, revived),
+                                         'America/New_York', '2026-03-01T00:00:00+00:00',
+                                         '2026-04-01T00:00:00+00:00')
+    assert warnings == []
+    assert [(row['start'], row['end']) for row in events] == [
+        ('2026-03-07T14:00:00+00:00', '2026-03-07T15:00:00+00:00'),
+        ('2026-03-08T15:00:00+00:00', '2026-03-08T17:00:00+00:00'),
+        ('2026-03-09T12:00:00+00:00', '2026-03-09T12:30:00+00:00'),
+        ('2026-03-10T15:00:00+00:00', '2026-03-10T17:00:00+00:00'),
+        ('2026-03-12T11:00:00+00:00', '2026-03-12T11:20:00+00:00'),
+    ]
+    assert [row['title'] for row in events] == [
+        'Original', 'Shifted range', 'Exact exception', 'Shifted range',
+        'Exact after cancellation']
+    assert events[1]['range_applied'] == '2026-03-08T09:00:00-04:00'
+    assert events[3]['range_applied'] == '2026-03-08T09:00:00-04:00'
+    assert events[2]['overridden'] is True
+    assert events[2]['recurrence_id'] == '2026-03-09T09:00:00-04:00'
+    assert events[3]['recurrence_id'] == '2026-03-10T09:00:00-04:00'
+    assert all('2026-03-11' not in row['id'] for row in events)
+    assert events[-1]['overridden'] is True
+
+
+def test_thisandfuture_expands_and_filters_by_shifted_window_start():
+    master = item('window-shift', 'DTSTART:20260101T090000Z', None,
+                  'DURATION:PT30M', 'RRULE:FREQ=DAILY;COUNT=4')
+    shifted = item('window-shift', 'DTSTART:20260102T110000Z', None,
+                   'DURATION:PT30M',
+                   'RECURRENCE-ID;RANGE=THISANDFUTURE:20260102T090000Z')
+    events, _ = calendar.parse_ics(envelope(master, shifted), 'UTC',
+                                   '2026-01-02T10:00:00+00:00', '2026-01-04T10:00:00+00:00')
+    assert [row['start'] for row in events] == [
+        '2026-01-02T11:00:00+00:00', '2026-01-03T11:00:00+00:00']
+    assert [row['recurrence_id'] for row in events] == [
+        '2026-01-02T09:00:00+00:00', '2026-01-03T09:00:00+00:00']
+    assert all(row['range_applied'] == '2026-01-02T09:00:00+00:00' for row in events)
+
+
+def test_invalid_vtimezone_and_range_value_fail_closed():
+    malformed_zone = '\r\n'.join([
+        'BEGIN:VTIMEZONE', 'TZID:Broken/Zone', 'BEGIN:STANDARD',
+        'DTSTART:19700101T000000', 'TZOFFSETFROM:+0000',
+        'END:STANDARD', 'END:VTIMEZONE',
+    ]) + '\r\n'
+    event = item('bad-zone', 'DTSTART;TZID=Broken/Zone:20260101T090000', None)
+    with pytest.raises(PeopleError, match='Invalid embedded VTIMEZONE'):
+        calendar.parse_ics(envelope(malformed_zone, event), 'UTC')
+    master = item('bad-range', 'DTSTART:20260101T090000Z', None,
+                  'RRULE:FREQ=DAILY;COUNT=2')
+    override = item('bad-range', 'DTSTART:20260102T100000Z', None,
+                    'RECURRENCE-ID;RANGE=THISANDPRIOR:20260102T090000Z')
+    with pytest.raises(PeopleError, match='Unsupported RECURRENCE-ID RANGE'):
+        calendar.parse_ics(envelope(master, override), 'UTC')
+
+
 def test_window_bounds_value_types_and_duplicate_overrides_are_rejected():
     with pytest.raises(PeopleError, match='at most 366 days'):
         calendar.parse_ics(recurring_calendar(), 'UTC', '2026-01-01T00:00:00+00:00', '2027-01-03T00:00:00+00:00')
