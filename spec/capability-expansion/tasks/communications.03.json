@@ -1,0 +1,73 @@
+{
+  "id": "communications.03",
+  "status": "locally_qualified",
+  "schema_version": 1,
+  "base_revision": "ffa02e2e",
+  "requires": [
+    "communications.02"
+  ],
+  "contract": "Record bounded source-local thread batches with explicit incoming/outgoing coverage and immutable message IDs. Exact batch replay is idempotent, conflicting identity or stale observation rolls back. Report answered/unanswered only within a complete covered window observed within24hours; incomplete/stale/future/ambiguous ordering remains unknown. Results are recorded_evidence_only pending real provider adapter qualification in communications.04. Native gideon-people ToolProvider supplies real people/import/touchpoint/thread operations with strict schemas and approval metadata.",
+  "acceptance": [
+    "Real persisted batch replay/atomicity/source isolation",
+    "Coverage and ordering unknown cases plus real local reply transition",
+    "Care incorporates observed events without rewriting touchpoint provenance",
+    "Actual native ToolProvider operations and SAFE/CAUTION approval schemas",
+    "Discoverable Console report with actual HTTP backed evidence transitions"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/communications/evidence.py",
+    "runtime/gideon/workspace/capabilities/communications/tools.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py",
+    "apps/console/src/features/capabilities/communications/ThreadsPanel.tsx",
+    "apps/console/src/features/capabilities/communications/Page.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/communications/test_evidence.py",
+    "checks/runtime/capabilities/communications/test_tools.py",
+    "checks/runtime/capabilities/communications/ui_server.py",
+    "apps/console/src/features/capabilities/communications/ThreadsPanel.test.tsx",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-people/app.json"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/communications/test_evidence.py",
+    "checks/runtime/capabilities/communications/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/communications/ThreadsPanel.test.tsx",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx"
+  ],
+  "verify_cmd": "GIDEON_TEST_PYTHON=/tmp/gideon-runtime-venv/bin/python python3 tooling/capability_workflow.py verify communications.03",
+  "exit_code": 0,
+  "evidence_dir": "/tmp/gideon-communications.03-checks-hclc3d2x",
+  "production_lines": 264,
+  "test_lines": 411,
+  "ratio": 1.5568181818181819,
+  "files": {
+    "apps/console/src/features/capabilities/communications/Page.tsx": "74f28efd370e2be791341e422fecc5db7e0f8c2263f77b4e9b1858155ae2a060",
+    "apps/console/src/features/capabilities/communications/ThreadsPanel.tsx": "6859d635e99fa5253ea82af83359a257c3010f60aed71a41988748f7ddeedc22",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_communications.py": "76d7cb1530184125a461ddbea0195d5079b68b04d3079ab8d20e3a47ca0f2da9",
+    "runtime/gideon/workspace/capabilities/communications/evidence.py": "4327015f9f24a91865736280185d5b9f7b1d5922a177b225501206a4482e8bf2",
+    "runtime/gideon/workspace/capabilities/communications/tools.py": "81d3004ebd3761114e54cb6f9d175c9d503002557b7e41a3eadb14747c6329a2",
+    "apps/console/src/features/capabilities/communications/Page.test.tsx": "68f033a04de405226da23a2db0b4bd73a2563017ddd600764dbddbb1ffaafb70",
+    "apps/console/src/features/capabilities/communications/ThreadsPanel.test.tsx": "b1e320c793aac77826b765458732f8a5dd67b9634a5a6fa8f53b733555644f6c",
+    "checks/runtime/capabilities/communications/test_evidence.py": "9a211b95a7ecd63caea78382bf603c81eafafe857cf6af16c37df998837cda94",
+    "checks/runtime/capabilities/communications/test_tools.py": "5385270d3c1b9b19ce7373ddc2012c73776b2dcabad8c62f0bd4e7863f2a05a7",
+    "checks/runtime/capabilities/communications/ui_server.py": "610182188b59eebf1e91aae34f2df1b24c8c332b281349f47d4c463b9aea0e4b"
+  },
+  "qualification": {
+    "compile": "passed",
+    "runtime": "48 passed including actual native ToolProvider calls",
+    "console_http": "4 passed",
+    "integrated_browser": "pending root integration",
+    "native_registration": "manifest supplied; shared registry metadata pending root integration",
+    "external_thread_coverage": "pending real provider adapter qualification"
+  },
+  "limits": [
+    "Verdicts describe recorded observations only, never live external-account confirmation.",
+    "Incoming and outgoing coverage must both be complete and observed within24hours; stale/incomplete/future/conflicting-order evidence remains unknown.",
+    "No external requests or outbound messaging."
+  ]
+}
