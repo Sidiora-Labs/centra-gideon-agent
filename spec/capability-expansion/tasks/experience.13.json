@@ -1,0 +1,72 @@
+{
+  "id": "experience.13",
+  "status": "locally_qualified",
+  "base_revision": "2235d61a",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/moltworld.py",
+    "runtime/gideon/workspace/capabilities/experience/moltworld_http.py",
+    "runtime/gideon/workspace/capabilities/experience/moltworld_provider.py",
+    "apps/console/src/features/capabilities/experience/Moltworld.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_moltworld.py",
+    "apps/console/src/features/capabilities/experience/Moltworld.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_moltworld.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/Moltworld.test.tsx"
+  ],
+  "contract": "Current Moltworld v1 adapter pinned to https://moltworld.fly.dev with named canonical Bearer credentials, authenticated GET /api/v1/agent, public bounded GET /api/v1/observe, and explicitly user-approved POST /api/v1/action. Exact local request IDs prevent duplicate sends: identical replay returns the durable receipt, changed replay refuses, provider 202 is queued_remote rather than completed, 429 is refused_remote with cooldown evidence, and timeout/transport failure is outcome_unknown with no automatic resend. Secrets and unfiltered remote account fields are not persisted.",
+  "protocol_evidence": {
+    "primary": "https://moltworld.app/skill.md",
+    "retrieved_at": "2026-09-25",
+    "observed": "HTTP 200 text/markdown, 14544 bytes; declares https://moltworld.fly.dev, Bearer API key, /api/v1/agent, /api/v1/observe, /api/v1/action, 202 queued tick receipts, one action per tick and 500ms request rate",
+    "legacy_donor": "/root/private-neo-v1/tmp/PortOS/server/integrations/moltworld/api.js uses incompatible moltworld.io agentId/body endpoints and was not copied"
+  },
+  "dependencies": {
+    "experience.12": "Ordering dependency only; the current Moltworld protocol has no game compiler dependency",
+    "credentials": "Canonical CredentialStore named secret resolution; API keys never enter capability SQLite or receipts"
+  },
+  "acceptance": [
+    "Configure an existing named credential without persisting its secret; local readiness remains remote unverified until an actual provider read succeeds",
+    "Exercise current authenticated agent status and unauthenticated bounded observation through real HTTP transport and label only validated responses provider_verified",
+    "Require explicit user approval for every queued action and persist queued_remote separately from provider completion",
+    "Replay the same request without a second send, refuse changed replay input, preserve remote 429 cooldown, and preserve transport uncertainty without retry",
+    "Expose durable receipt history through API, native tools and Console while keeping user_attested approval distinct from provider_verified reads"
+  ],
+  "shared_hooks": [
+    "Root dashboard handler may register register_moltworld(app, app[STORE]) from moltworld_http",
+    "Root Console experience page may mount Moltworld",
+    "Root native provider registry may expose moltworld_provider.create_provider"
+  ],
+  "remaining_limits": [
+    "Qualification uses a local real HTTP protocol peer and performs no external Moltworld action or registration",
+    "WebSocket subscriptions and autonomous action loops are excluded; no background action queue is created",
+    "A queued provider receipt proves admission for a future tick, not execution or resulting world state"
+  ],
+  "evidence": {
+    "qualified": "/tmp/gideon-experience.13-checks-y48eil__/evidence.json"
+  },
+  "qualification": {
+    "compile_exit": 0,
+    "runtime_passed": 7,
+    "runtime_failed": 0,
+    "ui_passed": 3,
+    "ui_failed": 0,
+    "repair_cycles": 0,
+    "production_lines": 219,
+    "test_lines": 228,
+    "ratio": 1.0410958904109588,
+    "external_writes": 0,
+    "file_hashes": {
+      "apps/console/src/features/capabilities/experience/Moltworld.tsx": "fed04f8debc42da7e3e229fdbf5f802eda101d22cf68d0cfcc7b762e2cabde03",
+      "runtime/gideon/workspace/capabilities/experience/moltworld.py": "d90366602f991967aa6890ac84e66e9cd911a8d6a85da6b55f142fb1ce27a992",
+      "runtime/gideon/workspace/capabilities/experience/moltworld_http.py": "df3b15cd22893ad3f785287c081e6d5981c7ca91aad3e06695c45c4abef1ce50",
+      "runtime/gideon/workspace/capabilities/experience/moltworld_provider.py": "b87ff1209138aa0a628cc81e3b0b0e509b46bf14310399199db9fbcd57835503",
+      "apps/console/src/features/capabilities/experience/Moltworld.test.tsx": "0324a7da5f4249b5b7542adef9f81a98721a2a846251417dc92b3e72d7db3f89",
+      "checks/runtime/capabilities/experience/test_moltworld.py": "1929368e40264e74c5b77a9fc441615101543052b33664c184d93793711a897e"
+    }
+  }
+}
