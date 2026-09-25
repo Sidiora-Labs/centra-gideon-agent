@@ -11,22 +11,33 @@
   "production_files": [
     "runtime/gideon/workspace/capabilities/platform/migration.py",
     "runtime/gideon/interfaces/dashboard/handlers/capabilities_platform_migration.py",
-    "apps/console/src/features/capabilities/platform/Migration.tsx"
+    "apps/console/src/features/capabilities/platform/Migration.tsx",
+    "runtime/gideon/workspace/artifacts/native.py"
   ],
   "test_files": [
     "checks/runtime/capabilities/platform/test_migration.py",
     "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
     "checks/runtime/capabilities/platform/test_migration_knowledge_coordinator.py",
     "checks/runtime/capabilities/platform/migration_ui_server.py",
-    "apps/console/src/features/capabilities/platform/Migration.test.tsx"
+    "apps/console/src/features/capabilities/platform/Migration.test.tsx",
+    "checks/runtime/capabilities/platform/test_migration_song_rollback.py",
+    "checks/runtime/capabilities/platform/test_migration_grouped_song.py",
+    "checks/runtime/capabilities/platform/test_migration_grouped_inbox.py",
+    "apps/console/src/features/capabilities/platform/MigrationGroupedSong.test.tsx",
+    "apps/console/src/features/capabilities/platform/MigrationGroupedInbox.test.tsx"
   ],
   "runtime_test_files": [
     "checks/runtime/capabilities/platform/test_migration.py",
     "checks/runtime/capabilities/platform/test_migration_people_coordinator.py",
-    "checks/runtime/capabilities/platform/test_migration_knowledge_coordinator.py"
+    "checks/runtime/capabilities/platform/test_migration_knowledge_coordinator.py",
+    "checks/runtime/capabilities/platform/test_migration_song_rollback.py",
+    "checks/runtime/capabilities/platform/test_migration_grouped_song.py",
+    "checks/runtime/capabilities/platform/test_migration_grouped_inbox.py"
   ],
   "ui_test_files": [
-    "apps/console/src/features/capabilities/platform/Migration.test.tsx"
+    "apps/console/src/features/capabilities/platform/Migration.test.tsx",
+    "apps/console/src/features/capabilities/platform/MigrationGroupedSong.test.tsx",
+    "apps/console/src/features/capabilities/platform/MigrationGroupedInbox.test.tsx"
   ],
   "base_revision": "9d53b394",
   "acceptance": [
