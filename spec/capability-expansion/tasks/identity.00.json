@@ -1,0 +1,76 @@
+{
+  "id": "identity.00",
+  "status": "locally_qualified",
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_identity_tools.py"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_identity_tools.py"
+  ],
+  "ui_test_files": [],
+  "extra_files": [
+    "runtime/gideon/extensions/apps/native/gideon-identity/app.json"
+  ],
+  "acceptance": [
+    "Native manifest factory discovers real ToolProvider and closed schemas",
+    "Invocations persist actual story/twin mutations and return real results",
+    "Temporary and remote sessions cannot access human identity; incognito cannot write",
+    "Private sources cannot be read, updated, deleted or enriched by agent tools",
+    "Runtime home cannot be redirected through configuration or tool arguments",
+    "Disabled enrichment sources fail without provider calls"
+  ],
+  "source_revision": "e7ba5cc6be6034d81d2fcade3094e728e914096c",
+  "evidence": {
+    "task": "identity.00",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790294478.7214754,
+    "production_lines": 123,
+    "test_lines": 182,
+    "ratio": 1.4796747967479675,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/test_identity_tools.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.00-checks-qdaw_2oh/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_identity_tools.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.00-checks-qdaw_2oh/runtime.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.00-checks-qdaw_2oh",
+    "completed_at": 1790294488.7163646,
+    "files": {
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "a472dbbb424557f8ad53ef7ec229ab4e7dd7a8e926768768aa4d616bc9e6ba12",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "d4e06c933aec53a5f9d7d6668528ce068d99b9ee1a639c17d17f1de863e47e39",
+      "checks/runtime/capabilities/identity/test_identity_tools.py": "1de3c89dfb183ac3f38f112f884c9644826e501bf019bf6166738f0bd036f302"
+    }
+  },
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.00",
+  "exit_code": 0,
+  "remaining_limits": [
+    "Root central tool metadata and integrated runtime registration pending",
+    "Successful external enrichment generation remains unqualified"
+  ]
+}
