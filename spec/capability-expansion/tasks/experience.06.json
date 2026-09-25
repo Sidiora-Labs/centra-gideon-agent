@@ -1,0 +1,53 @@
+{
+  "id": "experience.06",
+  "status": "locally_checked_browser_pending",
+  "base_revision": "3981aca2",
+  "requires": [
+    "music.07"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/experience/avatar.py",
+    "runtime/gideon/workspace/capabilities/experience/avatar_http.py",
+    "runtime/gideon/workspace/capabilities/experience/tools.py",
+    "runtime/gideon/workspace/capabilities/experience/assets/build_robot.py",
+    "runtime/gideon/workspace/capabilities/experience/assets/__init__.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_experience.py",
+    "apps/console/src/features/capabilities/experience/AvatarPanel.tsx",
+    "apps/console/src/features/capabilities/experience/avatarState.ts",
+    "apps/console/src/features/capabilities/experience/speechPlayback.ts",
+    "apps/console/src/features/capabilities/experience/OwnedAudio.tsx",
+    "apps/console/src/features/capabilities/experience/Page.tsx",
+    "apps/console/src/shared/data/useAgentActivity.ts"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/experience/test_avatar.py",
+    "checks/runtime/capabilities/experience/test_tools.py",
+    "apps/console/src/features/capabilities/experience/AvatarPanel.test.tsx"
+  ],
+  "extra_files": [
+    "runtime/gideon/workspace/capabilities/experience/assets/robot.glb"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/experience/test_avatar.py",
+    "checks/runtime/capabilities/experience/test_tools.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/experience/AvatarPanel.test.tsx"
+  ],
+  "contract": "Avatar variants bind validated animated canonical GLB versions, source hashes and actual clip names. Original authored articulated robot has real mesh geometry and six motion clips. Shared Three loader renders; real activity feed and native audio playback events choose clips; reduced motion and unknown sources stop animation. Native tools share registry and selected source.",
+  "remaining_limits": [
+    "Real WebGL rendering/GPU interaction and audible speech-driven visual transition require browser qualification; no provider-generated model success claimed",
+    "Bundled robot uses authored hierarchical joint motion; no phoneme/viseme lip sync or generated skinning claimed"
+  ],
+  "dependencies": [
+    "aa13b488"
+  ],
+  "evidence": "/tmp/gideon-experience.06-checks-kyid886h/evidence.json",
+  "qualification": {
+    "runtime_tests": 41,
+    "ui_tests": 5,
+    "production_lines": 324,
+    "test_lines": 332,
+    "ratio": 1.0246913580246915
+  }
+}
