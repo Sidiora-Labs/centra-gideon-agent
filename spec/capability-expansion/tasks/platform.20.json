@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "task": "platform.20",
-  "status": "locally_qualified_external_pending",
+  "status": "locally_qualified",
   "base_revision": "206d4681e3bbf586fab337724e0e7487bf4e435c",
   "contract": "Persistent Jira Cloud, Datadog Logs and GitHub REST applications store only documented HTTPS origins and existing named credential references. Exact read and mutation plans are durable and idempotent; every remote operation is prepared for explicit owner review, native mutation execution requires canonical approval, uncertain mutation outcomes are never blindly repeated, and GitHub Actions secret values are sealed with the repository public key before transport. Repository annotations retain local policy across remote refresh. No credential value enters the database, HTTP projection or console.",
   "acceptance": [
@@ -37,14 +37,26 @@
     "runtime/gideon/extensions/apps/native/gideon-integration-apps/app.json"
   ],
   "evidence": "/tmp/gideon-platform.20-checks-vllt5v0n/evidence.json",
+  "historical_evidence": {
+    "implementation_commit": "6b0d0f7518ad839b60bdb9501b860ed1872bc9eb",
+    "evidence": "/tmp/gideon-platform.20-checks-vllt5v0n/evidence.json",
+    "file_identity": "Every unique production and test file still matches the retained qualified evidence."
+  },
+  "shared_integration": {
+    "current_main_revision": "a83da7f899f0e0585d9475477a2b36d62d3fd7fb",
+    "registrar_commit": "505f92343",
+    "proof": "The current Platform registrar mounts capabilities_integration_apps, the Platform Page mounts IntegrationApps, and the current shared route test exercises the mounted HTTP endpoint. Shared files are not owned by this task record."
+  },
   "qualification": {
+    "status": "locally_qualified",
+    "compile_exit": 0,
     "runtime_tests": 25,
     "ui_tests": 2,
     "production_lines": 443,
     "test_lines": 464,
+    "ratio": 1.0474040632054176,
     "repair_cycles": 2,
-    "limitations": [
-      "Authenticated provider read journeys and explicitly designated live mutations were not run because no provider credentials or external mutation target were authorized for qualification."
-    ]
+    "local_consumers": "Qualified durable store, guarded request planning, canonical approval-gated native tools, owner HTTP application and HTTP-backed Console. Current main supplies the shared Platform registrar and Page mount.",
+    "external_provider_scope": "Provider credentials and mutation targets were not supplied. Authenticated provider quality and designated live mutations remain externally unqualified and are not used as local workflow evidence."
   }
 }
