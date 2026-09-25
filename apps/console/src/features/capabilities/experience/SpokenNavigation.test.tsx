@@ -32,7 +32,7 @@ function Shell({ catalog = items }: { catalog?: NavigationItem[] }) {
 }
 function enter(command: string) {
   fireEvent.change(screen.getByLabelText('Navigation command'), { target: { value: command } })
-  fireEvent.click(screen.getByRole('button', { name: 'Go', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'Go' }))
 }
 it('uses real shell routing and stores acknowledgement only after observed navigation in StrictMode', async () => {
   history.replaceState(null, '', '#/chat')
@@ -87,7 +87,7 @@ it('reports actual missing browser microphone support without an invented transc
   expect(await screen.findByRole('alert')).not.toBeEmptyDOMElement()
   expect(screen.getByLabelText('Navigation command')).toHaveValue('')
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Go', exact: true })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Go' })).toBeDisabled()
 })
 it('normalizes displayed labels but refuses ambiguous labels and unsafe routes', () => {
   expect(resolveNavigation(' SHOW   team calendar. ', items).id).toBe('apps/calendar')
