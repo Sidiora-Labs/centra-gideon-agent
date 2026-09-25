@@ -53,6 +53,20 @@ CONTRACTS.update({
 })
 
 
+PLANNING = {"id": IDENTIFIER, "request_id": IDENTIFIER, "expected_revision": {"type": "integer", "minimum": 0}, "title": {"type": "string", "minLength": 1, "maxLength": 200}}
+GOAL = {**PLANNING, "description": {"type": "string", "maxLength": 10000}, "status": {"enum": ["active", "completed", "archived"]}, "target_date": {"type": ["string", "null"]}}
+SESSION = {**PLANNING, "goal_id": IDENTIFIER, "start_at": TEXT, "end_at": TEXT, "status": {"enum": ["scheduled", "completed", "cancelled"]}, "notes": {"type": "string", "maxLength": 10000}}
+CONTRACTS.update({
+    "identity_goals_list_goals": ({}, [], "List human life goals", False),
+    "identity_goals_get_goal": ({"id": IDENTIFIER}, ["id"], "Read a human life goal", False),
+    "identity_goals_save_goal": (GOAL, ["title", "request_id"], "Create or revise a human goal with retry protection", True),
+    "identity_goals_list_sessions": ({}, [], "List human planned sessions", False),
+    "identity_goals_get_session": ({"id": IDENTIFIER}, ["id"], "Read a human planned session", False),
+    "identity_goals_save_session": (SESSION, ["goal_id", "title", "start_at", "end_at", "request_id"], "Schedule or revise a session, refusing overlapping plans", True),
+    "identity_goals_calendar": ({}, [], "Export recorded human plans as calendar text without remote delivery", False),
+})
+
+
 def definitions():
     return [ToolDefinition(name=name, provider="gideon-identity", description=description,
                            parameters={"type": "object", "properties": fields, "required": required, "additionalProperties": False},

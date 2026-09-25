@@ -1,0 +1,101 @@
+{
+  "id": "identity.04",
+  "schema_version": 1,
+  "status": "locally_qualified",
+  "acceptance": [
+    "Persist human life goals and linked planning sessions independently from agent execution goals",
+    "Atomic revision and request replay protection for creates and edits",
+    "Require timezone-aware session instants normalized UTC and refuse scheduled overlaps",
+    "Closed goals cannot gain scheduled sessions and scheduled sessions must be resolved before closing",
+    "Export actual persistent sessions as calendar events without claiming remote delivery",
+    "Actual HTTP console and native tools operate the same store and preserve errors"
+  ],
+  "production_files": [
+    "runtime/gideon/workspace/capabilities/identity/goals.py",
+    "runtime/gideon/workspace/capabilities/identity/tools.py",
+    "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+    "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goals.py",
+    "apps/console/src/features/capabilities/identity/LifeGoalsPage.tsx"
+  ],
+  "test_files": [
+    "checks/runtime/capabilities/identity/test_goals.py",
+    "checks/runtime/capabilities/identity/goals_ui_server.py",
+    "apps/console/src/features/capabilities/identity/LifeGoalsPage.test.tsx"
+  ],
+  "runtime_test_files": [
+    "checks/runtime/capabilities/identity/test_goals.py"
+  ],
+  "ui_test_files": [
+    "apps/console/src/features/capabilities/identity/LifeGoalsPage.test.tsx"
+  ],
+  "baseline_dir": "/tmp/gideon-identity04-baseline",
+  "remaining_limits": [
+    "Remote calendar sync not included; export represents local recorded plans",
+    "Root-owned route and durability registration requires integrated qualification",
+    "Hierarchy/milestone decomposition, activity/loop links and derived velocity remain unimplemented follow-up work; this record qualifies direct goals and sessions only"
+  ],
+  "evidence": {
+    "task": "identity.04",
+    "root": "/tmp/gideon-expansion-worktrees/identity",
+    "started_at": 1790295881.6758456,
+    "production_lines": 236,
+    "test_lines": 338,
+    "ratio": 1.4322033898305084,
+    "commands": [
+      {
+        "name": "compile",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-c",
+          "import ast,sys,pathlib; [ast.parse(pathlib.Path(p).read_text(),filename=p) for p in sys.argv[1:]]",
+          "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goals.py",
+          "runtime/gideon/workspace/capabilities/identity/goals.py",
+          "runtime/gideon/workspace/capabilities/identity/tool_schema.py",
+          "runtime/gideon/workspace/capabilities/identity/tools.py",
+          "checks/runtime/capabilities/identity/goals_ui_server.py",
+          "checks/runtime/capabilities/identity/test_goals.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.04-checks-typa9a2t/compile.log"
+      },
+      {
+        "name": "runtime",
+        "argv": [
+          "/tmp/gideon-runtime-venv/bin/python",
+          "-m",
+          "pytest",
+          "/tmp/gideon-expansion-worktrees/identity/checks/runtime/capabilities/identity/test_goals.py",
+          "-q"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.04-checks-typa9a2t/runtime.log"
+      },
+      {
+        "name": "ui",
+        "argv": [
+          "node",
+          "/tmp/gideon-expansion-worktrees/identity/node_modules/vitest/vitest.mjs",
+          "run",
+          "/tmp/gideon-expansion-worktrees/identity/apps/console/src/features/capabilities/identity/LifeGoalsPage.test.tsx"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/gideon-identity.04-checks-typa9a2t/ui.log"
+      }
+    ],
+    "status": "locally_qualified",
+    "evidence_dir": "/tmp/gideon-identity.04-checks-typa9a2t",
+    "completed_at": 1790295912.8098254,
+    "files": {
+      "apps/console/src/features/capabilities/identity/LifeGoalsPage.tsx": "2f986c41ff56171e49160887ba6fc6050ea7b493bfda06d51d721c4cfe4245dc",
+      "runtime/gideon/interfaces/dashboard/handlers/capabilities_identity_goals.py": "ddea76419f93b7636bf49b7a2a3095b66c63248af69edd2f67ddbfddfaa2ff6c",
+      "runtime/gideon/workspace/capabilities/identity/goals.py": "c33451754256fc31eac629c4388f59c8cbc02996cb276731ce290f71116a16ef",
+      "runtime/gideon/workspace/capabilities/identity/tool_schema.py": "4ec01fa5c2308c18a8ea41d4d6729e1dc261f281245b64580a07e7044ddc1fab",
+      "runtime/gideon/workspace/capabilities/identity/tools.py": "f5d2ce021565c6fe115dca9441bff40c8f50f448d1942ee8d3e9b300ae1ba6dc",
+      "apps/console/src/features/capabilities/identity/LifeGoalsPage.test.tsx": "dfa148a5f073c9fe1aff8309464c898ab3b6a76a3cd8843bc952079a2f3b9890",
+      "checks/runtime/capabilities/identity/goals_ui_server.py": "8ad64523847a4064ad3d22360c7d0f12dacc8c53214ecc443fa9114eebbb1503",
+      "checks/runtime/capabilities/identity/test_goals.py": "d36d1f0d3194f43203d46d1657693f8a3270a2875688716f3b86f574072210f7"
+    }
+  },
+  "repair_cycles": 0,
+  "verify_cmd": "python3 tooling/capability_workflow.py verify identity.04"
+}
