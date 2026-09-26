@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { GoalLoop } from '../../shared/data/api'
 import { findingHeatData, LoopPeek } from './LoopsListPage'
@@ -40,7 +40,12 @@ describe('LoopPeek finding activity', () => {
 
   it('mounts the real donor graph only for dated findings and keeps the full-loop action', async () => {
     const onOpenFull = vi.fn()
-    const loop: GoalLoop = { ...LOOP, sub_goals: ['Check sources'], findings: [{ cycle: 1, ts: Date.now() / 1000 }] }
+    const day = new Date()
+    day.setHours(12, 0, 0, 0)
+    const ts = day.getTime() / 1000
+    const loop: GoalLoop = { ...LOOP, sub_goals: ['Check sources'], findings: [
+      { cycle: 1, ts }, { cycle: 2, ts: ts + 60 },
+    ] }
     render(<LoopPeek loop={loop} onOpenFull={onOpenFull} />)
     const graph = screen.getByRole('region', { name: 'Finding activity by UTC day' })
     expect(screen.getByText('Find cited evidence')).toBeTruthy()
@@ -50,6 +55,10 @@ describe('LoopPeek finding activity', () => {
     expect(graph.classList.contains('overflow-x-auto')).toBe(true)
     expect(graph.querySelector('.min-w-\\[680px\\]')).toBeTruthy()
     expect(graph.getAttribute('tabindex')).toBe('0')
+    const cells = graph.querySelectorAll<HTMLElement>('.aspect-square')
+    fireEvent.mouseEnter(cells[cells.length - 1])
+    expect(await screen.findByText('2 findings')).toBeTruthy()
+    expect(screen.queryByText('2 contributions')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Open full loop' }))
     expect(onOpenFull).toHaveBeenCalledOnce()
   })
