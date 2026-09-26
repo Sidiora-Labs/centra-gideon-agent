@@ -60,9 +60,9 @@ export const titleFloor = (inner: number): number =>
   Math.round(Math.min(320, Math.max(48, inner * 0.34)))
 
 export function titleReserveFor(
-  { hasContent, naturalWidth, inner }: { hasContent: boolean; naturalWidth: number; inner: number },
+  { hasContent, naturalWidth, inner, sharesRow = true }: { hasContent: boolean; naturalWidth: number; inner: number; sharesRow?: boolean },
 ): number {
-  if (!hasContent) return 0
+  if (!hasContent || !sharesRow) return 0
   return Math.min(naturalWidth, titleFloor(inner))
 }
 
@@ -120,6 +120,7 @@ export function HeaderActions({ children, className, preferLabeledOverflow = fal
         hasContent,
         naturalWidth: left.scrollWidth,
         inner,
+        sharesRow: left.getBoundingClientRect().bottom > outer.getBoundingClientRect().top + 1,
       })
     }
     const availableWidth = (): number => {
