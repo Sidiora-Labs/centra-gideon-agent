@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react'
-import { Activity, useState, type ReactNode } from 'react'
+import { Activity, createContext, useContext, useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import type { SyntaxHighlighterProps } from '@assistant-ui/react-markdown'
 import { MarkdownText } from './markdown-text'
 import { SyntaxHighlighter as PrismHighlighter } from './syntax-highlighter'
@@ -16,6 +16,9 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 type StoredMessage = { id: string; role: 'user' | 'assistant'; text: string }
 function Runtime({ children, text = 'Hello from Gideon' }: { children: ReactNode; text?: string }) {
   const [messages, setMessages] = useState<StoredMessage[]>([{ id: 'assistant-one', role: 'assistant', text }])
+  useEffect(() => {
+    setMessages(current => current[0]?.text === text ? current : current.map((message, index) => index === 0 ? { ...message, text } : message))
+  }, [text])
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage: (message: StoredMessage): ThreadMessageLike => ({
@@ -797,5 +800,108 @@ describe('Renderer accessibility and stable source wrappers', () => {
     view.rerender(<ShikiHighlighter code="const n = 1" language="javascript" streaming />)
     expect(view.container.querySelector('.aui-shiki-base')).toBe(holder)
     expect(view.container.textContent).toContain('const n = 1')
+  })
+})
+
+const OverrideContext = createContext<ComponentProps<typeof MarkdownText>['components']>(undefined)
+function LiveMarkdown(props: ComponentProps<typeof MarkdownText>) {
+  return <MarkdownText {...props} components={useContext(OverrideContext)} />
+}
+function LiveAssistantMessage() {
+  return <MessagePrimitive.Root><MessagePrimitive.Parts components={{ Text: LiveMarkdown }} /></MessagePrimitive.Root>
+}
+const stableLiveParts = { AssistantMessage: LiveAssistantMessage }
+function StableParts() {
+  return <ThreadPrimitive.Root><ThreadPrimitive.Viewport autoScroll={false} scrollToBottomOnInitialize={false}
+    scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}>
+    <ThreadPrimitive.Messages components={stableLiveParts} />
+  </ThreadPrimitive.Viewport></ThreadPrimitive.Root>
+}
+
+describe('Markdown renderer branch behavior with live assistant data', () => {
+  it('keeps custom overrides stable across equal, changed, and removed component maps', async () => {
+    const First = ({ children }: { children?: ReactNode }) => <h1 data-testid="first-heading">{children}</h1>
+    const Second = ({ children }: { children?: ReactNode }) => <h1 data-testid="second-heading">{children}</h1>
+    const Paragraph = ({ children }: { children?: ReactNode }) => <p data-testid="override-paragraph">{children}</p>
+    const content = (text: string, components: ComponentProps<typeof MarkdownText>['components']) =>
+      <OverrideContext.Provider value={components}>
+        <Runtime text={text}><StableParts /></Runtime>
+      </OverrideContext.Provider>
+    const view = render(content('# Initial', undefined))
+    expect(screen.getByRole('heading', { name: 'Initial' }).className).toContain('aui-md-h1')
+    view.rerender(content('# Initial', { h1: First }))
+    expect(screen.getByTestId('first-heading')).toHaveTextContent('Initial')
+    view.rerender(content('# Initial', { h1: First }))
+    expect(screen.getByTestId('first-heading')).toHaveTextContent('Initial')
+    view.rerender(content('# Initial', { h1: Second }))
+    expect(screen.getByTestId('second-heading')).toHaveTextContent('Initial')
+    const expanded = { h1: Second, p: Paragraph }
+    view.rerender(content('# Initial\n\nAn update', expanded))
+    await waitFor(() => expect(screen.getByTestId('override-paragraph')).toHaveTextContent('An update'))
+    view.rerender(content('# Revised\n\nAn update', expanded))
+    await waitFor(() => expect(screen.getByTestId('second-heading')).toHaveTextContent('Revised'))
+    view.rerender(content('# Revised', undefined))
+    expect(screen.getByRole('heading', { name: 'Revised' }).className).toContain('aui-md-h1')
+  })
+  it('renders GFM footnote markers through the donor superscript component', () => {
+    const view = render(<Runtime text={'A claim[^proof]\n\n[^proof]: Primary evidence'}>
+      <Parts components={{ Text: MarkdownText }} /></Runtime>)
+    const marker = view.container.querySelector('sup.aui-md-sup')
+    expect(marker).toBeTruthy()
+    expect(marker?.querySelector('a')).toBeTruthy()
+    expect(screen.getByText('Primary evidence')).toBeTruthy()
+  })
+  it('leaves the clipboard untouched for an empty fenced code block', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    clipboard(writeText)
+    render(<Runtime text={'```ts\n\n```'}><Parts components={{ Text: MarkdownText }} /></Runtime>)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    expect(writeText).not.toHaveBeenCalled()
+  })
+  it('does not write the same fenced block again during copied confirmation', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    clipboard(writeText)
+    render(<Runtime text={'```ts\nconst value = 42;\n```'}>
+      <Parts components={{ Text: MarkdownText }} /></Runtime>)
+    const copy = screen.getByRole('button', { name: 'Copy' })
+    await act(async () => { fireEvent.click(copy); await Promise.resolve() })
+    fireEvent.click(copy)
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('const value = 42;\n')
+  })
+})
+
+describe('Mermaid zoom pointer and keyboard edge behavior', () => {
+  const preview = <span>Preview</span>
+  const svg = '<svg><rect width="10" height="10"/></svg>'
+  it('pans only while a pointer drag is active and stops after cancellation', () => {
+    render(<MermaidZoom svg={svg}>{preview}</MermaidZoom>)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand diagram' }))
+    const viewport = document.querySelector('.aui-mermaid-zoom-viewport') as HTMLElement
+    const zoom = document.querySelector('[data-slot="mermaid-zoom-content"]') as HTMLElement
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 35, clientY: 24 })
+    expect(zoom.style.transform).toBe('translate(0px, 0px) scale(1)')
+    fireEvent.pointerDown(viewport, { pointerId: 1, clientX: 10, clientY: 4 })
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 35, clientY: 24 })
+    expect(zoom.style.transform).toBe('translate(25px, 20px) scale(1)')
+    fireEvent.pointerCancel(viewport, { pointerId: 1 })
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 80, clientY: 90 })
+    expect(zoom.style.transform).toBe('translate(25px, 20px) scale(1)')
+    fireEvent.pointerDown(viewport, { pointerId: 1, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 5, clientY: 7 })
+    expect(zoom.style.transform).toBe('translate(30px, 27px) scale(1)')
+    fireEvent.pointerUp(viewport, { pointerId: 1 })
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 100, clientY: 100 })
+    expect(zoom.style.transform).toBe('translate(30px, 27px) scale(1)')
+  })
+  it('does not trap Tab when the zoom toolbar has no focusable control', () => {
+    render(<MermaidZoom svg={svg}>{preview}</MermaidZoom>)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand diagram' }))
+    const toolbar = document.querySelector('[data-slot="mermaid-zoom-toolbar"]') as HTMLElement
+    const controls = Array.from(toolbar.childNodes)
+    toolbar.replaceChildren()
+    const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    document.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    toolbar.replaceChildren(...controls)
   })
 })

@@ -105,9 +105,9 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
       const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * factor));
       const ratio = scale / t.scale;
       if (cx === undefined || cy === undefined) {
-        const viewport = viewportRef.current;
-        cx = (viewport?.clientWidth ?? 0) / 2;
-        cy = (viewport?.clientHeight ?? 0) / 2;
+        const viewport = viewportRef.current!;
+        cx = viewport.clientWidth / 2;
+        cy = viewport.clientHeight / 2;
       }
       return {
         scale,
@@ -119,9 +119,7 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
 
   const onWheel = useCallback(
     (e: React.WheelEvent) => {
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      const rect = viewport.getBoundingClientRect();
+      const rect = e.currentTarget.getBoundingClientRect();
       zoomBy(
         Math.exp(-e.deltaY * 0.0015),
         e.clientX - rect.left,
@@ -132,7 +130,7 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
   );
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const t = transformRef.current;
     drag.current = {
       startX: e.clientX,
@@ -265,11 +263,8 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
         }),
         error: null,
       };
-    } catch (err) {
-      return {
-        svg: null,
-        error: err instanceof Error ? err : new Error(String(err)),
-      };
+    } catch {
+      return { svg: null, error: true };
     }
   }, [streaming, code]);
 
