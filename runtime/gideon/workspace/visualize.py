@@ -21,7 +21,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from gideon.workspace.genui import library_prompt
+from gideon.workspace.genui import library_prompt, uispec_library_prompt, validate_uispec_envelope
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,16 @@ def _build_prompt(data: Any, hint: str) -> str:
     asking for ONLY the DSL. The vocabulary is derived (``library_prompt``) so it is
     never a hand-maintained, drifting copy."""
     ask = (hint or "").strip() or "Present this data clearly."
+    if isinstance(data, dict) and "generative_ui" in data:
+        envelope = validate_uispec_envelope(data["generative_ui"])
+        if envelope is None:
+            raise ValueError("Invalid structured UISpec input; provide a complete real record.")
+        return (
+            f"{uispec_library_prompt()}\n\n"
+            "Output ONLY the exact JSON object under DATA.generative_ui. No prose, "
+            "code fences, or widget tags. Never synthesize missing values.\n\n"
+            f"GOAL: {ask}\n\nDATA:\n{json.dumps(data, ensure_ascii=False)}"
+        )
     return (
         f"{library_prompt()}\n\n"
         "Render the DATA below as a compact generative-UI widget using ONLY the "
@@ -76,9 +86,9 @@ def _clean_dsl(text: str) -> str:
     return body
 
 
-def _wrap_widget(dsl: str, title: str) -> str:
+def _wrap_widget(dsl: str, title: str, kind: str = "genui") -> str:
     safe_title = (title or "Visualization").replace('"', "'")
-    return f'<widget kind="genui" title="{safe_title}">\n{dsl}\n</widget>'
+    return f'<widget kind="{kind}" title="{safe_title}">\n{dsl}\n</widget>'
 
 
 async def visualize(
@@ -103,4 +113,14 @@ async def visualize(
 
         text = await one_shot_completion(prompt, use_case="reasoning")
     dsl = _clean_dsl(str(text or ""))
+    if isinstance(data, dict) and "generative_ui" in data:
+        try:
+            emitted = json.loads(dsl)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Model did not return valid UISpec JSON.") from error
+        if validate_uispec_envelope(emitted) is None or emitted != data["generative_ui"]:
+            raise ValueError("Model changed the supplied UISpec record; nothing was rendered.")
+        body = json.dumps(emitted, ensure_ascii=False, separators=(",", ":"))
+        body = body.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        return Visualization(dsl=body, widget=_wrap_widget(body, title, "uispec"))
     return Visualization(dsl=dsl, widget=_wrap_widget(dsl, title))
