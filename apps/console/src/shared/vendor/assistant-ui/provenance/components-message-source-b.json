@@ -16,11 +16,12 @@
     "read-only feedback note and static reasons when callbacks are absent",
     "stopped-run actions render only when supplied",
     "regenerate menu describes response options without assuming a model change",
-    "confidence claim is static when no hover callback is supplied"
+    "confidence claim is static when no hover callback is supplied",
+    "StoppedRun can hide already-rendered partial words and caret while preserving the real stop reason and callback-controlled actions."
   ],
   "adapted_modules": {
     "feedback-dialog.tsx": "251f0c89242fc5e7a4ecba36d18857d4f3cb03bc452b6c61628c3234eeef2c04",
-    "stopped-run.tsx": "75a0f73b0fb516e8937c1a7a3cfe028a5c2f99e1e16374af0258ddabcab82924",
+    "stopped-run.tsx": "1411a875543d31b0abdc7e2cc711d8280396cc0028c10613682b3e72aade8a04",
     "day-separator.tsx": "b8996c1378496a68ee53d4b5a96a7974aff32bee49e960c5d64b8357214bb187",
     "speaker-identity.tsx": "3977d8db794ac58eae7adfbd06c1fada0fe932b00135b4b42aaa478e7d6495d7",
     "regenerate-menu.tsx": "6018a43fe83690ba5dc43a514cbe2ce00051165563d13c110a0222bd54ead5d4",

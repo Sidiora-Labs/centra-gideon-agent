@@ -92,6 +92,21 @@ describe('StoppedRun', () => {
     expect(root.querySelectorAll('svg')).toHaveLength(1)
   })
 
+  it('shows a persisted stop reason without repeating partial words when requested', () => {
+    const words = ['Already', 'rendered', 'above']
+    const view = render(<StoppedRun words={words} reason="Stopped by user" showWords={false} />)
+    const root = view.container.querySelector('[data-slot="stopped-run"]') as HTMLElement
+    expect(root.querySelector('p')).toBeNull()
+    expect(root.textContent).toContain('Stopped by user')
+    expect(root.textContent).not.toContain(words.join(' '))
+    expect(within(root).queryByRole('button')).toBeNull()
+    view.rerender(<StoppedRun words={words} reason="Stopped by user" />)
+    expect(root.querySelector('p')?.textContent).toContain(words.join(' '))
+    expect(root.querySelector('p span[aria-hidden]')).not.toBeNull()
+    view.rerender(<StoppedRun words={words} reason="Stopped by user" showWords />)
+    expect(root.querySelector('p')?.textContent).toContain(words.join(' '))
+  })
+
   it('offers only the continuation action when continuation exists', () => {
     const continueRun = vi.fn()
     render(<StoppedRun words={['Draft']} reason="Interrupted" onContinue={continueRun} />)
