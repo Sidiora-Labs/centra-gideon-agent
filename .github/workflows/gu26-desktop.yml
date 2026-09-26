@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      GIDEON_CLOUD_URL: ${{ vars.GIDEON_CLOUD_URL || 'https://gideon.workmates.app' }}
+      GIDEON_CLOUD_URL: ${{ vars.GIDEON_CLOUD_URL || 'https://gideon.centra.ag' }}
       GIDEON_SMOKE_EMAIL: ${{ secrets.GIDEON_SMOKE_EMAIL }}
       GIDEON_SMOKE_PASSWORD: ${{ secrets.GIDEON_SMOKE_PASSWORD }}
     steps:

@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const DEFAULT_HOSTED_ORIGIN = "https://gideon.workmates.app";
+export const DEFAULT_HOSTED_ORIGIN = "https://gideon.centra.ag";
 
 export function hostedOrigin(value) {
   if (typeof value !== "string" || value !== value.trim() || !/^https:\/\/[^/?#\s]+\/?$/.test(value)) {
