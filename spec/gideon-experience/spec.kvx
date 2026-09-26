@@ -91,7 +91,7 @@ ac_1 = "Implement the complete reachable feature: Improve automatic chat titles"
 
 [task.experience-workspace]
 title = "experience-workspace end-to-end implementation"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "experience-workspace"
 requires = []
