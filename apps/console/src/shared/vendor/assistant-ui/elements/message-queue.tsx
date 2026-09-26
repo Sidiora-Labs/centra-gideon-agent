@@ -10,23 +10,38 @@ export interface QueuedMessage {
   text: string;
 }
 
+export interface MessageQueueLabels {
+  running?: string;
+  queuedCount?: (count: number) => string;
+  stopCurrent?: string;
+  sendNext?: (text: string) => string;
+  edit?: (text: string) => string;
+  remove?: (text: string) => string;
+}
+
 export function MessageQueue({
   running,
   queued,
+  queueHint,
   onCancel,
   onEdit,
   onInterrupt,
+  onInterruptQueued,
+  labels,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "running" | "queued" | "onCancel" | "onEdit" | "onInterrupt"
+  "children" | "running" | "queued" | "queueHint" | "onCancel" | "onEdit" | "onInterrupt" | "onInterruptQueued" | "labels"
 > & {
-  running: string;
+  running?: string;
   queued: readonly QueuedMessage[];
+  queueHint?: string;
   onCancel?: (id: string) => void;
   onEdit?: (id: string) => void;
   onInterrupt?: () => void;
+  onInterruptQueued?: (id: string) => void;
+  labels?: MessageQueueLabels;
 }) {
   return (
     <div
@@ -35,7 +50,7 @@ export function MessageQueue({
 
       {...props}
     >
-      <div className={cn(paper, "flex items-center gap-2.5 rounded-2xl p-3")}>
+      {running && <div className={cn(paper, "flex items-center gap-2.5 rounded-2xl p-3")}>
         <span className="relative flex size-2 shrink-0">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-blue-500/60 motion-reduce:hidden" />
           <span className="relative inline-flex size-2 rounded-full bg-blue-500 dark:bg-blue-400" />
@@ -43,20 +58,20 @@ export function MessageQueue({
         <span className="text-foreground/90 min-w-0 flex-1 truncate text-[13.5px]">
           {running}
         </span>
-        <span className={cn(mono, "text-foreground/35 shrink-0")}>running</span>
-        {onInterrupt && <button type="button" aria-label="Stop current response" onClick={onInterrupt}
+        <span className={cn(mono, "text-foreground/35 shrink-0")}>{labels?.running ?? "running"}</span>
+        {onInterrupt && <button type="button" aria-label={labels?.stopCurrent ?? "Stop current response"} onClick={onInterrupt}
           className={cn(ghostButton, "size-6 shrink-0")}>
           <SquareIcon className="size-3.5" />
         </button>}
-      </div>
+      </div>}
 
       {queued.length > 0 && (
         <div className="flex items-baseline justify-between px-1">
           <span className={cn(mono, "text-foreground/35")}>
-            {queued.length} queued
+            {labels?.queuedCount?.(queued.length) ?? `${queued.length} queued`}
           </span>
           <span className={cn(mono, "text-foreground/35")}>
-            sends when this finishes
+            {queueHint ?? (running ? "sends when this finishes" : "Waiting to send")}
           </span>
         </div>
       )}
@@ -81,9 +96,12 @@ export function MessageQueue({
             <span className="text-foreground/60 min-w-0 flex-1 truncate text-[13.5px]">
               {message.text}
             </span>
-            <ArrowUpIcon className="text-foreground/25 size-3 shrink-0" />
+            {onInterruptQueued ? <button type="button" aria-label={labels?.sendNext?.(message.text) ?? `Send "${message.text}" next`}
+              onClick={() => onInterruptQueued(message.id)} className={cn(ghostButton, "size-6 shrink-0")}>
+              <ArrowUpIcon className="size-3.5" />
+            </button> : <ArrowUpIcon className="text-foreground/25 size-3 shrink-0" />}
             {onEdit && (
-              <button type="button" aria-label={`Edit "${message.text}" in the queue`}
+              <button type="button" aria-label={labels?.edit?.(message.text) ?? `Edit "${message.text}" in the queue`}
                 onClick={() => onEdit(message.id)} className={cn(ghostButton, "size-6 shrink-0")}>
                 <PencilIcon className="size-3.5" />
               </button>
@@ -91,7 +109,7 @@ export function MessageQueue({
             {onCancel && (
               <button
                 type="button"
-                aria-label={`Remove "${message.text}" from the queue`}
+                aria-label={labels?.remove?.(message.text) ?? `Remove "${message.text}" from the queue`}
                 onClick={() => onCancel(message.id)}
                 className={cn(ghostButton, "size-6 shrink-0")}
               >

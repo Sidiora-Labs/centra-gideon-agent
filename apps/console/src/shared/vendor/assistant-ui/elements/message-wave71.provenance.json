@@ -9,11 +9,11 @@
     },
     "message-branches.tsx": {
       "source_sha256": "d7968904afa08e27e29c64b339f9dbcb8a3a3a54cce4035c37d571dbe92734a0",
-      "adapted_sha256": "052f9be5eca7ba82d30a05cc6f9dfeb5e70d2c2154165e8da9241bd6171bad6c"
+      "adapted_sha256": "ba3da46f4fa8d08efed18d920306856ceb5cbdf3f937ef8764c5f174f46ba18d"
     },
     "message-actions.tsx": {
       "source_sha256": "000c9da991dd888234576521192579169a0b6c4913ad2b025ee387b29c6d5277",
-      "adapted_sha256": "237b138944abeb8306b8b9ace97436a7e7f069b285ddae4980824a28ecef972d"
+      "adapted_sha256": "7a6785f4191abc0becbf6fcbd55ee1624b1b76c17c0335fd0beea4a1ae9616fb"
     },
     "error-state.tsx": {
       "source_sha256": "b3b02f954b69523ce9fb3fa3b3475dd07b8456faa11b9f53dda5bbe9ded46c3c",
@@ -21,11 +21,11 @@
     },
     "message-queue.tsx": {
       "source_sha256": "45f3228682d18d32527d82094f1f09138b9333b2a66e19853155824775804dcb",
-      "adapted_sha256": "70c0983ad9e308d6d4332485eb6aa0ab614f534db0ac9e5a249b20afc9f1e502"
+      "adapted_sha256": "19b2eecd5d86d2058a50e293cb90404030a164ea42e3c2753b79814f779f4dd6"
     },
     "edit-message.tsx": {
       "source_sha256": "c7c7099294e7a4adeedd0887d70154ce47865f1ffddaaf7f4035f818f775d0d0",
-      "adapted_sha256": "cfed8973fae848127c3a9fdcb6494059dfb4ea5d8470052213b941a1b7cd81e4"
+      "adapted_sha256": "2f8301a047423725b736d7e906b9e3e99a2e1823e8068acaab9950f37d234b6d"
     }
   },
   "adaptations": [
@@ -35,6 +35,10 @@
     "MessageActions prevents duplicate regeneration while its owner reports regeneration in progress.",
     "ErrorState omits retry when the owner has no retry route.",
     "MessageQueue exposes owner callbacks for cancel, edit, and interrupt without local queue mutation.",
-    "EditMessage disables controls that have no owner callback."
+    "EditMessage disables controls that have no owner callback.",
+    "MessageQueue renders queued messages without an active run, offers real per-ID send-next callbacks, and accepts caller labels.",
+    "MessageBranches renders count-only navigation without fabricated variant bodies and accepts caller labels.",
+    "MessageActions renders only supplied controls, preserves caller children, and respects persisted reactions and busy state.",
+    "EditMessage accepts caller labels for hosted editing while retaining donor defaults and callback behavior."
   ]
 }
