@@ -88,21 +88,16 @@ describe('retrieval passages and announced relevance', () => {
     expect(screen.queryByRole('meter')).toBeNull()
   })
 
-  it('clamps announced meter values but preserves the recorded score text', () => {
+  it('does not present invalid relevance scores as measured evidence', () => {
     const outOfRange: RetrievalChunk[] = [
       { ...chunks[0], score: 1.2 }, { ...chunks[1], score: -0.4 },
     ]
     render(<RetrievalChunks query="worker recovery" chunks={outOfRange} visibleCount={2} searching={false} />)
-    const high = screen.getByRole('meter', { name: 'Incident timeline relevance score' })
-    const low = screen.getByRole('meter', { name: 'Recovery procedure relevance score' })
-    expect(high).toHaveAttribute('aria-valuemin', '0')
-    expect(high).toHaveAttribute('aria-valuemax', '100')
-    expect(high).toHaveAttribute('aria-valuenow', '100')
-    expect(high).toHaveAttribute('aria-valuetext', '1.20 of 1.00')
-    expect(high.querySelector('[style]')).toHaveStyle({ width: '100%' })
-    expect(low).toHaveAttribute('aria-valuenow', '0')
-    expect(low).toHaveAttribute('aria-valuetext', '-0.40 of 1.00')
-    expect(low.querySelector('[style]')).toHaveStyle({ width: '0%' })
+    expect(screen.getByText('Incident timeline')).toBeInTheDocument()
+    expect(screen.getByText('Recovery procedure')).toBeInTheDocument()
+    expect(screen.queryByRole('meter')).toBeNull()
+    expect(screen.queryByText('1.20')).toBeNull()
+    expect(screen.queryByText('-0.40')).toBeNull()
   })
 
   it('keeps searching and empty states distinct from measured passages', () => {
