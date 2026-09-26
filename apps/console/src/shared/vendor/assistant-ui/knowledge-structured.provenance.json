@@ -19,7 +19,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/image-generation.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/image-generation.tsx",
       "donor_sha256": "bcbe591fc9d2002ed07d2853a2d209bc06c3c44922aeba0fcbca034bf573b0f2",
-      "local_sha256": "07054449cebd557710edeee5b01460d5e5ee328d0dd3a734f5f9188395e2d569"
+      "local_sha256": "00449cceb1c32ff2db7cb6336fc174380f08e90bda0ea176a1a520d67a18bdf4"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/retrieval-chunks.tsx",

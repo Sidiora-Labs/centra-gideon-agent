@@ -10,6 +10,8 @@ const DOTS = Array.from({ length: 64 }, (_, i) => i);
 export function ImageGeneration({
   prompt,
   generating,
+  statusLabel,
+  showPrompt = true,
   imageUrl,
   width,
   height,
@@ -19,6 +21,8 @@ export function ImageGeneration({
 }: Omit<ComponentProps<"div">, "children"> & {
   prompt: string;
   generating: boolean;
+  statusLabel?: string;
+  showPrompt?: boolean;
   imageUrl?: string;
   width?: number;
   height?: number;
@@ -38,13 +42,14 @@ export function ImageGeneration({
           {width} × {height}
         </span>}
       </div>
-      <div className="flex items-center justify-between gap-2">
+      {(generating || showPrompt || onRegenerate) && <div className="flex items-center justify-between gap-2">
         <p className="text-foreground/45 min-w-0 flex-1 truncate text-xs">
-          {generating ? <ShimmerLabel className="relative">Generating</ShimmerLabel> : prompt}
+          {generating ? <><ShimmerLabel className="relative">{statusLabel ?? "Generating"}</ShimmerLabel>
+            {showPrompt && statusLabel && prompt ? <> · {prompt}</> : null}</> : showPrompt ? prompt : null}
         </p>
         {!generating && onRegenerate && <button type="button" aria-label="Regenerate image" onClick={onRegenerate}
           className={cn(ghostButton, "size-6 shrink-0")}><RefreshCwIcon className="size-3" /></button>}
-      </div>
+      </div>}
     </div>
   );
 }
