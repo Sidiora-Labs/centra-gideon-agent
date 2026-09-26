@@ -169,9 +169,9 @@ export function SessionMarkerRail({
                 <X size={18} aria-hidden="true" />
               </button>
             </header>
-            <SearchControl open query={query} source={searchSource} results={results}
+            <div className="mb-l min-w-0 shrink-0 [&_[role=search]]:static [&_[role=search]]:w-full"><SearchControl open query={query} source={searchSource} results={results}
               onToggle={() => { setQuery(''); clearHighlight() }}
-              onQuery={(value) => { setQuery(value); clearHighlight() }} onSelect={selectResult} />
+              onQuery={(value) => { setQuery(value); clearHighlight() }} onSelect={selectResult} /></div>
             <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto">
               <MapMarks id="mobile" turns={turns} viewport={viewport} current={current} compact={compact} jumpTo={jumpTo} moveWithKeyboard={moveWithKeyboard} />
             </div>
