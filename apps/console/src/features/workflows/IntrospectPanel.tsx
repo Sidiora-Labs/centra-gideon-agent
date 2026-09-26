@@ -9,6 +9,7 @@ import { fmtElapsed } from './workflowMeta'
 import { runCostStat, runCostText, templateCostStat } from '../../shared/data/runCost'
 import { UNRECORDED_LABEL, runTokensStat } from '../../shared/data/unrecorded'
 import { CostMeter } from '../../shared/vendor/assistant-ui/elements/cost-meter'
+import { WorkflowJobProgress, WorkflowTimeline } from '../chat/auiStructuredResults'
 
 export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
   const [data, setData] = useState<WorkflowIntrospection | null>(null)
@@ -299,34 +300,7 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
               <p data-type="caption" className="text-on-surface-low">
                 This run has written no journal events yet.
               </p>
-            ) : (
-              <ol data-type="caption" className="flex flex-col gap-xs">
-                {data.timeline.map((row, i) => (
-                  <li key={`${row.ts}-${row.kind}-${i}`} className="flex flex-col gap-xs rounded-lg bg-surface-high p-s">
-                    <span className="flex flex-wrap items-baseline gap-xs">
-                      <span className="text-on-surface fw-500">{row.kind}</span>
-                      {row.node_id ? <span className="font-mono text-on-surface-low">{row.node_id}</span> : null}
-                      {
-}
-                      {typeof row.attempt === 'number' && row.attempt > 1 ? (
-                        <span className="text-warning">attempt {row.attempt}</span>
-                      ) : null}
-                      {row.ts ? <span className="text-on-surface-low tabular-nums">{row.ts}</span> : null}
-                    </span>
-                    <span className="flex flex-wrap gap-xs text-on-surface-low tabular-nums">
-                      {row.model ? <span>{row.model}</span> : null}
-                      {typeof row.tokens === 'number' && row.tokens ? <span>{row.tokens.toLocaleString()} tokens</span> : null}
-                      {
-}
-                      {typeof row.cost_usd === 'number' && row.cost_usd ? <span>~${row.cost_usd.toFixed(4)}</span> : null}
-                      {typeof row.duration_secs === 'number' ? <span>{fmtElapsed(row.duration_secs)}</span> : null}
-                      {typeof row.approved === 'boolean' ? <span>{row.approved ? 'approved' : 'rejected'}</span> : null}
-                    </span>
-                    {row.detail ? <span className="text-on-surface-low">{String(row.detail)}</span> : null}
-                  </li>
-                ))}
-              </ol>
-            )
+            ) : <WorkflowTimeline rows={data.timeline} />
           )}
 
           {
@@ -334,8 +308,8 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
           {tab === 'proof' && (
             <section className="flex flex-col gap-xs">
               <p data-type="body-s" className="text-on-surface">{data.proof.summary}</p>
+              <WorkflowJobProgress workflow={data} />
               <dl data-type="caption" className="grid grid-cols-2 gap-xs">
-                <Stat label="Verified steps" value={`${data.proof.verified_steps} of ${data.proof.total_steps}`} />
                 <Stat label="Coverage" value={`${Math.round(data.proof.coverage * 100)}%`} />
               </dl>
               <h4 data-type="label-s" className="text-on-surface fw-500">Evidence</h4>

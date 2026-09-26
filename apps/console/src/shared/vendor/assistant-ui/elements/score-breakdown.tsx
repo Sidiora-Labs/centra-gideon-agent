@@ -8,7 +8,7 @@ import { announced, pct, take } from "../utils/range";
 export interface ScoreCriterion {
   label: string;
   score: number;
-  weight: number;
+  weight?: number;
   note?: string;
 }
 
@@ -24,13 +24,15 @@ export function ScoreBreakdown({
   ComponentProps<"div">,
   "children" | "verdict" | "total" | "outOf" | "criteria" | "visibleCount"
 > & {
-  verdict: string;
-  total: number;
-  outOf: number;
+  verdict?: string;
+  total?: number;
+  outOf?: number;
   criteria: readonly ScoreCriterion[];
   visibleCount: number;
 }) {
-  const ratio = outOf === 0 ? 0 : total / outOf;
+  const ratio = total !== undefined && outOf !== undefined
+    ? (outOf === 0 ? 0 : total / outOf)
+    : undefined;
 
   return (
     <div
@@ -43,17 +45,24 @@ export function ScoreBreakdown({
 
       {...props}
     >
-      <div className="flex items-baseline gap-2">
+      {(total !== undefined || verdict !== undefined) && <div className="flex items-baseline gap-2">
+        {total !== undefined && (
         <span className="text-2xl font-medium tracking-tight tabular-nums">
-          {total.toFixed(1)}
+          {outOf === undefined ? String(total) : total.toFixed(1)}
         </span>
+        )}
+        {outOf !== undefined && total !== undefined && (
         <span className={cn(mono, "text-foreground/30 tabular-nums")}>
           / {outOf}
         </span>
+        )}
+        {verdict !== undefined && (
         <span
           className={cn(
             "ms-auto rounded-full px-2 py-0.5 text-xs font-medium",
-            ratio >= 0.75
+            ratio === undefined
+              ? "bg-foreground/[0.06] text-foreground/60"
+              : ratio >= 0.75
               ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
               : ratio >= 0.5
                 ? "bg-amber-500/12 text-amber-700 dark:text-amber-300"
@@ -62,7 +71,8 @@ export function ScoreBreakdown({
         >
           {verdict}
         </span>
-      </div>
+        )}
+      </div>}
 
       <div className="flex flex-col gap-2">
         {take(criteria, visibleCount).map((criterion) => (
@@ -74,16 +84,16 @@ export function ScoreBreakdown({
               <span className="text-foreground/75 min-w-0 flex-1 truncate text-[13px]">
                 {criterion.label}
               </span>
-              <span className={cn(mono, "text-foreground/25 shrink-0")}>
+              {criterion.weight !== undefined && <span className={cn(mono, "text-foreground/25 shrink-0")}>
                 ×{criterion.weight}
-              </span>
+              </span>}
               <span
                 className={cn(mono, "text-foreground/55 shrink-0 tabular-nums")}
               >
-                {criterion.score.toFixed(1)}
+                {outOf === undefined ? String(criterion.score) : criterion.score.toFixed(1)}
               </span>
             </div>
-            <span
+            {outOf !== undefined && <span
               role="meter"
               aria-label={`${criterion.label} score`}
               aria-valuemin={0}
@@ -98,7 +108,7 @@ export function ScoreBreakdown({
                   width: `${pct(criterion.score, outOf)}%`,
                 }}
               />
-            </span>
+            </span>}
             {criterion.note && (
               <span className="text-foreground/40 text-xs leading-relaxed break-words">
                 {criterion.note}

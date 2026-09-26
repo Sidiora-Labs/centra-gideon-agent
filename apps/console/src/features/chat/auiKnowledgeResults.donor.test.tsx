@@ -42,7 +42,7 @@ describe('real donor knowledge result surfaces', () => {
     expect(link).toHaveAttribute('href', 'https://docs.example.org/incident')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(screen.getByText('Incident review, Timeline')).toBeInTheDocument()
+    expect(screen.getByLabelText('Knowledge citations')).toHaveTextContent('Sources1')
     expect(within(donor('web-search')).queryByRole('button')).toBeNull()
   })
 
@@ -60,7 +60,7 @@ describe('real donor knowledge result surfaces', () => {
     expect(within(surface).getByText('native')).toBeInTheDocument()
     expect(within(surface).queryByRole('link')).toBeNull()
     expect(within(surface).queryByRole('button')).toBeNull()
-    expect(screen.getByText('Incident review, Timeline')).toBeInTheDocument()
+    expect(screen.getByLabelText('Knowledge citations')).toHaveTextContent('Sources1')
   })
 
   it('uses recorded source type when no host or provider exists, including an empty metadata case', () => {

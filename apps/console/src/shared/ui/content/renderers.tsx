@@ -1,3 +1,5 @@
+export { CodePreview } from './CodePreview'
+import { CodePreview, isCodePreviewPath } from './CodePreview'
 import { memo, useMemo, useRef, useState } from 'react'
 import { Download, ShieldAlert, Sliders } from 'lucide-react'
 import type { PreviewProps } from './contentTypes'
@@ -64,8 +66,9 @@ export const DocumentPreview = memo(function DocumentPreview(props: PreviewProps
   return <div className={`doc mx-auto ${PROSE_MEASURE_CLASS} px-l py-xl`} dangerouslySetInnerHTML={{ __html: sanitized }} />
 })
 
-export const TextPreview = memo(function TextPreview({ content }: PreviewProps) {
-  return <pre data-type="body-s" className="overflow-auto whitespace-pre-wrap px-l py-m font-mono leading-relaxed text-on-surface">{content}</pre>
+export const TextPreview = memo(function TextPreview(props: PreviewProps) {
+  if (isCodePreviewPath(props.path || props.title)) return <CodePreview {...props} />
+  return <pre data-type="body-s" className="overflow-auto whitespace-pre-wrap px-l py-m font-mono leading-relaxed text-on-surface">{props.content}</pre>
 })
 export const JsonTreePreview = memo(function JsonTreePreview({ content, path }: PreviewProps) {
   return <JsonPreview content={content} name={path} />

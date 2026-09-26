@@ -13,7 +13,7 @@
   },
   "adapted_modules": {
     "elements/markdown-text.tsx": "5767b517fe86916e2f913b4edb033cd9a60406449cb70f9070f0bfbeeae8e9a4",
-    "elements/syntax-highlighter.tsx": "5a744f84764857325a67b82d04499fed98e046dc2d621122b8b3202bd17f886d",
+    "elements/syntax-highlighter.tsx": "e66c5fb06b56ba90ba249beba647db8e00b688a275e32199e04ab49d4d54bb9e",
     "elements/shiki-highlighter.aui.tsx": "f3b0c83d58234376a60fe3296c42da4fc7cad64260789a91a13f4997cc7dbceb",
     "elements/mermaid-diagram.aui.tsx": "5a67938ae2045c68d04feb5c8e327c06f2ab80b5bdadd0410fdc28bc62b03724",
     "elements/shiki-highlighter.tsx": "3a75851baba855bcd3e12a4efdc7d64feb8433b614210f5ff883543982716e58",
@@ -25,7 +25,8 @@
     "use W09-owned tooltip button and compatibility layer without duplicating them",
     "use the same pinned beautiful-mermaid and Shiki runtime dependencies as the donor",
     "simplify unreachable viewport and parser error branches in Mermaid zoom, retaining native pointer capture when supported",
-    "treat a null Mermaid SVG as a render fallback before zoom and HTML mounting"
+    "treat a null Mermaid SVG as a render fallback before zoom and HTML mounting",
+    "allow an explicit artifact theme to render one code pane while retaining automatic donor theme defaults"
   ],
   "donor_paths": {
     "elements/markdown-text.tsx": "packages/ui/src/components/react/assistant-ui/elements/markdown-text.tsx",

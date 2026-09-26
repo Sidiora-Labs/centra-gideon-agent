@@ -271,7 +271,8 @@ describe('the Proof section states its own caveats', () => {
     render(<IntrospectPanel runId="r1" onClose={() => {}} />)
     fireEvent.click(await screen.findByRole('tab', { name: /proof/i }))
     expect(await screen.findByText(/a claim about the run rather than proof of it/i)).toBeTruthy()
-    expect(screen.getByText('1 of 4')).toBeTruthy()
+    expect(screen.getByText('1/4 steps verified')).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: 'weekly-report progress' })).toHaveAttribute('aria-valuenow', '25')
   })
 
   it('flags a section that is neither evidenced nor caveated', async () => {
@@ -287,9 +288,9 @@ describe('the timeline is the journal AND the attempt ledger', () => {
   it('renders events oldest-first and marks a retry', async () => {
     render(<IntrospectPanel runId="r1" onClose={() => {}} />)
     fireEvent.click(await screen.findByRole('tab', { name: /timeline/i }))
-    const rows = await screen.findAllByRole('listitem')
-    expect(rows[0].textContent).toContain('run_started')
-    expect(screen.getByText('attempt 2')).toBeTruthy()
+    const timeline = await screen.findByLabelText('Workflow events')
+    expect(timeline.firstElementChild).toHaveTextContent('run_started')
+    expect(timeline).toHaveTextContent('attempt 2')
   })
 
   it('rowSummary never renders undefined when a field is absent', () => {
