@@ -384,10 +384,11 @@ ac_1 = "Implement the complete reachable feature: Widget form submission and fai
 
 [task.automation-apps]
 title = "automation-apps end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "automation-apps"
 requires = []
 reqs = ["014.1", "114.1", "115.1", "116.1", "117.1", "118.1", "119.1", "120.1", "121.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
+touches = ["apps/console/src/features/apps/AppsSection.tsx", "apps/console/src/features/apps/appConfigForm.tsx", "apps/console/src/features/apps/installConsent.tsx", "apps/console/src/features/settings/PacksPanel.tsx", "apps/console/src/features/settings/packLedgerDetail.test.tsx", "apps/console/src/shared/data/useGuardedInstall.ts", "apps/console/src/shared/ui/widget/WidgetFrame.tsx", "apps/console/src/shared/ui/widget/useWidgetActionBridge.ts", "apps/console/src/shared/ui/widget/widgetHostScript.test.ts", "apps/console/src/shared/ui/widget/widgetSrcdoc.ts", "checks/runtime/test_app_hook_contributions.py", "checks/runtime/test_app_manager_lifecycle.py", "checks/runtime/test_packs_kinds.py", "checks/runtime/test_prompt_api.py", "runtime/gideon/engine/automation_boot.py", "runtime/gideon/extensions/apps/app_hooks.py", "runtime/gideon/extensions/apps/app_manager.py", "runtime/gideon/extensions/apps/catalog.py", "runtime/gideon/extensions/apps/manifest.py", "runtime/gideon/extensions/skills/loader.py", "runtime/gideon/interfaces/dashboard/handlers/apps.py", "runtime/gideon/interfaces/dashboard/handlers/packs.py", "runtime/gideon/interfaces/dashboard/handlers/prompts.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_app_hook_contributions.py checks/runtime/test_app_manager_lifecycle.py::TestInstall::test_warning_discloses_lifecycle_hooks_before_consent checks/runtime/test_prompt_api.py::test_create_skill_uses_requested_name_on_first_creation checks/runtime/test_packs_kinds.py::test_bundled_install_route_drives_the_whole_flow"

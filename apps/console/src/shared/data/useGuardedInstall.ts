@@ -9,6 +9,7 @@ export interface GuardedResult {
   clientInstall?: { shell?: string; postInstall?: string } | null
   restartRequired?: boolean
   fixPrompt?: string
+  hooks?: Array<{ name: string; event: string; provider: string }>
 }
 
 export function terminalRefusalReason(r: GuardedResult | null | undefined): string {
@@ -30,10 +31,11 @@ export function isBlockingResult(r: GuardedResult | null | undefined): boolean {
 }
 
 export function guardedFromApp(r: AppInstallResult): GuardedResult {
+  const hooks = r.hooks
   return { ok: r.ok, needsConsent: !!r.needs_consent, scan: r.scan, error: r.error,
             clientInstall: r.needs_client_install ? (r.client_install ?? {}) : null,
             restartRequired: !!r.restart_required,
-            fixPrompt: r.fix_prompt || undefined }
+            fixPrompt: r.fix_prompt || undefined, hooks }
 }
 
 export function guardedFromSkill(r: SkillInstallResult): GuardedResult {
@@ -62,7 +64,7 @@ export function useGuardedInstall(run: (confirm: boolean) => Promise<GuardedResu
     setBusy(true)
     setError(null)
     setFixPrompt(null)
-    if (!confirm) setBlocked(null)
+    setBlocked(null)
     try {
       const r = await runRef.current(confirm)
       if (r.ok) {

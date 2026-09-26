@@ -10,6 +10,11 @@ from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 
 RECONCILERS = (
     (
+        "gideon.extensions.apps.app_hooks",
+        "reconcile_app_hooks",
+        "app-hook reconcile failed",
+    ),
+    (
         "gideon.extensions.apps.app_crons",
         "reconcile_app_crons",
         "app-cron reconcile failed",

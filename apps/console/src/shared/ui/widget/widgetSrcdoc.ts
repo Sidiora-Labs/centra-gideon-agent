@@ -25,14 +25,25 @@ export const HOST_SCRIPT_SOURCE = String.raw`(function () {
     }).map(function (node) { return node.getBoundingClientRect().width; });
     parent.postMessage({type:'widget-height', height:Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), width:Math.ceil(Math.max(0, ...sizes))}, '*');
   }
-  function inputValues() {
+  function inputValues(root) {
     var values = Object.create(null);
-    document.querySelectorAll('input,select,textarea').forEach(function (field) {
+    (root || document).querySelectorAll('input,select,textarea').forEach(function (field) {
       var name = field.name || field.id || field.getAttribute('data-field');
       if (!name || (field.type === 'radio' && !field.checked)) return;
       values[name] = field.type === 'checkbox' ? field.checked : field.value;
     });
     return values;
+  }
+  function sendAction(control, root) {
+    var payload;
+    try { payload = JSON.parse(control.dataset.payload || '{}'); } catch (_) {
+      parent.postMessage({type:'widget-error', message:'Widget action payload is invalid JSON'}, '*');
+      return;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {};
+    var values = inputValues(root);
+    if (Object.keys(values).length) payload.formData = values;
+    parent.postMessage({type:'widget-action', action:control.dataset.action, payload:payload}, '*');
   }
   document.addEventListener('click', function (event) {
     if (!event.isTrusted) return;
@@ -40,12 +51,19 @@ export const HOST_SCRIPT_SOURCE = String.raw`(function () {
     var control = target && target.closest('[data-action]');
     if (!control) return;
     event.preventDefault();
-    var payload;
-    try { payload = JSON.parse(control.dataset.payload || '{}'); } catch (_) { payload = {}; }
-    if (!payload || typeof payload !== 'object') payload = {};
-    var values = inputValues();
-    if (Object.keys(values).length) payload.formData = values;
-    parent.postMessage({type:'widget-action', action:control.dataset.action, payload:payload}, '*');
+    sendAction(control, control.closest('form'));
+  });
+  document.addEventListener('submit', function (event) {
+    if (!event.isTrusted) return;
+    var form = event.target;
+    if (!form || form.tagName !== 'FORM') return;
+    event.preventDefault();
+    var control = event.submitter && event.submitter.dataset.action ? event.submitter : form;
+    if (!control.dataset.action) {
+      parent.postMessage({type:'widget-error', message:'This form has no action. Add data-action to the form or submit button.'}, '*');
+      return;
+    }
+    sendAction(control, form);
   });
   var observer = new ResizeObserver(measure);
   observer.observe(document.body);

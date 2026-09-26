@@ -153,6 +153,13 @@ def _reconcile_app_crons(request: web.Request) -> None:
     presence check no longer answers the question. `no_crons` on the dashboard state does.
     """
     try:
+        from gideon.extensions.apps.app_hooks import reconcile_app_hooks
+
+        state = request.app.get("state")
+        reconcile_app_hooks(getattr(state, "_hook_store", None))
+    except Exception:
+        logger.debug("app hook reconcile after lifecycle transition failed", exc_info=True)
+    try:
         state = request.app.get("state")
         if state is not None and getattr(state, "no_crons", False):
             return
@@ -273,6 +280,12 @@ async def api_apps_list(request: web.Request) -> web.Response:
                 ),
                 "hasConfig": has_config,
                 "permissions": manifest.get("permissions", {}),
+                "hooks": [
+                    {"name": h["name"], "event": h["event"], "provider": h["provider"]}
+                    for h in manifest.get("hooks", [])
+                    if isinstance(h, dict)
+                    and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))
+                ],
                 "tags": [str(t) for t in manifest.get("tags", []) if t],
                 "quality": _quality_wire(manifest.get("quality")),
                 "installedAt": app.get("installedAt", ""),

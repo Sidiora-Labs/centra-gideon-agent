@@ -67,6 +67,7 @@ function deliver(message: WidgetWireMessage, handlers: WidgetWireHandlers) {
       const artifact = handlers.liveArtifact?.()
       const text = composeWidgetActionText(message.action, message.payload, artifact)
       if (text !== null) publishWidgetAction(text, artifact?.saved ? { slug: artifact.slug } : {})
+      else handlers.onError?.('The widget action could not be submitted. Check its payload and try again.')
     }
   }
 }
