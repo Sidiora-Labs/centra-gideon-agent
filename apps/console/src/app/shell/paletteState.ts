@@ -1,11 +1,12 @@
 import type { Command } from './CommandPalette'
 export interface PaletteState { open: boolean; query: string; cursor: number }
 export const initialPalette: PaletteState = { open: false, query: '', cursor: 0 }
-export type PaletteAction = { type: 'toggle' | 'close' } | { type: 'search'; value: string } | { type: 'select'; index: number } | { type: 'move'; delta: number; count: number }
+export type PaletteAction = { type: 'open' | 'toggle' | 'close' } | { type: 'search'; value: string } | { type: 'select'; index: number } | { type: 'move'; delta: number; count: number }
 export function paletteReducer(state: PaletteState, action: PaletteAction): PaletteState {
   switch (action.type) {
+    case 'open': return { open: true, query: '', cursor: 0 }
     case 'toggle': return { open: !state.open, query: '', cursor: 0 }
-    case 'close': return { ...state, open: false }
+    case 'close': return { open: false, query: '', cursor: 0 }
     case 'search': return { ...state, query: action.value, cursor: 0 }
     case 'select': return { ...state, cursor: action.index }
     case 'move': return { ...state, cursor: Math.max(0, Math.min(state.cursor + action.delta, action.count - 1)) }

@@ -7,6 +7,7 @@ import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { ListControls } from '../../shared/ui/ListControls'
 import { EmptyState, ListRow, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { ContextMenu } from '../../shared/ui/motion'
+import { AgentCard } from '../../shared/vendor/assistant-ui/elements/agent-card'
 import { SidePanel } from '../../shared/ui/SidePanel'
 import { useAgentsData, type NativeGroup, type DiscoveredGroup } from './agentsData'
 import { providerMeta, isReservedAgent } from './agentMeta'
@@ -46,7 +47,7 @@ export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => 
   }
   const sections: ReactNode[] = []
   if (native) sections.push(<GroupSection key="native" title="Native" icon={Users} tone="var(--color-primary)" subtitle="Built-ins run the platform — definition fixed, model swappable. Agents you create are fully editable." count={shownNative.length}>
-    {shownNative.length ? <div className="grid gap-s">{shownNative.map((agent, index) => <NativeRow key={agent.name} agent={agent} index={index} isDefault={native.defaultAgent === agent.name} onClick={() => setOpen({ kind: 'native', name: agent.name })} />)}</div> : n ? <EmptyState icon={Search} title="No matching agents" hint="Try a different term." /> : <EmptyState icon={Users} title="No native agents" hint="Create an agent to define its model, system prompt, skills, tools, triggers, and workflows." action={{ label: 'New agent', onClick: onCreate, icon: Plus }} />}
+    {shownNative.length ? <div className="grid gap-s">{shownNative.map(agent => <NativeRow key={agent.name} agent={agent} isDefault={native.defaultAgent === agent.name} onClick={() => setOpen({ kind: 'native', name: agent.name })} />)}</div> : n ? <EmptyState icon={Search} title="No matching agents" hint="Try a different term." /> : <EmptyState icon={Users} title="No native agents" hint="Create an agent to define its model, system prompt, skills, tools, triggers, and workflows." action={{ label: 'New agent', onClick: onCreate, icon: Plus }} />}
   </GroupSection>)
   for (const { group, items } of runtimeGroups) {
     const provider = providerMeta(group.providerId)
@@ -63,19 +64,29 @@ export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => 
 function GroupSection({ title, icon: Icon, tone, subtitle, count, ready = true, children }: { title: string; icon: typeof Users; tone: string; subtitle: string; count: number; ready?: boolean; children: ReactNode }) {
   return <section className="rounded-lg border border-outline-variant/30 bg-surface-container/15 p-m"><header className="mb-m grid gap-s border-b border-outline-variant/25 pb-m"><div className="flex items-center gap-s"><Icon size={16} style={{ color: tone }} /><h2 data-type="label-m" className="text-on-surface">{title}</h2><span data-type="caption" className="text-on-surface-low tabular-nums">{count}</span>{!ready && <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low"><Lock size={11} /> unavailable</span>}</div><p data-type="caption" className="text-on-surface-low">{subtitle}</p></header>{children}</section>
 }
-function NativeRow({ agent, index, isDefault, onClick }: { agent: SavedAgent; index: number; isDefault: boolean; onClick: () => void }) {
-  return <ContextMenu items={[{ icon: <Users size={15} />, label: 'Open', onSelect: onClick }]}><ListRow index={index} accent={isDefault ? 'var(--color-primary)' : undefined} onClick={onClick} label={agent.name}>
-    <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/10"><Users size={19} className="text-primary" /></span>
-    <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-s"><span className="truncate text-on-surface text-[0.9375rem] font-mono" style={fvs(500)} title={agent.name}>{agent.name}</span>{isDefault && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-primary"><Star size={11} fill="currentColor" /> default</span>}{isReservedAgent(agent) && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-on-surface-low"><Lock size={10} /> built-in</span>}</div>
-      <div data-type="body-s" className="mt-1 flex flex-wrap items-center gap-x-m gap-y-1 text-on-surface-low">{agent.model && <span data-type="caption" className="font-mono">{agent.model}</span>}{agent.description && <span className="truncate" title={agent.description}>{agent.model ? '· ' : ''}{agent.description}</span>}</div>
-    </div>
-    <div data-type="caption" className="hidden shrink-0 items-center gap-m text-on-surface-low sm:flex">
-      {(agent.skills?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.skills!.length} skill${agent.skills!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Sparkles size={11} /> {agent.skills!.length}</span>}
-      {(agent.tools?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.tools!.length} tool${agent.tools!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Wrench size={11} /> {agent.tools!.length}</span>}
-      {(agent.triggers?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.triggers!.length} trigger${agent.triggers!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Zap size={11} /> {agent.triggers!.length}</span>}
-      {!!agent.active_sessions && <span className="tabular-nums">{agent.running_sessions ? `${agent.running_sessions} running · ` : ''}{agent.active_sessions} active</span>}
-    </div>
-  </ListRow></ContextMenu>
+function NativeRow({ agent, isDefault, onClick }: { agent: SavedAgent; isDefault: boolean; onClick: () => void }) {
+  const skillCount = agent.skills?.length ?? 0
+  const toolCount = agent.tools?.length ?? 0
+  const triggerCount = agent.triggers?.length ?? 0
+  const activeSessions = agent.active_sessions ?? 0
+  const reserved = isReservedAgent(agent)
+  const hasDetails = isDefault || reserved || skillCount > 0 || toolCount > 0 || triggerCount > 0 || activeSessions > 0
+  return <ContextMenu items={[{ icon: <Users size={15} />, label: 'Open', onSelect: onClick }]}>
+    <AgentCard name={agent.name} description={agent.description ?? ''} provider={providerMeta(agent.provider).label}
+      model={agent.model} skills={(agent.skills ?? []).map(name => ({ name, description: '' }))}
+      role="button" tabIndex={0} aria-label={agent.name} data-ctx-anchor onClick={onClick}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick() } }}
+      className="max-w-none cursor-pointer rounded-lg border-outline-variant/30 bg-surface-container text-left hover:bg-surface-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+      {hasDetails && <div data-type="caption" className="flex flex-wrap items-center gap-x-m gap-y-1 text-on-surface-low">
+        {isDefault && <span className="inline-flex items-center gap-1 text-primary"><Star size={11} fill="currentColor" /> default</span>}
+        {reserved && <span className="inline-flex items-center gap-1"><Lock size={10} /> built-in</span>}
+        {skillCount > 0 && <span role="img" aria-label={`${skillCount} skill${skillCount === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Sparkles size={11} /> {skillCount}</span>}
+        {toolCount > 0 && <span role="img" aria-label={`${toolCount} tool${toolCount === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Wrench size={11} /> {toolCount}</span>}
+        {triggerCount > 0 && <span role="img" aria-label={`${triggerCount} trigger${triggerCount === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Zap size={11} /> {triggerCount}</span>}
+        {activeSessions > 0 && <span className="tabular-nums">{agent.running_sessions ? `${agent.running_sessions} running · ` : ''}{activeSessions} active</span>}
+      </div>}
+    </AgentCard>
+  </ContextMenu>
 }
 function DiscoveredRow({ agent, index, tone, icon: Icon, onClick }: { agent: DiscoveredAgent; index: number; tone: string; icon: typeof Cpu; onClick: () => void }) {
   return <ContextMenu items={[{ icon: <Icon size={15} />, label: 'Open', onSelect: onClick }]}><ListRow index={index} onClick={onClick} label={agent.name}>

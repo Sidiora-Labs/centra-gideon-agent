@@ -1,0 +1,179 @@
+"use client";
+
+import type { ComponentProps, ReactNode } from "react";
+import { KeyRoundIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { field, inkButton, mono, paper } from "./surfaces";
+
+export type GrantScope = "session" | "always" | "denied";
+
+export type PermissionChoice = {
+  id: string;
+  label: string;
+  name?: string;
+  disabled?: boolean;
+  tone?: "danger" | "neutral";
+};
+
+export type PermissionGrantProps = Omit<
+  ComponentProps<"div">,
+  "children" | "capability" | "requester" | "reach" | "scope" | "onGrant"
+> & {
+  capability: string;
+  requester?: string;
+  reach: readonly string[];
+  scope: GrantScope | "pending" | (string & {});
+  onGrant?: (scope: GrantScope) => void;
+  choices?: readonly PermissionChoice[];
+  onChoice?: (id: string) => void;
+  resultLabel?: string;
+  children?: ReactNode;
+};
+
+export function PermissionGrant({
+  capability,
+  requester,
+  reach,
+  scope,
+  onGrant,
+  choices,
+  onChoice,
+  resultLabel,
+  children,
+  className,
+  ...props
+}: PermissionGrantProps) {
+  return (
+    <div
+      data-slot="permission-grant"
+      className={cn(
+        paper,
+        "flex w-full max-w-sm flex-col gap-3.5 rounded-[20px] p-4",
+        className,
+      )}
+
+      {...props}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="bg-foreground/[0.05] text-foreground/45 flex size-7 shrink-0 items-center justify-center rounded-lg">
+          <KeyRoundIcon className="size-3.5" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-[13.5px] font-medium">
+            {capability}
+          </span>
+          {requester && (
+            <span className="text-foreground/45 truncate text-xs">
+              requested by {requester}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {reach.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className={cn(mono, "text-foreground/30")}>this grants</span>
+          {reach.map((item) => (
+            <span
+              key={item}
+              className="text-foreground/60 flex items-baseline gap-2 text-xs"
+            >
+              <span
+                aria-hidden
+                className="bg-foreground/20 size-1 rounded-full"
+              />
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {children}
+
+      <div className={cn(
+        "flex items-center justify-end gap-2",
+        choices === undefined ? "h-8" : "flex-wrap",
+      )}>
+        {scope === "pending" ? (
+          choices !== undefined ? (
+            choices.length > 0 ? (
+              choices.map(({ id, label, name, disabled, tone }) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-label={name}
+                  title={name}
+                  disabled={!onChoice || disabled}
+                  onClick={onChoice ? () => onChoice(id) : undefined}
+                  className={cn(
+                    "h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50",
+                    tone === "danger"
+                      ? "text-red-600 hover:bg-red-500/10 hover:text-red-700"
+                      : "text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90",
+                  )}
+                >
+                  {label}
+                </button>
+              ))
+            ) : (
+              <span className={cn(field, mono, "text-foreground/55 rounded-full px-2.5 py-1.5")}>pending</span>
+            )
+          ) : onGrant ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onGrant("denied")}
+                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                onClick={() => onGrant("session")}
+                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
+              >
+                This session
+              </button>
+              <button
+                type="button"
+                onClick={() => onGrant("always")}
+                className={cn(
+                  inkButton,
+                  "flex h-8 items-center rounded-full px-3 text-xs font-medium",
+                )}
+              >
+                Always
+              </button>
+            </>
+          ) : (
+            <span
+              key={scope}
+              className={cn(
+                field,
+                mono,
+                "fade-in animate-in text-foreground/55 rounded-full px-2.5 py-1.5 duration-300",
+              )}
+            >
+              pending
+            </span>
+          )
+        ) : (
+          <span
+            key={scope}
+            className={cn(
+              field,
+              mono,
+              "fade-in animate-in text-foreground/55 rounded-full px-2.5 py-1.5 duration-300",
+            )}
+          >
+            {resultLabel ?? (scope === "denied"
+              ? "denied"
+              : scope === "session" || scope === "always"
+                ? `granted · ${scope}`
+                : scope)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

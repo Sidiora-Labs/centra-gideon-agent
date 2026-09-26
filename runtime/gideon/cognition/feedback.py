@@ -43,6 +43,7 @@ TARGET_KINDS = (
     "inbox_digest",
     "loop_finding",
     "routing_suggestion",
+    "chat_message",
     "proposal_content",
     "app_judgment",
 )

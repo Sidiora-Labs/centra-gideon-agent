@@ -809,9 +809,10 @@ export interface OrganizeProposal {
 }
 export interface RetagJob { id?: string; status: 'idle' | 'running' | 'done' | 'error' | 'cancelled'; done?: number; total?: number; updated?: number; skipped?: number; errors?: number; current?: string; error?: string }
 export interface TagColumn { id: string; name?: string; tag_ids?: string[]; mode?: 'any' | 'all' | 'none'; order?: number; include_untagged?: boolean }
+export interface ChatFileChange { path: string; before: string; after: string }
 export interface ChatHistoryMsg {
   role: string; content: string; ts?: string; cls?: string
-  meta?: { tool_call_id?: string; input?: string; purpose?: string; output?: string; done?: boolean; tool?: string; memory_citations?: { n: number; id: string | null; preview?: string }[]; skills_used?: { name: string; state: string; loaded_tokens: number }[] }
+  meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; input?: string; purpose?: string; output?: string; done?: boolean; tool?: string; files?: string[]; memory_citations?: { n: number; id: string | null; preview?: string }[]; skills_used?: { name: string; state: string; loaded_tokens: number }[]; file_changes?: ChatFileChange[] }
 }
 
 export interface NotificationItem {
@@ -2331,6 +2332,13 @@ export interface SessionTemplate {
   reasoning_effort: string; first_prompt: string; created_at: number
 }
 export type SessionTemplateInput = Omit<SessionTemplate, 'id' | 'created_at'>
+export interface ChatSessionShare {
+  slug: string; name: string; created_at: string; shared_by: string | null
+  url: string; audience: 'private'; readonly: true; redacted: true
+}
+export interface ChatSessionShareDetail extends ChatSessionShare {
+  turns: Array<{ id: string; role: 'user' | 'assistant'; text: string }>
+}
 export interface PortabilityManifest {
   version: number; format: string; created_at: string; hostname: string; user: string
   contents: Record<string, number>
@@ -4159,8 +4167,16 @@ export const api = {
   sessionExportUrl: (key: string, format: 'md' | 'json') =>
     `/api/chat/sessions/${encodeURIComponent(key)}/export?format=${format}`,
   shareSession: (key: string) =>
-    post<{ ok: boolean; slug: string; name: string; kind: ArtifactKind; readonly: boolean; redacted: boolean }>(
+    post<{ ok: boolean; kind: ArtifactKind } & ChatSessionShare>(
       `/api/chat/sessions/${encodeURIComponent(key)}/share`, {}),
+  sessionShares: (key: string) =>
+    get<{ shares: ChatSessionShare[] }>(`/api/chat/sessions/${encodeURIComponent(key)}/shares`),
+  sessionShare: (key: string, slug: string) =>
+    get<ChatSessionShareDetail>(
+      `/api/chat/sessions/${encodeURIComponent(key)}/shares/${encodeURIComponent(slug)}`),
+  revokeSessionShare: (key: string, slug: string) =>
+    del(
+      `/api/chat/sessions/${encodeURIComponent(key)}/shares/${encodeURIComponent(slug)}`),
   createChatSession: (opts: { name?: string; agent?: string; model?: string; memory_mode?: MemoryMode; mode?: string; project_id?: string } = {}) =>
     post<ChatSession>('/api/chat/sessions', opts),
   setSessionAgent: (session: string, agent: string) => post(`/api/chat/sessions/${session}/agent`, { agent }),
@@ -4977,6 +4993,12 @@ export const api = {
   setToolGroupsEnabled: (enabled: boolean) =>
     patch<Record<string, any>>('/api/config/gideon', { path: 'tools.groups_enabled', value: enabled }),
   recordFeedback: (body: FeedbackRecordBody) => post<{ ok: boolean; id: string; verdict: string }>('/api/feedback', body),
+  chatMessageFeedback: (session: string, visibleIndex: number, verdict: 'up' | 'down', reason = '') =>
+    post<{ ok: boolean; id: string; verdict: 'up' | 'down' }>(
+      `/api/chat/sessions/${encodeURIComponent(session)}/feedback/${visibleIndex}`, { verdict, reason }),
+  chatMessageFeedbackTarget: (session: string, visibleIndex: number) =>
+    get<{ verdict: 'up' | 'down' | null; reason: string }>(
+      `/api/chat/sessions/${encodeURIComponent(session)}/feedback/${visibleIndex}`),
   feedbackTarget: (kind: FeedbackTargetKind, id: string) =>
     get<{ verdict: 'up' | 'down' | null; reason?: string }>(`/api/feedback/target/${kind}/${encodeURIComponent(id)}`),
   feedbackProducers: (windowDays?: number) =>

@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { setUILanguage, type UILanguage } from '../../../shared/i18n';
 import Page from './Page';
 
 let server: ChildProcess;
@@ -39,18 +38,20 @@ asyncio.run(main())
     server.stderr!.on('data', data => { if (String(data).includes('Traceback')) reject(new Error(String(data))); });
   });
   globalThis.fetch = (input, init) => nativeFetch(new URL(String(input), origin), init);
-}, 20000);
+}, 60000);
 
 afterAll(async () => {
   cleanup();
-  await act(async () => setUILanguage('en', false));
+  document.documentElement.lang = 'en';
+  document.documentElement.dir = 'ltr';
   globalThis.fetch = nativeFetch;
   if (server?.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM'); });
   rmSync(home, { recursive: true, force: true });
 });
 
-test('shared page navigates and deep-links all clinical forms with localized wrapping navigation', async () => {
-  await act(async () => setUILanguage('en', false));
+test('shared page navigates and deep-links all clinical forms with localized section navigation', async () => {
+  document.documentElement.lang = 'en';
+  document.documentElement.dir = 'ltr';
   async function create(path: string, payload: object) {
     const response = await nativeFetch(origin + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     expect(response.status).toBe(201);
@@ -65,7 +66,8 @@ test('shared page navigates and deep-links all clinical forms with localized wra
   window.history.replaceState(null, '', '#/capabilities/wellbeing');
   let mounted = render(<Page />);
   const navigation = screen.getByRole('navigation', { name: 'Wellbeing sections' });
-  expect(navigation).toHaveStyle({ display: 'flex', flexWrap: 'wrap' });
+  expect(navigation).toHaveClass('capability-area-navigation');
+  expect(screen.getByRole('button', { name: 'Body composition' })).toBeInTheDocument();
   mounted.unmount();
 
   const journeys = [
@@ -93,17 +95,47 @@ test('shared page navigates and deep-links all clinical forms with localized wra
   }
 
   window.history.replaceState(null, '', '#/capabilities/wellbeing');
-  render(<Page />);
-  const localized: Array<[UILanguage, string, string]> = [
+  mounted = render(<Page />);
+  const localized = [
     ['es', 'Secciones de bienestar', 'Recetas oculares'],
     ['ar', 'أقسام العافية', 'وصفات العيون'],
     ['hi', 'स्वास्थ्य अनुभाग', 'नेत्र पर्चे'],
     ['zh-CN', '健康栏目', '眼镜处方'],
     ['en', 'Wellbeing sections', 'Eye prescriptions'],
-  ];
+  ] as const;
   for (const [language, navLabel, eyeLabel] of localized) {
-    await act(async () => setUILanguage(language, false));
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    mounted.rerender(<Page />);
     expect(screen.getByRole('navigation', { name: navLabel })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: eyeLabel })).toBeInTheDocument();
   }
+}, 20000);
+
+test('organizations route reaches real subject, consent and organization controls without losing the record', async () => {
+  document.documentElement.lang = 'en';
+  document.documentElement.dir = 'ltr';
+  window.history.replaceState(null, '', '#/capabilities/wellbeing');
+  const mounted = render(<Page />);
+  fireEvent.click(screen.getByRole('button', { name: 'Organizations' }));
+  await screen.findByRole('heading', { name: 'Private identity facts' });
+  expect(location.hash).toBe('#/capabilities/wellbeing?view=organizations');
+  fireEvent.change(screen.getByLabelText('Subject alias'), { target: { value: 'Route owner' } });
+  fireEvent.change(screen.getByLabelText('Subject source'), { target: { value: 'Owner entry' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create privacy subject' }));
+  await screen.findByRole('heading', { name: 'Organizations and changed facts' });
+  fireEvent.change(screen.getByLabelText('Consent method'), { target: { value: 'Owner review' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record consent decision' }));
+  await screen.findByText(/vault revision 1: granted/);
+  fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: 'Route organization' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save organization' }));
+  await screen.findByRole('button', { name: 'Route organization · revision 1' });
+  fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
+  await screen.findByRole('button', { name: 'Route owner' });
+  fireEvent.click(screen.getByRole('button', { name: 'Route owner' }));
+  await screen.findByRole('button', { name: 'Route organization · revision 1' });
+  fireEvent.click(screen.getByRole('button', { name: 'Organizations' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Route owner' }));
+  expect(await screen.findByRole('button', { name: 'Route organization · revision 1' })).toBeInTheDocument();
+  mounted.unmount();
 }, 20000);

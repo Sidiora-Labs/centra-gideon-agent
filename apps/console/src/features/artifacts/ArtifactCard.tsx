@@ -1,11 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { fvs } from '../../shared/theme/fontWeight'
 import { api, type Artifact } from '../../shared/data/api'
 import { artifactKindMeta, relTime } from '../files/fileMeta'
 import { buildSrcdoc, buildReactSrcdoc, readThemeVars } from '../../shared/ui/widget/widgetSrcdoc'
 import { resolveContentType, isSandboxed } from '../../shared/ui/content/contentTypes'
 import { TileButton } from '../../shared/ui/TileButton'
+import { ArtifactCard as DonorArtifactCard } from '../../shared/vendor/assistant-ui/elements/artifact-card'
 import { useMode } from '../../app/shell/theme'
 
 
@@ -96,7 +96,7 @@ export const ArtifactCard = memo(function ArtifactCard({ art, onOpen }: {
   const [near, setNear] = useState(false)
   const [live, setLive] = useState(false)
   const [content, setContent] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
+  const [dirty, setDirty] = useState(!!art.live_dirty)
   const slotRef = useRef<number | null>(null)
 
   const ctype = useMemo(() => resolveContentType({ kind: art.kind }), [art.kind])
@@ -150,22 +150,14 @@ export const ArtifactCard = memo(function ArtifactCard({ art, onOpen }: {
     <div ref={rootRef}>
     <TileButton onClick={() => onOpen(art)} title={art.name} ariaLabel={art.name}
       className="h-full w-full">
-      <div className="h-36 w-full shrink-0 overflow-hidden border-b border-outline-variant/30 bg-surface">
-        {preview}
-      </div>
-      <div className="flex min-w-0 flex-col gap-0.5 px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <Icon size={13} style={{ color: km.tone }} className="shrink-0" />
-          <span className="truncate text-on-surface text-[0.8125rem]" style={fvs(500)}>{art.name}</span>
-        </div>
-        <div className="flex items-center gap-1.5 text-on-surface-low text-[0.6875rem]">
-          <span>{km.label}</span>
-          <span>· v{art.version}</span>
+      <DonorArtifactCard embedded title={art.name} meta={`${km.label} · v${art.version}`}
+        icon={<Icon size={16} style={{ color: km.tone }} />}
+        preview={preview}
+        details={<div className="mt-1 flex flex-wrap items-center gap-1.5 text-on-surface-low text-[0.6875rem]">
           {art.collection && <span className="truncate rounded-pill bg-surface-high px-1.5">{art.collection}</span>}
           {dirty && <span className="shrink-0 rounded-pill px-1.5" title="The source file changed since the last snapshot" style={{ background: 'color-mix(in srgb, var(--color-warning) 16%, transparent)', color: 'var(--color-warning)' }}>source changed</span>}
           <span className="ml-auto shrink-0">{relTime(art.updated_at || art.created_at)}</span>
-        </div>
-      </div>
+        </div>} />
     </TileButton>
     </div>
   )

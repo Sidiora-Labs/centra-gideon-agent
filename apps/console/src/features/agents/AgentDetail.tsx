@@ -12,6 +12,7 @@ import { api, type SavedAgent, type DiscoveredAgent, type McpActiveServer, type 
 import { AGENT_ROUTING_MUTES_KEY, canonicalAgentKey, unmuteAgent, useActiveChatModelOptions } from '../../shared/data/agents'
 import { providerMeta, isReservedAgent } from './agentMeta'
 import { AgentForm, toDraft, draftToPayload } from './AgentForm'
+import { GideonAgentStatus } from './auiAgentPanel'
 import { accentChip, toneChipSkin } from '../../shared/theme/accent'
 import { useAgentRoutingNotes, useAgentTriggerNames, useAgentWrite } from './agentEditorState'
 import { documentationUrl } from '../../app/shell/config'
@@ -56,6 +57,7 @@ export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetD
     {operation.error && <FieldError>{operation.error}</FieldError>}
     {reserved && <><p data-type="body-s" className="leading-relaxed text-on-surface-low">This is a built-in system agent (the background-chore worker, the goal-loop worker, or the goal-planner). Its definition is fixed, but you can swap which model it runs on.</p><ReservedModelEditor agent={agent} onSaved={onSaved} /></>}
     <div className="flex flex-wrap items-center gap-s"><span className={badgeClass} style={accentChip}>{reserved && <ShieldCheck size={12} />}{reserved ? 'Built-in' : providerMeta(agent.provider).label}</span>{!reserved && agent.model && <span className={`${badgeClass} bg-surface-high font-mono text-on-surface-var`}>{agent.model}</span>}{agent.approval_mode && <span className={`${badgeClass} bg-surface-high text-on-surface-var`}>{agent.approval_mode}</span>}</div>
+    {agent.running_sessions !== undefined && <GideonAgentStatus agent={agent} />}
     {agent.description && <p className="text-[0.9375rem] leading-relaxed text-on-surface">{agent.description}</p>}
     {agent.system_prompt && <Section label="System prompt"><div tabIndex={0} role="group" aria-label="System prompt" className="max-h-72 overflow-y-auto rounded-md border border-outline-variant/25 bg-surface-container/40 p-m text-[0.8125rem] leading-relaxed text-on-surface-var"><Markdown>{agent.system_prompt}</Markdown></div></Section>}
     <Caps label="Skills" items={agent.skills} /><Caps label="Tools" items={agent.tools} /><Caps label="Triggers" items={agent.triggers} resolve={triggerNames} />

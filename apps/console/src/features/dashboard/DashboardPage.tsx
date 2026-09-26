@@ -3,7 +3,7 @@ import { CoreWidgets } from '../capabilities/platform/CoreWidgets'
 import { useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  MessageSquare, History, type LucideIcon,
+  MessageSquare, History, Activity, type LucideIcon,
   MessageSquarePlus, ListTodo, BookOpen, FolderKanban, FileCode2, TerminalSquare, Sparkles, Compass,
   Package, HardDrive, Orbit, Monitor,
 } from 'lucide-react'
@@ -35,9 +35,11 @@ import { useComposerData } from '../../shared/data/useComposerData'
 import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { InlineError } from '../../shared/ui/InlineError'
+import { LauncherBubble } from '../../shared/vendor/assistant-ui/elements/launcher-bubble'
 
 export function DashboardPage(route: RouteProps) {
   const { name } = useIdentity()
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const composition = useComposition()
   const custom = composition.selected && !composition.selected.preset
   return (
@@ -45,31 +47,20 @@ export function DashboardPage(route: RouteProps) {
       <div className="flex h-full flex-col overflow-hidden">
         {
 }
-        <TopBar
-          contentAligned
-          left={(
-            <h1 data-type="headline-s" className="min-w-0 truncate text-on-surface">{greetingFor(name)}</h1>
-          )}
-          right={(
-            <div className="hidden lg:block">
-              <HeroPulse variant="header" {...route} />
-            </div>
-          )}
-        />
+        <TopBar contentAligned left={(
+          <h1 data-type="headline-s" className="min-w-0 truncate text-on-surface">{greetingFor(name)}</h1>
+        )} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           {
 }
           <EntranceGroup className="mx-auto flex w-full flex-col gap-2xl px-l py-xl" style={{ maxWidth: 'var(--content-width)' }}>
-            <CompositionEditor model={composition} />
+            <GideonHomeIntro navigate={route.navigate} />
             <EntranceRegion><Launcher {...route} /></EntranceRegion>
 
             {
 }
-            <EntranceRegion className="lg:hidden" style={{ minHeight: 'calc(36px * var(--space-scale))' }}><HeroPulse {...route} /></EntranceRegion>
-
             {
 }
-            <PinnedTiles viewId={composition.selected?.id || 'overview'} />
 
             {
 }
@@ -77,6 +68,20 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
+            <EntranceRegion className="grid grid-cols-1 gap-2xl lg:grid-cols-2">
+              <Section label="Needs you" icon={ListTodo} tour="approvals">
+                <ActionCenter {...route} />
+              </Section>
+              <Section label="Active work" icon={Sparkles}>
+                <ActiveWork {...route} />
+              </Section>
+            </EntranceRegion>
+
+            <OverviewDisclosure>
+              <Section label="Activity" icon={Activity}><HeroPulse {...route} /></Section>
+              <Section label="System status" icon={HardDrive}><SystemRailIsland {...route} /></Section>
+              <CompositionEditor model={composition} />
+              <PinnedTiles viewId={composition.selected?.id || 'overview'} />
             {custom ? <CoreWidgets tiles={composition.selected!.tiles} route={route} /> : <>
             <EntranceRegion className="grid grid-cols-1 gap-2xl lg:grid-cols-2">
               <Section label="Needs you" icon={ListTodo} tour="approvals">
@@ -147,20 +152,55 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <EntranceRegion className="min-w-0 lg:hidden">
-              <SystemRailIsland {...route} />
-            </EntranceRegion>
             </>}
+            </OverviewDisclosure>
           </EntranceGroup>
         </div>
         {
 }
-        {!custom && <div className="hidden shrink-0 px-l pb-m pt-xs lg:block">
-          <SystemRailIsland {...route} />
-        </div>}
+        <LauncherBubble
+          className="fixed bottom-6 right-6 z-30"
+          open={assistantOpen}
+          unread={0}
+          greeting="How can I help?"
+          prompts={[]}
+          onToggle={() => setAssistantOpen((open) => !open)}
+          onStart={() => route.navigate('chat/new')}
+        />
       </div>
     </DashboardLiveProvider>
   )
+}
+
+export function GideonHomeIntro({ navigate }: Pick<RouteProps, 'navigate'>) {
+  return <div className="mx-auto flex w-full flex-col items-center gap-s py-l text-center" style={{ maxWidth: '44rem' }}>
+    <p className="text-xs uppercase tracking-[.16em] text-on-surface-low">Your space</p>
+    <h2 className="text-3xl font-medium tracking-tight text-on-surface">What would you like to do?</h2>
+    <p className="text-sm text-on-surface-low">Start a conversation, or pick up your work.</p>
+    <div className="mt-m flex flex-col items-stretch gap-s sm:flex-row sm:items-center sm:justify-center">
+      <button type="button" onClick={() => navigate('chat/new')} className="whitespace-nowrap rounded-lg bg-primary px-m py-s text-on-primary">New conversation</button>
+      <button type="button" onClick={() => navigate('apps')} className="whitespace-nowrap rounded-lg border border-outline-variant px-m py-s text-on-surface">Explore apps</button>
+    </div>
+  </div>
+}
+
+const OVERVIEW_PREF = 'gideon:dashboard:overview-open'
+
+export function OverviewDisclosure({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(OVERVIEW_PREF) === '1' } catch { return false }
+  })
+  const toggle = (next: boolean) => {
+    setOpen(next)
+    try { localStorage.setItem(OVERVIEW_PREF, next ? '1' : '0') } catch {}
+  }
+  return <details open={open} onToggle={(event) => toggle(event.currentTarget.open)}
+    className="rounded-xl border border-outline-variant/50 bg-surface-low/40 p-l">
+    <summary className="cursor-pointer text-on-surface" data-type="title-m">Your overview
+      <span className="ml-s text-sm text-on-surface-low">Tasks, discoveries, activity, and your saved layout</span>
+    </summary>
+    {open && <div className="mt-l flex flex-col gap-2xl">{children}</div>}
+  </details>
 }
 
 function SystemRailIsland(route: RouteProps) {

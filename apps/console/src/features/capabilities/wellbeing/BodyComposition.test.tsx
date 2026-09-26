@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -6,14 +6,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import BodyComposition from './BodyComposition'
-import { setUILanguage, type UILanguage } from '../../../shared/i18n'
 
 let child: ChildProcess
 let origin = ''
 let home = ''
 
 beforeAll(async () => {
-  await setUILanguage('en', false)
+  document.documentElement.lang = 'en'
+  document.documentElement.dir = 'ltr'
   home = mkdtempSync(join(tmpdir(), 'body-composition-ui-'))
   const root = resolve('../..')
   child = spawn('/tmp/gideon-runtime-venv/bin/python', ['-u', '-c', `
@@ -48,9 +48,11 @@ afterAll(async () => {
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
 test('authors, normalizes, corrects, reloads and exports a real canonical observation', async () => {
+  window.history.replaceState(null, '', '#/capabilities/wellbeing?view=body-composition')
   const mounted = render(<BodyComposition baseUrl={origin} />)
   await screen.findByText('No body composition observations')
   expect(screen.getByText(/does not provide medical advice or duplicate body weight/)).toBeInTheDocument()
+  fireEvent.click(screen.getAllByRole('button', { name: 'New observation' })[0])
   change('Observed at', '2026-09-25T08:30:00+02:00')
   change('Source', 'User-authored scale transcription')
   change('Muscle percent', '41.2')
@@ -60,6 +62,10 @@ test('authors, normalizes, corrects, reloads and exports a real canonical observ
   change('Temperature', '98.6')
   change('Temperature unit', 'F')
   change('Notes', 'Morning observation')
+  for (const label of ['Muscle percent', 'Fat percent', 'Bone mass', 'Temperature']) {
+    expect(screen.getByLabelText(label)).toHaveAttribute('step', 'any')
+    expect((screen.getByLabelText(label) as HTMLInputElement).validity.stepMismatch).toBe(false)
+  }
   fireEvent.click(screen.getByRole('button', { name: 'Save observation' }))
   await screen.findByRole('heading', { name: 'Canonical record' })
   expect(screen.getByText('41.2% muscle · 18.4% fat · 6.6 lb bone · 98.6 °F')).toBeInTheDocument()
@@ -84,7 +90,7 @@ test('authors, normalizes, corrects, reloads and exports a real canonical observ
   expect(JSON.stringify(catalog)).not.toContain('weight')
   mounted.unmount()
   render(<BodyComposition baseUrl={origin} />)
-  const rowButton = await screen.findByRole('button', { name: '2026-09-25T08:30:00+02:00 · User-authored scale transcription' })
+  const rowButton = await screen.findByRole('button', { name: /User-authored scale transcription/ })
   fireEvent.click(rowButton)
   await screen.findByText('v2: 310.15 °K · Corrected paper record')
   expect(screen.getByLabelText('Bone mass')).toHaveValue(2994)
@@ -101,7 +107,7 @@ test('authors, normalizes, corrects, reloads and exports a real canonical observ
 test('invalid authored percentages retain the form and create no second record', async () => {
   cleanup()
   render(<BodyComposition baseUrl={origin} />)
-  await screen.findByRole('button', { name: '2026-09-25T08:30:00+02:00 · User-authored scale transcription' })
+  await screen.findByRole('button', { name: /User-authored scale transcription/ })
   await screen.findByRole('heading', { name: 'Canonical record' })
   fireEvent.click(screen.getByRole('button', { name: 'New observation' }))
   change('Observed at', '2026-09-26T08:30:00Z')
@@ -127,24 +133,28 @@ test('invalid authored percentages retain the form and create no second record',
 
 test('five languages retain explicit unit controls and RTL direction', async () => {
   cleanup()
-  render(<BodyComposition baseUrl={origin} />)
-  await screen.findByRole('button', { name: '2026-09-25T08:30:00+02:00 · User-authored scale transcription' })
-  const languages: [UILanguage, string, string, string][] = [
+  const mounted = render(<BodyComposition baseUrl={origin} />)
+  await screen.findByRole('button', { name: /User-authored scale transcription/ })
+  const languages = [
     ['es', 'Observaciones de composición corporal', 'Unidad de masa ósea', 'Unidad de temperatura'],
     ['ar', 'ملاحظات تكوين الجسم', 'وحدة كتلة العظام', 'وحدة الحرارة'],
     ['hi', 'शारीरिक संरचना अवलोकन', 'अस्थि द्रव्यमान इकाई', 'तापमान इकाई'],
     ['zh-CN', '身体成分观察', '骨量单位', '温度单位'],
     ['en', 'Body composition observations', 'Bone mass unit', 'Temperature unit'],
-  ]
+  ] as const
   try {
     for (const [language, heading, boneLabel, temperatureLabel] of languages) {
-      await act(async () => { await setUILanguage(language, false) })
+      document.documentElement.lang = language
+      document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr'
+      mounted.rerender(<BodyComposition baseUrl={origin} />)
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
       expect(screen.getByLabelText(boneLabel)).toHaveValue('kg')
       expect(screen.getByLabelText(temperatureLabel)).toHaveValue('C')
       expect(document.documentElement.dir).toBe(language === 'ar' ? 'rtl' : 'ltr')
     }
   } finally {
-    await act(async () => { await setUILanguage('en', false) })
+    document.documentElement.lang = 'en'
+    document.documentElement.dir = 'ltr'
+    mounted.unmount()
   }
 })

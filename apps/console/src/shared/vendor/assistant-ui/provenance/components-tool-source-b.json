@@ -1,0 +1,32 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "elicitation-form.tsx": "331902af2b381e05169ccb5bea35fbf5e0cb2a5e9f021f22f18b0f02f9541b8e",
+    "mcp-server-panel.tsx": "5a440fec4c3a78fd297deb9adfacede4a5d96d98cdc2c2ff73acd701d18f74f7",
+    "tool-error.tsx": "ecd371d80788bb9d10cf96d2bf91c3742365d1f15fd1ee8d8faa04019f8b6207",
+    "permission-grant.tsx": "4ec5344859162429f6e9e887bd73c2c0f12c854b755023228bc977a0fa6dfd65",
+    "computer-use.tsx": "1def5f888c3818f4888bdf4ac5831471ac50d0df1e0fd344c0988f4cab3606e0",
+    "code-runner.tsx": "3621e90c9ab954da9055ceb6696ff438dad0a4454b082fce031090babad2be4c"
+  },
+  "adapted_modules": {
+    "elicitation-form.tsx": "e41fb8c832f933e6eee19a12dbfea72ba854df2aca5e0fc11f524c7fba07330c",
+    "mcp-server-panel.tsx": "14b82c682eec29a594cefbbbc992966d99c092e4f053552c5fe8612df11f15c1",
+    "tool-error.tsx": "cb6b22cfa0e39019e3d63bbc6b9f9d621de5de95243a0da268e5c9fae345919a",
+    "permission-grant.tsx": "8f51713d73a08cf05daf37fbc7670af6e4f5cea8117460833ea21403f409d965",
+    "computer-use.tsx": "e33f379eea3404acc883b10d5ed13b1ba9120e5d1fdbcc2ac5cd80228504fc7d",
+    "code-runner.tsx": "9769774faf957b279ef886c85e6374acebafa0ca44e0185f8469b6d7fcf802ec"
+  },
+  "adaptations": [
+    "replace donor @/lib/utils import with shared vendor ../lib/utils",
+    "retain donor typed props, caller actions and presentation behavior",
+    "disable action buttons when the caller has not supplied an action",
+    "allow unknown retry telemetry and show attempt fraction only when both counts are supplied",
+    "allow a caller to render live schema controls while retaining donor read-only field defaults",
+    "expose an optional Cancel action and caller labels without changing the default donor actions",
+    "accept exact caller-supplied approval choices, resolved labels and details without implying donor session or always policy",
+    "omit unknown requester and empty reach sections while retaining donor populated presentation",
+    "allow per-choice accessible names, disabled revision and neutral or danger presentation"
+  ]
+}

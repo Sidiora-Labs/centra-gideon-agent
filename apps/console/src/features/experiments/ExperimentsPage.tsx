@@ -7,6 +7,7 @@ import { PageTitle } from '../../shared/ui/PageTitle'
 import { Button } from '../../shared/ui/Button'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { Field, NumberField, TextArea, TextInput } from '../../shared/ui/forms'
+import { ScoreBreakdown } from '../../shared/vendor/assistant-ui/elements/score-breakdown'
 
 export function ExperimentsPage({ navigate, sub }: RouteProps) {
   const [campaigns, setCampaigns] = useState<ExperimentCampaign[]>([])
@@ -29,6 +30,11 @@ export function ExperimentsPage({ navigate, sub }: RouteProps) {
   const [replay, setReplay] = useState<ExperimentReplay | null>(null)
 
   const campaignId = sub?.split('/')[0] || ''
+  const scoredAttempts = selected?.attempts.flatMap(attempt => attempt.score === null ? [] : [{
+    label: `Attempt #${attempt.ordinal + 1}`,
+    score: attempt.score,
+    note: attempt.valid === null ? 'Validity not recorded' : attempt.valid ? 'Valid' : 'Invalid',
+  }]) ?? []
   const refresh = useCallback(async () => {
     try {
       const [list, detail] = await Promise.all([
@@ -120,6 +126,10 @@ export function ExperimentsPage({ navigate, sub }: RouteProps) {
           <Button size="sm" variant="secondary" disabled={selected.status !== 'active'} onClick={() => void act(() => api.stopExperimentCampaign(selected.id))}>Stop new launches</Button>
         </div>
         {selected.best_attempt === null ? <p data-type="body-s" className="text-on-surface-low">No valid scored result yet.</p> : <p data-type="body-s">Best valid attempt: #{selected.best_attempt + 1}</p>}
+        {scoredAttempts.length > 0 && <div className="space-y-xs">
+          <h3 data-type="label-s">Recorded {selected.metric} scores</h3>
+          <ScoreBreakdown criteria={scoredAttempts} visibleCount={scoredAttempts.length} className="max-w-full" role="group" aria-label="Recorded attempt scores" />
+        </div>}
         <div className="space-y-s">{selected.attempts.map(attempt => <AttemptRow key={attempt.ordinal} campaign={selected} ordinal={attempt.ordinal} onObserve={(score, valid, observation) => void act(() => api.observeExperimentAttempt(selected.id, attempt.ordinal, { score, valid, observation }))} navigate={navigate} />)}</div>
       </section> : <>
         <section className="space-y-m rounded-xl bg-surface-container p-l">

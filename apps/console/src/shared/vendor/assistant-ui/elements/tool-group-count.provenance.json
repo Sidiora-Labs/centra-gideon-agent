@@ -1,0 +1,5 @@
+{
+  "module": "tool-group.aui.tsx",
+  "local_sha256": "7806013c842c188c4e5290850be3b24b556696c1c0b89777a5fabccf018cd1a6",
+  "adaptation": "Optional caller count label for localized real tool-call counts; donor English singular and plural labels remain the default."
+}

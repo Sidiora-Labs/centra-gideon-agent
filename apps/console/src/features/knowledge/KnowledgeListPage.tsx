@@ -29,6 +29,7 @@ import { PageTitle } from '../../shared/ui/PageTitle'
 import { notify } from '../../app/shell/appSdk'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { readingTimeLabel } from './readingTime'
+import { AuiKnowledgePanel } from './auiKnowledgePanel'
 
 type View = 'home' | 'library' | 'graph' | 'intents' | 'tags' | 'conflicts' | 'decisions'
 
@@ -311,6 +312,7 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
     }
   }, [items])
   const empty = stats && stats.items === 0
+  const knowledgeSearch = view === 'library' ? submitted.trim() : ''
 
   return (
     <WorkbenchLayout
@@ -395,6 +397,10 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
           </div>
         </div>
       )}
+
+      {knowledgeSearch && <div className="mx-auto w-full px-l pt-l" style={{ maxWidth: 'var(--content-width)' }}>
+        <AuiKnowledgePanel query={knowledgeSearch} onOpen={onOpenItem} />
+      </div>}
 
       {
 }

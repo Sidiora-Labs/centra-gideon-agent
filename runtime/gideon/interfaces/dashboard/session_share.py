@@ -37,6 +37,7 @@ that test instead of quietly publishing conversations.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -67,6 +68,7 @@ def share_session(
     meta: dict,
     messages: list[dict],
     session_id: str = "",
+    shared_by: str = "",
 ) -> Artifact:
     """Create the read-only artifact for one conversation. THE only share path.
 
@@ -94,8 +96,62 @@ def share_session(
         tags=[SHARE_TAG],
         actor="user",
         session_id=session_id or "",
-        event_metadata={"shared_session": key, "redacted": True, "readonly": True},
+        event_metadata={
+            "shared_session": key,
+            "shared_session_sha256": hashlib.sha256(key.encode()).hexdigest(),
+            "redacted": True,
+            "readonly": True,
+            **({"shared_by": shared_by} if shared_by else {}),
+        },
         readonly=True,
     )
     logger.info("shared session %r as read-only artifact %r", key, art.slug)
     return art
+
+
+def share_info(art: Artifact, key: str) -> dict | None:
+    """Describe an owner-only snapshot only when its stored provenance matches."""
+    if not art.readonly or SHARE_TAG not in art.tags or art.source != SHARE_SOURCE:
+        return None
+    key_digest = hashlib.sha256(key.encode()).hexdigest()
+    event = next((e for e in art.events if e.type == "created" and (
+        e.metadata.get("shared_session_sha256") == key_digest
+        or e.metadata.get("shared_session") == key
+    )), None)
+    if event is None:
+        return None
+    return {
+        "slug": art.slug,
+        "name": art.name,
+        "created_at": art.created_at,
+        "shared_by": event.metadata.get("shared_by") or None,
+        "url": f"#/artifacts/{art.slug}",
+        "audience": "private",
+        "readonly": True,
+        "redacted": True,
+    }
+
+
+def snapshot_turns(markdown: str, *, limit: int = 4) -> list[dict[str, str]]:
+    """Extract a short preview from the stored redacted Markdown snapshot."""
+    turns: list[dict[str, str]] = []
+    role = ""
+    quoted: list[str] = []
+
+    def flush() -> None:
+        if role and quoted:
+            turns.append({
+                "id": str(len(turns)), "role": role,
+                "text": "\n".join(quoted).strip(),
+            })
+
+    for line in markdown.splitlines():
+        if line.startswith("## "):
+            flush()
+            heading = line[3:].split(" · ", 1)[0]
+            role = {"You": "user", "Assistant": "assistant"}.get(heading, "")
+            quoted = []
+        elif role and (line == ">" or line.startswith("> ")):
+            quoted.append(line[2:] if line != ">" else "")
+    flush()
+    return [turn for turn in turns if turn["text"]][-limit:]

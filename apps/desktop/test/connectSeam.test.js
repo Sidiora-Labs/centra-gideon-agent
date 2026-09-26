@@ -24,7 +24,7 @@ describe("application controller ownership", () => {
   it("registers every bridge before any content window is mounted", () => {
     const configure = body(DesktopApplication, "configure");
     for (const name of ["registerCapabilityIpc", "registerPushToTalkIpc", "registerLoginItemIpc", "registerNativeNotificationIpc"]) {
-      assert.ok(configure.indexOf(name) < configure.indexOf("this.workspace.mount(window)"), name);
+      assert.ok(configure.indexOf(name) < configure.indexOf("this.workspace.mount(window"), name);
     }
   });
   it("keeps single-instance, native activation, tab and orderly shutdown wiring", () => {
@@ -48,7 +48,7 @@ describe("bridge isolation and credentials", () => {
     assert.equal(sites.length, 1);
     assert.match(WORKSPACE.slice(sites[0].index - 30, sites[0].index), /attachBridge/);
     assert.match(body(EndpointSession, "navigate"), /policy.shouldAttachBridge\(address\)/);
-    assert.match(WORKSPACE, /attachBridge: shouldAttachBridge\(target\)/);
+    assert.match(WORKSPACE, /attachBridge: !this.actions.hostedMode\?\.\(\) && shouldAttachBridge\(target\)/);
     assert.doesNotMatch(APP + ENDPOINT + WORKSPACE, /attachBridge:\s*true/);
   });
   it("keeps the two browser bridge surfaces separate", () => {

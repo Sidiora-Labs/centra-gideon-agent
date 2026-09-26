@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { Artifact } from '../../shared/data/api'
-import { ArtifactCard } from './ArtifactCard'
+import { ArtifactCard, IFRAME_CAP } from './ArtifactCard'
+import { ArtifactCard as DonorArtifactCard } from '../../shared/vendor/assistant-ui/elements/artifact-card'
 import { PdfFilePreview, ImageFilePreview } from '../../shared/ui/content/renderers'
 import { registerBuiltinContentTypes } from '../../shared/ui/content/registerBuiltins'
 import { resolveContentType } from '../../shared/ui/content/contentTypes'
-import { ARTIFACT_KINDS, artifactKindMeta } from '../files/fileMeta'
+import { ARTIFACT_KINDS, artifactKindMeta, relTime } from '../files/fileMeta'
 
 
 registerBuiltinContentTypes()
@@ -26,17 +28,82 @@ vi.mock('../../shared/data/api', async (importActual) => {
   }
 })
 
-const art = (kind: string, slug = `a-${kind}`): Artifact => ({
+const art = (kind: Artifact['kind'], slug = `a-${kind}`): Artifact => ({
   slug, name: `Quarterly report.${kind}`, kind, source: 'chat', version: 1,
   created_at: '2026-08-16T00:00:00Z', updated_at: '2026-08-16T00:00:00Z',
-} as unknown as Artifact)
+  description: '', tags: [], events: [], source_path: '', readonly: false,
+})
 
 function previewPane(): HTMLElement {
   const tile = screen.getByRole('button')
-  return tile.firstElementChild as HTMLElement
+  return tile.querySelector('[data-slot="artifact-preview"]') as HTMLElement
 }
 
 beforeEach(() => { fetched.length = 0 })
+
+describe('the donor artifact surface in the live grid', () => {
+  it('keeps the donor compact card readable when used outside the grid', () => {
+    const { container } = render(<DonorArtifactCard title="Release notes" meta="Markdown · v2" />)
+    const card = container.querySelector('[data-slot="artifact-card"]')!
+    expect(card).toHaveClass('max-w-xs')
+    expect(card).toHaveTextContent('Release notes')
+    expect(card).toHaveTextContent('Markdown · v2')
+    expect(container.querySelector('[data-slot="artifact-preview"]')).toBeNull()
+  })
+
+  it('uses one keyboard-accessible open control with recorded name, kind, version, collection and time', async () => {
+    const user = userEvent.setup()
+    const record = { ...art('image', 'a-chart'), version: 4, collection: 'Campaign' }
+    const opened: Artifact[] = []
+    const { container } = render(<ArtifactCard art={record} onOpen={value => opened.push(value)} />)
+    const button = screen.getByRole('button', { name: record.name })
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(button).toHaveAttribute('title', record.name)
+    const donor = container.querySelector('[data-slot="artifact-card"]')!
+    expect(donor).not.toHaveClass('max-w-xs')
+    expect(donor).toHaveTextContent(`${artifactKindMeta(record.kind).label} · v4`)
+    expect(donor).toHaveTextContent('Campaign')
+    expect(donor).toHaveTextContent(relTime(record.updated_at))
+    expect(donor.querySelectorAll('img')).toHaveLength(1)
+    button.focus()
+    await user.keyboard('{Enter}')
+    expect(opened).toEqual([record])
+    await user.click(button)
+    expect(opened).toEqual([record, record])
+  })
+
+  it('keeps the donor generating state in its original compact layout', () => {
+    render(<DonorArtifactCard title="Draft" meta="ignored" generating words={42} />)
+    expect(screen.getByText('Writing')).toBeInTheDocument()
+    expect(screen.getByText('42 words')).toBeInTheDocument()
+    expect(screen.queryByText('ignored')).toBeNull()
+  })
+
+  it('shows recorded source changes immediately and falls back to creation time', () => {
+    const record = { ...art('docx', 'a-dirty'), updated_at: '', live_dirty: true }
+    const { container } = render(<ArtifactCard art={record} onOpen={() => {}} />)
+    const donor = container.querySelector('[data-slot="artifact-card"]')!
+    expect(donor).toHaveTextContent('source changed')
+    expect(donor.querySelector('[title="The source file changed since the last snapshot"]')).toBeInTheDocument()
+    expect(donor).toHaveTextContent(relTime(record.created_at))
+    expect(donor).not.toHaveTextContent('undefined')
+  })
+
+  it('keeps lazy live previews sandboxed and demotes the oldest above the iframe cap', async () => {
+    const records = Array.from({ length: IFRAME_CAP + 1 }, (_, index) => ({
+      ...art('html', `a-live-${index}`), name: `Live ${index}`,
+    }))
+    render(<div>{records.map(record => <ArtifactCard key={record.slug} art={record} onOpen={() => {}} />)}</div>)
+    await waitFor(() => expect(fetched).toHaveLength(IFRAME_CAP + 1))
+    await waitFor(() => expect(document.querySelectorAll('iframe[title^="Preview of Live"]')).toHaveLength(IFRAME_CAP))
+    expect(screen.getByRole('button', { name: 'Live 0' }).querySelector('iframe')).toBeNull()
+    expect(screen.getByRole('button', { name: `Live ${IFRAME_CAP}` }).querySelector('iframe')).toBeInTheDocument()
+    for (const frame of document.querySelectorAll('iframe[title^="Preview of Live"]')) {
+      expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+      expect(frame.closest('[data-slot="artifact-preview"]')).toBeInTheDocument()
+    }
+  })
+})
 
 describe('a generated document is labelled by its real kind', () => {
   it('names the format instead of falling through to "Widget"', () => {
@@ -47,7 +114,7 @@ describe('a generated document is labelled by its real kind', () => {
 
   it('renders that label on the card, not the fallback kind', () => {
     render(<ArtifactCard art={art('docx')} onOpen={() => {}} />)
-    expect(screen.getByText(artifactKindMeta('docx').label)).toBeInTheDocument()
+    expect(screen.getByText(`${artifactKindMeta('docx').label} · v1`)).toBeInTheDocument()
     expect(screen.queryByText('Widget')).toBeNull()
   })
 
@@ -60,7 +127,7 @@ describe('a generated document is labelled by its real kind', () => {
 })
 
 describe('a card draws a thumbnail only when a browser can decode one', () => {
-  for (const kind of ['docx', 'xlsx', 'pptx', 'pdf', 'video']) {
+  for (const kind of ['docx', 'xlsx', 'pptx', 'pdf', 'video'] as const) {
     it(`${kind} shows its kind icon, not a broken image`, async () => {
       render(<ArtifactCard art={art(kind)} onOpen={() => {}} />)
       const pane = previewPane()

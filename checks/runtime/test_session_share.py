@@ -19,6 +19,7 @@ being true:
 from __future__ import annotations
 
 import ast
+import shutil
 from pathlib import Path
 
 import pytest
@@ -231,14 +232,172 @@ def routed(tmp_path, monkeypatch, provider):
 @pytest.mark.asyncio
 async def test_post_share_creates_the_artifact(routed):
     state, provider = routed
+    state.owner_id = "owner-a"
     async with TestClient(TestServer(_make_app(state, provider))) as client:
         resp = await client.post("/api/chat/sessions/s1/share")
         assert resp.status == 201
         body = await resp.json()
     assert body["ok"] is True and body["readonly"] is True and body["redacted"] is True
+    assert body["audience"] == "private"
+    assert body["shared_by"] == "owner-a"
+    assert body["created_at"]
+    assert body["url"] == f"#/artifacts/{body['slug']}"
     stored = provider.get(body["slug"])
     assert stored is not None
     assert AWS_KEY not in stored.content
+    assert stored.events[0].metadata["shared_by"] == "owner-a"
+
+
+@pytest.mark.asyncio
+async def test_private_snapshot_list_and_owner_revoke(routed):
+    state, provider = routed
+    state.owner_id = "owner-a"
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        path = "/api/chat/sessions/s1/shares"
+        assert (await (await client.get(path)).json()) == {"shares": []}
+        first = await (await client.post("/api/chat/sessions/s1/share")).json()
+        second = await (await client.post("/api/chat/sessions/s1/share")).json()
+        assert first["slug"] != second["slug"]
+        listed = (await (await client.get(path)).json())["shares"]
+        assert {row["slug"] for row in listed} == {first["slug"], second["slug"]}
+        assert all(row["audience"] == "private" and row["readonly"] for row in listed)
+        assert all(row["shared_by"] == "owner-a" for row in listed)
+        preview = await (await client.get(f"{path}/{first['slug']}")).json()
+        assert preview["slug"] == first["slug"]
+        assert [turn["role"] for turn in preview["turns"]] == ["user", "assistant"]
+        assert AWS_KEY not in str(preview["turns"])
+        assert "[REDACTED" in preview["turns"][0]["text"]
+        state.conversation_log.append("dashboard:s1", "assistant", "Added after snapshot")
+        frozen = await (await client.get(f"{path}/{first['slug']}")).json()
+        assert frozen["turns"] == preview["turns"]
+        revoked = await client.delete(f"{path}/{first['slug']}")
+        assert revoked.status == 200
+        assert (await revoked.json())["slug"] == first["slug"]
+        assert provider.get(first["slug"]) is None
+        assert provider.get(second["slug"]) is not None
+        remaining = (await (await client.get(path)).json())["shares"]
+        assert [row["slug"] for row in remaining] == [second["slug"]]
+        assert (await client.delete(f"{path}/{first['slug']}")).status == 404
+        assert (await client.get(f"{path}/{first['slug']}")).status == 404
+
+
+@pytest.mark.asyncio
+async def test_revoke_reports_real_storage_delete_failure_without_losing_snapshot(routed, monkeypatch):
+    state, provider = routed
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        shared = await (await client.post("/api/chat/sessions/s1/share")).json()
+        path = f"/api/chat/sessions/s1/shares/{shared['slug']}"
+
+        def failed_remove(_path):
+            raise OSError("artifact storage cannot remove this directory")
+
+        with monkeypatch.context() as fault:
+            fault.setattr(shutil, "rmtree", failed_remove)
+            assert (await client.delete(path)).status == 500
+
+        assert provider.get(shared["slug"]) is not None
+        assert (await client.get(path)).status == 200
+
+
+@pytest.mark.asyncio
+async def test_revoke_refuses_other_session_and_unrelated_artifact(routed):
+    state, provider = routed
+    ordinary = provider.create(name="Notes", content="private", kind="markdown")
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        shared = await (await client.post("/api/chat/sessions/s1/share")).json()
+        assert (await client.get("/api/chat/sessions/s2/shares")).status == 200
+        assert (await (await client.get("/api/chat/sessions/s2/shares")).json())["shares"] == []
+        assert (await client.delete(f"/api/chat/sessions/s2/shares/{shared['slug']}")).status == 404
+        assert (await client.delete(f"/api/chat/sessions/s1/shares/{ordinary.slug}")).status == 404
+        assert (await client.get(f"/api/chat/sessions/s2/shares/{shared['slug']}")).status == 404
+        assert (await client.get(f"/api/chat/sessions/s1/shares/{ordinary.slug}")).status == 404
+        assert provider.get(shared["slug"]) is not None
+        assert provider.get(ordinary.slug) is not None
+
+
+@pytest.mark.asyncio
+async def test_private_snapshot_survives_source_session_removal_until_owner_revokes(routed):
+    state, provider = routed
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        shared = await (await client.post("/api/chat/sessions/s1/share")).json()
+        state.conversation_log._path("dashboard:s1").unlink()
+        path = f"/api/chat/sessions/s1/shares/{shared['slug']}"
+        listing = await (await client.get("/api/chat/sessions/s1/shares")).json()
+        assert [row["slug"] for row in listing["shares"]] == [shared["slug"]]
+        detail = await (await client.get(path)).json()
+        assert detail["turns"][1]["text"] == "On it."
+        assert (await client.delete(path)).status == 200
+        assert provider.get(shared["slug"]) is None
+
+
+@pytest.mark.asyncio
+async def test_private_snapshot_keeps_unknown_attribution_unknown(routed):
+    state, provider = routed
+    assert not state.owner_id
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        created = await (await client.post("/api/chat/sessions/s1/share")).json()
+        assert created["shared_by"] is None
+        detail = await (await client.get(
+            f"/api/chat/sessions/s1/shares/{created['slug']}"
+        )).json()
+        assert detail["shared_by"] is None
+        assert detail["audience"] == "private"
+        assert detail["url"] == f"#/artifacts/{created['slug']}"
+        assert provider.get(created["slug"]).readonly is True
+
+
+def test_share_info_requires_stored_readonly_provenance(provider):
+    ordinary = provider.create(name="Notes", content="private", kind="markdown", tags=[sh.SHARE_TAG])
+    assert sh.share_info(ordinary, "dashboard:s1") is None
+    shared = sh.share_session(
+        provider, key="dashboard:s1", title="Deploy chat", meta=META, messages=MESSAGES
+    )
+    assert sh.share_info(shared, "dashboard:s2") is None
+    info = sh.share_info(shared, "dashboard:s1")
+    assert info is not None and info["shared_by"] is None
+    assert info["audience"] == "private"
+    long_key = "dashboard:" + "a" * 280
+    long_share = sh.share_session(
+        provider, key=long_key, title="Long key", meta=META, messages=MESSAGES
+    )
+    assert sh.share_info(long_share, long_key)["slug"] == long_share.slug
+    assert sh.share_info(long_share, long_key + "b") is None
+
+
+def test_snapshot_preview_accepts_only_canonical_redacted_turn_blocks():
+    markdown = """# Conversation
+
+## You · 2026-09-26T10:00:00Z
+
+> A line
+> ## This heading is quoted content
+>
+> Last line
+
+## Guest speaker
+
+> A role that cannot be safely inferred
+
+## Assistant
+
+> Answer
+"""
+    assert sh.snapshot_turns(markdown) == [
+        {"id": "0", "role": "user", "text": "A line\n## This heading is quoted content\n\nLast line"},
+        {"id": "1", "role": "assistant", "text": "Answer"},
+    ]
+    assert sh.snapshot_turns(markdown, limit=1) == [
+        {"id": "1", "role": "assistant", "text": "Answer"},
+    ]
+    six = "\n".join(
+        f"## {'You' if index % 2 == 0 else 'Assistant'}\n\n> Turn {index}\n"
+        for index in range(6)
+    )
+    assert sh.snapshot_turns(six) == [
+        {"id": str(index), "role": "user" if index % 2 == 0 else "assistant", "text": f"Turn {index}"}
+        for index in range(2, 6)
+    ]
+    assert sh.snapshot_turns("# Empty\n\n## System\n\n> Hidden") == []
 
 
 @pytest.mark.asyncio
@@ -298,6 +457,9 @@ async def test_share_reports_unavailable_artifacts_instead_of_500ing(
     async with TestClient(TestServer(_make_app(state, provider))) as client:
         resp = await client.post("/api/chat/sessions/s1/share")
         assert resp.status == 503
+        assert (await client.get("/api/chat/sessions/s1/shares")).status == 503
+        assert (await client.get("/api/chat/sessions/s1/shares/any-snapshot")).status == 503
+        assert (await client.delete("/api/chat/sessions/s1/shares/any-snapshot")).status == 503
 
 
 def _share_call_sites(sources: dict[str, str]) -> set[tuple[str, str]]:

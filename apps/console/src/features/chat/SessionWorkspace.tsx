@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, Boxes, GripVertical, Workflow } from 'lucide-react'
 import { api, type Artifact, type SpawnControl, type SpawnedAgent, type WorkflowOutboxEntry, type WorkflowReviewPayload, type WorkflowWorkspaceReview } from '../../shared/data/api'
 import { Button } from '../../shared/ui/Button'
+import { BackgroundAgentRuns } from '../agents/auiAgentPanel'
 import { ChatActivityPanel, type SidePanelData } from './ChatActivityPanel'
 import { WorkflowProgressCard, workflowRefFromTool } from './WorkflowProgressCard'
 import { memoryReceiptLabel, type ChatActivity, type ChatTurn, type SubagentCard } from './chatTypes'
@@ -216,6 +217,7 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 5000); return () => window.clearInterval(timer) }, [sessionKey])
   useEffect(() => {
     if (!selected) { setDetail(null); setControl(null); return }
+    setDetail(null); setControl(null)
     let live = true
     const load = () => api.spawnedAgent(selected)
       .then((value) => { if (live) { setDetail(value); setError('') } })
@@ -243,11 +245,10 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
   return <div className="space-y-s">
     {error && <p role="alert" className="text-xs text-danger">{error}</p>}
     {!agents.length && !error && <p className="py-xl text-center text-sm text-on-surface-low">No delegated agents in this conversation.</p>}
-    {agents.map((agent) => <article key={agent.id} className="rounded-lg border border-outline-variant/50 p-s">
+    {!!agents.length && <BackgroundAgentRuns agents={agents} onOpen={(id) => setSelected(selected === id ? '' : id)} />}
+    {agents.filter((agent) => !agent.done).map((agent) => <article key={agent.id} className="rounded-lg border border-outline-variant/50 p-s">
       <div className="flex items-start gap-s"><div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-on-surface">{agent.agent || agent.id}</p>
-        <p className="mt-xs whitespace-pre-wrap text-xs text-on-surface-var">{agent.task}</p>
-        <p className="mt-xs text-xs text-on-surface-low">{agent.done ? agent.error ? 'Failed' : 'Done' : `Running${agent.started ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - agent.started))}s` : ''}`}{agent.last_tool ? ` · ${agent.last_tool}` : ''}</p>
       </div><Button variant="ghost" size="xs" onClick={() => setSelected(selected === agent.id ? '' : agent.id)}>{selected === agent.id ? 'Close' : 'Inspect'}</Button>{!agent.done && <Button variant="danger" size="xs" disabled={busy === agent.id} onClick={() => void cancel(agent)}>Interrupt</Button>}</div>
       {selected === agent.id && <div className="mt-s border-t border-outline-variant/40 pt-s text-xs text-on-surface-var">
         {!detail ? <p role="status">Loading this agent…</p> : <>
@@ -280,5 +281,14 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
       {agent.error && <p role="alert" className="mt-s text-xs text-danger">{agent.error}</p>}
       {agent.done && agent.result && <details className="mt-s text-xs text-on-surface-var"><summary className="cursor-pointer">Result</summary><pre className="mt-xs max-h-52 overflow-auto whitespace-pre-wrap">{agent.result}</pre></details>}
     </article>)}
+    {agents.some((agent) => agent.id === selected && agent.done) && <div className="rounded-lg border border-outline-variant/50 p-s text-xs text-on-surface-var">
+      <Button variant="ghost" size="xs" onClick={() => setSelected('')}>Close</Button>
+      {!detail ? <p role="status">Loading this agent…</p> : <>
+        <p>Instance {detail.id}</p>
+        <p>{detail.error ? `Failed: ${detail.error}` : 'Complete'}</p>
+        {detail.memory_receipt && <p className="mt-xs">{memoryReceiptLabel(detail.memory_receipt)}</p>}
+        {detail.result && <pre className="mt-s max-h-52 overflow-auto whitespace-pre-wrap">{detail.result}</pre>}
+      </>}
+    </div>}
   </div>
 }

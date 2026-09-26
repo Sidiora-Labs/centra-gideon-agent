@@ -1,19 +1,37 @@
+// @vitest-environment node
+
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
+import { describe, expect, it, vi } from 'vitest'
 import { GatewaySocket } from '../../shared/data/socketTransport'
-import { McpElicitationCards } from './McpElicitation'
+
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
+vi.stubGlobal('window', dom.window)
+vi.stubGlobal('document', dom.window.document)
+vi.stubGlobal('navigator', dom.window.navigator)
+vi.stubGlobal('HTMLElement', dom.window.HTMLElement)
+vi.stubGlobal('MutationObserver', dom.window.MutationObserver)
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+vi.resetModules()
+const { fireEvent, render, within, waitFor } = await import('@testing-library/react')
+const { McpElicitationCards } = await import('./McpElicitation')
+const screen = within(dom.window.document.body)
 
 const serverCode = `
 import asyncio, json, sys
 from aiohttp import web
 
-def request(identifier):
+def request(identifier, scenario="text"):
+    fields = {"value": {"type": "string", "title": "Value"}}
+    if scenario in ("enum", "multi_enum"):
+        fields["value"]["enum"] = ["alpha", "beta"]
+    if scenario == "multi_enum":
+        fields["reason"] = {"type": "string", "title": "Reason"}
     return {"type": "mcp_elicitation", "data": {"id": identifier, "server": "Calendar",
         "message": "Choose " + identifier, "requestedSchema": {"properties": {
-        "value": {"type": "string", "title": "Value"}}, "required": ["value"]}}}
+        **fields}, "required": ["value"]}}}
 
 async def websocket(request_http):
     ws = web.WebSocketResponse()
@@ -26,7 +44,7 @@ async def websocket(request_http):
         await asyncio.sleep(0.5)
         await ws.close()
     else:
-        await ws.send_json(request("answer"))
+        await ws.send_json(request("answer", sys.argv[1]))
         response = await ws.receive_json()
         print(json.dumps(response), flush=True)
         await ws.close()
@@ -78,6 +96,35 @@ describe('MCP elicitation cards over a real WebSocket', () => {
       const [raw] = await response
       expect(JSON.parse(raw)).toEqual({ type: 'mcp_elicitation_response', id: 'answer', action: 'accept', content: { value: 'chosen' } })
       expect(screen.queryByLabelText('MCP requests')).not.toBeInTheDocument()
+    } finally { view.unmount(); lines.close(); process.kill() }
+  })
+
+  it('sends a single enum selection through the real gateway socket', async () => {
+    const { process, lines, view } = await connected('enum')
+    try {
+      expect(await screen.findByRole('button', { name: 'alpha' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'beta' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull()
+      const response = once(lines, 'line')
+      fireEvent.click(screen.getByRole('button', { name: 'beta' }))
+      const [raw] = await response
+      expect(JSON.parse(raw)).toEqual({ type: 'mcp_elicitation_response', id: 'answer', action: 'accept', content: { value: 'beta' } })
+      await waitFor(() => expect(screen.queryByLabelText('MCP requests')).toBeNull())
+    } finally { view.unmount(); lines.close(); process.kill() }
+  })
+
+  it('retains the existing form for a multi-field enum request', async () => {
+    const { process, lines, view } = await connected('multi_enum')
+    try {
+      expect(await screen.findByLabelText('Value')).toBeInTheDocument()
+      expect(screen.getByLabelText('Reason')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'alpha' })).toBeNull()
+      fireEvent.change(screen.getByLabelText('Value'), { target: { value: 'alpha' } })
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'calendar' } })
+      const response = once(lines, 'line')
+      fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+      const [raw] = await response
+      expect(JSON.parse(raw)).toEqual({ type: 'mcp_elicitation_response', id: 'answer', action: 'accept', content: { value: 'alpha', reason: 'calendar' } })
     } finally { view.unmount(); lines.close(); process.kill() }
   })
 })

@@ -103,7 +103,7 @@ export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'q
       : <div role="status" aria-busy="true" className="flex items-center gap-s py-s"><LoadingStatus what="what's already set up" /><Loader2 size={18} className="animate-spin text-on-surface-low" aria-hidden="true" /></div>,
     try: <TryOneStep onProgress={progress} onDone={(summary) => advance('try', summary)} onSkip={() => advance('try', 'Skipped')} onExitTo={exitTo} />,
     ready: <ReadyScreen name={state.name} model={state.model} tried={state.tried} showEverything={state.showEverything}
-      setDisclosure={(value) => dispatch({ type: 'disclosure', value })} finish={finish} tour={tour} exitTo={exitTo} />,
+      setDisclosure={(value) => dispatch({ type: 'disclosure', value })} tour={tour} exitTo={exitTo} />,
   }
   return <div data-onboarding-scroll className="fixed inset-0 z-[var(--z-modal)] h-dvh min-h-0 overflow-y-auto overscroll-contain bg-canvas">
     <DotGlow intensity={1.15} composerRef={rows[state.step]} />
@@ -127,8 +127,8 @@ export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'q
       </ol>
       {saveError && <p role="alert" className="text-danger">Could not finish setup: {saveError}</p>}
       {finishing && <p role="status">Saving your setup…</p>}
-      {state.step !== 'ready' && <div className="flex justify-center"><TextLink size="sm" ink="emphasis" onClick={finish}>
-        {state.step === 'name' ? `Skip setup — start as ${DEFAULT_USER_NAME}, rename yourself in Settings` : 'Skip setup and go to the dashboard'}
+      {state.step !== 'ready' && <div className="flex justify-center"><TextLink size="sm" ink="emphasis" onClick={() => exitTo('chat/new')}>
+        {state.step === 'name' ? `Skip setup — start as ${DEFAULT_USER_NAME}, rename yourself in Settings` : 'Skip setup and start a conversation'}
       </TextLink></div>}
     </main>
   </div>
@@ -152,8 +152,8 @@ export function NameStep({ value, change, handle, changeHandle, submit }: {
     <p id="attribution-hint" className="text-on-surface-low">Labels tasks and comments you create. Leave empty for no attribution; you can change it in Settings.</p>
   </form>
 }
-function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish, tour, exitTo }: {
-  name: string; model: string; tried: string; showEverything: boolean; setDisclosure: (value: boolean) => void; finish: () => void; tour: () => void; exitTo: (path: string) => void
+function ReadyScreen({ name, model, tried, showEverything, setDisclosure, tour, exitTo }: {
+  name: string; model: string; tried: string; showEverything: boolean; setDisclosure: (value: boolean) => void; tour: () => void; exitTo: (path: string) => void
 }) {
   const [autonomy, setAutonomy] = useState<{ autoUpdate: boolean; registryEnabled: boolean } | 'failed' | null>(null)
   useEffect(() => {
@@ -183,7 +183,7 @@ function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish
     { icon: RefreshCw, title: 'It keeps itself current on its own', body: 'When a new version ships, it installs and restarts unattended. This is the real switch from Settings → Updates.',
       control: <div className="flex flex-col gap-s">
         {autonomy === 'failed' ? <TextLink size="sm" ink="emphasis" onClick={() => exitTo('settings/updates')}>Manage updates in Settings</TextLink> : autonomy ? <SettingToggle value={autonomy.autoUpdate} change={updateAutomatically} label="Update automatically" /> : null}
-        {autonomy && autonomy !== 'failed' && autonomy.registryEnabled && <p className="text-on-surface-low text-[0.8125rem]">App discovery uses the sources configured for this gateway; installing anything still runs the security scanner. <TextLink size="sm" ink="emphasis" onClick={() => exitTo('apps')}>Review Store sources</TextLink></p>}
+        {autonomy && autonomy !== 'failed' && autonomy.registryEnabled && <p className="text-on-surface-low text-[0.8125rem]">App discovery uses the sources configured for this gateway; installing anything still runs the security scanner. <TextLink size="sm" ink="emphasis" onClick={() => exitTo('apps/manage')}>Review Store sources</TextLink></p>}
       </div> },
   ]
   return <div className="flex flex-col gap-l">
@@ -196,8 +196,14 @@ function ReadyScreen({ name, model, tried, showEverything, setDisclosure, finish
       <Icon size={19} className="mt-1 shrink-0 text-primary" aria-hidden="true" />
       <div className="min-w-0 flex-1"><h3 className="text-on-surface text-[0.8125rem]" style={withWeight({}, 600)}>{title}</h3><p className="mt-s text-on-surface-low text-[0.8125rem]">{body}</p><div className="mt-m">{control}</div></div>
     </section>)}</div>
-    <div className="flex flex-wrap gap-s"><Button size="lg" onClick={finish}>Start using {APP_NAME} <ArrowRight size={17} /></Button>
-      <Button variant="secondary" size="lg" onClick={tour}><Compass size={17} /> Take the quick tour</Button></div>
+    <FirstJourneyActions exitTo={exitTo} tour={tour} />
+  </div>
+}
+
+export function FirstJourneyActions({ exitTo, tour }: { exitTo: (path: string) => void; tour: () => void }) {
+  return <div className="flex flex-wrap gap-s">
+    <Button size="lg" onClick={() => exitTo('chat/new')}>Start a conversation <ArrowRight size={17} /></Button>
+    <Button variant="secondary" size="lg" onClick={tour}><Compass size={17} /> Take the quick tour</Button>
   </div>
 }
 function SettingToggle({ value, change, label }: { value: boolean; change: (value: boolean) => void; label: string }) {

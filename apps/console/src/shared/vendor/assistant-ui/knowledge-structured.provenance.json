@@ -1,0 +1,193 @@
+{
+  "donor_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "donor_repository": "assistant-ui/assistant-ui",
+  "files": [
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/web-search.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/web-search.tsx",
+      "donor_sha256": "8bc68f323de40625934a313bdd248c23e6317b2ade5f52f33caa57609c277229",
+      "local_sha256": "012b5267d0183061a36c34fa0209ee394b78c0a8d250df49b869598fdb33fa67"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/inline-citation.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/inline-citation.tsx",
+      "donor_sha256": "b0475e4269251537e10d8dcb12b7cf856af60eed27c6dffa7313ca02fdc5edce",
+      "local_sha256": "5a88fb2eb571d5670f55479d0b6db6cc6d7d18147e812c2a13b81ae38a93260b"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/image-generation.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/image-generation.tsx",
+      "donor_sha256": "bcbe591fc9d2002ed07d2853a2d209bc06c3c44922aeba0fcbca034bf573b0f2",
+      "local_sha256": "00449cceb1c32ff2db7cb6336fc174380f08e90bda0ea176a1a520d67a18bdf4"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/retrieval-chunks.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/retrieval-chunks.tsx",
+      "donor_sha256": "4d5865907f9451cc44ef66469cd71c3e19fc090d60ca0a055b75d2cabab49131",
+      "local_sha256": "10744decd73d255f6a05e949a54f3dd19fce853fec81a7a5a1d52c5a492e774a"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/document-reference.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/document-reference.tsx",
+      "donor_sha256": "dc33735b020be079be37778f8e127531dd4ebc51d099301b50b5e38596f45282",
+      "local_sha256": "bf3a62fcf493f079d8a618ae4bcc5f7da6d72438c2aaf366d40e0570d6c2621f"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/memory-chips.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/memory-chips.tsx",
+      "donor_sha256": "08c1bcbf0d1c850b48f6e216bf97248c5f5b14d9069219ddcab9376f8e52548e",
+      "local_sha256": "8390a43359ceeeb51b971f80d6fe9b0fdf11440ec133e41099c837d906a48e2a"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/research-report.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/research-report.tsx",
+      "donor_sha256": "f6c4b44ad78ce68b6f1000af2d5df380791bf3ff7d6badcf734eab2620e814fd",
+      "local_sha256": "af7e6d8fcf336481c2590a92ae4b2b86d85ab0822c3220b28791684ed5bfc2d4"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/map-answer.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/map-answer.tsx",
+      "donor_sha256": "98f4f90c0617da95bbc6aa1b53b7fce119dacd462b294414c8d5fdc82a805291",
+      "local_sha256": "1c94e8dbfed344f73b3a711598a168859755ba4884f0a5d53563fed5c962498e"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/data-table.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/data-table.tsx",
+      "donor_sha256": "e7b3b761f7e64ef081baf1e8ea39ad9d6d26389ae49c888ea6234f07c01351e1",
+      "local_sha256": "dece3f79324cb8bd443cd11cbbc8b614606229b16d8490c64e333607bbbeba92"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/number-ticker.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/number-ticker.tsx",
+      "donor_sha256": "195d0eb6f2d623663d59e4538b0e1d6858335215264de5dbaa20d50b069e5bf4",
+      "local_sha256": "3e1a2a6cb75c8b39bd56b1fa42b082f2796176acd57c69cc5373d6a07ae4544f"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/chart.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/chart.tsx",
+      "donor_sha256": "8aae766014a52b0a9e4f7452b3246c8df8bc26f08b4d71bdaf7ec94e514f02ee",
+      "local_sha256": "d9d1b025e60e8a6cdc322af38e290f1b4899b4b96efe9eec3a733326b318e488"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/web-preview.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/web-preview.tsx",
+      "donor_sha256": "0fd0c79d6d31ae14333d1b10cda0ebe448ddb6fd0cbdd1fa2664024553b56af2",
+      "local_sha256": "15c77cfcd7c8d6595e87f9a739fa8411287a23abf60fec998f51ca88b7a10f0b"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/diagram.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/diagram.tsx",
+      "donor_sha256": "01f315373febab9372470d6ed6281952e21a341b7f6f98be27aeea0b67ad4def",
+      "local_sha256": "9018be59a5ffb0a25e5c77698db5fc2a5a56c25041bbc869a8245622b30e5878"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/flow-graph.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/flow-graph.tsx",
+      "donor_sha256": "7abe38ff10f4795ba6cb4dfc45c336a316edd8ac06401621ea6d2d08fa627409",
+      "local_sha256": "a234d10ebf2b21a7e37cb6bfbeb0fe8b9058aae9bc07335a8905170837424dcb"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/activity-graph.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/activity-graph.tsx",
+      "donor_sha256": "e08fa7d7416f3524aa87550e58ec90d3f04bbe539f5cef95d04d3fdd06c3db0a",
+      "local_sha256": "3248f6d7d443e007d3b3dc3727b3ed5fdd7b74f2350feb8fdf5a3ed42bd9d06e"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/math-block.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/math-block.tsx",
+      "donor_sha256": "a08af0fd265544b42c69f2687b07587237777838d4f061848d53450bedf838f4",
+      "local_sha256": "ae0d301ab518ce9c6d4af99f5bb78c6d3f7493bd80a2384d78b6ed4144e51ee9"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/spec-sheet.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/spec-sheet.tsx",
+      "donor_sha256": "fb9a91f8fffdc65090c122d10fcb0517fd09e69dae9f5dad1df33965798df408",
+      "local_sha256": "d1a7d2768ca9bf8a30abe761e5c9434d153128131cb531dc4f54913cb5d0c47c"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/comparison-card.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/comparison-card.tsx",
+      "donor_sha256": "ab1221f25b862bbd0a86fcb59c31b14a6af91d9b5bdedbece96cbbbf9960f32d",
+      "local_sha256": "41a4b106802e7d77b7dc7c0817eb8e5fd84e5e634088a1ebfcc6d15145460557"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/timeline.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/timeline.tsx",
+      "donor_sha256": "605316d8ee1f3e511b9bebe203b58b2533489f02b5f3692fbe5b8a7f7235035d",
+      "local_sha256": "3360b17525f4e64f1424ff826c6772982cdb939b4fadd940f340579b473adf3d"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/job-progress.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/job-progress.tsx",
+      "donor_sha256": "160cb61f6d335f6170610ff639b62b4ebcf1e1440131c4fd8c81d9cbbdd01d2f",
+      "local_sha256": "08b4edcd9914fa4c7b9e535ca8d378ba0631a856d4883c5ff7cd43910a4db593"
+    },
+    {
+      "donor_path": "packages/ui/src/components/react/assistant-ui/elements/score-breakdown.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/score-breakdown.tsx",
+      "donor_sha256": "006521c880bd82eab6eb8620a454a0345eaeb2273ae638966195c439e04025f8",
+      "local_sha256": "cd3967ba9582c193f907f1fa0f796d8ccaaaaa37b6ddc3eae106660f43e13f77"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/components/Root.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/components/Root.tsx",
+      "donor_sha256": "56bbd7f81ce26284b6d09ad79dbbb944a6c30864365499734b9fab01d7871374",
+      "local_sha256": "56bbd7f81ce26284b6d09ad79dbbb944a6c30864365499734b9fab01d7871374"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/components/DayLabels.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/components/DayLabels.tsx",
+      "donor_sha256": "4da20e230884820293e2515639a9a454e1192279eae858b912967f0f9b9bfc93",
+      "local_sha256": "4da20e230884820293e2515639a9a454e1192279eae858b912967f0f9b9bfc93"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/components/Grid.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/components/Grid.tsx",
+      "donor_sha256": "e935b802717c338b338e9104a6c8cbaba5d40c38b4649ac63060016dcd7988e1",
+      "local_sha256": "e935b802717c338b338e9104a6c8cbaba5d40c38b4649ac63060016dcd7988e1"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/components/Cell.tsx",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/components/Cell.tsx",
+      "donor_sha256": "5042fb35125c7afa547e7dcac5f4e9f06d4256d7f3c3b77cdb687f564c3c8625",
+      "local_sha256": "5042fb35125c7afa547e7dcac5f4e9f06d4256d7f3c3b77cdb687f564c3c8625"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/context.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/context.ts",
+      "donor_sha256": "69646fc9e7f8b049285f6f53b5e58f8fe58d9821628b74d2e627af17c35906d3",
+      "local_sha256": "69646fc9e7f8b049285f6f53b5e58f8fe58d9821628b74d2e627af17c35906d3"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/types.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/types.ts",
+      "donor_sha256": "47f7d32fdaa3d3cbb45d8eac865c973fecf5683759f9a0ec206f6d2bc3f613d4",
+      "local_sha256": "47f7d32fdaa3d3cbb45d8eac865c973fecf5683759f9a0ec206f6d2bc3f613d4"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/utils/classify.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/utils/classify.ts",
+      "donor_sha256": "0fa6f97e310c3485cadfc93df70831e06e5f755a28174ccf0995c703ca60c80e",
+      "local_sha256": "0fa6f97e310c3485cadfc93df70831e06e5f755a28174ccf0995c703ca60c80e"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/utils/date-utils.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/utils/date-utils.ts",
+      "donor_sha256": "d0ce200153d9407f153abc24cef244328b5c36fcbf6320a495b7916de025a99b",
+      "local_sha256": "d0ce200153d9407f153abc24cef244328b5c36fcbf6320a495b7916de025a99b"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/utils/grid.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/utils/grid.ts",
+      "donor_sha256": "fc7996eb5d59f850ce5ea25085b9465742ecc52513696b6768db17562ad3bdd5",
+      "local_sha256": "fc7996eb5d59f850ce5ea25085b9465742ecc52513696b6768db17562ad3bdd5"
+    },
+    {
+      "donor_path": "packages/heat-graph/src/index.ts",
+      "local_path": "apps/console/src/shared/vendor/assistant-ui/dependencies/heat-graph/index.ts",
+      "donor_sha256": "6050acf5219f14fc6e00c9e87242f773637d0ffdeb215f7fe4402ac34d638b47",
+      "local_sha256": "bc2f2d622080cb80ed9c5cd5d20c6d895598632749e2b36d1879e51a01ea6c29"
+    }
+  ]
+}

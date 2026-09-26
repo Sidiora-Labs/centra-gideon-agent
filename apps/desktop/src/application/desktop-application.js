@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { LocalGateway } = require("./local-gateway");
 const { EndpointSession, waitRemote } = require("./endpoint-session");
+const { isHostedWindowsMode } = require("../connection/hosted-config");
 const { WindowWorkspace } = require("./window-workspace");
 const { IPC_CHANNELS, makeCapabilities, registerCapabilityIpc } = require("../native/capabilities");
 const { makePushToTalk, registerPushToTalkIpc } = require("../native/push-to-talk");
@@ -11,31 +12,37 @@ const { makeLoginItem, registerLoginItemIpc } = require("../native/login-item");
 const { makeNativeNotifications, registerNativeNotificationIpc } = require("../native/notifications");
 const { DEEP_LINKS, summarizePresence, makeTrayPresence, shouldHideOnClose, shouldQuitOnAllWindowsClosed } = require("../native/tray-presence");
 
-function applicationMenu(actions) {
+function applicationMenu(actions, platform = process.platform) {
   const item = (label, action, accelerator) => ({ label, click: actions[action], ...(accelerator ? { accelerator } : {}) });
-  return [{ role: "appMenu" }, { role: "editMenu" }, { label: "Tab", submenu: [
-    item("New Tab", "newTab", "CmdOrCtrl+T"), item("Rename Tab…", "rename", "CmdOrCtrl+Shift+R"),
-    { type: "separator" }, item("Merge All Windows", "merge"),
+  const windows = platform === "win32";
+  return [{ role: "appMenu" }, { role: "editMenu" }, { label: windows ? "Window" : "Tab", submenu: [
+    item(windows ? "New Window" : "New Tab", "newTab", windows ? "CmdOrCtrl+N" : "CmdOrCtrl+T"),
+    item(windows ? "Rename Window…" : "Rename Tab…", "rename", "CmdOrCtrl+Shift+R"),
+    ...(windows ? [] : [{ type: "separator" }, item("Merge All Windows", "merge")]),
   ] }, { label: "Gateway", submenu: [item("Gateways…", "gateways", "CmdOrCtrl+Shift+G")] }, { role: "windowMenu" }];
 }
 
 class DesktopApplication {
   constructor(electron) {
     this.electron = electron;
+    this.hostedMode = isHostedWindowsMode({ platform: process.platform, isPackaged: electron.app.isPackaged });
     this.state = { window: null, quitting: false, shutdown: null, complete: false, presenceTimer: null };
     const home = process.env.GIDEON_HOME || path.join(os.homedir(), ".gideon");
     this.gateway = new LocalGateway({ app: electron.app, home, status: (message) => this.send("status", message) });
     this.workspace = new WindowWorkspace(electron, {
       main: () => this.state.window, target: () => this.endpoints.target(), local: () => this.gateway.url,
+      hostedMode: () => this.hostedMode,
       waitLocal: (window) => this.gateway.waitReady(window), waitRemote,
       failedLoad: (window) => this.endpoints.scheduleReachability(window), openConnect: () => this.endpoints.openDialog(),
     });
     this.endpoints = new EndpointSession({ gateway: this.gateway, workspace: this.workspace, mainWindow: () => this.state.window,
       home, electron, quit: () => this.requestQuit() });
     this.capabilities = makeCapabilities({ platform: process.platform, systemPreferences: electron.systemPreferences,
+      shellAvailability: { tray: () => this.tray?.available, global_hotkey: () => Boolean(electron.globalShortcut),
+        login_item: () => this.login?.supported },
       notification: electron.Notification, onChange: (capability, state) => {
         this.send(IPC_CHANNELS.state, { capability, state });
-        this.gateway.publish(this.capabilities.snapshot());
+        if (!this.hostedMode) this.gateway.publish(this.capabilities.snapshot());
       } });
     this.capture = makePushToTalk({ globalShortcut: electron.globalShortcut,
       send: (payload) => this.send(IPC_CHANNELS.pushToTalk, payload), onCapturing: (active) => this.tray.setCapturing(active) });
@@ -43,6 +50,7 @@ class DesktopApplication {
     this.notifications = makeNativeNotifications({ Notification: electron.Notification, focusWindow: () => this.show(),
       sendToRenderer: (payload) => this.send(IPC_CHANNELS.notificationActivate, payload), log: (message) => console.warn(message) });
     this.tray = makeTrayPresence({ TrayCtor: electron.Tray, MenuCtor: electron.Menu, nativeImageMod: electron.nativeImage,
+      platform: process.platform, mode: this.hostedMode ? "hosted" : "local",
       nativeTheme: electron.nativeTheme,
       iconPath: () => path.join(__dirname, `../../assets/tray-${electron.nativeTheme?.shouldUseDarkColors ? "dark" : "light"}.png`),
       log: (message) => console.warn(`tray: ${message}`),
@@ -90,11 +98,11 @@ class DesktopApplication {
     registerLoginItemIpc(ipcMain, this.login, IPC_CHANNELS, () => this.syncLogin());
     registerNativeNotificationIpc(ipcMain, this.notifications, IPC_CHANNELS);
     this.endpoints.initialize();
-    if (!this.tray.start()) console.warn("running without menu-bar presence — the window will close on close");
+    if (!this.tray.start()) console.warn("running without tray presence — the window will close on close");
     this.syncLogin();
     const window = this.workspace.create();
     this.state.window = window;
-    this.workspace.mount(window);
+    this.workspace.mount(window, { attachBridge: !this.hostedMode });
     window.on("close", (event) => {
       if (shouldHideOnClose({ trayAvailable: this.tray.available, isQuitting: this.state.quitting })) {
         event.preventDefault();
@@ -122,6 +130,10 @@ class DesktopApplication {
 
   async boot() {
     this.configure();
+    if (this.hostedMode) {
+      await this.endpoints.chooseStartup();
+      return;
+    }
     try { await this.gateway.start(); }
     catch (error) { console.error("Gateway did not start:", error.message); }
     if (this.state.quitting) return;
@@ -143,8 +155,8 @@ class DesktopApplication {
     if (this.state.presenceTimer !== null) clearInterval(this.state.presenceTimer);
     this.state.presenceTimer = null;
     this.endpoints.cancelReachability();
-    this.gateway.unregister();
-    this.state.shutdown = this.gateway.stop()
+    if (!this.hostedMode) this.gateway.unregister();
+    this.state.shutdown = (this.hostedMode ? Promise.resolve() : this.gateway.stop())
       .catch((error) => console.warn(`gateway shutdown failed: ${error.message}`))
       .finally(() => { this.tray.destroy(); this.state.complete = true; this.electron.app.quit(); });
   }

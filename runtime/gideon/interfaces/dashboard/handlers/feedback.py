@@ -21,6 +21,11 @@ from aiohttp import web
 
 from gideon.cognition import feedback as fb
 from gideon.core.http_request import read_json_body
+from gideon.interfaces.dashboard.chat_persistence import (
+    persisted_history_key,
+    resolve_session,
+)
+from gideon.interfaces.dashboard.state import _ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,11 @@ async def api_feedback_record(request: web.Request) -> web.Response:
                     "message": f"unknown target_kind {target_kind!r}",
                 }
             },
+            status=400,
+        )
+    if target_kind == "chat_message":
+        return web.json_response(
+            {"error": {"code": "bad_request", "message": "use the session feedback route"}},
             status=400,
         )
     if not target_id:
@@ -131,12 +141,79 @@ async def api_feedback_target(request: web.Request) -> web.Response:
     target_id = request.match_info.get("id", "")
     if kind not in fb.TARGET_KINDS:
         return web.json_response({"error": "target kind not found"}, status=404)
+    if kind == "chat_message":
+        return web.json_response({"error": "target kind not found"}, status=404)
     rec = fb.current_verdict(kind, target_id)
     if rec is None:
         return web.json_response({"verdict": None})
     return web.json_response(
         {"verdict": rec.verdict, "reason": rec.reason, "id": rec.id}
     )
+
+
+def _chat_feedback_target(request: web.Request) -> tuple[str, _ChatSession] | None:
+    state = request.app.get("state")
+    if state is None:
+        return None
+    try:
+        visible_index = int(request.match_info["visible_index"])
+    except (KeyError, ValueError):
+        return None
+    if visible_index < 0:
+        return None
+    session = resolve_session(state, request.match_info["session"])
+    if session is None:
+        return None
+    messages = list(session.messages)
+    older_count = session._disk_older_count
+    if older_count > 0 and state.conversation_log:
+        try:
+            key = persisted_history_key(state.conversation_log, session.key)
+            older = state.conversation_log.read_messages_chained(key)[:older_count]
+        except (OSError, ValueError):
+            return None
+        messages = older + messages
+    visible = [
+        m for m in messages if m.get("role") in ("user", "assistant", "streaming")
+    ]
+    if visible_index >= len(visible) or visible[visible_index].get("role") not in (
+        "assistant", "streaming"
+    ):
+        return None
+    owner = state.owner_id or "local"
+    return f"{owner}:{session.key}:{visible_index}", session
+
+
+async def api_chat_message_feedback(request: web.Request) -> web.Response:
+    """Persist a verdict only for an assistant turn in the current session."""
+    if not _enabled():
+        return _disabled_response()
+    target = _chat_feedback_target(request)
+    if target is None:
+        return web.json_response({"error": "assistant turn not found"}, status=404)
+    target_id, session = target
+    if request.method == "GET":
+        rec = fb.current_verdict("chat_message", target_id)
+        return web.json_response(
+            {"verdict": rec.verdict if rec else None, "reason": rec.reason if rec else ""}
+        )
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or body.get("verdict") not in ("up", "down"):
+        return web.json_response({"error": "verdict must be 'up' or 'down'"}, status=400)
+    rec = fb.record_feedback(
+        target_kind="chat_message",
+        target_id=target_id,
+        verdict=body["verdict"],
+        reason=str(body.get("reason", "") or ""),
+        session_key=session.key,
+        state=request.app["state"],
+    )
+    if rec is None:
+        return web.json_response({"error": "feedback could not be recorded"}, status=500)
+    return web.json_response({"ok": True, "id": rec.id, "verdict": rec.verdict})
 
 
 async def api_feedback_producers(request: web.Request) -> web.Response:
@@ -240,6 +317,9 @@ async def api_feedback_clear(request: web.Request) -> web.Response:
 
 
 def register_feedback_routes(app: web.Application) -> None:
+    path = "/api/chat/sessions/{session}/feedback/{visible_index}"
+    app.router.add_get(path, api_chat_message_feedback)
+    app.router.add_post(path, api_chat_message_feedback)
     app.router.add_post("/api/feedback", api_feedback_record)
     app.router.add_get("/api/feedback/target/{kind}/{id}", api_feedback_target)
     app.router.add_get("/api/feedback/producers", api_feedback_producers)

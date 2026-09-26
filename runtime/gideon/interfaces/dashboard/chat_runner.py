@@ -45,6 +45,7 @@ from gideon.integrations.llm.base import (
     EVENT_TOOL_CALL_UPDATE,
     EVENT_TOOL_RESULT,
 )
+from gideon.integrations.llm.events import ContextUsage
 from gideon.integrations.llm_helpers import (
     PromptBusyExhaustedError,
     humanize_provider_error,
@@ -1610,6 +1611,36 @@ async def _abort_acp_turn(provider: object, reason: str) -> str | None:
         return None
 
 
+def _context_usage_payload(
+    session_key: str, pct: float | None, usage: ContextUsage | None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "session": session_key,
+        "pct": None if pct is None else round(pct, 1),
+    }
+    if usage is not None:
+        payload["usage"] = usage.as_payload()
+    return payload
+
+
+def _tool_result_payload(session_key: str, event: Any, output: str) -> dict[str, Any]:
+    meta = event.tool_meta or {}
+    ok = meta.get("ok")
+    agent_error = meta.get("agent_error")
+    return {
+        "session": session_key,
+        "tool_call_id": event.tool_call_id,
+        "output": output,
+        "content_type": str(meta.get("content_type", "") or ""),
+        "raw_ref": str(meta.get("raw_ref", "") or ""),
+        "truncated": bool(meta.get("truncated", False)),
+        "original_length": meta.get("original_length"),
+        "recovery_hints": [str(h) for h in (meta.get("recovery_hints") or [])][:6],
+        **({"agent_error": agent_error} if agent_error else {}),
+        **({"ok": bool(ok)} if ok is not None else {}),
+    }
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,
@@ -2509,6 +2540,7 @@ async def run_chat(
         _turn_model = ""
         _turn_cost_usd = 0.0
         _turn_priced = False
+        _turn_context_usage: ContextUsage | None = None
         _acp_cli = ""
         _prov_id = str(getattr(client, "provider_id", "") or "")
         if _prov_id.startswith("acp:"):
@@ -2730,29 +2762,16 @@ async def run_chat(
                 _out = (event.tool_output or "")[:8000]
                 _out, _ = redact_exfiltration_urls(_out)
                 _out, _ = redact_credentials(_out)
+                _payload = _tool_result_payload(session.key, event, _out)
+                _content_type = _payload["content_type"]
+                _raw_ref = _payload["raw_ref"]
+                _truncated = _payload["truncated"]
+                _orig_len = _payload["original_length"]
+                _recovery = _payload["recovery_hints"]
                 _tmeta = event.tool_meta or {}
-                _content_type = str(_tmeta.get("content_type", "") or "")
-                _raw_ref = str(_tmeta.get("raw_ref", "") or "")
-                _truncated = bool(_tmeta.get("truncated", False))
-                _orig_len = _tmeta.get("original_length")
-                _recovery = [str(h) for h in (_tmeta.get("recovery_hints") or [])][:6]
                 _tool_ok = _tmeta.get("ok")
-                _agent_error = _tmeta.get("agent_error")
-                state.broadcast_ws(
-                    "tool_result",
-                    {
-                        "session": session.key,
-                        "tool_call_id": event.tool_call_id,
-                        "output": _out,
-                        "content_type": _content_type,
-                        "raw_ref": _raw_ref,
-                        "truncated": _truncated,
-                        "original_length": _orig_len,
-                        "recovery_hints": _recovery,
-                        **({"agent_error": _agent_error} if _agent_error else {}),
-                        **({"ok": bool(_tool_ok)} if _tool_ok is not None else {}),
-                    },
-                )
+                _agent_error = _payload.get("agent_error")
+                state.broadcast_ws("tool_result", _payload)
                 if event.tool_call_id:
                     for m in reversed(session.messages):
                         if (
@@ -3530,6 +3549,7 @@ async def run_chat(
                     )
                     needs_session_reset = True
             elif event.kind == EVENT_COMPLETE:
+                _turn_context_usage = getattr(event, "context_usage", None)
                 if event.input_tokens or event.output_tokens:
                     stats = Stats()
                     stats.inc_input_tokens(event.input_tokens)
@@ -3664,7 +3684,7 @@ async def run_chat(
             pct = client.context_usage_pct()
             state.broadcast_ws(
                 "context_usage",
-                {"session": session.key, "pct": None if pct is None else round(pct, 1)},
+                _context_usage_payload(session.key, pct, _turn_context_usage),
             )
 
         _is_empty = is_empty_turn(
@@ -3743,7 +3763,7 @@ async def run_chat(
         pct = client.context_usage_pct()
         state.broadcast_ws(
             "context_usage",
-            {"session": session.key, "pct": None if pct is None else round(pct, 1)},
+            _context_usage_payload(session.key, pct, _turn_context_usage),
         )
         if not is_cancelled_stop(_stop_reason):
             state.sessions.record_success(session_key)

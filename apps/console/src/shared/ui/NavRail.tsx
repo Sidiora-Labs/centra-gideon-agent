@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { withWeight } from '../theme/fontWeight'
-import { ChevronDown, type LucideIcon } from 'lucide-react'
+import { ChevronDown, Search, type LucideIcon } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { cx } from './cx'
 import { fvs } from '../theme/fontWeight'
 import { GideonMark } from './GideonMark'
 import { usePersonality } from '../../app/shell/personality'
 import { spring } from '../theme/motion'
+import { captureFocus, FocusScope } from './focusNavigation'
 import './navRail.css'
 
 export interface NavItem {
@@ -26,18 +27,20 @@ export interface NavDisclosureControl {
 }
 
 const W_KEY = 'nav-width-v2'
+const W_MIGRATION_KEY = 'nav-width-v2-default-migrated'
 const MIN_W = 172
 const MAX_W = 380
 const COLLAPSED_W = 64
 const OVERLAY_W = 264
-const DEFAULT_W = 196
+const DEFAULT_W = 248
 
 export function NavRail({
-  items, activeId, onSelect, collapsed, overlay = false, overlayOpen = false, onScrimClick, disclosure,
+  items, activeId, onSelect, onSearch, collapsed, overlay = false, overlayOpen = false, onScrimClick, disclosure,
 }: {
   items: NavItem[]
   activeId: string
   onSelect: (id: string) => void
+  onSearch: () => void
   collapsed: boolean
   disclosure?: NavDisclosureControl
   overlay?: boolean
@@ -47,11 +50,22 @@ export function NavRail({
   const { wordmarkLabel } = usePersonality()
   const [width, setWidth] = useState(() => {
     const v = Number(localStorage.getItem(W_KEY))
+    if (v === 196 && localStorage.getItem(W_MIGRATION_KEY) !== '1') return DEFAULT_W
     return v >= MIN_W && v <= MAX_W ? v : DEFAULT_W
   })
   const dragging = useRef(false)
+  const overlayRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { if (!collapsed) localStorage.setItem(W_KEY, String(width)) }, [width, collapsed])
+  useEffect(() => {
+    if (!overlay || !overlayOpen || !overlayRef.current) return
+    return new FocusScope(captureFocus()).attach(overlayRef.current)
+  }, [overlay, overlayOpen])
+
+  useEffect(() => {
+    if (collapsed) return
+    localStorage.setItem(W_KEY, String(width))
+    localStorage.setItem(W_MIGRATION_KEY, '1')
+  }, [width, collapsed])
 
   useEffect(() => {
     if (collapsed) return
@@ -63,6 +77,7 @@ export function NavRail({
   }, [collapsed])
 
   const w = collapsed ? COLLAPSED_W : width
+  const compact = collapsed && !overlay
   let lastSection: string | undefined
 
   const topItems = items.filter((i) => !i.pinBottom)
@@ -70,14 +85,14 @@ export function NavRail({
 
   const rowCls = (tone: string) => cx(
     'gideon-nav-row group relative flex items-center gap-s w-full text-left transition-colors duration-100',
-    collapsed ? 'gideon-nav-row-collapsed justify-center px-0' : 'px-s',
+    compact ? 'gideon-nav-row-collapsed justify-center px-0' : 'px-s',
     tone,
   )
 
   const renderItem = (item: NavItem, withSection: boolean) => {
-    const showSection = withSection && !collapsed && item.section && item.section !== lastSection
+    const showSection = withSection && !compact && item.section && item.section !== lastSection
     if (withSection) lastSection = item.section
-    const active = item.id === activeId
+    const active = item.id === activeId || activeId.startsWith(`${item.id}/`)
     const Icon = item.icon
     const badgeHint = item.badge ? (item.badgeLabel ?? item.badge) : undefined
     return (
@@ -90,7 +105,7 @@ export function NavRail({
         )}
         <motion.button
           type="button" onClick={() => onSelect(item.id)} whileTap={{ scale: 0.98 }} transition={spring.spatialFast}
-          title={collapsed ? (badgeHint ? `${item.label}, ${badgeHint}` : item.label) : badgeHint}
+          title={compact ? (badgeHint ? `${item.label}, ${badgeHint}` : item.label) : badgeHint}
           aria-label={badgeHint ? `${item.label}, ${badgeHint}` : item.label}
           aria-current={active ? 'page' : undefined}
           data-type="body-m"
@@ -110,12 +125,12 @@ export function NavRail({
             <Icon size={18} strokeWidth={2} />
             {
 }
-            {collapsed && item.badge && (
+            {compact && item.badge && (
               <span className="absolute -right-1 -top-1 size-2 rounded-pill ring-2 ring-surface" style={{ background: 'var(--color-primary)' }} />
             )}
           </span>
-          {!collapsed && <span className="relative z-10 flex-1 truncate">{item.label}</span>}
-          {!collapsed && item.badge && (
+          {!compact && <span className="relative z-10 flex-1 truncate">{item.label}</span>}
+          {!compact && item.badge && (
             <span data-type="caption" className="gideon-nav-badge relative z-10 inline-flex h-5 items-center">
               {item.badge}
             </span>
@@ -125,7 +140,7 @@ export function NavRail({
     )
   }
 
-  const showFull = overlay ? true : !collapsed
+  const showFull = !compact
   const railBody = (
     <nav data-tour="rail" className={cx('gideon-nav flex h-full flex-col gap-1 overflow-y-auto overflow-x-hidden', !showFull && 'gideon-nav-collapsed')}
       style={{ width: overlay ? OVERLAY_W : w, background: 'var(--color-rail)' }}>
@@ -136,9 +151,15 @@ export function NavRail({
         {showFull && <span className="gideon-nav-wordmark" style={fvs(650)}>{wordmarkLabel}</span>}
       </div>
 
+      <button type="button" className={rowCls('gideon-nav-search')} onClick={onSearch}
+        aria-label="Search" title={showFull ? undefined : 'Search'}>
+        <Search size={18} aria-hidden="true" />
+        {showFull && <span className="gideon-nav-search-label">Search</span>}
+      </button>
+
       {
 }
-      {topItems.map((item) => renderItem(item, !disclosure || disclosure.expanded))}
+      {topItems.map((item) => renderItem(item, true))}
 
       {
 }
@@ -159,12 +180,12 @@ export function NavRail({
             <ChevronDown size={18} strokeWidth={2}
               className={cx('transition-transform', disclosure.expanded && 'rotate-180')} />
           </span>
-          {!collapsed && (
+          {showFull && (
             <span className="relative z-10 flex-1 truncate">
               {disclosure.expanded ? 'Show fewer' : 'Everything'}
             </span>
           )}
-          {!collapsed && !disclosure.expanded && (
+          {showFull && !disclosure.expanded && (
             <span data-type="caption" className="gideon-nav-count relative z-10 tabular-nums">+{disclosure.moreCount}</span>
           )}
         </motion.button>
@@ -173,6 +194,7 @@ export function NavRail({
       {
 }
       <div className="gideon-nav-utilities mt-auto">
+        {showFull && pinnedItems.length > 0 && <div className="gideon-nav-section">Account</div>}
         {pinnedItems.map((item) => renderItem(item, false))}
       </div>
     </nav>
@@ -193,6 +215,7 @@ export function NavRail({
         {
 }
         <motion.div
+          ref={overlayRef}
           className="fixed left-0 top-0 z-[var(--z-modal)] h-full shadow-2xl"
           initial={false}
           animate={{ x: overlayOpen ? 0 : '-100%' }}

@@ -5,22 +5,24 @@ import { SearchField } from '../../shared/ui/SearchField'
 import { initialPalette, paletteReducer, searchCommands } from './paletteState'
 
 export interface Command { id: string; label: string; hint?: string; icon: LucideIcon; keywords?: string; run: () => void }
-export function CommandPalette({ commands }: { commands: Command[] }) {
+export function CommandPalette({ commands, open, onOpenChange }: { commands: Command[]; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const [state, dispatch] = useReducer(paletteReducer, initialPalette)
-  const close = useCallback(() => dispatch({ type: 'close' }), [])
+  const close = useCallback(() => { dispatch({ type: 'close' }); onOpenChange?.(false) }, [onOpenChange])
+  useEffect(() => { if (open) dispatch({ type: 'open' }) }, [open])
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        dispatch({ type: 'toggle' })
+        if (open === undefined) dispatch({ type: 'toggle' })
+        else onOpenChange?.(!open)
       }
     }
     window.addEventListener('keydown', toggle)
     return () => window.removeEventListener('keydown', toggle)
-  }, [])
+  }, [open, onOpenChange])
   const results = useMemo(() => searchCommands(commands, state.query), [commands, state.query])
   const run = (command?: Command) => { if (command) { close(); command.run() } }
-  return state.open ? <Modal title="Command palette" onClose={close}>
+  return (open ?? state.open) ? <Modal title="Command palette" onClose={close}>
     <PaletteResults query={state.query} results={results} cursor={Math.min(state.cursor, Math.max(0, results.length - 1))}
       search={(value) => dispatch({ type: 'search', value })} select={(index) => dispatch({ type: 'select', index })}
       move={(delta) => dispatch({ type: 'move', delta, count: results.length })} run={run} />

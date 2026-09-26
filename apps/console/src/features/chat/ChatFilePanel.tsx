@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { fvs } from '../../shared/theme/fontWeight'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
-import { X, Maximize2, Minimize2, Box } from 'lucide-react'
+import { Maximize2, Minimize2, Box } from 'lucide-react'
 import { IconButton } from '../../shared/ui/IconButton'
 import { useFocusTrap } from '../../shared/ui/useFocusTrap'
 import { useResizablePanel } from '../../shared/ui/useResizablePanel'
@@ -15,6 +14,9 @@ import { notify } from '../../app/shell/appSdk'
 import { FileViewer, type FileViewerHandle } from '../files/browse/FileViewer'
 import { baseName } from '../files/fileMeta'
 import type { CommentTarget } from '../../shared/ui/content/commentTarget'
+import { CanvasSplit, CanvasSplitThread, CanvasSplitMessage, CanvasSplitDocument, CanvasSplitHeader, CanvasSplitBody } from '../../shared/vendor/assistant-ui/elements/canvas-split'
+import type { ChatTurn } from './chatTypes'
+import { recentCanvasTurns } from './auiThreadSurfaces'
 
 const MIN_W = 360, MAX_W = 900, DEFAULT_W = 480
 
@@ -28,7 +30,7 @@ function ExpandedOverlay({ children }: { children: ReactNode }) {
   )
 }
 
-export function ChatFilePanel({ path, onClose, commentTarget }: { path: string; onClose: () => void; commentTarget?: CommentTarget }) {
+export function ChatFilePanel({ path, onClose, commentTarget, contextTurns = [] }: { path: string; onClose: () => void; commentTarget?: CommentTarget; contextTurns?: readonly ChatTurn[] }) {
   const { width, fitWidth: dockW, onHandleDown, onHandleKey, min, max } = useResizablePanel(
     'chat-file', { def: DEFAULT_W, min: MIN_W, max: MAX_W, side: 'right' })
   const [expanded, setExpanded] = useState(false)
@@ -54,25 +56,24 @@ export function ChatFilePanel({ path, onClose, commentTarget }: { path: string; 
   }
 
   const dir = path.replace(/\/+$/, '').replace(/\/[^/]*$/, '')
-  const chrome = (
-    <div className="flex items-center gap-2 border-b border-outline-variant/40 px-m py-1.5">
-      <span data-type="caption" className="min-w-0 flex-1 truncate text-on-surface-low" title={path}>
-        {dir && <span className="opacity-60">{dir}/</span>}
-        <span className="text-on-surface" style={fvs(500)}>{baseName(path)}</span>
-      </span>
-      <div className="flex shrink-0 items-center gap-0.5">
-        <IconButton icon={expanded ? Minimize2 : Maximize2} label={expanded ? 'Collapse to panel' : 'Expand to full width'} size={28} onClick={() => setExpanded((v) => !v)} />
-        <IconButton icon={X} label="Close (Esc)" size={28} onClick={onClose} />
-      </div>
-    </div>
-  )
+  const chrome = <CanvasSplitHeader title={dir ? `${dir}/${baseName(path)}` : baseName(path)} onClose={onClose}
+    actions={<IconButton icon={expanded ? Minimize2 : Maximize2} label={expanded ? 'Collapse to panel' : 'Expand to full width'} size={28} onClick={() => setExpanded((v) => !v)} />}/>
 
   const body = (
     <div className="flex h-full flex-col">
-      {chrome}
-      <div className="min-h-0 flex-1">
-        <FileViewer ref={viewerRef} entry={entry} compact={!expanded} onSaved={() => {}} onSaveAsArtifact={saveAsArtifact} commentTarget={commentTarget} />
-      </div>
+      <CanvasSplit className="h-full max-w-none rounded-none border-0 md:h-full">
+        {expanded && contextTurns.length > 0 && <CanvasSplitThread aria-label="Recent conversation" className="md:w-64">
+          {recentCanvasTurns(contextTurns).map((turn, index) => <CanvasSplitMessage key={index} speaker={turn.speaker}>
+            {turn.text}
+          </CanvasSplitMessage>)}
+        </CanvasSplitThread>}
+        <CanvasSplitDocument className="min-h-0">
+          {chrome}
+          <CanvasSplitBody className="min-h-0 overflow-hidden p-0">
+            <FileViewer ref={viewerRef} entry={entry} compact={!expanded} onSaved={() => {}} onSaveAsArtifact={saveAsArtifact} commentTarget={commentTarget} />
+          </CanvasSplitBody>
+        </CanvasSplitDocument>
+      </CanvasSplit>
       {artModal && (
         <Modal title="Save as artifact" icon={<Box size={18} className="text-primary" />} onClose={() => setArtModal(null)}>
           <div className="flex flex-col gap-m p-l" style={{ minWidth: 360 }}>

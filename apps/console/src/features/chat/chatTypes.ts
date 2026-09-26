@@ -1,5 +1,5 @@
 
-import type { SpawnMemoryReceipt } from '../../shared/data/api'
+import type { ChatFileChange, SpawnMemoryReceipt } from '../../shared/data/api'
 
 export interface TextSegment { kind: 'text'; text: string }
 
@@ -30,6 +30,20 @@ export interface AgentError {
   why: string
   fix: string
   suggestions?: string[]
+}
+
+const GUARDRAIL_ERROR_CODES = new Set([
+  'ERR_COMPUTER_USE_APP_NOT_ALLOWED',
+  'ERR_COMPUTER_USE_SECURE_FIELD',
+  'ERR_COMPUTER_USE_UNATTENDED_NOT_GRANTED',
+  'ERR_COMPUTER_USE_DISABLED',
+])
+
+export function guardrailNoticeForTool(segment: ToolSegment): { code: string; reason: string } | null {
+  const error = segment.agentError
+  return error && GUARDRAIL_ERROR_CODES.has(error.code)
+    ? { code: error.code, reason: error.what }
+    : null
 }
 
 export interface ApprovalSegment {
@@ -118,6 +132,13 @@ export interface ChatTurn {
   variantIdx?: number
   rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]
   visibleIndex?: number
+  fileChanges?: ChatFileChange[]
+  stopOutcome?: StopOutcome
+}
+
+export interface StopOutcome {
+  state: 'stopped' | 'stop_failed_reset'
+  outcome?: 'soft' | 'hard'
 }
 
 export const userTurn = (text: string, ts?: string, pastes?: ChatTurn['pastes'], files?: string[], optimized?: string): ChatTurn => ({ role: 'user', segments: [{ kind: 'text', text }], ts, pastes, files: files?.length ? files : undefined, optimized: optimized || undefined })
@@ -190,7 +211,27 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+
+export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
+  const meta = message.meta
+  if (message.role !== 'system' || meta?.kind !== 'stop_event' || !meta.id) return null
+  let content: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(message.content)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    content = parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+  if (content.kind !== 'stop_event' || content.id !== meta.id
+    || content.state !== meta.state || content.outcome !== meta.outcome) return null
+  if (meta.state !== 'stopped' && meta.state !== 'stop_failed_reset') return null
+  if (meta.outcome != null && meta.outcome !== 'soft' && meta.outcome !== 'hard') return null
+  if ((meta.state === 'stopped' && meta.outcome === 'hard')
+    || (meta.state === 'stop_failed_reset' && meta.outcome === 'soft')) return null
+  return { state: meta.state, ...(meta.outcome ? { outcome: meta.outcome } : {}) }
+}
 
 function recollapsePastes(content: string, pastes: { seq: number; lines: number; content: string }[]): string {
   let out = content
@@ -242,6 +283,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       visible += 1
       const at = lastAssistant()
       at.visibleIndex = visible
+      if (m.ts && !Number.isNaN(new Date(m.ts).getTime())) at.ts = m.ts
       at.segments.push({ kind: 'text', text: m.content })
       if (m.meta?.summary) at.summary = m.meta.summary
       if (Array.isArray(m.meta?.memory_citations) && m.meta!.memory_citations.length) {
@@ -249,6 +291,9 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
       if (Array.isArray(m.meta?.skills_used) && m.meta!.skills_used.length) {
         at.skillsUsed = m.meta!.skills_used
+      }
+      if (Array.isArray(m.meta?.file_changes) && m.meta.file_changes.length) {
+        at.fileChanges = m.meta.file_changes
       }
       if (Array.isArray(m.variants) && m.variants.length > 1) {
         at.variantCount = m.variants.length
@@ -280,6 +325,10 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
     } else if (m.role === 'error') {
       lastAssistant().segments.push({ kind: 'error', text: m.content })
+    } else if (m.role === 'system') {
+      const outcome = stopOutcomeForMessage(m)
+      const previous = turns[turns.length - 1]
+      if (outcome && previous?.role === 'assistant') previous.stopOutcome = outcome
     }
   }
   if (!running) {

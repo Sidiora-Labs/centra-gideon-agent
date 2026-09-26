@@ -4,10 +4,12 @@
   border: 1px solid color-mix(in srgb, var(--color-outline-variant) 58%, transparent);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--color-on-surface) 5%, transparent);
 }
 
 .gideon-topbar {
   border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 38%, transparent);
+  background: var(--color-surface);
 }
 
 .gideon-corner-left {
@@ -76,11 +78,42 @@
   background: var(--color-surface-low);
 }
 
+@media (max-width: 768px) {
+  .gideon-shell .gideon-topbar {
+    height: auto !important;
+    min-height: 0;
+    flex-wrap: wrap;
+    align-content: start;
+    padding-inline: var(--spacing-m) !important;
+    padding-bottom: var(--spacing-xs);
+  }
+
+  .gideon-shell:not([data-hosted-mobile='true']) .gideon-topbar {
+    padding-top: max(64px, var(--shell-corner-rh, 0px));
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-left],
+  .gideon-shell .gideon-topbar > [data-header-right] {
+    flex: 0 0 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 0 !important;
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-right] {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-right]:empty { display: none; }
+}
+
 @media (max-width: 767px) {
   .gideon-workspace {
     margin: 0;
     border: 0;
     border-radius: 0;
+    box-shadow: none;
   }
 
   .gideon-corner-left { padding-inline: var(--spacing-xs); }

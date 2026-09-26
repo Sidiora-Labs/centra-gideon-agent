@@ -5,6 +5,7 @@ import {
 import { registerContentType, type ContentType } from './contentTypes'
 import { HtmlWidgetEmbed, ReactWidgetEmbed } from './chatEmbeds'
 import { GenUiWidget } from '../genui/GenUiWidget'
+import { UISpecEmbed } from '../assistant-ui/generative/UISpecEmbed'
 import { exportDocumentHtml, copyDocumentHtml, exportInfographicSvg } from './exporters'
 
 
@@ -22,6 +23,7 @@ const RawHtml = renderer('RawHtmlPreview')
 const ReactR = renderer('ReactPreview')
 const Svg = renderer('SvgPreview')
 const Text = renderer('TextPreview')
+const Code = renderer('CodePreview')
 const JsonTree = renderer('JsonTreePreview')
 const CsvTable = renderer('CsvTablePreview')
 const ImageFile = renderer('ImageFilePreview')
@@ -43,6 +45,11 @@ function builtinDefinitions(): ContentType[] { return [
   {
     id: 'genui', label: 'Generated UI', icon: LayoutDashboard, tone: PRIMARY,
     embed: { render: GenUiWidget, streaming: true },
+    commentable: false,
+  },
+  {
+    id: 'uispec', label: 'Structured result', icon: LayoutDashboard, tone: PRIMARY,
+    embed: { render: UISpecEmbed, streaming: false },
     commentable: false,
   },
   {
@@ -165,6 +172,8 @@ function builtinDefinitions(): ContentType[] { return [
   },
   {
     id: 'code', label: 'Code', icon: FileCode, tone: 'var(--color-on-surface-low)',
+    exts: ['js', 'mjs', 'cjs', 'ts', 'py'],
+    preview: { render: Code },
     edit: { language: 'plaintext' },
   },
   {

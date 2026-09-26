@@ -1,4 +1,3 @@
-import { capabilityAreas, capabilityNavigationId } from '../../features/capabilities/navigation'
 import VoiceControls from './VoiceControls'
 import './shell.css'
 import { Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
@@ -7,7 +6,7 @@ import { MotionConfig, motion } from 'framer-motion'
 import { ease, duration, useReducedMotion } from '../../shared/theme/motion'
 import { armCueAudio } from '../../shared/theme/soundCues'
 import { installPushCuePlayback } from './pushCuePlayback'
-import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FlaskConical, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
+import { Bell, Compass, Loader2, Radar, Settings, Sparkles, Terminal } from 'lucide-react'
 import { NavRail, type NavItem } from '../../shared/ui/NavRail'
 import { ShellCornerLeft, ShellCornerRight } from '../../shared/ui/ShellCorners'
 import { IncidentBanner } from './IncidentBanner'
@@ -40,9 +39,10 @@ import { resolveAppIcon } from '../../features/apps/appIcon'
 import { useWidgetActionLauncher } from '../../shared/ui/widget/useWidgetActionBridge'
 import { getNavApps, onNavAppsChange } from '../../features/apps/navApps'
 import { isDisclosed, undisclosedCount, useNavDisclosure } from './navDisclosure'
-import type { AppSummary } from '../../shared/data/api'
+import type { AppSummary, ChatSessionSummary } from '../../shared/data/api'
 import { onTaskListCreated } from '../../shared/data/taskListCount'
 import { useNotificationToasts } from './useNotificationToasts'
+import { navigationItems, ROUTABLE_ROOTS, activeNavigationId, managesApps, recentSessionItems } from './navigationModel'
 
 const LoopsSection = lazyRoute('loops', () => import('../../features/loops/LoopsSection').then((m) => ({ default: m.LoopsSection })))
 const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
@@ -66,7 +66,8 @@ const LoopSection = lazyRoute('loop', () => import('../../features/loop/LoopSect
 const InboxPage = lazyRoute('inbox', () => import('../../features/inbox/InboxPage').then((m) => ({ default: m.InboxPage })))
 const FilesSection = lazyRoute('files', () => import('../../features/files/FilesSection').then((m) => ({ default: m.FilesSection })))
 const ArtifactsSection = lazyRoute('artifacts', () => import('../../features/artifacts/ArtifactsSection').then((m) => ({ default: m.ArtifactsSection })))
-const AppsSection = lazyRoute('apps', () => import('../../features/apps/AppsSection').then((m) => ({ default: m.AppsSection })))
+const AppsSection = lazyRoute('apps/manage', () => import('../../features/apps/AppsSection').then((m) => ({ default: m.AppsSection })))
+const GideonCollection = lazyRoute('apps', () => import('../../features/apps/GideonCollection').then((m) => ({ default: m.GideonCollection })))
 const AppHostPage = lazyRoute('app', () => import('../../features/apps/AppHostPage').then((m) => ({ default: m.AppHostPage })))
 const TerminalPage = lazyRoute('terminal', () => import('../../features/terminal/TerminalPage').then((m) => ({ default: m.TerminalPage })))
 const DashboardPage = lazyRoute('dashboard', () => import('../../features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
@@ -76,30 +77,8 @@ const CompanionPage = lazyRoute('companion', () => import('../../features/compan
 
 installRoutePreload()
 
-const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-  { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'rooms', label: 'Rooms', icon: Users },
-  { id: 'projects', label: 'Projects', icon: FolderKanban },
-  { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
-  { id: 'tasks', label: 'Tasks', icon: ListChecks, section: 'Platform' },
-  { id: 'inbox', label: 'Inbox', icon: Inbox, section: 'Platform' },
-  { id: 'triggers', label: 'Triggers', icon: Zap, section: 'Platform' },
-  { id: 'files', label: 'Files', icon: Files, section: 'Platform' },
-  { id: 'artifacts', label: 'Artifacts', icon: FileCode, section: 'Platform' },
-  { id: 'terminal', label: 'Terminal', icon: Terminal, section: 'Platform' },
-  ...capabilityAreas.map(area => ({ id: `capabilities/${area.id}`, label: area.label, section: area.group, icon: area.icon })),
-  { id: 'agents', label: 'Agents', icon: Users, section: 'Capabilities' },
-  { id: 'tools', label: 'Tools', icon: Wrench, section: 'Capabilities' },
-  { id: 'skills', label: 'Skills', icon: Sparkles, section: 'Capabilities' },
-  { id: 'learning', label: 'Learning', icon: Brain, section: 'Capabilities' },
-  { id: 'prompts', label: 'Prompts', icon: FileText, section: 'Capabilities' },
-  { id: 'workflows', label: 'Workflows', icon: Workflow, section: 'Capabilities' },
-  { id: 'experiments', label: 'Experiments', icon: FlaskConical, section: 'Capabilities' },
-  { id: 'apps', label: 'Apps', icon: Blocks, section: 'Apps' },
-  { id: 'settings', label: 'Settings', icon: Settings, pinBottom: true },
-]
-const ROUTABLE = new Set([...NAV.map((n) => n.id), 'notifications', 'discover', 'loop', 'loops', 'code', 'app', 'mission-control'])
+const NAV = navigationItems()
+const ROUTABLE = ROUTABLE_ROOTS
 
 function PageFallback() {
   return (
@@ -136,12 +115,13 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   learning: LearningPage,
   tools: ToolsPage,
   agents: AgentsSection,
-  apps: AppsSection,
+  apps: GideonCollection,
   app: AppHostPage,
   settings: SettingsPage,
 }
 
 function renderPage(route: string, props: RouteProps) {
+  if (route === 'apps' && managesApps(props.sub ?? '', props.query)) return <AppsSection {...props} />
   if (route === 'knowledge') {
     const parts = (props.sub || '').split('/')
     const readingId = parts[0] === 'read' && parts[1]
@@ -187,6 +167,7 @@ function AppInner() {
   const toggleNav = rail.toggle
   const onNavSelect = rail.select
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [activeLoops, setActiveLoops] = useState(0)
   const [taskListCount, setTaskListCount] = useState(0)
   useEffect(() => {
@@ -214,7 +195,7 @@ function AppInner() {
       id: `app/${a.name}`,
       label: a.uiPages[0].label || a.displayName,
       icon: resolveAppIcon(a.uiPages[0].icon || a.icon),
-      section: 'Apps',
+      section: 'Your apps',
     }))
 
   const appBadges = useApplicationEvents(navigate)
@@ -236,15 +217,17 @@ function AppInner() {
     else if (onboarded) clearOnboardingExit()
   }, [loaded, onboarded, route, navigate])
 
+  const { data: recentSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
+  const recentItems = recentSessionItems(recentSessions)
+
   const { mode: navMode, pinned: navPinned, setMode: setNavMode, pin: pinNav } = useNavDisclosure()
 
   const rendered = ROUTABLE.has(route) ? route : 'dashboard'
-  const active = (rendered === 'loop' || rendered === 'loops' || rendered === 'code') ? 'projects'
-    : rendered === 'app' ? `app/${(sub ?? '').split('/')[0]}`
-      : rendered === 'capabilities' ? capabilityNavigationId(sub ?? '') : rendered
+  const active = activeNavigationId(rendered, sub ?? '', query)
 
   useEffect(() => {
     if (navMode !== 'starter') return
+    if (active === 'dashboard') return
     if (isDisclosed(active, navMode, navPinned)) return
     pinNav(active)
   }, [active, navMode, navPinned, pinNav])
@@ -324,8 +307,9 @@ function AppInner() {
       }
     }
   }
-  const disclosedItems = navItems.filter((n) => isDisclosed(n.id, navMode, navPinned))
-  const moreCount = undisclosedCount(navItems.map((n) => n.id), navPinned)
+  navItems.push(...recentItems)
+  const disclosedItems = navItems.filter((n) => n.section === 'Recent' || isDisclosed(n.id, navMode, navPinned))
+  const moreCount = undisclosedCount(navItems.filter(n => n.section !== 'Recent').map((n) => n.id), navPinned)
 
   const commands: Command[] = [
     { id: 'go:capabilities', label: 'All workspaces', hint: 'Go to', icon: Sparkles, run: () => navigate('capabilities') },
@@ -340,7 +324,7 @@ function AppInner() {
   ]
   return (
     <div className="gideon-shell flex h-full" style={{ background: 'var(--color-canvas)' }}>
-      <NavRail items={disclosedItems} activeId={active} onSelect={onNavSelect} collapsed={railCollapsed}
+      <NavRail items={disclosedItems} activeId={active} onSelect={onNavSelect} onSearch={() => { rail.close(); setPaletteOpen(true) }} collapsed={railCollapsed}
         overlay={isMobile} overlayOpen={isMobile && mobileNavOpen} onScrimClick={() => rail.close()}
         disclosure={{
           expanded: navMode === 'expert',
@@ -371,7 +355,7 @@ function AppInner() {
         </ErrorBoundary>
       </main>
       <VoiceControls open={voiceOpen} onClose={() => setVoiceOpen(false)} items={[...navItems, { id: 'capabilities', label: 'Capabilities', icon: Sparkles }]} navigate={navigate} currentRoute={[route, sub].filter(Boolean).join('/')} />
-      <CommandPalette commands={commands} />
+      <CommandPalette commands={commands} open={paletteOpen} onOpenChange={setPaletteOpen} />
       {
 }
       <ProductTour route={rendered} navigate={navigate} />
