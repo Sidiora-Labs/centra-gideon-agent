@@ -130,7 +130,7 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
   const iterateOpen = canIterate && !!iterate
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       <TopBar
         keepCornerPadding
         left={<div className="flex min-w-0 items-center gap-m">
@@ -173,14 +173,14 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
           )}
         </div>
       ) : (
-        <div className="mx-auto flex min-h-0 w-full flex-1 flex-col" style={{ maxWidth: 'var(--content-width)' }}>
+        <div className="mx-auto flex min-h-0 min-w-0 w-full flex-1 flex-col" style={{ maxWidth: 'var(--content-width)' }}>
           { }
-          <div className="flex flex-wrap items-center gap-m border-b border-outline/40 px-l py-2.5">
-            <div className="w-64"><SearchField size="sm" value={q} onChange={setQ} placeholder="Search artifacts…" ariaLabel="Search artifacts" name="artifacts-search" /></div>
+          <div data-slot="artifact-filters" className="flex min-w-0 flex-wrap items-center gap-m border-b border-outline/40 px-l py-2.5">
+            <div className="w-full min-w-0 sm:w-64"><SearchField size="sm" value={q} onChange={setQ} placeholder="Search artifacts…" ariaLabel="Search artifacts" name="artifacts-search" /></div>
             {
 }
-            <Segmented ariaLabel="Artifact kind" value={kind} onChange={setKind} collapse="scroll"
-              options={[{ key: '', label: 'All kinds' }, ...ARTIFACT_KINDS.map((k) => ({ key: k.key, label: k.label }))]} />
+            <div className="w-full min-w-0 sm:flex-1"><Segmented ariaLabel="Artifact kind" value={kind} onChange={setKind} collapse="scroll"
+              options={[{ key: '', label: 'All kinds' }, ...ARTIFACT_KINDS.map((k) => ({ key: k.key, label: k.label }))]} /></div>
             <FilterMenu sections={filterSections} />
             {
 }
@@ -189,7 +189,7 @@ export function ArtifactsSection({ sub, navigate, query: routeQuery, setQuery }:
 }
             <ResultAnnouncement count={filtered.length} noun="artifacts" active={!!(q.trim() || kind || src || col)} />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             {loadErr && artifacts.length === 0
               ? <LoadError what="artifacts" error={loadErr} onRetry={load} />
               : loading && artifacts.length === 0

@@ -1397,7 +1397,7 @@ function RemoveAppModal({ name, onClose, onDone }: { name: string; onClose: () =
 
   return (
     <Modal title={`Uninstall ${name}?`} icon={<Archive size={18} />} onClose={onClose}>
-      <div className="flex flex-col gap-m p-l" style={{ minWidth: 400 }}>
+      <div className="flex min-w-0 flex-col gap-m p-l">
         <div data-type="body-s" className="text-on-surface-low">
           This removes the app's files and providers from disk. To just turn it off and leave the
           files in place, use <span className="text-on-surface">Deactivate</span> instead.
@@ -1436,7 +1436,7 @@ function RemoveAppModal({ name, onClose, onDone }: { name: string; onClose: () =
           </div>
         </div>
         <KeptDepsList kept={kept} />
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           {
 }
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -1472,7 +1472,7 @@ function UninstallModal({ name, onClose, onDone }: { name: string; onClose: () =
 
   return (
     <Modal title={`Force uninstall ${name}?`} icon={<Trash2 size={18} />} onClose={onClose}>
-      <div className="flex flex-col gap-m p-l" style={{ minWidth: 400 }}>
+      <div className="flex min-w-0 flex-col gap-m p-l">
         {
 }
         <div data-type="body-s" className="text-on-surface-low">
@@ -1485,7 +1485,7 @@ function UninstallModal({ name, onClose, onDone }: { name: string; onClose: () =
           {kept.length > 0 && ' Shared dependencies still used by other apps will be kept.'}
         </div>
         <KeptDepsList kept={kept} />
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="danger" loading={busy} onClick={forceUninstall}><Trash2 size={16} /> Force uninstall
           </Button>

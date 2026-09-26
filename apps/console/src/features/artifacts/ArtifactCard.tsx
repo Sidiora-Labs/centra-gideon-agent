@@ -147,14 +147,14 @@ export const ArtifactCard = memo(function ArtifactCard({ art, onOpen }: {
 
   const Icon = km.icon
   return (
-    <div ref={rootRef}>
+    <div ref={rootRef} className="h-full min-w-0">
     <TileButton onClick={() => onOpen(art)} title={art.name} ariaLabel={art.name}
-      className="h-full w-full">
+      className="h-full w-full min-w-0">
       <DonorArtifactCard embedded title={art.name} meta={`${km.label} · v${art.version}`}
         icon={<Icon size={16} style={{ color: km.tone }} />}
         preview={preview}
-        details={<div className="mt-1 flex flex-wrap items-center gap-1.5 text-on-surface-low text-[0.6875rem]">
-          {art.collection && <span className="truncate rounded-pill bg-surface-high px-1.5">{art.collection}</span>}
+        details={<div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-on-surface-low text-[0.6875rem]">
+          {art.collection && <span className="max-w-full rounded-pill bg-surface-high px-1.5 break-words [overflow-wrap:anywhere]">{art.collection}</span>}
           {dirty && <span className="shrink-0 rounded-pill px-1.5" title="The source file changed since the last snapshot" style={{ background: 'color-mix(in srgb, var(--color-warning) 16%, transparent)', color: 'var(--color-warning)' }}>source changed</span>}
           <span className="ml-auto shrink-0">{relTime(art.updated_at || art.created_at)}</span>
         </div>} />

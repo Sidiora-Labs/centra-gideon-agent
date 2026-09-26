@@ -39,20 +39,20 @@ export function ComparisonCard({
 
       {...props}
     >
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {options.map((option) => {
           const recommended = option.id === recommendedId;
           return (
             <div
               key={option.id}
               className={cn(
-                "flex min-w-0 flex-1 flex-col gap-2 rounded-xl p-3 transition-colors",
+                "flex min-w-0 flex-[1_1_14rem] flex-col gap-2 rounded-xl p-3 transition-colors",
                 recommended ? "bg-blue-500/[0.07] dark:bg-blue-400/10" : field,
               )}
             >
               <div className="flex flex-col gap-0.5">
                 <span className="flex items-baseline gap-1.5">
-                  <span className="truncate text-[13px] font-medium">
+                  <span className="min-w-0 break-words [overflow-wrap:anywhere] text-[13px] font-medium">
                     {option.name}
                   </span>
                   {recommended && (
@@ -66,7 +66,7 @@ export function ComparisonCard({
                     </span>
                   )}
                 </span>
-                <span className="text-foreground/45 truncate text-xs">
+                <span className="text-foreground/45 break-words [overflow-wrap:anywhere] text-xs">
                   {option.headline}
                 </span>
               </div>
@@ -87,7 +87,7 @@ export function ComparisonCard({
                       )}
                       <span
                         className={cn(
-                          "min-w-0 truncate",
+                          "min-w-0 break-words [overflow-wrap:anywhere]",
                           absent ? "text-foreground/30" : "text-foreground/65",
                         )}
                       >

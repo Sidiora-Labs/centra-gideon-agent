@@ -11,6 +11,7 @@ export interface TimelineEvent {
   id: string;
   when: TimelineWhen;
   time: string;
+  dateTime?: string;
   title: string;
   detail?: string;
 }
@@ -40,7 +41,8 @@ export function Timeline({
           key={event.id}
           className="fade-in slide-in-from-left-1 animate-in fill-mode-both grid grid-cols-[3.5rem_1rem_minmax(0,1fr)] gap-x-2 duration-300"
         >
-          <span
+          <time
+            dateTime={event.dateTime}
             className={cn(
               mono,
               "pt-[3px] text-end tabular-nums",
@@ -50,7 +52,7 @@ export function Timeline({
             )}
           >
             {event.time}
-          </span>
+          </time>
 
           <span className="flex flex-col items-center">
             <span

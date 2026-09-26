@@ -27,7 +27,7 @@ export function Field({ label, hint, right, children }: { label: string; hint?: 
   const hintId = hint ? `${identity}-hint` : undefined
   return <FieldLabelProvider value={labelId}><FieldHintProvider value={hintId}>
     <div className="min-w-0">
-      <div className="mb-1.5 flex min-w-0 items-center gap-s"><Eyebrow as="span" id={labelId}>{label}</Eyebrow>{right}</div>
+      <div className="mb-1.5 flex min-w-0 flex-wrap items-start gap-s"><Eyebrow as="span" id={labelId} className="min-w-0 flex-1 [overflow-wrap:anywhere]">{label}</Eyebrow>{right && <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">{right}</div>}</div>
       {children}
       {hint && <p id={hintId} data-type="caption" className="mt-1 break-words text-on-surface-low">{hint}</p>}
     </div>
@@ -53,11 +53,11 @@ export function TextInput({ value, onChange, placeholder, autoFocus, onKeyDown, 
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
     onChange={(event) => { if (!disabled) onChange(event.target.value) }} onKeyDown={onKeyDown}
-    data-type={dimensions.role} className={cx(fieldChrome, 'w-full', dimensions.height, surfaces[surface],
+    data-type={dimensions.role} className={cx(fieldChrome, 'w-full min-w-0 max-w-full', dimensions.height, surfaces[surface],
       leadingIcon && trailingSlot ? 'pl-9 pr-10' : leadingIcon ? 'pl-9 pr-m' : trailingSlot ? 'pl-m pr-10' : 'px-m',
       mono && 'font-mono', disabled && 'opacity-50')} />
   if (!leadingIcon && !trailingSlot) return input
-  return <div className="relative w-full">
+  return <div className="relative w-full min-w-0 max-w-full">
     {leadingIcon && <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-low">{leadingIcon}</span>}
     {input}
     {trailingSlot && <span className="absolute right-1.5 top-1/2 -translate-y-1/2">{trailingSlot}</span>}
@@ -74,7 +74,7 @@ export function TextArea({ value, onChange, placeholder, rows = 4, mono, ariaLab
   return <textarea id={id || identity} value={value} rows={rows} autoFocus={autoFocus} placeholder={placeholder}
     {...fieldNaming(label, ariaLabel)} aria-describedby={hint} disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
     onChange={(event) => { if (!disabled) onChange(event.target.value) }} data-type={mono ? 'body-s' : sizeTokens[size].role}
-    className={cx(fieldChrome, 'w-full resize-y px-m py-2', surfaces[surface], mono && 'font-mono')} />
+    className={cx(fieldChrome, 'w-full min-w-0 max-w-full resize-y px-m py-2', surfaces[surface], mono && 'font-mono')} />
 }
 
 export function NumberField({ value, onChange, min, max, step, width = 'w-24', ariaLabel }: {
@@ -93,7 +93,7 @@ export function NumberField({ value, onChange, min, max, step, width = 'w-24', a
     {...fieldNaming(label, ariaLabel)} aria-describedby={hint}
     onChange={(event) => dispatch({ type: 'edit', text: event.target.value })} onBlur={commit}
     onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} data-type="body-s"
-    className={cx(fieldChrome, 'h-8 bg-surface-high px-2 text-right tabular-nums', width)} />
+    className={cx(fieldChrome, 'h-8 min-w-0 max-w-full bg-surface-high px-2 text-right tabular-nums', width)} />
 }
 
 export function DateInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -101,7 +101,7 @@ export function DateInput({ value, onChange }: { value: string; onChange: (value
   const hint = useFieldHintId()
   const identity = useId()
   return <input id={identity} type="date" value={value} {...fieldNaming(label)} aria-describedby={hint}
-    onChange={(event) => onChange(event.target.value)} data-type="body-m" className={cx(fieldChrome, 'h-10 bg-surface-container px-m')} />
+    onChange={(event) => onChange(event.target.value)} data-type="body-m" className={cx(fieldChrome, 'h-10 w-full min-w-0 max-w-full bg-surface-container px-m')} />
 }
 
 interface SelectProps {
@@ -112,13 +112,13 @@ export function Select({ value, onChange, options, disabled, id, name, ariaLabel
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
-  return <div className="relative w-full"><select id={id || name || identity} name={name} value={value} disabled={disabled}
+  return <div className="relative w-full min-w-0 max-w-full"><select id={id || name || identity} name={name} value={value} disabled={disabled}
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     title={disabled ? disabledReason || undefined : undefined} data-type={sizeTokens[size].role}
     onChange={(event) => {
       const next = event.target.value
       if (!disabled && !options.find((option) => option.value === next)?.disabled) onChange(next)
-    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface])}>
+    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full min-w-0 max-w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface])}>
     {options.map(({ value: key, label: text, disabled: unavailable, title }) => <option key={key} value={key} disabled={unavailable} title={title}>{text}</option>)}
   </select><ChevronDown size={16} aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-low ${disabled ? 'opacity-50' : ''}`} /></div>
 }
@@ -145,11 +145,11 @@ export function ChipInput({ values, onChange, placeholder, max, suggestions, ari
     onChange(values.filter((item) => item !== value)); input.current?.focus()
   }
   const remaining = suggestions?.filter((suggestion) => !values.includes(suggestion)) ?? []
-  return <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-outline-variant/30 bg-surface-container px-2 py-2 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
+  return <div className="flex min-h-10 min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-md border border-outline-variant/30 bg-surface-container px-2 py-2 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary"
     aria-disabled={disabled || undefined} title={disabled ? disabledReason : undefined}
     onMouseDown={(event) => { if (!disabled && event.target === event.currentTarget) { event.preventDefault(); input.current?.focus() } }}>
-    {values.map((value) => <span key={value} data-type="body-s" className="inline-flex h-7 items-center rounded-lg bg-surface-high pl-2 pr-0 text-on-surface-var">
-      {value}<button type="button" aria-label={`Remove ${value}`} onClick={() => remove(value)} disabled={disabled}
+    {values.map((value) => <span key={value} data-type="body-s" className="inline-flex min-h-7 min-w-0 max-w-full items-center rounded-lg bg-surface-high pl-2 pr-0 text-on-surface-var">
+      <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span><button type="button" aria-label={`Remove ${value}`} onClick={() => remove(value)} disabled={disabled}
         className="inline-flex size-6 shrink-0 items-center justify-center rounded-r-lg text-on-surface-low hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><X size={12} /></button>
     </span>)}
     <input ref={input} value={draft} name={`chip-${listId}`} list={remaining.length ? listId : undefined}
@@ -160,7 +160,7 @@ export function ChipInput({ values, onChange, placeholder, max, suggestions, ari
         if (event.nativeEvent.isComposing) return
         if (event.key === 'Enter' || event.key === ',') { event.preventDefault(); commit() }
         else if (event.key === 'Backspace' && draft === '' && values.length) onChange(values.slice(0, -1))
-      }} data-type="body-s" className="min-h-6 min-w-[80px] flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low disabled:opacity-50" />
+      }} data-type="body-s" className="min-h-6 min-w-0 basis-20 flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low disabled:opacity-50" />
     {remaining.length > 0 && <datalist id={listId}>{remaining.map((suggestion) => <option key={suggestion} value={suggestion} />)}</datalist>}
   </div>
 }

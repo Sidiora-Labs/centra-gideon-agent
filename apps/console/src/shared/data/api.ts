@@ -3678,7 +3678,7 @@ export const api = {
   routingUnmute: (agent: string) => post<{ ok: boolean; agent: string }>('/api/agents/routing/unmute', { agent }),
   routingStatus: () => get<{ enabled: boolean; muted: string[]; dismissals: Record<string, { count: number; last_dismissed_at: number }> }>('/api/agents/routing/status'),
   usageTotals: (opts?: { session?: string; since?: string; until?: string }) => get<{ session: string; totals: UsageAgg }>(`/api/usage/totals${_usageQuery(opts)}`),
-  usageRollup: (opts?: { group_by?: 'model' | 'source' | 'agent' | 'provider' | 'day'; since?: string; until?: string; session?: string }) => get<{ group_by: string; rows: Array<UsageAgg & Record<string, string>> }>(`/api/usage/rollup${_usageQuery(opts)}`),
+  usageRollup: (opts?: { group_by?: 'model' | 'source' | 'agent' | 'provider' | 'day'; since?: string; until?: string; session?: string }) => get<{ group_by: string; rows: Array<UsageAgg & Partial<Record<'model' | 'source' | 'agent' | 'provider' | 'day', string>>> }>(`/api/usage/rollup${_usageQuery(opts)}`),
   usageFold: (opts?: { window?: 'day' | 'week' | 'month'; group?: 'model' | 'provider' | 'purpose' }) => {
     const p = new URLSearchParams()
     if (opts?.window) p.set('window', opts.window)

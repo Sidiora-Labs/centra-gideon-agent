@@ -20,7 +20,7 @@ export function MessageUser({ children, fromComposer = false, onFileClick, paste
   const time = clockTime(timestamp)
   return (
     <motion.div variants={fromComposer ? travelEnter() : messageEnter} initial="initial" animate="animate" className="flex justify-end">
-      <div className="flex min-w-0 flex-col items-end gap-1">
+      <div className="flex w-full min-w-0 flex-col items-end gap-1">
         <div
           className="gideon-chat-user text-on-surface [&_>div>*:first-child]:mt-0 [&_>div>*:last-child]:mb-0"
           data-type="body-m"

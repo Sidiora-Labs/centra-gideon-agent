@@ -8,8 +8,24 @@
 }
 
 .gideon-topbar {
+  min-width: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 38%, transparent);
   background: var(--color-surface);
+}
+
+[data-gideon-chat-page] {
+  --gideon-chat-reading-width: 820px;
+}
+
+[data-gideon-chat-content] [data-slot='aui_message-group'] {
+  box-sizing: border-box;
+  width: min(100%, var(--gideon-chat-reading-width));
+  margin-inline: auto;
+  padding-inline: var(--spacing-l);
+}
+
+[data-gideon-chat-content] [data-slot='aui_message-group'] > * {
+  min-width: 0;
 }
 
 .gideon-corner-left {
@@ -42,7 +58,7 @@
 
 .gideon-chat-intro {
   width: 100%;
-  max-width: var(--content-width);
+  max-width: var(--gideon-chat-reading-width, 820px);
   justify-content: flex-start;
   margin-inline: auto;
   margin-bottom: var(--spacing-3xl);
@@ -78,7 +94,7 @@
   background: var(--color-surface-low);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .gideon-shell .gideon-topbar {
     height: auto !important;
     min-height: 0;

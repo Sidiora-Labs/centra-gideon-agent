@@ -14,8 +14,8 @@ export function Table({ caption, sized = true, className, wrapClassName, childre
   wrapClassName?: string
   children: ReactNode
 }) {
-  return <div data-table-surface className={cx('isolate overflow-x-auto rounded-lg border border-outline-variant/20', wrapClassName)}>
-    <table className={cx('w-full border-collapse', sized && 'text-[0.75rem]', className)}>
+  return <div data-table-surface role="region" aria-label={caption} tabIndex={0} className={cx('isolate w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-lg border border-outline-variant/20', wrapClassName)}>
+    <table className={cx('w-max min-w-full border-collapse', sized && 'text-[0.75rem]', className)}>
       <caption className="sr-only">{caption}</caption>
       {children}
     </table>
