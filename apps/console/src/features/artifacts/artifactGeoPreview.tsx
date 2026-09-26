@@ -34,6 +34,6 @@ export function artifactGeoPoints(content: string): KnowledgeGeoPoint[] | null {
 export function ArtifactGeoPreview({ points }: { points: KnowledgeGeoPoint[] }) {
   return <div className="p-4">
     <KnowledgeGeoMap points={points} />
-    <p className="mt-2 text-xs text-on-surface-low">Coordinates shown by longitude and latitude.</p>
+    <p className="mt-2 text-xs text-on-surface-low">Coordinates: latitude, longitude.</p>
   </div>
 }
