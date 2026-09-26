@@ -92,4 +92,93 @@ describe('persisted message timing', () => {
     view.rerender(<MessageAssistant>Saved answer</MessageAssistant>)
     expect(view.container.querySelector('[data-slot="feedback-dialog"]')).toBeNull()
   })
+
+  it('submits a downvote with no invented reason when the note is blank', () => {
+    const reasons: Array<string | undefined> = []
+    render(<MessageAssistant feedback={{ verdict: 'down', busy: false,
+      onSubmit: (_verdict, reason) => reasons.push(reason), onClose: () => {},
+    }}>Answer</MessageAssistant>)
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    expect(reasons).toEqual([undefined])
+  })
+})
+
+describe('persisted assistant file changes', () => {
+  it('renders an exact applied diff and opens the recorded path without review actions', () => {
+    const opened: string[] = []
+    const view = render(<MessageAssistant fileChanges={[{ path: 'src/account.ts', before: 'one\nold\nshared\n', after: 'one\nnew\nshared\n' }]}
+      onOpenFile={path => opened.push(path)}>Updated the account</MessageAssistant>)
+    const tree = view.container.querySelector('[data-slot="file-tree"]')
+    expect(tree?.textContent).toContain('1 files changed')
+    expect(tree?.textContent).toContain('+1')
+    expect(tree?.textContent).toContain('−1')
+    fireEvent.click(screen.getByRole('button', { name: /src\/account.ts/ }))
+    expect(opened).toEqual(['src/account.ts'])
+    fireEvent.click(screen.getByText('File changes · src/account.ts'))
+    const diff = view.container.querySelector('[data-slot="reviewable-diff"]')
+    expect(diff?.textContent).toContain('Applied')
+    expect(diff?.textContent).toContain('old')
+    expect(diff?.textContent).toContain('new')
+    expect(diff?.textContent).toContain('shared')
+    expect(diff?.textContent).not.toContain('kept')
+    expect(screen.queryByRole('button', { name: /Keep|Discard|Apply/ })).toBeNull()
+  })
+
+  it('counts actual file creation and deletion lines without inventing context', () => {
+    const view = render(<MessageAssistant fileChanges={[
+      { path: 'src/new.ts', before: '', after: 'first\nsecond\n' },
+      { path: 'src/old.ts', before: 'removed\n', after: '' },
+    ]}>Applied changes</MessageAssistant>)
+    const tree = view.container.querySelector('[data-slot="file-tree"]')
+    expect(tree?.textContent).toContain('2 files changed')
+    expect(tree?.textContent).toContain('+2')
+    expect(tree?.textContent).toContain('−1')
+    expect(view.container.querySelectorAll('[data-slot="reviewable-diff"]')).toHaveLength(2)
+    expect(view.container.textContent).toContain('@@ -0,0 +1,2 @@')
+    expect(view.container.textContent).toContain('@@ -1,1 +0,0 @@')
+    expect(tree?.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('shows a truncated snapshot path without diff lines or fabricated counts', () => {
+    const view = render(<MessageAssistant fileChanges={[
+      { path: 'src/complete.ts', before: 'old\n', after: 'new\n' },
+      { path: 'src/truncated.ts', before: 'begin\n… [truncated]', after: 'end\n… [truncated]' },
+    ]}>Updated two files</MessageAssistant>)
+    const tree = view.container.querySelector('[data-slot="file-tree"]')
+    expect(tree?.textContent).toContain('src/truncated.ts')
+    expect(tree?.firstElementChild?.textContent).not.toContain('+1')
+    expect(tree?.firstElementChild?.textContent).not.toContain('−1')
+    expect(view.container.querySelectorAll('[data-slot="reviewable-diff"]')).toHaveLength(1)
+    expect(view.container.querySelector('summary')?.textContent).toContain('src/complete.ts')
+    expect(view.container.querySelector('summary')?.textContent).not.toContain('src/truncated.ts')
+  })
+
+  it('keeps an oversized complete snapshot as a path without guessing line changes', () => {
+    const manyLines = 'same\n'.repeat(2_001)
+    const view = render(<MessageAssistant fileChanges={[{ path: 'src/large.ts', before: manyLines, after: manyLines + 'end\n' }]}>Updated file</MessageAssistant>)
+    const tree = view.container.querySelector('[data-slot="file-tree"]')
+    expect(tree?.textContent).toContain('src/large.ts')
+    expect(tree?.textContent).not.toContain('+')
+    expect(view.container.querySelector('[data-slot="reviewable-diff"]')).toBeNull()
+  })
+
+  it('compares complete snapshots even when neither ends with a newline', () => {
+    const view = render(<MessageAssistant fileChanges={[{
+      path: 'src/plain.txt', before: 'same\nold', after: 'same\nnew',
+    }]}>Updated file</MessageAssistant>)
+    const diff = view.container.querySelector('[data-slot="reviewable-diff"]')
+    expect(diff?.textContent).toContain('same')
+    expect(diff?.textContent).toContain('old')
+    expect(diff?.textContent).toContain('new')
+    expect(view.container.querySelector('[data-slot="file-tree"]')?.textContent).toContain('+1')
+  })
+
+  it('adds and removes the donor file surface as persisted history changes', () => {
+    const view = render(<MessageAssistant>Streaming answer</MessageAssistant>)
+    expect(view.container.querySelector('[data-slot="file-tree"]')).toBeNull()
+    view.rerender(<MessageAssistant fileChanges={[{ path: 'src/new.ts', before: '', after: 'saved\n' }]}>Saved answer</MessageAssistant>)
+    expect(view.container.querySelector('[data-slot="file-tree"]')?.textContent).toContain('src/new.ts')
+    view.rerender(<MessageAssistant fileChanges={[]}>Another answer</MessageAssistant>)
+    expect(view.container.querySelector('[data-slot="file-tree"]')).toBeNull()
+  })
 })
