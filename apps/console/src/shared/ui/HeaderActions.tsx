@@ -57,7 +57,7 @@ export function useHeaderChild(reg: Omit<ChildReg, 'id'>): { visible: boolean; t
 const TIER_ORDER: Tier[] = ['full', 'text', 'icon', 'overflow']
 
 export const titleFloor = (inner: number): number =>
-  Math.round(Math.min(96, Math.max(48, inner * 0.34)))
+  Math.round(Math.min(320, Math.max(48, inner * 0.34)))
 
 export function titleReserveFor(
   { hasContent, naturalWidth, inner }: { hasContent: boolean; naturalWidth: number; inner: number },
@@ -116,7 +116,7 @@ export function HeaderActions({ children, className }: { children: ReactNode; cl
       })
       return titleReserveFor({
         hasContent,
-        naturalWidth: Math.min(left.scrollWidth, left.clientWidth || left.scrollWidth),
+        naturalWidth: left.scrollWidth,
         inner,
       })
     }
