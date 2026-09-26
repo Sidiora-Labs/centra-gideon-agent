@@ -1,0 +1,30 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "MonthLabels.tsx": {
+      "source_sha256": "25d3ea8a2a0b50d977b34c637baa8fbef9284d7c495d716c358113407029a2e7",
+      "local_sha256": "25d3ea8a2a0b50d977b34c637baa8fbef9284d7c495d716c358113407029a2e7"
+    },
+    "Tooltip.tsx": {
+      "source_sha256": "5999e5a0f14ad94c05d480f1f6620e1e3c4f5f2e1e5c5d8187749770a8d10459",
+      "local_sha256": "5999e5a0f14ad94c05d480f1f6620e1e3c4f5f2e1e5c5d8187749770a8d10459"
+    },
+    "Legend.tsx": {
+      "source_sha256": "4f3095c986abe7458a1eae3e5167d6677e61a029886334b2fc2cd18ae96f8621",
+      "local_sha256": "4f3095c986abe7458a1eae3e5167d6677e61a029886334b2fc2cd18ae96f8621"
+    },
+    "LegendLevel.tsx": {
+      "source_sha256": "64780fe0037d32a3c5e1a26be9c0d2ea14ed5ceab0b7a2660582b83461f90310",
+      "local_sha256": "64780fe0037d32a3c5e1a26be9c0d2ea14ed5ceab0b7a2660582b83461f90310"
+    },
+    "index.ts": {
+      "source_sha256": "6050acf5219f14fc6e00c9e87242f773637d0ffdeb215f7fe4402ac34d638b47",
+      "local_sha256": "6166ea94b35117a8ae0eff7f6359adf794e08bd2a58099d82755dc96242f878c"
+    }
+  },
+  "adaptations": [
+    "complete exports for W10 local heat-graph dependency without changing its existing Root, DayLabels, Grid, Cell and utility implementations"
+  ]
+}
