@@ -84,6 +84,7 @@ describe('real ToolSegment donor progress', () => {
     const view = render(<AuiToolProgress tools={[finished, read]} streaming={false} countLabel={(count) => `Recorded calls: ${count}`}>
       <span>Recorded output</span>
     </AuiToolProgress>)
+    expect(view.container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Recorded calls: 2' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Recorded calls: 2' }))
     expect(screen.getAllByText('Recorded output')).toHaveLength(1)
