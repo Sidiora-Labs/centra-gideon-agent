@@ -741,6 +741,51 @@ class DelegationSupervisor:
     def get(self, agent_id: str) -> SubagentInfo | None:
         return self._agents.get(agent_id)
 
+    def live_controls(self, agent_id: str) -> dict[str, Any] | None:
+        info = self.get(agent_id)
+        if info is None:
+            return None
+        empty = {"model": info.model, "effort": "", "models": [], "efforts": []}
+        if info.done or info.queued:
+            return empty
+        provider = self._sessions.get_provider(f"subagent:{agent_id}")
+        controls = getattr(provider, "live_controls", None)
+        if not callable(controls):
+            return empty
+        offered = controls()
+        if os.environ.get("GIDEON_HOSTED", "").strip() == "1":
+            offered["models"] = []
+        return offered
+
+    async def set_live_control(
+        self, agent_id: str, axis: str, value: str
+    ) -> dict[str, Any]:
+        from gideon.integrations.acp.live_controls import LiveControlUnavailable
+
+        offered = self.live_controls(agent_id)
+        if offered is None:
+            raise KeyError(agent_id)
+        choices = (
+            offered["models"]
+            if axis == "model"
+            else [row["value"] for row in offered["efforts"]]
+            if axis == "effort"
+            else []
+        )
+        if value not in choices:
+            raise LiveControlUnavailable(
+                f"This agent does not offer live {axis} selection"
+            )
+        provider = self._sessions.get_provider(f"subagent:{agent_id}")
+        change = getattr(provider, "set_live_control", None)
+        if change is None:
+            raise LiveControlUnavailable("This agent has no live control contract")
+        await change(axis, value)
+        if axis == "model":
+            info = self._agents[agent_id]
+            info.model = value
+        return self.live_controls(agent_id) or offered
+
     @property
     def count(self) -> int:
         return sum(not info.done for info in self._agents.values())

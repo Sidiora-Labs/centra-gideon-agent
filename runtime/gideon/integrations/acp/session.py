@@ -494,6 +494,7 @@ class AcpConnection:
     ) -> AcpSession | None:
         response = await self.request("session/load", params, timeout=timeout)
         if isinstance(response.result, dict) and "modes" in response.result:
+            self._last_session_new_snapshot = dict(response.result)
             return self._bind_session(session_id, session_files_dir)
         return None
 

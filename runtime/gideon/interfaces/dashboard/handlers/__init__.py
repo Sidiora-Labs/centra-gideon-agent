@@ -274,6 +274,7 @@ from gideon.interfaces.dashboard.handlers.messaging import (
     api_spawn,
     api_spawn_cancel_fanout,
     api_spawn_clear,
+    api_spawn_control,
     api_spawn_delete,
     api_spawn_list,
     api_spawn_status,
