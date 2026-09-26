@@ -74,6 +74,7 @@ function desktopHarness() {
     focus() { this.focused = true; }
     isVisible() { return this.visible; }
     addTabbedWindow(tab) { this.tab = tab; }
+    destroy() { this.destroyed = true; this.emit("closed"); }
     setTitle(title) { this.title = title; }
     setBackgroundColor(color) { this.background = color; }
   }
@@ -172,6 +173,46 @@ test("Hosted Windows opens a separate window without a bridge, even for loopback
     assert.equal(tab.children[0].options.webPreferences.preload, undefined);
     assert.equal(tab.webContents.url, "http://localhost:8443");
     assert.equal(workspace.hasBridge(tab), false);
+  });
+});
+
+test("a failed hosted new-window load closes only that window and leaves the main view usable", async () => {
+  await onPlatformAsync("win32", async () => {
+    const harness = desktopHarness();
+    const workspace = new WindowWorkspace(harness.electron, {
+      main: () => main, target: () => "https://cloud.example",
+      local: () => "", hostedMode: () => true,
+      waitRemote: async () => { throw new Error("hosted address unreachable"); },
+    });
+    const main = workspace.create();
+    const mainPage = workspace.mount(main, { attachBridge: false });
+    await workspace.openTab();
+    const attempted = harness.windows[1];
+    assert.equal(attempted.destroyed, true);
+    assert.equal(attempted.webContents.closed, true);
+    assert.equal(main.isDestroyed(), false);
+    assert.equal(main.children.length, 1);
+    assert.equal(mainPage.closed, undefined);
+    assert.equal(workspace.hasBridge(main), false);
+  });
+});
+
+test("remounting a hosted window releases the old sandboxed view and keeps the new view isolated", () => {
+  onPlatform("win32", () => {
+    const { electron } = desktopHarness();
+    const workspace = new WindowWorkspace(electron, { target: () => "https://cloud.example", hostedMode: () => true });
+    const window = workspace.create();
+    const oldPage = workspace.mount(window, { attachBridge: false });
+    const nextPage = workspace.mount(window, { attachBridge: false });
+    assert.equal(oldPage.closed, true);
+    assert.equal(window.children.length, 1);
+    assert.equal(window.webContents, nextPage);
+    assert.equal(window.children[0].options.webPreferences.preload, undefined);
+    assert.equal(workspace.hasBridge(window), false);
+    const request = { requestHeaders: { Referer: "https://previous.example", Accept: "text/html" } };
+    let forwarded;
+    nextPage.headers(request, (value) => { forwarded = value; });
+    assert.deepEqual(forwarded, { requestHeaders: { Accept: "text/html" } });
   });
 });
 
@@ -331,6 +372,71 @@ test("Windows endpoint store survives restart and reports ACL status honestly", 
   assert.equal(openShellStore({ home, platform: "win32" }).getItem("endpoint"), "https://cloud.example");
 });
 
+test("Windows store preserves valid endpoints through corrupt data and reports failed disk writes", (context) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "gideon-win-store-recovery-"));
+  context.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const first = openShellStore({ home, platform: "win32" });
+  assert.equal(first.status, "absent");
+  assert.equal(first.permissions.reason, "absent");
+  const file = first.file;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  fs.writeFileSync(file, "");
+  assert.equal(openShellStore({ home, platform: "win32" }).status, "empty");
+  fs.writeFileSync(file, "{broken");
+  const malformed = openShellStore({ home, platform: "win32" });
+  assert.equal(malformed.status, "unparseable");
+  assert.equal(malformed.storeReason, "invalid_json");
+
+  fs.writeFileSync(file, JSON.stringify({ endpoint: "https://cloud.example", selection: 7 }));
+  const partial = openShellStore({ home, platform: "win32" });
+  assert.equal(partial.status, "unparseable");
+  assert.equal(partial.storeReason, "non_string_values");
+  assert.equal(partial.storeDetail, "selection");
+  assert.equal(partial.getItem("endpoint"), "https://cloud.example");
+  assert.equal(partial.getItem("selection"), null);
+  partial.setItem("selection", "ep_cloud");
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")),
+    { endpoint: "https://cloud.example", selection: "ep_cloud" });
+
+  fs.rmSync(file);
+  fs.mkdirSync(file);
+  const messages = [];
+  const unwritable = openShellStore({ home, platform: "win32", log: (message) => messages.push(message) });
+  assert.equal(unwritable.status, "unreadable");
+  assert.equal(unwritable.permissions.safe, false);
+  unwritable.setItem("volatile", "this session");
+  assert.equal(unwritable.readOnly, true);
+  assert.equal(unwritable.getItem("volatile"), "this session");
+  unwritable.setItem("second", "memory only");
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /changes are this-session only/);
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ["shell-store.json"], "failed atomic write must remove its temp file");
+});
+
+test("Mac and Linux store permissions are checked on real files and parent directories", (context) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "gideon-posix-store-"));
+  context.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const fresh = openShellStore({ home, platform: "linux" });
+  assert.equal(fresh.status, "absent");
+  assert.equal(fresh.permissions.safe, true);
+  fresh.setItem("endpoint", "http://localhost:10000");
+  const file = fresh.file;
+  const reopened = openShellStore({ home, platform: "linux" });
+  assert.equal(reopened.getItem("endpoint"), "http://localhost:10000");
+  assert.equal(reopened.permissions.safe, true);
+  assert.equal(reopened.permissions.mode, 0o600);
+  fs.chmodSync(file, 0o644);
+  const exposedFile = openShellStore({ home, platform: "linux" });
+  assert.equal(exposedFile.permissions.safe, false);
+  assert.equal(exposedFile.permissions.reason, "readable_or_writable_by_others");
+  fs.chmodSync(file, 0o600);
+  fs.chmodSync(path.dirname(file), 0o777);
+  const exposedDirectory = openShellStore({ home, platform: "linux" });
+  assert.equal(exposedDirectory.permissions.safe, false);
+  assert.equal(exposedDirectory.permissions.reason, "directory_writable_by_others");
+});
+
 test("Packaged Windows boot, close, reopen, and quit never invoke the POSIX gateway", async (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gideon-win-app-"));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -349,6 +455,8 @@ test("Packaged Windows boot, close, reopen, and quit never invoke the POSIX gate
       const app = new EventEmitter();
       app.isPackaged = true;
       app.getLoginItemSettings = () => ({ openAtLogin: false });
+      app.requestSingleInstanceLock = () => true;
+      app.whenReady = () => Promise.resolve();
       app.quit = () => { app.quitCalls = (app.quitCalls || 0) + 1; };
       let trayHandle;
       const electron = { ...harness.electron, app, ipcMain: { handle() {} },
@@ -364,8 +472,12 @@ test("Packaged Windows boot, close, reopen, and quit never invoke the POSIX gate
         desktop.gateway[method] = () => { gatewayCalls.push(method); throw new Error(`gateway ${method} was used`); };
       }
       let startup = 0;
-      desktop.endpoints.chooseStartup = async () => { startup++; };
-      await desktop.boot();
+      let reachedStartup;
+      const booted = new Promise((resolve) => { reachedStartup = resolve; });
+      desktop.endpoints.chooseStartup = async () => { startup++; reachedStartup(); };
+      desktop.run();
+      await booted;
+      assert.equal(app.name, "Gideon");
       assert.equal(startup, 1);
       assert.deepEqual(gatewayCalls, []);
       const window = desktop.state.window;
@@ -377,8 +489,11 @@ test("Packaged Windows boot, close, reopen, and quit never invoke the POSIX gate
       trayHandle.emit("click");
       assert.equal(window.isVisible(), true);
       assert.equal(window.focused, true);
+      window.hide();
+      app.emit("second-instance");
+      assert.equal(window.isVisible(), true);
       let quitPrevented = false;
-      desktop.beforeQuit({ preventDefault: () => { quitPrevented = true; } });
+      app.emit("before-quit", { preventDefault: () => { quitPrevented = true; } });
       await desktop.state.shutdown;
       assert.equal(quitPrevented, true);
       assert.equal(desktop.state.complete, true);
@@ -392,4 +507,22 @@ test("Packaged Windows boot, close, reopen, and quit never invoke the POSIX gate
     if (originalHome === undefined) delete process.env.GIDEON_HOME;
     else process.env.GIDEON_HOME = originalHome;
   }
+});
+
+test("a second Linux desktop process yields the single-instance lock before booting", () => {
+  onPlatform("linux", () => {
+    const { DesktopApplication } = require("../src/application/desktop-application");
+    const harness = desktopHarness();
+    const app = new EventEmitter();
+    app.isPackaged = false;
+    app.requestSingleInstanceLock = () => false;
+    app.whenReady = () => { throw new Error("duplicate process must not boot"); };
+    app.quit = () => { app.quitCalls = (app.quitCalls || 0) + 1; };
+    const desktop = new DesktopApplication({ ...harness.electron, app });
+    desktop.run();
+    assert.equal(app.name, "Gideon");
+    assert.equal(app.quitCalls, 1);
+    assert.equal(app.listenerCount("second-instance"), 0);
+    assert.equal(harness.windows.length, 0);
+  });
 });
