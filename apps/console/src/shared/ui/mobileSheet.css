@@ -1,0 +1,84 @@
+.gideon-mobile-sheet-overlay {
+  position: fixed;
+  z-index: var(--z-modal);
+  inset-inline: 0;
+  top: var(--gideon-mobile-viewport-top, 0px);
+  height: var(--gideon-visual-height, 100dvh);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+}
+
+.gideon-mobile-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklch, var(--color-canvas) 72%, transparent);
+}
+
+.gideon-mobile-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  max-width: 36rem;
+  max-height: 88%;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-on-surface) 12%, transparent);
+  border-radius: var(--radius-thread, 16px);
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+}
+
+.gideon-mobile-sheet-header {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid color-mix(in oklch, var(--color-on-surface) 10%, transparent);
+}
+
+.gideon-mobile-sheet-header h2 {
+  flex: 1 1 0;
+  min-width: 0;
+  max-height: min(7rem, 30dvh);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  white-space: normal;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 550;
+}
+
+.gideon-mobile-sheet-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.gideon-mobile-sheet-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+
+.gideon-mobile-sheet-overlay[data-full-height] {
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.gideon-mobile-sheet-overlay[data-full-height] > .gideon-mobile-sheet {
+  height: 100%;
+  max-height: 100%;
+  border-radius: 0;
+}
