@@ -1,5 +1,4 @@
 import PrivacyPage from './Privacy';
-import HoldingsPage from './PrivacyOrganizations';
 import SharedPage from './SharedHealth';
 import ExportsPage from './Exports';
 import LifePage from './LifeCalendar';
@@ -108,7 +107,7 @@ export default function Page() {
   const view = query.view || 'measurements';
   const detailKey = [view, query.id, query.source, query.plan, query.record, query.card, query.event, query.subject, query.fact].join(':');
   const title = labels[views.indexOf(view)] ?? labels[0];
-  const content = view === 'body-composition' ? <BodyComposition /> : view === 'lifestyle' ? <LifestyleProfile /> : view === 'eyes' ? <EyePrescriptions /> : view === 'epigenetic' ? <EpigeneticRecords /> : view === 'organizations' ? <HoldingsPage /> : view === 'privacy' ? <PrivacyPage /> : view === 'shared' ? <SharedPage /> : view === 'exports' ? <ExportsPage /> : view === 'life' ? <LifePage /> : view === 'memory' ? <MemoryPage /> : view === 'cognition' ? <CognitionPage /> : view === 'interventions' ? <InterventionPage /> : view === 'genome' ? <GenomePage /> : view === 'consumption' ? <ConsumptionPage /> : view === 'labs' ? <LabsPage /> : view === 'import' ? <ImportPage /> : <MeasurementsPage />;
+  const content = view === 'body-composition' ? <BodyComposition /> : view === 'lifestyle' ? <LifestyleProfile /> : view === 'eyes' ? <EyePrescriptions /> : view === 'epigenetic' ? <EpigeneticRecords /> : view === 'organizations' || view === 'privacy' ? <PrivacyPage /> : view === 'shared' ? <SharedPage /> : view === 'exports' ? <ExportsPage /> : view === 'life' ? <LifePage /> : view === 'memory' ? <MemoryPage /> : view === 'cognition' ? <CognitionPage /> : view === 'interventions' ? <InterventionPage /> : view === 'genome' ? <GenomePage /> : view === 'consumption' ? <ConsumptionPage /> : view === 'labs' ? <LabsPage /> : view === 'import' ? <ImportPage /> : <MeasurementsPage />;
   const changeView = (next: string) => setQuery({ view: next === 'measurements' ? null : next, id: null, source: null, plan: null, record: null, card: null, event: null, subject: null, fact: null }, { replace: true });
   return <AreaNavigation label={navigationLabel} items={destinations} active={view} onChange={changeView}>
     <div className="flex h-full min-h-0 flex-col"><TopBar left={<PageTitle>{title}</PageTitle>} /><div className="min-h-0 flex-1 overflow-y-auto"><div key={detailKey}>{content}</div></div></div>
