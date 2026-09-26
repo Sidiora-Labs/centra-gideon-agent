@@ -404,12 +404,13 @@ function RoutingPolicySection({ useCase, queryClass }: { useCase: string; queryC
   )
 }
 
-function TelemetryTable({ rows }: { rows: TelemetryRow[] }) {
+export function TelemetryTable({ rows }: { rows: TelemetryRow[] }) {
   const th = 'border-b border-outline-variant/40 px-2 py-1.5 font-normal'
   const td = 'border-b border-outline-variant/25 px-2 py-1.5'
   return (
-    <div className="overflow-x-auto">
-      <table data-type="body-s" className="w-full border-collapse">
+    <div data-table-surface role="region" aria-label="Routing telemetry" tabIndex={0} className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain">
+      <table data-type="body-s" className="w-max min-w-full border-collapse">
+        <caption className="sr-only">Routing telemetry</caption>
         <thead>
           <tr className="text-on-surface-low">
             <th scope="col" className={`${th} text-left`}>Model</th>
@@ -425,7 +426,7 @@ function TelemetryTable({ rows }: { rows: TelemetryRow[] }) {
         <tbody>
           {rows.map((r) => (
             <tr key={r.ref} className="text-on-surface-var">
-              <td className={`${td} font-mono text-on-surface`}>{r.ref}</td>
+              <td className={`${td} font-mono text-on-surface max-w-64 break-all`}>{r.ref}</td>
               <td className={`${td} text-right tabular-nums`}>{r.n.toLocaleString()}</td>
               <td className={`${td} text-right tabular-nums`}>{fmtPct(r.success)}</td>
               <td className={`${td} text-right tabular-nums text-on-surface-low`}>{fmtFeedback(r.feedback)}</td>

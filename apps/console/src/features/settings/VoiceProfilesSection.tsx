@@ -252,7 +252,7 @@ function EffectivePill({ resolution, pending }: { resolution?: VoiceResolution; 
   )
 }
 
-function ProfileRow({ profile, busy, run }: {
+export function ProfileRow({ profile, busy, run }: {
   profile: VoiceProfile
   busy: string
   run: (label: string, fn: () => Promise<unknown>) => Promise<void>
@@ -261,12 +261,12 @@ function ProfileRow({ profile, busy, run }: {
   const engine = [p.provider, p.model].filter(Boolean).join(' · ')
   return (
     <tr>
-      <Td>
+      <Td className="max-w-64 break-all">
         <span className="text-on-surface" data-type="label-s">{p.name || p.id}</span>
         <span className="ml-2 font-mono text-on-surface-low" data-type="caption">{p.id}</span>
       </Td>
       <Td><StatusPill tone={p.kind === 'clone' ? 'info' : 'neutral'}>{p.kind}</StatusPill></Td>
-      <Td>{engine || <span className="text-on-surface-low">Bound model</span>}</Td>
+      <Td className="max-w-64 break-all">{engine || <span className="text-on-surface-low">Bound model</span>}</Td>
       <Td>
         <span className="flex flex-wrap items-center gap-1.5">
           {p.locked && <StatusPill tone="primary">locked</StatusPill>}
