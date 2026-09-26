@@ -48,7 +48,7 @@ describe("hosted Windows package configuration", () => {
 
   it("uses the confirmed production origin and accepts explicit HTTPS overrides", async () => {
     const { hostedOrigin, configuredOrigin, DEFAULT_HOSTED_ORIGIN } = await packaging();
-    assert.equal(DEFAULT_HOSTED_ORIGIN, "https://gideon.workmates.app");
+    assert.equal(DEFAULT_HOSTED_ORIGIN, "https://gideon.centra.ag");
     assert.equal(configuredOrigin(), DEFAULT_HOSTED_ORIGIN);
     assert.equal(configuredOrigin("https://alternate.example"), "https://alternate.example");
     assert.equal(hostedOrigin("https://gideon.example"), "https://gideon.example");

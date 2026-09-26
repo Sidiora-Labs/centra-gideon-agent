@@ -42,7 +42,7 @@ test("workflow is manually dispatched on Windows with read-only repository permi
 });
 
 test("workflow requires operator URL and a provisioned hosted identity before building", () => {
-  assert.match(workflow, /GIDEON_CLOUD_URL: \$\{\{ vars\.GIDEON_CLOUD_URL \|\| 'https:\/\/gideon\.workmates\.app' \}\}/);
+  assert.match(workflow, /GIDEON_CLOUD_URL: \$\{\{ vars\.GIDEON_CLOUD_URL \|\| 'https:\/\/gideon\.centra\.ag' \}\}/);
   assert.match(workflow, /GIDEON_SMOKE_EMAIL: \$\{\{ secrets\.GIDEON_SMOKE_EMAIL \}\}/);
   assert.match(workflow, /GIDEON_SMOKE_PASSWORD: \$\{\{ secrets\.GIDEON_SMOKE_PASSWORD \}\}/);
   const required = workflow.indexOf("Require approved hosted configuration");
@@ -52,7 +52,7 @@ test("workflow requires operator URL and a provisioned hosted identity before bu
   assert.match(workflow, /Scheme -ne 'https'/);
   assert.match(workflow, /AbsoluteUri -ne/);
   assert.match(workflow, /if \(-not \$env:GIDEON_SMOKE_EMAIL -or -not \$env:GIDEON_SMOKE_PASSWORD\)/);
-  assert.match(workflow, /https:\/\/gideon\.workmates\.app/);
+  assert.match(workflow, /https:\/\/gideon\.centra\.ag/);
 });
 
 test("workflow installs locked dependencies and builds the real x64 NSIS target", () => {
