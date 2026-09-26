@@ -43,6 +43,11 @@ export interface ComposerProps {
   selection?: ComposerValue
   onSelect?: (patch: Partial<ComposerValue>) => void
   onAttach?: (files: File[]) => void
+  attachments?: readonly { id: string; name: string; meta?: string; kind?: 'image' | 'text' | 'archive'; state?: 'uploading' | 'done' | 'error'; progress?: number }[]
+  onRemoveAttachment?: (id: string) => void
+  onOpenAttachment?: (id: string) => void
+  draftKey?: string
+  contextUsage?: { input_tokens: number | null; cache_creation_tokens: number | null; cache_read_tokens: number | null; context_window_tokens: number | null; total_input_tokens?: number }
   onOpenPrompts?: () => void
   plusMenuExtra?: (close: () => void) => ReactNode
   onFocusChange?: (focused: boolean) => void
@@ -79,6 +84,7 @@ export interface ComposerProps {
   contextPct?: number
   minChars?: number
   openModelSignal?: number
+  auiModelSelector?: boolean
   openAgentSignal?: number
   openReasoningSignal?: number
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { BookText, FileText, Loader2, ScrollText } from 'lucide-react'
-import { fvs } from '../../theme/fontWeight'
+import { Loader2 } from 'lucide-react'
 import { composerMenuClass, composerOptionClass, useComposerTypeahead } from './composerTypeahead'
 import { formatMentionSize, mentionResults, mentionSearchKey, searchMentions, type MentionRow } from './mentionSearch'
+import { ComposerPersonItem } from '../../vendor/assistant-ui/elements/composer'
 
 export type MentionPick =
   | { kind: 'file'; path: string; name: string }
@@ -42,7 +42,6 @@ export function MentionMenu({ query, anchorRef, open, project, leading, onSelect
     onSelect: choose, onClose, onActiveIndex, height: 300, above: 140 })
   if (!open || !anchorRef.current) return null
   const scope = leading ? 'prompts, files & knowledge' : 'files & knowledge'
-  const icons = { file: FileText, knowledge: BookText, prompt: ScrollText }
   const hint = query.length < 2 ? `Type 2+ characters to search ${scope}…`
     : loading ? 'Searching…' : `No matching ${leading ? 'prompts, files or knowledge' : 'files or knowledge'}`
   return createPortal(<div ref={menu.menuRef} id={`${idPrefix}-list`} role="listbox"
@@ -50,20 +49,15 @@ export function MentionMenu({ query, anchorRef, open, project, leading, onSelect
     {rows.length === 0 ? <div data-type="caption" className="px-3 py-3 text-center text-on-surface-low">
       {loading && query.length >= 2 && <Loader2 size={12} className="mr-1.5 inline animate-spin" aria-hidden />}{hint}
     </div> : rows.map((row, index) => {
-      const Icon = icons[row.kind]
       const selected = index === menu.cursor
       const subtitle = row.kind === 'file' ? row.sub : `${row.kind} · ${row.sub}`
-      return <button key={`${row.kind}:${row.id}`} id={`${idPrefix}-opt-${index}`} type="button" role="option"
+      return <ComposerPersonItem key={`${row.kind}:${row.id}`} person={{ name: row.name, role: row.kind }} active={selected}
+        meta={<span className="flex min-w-0 items-center gap-2 text-xs text-on-surface-low"><span className="truncate">{subtitle}</span>
+          {row.size !== undefined && <span className="shrink-0 tabular-nums">{formatMentionSize(row.size)}</span>}</span>}
+        id={`${idPrefix}-opt-${index}`} role="option"
         aria-selected={selected} title={row.sub} onMouseEnter={() => menu.selectCursor(index)}
         onMouseDown={event => { event.preventDefault(); choose(index) }} className={composerOptionClass}
-        style={selected ? { background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' } : undefined}>
-        <Icon size={13} aria-hidden className={`shrink-0 ${selected ? 'text-primary' : 'text-on-surface-low'}`} />
-        <span className="min-w-0 flex-1">
-          <span data-type="label-s" className="block truncate font-mono text-on-surface" style={fvs(500)}>{row.name}</span>
-          <span data-type="caption" className="block truncate text-on-surface-low">{subtitle}</span>
-        </span>
-        {row.size !== undefined && <span data-type="caption" className="shrink-0 font-mono text-on-surface-low tabular-nums">{formatMentionSize(row.size)}</span>}
-      </button>
+        style={selected ? { background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' } : undefined} />
     })}
   </div>, document.body)
 }

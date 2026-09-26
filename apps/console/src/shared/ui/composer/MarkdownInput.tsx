@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
-import { Annotation, Compartment, EditorState, Transaction } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state'
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
+import type { Unstable_TriggerPopoverAriaProps } from '@assistant-ui/react'
 import { markdown } from '@codemirror/lang-markdown'
 import { liveMarkdown, liveMarkdownTheme } from './liveMarkdown'
 import { MentionMenu, type MentionPick } from './MentionMenu'
@@ -8,7 +9,7 @@ import { SlashMenu } from './SlashMenu'
 import { enterKeyAction } from './enterKeyAction'
 import { activeMention, activeSlash, EditorJournal, PromptRecall, type EditorSnapshot, type MentionTrigger, type TypeaheadCursor, typeaheadAttributes, updateTypeaheadCursor } from './editorState'
 
-export interface MarkdownInputHandle { focus: () => void; insertAtCaret: (text: string) => void }
+export interface MarkdownInputHandle { focus: () => void; insertAtCaret: (text: string) => void; applyDonorText: (text: string, caret: number) => void }
 interface Props {
   value: string
   onChange: (v: string) => void
@@ -27,6 +28,10 @@ interface Props {
   onLargePaste?: (text: string) => boolean
   mobile?: boolean
   sendOnEnter?: boolean
+  donorTriggers?: boolean
+  onCursorChange?: (position: number) => void
+  onTriggerKeyDown?: (event: KeyboardEvent) => boolean
+  donorAria?: Unstable_TriggerPopoverAriaProps
 }
 const origin = Annotation.define<'recall' | 'journal' | 'host'>()
 function snapshot(state: EditorState): EditorSnapshot {
@@ -62,8 +67,9 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
   const syncTriggers = useRef((view: EditorView) => {
     const text = view.state.doc.toString()
     const caret = view.state.selection.main.head
-    const mention = cb.current.onMentionFile || cb.current.onMentionKnowledge ? activeMention(text, caret) : null
-    const slash = cb.current.slashCommands ? activeSlash(text, caret) : null
+    const mention = !cb.current.donorTriggers && (cb.current.onMentionFile || cb.current.onMentionKnowledge) ? activeMention(text, caret) : null
+    const slash = !cb.current.donorTriggers && cb.current.slashCommands ? activeSlash(text, caret) : null
+    cb.current.onCursorChange?.(caret)
     const mentionKey = mention ? `${mention.at}:${mention.query}` : ''
     const slashKey = slash ? `/${slash.query}` : ''
     if (dismissed.current.mention !== mentionKey) dismissed.current.mention = ''
@@ -133,7 +139,8 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
           if (update.docChanged || update.selectionSet) syncTriggers.current(update.view)
           if (update.focusChanged) cb.current.onFocusChange?.(update.view.hasFocus)
         }),
-        EditorView.domEventHandlers({
+        Prec.high(EditorView.domEventHandlers({
+          keydown: event => !composing.current && !editor.current?.composing && !!cb.current.onTriggerKeyDown?.(event),
           compositionstart: () => { composing.current = true; return false },
           compositionend: () => { composing.current = false; return false },
           paste: event => {
@@ -141,7 +148,7 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
             if (!text || !cb.current.onLargePaste?.(text)) return false
             event.preventDefault(); return true
           },
-        }),
+        })),
       ],
     }) })
     editor.current = view
@@ -157,13 +164,25 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
     editor.current?.dispatch({ effects: compartments.current.placeholder.reconfigure(cmPlaceholder(placeholder ?? '')) })
   }, [placeholder])
   useEffect(() => {
-    editor.current?.dispatch({ effects: compartments.current.typeahead.reconfigure(EditorView.contentAttributes.of(typeaheadAttributes(comboId, cursor))) })
-  }, [comboId, cursor])
+    const donor = props.donorAria
+    const attributes = donor?.['aria-controls'] ? {
+      role: 'combobox', 'aria-controls': donor['aria-controls'], 'aria-expanded': 'true',
+      'aria-haspopup': 'listbox', ...(donor['aria-activedescendant'] ? { 'aria-activedescendant': donor['aria-activedescendant'] } : {}),
+    } : typeaheadAttributes(comboId, cursor)
+    editor.current?.dispatch({ effects: compartments.current.typeahead.reconfigure(EditorView.contentAttributes.of(attributes)) })
+  }, [comboId, cursor, props.donorAria])
   useEffect(() => { if (editor.current) syncTriggers.current(editor.current) }, [onMentionFile, onMentionKnowledge, slashCommands])
 
   const focusSoon = (view: EditorView) => requestAnimationFrame(() => { if (editor.current === view) view.focus() })
   useImperativeHandle(ref, () => ({
     focus() { editor.current?.focus() },
+    applyDonorText(text, caret) {
+      const view = editor.current
+      if (!view) return
+      const position = Math.min(Math.max(caret, 0), text.length)
+      replaceDocument(view, { text, anchor: position, head: position })
+      focusSoon(view)
+    },
     insertAtCaret(text) {
       const view = editor.current
       if (!view) return
@@ -191,7 +210,7 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
   }
   return <div className="relative w-full">
     <div ref={host} className="w-full overflow-y-auto overscroll-contain px-s pt-1" style={{ minHeight, maxHeight }} />
-    {(onMentionFile || onMentionKnowledge) && <MentionMenu query={mention?.query ?? ''} anchorRef={host} open={!!mention}
+    {!props.donorTriggers && (onMentionFile || onMentionKnowledge) && <MentionMenu query={mention?.query ?? ''} anchorRef={host} open={!!mention}
       project={mentionProject} leading={mention?.at === 0} idPrefix={`${comboId}-mention`}
       onActiveIndex={index => reportCursor('mention', index)} onSelect={pickMention}
       onClose={() => {
@@ -199,7 +218,7 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
         if (active) dismissed.current.mention = `${active.at}:${active.query}`
         triggers.current.mention = null; setMention(null)
       }} />}
-    {slashCommands && <SlashMenu query={slash?.query ?? ''} anchorRef={host} open={!!slash} idPrefix={`${comboId}-slash`}
+    {!props.donorTriggers && slashCommands && <SlashMenu query={slash?.query ?? ''} anchorRef={host} open={!!slash} idPrefix={`${comboId}-slash`}
       onActiveIndex={index => reportCursor('slash', index)} onSelect={pickSlash}
       onClose={() => {
         if (triggers.current.slash) dismissed.current.slash = `/${triggers.current.slash.query}`
