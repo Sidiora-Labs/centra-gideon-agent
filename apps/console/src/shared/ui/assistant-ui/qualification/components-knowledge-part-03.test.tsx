@@ -105,7 +105,7 @@ describe('persisted task flow', () => {
 
   it('opens the exact task ID when its handler is supplied', () => {
     render(<GraphHarness />)
-    fireEvent.click(screen.getByRole('button', { name: 'Write report' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Write report, blocked' }))
     expect(screen.getByRole('status', { name: 'Selected task' }).textContent).toBe('task-b')
   })
 

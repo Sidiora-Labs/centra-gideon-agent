@@ -10,7 +10,8 @@ import { InvestigateButton } from '../../shared/ui/InvestigateButton'
 import { Markdown } from '../../shared/ui/Markdown'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { api, type ScheduleJob, type ScheduleRun } from '../../shared/data/api'
-import { kindMeta, modeMeta, deriveKind, deriveMode, statusMeta, lastRunMeta, isInertOutcome, relFuture, relPast, absTime, mdToPlain } from './scheduleMeta'
+import { modeMeta, deriveMode, statusMeta, lastRunMeta, isInertOutcome, relPast, absTime, mdToPlain } from './scheduleMeta'
+import { ScheduledAgentRun } from '../agents/auiAgentPanel'
 import { actionLabel, actionIcon } from '../triggers/triggerMeta'
 import { ScheduleForm, toDraft, draftToPayload, type ScheduleDraft } from './ScheduleForm'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
@@ -30,12 +31,12 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
   const [err, setErr] = useState('')
   const [note, setNote] = useState('')
   const [histKey, setHistKey] = useState(0)
+  const [cardHistory, setCardHistory] = useState<{ jobId: string; runs: ScheduleRun[] } | null>(null)
 
   const [triggered, setTriggered] = useState(false)
   const [ranFlash, setRanFlash] = useState<null | 'ok' | 'error'>(null)
   const [fading, setFading] = useState(false)
   const runStartRef = useRef<number | null>(null)
-  const km = kindMeta(deriveKind(job))
   const mm = modeMeta(deriveMode(job))
   const provider = job.action?.provider
   const cfg = (job.action?.config ?? {}) as Record<string, unknown>
@@ -167,13 +168,13 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
       {err && <FieldError>{err}</FieldError>}
       {note && !running && <p className="text-ok text-[0.8125rem]">{note}</p>}
 
+      {cardHistory?.jobId === job.id && <ScheduledAgentRun job={job} history={cardHistory.runs} onSaved={onChanged} displayOnly />}
+
       {
 }
       { }
       <div className="flex flex-wrap items-center gap-s">
-        <span className="inline-flex items-center gap-1.5 rounded-pill px-m h-7 text-[0.8125rem]" style={toneChipSkin(km.tone, 16)}><km.icon size={13} /> {job.schedule}</span>
         <span className="inline-flex items-center gap-1.5 rounded-pill px-m h-7 text-[0.8125rem]" style={toneChipSkin(mm.tone, 16)}><ActionIcon size={13} /> {actLabel}</span>
-        {job.enabled && job.next_run_ts && <span className="text-on-surface-low text-[0.8125rem]">next {relFuture(job.next_run_ts)} · {absTime(job.next_run_ts)}</span>}
       </div>
 
       { }
@@ -224,7 +225,8 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
         {job.last_result && <div className="mt-2 rounded-md bg-surface-container px-m py-2 text-on-surface-var text-[0.8125rem] leading-relaxed"><Markdown>{job.last_result}</Markdown></div>}
       </Section>
 
-      <RunHistory triggerId={`schedule:${job.id}`} reloadKey={histKey} />
+      <RunHistory triggerId={`schedule:${job.id}`} reloadKey={histKey}
+        onLoaded={runs => setCardHistory(runs == null ? null : { jobId: job.id, runs })} />
     </div>
   )
 }
@@ -233,7 +235,7 @@ function Chip({ children }: { children: React.ReactNode }) {
   return <span className="rounded-pill bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var font-mono">{children}</span>
 }
 
-export function RunHistory({ triggerId, reloadKey = 0 }: { triggerId: string; reloadKey?: number }) {
+export function RunHistory({ triggerId, reloadKey = 0, onLoaded }: { triggerId: string; reloadKey?: number; onLoaded?: (runs: ScheduleRun[] | null) => void }) {
   const [runs, setRuns] = useState<ScheduleRun[] | null>(null)
   const [total, setTotal] = useState(0)
   const [limit, setLimit] = useState(5)
@@ -243,11 +245,15 @@ export function RunHistory({ triggerId, reloadKey = 0 }: { triggerId: string; re
 
   useEffect(() => {
     let alive = true
+    setRuns(null)
+    onLoaded?.(null)
     api.triggerHistory(triggerId, limit).then((d) => {
       if (!alive) return
-      setUnsupported(d.supported === false ? (d.reason || 'this kind keeps no run records') : null)
+      const supported = d.supported !== false
+      setUnsupported(supported ? null : (d.reason || 'this kind keeps no run records'))
       setRuns(d.runs); setTotal(d.total)
-    }).catch(() => { if (alive) setRuns([]) })
+      onLoaded?.(supported ? d.runs : null)
+    }).catch(() => { if (alive) { setUnsupported('Run history unavailable.'); setRuns([]); onLoaded?.(null) } })
     return () => { alive = false }
   }, [triggerId, limit, reloadKey])
 

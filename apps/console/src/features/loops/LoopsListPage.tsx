@@ -276,7 +276,7 @@ export function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () 
       {heatData.length > 0 && <section className="min-w-0" aria-label="Finding activity">
         <div data-type="caption" className="mb-1.5 uppercase tracking-wide text-on-surface-low">Finding activity</div>
         <div role="region" aria-label="Finding activity by UTC day" tabIndex={0} className="max-w-full overflow-x-auto focus-visible:outline focus-visible:outline-primary">
-          <div className="min-w-[680px]"><HeatGraph data={heatData} /></div>
+          <div className="min-w-[680px]"><HeatGraph data={heatData} unitLabel="findings" /></div>
         </div>
       </section>}
 

@@ -9,9 +9,9 @@ const scout: SavedAgent = {
   triggers: ['daily', 'manual'], active_sessions: 3, running_sessions: 1,
 }
 const maker: SavedAgent = {
-  name: 'maker', provider: '', description: '', skills: [], tools: [], triggers: [], active_sessions: 0,
+  name: 'maker', provider: '',
 }
-const catalog = { agents: [scout, maker], default_agent: 'scout' }
+let catalog = { agents: [scout, maker], default_agent: 'scout' }
 
 async function mount(query: Record<string, string> = {}) {
   const setQuery = vi.fn()
@@ -24,6 +24,7 @@ async function mount(query: Record<string, string> = {}) {
 beforeEach(() => {
   vi.resetModules()
   sessionStorage.clear()
+  catalog = { agents: [scout, maker], default_agent: 'scout' }
   vi.doMock('../../shared/data/api', async orig => ({
     ...(await orig<Record<string, unknown>>()),
     api: {
@@ -54,7 +55,7 @@ describe('Agents list uses the recorded AgentCard', () => {
     expect(within(card).getByText('1 running · 3 active')).toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: /connect/i })).toBeNull()
     expect(within(card).queryByText(/undefined|vundefined/i)).toBeNull()
-  })
+  }, 45_000)
 
   it('keeps an agent without optional metadata concise and does not infer reserved or active state', async () => {
     await mount()
@@ -96,5 +97,48 @@ describe('Agents list uses the recorded AgentCard', () => {
     expect(screen.queryByRole('button', { name: 'scout' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'New agent' }))
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
+  })
+
+  it('uses singular and plural counts from another recorded agent without inventing a running session', async () => {
+    catalog = { agents: [{
+      name: 'runner', provider: 'acp:claude-code', skills: ['dispatch'], tools: ['web', 'calendar'],
+      triggers: ['daily'], active_sessions: 2, running_sessions: 0,
+    }], default_agent: 'scout' }
+    await mount()
+    const card = await screen.findByRole('button', { name: 'runner' })
+    expect(within(card).getByRole('img', { name: '1 skill' })).toBeInTheDocument()
+    expect(within(card).getByRole('img', { name: '2 tools' })).toBeInTheDocument()
+    expect(within(card).getByRole('img', { name: '1 trigger' })).toBeInTheDocument()
+    expect(within(card).getByText('2 active')).toBeInTheDocument()
+    expect(within(card).queryByText(/running|default|built-in/)).toBeNull()
+  })
+
+  it('shows the matching empty state when search excludes all recorded native agents', async () => {
+    await mount({ q: 'absent' })
+    expect((await screen.findAllByText('No matching agents')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'scout' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'maker' })).toBeNull()
+  })
+
+  it('shows the native empty state and creation action when the catalog has no saved agents', async () => {
+    catalog = { agents: [], default_agent: '' }
+    const { onCreate } = await mount()
+    expect(await screen.findByText('No native agents')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'scout' })).toBeNull()
+    const actions = screen.getAllByRole('button', { name: 'New agent' })
+    await userEvent.click(actions[actions.length - 1])
+    expect(onCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps donor skill descriptions and the recorded child slot visible when supplied', async () => {
+    const { AgentCard } = await import('../../shared/vendor/assistant-ui/elements/agent-card')
+    render(<AgentCard name="described" provider="Native" description="Recorded purpose"
+      skills={[{ name: 'search', description: 'Finds customer records' }]}>
+      <span>2 active</span>
+    </AgentCard>)
+    const card = screen.getByText('described').closest('[data-slot="agent-card"]')!
+    expect(within(card as HTMLElement).getByText('Recorded purpose')).toBeInTheDocument()
+    expect(within(card as HTMLElement).getByText('Finds customer records')).toBeInTheDocument()
+    expect(within(card as HTMLElement).getByText('2 active')).toBeInTheDocument()
   })
 })

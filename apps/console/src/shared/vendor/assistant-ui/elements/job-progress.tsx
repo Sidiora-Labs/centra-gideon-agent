@@ -17,6 +17,8 @@ export function JobProgress({
   stageIndex,
   stageProgress,
   eta,
+  measured,
+  details,
   onCancel,
   className,
   ...props
@@ -28,13 +30,17 @@ export function JobProgress({
   | "stageIndex"
   | "stageProgress"
   | "eta"
+  | "measured"
+  | "details"
   | "onCancel"
 > & {
   title: string;
   stages: readonly JobStage[];
   stageIndex: number;
   stageProgress: number;
-  eta: string;
+  eta?: string;
+  measured?: { completed: number; total: number };
+  details?: readonly string[];
   onCancel?: () => void;
 }) {
   const stage = progressOf(stageIndex, stages.length);
@@ -45,11 +51,15 @@ export function JobProgress({
     0,
   );
   const current = stages[stage];
-  const overall = pct(
+  const stageOverall = pct(
     completed + (current ? current.weight * progress : 0),
     totalWeight,
   );
-  const finished = stage >= stages.length;
+  const validMeasurement = measured && Number.isFinite(measured.completed)
+    && Number.isFinite(measured.total) && measured.total > 0
+    && measured.completed >= 0 && measured.completed <= measured.total;
+  const overall = measured ? validMeasurement ? pct(measured.completed, measured.total) : 0 : stageOverall;
+  const finished = measured ? Boolean(validMeasurement && measured.completed === measured.total) : stage >= stages.length;
 
   return (
     <div
@@ -63,7 +73,7 @@ export function JobProgress({
       {...props}
     >
       <div className="flex items-center gap-2.5">
-        {finished ? (
+        {measured && !validMeasurement ? null : finished ? (
           <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />
         ) : (
           <Loader2Icon className="text-foreground/35 size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
@@ -71,9 +81,9 @@ export function JobProgress({
         <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">
           {title}
         </span>
-        <span className={cn(mono, "text-foreground/35 shrink-0 tabular-nums")}>
+        {(finished || eta) && <span className={cn(mono, "text-foreground/35 shrink-0 tabular-nums")}>
           {finished ? "done" : eta}
-        </span>
+        </span>}
         {!finished && onCancel && (
           <button
             type="button"
@@ -86,7 +96,7 @@ export function JobProgress({
         )}
       </div>
 
-      <span
+      {(!measured || validMeasurement) && <span
         role="progressbar"
         aria-label={`${title} progress`}
         aria-valuemin={0}
@@ -101,9 +111,9 @@ export function JobProgress({
           )}
           style={{ width: `${overall}%` }}
         />
-      </span>
+      </span>}
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {stages.length > 0 && <div className="flex flex-wrap gap-x-3 gap-y-1">
         {stages.map((item, i) => (
           <span
             key={item.name}
@@ -119,7 +129,8 @@ export function JobProgress({
             {item.name}
           </span>
         ))}
-      </div>
+      </div>}
+      {details?.map((detail) => <span key={detail} className={cn(mono, "text-foreground/45")}>{detail}</span>)}
     </div>
   );
 }

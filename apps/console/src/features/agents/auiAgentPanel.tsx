@@ -44,16 +44,17 @@ export function RecordedCheckpoints({ checkpoints, currentId }: { checkpoints: C
     : <p role="status">Checkpoint records unavailable.</p>
 }
 
-export function ScheduledAgentRun({ job, history, onSaved }: {
-  job: ScheduleJob; history: ScheduleRun[]; onSaved: () => void
+export function ScheduledAgentRun({ job, history, onSaved, displayOnly = false }: {
+  job: ScheduleJob; history: ScheduleRun[]; onSaved: () => void; displayOnly?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const known = history.flatMap(run => {
     const status = run.status ?? ''
     if (!run.id && !run.run_id) return []
-    if (!['success', 'succeeded', 'failed', 'error'].includes(status)) return []
-    return [{ id: run.run_id || run.id!, at: String(run.started_at ?? 'Time unavailable'), ok: status === 'success' || status === 'succeeded' }]
+    if (!['success', 'succeeded', 'failure', 'failed', 'error'].includes(status)) return []
+    const date = run.started_at == null ? null : new Date(typeof run.started_at === 'number' ? run.started_at * 1000 : run.started_at)
+    return [{ id: run.run_id || run.id!, at: date && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : 'Time unavailable', ok: status === 'success' || status === 'succeeded' }]
   })
   async function toggle() {
     if (busy || job.read_only) return
@@ -74,8 +75,8 @@ export function ScheduledAgentRun({ job, history, onSaved }: {
   return <div aria-label={`Schedule ${job.id}`}>
     <ScheduleCard name={job.name} cadence={job.schedule} enabled={job.enabled}
       nextRun={job.next_run_ts == null ? 'Next run unavailable' : new Date(job.next_run_ts * 1000).toLocaleString()}
-      history={known} onToggle={job.read_only ? undefined : () => void toggle()} />
-    {history.some(run => run.error) && <ul aria-label="Schedule run errors">
+      history={known} onToggle={displayOnly || job.read_only ? undefined : () => void toggle()} />
+    {!displayOnly && history.some(run => run.error) && <ul aria-label="Schedule run errors">
       {history.filter(run => run.error).map(run => <li key={run.run_id || run.id || String(run.started_at)}>
         {run.run_id || run.id || job.id}: {run.error}
       </li>)}

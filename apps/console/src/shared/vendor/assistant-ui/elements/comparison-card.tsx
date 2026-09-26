@@ -25,8 +25,8 @@ export function ComparisonCard({
 > & {
   traitLabels: readonly string[];
   options: readonly ComparisonOption[];
-  recommendedId: string;
-  reason: string;
+  recommendedId?: string;
+  reason?: string;
 }) {
   return (
     <div
@@ -102,7 +102,7 @@ export function ComparisonCard({
         })}
       </div>
 
-      <p className="text-foreground/55 text-xs leading-relaxed">{reason}</p>
+      {reason && <p className="text-foreground/55 text-xs leading-relaxed">{reason}</p>}
     </div>
   );
 }

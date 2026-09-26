@@ -53,15 +53,19 @@ describe('workflow records', () => {
 
   it('prints actual workflow event time, node, state, and detail', () => {
     render(<WorkflowTimeline rows={[row]} />)
-    expect(screen.getByText(/2026-09-26T10:00:00Z · fetch · completed/)).toBeTruthy()
+    expect(screen.getByText('2026-09-26T10:00:00Z')).toBeTruthy()
+    expect(screen.getByText('fetch · completed')).toBeTruthy()
     expect(screen.getByText('Fetched the source')).toBeTruthy()
   })
 
-  it('does not invent duration, quota, or completion percentage', () => {
+  it('uses the recorded proof for progress without inventing an ETA or cancellation', () => {
     render(<WorkflowJobProgress workflow={workflow} />)
     expect(screen.getByText('1 completed · 0 failed · 1 unverified')).toBeTruthy()
     expect(screen.getByText('Run run-1')).toBeTruthy()
-    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByRole('progressbar', { name: 'Source scan progress' }).getAttribute('aria-valuenow')).toBe('0')
+    expect(screen.getByText('0/1 steps verified')).toBeTruthy()
+    expect(screen.queryByText('unknown')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel the job' })).toBeNull()
   })
 })
 
@@ -99,10 +103,13 @@ describe('artifact structure', () => {
   it('compares actual row counts and version identities', () => {
     render(<ArtifactComparison before={artifact} after={{ ...artifact, name: 'Updated rows', version: 4,
       content: '[{"stage":"check"},{"stage":"write"}]' }} />)
-    expect(screen.getByText('Run rows → Updated rows')).toBeTruthy()
-    expect(screen.getByText('1 rows → 2 rows')).toBeTruthy()
-    expect(screen.getByText('Versions 3 and 4')).toBeTruthy()
-    expect(screen.getByText('Row 1, stage: fetch → check')).toBeTruthy()
+    expect(screen.getByText('Run rows')).toBeTruthy()
+    expect(screen.getByText('Updated rows')).toBeTruthy()
+    expect(screen.getByText('1 rows · version 3')).toBeTruthy()
+    expect(screen.getByText('2 rows · version 4')).toBeTruthy()
+    expect(screen.getByText('Row 1, stage: fetch')).toBeTruthy()
+    expect(screen.getByText('Row 1, stage: check')).toBeTruthy()
+    expect(screen.queryByText('pick')).toBeNull()
   })
 
   it('does not compare artifacts without tabular records', () => {

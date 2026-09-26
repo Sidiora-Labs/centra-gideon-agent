@@ -23,10 +23,10 @@
     "retain donor typed props, caller actions and presentation behavior",
     "disable action buttons when the caller has not supplied an action",
     "allow unknown retry telemetry and show attempt fraction only when both counts are supplied",
+    "allow a caller to render live schema controls while retaining donor read-only field defaults",
+    "expose an optional Cancel action and caller labels without changing the default donor actions",
     "accept exact caller-supplied approval choices, resolved labels and details without implying donor session or always policy",
     "omit unknown requester and empty reach sections while retaining donor populated presentation",
-    "allow per-choice accessible names, disabled revision and neutral or danger presentation",
-    "allow a caller to render live schema controls while retaining donor read-only field defaults",
-    "expose an optional Cancel action and caller labels without changing the default donor actions"
+    "allow per-choice accessible names, disabled revision and neutral or danger presentation"
   ]
 }
