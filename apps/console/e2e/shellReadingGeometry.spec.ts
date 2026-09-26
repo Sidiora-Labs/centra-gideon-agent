@@ -28,6 +28,11 @@ test('conversation keeps one centered reading column across desktop and mobile',
       const workspaceAction = header?.querySelector<HTMLElement>('[title="Workspace"]')
       const briefAction = header?.querySelector<HTMLElement>('[title="Brief the agent"]')
       const overflow = header?.querySelector<HTMLElement>('[title="More actions"]')
+      const labelFits = (action?: HTMLElement | null) => {
+        const label = action?.querySelector('span')?.getBoundingClientRect()
+        const clip = action?.closest('.overflow-x-auto')?.getBoundingClientRect()
+        return !!label && !!clip && label.left >= clip.left - 1 && label.right <= clip.right + 1
+      }
       const groupBox = group.getBoundingClientRect()
       const composerBox = composer.getBoundingClientRect()
       const assistantBox = assistant.getBoundingClientRect()
@@ -42,7 +47,7 @@ test('conversation keeps one centered reading column across desktop and mobile',
         headerWidth: header ? header.clientWidth - parseFloat(headerStyle!.paddingLeft) - parseFloat(headerStyle!.paddingRight) : null,
         titleWidth: headerTitle?.getBoundingClientRect().width ?? null,
         primaryReachable: !!newChat && newChat.getBoundingClientRect().width >= 40 && newChat.getBoundingClientRect().right <= innerWidth,
-        primaryLabeled: newChat?.textContent?.includes('New chat') && workspaceAction?.textContent?.includes('Workspace'),
+        primaryLabeled: newChat?.textContent?.includes('New chat') && workspaceAction?.textContent?.includes('Workspace') && labelFits(newChat) && labelFits(workspaceAction),
         secondaryLabeledOrOverflowed: !!overflow || !!briefAction?.textContent?.includes('Brief the agent'),
       }
     })
