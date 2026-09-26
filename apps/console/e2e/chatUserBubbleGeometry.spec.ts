@@ -50,6 +50,15 @@ test('a persisted user message keeps a natural bubble width on desktop and mobil
       expect(clearOfMessage, 'session map launcher covers the first message').toBe(true)
       await launcher.click()
       await expect(page.getByRole('dialog', { name: 'Session map drawer' })).toBeVisible()
+      const drawerGeometry = await page.getByRole('dialog', { name: 'Session map drawer' }).evaluate(element => {
+        const drawer = element.getBoundingClientRect()
+        const search = element.querySelector('[role="search"]')!.getBoundingClientRect()
+        const messages = element.querySelector('[data-session-map]')!.getBoundingClientRect()
+        return { searchContained: search.left >= drawer.left && search.right <= drawer.right,
+          listClear: messages.top >= search.bottom }
+      })
+      expect(drawerGeometry.searchContained, 'map search extends outside its drawer').toBe(true)
+      expect(drawerGeometry.listClear, 'map search overlaps the message list').toBe(true)
       await page.getByRole('dialog', { name: 'Session map drawer' }).getByRole('button', { name: 'Close session map' }).click()
       await expect(page.getByRole('dialog', { name: 'Session map drawer' })).toHaveCount(0)
     }
