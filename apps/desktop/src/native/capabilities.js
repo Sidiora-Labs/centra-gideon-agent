@@ -26,14 +26,14 @@ const SPECS = {
   },
   native_notifications: {
     kind: "opaque",
-    platforms: ["darwin"],
+    platforms: ["darwin", "win32"],
     requestable: false,
     disclosure:
       "macOS does not report notification authorization to the app; the first " +
       "notification asks, and Notifications in System Settings is the only control.",
     label: "Native notifications",
   },
-  global_hotkey: { kind: "shell", platforms: ["darwin"], requestable: false, label: "Global hotkey" },
+  global_hotkey: { kind: "shell", platforms: ["darwin", "win32"], requestable: false, label: "Global hotkey" },
   system_audio: {
     kind: "unsupported",
     platforms: [],
@@ -43,20 +43,28 @@ const SPECS = {
       "is no audio-only tap), so Gideon captures the microphone only.",
     label: "System audio",
   },
-  tray: { kind: "shell", platforms: ["darwin"], requestable: false, label: "Menu-bar item" },
-  login_item: { kind: "shell", platforms: ["darwin"], requestable: false, label: "Open at login" },
+  tray: { kind: "shell", platforms: ["darwin", "win32"], requestable: false, label: "Tray icon" },
+  login_item: { kind: "shell", platforms: ["darwin", "win32"], requestable: false, label: "Open at login" },
 };
 
 
 const unavailable = (reason) => ({ available: false, granted: "unavailable", requestable: false, reason });
 const answer = (state, reason = "", prompted = false) => ({ granted: state === "granted", state, prompted, reason });
 
-function makeCapabilities({ platform = "", systemPreferences, notification, onChange } = {}) {
+function makeCapabilities({ platform = "", systemPreferences, notification, shellAvailability = {}, onChange } = {}) {
   const nativeReaders = {
-    shell: () => ({ available: true, granted: "granted", requestable: false, reason: "" }),
+    shell: (specification, capability) => {
+      const reported = shellAvailability[capability];
+      if (platform === "win32" && reported !== undefined && !(typeof reported === "function" ? reported() : reported)) {
+        return unavailable(`${specification.label} is unavailable in this session`);
+      }
+      return { available: true, granted: "granted", requestable: false, reason: "" };
+    },
     opaque(specification) {
+      if (platform === "win32" && typeof notification?.isSupported !== "function") return unavailable("notification support cannot be checked");
       if (typeof notification?.isSupported === "function" && !notification.isSupported()) return unavailable("the OS does not support notifications");
-      return { available: true, granted: "not-determined", requestable: false, reason: specification.disclosure || "" };
+      return { available: true, granted: "not-determined", requestable: false,
+        reason: platform === "win32" ? "Windows notification permission is managed in system settings." : specification.disclosure || "" };
     },
     tcc(specification) {
       if (typeof systemPreferences?.getMediaAccessStatus !== "function") return unavailable("permission state unavailable in this build");
@@ -71,7 +79,7 @@ function makeCapabilities({ platform = "", systemPreferences, notification, onCh
     if (!specification || !CAPABILITIES.includes(capability)) return unavailable("unknown capability");
     if (specification.kind === "unsupported") return unavailable(specification.unsupported);
     if (!specification.platforms.includes(platform)) return unavailable(`not implemented on ${platform || "this platform"}`);
-    try { return nativeReaders[specification.kind](specification); }
+    try { return nativeReaders[specification.kind](specification, capability); }
     catch (error) { return unavailable(`probe failed: ${error?.message || "unknown error"}`); }
   }
   async function request(capability) {

@@ -10,7 +10,8 @@ const workspacePath = path.join(__dirname, "../src/application/window-workspace.
 const workspace = fs.readFileSync(workspacePath, "utf8");
 
 function preferences(view, attachBridge) {
-  const expression = workspace.match(new RegExp(`const ${view} = new WebContentsView\\((\\{[\\s\\S]*?)\\);`));
+  const ending = view === "drag" ? "\\) : null;" : "\\);";
+  const expression = workspace.match(new RegExp(`const ${view} = [\\s\\S]*?new WebContentsView\\((\\{[\\s\\S]*?)${ending}`));
   assert.ok(expression, `${view} must construct a WebContentsView`);
   return new Function("attachBridge", "path", "__dirname", `return (${expression[1]});`)(
     attachBridge, path, path.dirname(workspacePath),
@@ -39,6 +40,7 @@ test("a dashboard without the bridge remains sandboxed", () => {
 });
 
 test("the separate drag view remains sandboxed without a preload", () => {
+  assert.match(workspace, /const drag = process\.platform !== "win32"/);
   for (const attachBridge of [true, false]) {
     const settings = preferences("drag", attachBridge);
     assert.equal(settings.sandbox, true);

@@ -2,7 +2,9 @@
 
 const path = require("node:path");
 const { openShellStore } = require("../storage/shell-store");
-const { loadRegistry } = require("../storage/endpoint-registry");
+const { loadRegistry, saveRegistry, setActive } = require("../storage/endpoint-registry");
+const { withHostedEndpoint, hostedGatewayUrl, configureHostedEndpoint, HOSTED_ENDPOINT_ID } = require("../connection/hosted");
+const { readHostedConfig } = require("../connection/hosted-config");
 const policy = require("../connection/controller");
 const { describeList, makeConnectDialog } = require("../connection/dialog");
 const { START_TIMEOUT, pause } = require("./local-gateway");
@@ -25,20 +27,30 @@ async function waitRemote(window, address) {
 }
 
 class EndpointSession {
-  constructor({ gateway, workspace, mainWindow, home, electron, quit }) {
+  constructor({ gateway, workspace, mainWindow, home, electron, quit, hostedConfigOptions = {} }) {
     Object.assign(this, { gateway, workspace, mainWindow, home, electron, quit });
+    this.hostedConfig = readHostedConfig({ isPackaged: electron.app.isPackaged, ...hostedConfigOptions });
+    configureHostedEndpoint(this.hostedConfig);
     this.state = { activeUrl: null, store: null, health: {}, warnings: [], timer: null, attempt: 0, epoch: 0 };
     this.dialog = null;
   }
 
   initialize() {
     this.state.store = openShellStore({ home: this.home, log: (message) => console.warn(`desktop: ${message}`) });
+    if (!this.state.store.readOnly || this.hostedConfig) {
+      const registry = withHostedEndpoint(loadRegistry(this.state.store));
+      saveRegistry(this.state.store, registry);
+      const hosted = hostedGatewayUrl();
+      if (hosted) policy.writeConfirmation(this.state.store, "ep_gideoncloud", {
+        origin: hosted, scheme: "https", trust: "public", addresses: "",
+      });
+    }
     this.dialog = makeConnectDialog({ BrowserWindowCtor: this.electron.BrowserWindow, ipcMain: this.electron.ipcMain,
       handlers: this.handlers(), log: (message) => console.warn(message) });
     this.dialog.registerIpc();
   }
 
-  target() { return this.state.activeUrl || this.gateway.url; }
+  target() { return this.state.activeUrl || this.hostedConfig?.hostedUrl || this.gateway.url; }
   registry() { return loadRegistry(this.state.store); }
   openDialog() { this.dialog?.open(alive(this.mainWindow()) ? this.mainWindow() : null); }
 
@@ -87,20 +99,29 @@ class EndpointSession {
     this.cancelReachability();
     this.state.activeUrl = address;
     const epoch = this.state.epoch;
-    const attachBridge = policy.shouldAttachBridge(address);
+    const attachBridge = !this.hostedConfig && policy.shouldAttachBridge(address);
     if (this.workspace.hasBridge(window) !== attachBridge) this.workspace.mount(window, { attachBridge });
     const page = window.webContents;
     page.loadFile(path.join(__dirname, "../../views/loading.html"));
     try {
       await (local ? this.gateway.waitReady(window) : waitRemote(window, address));
       if (!alive(window) || epoch !== this.state.epoch) return false;
-      if (!local) page.once("did-finish-load", () => this.discoverName(page, address));
+      if (!local && address !== hostedGatewayUrl()) page.once("did-finish-load", () => this.discoverName(page, address));
       page.loadURL(address);
       return true;
     } catch (error) {
       if (!alive(window) || epoch !== this.state.epoch) return false;
       if (error.probe) this.recordHealth(error.probe);
       console.warn(`could not reach ${address}: ${error.message}`);
+      if (this.hostedConfig && address === this.hostedConfig.hostedUrl) {
+        const { response } = await this.electron.dialog.showMessageBox(window, { type: "error", title: "Gideon",
+          message: "Could not connect to Gideon Cloud.", detail: "Check your connection and try again, or open your saved gateways.",
+          buttons: ["Retry", "Gateways", "Quit"] });
+        if (response === 0) return this.navigate(window, address);
+        if (response === 1) this.openDialog();
+        if (response === 2) this.quit();
+        return false;
+      }
       if (!this.gateway.url || address === this.gateway.url) return false;
       this.openDialog();
       return this.navigate(window, this.gateway.url, true);
@@ -129,7 +150,25 @@ class EndpointSession {
     return row && row.kind !== "local" ? await policy.currentFingerprintFor(row.base_url) : "";
   }
 
+  async chooseHostedStartup() {
+    const registry = this.registry();
+    const row = registry.endpoints.find((endpoint) => endpoint.id === registry.active);
+    const currentFingerprint = row?.id === HOSTED_ENDPOINT_ID ? "" : await this.fingerprint(row);
+    const choice = row?.kind === "remote" ? policy.switchTo(this.state.store, row.id,
+      { localBaseUrl: "", currentFingerprint }) : { ok: false };
+    if (choice.ok) return choice.navigateTo;
+    const hosted = registry.endpoints.find((endpoint) => endpoint.id === HOSTED_ENDPOINT_ID);
+    if (!hosted) throw new Error("Configured Gideon Cloud endpoint is unavailable");
+    saveRegistry(this.state.store, setActive(registry, HOSTED_ENDPOINT_ID));
+    return hosted.base_url;
+  }
+
   async chooseStartup() {
+    if (this.hostedConfig) {
+      await this.navigate(this.mainWindow(), await this.chooseHostedStartup());
+      this.refresh().catch(() => {});
+      return;
+    }
     if (this.gateway.url) policy.rememberLocalGateway(this.state.store, this.gateway.url);
     const registry = this.registry();
     const row = registry.endpoints.find((endpoint) => endpoint.id === registry.active);

@@ -32,15 +32,19 @@ function readStoreFile(file, { fsMod = fs } = {}) {
     : { status: STORE_OK, data, reason: "" };
 }
 
-function inspect(file, { fsMod = fs, uid } = {}) {
+function inspect(file, { fsMod = fs, uid, platform = process.platform } = {}) {
   const owner = uid === undefined ? (process.getuid?.() ?? null) : uid;
   let metadata;
   try { metadata = fsMod.statSync(file); }
   catch (error) {
     const absent = error?.code === "ENOENT";
+    if (platform === "win32") return { exists: false, ownedByUs: null, ownerOnly: null, mode: null,
+      dirOwnerOnly: null, safe: false, reason: absent ? "absent" : "stat_failed" };
     return { exists: false, ownedByUs: absent, ownerOnly: absent, mode: null,
       dirOwnerOnly: absent, safe: absent, reason: absent ? "absent" : "stat_failed" };
   }
+  if (platform === "win32") return { exists: true, ownedByUs: null, ownerOnly: null, mode: null,
+    dirOwnerOnly: null, safe: false, reason: "windows_acl_not_verified" };
   const mode = metadata.mode & 0o777;
   const ownedByUs = owner === null || owner === metadata.uid;
   const ownerOnly = (mode & 0o077) === 0;
@@ -58,7 +62,7 @@ function inspect(file, { fsMod = fs, uid } = {}) {
     safe: ownedByUs && ownerOnly && dirOwnerOnly, reason: failure?.[1] || "" };
 }
 
-function writeStoreFile(file, data, { fsMod = fs } = {}) {
+function writeStoreFile(file, data, { fsMod = fs, platform = process.platform } = {}) {
   const directory = path.dirname(file);
   fsMod.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const temporary = path.join(directory, `.${STORE_FILE_NAME}.${process.pid}.${Date.now()}.tmp`);
@@ -68,17 +72,17 @@ function writeStoreFile(file, data, { fsMod = fs } = {}) {
     try { fsMod.unlinkSync(temporary); } catch {}
     throw error;
   }
-  try { fsMod.chmodSync(file, 0o600); } catch {}
+  if (platform !== "win32") try { fsMod.chmodSync(file, 0o600); } catch {}
 }
 
-function openShellStore({ home, fsMod = fs, uid, log } = {}) {
+function openShellStore({ home, fsMod = fs, uid, platform = process.platform, log } = {}) {
   const file = storePath(home || process.env.GIDEON_HOME || path.join(os.homedir(), ".gideon"));
   const loaded = readStoreFile(file, { fsMod });
   const entries = new Map(Object.entries(loaded.data));
   let readOnly = false;
   const persist = () => {
     if (readOnly) return;
-    try { writeStoreFile(file, Object.fromEntries(entries), { fsMod }); }
+    try { writeStoreFile(file, Object.fromEntries(entries), { fsMod, platform }); }
     catch (error) {
       readOnly = true;
       log?.(`shell store is not writable (${error?.message}); changes are this-session only`);
@@ -86,7 +90,7 @@ function openShellStore({ home, fsMod = fs, uid, log } = {}) {
   };
   return {
     file, status: loaded.status, storeReason: loaded.reason || "", storeDetail: loaded.detail || "",
-    permissions: inspect(file, { fsMod, uid }),
+    permissions: inspect(file, { fsMod, uid, platform }),
     get readOnly() { return readOnly; },
     get length() { return entries.size; },
     getItem(key) { return entries.get(String(key)) ?? null; },
