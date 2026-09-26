@@ -55,6 +55,7 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     GIDEON_HOME=/data \
+    GIDEON_WORKSPACE=/data/workspace \
     GIDEON_PORT=10000 \
     GIDEON_INSTALL_KIND=container
 RUN mkdir -p /data && chown gideon:gideon /data
@@ -66,3 +67,22 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:10000/api/healthz || exit 1
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["gideon", "gateway"]
+
+FROM mirror.gcr.io/library/node:24-alpine AS console
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/console/package.json apps/console/
+RUN npm ci --workspace=apps/console --prefer-offline
+COPY apps/console/ apps/console/
+COPY runtime/gideon/security/scan_rule_gloss.json runtime/gideon/security/scan_rule_gloss.json
+RUN npm exec --workspace=apps/console -- vite build
+
+FROM runtime AS single
+USER root
+COPY --from=console /app/apps/console/dist /tmp/gideon-console-dist
+RUN python -c 'from pathlib import Path; import shutil, sysconfig; shutil.copytree("/tmp/gideon-console-dist", Path(sysconfig.get_path("purelib")) / "gideon/static/dist", dirs_exist_ok=True)' && \
+    rm -rf /tmp/gideon-console-dist
+ENV GIDEON_DOCKER_MODE=single GIDEON_BIND_HOST=0.0.0.0
+USER gideon
+
+FROM runtime AS default
