@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ComposerPrimitive, unstable_useTriggerPopoverAriaProps, unstable_useTriggerPopoverTriggers, useAui, type Unstable_DirectiveFormatter, type Unstable_TriggerItem, type Unstable_TriggerPopoverAriaProps } from '@assistant-ui/react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Sparkles, Ear, Paperclip, MonitorUp, X } from 'lucide-react'
+import { Sparkles, Ear, Paperclip, MonitorUp, Gauge, ChevronDown, X } from 'lucide-react'
 import { IconButton } from './IconButton'
 import { physics, expr, useReducedMotion } from '../theme/motion'
-import { AgentPill, ApprovalPill, ReasoningPill, NaturalVoicePill, effortsForAgent, PlusMenu } from './composer/controls'
+import { AgentPill, ApprovalPill, NaturalVoicePill, effortsForAgent, PlusMenu } from './composer/controls'
 import { modelChoices } from './composer/composerChoices'
 import { Popover } from './Popover'
 import { MarkdownInput, type MarkdownInputHandle } from './composer/MarkdownInput'
@@ -35,6 +35,8 @@ import { DraftRestore } from '../vendor/assistant-ui/elements/draft-restore'
 import { MobileComposer as AssistantMobileComposer } from '../vendor/assistant-ui/elements/mobile-composer'
 import { ModelSelector } from '../vendor/assistant-ui/elements/model-selector.aui'
 import { ComposerTriggerPopover } from '../vendor/assistant-ui/elements/composer-trigger-popover.aui'
+import { ReasoningEffort as AssistantReasoningEffort } from '../vendor/assistant-ui/elements/reasoning-effort'
+import type { ReasoningEffort as GideonReasoningEffort } from '../data/api'
 import { activeMention, activeSlash } from './composer/editorState'
 import { filterSlashCommands } from './composer/SlashMenu'
 import { searchMentions, type MentionRow } from './composer/mentionSearch'
@@ -182,6 +184,25 @@ function ModelControl({ data, agent, value, openSignal, onSelect, aui }: {
       </div>}
     </Popover>}
   </div>
+}
+
+function ReasoningControl({ value, efforts, openSignal, onSelect }: {
+  value: GideonReasoningEffort; efforts: { value: string; label: string }[]; openSignal?: number
+  onSelect: (value: GideonReasoningEffort) => void
+}) {
+  if (!efforts.length) return null
+  const levels = [{ key: '', label: 'Default' }, ...efforts.map(effort => ({ key: effort.value, label: effort.label }))]
+  const label = levels.find(level => level.key === value)?.label ?? levels[0].label
+  return <Popover portal width={320} openSignal={openSignal}
+    trigger={(open, toggle) => <button type="button" onClick={toggle} aria-expanded={open} aria-haspopup="true"
+      aria-label={`Reasoning effort: ${label}`} data-type="label-s" data-composer-dimension="Reasoning effort"
+      className="flex h-9 max-w-[160px] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-left text-on-surface-var transition-colors hover:border-outline-variant/40 hover:bg-surface-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+      <Gauge size={16} aria-hidden className="shrink-0 text-primary/80" />
+      <span className="truncate">{label}</span><ChevronDown size={13} aria-hidden className="ml-auto shrink-0 text-on-surface-low" />
+    </button>}>
+    {close => <AssistantReasoningEffort levels={levels} selectedKey={value}
+      onSelect={key => { onSelect(key as GideonReasoningEffort); close() }} />}
+  </Popover>
 }
 
 export function Composer(props: ComposerProps) {
@@ -333,7 +354,7 @@ export function Composer(props: ComposerProps) {
             windowTokens: props.contextUsage?.context_window_tokens ?? null,
             breakdown: contextRows, breakdownComplete: !!contextBreakdown, sources: contextSources }} />}
           {controls.approval && <ApprovalPill value={selection?.approval ?? 'normal'} onSelect={approval => onSelect?.({ approval })} />}
-          {controls.reasoning && <ReasoningPill value={selection?.reasoning ?? ''} efforts={effortsForAgent(data, selection?.agent ?? '')}
+          {controls.reasoning && <ReasoningControl value={selection?.reasoning ?? ''} efforts={effortsForAgent(data, selection?.agent ?? '')}
             openSignal={props.openReasoningSignal} onSelect={reasoning => onSelect?.({ reasoning })} />}
           {naturalVoice && <NaturalVoicePill {...naturalVoice} />}
         </div>
