@@ -24,9 +24,9 @@ export const ArtifactGrid = memo(function ArtifactGrid({ artifacts, onOpen, onBr
             action={{ label: 'Browse files', onClick: onBrowseFiles, icon: FolderOpen }} />
   }
   return (
-    <div className="grid grid-cols-1 gap-m p-l sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div data-slot="artifact-grid" className="grid min-w-0 gap-m p-l" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 14rem), 1fr))' }}>
       {artifacts.map((a) => (
-        <Morph key={a.slug} id={`artifact-${a.slug}`} className="grid">
+        <Morph key={a.slug} id={`artifact-${a.slug}`} className="grid min-w-0">
           <ArtifactCard art={a} onOpen={onOpen} />
         </Morph>
       ))}

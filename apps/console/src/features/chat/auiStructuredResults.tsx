@@ -20,6 +20,14 @@ import remarkGfm from 'remark-gfm'
 type Cell = string | number | boolean | null
 type Row = Record<string, Cell>
 
+function compactTimelineTime(timestamp: string): string {
+  const at = new Date(timestamp)
+  if (!Number.isFinite(at.getTime())) return timestamp
+  const day = new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric' }).format(at)
+  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(at)
+  return `${day} ${time}`
+}
+
 function isCell(value: unknown): value is Cell {
   return value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 }
@@ -38,12 +46,12 @@ export function StructuredArtifactTable({ artifact, onOpen, showTitle = true }: 
   const rows = artifactTableRows(artifact)
   if (!rows) return <p data-slot="data-table" className="text-sm text-on-surface-low">No tabular JSON in {artifact.name}.</p>
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
-  return <section aria-label={`Data table from ${artifact.name}`} className="space-y-2">
-    {(showTitle || onOpen) && <div className="flex items-center justify-between gap-2">
-      {showTitle && <strong>{artifact.name}</strong>}
+  return <section aria-label={`Data table from ${artifact.name}`} className="min-w-0 max-w-full space-y-2">
+    {(showTitle || onOpen) && <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+      {showTitle && <strong className="min-w-0 break-words [overflow-wrap:anywhere]">{artifact.name}</strong>}
       {onOpen && <button type="button" onClick={() => onOpen(artifact.slug)} className="underline">Open artifact</button>}
     </div>}
-    <DataTable rows={rows} columns={columns.map(key => ({ key, label: key }))} />
+    <DataTable rows={rows} columns={columns.map(key => ({ key, label: key }))} className="min-w-0 max-w-full" />
   </section>
 }
 
@@ -53,16 +61,16 @@ export function ArtifactMetricChart({ artifact, column }: { artifact: Artifact; 
   if (!points?.length || !points.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) {
     return <p className="text-sm text-on-surface-low">No numeric {column} series in {artifact.name}.</p>
   }
-  return <div data-slot="artifact-chart" className="space-y-2">
+  return <div data-slot="artifact-chart" className="min-w-0 max-w-full space-y-2">
     <NumberTicker label={`${artifact.name}: ${column}`} value={points.at(-1)!} />
-    <Chart label={column} value={String(points.at(-1))} points={points} visibleCount={points.length} variant="line" />
+    <Chart label={column} value={String(points.at(-1))} points={points} visibleCount={points.length} variant="line" className="min-w-0 max-w-full" />
   </div>
 }
 
 export function ArtifactWebPreview({ artifact }: { artifact: Artifact }) {
   if (artifact.kind !== 'html') return null
   const src = `/api/artifacts/${encodeURIComponent(artifact.slug)}/raw?version=${artifact.version}`
-  return <WebPreview origin={src} loading={false}>
+  return <WebPreview origin={src} loading={false} className="min-w-0 max-w-full">
     <iframe title={artifact.name} src={src} sandbox="" referrerPolicy="no-referrer" className="h-60 w-full border-0" />
   </WebPreview>
 }
@@ -70,7 +78,7 @@ export function ArtifactWebPreview({ artifact }: { artifact: Artifact }) {
 export function ArtifactDiagram({ artifact }: { artifact: Artifact }) {
   if (artifact.kind !== 'svg') return null
   const src = `/api/artifacts/${encodeURIComponent(artifact.slug)}/raw?version=${artifact.version}`
-  return <Diagram title={artifact.name} zoom={1}>
+  return <Diagram title={artifact.name} zoom={1} className="min-w-0 max-w-full">
     <img src={src} alt={artifact.name} className="max-h-80 max-w-full object-contain" />
   </Diagram>
 }
@@ -85,7 +93,7 @@ export function TaskFlowGraph({ graph, onOpen }: { graph: TaskGraphData; onOpen?
   return <FlowGraph aria-label="Task dependency graph" nodes={graph.tasks.map((task, index) => ({
     id: task.id, label: task.title, status: task.status, column: index, row: 0, state: state(task.status),
   }))} edges={graph.edges.map(({ from, to }) => ({ from, to }))}
-    visibleCount={graph.tasks.length} onSelect={onOpen} />
+    visibleCount={graph.tasks.length} onSelect={onOpen} className="min-w-0 max-w-full" />
 }
 
 export function WorkflowActivityGraph({ workflow }: { workflow: WorkflowIntrospection }) {
@@ -93,7 +101,7 @@ export function WorkflowActivityGraph({ workflow }: { workflow: WorkflowIntrospe
   const counts = new Map<string, number>()
   dates.forEach((date) => { const day = date.toISOString().slice(0, 10); counts.set(day, (counts.get(day) || 0) + 1) })
   if (!dates.length) return <p data-slot="activity-graph">No timestamped activity.</p>
-  return <ActivityGraph title={workflow.workflow} total={`${dates.length} timestamped events`}
+  return <ActivityGraph title={workflow.workflow} total={`${dates.length} timestamped events`} className="min-w-0 max-w-full"
     data={Array.from(counts, ([day, count]) => ({ date: day, count }))}
     start={new Date(Math.min(...dates.map((date) => date.getTime())))}
     end={new Date(Math.max(...dates.map((date) => date.getTime())))} />
@@ -103,8 +111,8 @@ export interface ArtifactMathResult { artifact: Artifact; expression: string; no
 
 export function ArtifactMath({ result }: { result: ArtifactMathResult }) {
   if (!result.expression.trim()) return null
-  return <section data-slot="math" aria-label={`Math from ${result.artifact.name}`}>
-    <MathBlock label={result.artifact.name} steps={[{ expression: result.expression, note: result.note }]} visibleSteps={1} />
+  return <section data-slot="math" aria-label={`Math from ${result.artifact.name}`} className="min-w-0 max-w-full">
+    <MathBlock label={result.artifact.name} steps={[{ expression: result.expression, note: result.note }]} visibleSteps={1} className="min-w-0 max-w-full" />
   </section>
 }
 
@@ -115,7 +123,7 @@ export function ArtifactSpecSheet({ artifact }: { artifact: Artifact }) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const rows = Object.entries(value).filter(([, entry]) => isCell(entry)).map(([label, entry]) => ({ label, value: entry == null ? '—' : String(entry) }))
   if (!rows.length) return null
-  return <SpecSheet title={artifact.name} rows={rows} visibleCount={rows.length} />
+  return <SpecSheet title={artifact.name} rows={rows} visibleCount={rows.length} className="min-w-0 max-w-full" style={{ overflowWrap: 'anywhere' }} />
 }
 
 export function ArtifactComparison({ before, after }: { before: Artifact; after: Artifact }) {
@@ -133,8 +141,8 @@ export function ArtifactComparison({ before, after }: { before: Artifact; after:
   }
   const trait = (label: string, value: Cell | undefined): string | false => value === undefined
     ? false : `${label}: ${value === '' ? 'empty string' : String(value)}`
-  return <section data-slot="comparison" aria-label={`Compare ${before.name} and ${after.name}`}>
-    <ComparisonCard traitLabels={changes.map((change) => change.label)} options={[
+  return <section data-slot="comparison" aria-label={`Compare ${before.name} and ${after.name}`} className="min-w-0 max-w-full">
+    <ComparisonCard className="min-w-0 max-w-full" traitLabels={changes.map((change) => change.label)} options={[
       { id: before.slug + ':' + before.version, name: before.name, headline: `${left.length} rows · version ${before.version}`,
         traits: changes.map((change) => trait(change.label, change.from)) },
       { id: after.slug + ':' + after.version, name: after.name, headline: `${right.length} rows · version ${after.version}`,
@@ -156,10 +164,10 @@ export function WorkflowTimeline({ rows }: { rows: readonly WorkflowTimelineRow[
     ].filter(Boolean)
     return {
       id: `${row.node_id}:${row.ts}:${index}`, when: 'past',
-      time: row.ts, title: [row.node_id || row.kind, row.state].filter(Boolean).join(' · '),
+      time: compactTimelineTime(row.ts), dateTime: row.ts, title: [row.node_id || row.kind, row.state].filter(Boolean).join(' · '),
       detail: [row.detail, ...facts].filter(Boolean).join(' · ') || undefined,
     }
-  })} visibleCount={rows.length} className="max-w-none" />
+  })} visibleCount={rows.length} className="min-w-0 max-w-full" />
 }
 
 export function WorkflowJobProgress({ workflow }: { workflow: WorkflowIntrospection }) {
@@ -167,7 +175,7 @@ export function WorkflowJobProgress({ workflow }: { workflow: WorkflowIntrospect
   return <JobProgress aria-label={`Progress of ${workflow.workflow}`} title={workflow.workflow}
     stages={[]} stageIndex={0} stageProgress={0}
     measured={{ completed: workflow.proof.verified_steps, total: workflow.proof.total_steps }}
-    details={[
+    className="min-w-0 max-w-full" details={[
       `${workflow.proof.verified_steps}/${workflow.proof.total_steps} steps verified`,
       `${stats.steps_completed} completed · ${stats.steps_failed} failed · ${stats.unverified_steps} unverified`,
       `Run ${stats.run_id}`,
