@@ -13,6 +13,7 @@ export interface FlowNode {
   column: number;
   row: number;
   state: FlowNodeState;
+  status?: string;
 }
 
 export interface FlowEdge {
@@ -29,26 +30,29 @@ export function FlowGraph({
   nodes,
   edges,
   visibleCount,
+  onSelect,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "nodes" | "edges" | "visibleCount"
+  "children" | "nodes" | "edges" | "visibleCount" | "onSelect"
 > & {
   nodes: readonly FlowNode[];
   edges: readonly FlowEdge[];
   visibleCount: number;
+  onSelect?: (id: string) => void;
 }) {
   const shown = take(nodes, visibleCount);
   const shownIds = new Set(shown.map((node) => node.id));
   const columns = Math.max(0, ...nodes.map((node) => node.column)) + 1;
   const rows = Math.max(0, ...nodes.map((node) => node.row)) + 1;
   const width = (columns - 1) * COL_W + NODE_W;
-  const height = (rows - 1) * ROW_H + NODE_H;
+  const nodeHeight = nodes.some((node) => node.status) ? 40 : NODE_H;
+  const height = (rows - 1) * ROW_H + nodeHeight;
 
   const center = (node: FlowNode) => ({
     x: node.column * COL_W + NODE_W / 2,
-    y: node.row * ROW_H + NODE_H / 2,
+    y: node.row * ROW_H + nodeHeight / 2,
   });
 
   return (
@@ -92,28 +96,35 @@ export function FlowGraph({
           })}
         </svg>
 
-        {shown.map((node) => (
-          <div
-            key={node.id}
-            className={cn(
+        {shown.map((node) => {
+          const nodeProps = {
+            title: node.status ? `${node.label} · ${node.status}` : node.label,
+            className: cn(
               "fade-in zoom-in-95 animate-in fill-mode-both absolute flex items-center justify-center rounded-xl border text-center text-[11.5px] leading-tight duration-300",
+              node.status && "flex-col",
               node.state === "done" &&
                 "border-foreground/10 bg-foreground/[0.04] text-foreground/50",
               node.state === "active" &&
                 "text-foreground/90 border-blue-500/30 bg-blue-500/10 dark:border-blue-400/30",
               node.state === "pending" &&
                 "border-foreground/8 text-foreground/35 border-dashed",
-            )}
-            style={{
+            ),
+            style: {
               left: node.column * COL_W,
               top: node.row * ROW_H,
               width: NODE_W,
-              height: NODE_H,
-            }}
-          >
-            <span className={cn(mono, "px-2")}>{node.label}</span>
-          </div>
-        ))}
+              height: nodeHeight,
+            },
+          };
+          const content = <>
+            <span className={cn(mono, "w-full truncate px-2")}>{node.label}</span>
+            {node.status && <span className="text-foreground/50 text-[9px]">{node.status}</span>}
+          </>;
+          return onSelect ? <button key={node.id} type="button" {...nodeProps}
+            aria-label={node.status ? `${node.label}, ${node.status}` : node.label}
+            onClick={() => onSelect(node.id)}>{content}</button>
+            : <div key={node.id} {...nodeProps}>{content}</div>;
+        })}
       </div>
     </div>
   );

@@ -9,6 +9,10 @@ import { TraceWaterfall, type TraceSpan } from '../../shared/vendor/assistant-ui
 import { WebPreview } from '../../shared/vendor/assistant-ui/elements/web-preview'
 import { Diagram } from '../../shared/vendor/assistant-ui/elements/diagram'
 import { ActivityGraph } from '../../shared/vendor/assistant-ui/elements/activity-graph'
+import { FlowGraph, type FlowNodeState } from '../../shared/vendor/assistant-ui/elements/flow-graph'
+import { ComparisonCard } from '../../shared/vendor/assistant-ui/elements/comparison-card'
+import { Timeline } from '../../shared/vendor/assistant-ui/elements/timeline'
+import { JobProgress } from '../../shared/vendor/assistant-ui/elements/job-progress'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -71,26 +75,16 @@ export function ArtifactDiagram({ artifact }: { artifact: Artifact }) {
 }
 
 export function TaskFlowGraph({ graph, onOpen }: { graph: TaskGraphData; onOpen?: (id: string) => void }) {
-  const tasks = graph.tasks
-  const positions = new Map(tasks.map((task, index) => [task.id, 24 + index * 48]))
-  return <section data-slot="flow-graph" aria-label="Task dependency graph" className={`${paper} overflow-x-auto rounded-xl p-3`}>
-    <svg role="img" aria-label="Task dependencies" width="360" height={Math.max(48, tasks.length * 48)}>
-      {graph.edges.map((edge) => {
-        const from = positions.get(edge.from)
-        const to = positions.get(edge.to)
-        return from === undefined || to === undefined ? null : <path key={`${edge.from}:${edge.to}`}
-          d={`M 170 ${from} Q 230 ${(from + to) / 2} 170 ${to}`} fill="none" stroke="currentColor" strokeOpacity="0.45" />
-      })}
-      {tasks.map((task) => <g key={task.id}>
-        <rect x="2" y={positions.get(task.id)! - 17} width="160" height="34" rx="8" fill="none" stroke="currentColor" />
-        <text x="10" y={positions.get(task.id)! + 4} fontSize="12" fill="currentColor">{task.title.slice(0, 21)}</text>
-      </g>)}
-    </svg>
-    <ul className="space-y-1 text-sm">{tasks.map((task) => <li key={task.id}>
-      {onOpen ? <button type="button" onClick={() => onOpen(task.id)} className="underline">{task.title}</button> : task.title}
-      <span className="ml-2 text-on-surface-low">{task.status}</span>
-    </li>)}</ul>
-  </section>
+  const state = (status: string): FlowNodeState => {
+    const value = status.toLowerCase()
+    if (['done', 'completed', 'succeeded'].includes(value)) return 'done'
+    if (['running', 'in_progress', 'active'].includes(value)) return 'active'
+    return 'pending'
+  }
+  return <FlowGraph aria-label="Task dependency graph" nodes={graph.tasks.map((task, index) => ({
+    id: task.id, label: task.title, status: task.status, column: index, row: 0, state: state(task.status),
+  }))} edges={graph.edges.map(({ from, to }) => ({ from, to }))}
+    visibleCount={graph.tasks.length} onSelect={onOpen} />
 }
 
 export function WorkflowActivityGraph({ workflow }: { workflow: WorkflowIntrospection }) {
@@ -127,41 +121,44 @@ export function ArtifactComparison({ before, after }: { before: Artifact; after:
   const left = artifactTableRows(before)
   const right = artifactTableRows(after)
   if (!left || !right) return null
-  const changes: { row: number; column: string; from: Cell | undefined; to: Cell | undefined }[] = []
-  for (let index = 0; index < Math.min(left.length, right.length); index++) {
-    const columns = new Set([...Object.keys(left[index]), ...Object.keys(right[index])])
+  const changes: { label: string; from: Cell | undefined; to: Cell | undefined }[] = []
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const columns = new Set([...Object.keys(left[index] || {}), ...Object.keys(right[index] || {})])
     for (const column of columns) {
-      const from = left[index][column]
-      const to = right[index][column]
-      if (from !== to) changes.push({ row: index + 1, column, from, to })
+      const from = left[index]?.[column]
+      const to = right[index]?.[column]
+      if (from !== to) changes.push({ label: `Row ${index + 1}, ${column}`, from, to })
     }
   }
-  return <section data-slot="comparison" aria-label={`Compare ${before.name} and ${after.name}`} className={`${paper} rounded-xl p-3`}>
-    <h3>{before.name} → {after.name}</h3>
-    <p className="text-sm">{left.length} rows → {right.length} rows</p>
-    <p className="text-xs text-on-surface-low">Versions {before.version} and {after.version}</p>
-    {changes.length > 0 && <ul className="mt-2 text-sm">{changes.map((change) => <li key={`${change.row}:${change.column}`}>
-      Row {change.row}, {change.column}: {change.from == null ? '—' : String(change.from)} → {change.to == null ? '—' : String(change.to)}
-    </li>)}</ul>}
+  const trait = (label: string, value: Cell | undefined): string | false => value === undefined
+    ? false : `${label}: ${value === '' ? 'empty string' : String(value)}`
+  return <section data-slot="comparison" aria-label={`Compare ${before.name} and ${after.name}`}>
+    <ComparisonCard traitLabels={changes.map((change) => change.label)} options={[
+      { id: before.slug + ':' + before.version, name: before.name, headline: `${left.length} rows · version ${before.version}`,
+        traits: changes.map((change) => trait(change.label, change.from)) },
+      { id: after.slug + ':' + after.version, name: after.name, headline: `${right.length} rows · version ${after.version}`,
+        traits: changes.map((change) => trait(change.label, change.to)) },
+    ]} />
   </section>
 }
 
 export function WorkflowTimeline({ rows }: { rows: readonly WorkflowTimelineRow[] }) {
-  return <section data-slot="timeline" aria-label="Workflow events" className={`${paper} rounded-xl p-3`}>
-    <ol>{rows.map((row, index) => <li key={`${row.node_id}:${row.ts}:${index}`} className="border-l pl-3 text-sm">
-      <time dateTime={row.ts}>{row.ts}</time> · {row.node_id} · {row.state}
-      {row.detail && <p className="text-on-surface-low">{row.detail}</p>}
-    </li>)}</ol>
-  </section>
+  return <Timeline aria-label="Workflow events" events={rows.map((row, index) => ({
+    id: `${row.node_id}:${row.ts}:${index}`, when: row.state === 'running' ? 'now' : 'past',
+    time: row.ts, title: `${row.node_id} · ${row.state}`, detail: row.detail || undefined,
+  }))} visibleCount={rows.length} className="max-w-none" />
 }
 
 export function WorkflowJobProgress({ workflow }: { workflow: WorkflowIntrospection }) {
   const stats = workflow.stats
-  return <section data-slot="job-progress" aria-label={`Progress of ${workflow.workflow}`} className={`${paper} rounded-xl p-3`}>
-    <h3>{workflow.workflow}</h3>
-    <p className="text-sm">{stats.steps_completed} completed · {stats.steps_failed} failed · {stats.unverified_steps} unverified</p>
-    <p className="text-xs text-on-surface-low">Run {stats.run_id}</p>
-  </section>
+  return <JobProgress aria-label={`Progress of ${workflow.workflow}`} title={workflow.workflow}
+    stages={[]} stageIndex={0} stageProgress={0}
+    measured={{ completed: workflow.proof.verified_steps, total: workflow.proof.total_steps }}
+    details={[
+      `${workflow.proof.verified_steps}/${workflow.proof.total_steps} steps verified`,
+      `${stats.steps_completed} completed · ${stats.steps_failed} failed · ${stats.unverified_steps} unverified`,
+      `Run ${stats.run_id}`,
+    ]} />
 }
 
 export interface RecordedSpan {

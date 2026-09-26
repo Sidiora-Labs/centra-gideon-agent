@@ -85,7 +85,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/flow-graph.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/flow-graph.tsx",
       "donor_sha256": "7abe38ff10f4795ba6cb4dfc45c336a316edd8ac06401621ea6d2d08fa627409",
-      "local_sha256": "266c791d4e8839a1ac392bdf9e8dea8c9b37300fc628152fb8e965a053eaf2b7"
+      "local_sha256": "a234d10ebf2b21a7e37cb6bfbeb0fe8b9058aae9bc07335a8905170837424dcb"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/activity-graph.tsx",
@@ -109,7 +109,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/comparison-card.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/comparison-card.tsx",
       "donor_sha256": "ab1221f25b862bbd0a86fcb59c31b14a6af91d9b5bdedbece96cbbbf9960f32d",
-      "local_sha256": "68f44065652105dba4612d912c37953ebc40d400baee28483b7cb6fad08ca659"
+      "local_sha256": "41a4b106802e7d77b7dc7c0817eb8e5fd84e5e634088a1ebfcc6d15145460557"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/timeline.tsx",
@@ -121,7 +121,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/job-progress.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/job-progress.tsx",
       "donor_sha256": "160cb61f6d335f6170610ff639b62b4ebcf1e1440131c4fd8c81d9cbbdd01d2f",
-      "local_sha256": "00bd3736df66bb610b2b1d1debe1a548e6136709ac1b692c1b996e8eb4159f8c"
+      "local_sha256": "08b4edcd9914fa4c7b9e535ca8d378ba0631a856d4883c5ff7cd43910a4db593"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/score-breakdown.tsx",
