@@ -1,5 +1,6 @@
 import type { Artifact, ExperimentCampaign, TaskGraphData, WorkflowIntrospection, WorkflowRunStats, WorkflowTimelineRow } from '../../shared/data/api'
 import { paper } from '../../shared/vendor/assistant-ui/elements/surfaces'
+import { DataTable } from '../../shared/vendor/assistant-ui/elements/data-table'
 import { Chart } from '../../shared/vendor/assistant-ui/elements/chart'
 import { NumberTicker } from '../../shared/vendor/assistant-ui/elements/number-ticker'
 import { MathBlock } from '../../shared/vendor/assistant-ui/elements/math-block'
@@ -32,17 +33,12 @@ export function StructuredArtifactTable({ artifact, onOpen }: { artifact: Artifa
   const rows = artifactTableRows(artifact)
   if (!rows) return <p data-slot="data-table" className="text-sm text-on-surface-low">No tabular JSON in {artifact.name}.</p>
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
-  return <section data-slot="data-table" aria-label={`Data table from ${artifact.name}`} className={`${paper} overflow-x-auto rounded-xl p-3`}>
+  return <section aria-label={`Data table from ${artifact.name}`} className="space-y-2">
     <div className="flex items-center justify-between gap-2">
       <strong>{artifact.name}</strong>
       {onOpen && <button type="button" onClick={() => onOpen(artifact.slug)} className="underline">Open artifact</button>}
     </div>
-    {columns.length > 0 ? <table className="mt-2 w-full text-left text-sm">
-      <thead><tr>{columns.map((column) => <th key={column} scope="col" className="px-2 py-1">{column}</th>)}</tr></thead>
-      <tbody>{rows.map((row, index) => <tr key={index}>
-        {columns.map((column) => <td key={column} className="px-2 py-1">{row[column] == null ? '—' : String(row[column])}</td>)}
-      </tr>)}</tbody>
-    </table> : <p className="text-sm text-on-surface-low">No rows available.</p>}
+    <DataTable rows={rows} columns={columns.map(key => ({ key, label: key }))} />
   </section>
 }
 

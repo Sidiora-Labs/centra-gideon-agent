@@ -55,7 +55,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/data-table.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/data-table.tsx",
       "donor_sha256": "e7b3b761f7e64ef081baf1e8ea39ad9d6d26389ae49c888ea6234f07c01351e1",
-      "local_sha256": "7dd0c9a214979c7e7e98fa2af99ec705795bb49f1cd00675bb06d33bacebc670"
+      "local_sha256": "dece3f79324cb8bd443cd11cbbc8b614606229b16d8490c64e333607bbbeba92"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/number-ticker.tsx",
