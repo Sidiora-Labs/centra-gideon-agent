@@ -119,12 +119,14 @@ ac_1 = "Implement the complete reachable feature: Accepted skills in portable ex
 
 [task.runtime-memory]
 title = "runtime-memory end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "runtime-memory"
 requires = []
 reqs = ["001.1", "002.1", "047.1", "048.1", "049.1", "050.1", "051.1", "052.1", "053.1", "054.1", "055.1", "056.1", "057.1", "132.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/onboarding/ImportStep.tsx", "runtime/gideon/cognition/archive_recall.py", "runtime/gideon/cognition/consolidation_cycle.py", "runtime/gideon/cognition/history.py", "runtime/gideon/cognition/knowledge/pipeline/runner.py", "runtime/gideon/cognition/knowledge/readers.py", "runtime/gideon/cognition/onboarding_import/model.py", "runtime/gideon/cognition/onboarding_import/registry.py", "runtime/gideon/cognition/onboarding_import/sources/claude_code.py", "runtime/gideon/cognition/onboarding_import/sources/hermes.py", "runtime/gideon/cognition/onboarding_import/transcripts.py", "runtime/gideon/cognition/onboarding_import/writers.py", "runtime/gideon/engine/agents/native/builtin_tools.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/engine/subagent.py", "runtime/gideon/engine/subagent_memory.py", "runtime/gideon/interfaces/dashboard/handlers/messaging.py", "checks/runtime/verify_runtime_memory.py", "apps/console/src/features/settings/MemoryPanel.tsx", "apps/console/src/shared/data/api.ts", "runtime/gideon/cognition/memory_graph.py", "runtime/gideon/cognition/memory_service.py", "runtime/gideon/interfaces/dashboard/handlers/__init__.py", "runtime/gideon/interfaces/dashboard/handlers/memory.py", "runtime/gideon/interfaces/dashboard/server.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python checks/runtime/verify_runtime_memory.py"
 
 [req.025]
 title = "Turn-boundary runtime configuration replacement"

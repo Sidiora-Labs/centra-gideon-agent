@@ -39,21 +39,81 @@ class ConsolidationTasks:
         self.activity = {}
         self.history = {}
         self.preferences = {}
+        self.capacity = 64
+        self.concurrent = asyncio.Semaphore(2)
+        self.inflight = set()
+        self.deferred = set()
 
     def start(self, key, include_history, destination, stamp):
         owner = self.owner
+        if key in owner._running:
+            return False
+        if len(owner._tasks) >= self.capacity:
+            self.deferred.add(key)
+            return False
         owner._running.add(key)
-        task = asyncio.create_task(
-            owner._consolidate(key, include_history=include_history)
-        )
+        self.deferred.discard(key)
+        initial_count = len(owner._log._read_messages(key))
+
+        async def ordered():
+            async with self.concurrent:
+                self.inflight.add(key)
+                try:
+                    for attempt in range(2):
+                        try:
+                            await owner._consolidate(key, include_history=include_history)
+                            return
+                        except Exception:
+                            if attempt:
+                                raise
+                            await asyncio.sleep(0.5)
+                finally:
+                    self.inflight.discard(key)
+                    owner._running.discard(key)
+
+        task = asyncio.create_task(ordered(), name=f"memory-extract:{key}")
         owner._tasks.add(task)
 
         def settled(completed):
             owner._tasks.discard(completed)
             if not completed.cancelled() and completed.exception() is None:
                 destination[key] = stamp
+                current_count = len(owner._log._read_messages(key))
+                if current_count > initial_count and owner._log.unconsolidated_count(key) >= 1:
+                    self.start(key, include_history, destination, current_count)
+            else:
+                self.deferred.add(key)
 
         task.add_done_callback(settled)
+        return True
+
+    def recover(self):
+        for session in self.owner._log.list_sessions():
+            key = session.get("key")
+            if key and self.owner._log.unconsolidated_count(key):
+                self.activity.setdefault(key, float(session.get("modified") or 0))
+
+    async def drain(self, timeout=3.0):
+        tasks = list(self.tasks)
+        if tasks:
+            _, unfinished = await asyncio.wait(tasks, timeout=max(0.0, timeout))
+        else:
+            unfinished = set()
+        outcome = {"queued": len(self.tasks - self.inflight_tasks()),
+                   "in_flight": len(unfinished & self.inflight_tasks()),
+                   "deferred": len(self.deferred)}
+        for task in unfinished:
+            task.cancel()
+        from gideon.core.atomic_write import atomic_write
+        from gideon.core.config.loader import config_dir
+
+        path = config_dir() / "memory" / "extraction_shutdown.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps(outcome, sort_keys=True) + "\n")
+        return outcome
+
+    def inflight_tasks(self):
+        return {task for task in self.tasks if task.get_name().removeprefix("memory-extract:") in self.inflight}
 
     def idle(self, now):
         owner = self.owner

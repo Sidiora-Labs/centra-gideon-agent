@@ -329,6 +329,11 @@ function MemoryStudio({ onChanged, initialSel }: { onChanged: () => void; initia
           + 'that earned it.',
       }))) return
       try { await api.deleteLesson(selected.lesson.rule) } catch (e) { return fail('lesson', e) }
+    } else if (selected.kind === 'entity' && selected.entity) {
+      if (!(await confirmDelete('entity', selected.entity.name, {
+        body: 'The entity and its links disappear. Its name stays retired so a rebuild does not recreate it.',
+      }))) return
+      try { await api.memoryEntityDelete(selected.entity.id) } catch (e) { return fail('entity', e) }
     } else return
     setSelUid(null); reloadAll()
   }
@@ -516,7 +521,7 @@ function StudioInspector({ item, onDelete, onSaved, onSlotChanged }: {
   item: StudioItem; onDelete: () => void; onSaved: () => void; onSlotChanged: () => void
 }) {
   const Icon = STUDIO_KIND_META[item.kind].icon
-  const deletable = item.kind === 'fact' || item.kind === 'episodic' || item.kind === 'lesson'
+  const deletable = item.kind === 'fact' || item.kind === 'episodic' || item.kind === 'lesson' || item.kind === 'entity'
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-outline-variant/30 px-3 py-2.5">
