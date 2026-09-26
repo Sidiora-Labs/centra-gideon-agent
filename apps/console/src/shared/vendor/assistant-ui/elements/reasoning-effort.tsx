@@ -10,28 +10,34 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 export interface EffortLevel {
   key: string;
   label: string;
-  budget: number;
+  budget?: number | null;
 }
 
 export function ReasoningEffort({
   levels,
   selectedKey,
+  heading = "Thinking",
   spent,
   onSelect,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "levels" | "selectedKey" | "spent" | "onSelect"
+  "children" | "levels" | "selectedKey" | "heading" | "spent" | "onSelect"
 > & {
   levels: readonly EffortLevel[];
   selectedKey: string;
-  spent: number;
+  heading?: string;
+  spent?: number | null;
   onSelect?: (key: string) => void;
 }) {
   const selected = levels.find((level) => level.key === selectedKey);
-  const budget = selected?.budget ?? 0;
-  const used = pct(spent, budget);
+  const budget = selected?.budget;
+  const usage =
+    typeof spent === "number" && Number.isFinite(spent) &&
+    typeof budget === "number" && Number.isFinite(budget)
+      ? { spent, budget, used: pct(spent, budget) }
+      : undefined;
 
   return (
     <div
@@ -41,10 +47,10 @@ export function ReasoningEffort({
       {...props}
     >
       <div className="flex items-baseline justify-between">
-        <span className="text-[13.5px] font-medium">Thinking</span>
-        <span className={cn(mono, "text-foreground/35 tabular-nums")}>
-          {fmt(spent)} / {fmt(budget)}
-        </span>
+        <span className="text-[13.5px] font-medium">{heading}</span>
+        {usage && <span className={cn(mono, "text-foreground/35 tabular-nums")}>
+          {fmt(usage.spent)} / {fmt(usage.budget)}
+        </span>}
       </div>
 
       <div className={cn(field, "flex gap-0.5 rounded-full p-0.5")}>
@@ -81,20 +87,20 @@ export function ReasoningEffort({
         })}
       </div>
 
-      <span
+      {usage && <span
         role="progressbar"
         aria-label="Thinking budget used"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={announced(used)}
-        aria-valuetext={`${fmt(spent)} of ${fmt(budget)}`}
+        aria-valuenow={announced(usage.used)}
+        aria-valuetext={`${fmt(usage.spent)} of ${fmt(usage.budget)}`}
         className="bg-foreground/[0.06] h-[3px] w-full overflow-hidden rounded-full"
       >
         <span
           className="block h-full rounded-full bg-blue-500 transition-[width] duration-500 motion-reduce:transition-none dark:bg-blue-400"
-          style={{ width: `${used}%` }}
+          style={{ width: `${usage.used}%` }}
         />
-      </span>
+      </span>}
     </div>
   );
 }

@@ -63,6 +63,25 @@ describe('AUI connected model selector', () => {
   })
 })
 
+describe('donor reasoning effort in the live composer', () => {
+  it('selects a supported effort without inventing a thinking budget or spent tokens', () => {
+    const onSelect = vi.fn()
+    const host = render(<Composer value="Draft" onChange={vi.fn()} onSend={vi.fn()}
+      controls={{ reasoning: true }} data={data} selection={selection} onSelect={onSelect} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning effort: Default' }))
+    const effort = document.querySelector('[data-slot="reasoning-effort"]')
+    expect(effort).toBeInTheDocument()
+    expect(effort).not.toHaveTextContent(/0\s*\/\s*0/)
+    expect(effort?.querySelector('[role="progressbar"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'High' }))
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith({ reasoning: 'high' })
+    host.rerender(<Composer value="Draft" onChange={vi.fn()} onSend={vi.fn()}
+      controls={{ reasoning: true }} data={data} selection={{ ...selection, reasoning: 'high' }} onSelect={onSelect} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Reasoning effort: High' }))
+    expect(screen.getByRole('button', { name: 'High' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
 describe('AUI trigger popover over the single Gideon editor', () => {
   it('executes a real slash command with Enter without submitting or rendering the legacy menu', async () => {
     vi.spyOn(api, 'slashCommands').mockResolvedValue([{ name: '/help', description: 'Show help' }])

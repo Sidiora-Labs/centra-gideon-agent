@@ -320,6 +320,119 @@ describe('PermissionGrant donor behavior', () => {
   })
 })
 
+describe('PermissionGrant exact caller decisions', () => {
+  const exactChoices = [
+    { id: 'approved', label: 'Allow once' },
+    { id: 'trust', label: 'Trust this chat' },
+    { id: 'trust_agent', label: 'Trust this agent' },
+    { id: 'rejected', label: 'Reject' },
+    { id: 'revised', label: 'Revise request' },
+  ] as const
+
+  it('dispatches only the supplied exact action IDs while retaining caller details', () => {
+    const onChoice = vi.fn()
+    const onGrant = vi.fn()
+    const { container } = render(<PermissionGrant capability="Write report" requester="Planner"
+      reach={['Write report']} scope="pending" choices={exactChoices}
+      onChoice={onChoice} onGrant={onGrant}>
+      <div data-testid="risk-details">Medium risk · proposed scope: this chat</div>
+    </PermissionGrant>)
+    expect(screen.getByText('requested by Planner')).toBeTruthy()
+    expect(screen.getByText('this grants')).toBeTruthy()
+    expect(screen.getAllByText('Write report')).toHaveLength(2)
+    expect(screen.getByTestId('risk-details').textContent).toContain('this chat')
+    expect(container.querySelector('[data-slot="permission-grant"]')?.textContent).toContain('Medium risk')
+    for (const choice of exactChoices) fireEvent.click(screen.getByRole('button', { name: choice.label }))
+    expect(onChoice.mock.calls).toEqual(exactChoices.map(choice => [choice.id]))
+    expect(onGrant).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Always' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'This session' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
+  })
+
+  it('renders only caller-allowed decisions without inventing agent trust or revision', () => {
+    const onChoice = vi.fn()
+    render(<PermissionGrant capability="Search" reach={[]} scope="pending"
+      choices={[exactChoices[0], exactChoices[3]]} onChoice={onChoice} />)
+    expect(screen.getAllByRole('button').map(button => button.textContent)).toEqual(['Allow once', 'Reject'])
+    expect(screen.queryByRole('button', { name: 'Trust this agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Revise request' })).toBeNull()
+    expect(screen.queryByText(/requested by/)).toBeNull()
+    expect(screen.queryByText('this grants')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    expect(onChoice).toHaveBeenCalledExactlyOnceWith('approved')
+  })
+
+  it('keeps supplied decisions visible but inactive without a caller handler', () => {
+    const onGrant = vi.fn()
+    render(<PermissionGrant capability="Read" reach={[]} scope="pending"
+      choices={[exactChoices[0]]} onGrant={onGrant} />)
+    const button = screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(onGrant).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Always' })).toBeNull()
+  })
+
+  it('shows pending rather than legacy grant buttons for an empty action set', () => {
+    const onGrant = vi.fn()
+    render(<PermissionGrant capability="Read" reach={[]} scope="pending"
+      choices={[]} onGrant={onGrant} />)
+    expect(screen.getByText('pending')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(onGrant).not.toHaveBeenCalled()
+  })
+
+  it('keeps compact action text separate from accessible names and disabled revision', () => {
+    const onChoice = vi.fn()
+    render(<PermissionGrant capability="Write report" reach={[]} scope="pending" onChoice={onChoice}
+      choices={[
+        { id: 'approved', label: 'Allow', name: 'Allow once for this request' },
+        { id: 'rejected', label: 'Deny', name: 'Deny this request', tone: 'danger' },
+        { id: 'revised', label: 'Request change', name: 'Request a revised action', disabled: true },
+      ]} />)
+    const allow = screen.getByRole('button', { name: 'Allow once for this request' }) as HTMLButtonElement
+    const deny = screen.getByRole('button', { name: 'Deny this request' }) as HTMLButtonElement
+    const revise = screen.getByRole('button', { name: 'Request a revised action' }) as HTMLButtonElement
+    expect(allow.textContent).toBe('Allow')
+    expect(allow.title).toBe('Allow once for this request')
+    expect(allow.className).toContain('text-foreground/55')
+    expect(deny.textContent).toBe('Deny')
+    expect(deny.title).toBe('Deny this request')
+    expect(deny.className).toContain('text-red-600')
+    expect(revise.disabled).toBe(true)
+    expect(revise.title).toBe('Request a revised action')
+    fireEvent.click(allow)
+    fireEvent.click(deny)
+    fireEvent.click(revise)
+    expect(onChoice.mock.calls).toEqual([['approved'], ['rejected']])
+    expect(screen.queryByRole('button', { name: 'Always' })).toBeNull()
+  })
+
+  it.each([
+    ['approved', 'Allowed once'],
+    ['trust', 'Trusted for this chat'],
+    ['trust_agent_session', 'Trusted this agent for this session'],
+    ['trust_reads', 'Trusted read actions'],
+    ['rejected', 'Rejected'],
+    ['revised', 'Revised request'],
+    ['yolo', 'Broad access accepted'],
+  ])('shows actual resolved %s using the caller label', (scope, resultLabel) => {
+    render(<PermissionGrant capability="Files" reach={[]} scope={scope}
+      choices={exactChoices} onChoice={vi.fn()} resultLabel={resultLabel} />)
+    expect(screen.getByText(resultLabel)).toBeTruthy()
+    expect(screen.queryByText(/granted ·/)).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows an unknown resolved ID plainly when no result label is available', () => {
+    render(<PermissionGrant capability="Files" reach={[]} scope="backend_future_decision" />)
+    expect(screen.getByText('backend_future_decision')).toBeTruthy()
+    expect(screen.queryByText(/granted ·/)).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+})
+
 describe('ComputerUse donor behavior', () => {
   it('renders a remote page as supplied children without fabricating a screenshot', () => {
     const { container } = render(<ComputerUse url="https://app.example" steps={[]} activeIndex={0}>
