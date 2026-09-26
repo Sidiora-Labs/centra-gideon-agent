@@ -1,0 +1,29 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "feedback-dialog.tsx": "fda6ee57e943fb4bd41189dba8f0003cbe383ab0326106424ea5ae661297d360",
+    "stopped-run.tsx": "c6e63a0382f32ae4a6e5f28492cf6a03872751513ba38099eb7a8cbc2ac1b7a4",
+    "day-separator.tsx": "47b268ccbdd3756f1cfb1313bab43897e4c3a6e71c888bf561c5496e1d18e021",
+    "speaker-identity.tsx": "a3cdd0210d7d9354873873aa3c85e21bf88feb026c85bd2c43867a7beb331cfa",
+    "regenerate-menu.tsx": "4ac5559afb58c4c30d91b244adca5084c9ae9f767dde9cd9c5d07e9ca1b8977b",
+    "confidence-marker.tsx": "2aa467304ba028b91531179bf226b376621e3163f530663e2fadb48aad5de928"
+  },
+  "adaptations": [
+    "Gideon relative utility import and shared surfaces",
+    "feedback submission uses caller callbacks and confirms only submitted state",
+    "read-only feedback note and static reasons when callbacks are absent",
+    "stopped-run actions render only when supplied",
+    "regenerate menu describes response options without assuming a model change",
+    "confidence claim is static when no hover callback is supplied"
+  ],
+  "adapted_modules": {
+    "feedback-dialog.tsx": "251f0c89242fc5e7a4ecba36d18857d4f3cb03bc452b6c61628c3234eeef2c04",
+    "stopped-run.tsx": "75a0f73b0fb516e8937c1a7a3cfe028a5c2f99e1e16374af0258ddabcab82924",
+    "day-separator.tsx": "b8996c1378496a68ee53d4b5a96a7974aff32bee49e960c5d64b8357214bb187",
+    "speaker-identity.tsx": "3977d8db794ac58eae7adfbd06c1fada0fe932b00135b4b42aaa478e7d6495d7",
+    "regenerate-menu.tsx": "6018a43fe83690ba5dc43a514cbe2ce00051165563d13c110a0222bd54ead5d4",
+    "confidence-marker.tsx": "5e0f5c0bd0b85a125bd6d439a6bbd12d02e45a74f3eb59154b67735ecd40b19e"
+  }
+}
