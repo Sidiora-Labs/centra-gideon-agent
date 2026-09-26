@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode, type Ref } from 'react'
+import { useMemo, useState, type ComponentProps, type ReactNode, type Ref } from 'react'
 import { X } from 'lucide-react'
 import { ConversationSearch, type SearchHit } from '../../shared/vendor/assistant-ui/elements/conversation-search'
 import { ThreadSearch } from '../../shared/vendor/assistant-ui/elements/thread-search'
@@ -6,6 +6,7 @@ import { ChatPanel, ChatPanelAssistantMessage, ChatPanelMessages, ChatPanelTypin
 import { EmptyState as AuiEmptyState, EmptyStateGreeting, EmptyStateSuggestion, EmptyStateSuggestions } from '../../shared/vendor/assistant-ui/elements/empty-state'
 import { ConnectionState } from '../../shared/vendor/assistant-ui/elements/connection-state'
 import { SharedConversation } from '../../shared/vendor/assistant-ui/elements/shared-conversation'
+import { ConversationHistoryView } from './auiConversationViews'
 import { findInText } from '../../shared/ui/findText'
 import { findSegments } from './findSegments'
 import { turnText, type ChatTurn } from './chatTypes'
@@ -80,6 +81,29 @@ export function ThreadChatPreview({ turns, streamingText, busy = false, renderAs
       <div ref={endRef}/>
     </ChatPanelMessages>
   </ChatPanel>
+}
+
+export function ThreadPeekViews({ turns, streamingText, busy = false, renderAssistant, endRef, labels }: {
+  turns: readonly ChatTurn[]
+  streamingText?: string | null
+  busy?: boolean
+  renderAssistant?: (text: string) => ReactNode
+  endRef?: Ref<HTMLDivElement>
+  labels?: { preview?: string; timeline?: string; group?: string; conversation?: ComponentProps<typeof ConversationHistoryView>['labels'] }
+}) {
+  const [view, setView] = useState<'preview' | 'timeline'>('preview')
+  const live = busy || !!streamingText
+  const timeline = view === 'timeline' && !live && turns.length > 0
+  return <>
+    {turns.length > 0 && <div role="group" aria-label={labels?.group ?? 'Conversation view'} className="flex gap-1 px-1 pb-2">
+      <button type="button" aria-pressed={!timeline} onClick={() => setView('preview')}
+        className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface">{labels?.preview ?? 'Preview'}</button>
+      <button type="button" aria-pressed={timeline} disabled={live} onClick={() => setView('timeline')}
+        className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface disabled:opacity-50">{labels?.timeline ?? 'Timeline'}</button>
+    </div>}
+    {timeline ? <ConversationHistoryView turns={turns} labels={labels?.conversation}/>
+      : <ThreadChatPreview turns={turns} streamingText={streamingText} busy={busy} renderAssistant={renderAssistant} endRef={endRef}/>}
+  </>
 }
 
 export function recentCanvasTurns(turns: readonly ChatTurn[]): { speaker: 'user' | 'assistant'; text: string }[] {

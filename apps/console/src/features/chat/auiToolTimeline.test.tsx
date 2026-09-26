@@ -79,6 +79,16 @@ describe('real ToolSegment donor progress', () => {
     expect(screen.getByText('19 passed')).toBeInTheDocument()
   })
 
+  it('uses a supplied count label only for the completed multi-call disclosure', () => {
+    const finished = { ...bash, done: true }
+    const view = render(<AuiToolProgress tools={[finished, read]} streaming={false} countLabel={(count) => `Recorded calls: ${count}`}>
+      <span>Recorded output</span>
+    </AuiToolProgress>)
+    expect(screen.getByRole('button', { name: 'Recorded calls: 2' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Recorded calls: 2' }))
+    expect(screen.getAllByText('Recorded output')).toHaveLength(1)
+  })
+
   it('keeps a single completed call on the timeline without claiming it is running', () => {
     const view = show([read])
     expect(view.container.querySelector('[data-slot="tool-timeline"]')).not.toBeNull()

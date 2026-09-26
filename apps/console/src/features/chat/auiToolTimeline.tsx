@@ -8,6 +8,7 @@ export type AuiToolProgressProps = {
   tools: readonly ToolSegment[]
   streaming: boolean
   children: ReactNode
+  countLabel?: (count: number) => string
 }
 
 function inputChip(seg: ToolSegment): string {
@@ -36,13 +37,13 @@ export function toolTimelineSteps(tools: readonly ToolSegment[]): TimelineStep[]
   })
 }
 
-export function AuiToolProgress({ tools, streaming, children }: AuiToolProgressProps) {
+export function AuiToolProgress({ tools, streaming, children, countLabel }: AuiToolProgressProps) {
   const [open, setOpen] = useState(false)
   if (tools.length === 0) return <div data-slot="aui-tool-progress">{children}</div>
 
   const unfinished = tools.some(seg => !seg.done && seg.ok !== false && !seg.agentError)
   const useTimeline = streaming || unfinished || tools.length === 1
-  const countLabel = `${tools.length} tool ${tools.length === 1 ? 'call' : 'calls'}`
+  const timelineLabel = `${tools.length} tool ${tools.length === 1 ? 'call' : 'calls'}`
 
   return <div data-slot="aui-tool-progress">
     {useTimeline ? <>
@@ -52,13 +53,13 @@ export function AuiToolProgress({ tools, streaming, children }: AuiToolProgressP
         streaming={unfinished}
         open={open}
         onOpenChange={setOpen}
-        restingLabel={countLabel}
-        activeLabel={`${countLabel} running`}
+        restingLabel={timelineLabel}
+        activeLabel={`${timelineLabel} running`}
         stats={[]}
       />
       {children}
     </> : <ToolGroupRoot variant="ghost" open={open} onOpenChange={setOpen}>
-      <ToolGroupTrigger count={tools.length} />
+      <ToolGroupTrigger count={tools.length} countLabel={countLabel} />
       <ToolGroupContent>{children}</ToolGroupContent>
     </ToolGroupRoot>}
   </div>
