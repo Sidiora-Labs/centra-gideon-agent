@@ -442,7 +442,9 @@ export interface ChannelTrust {
   default_dm_policy: string
   default_group_policy: string
 }
-export interface SpawnedAgent { id: string; task: string; done: boolean; parent?: string; agent?: string; started?: number; result?: string; error?: string }
+export interface SpawnMemoryReceipt { status: 'pending' | 'recorded' | 'no_contribution' | 'unavailable'; count: number; run_id?: string; conversation_id?: string; parent_session?: string; agent?: string; source?: 'delegated_result' }
+export interface SpawnedAgent { id: string; task: string; done: boolean; parent?: string; agent?: string; started?: number; result?: string; error?: string; turns?: number; last_tool?: string; elapsed?: number; memory_receipt?: SpawnMemoryReceipt }
+export interface SpawnControl { model: string; effort: string; models: string[]; efforts: Array<{ value: string; label: string }> }
 export interface KnowledgeContextCard {
   id: string; title: string; provider?: string; match_type?: string; tokens: number; summary?: string
   content?: string
@@ -3834,6 +3836,10 @@ export const api = {
   sessionsSearch: (q: string) => get<{ sessions: Array<{ key: string; title?: string; messages?: number; snippet?: string }>; source?: string }>(`/api/sessions/search?q=${encodeURIComponent(q)}`).then((d) => d.sessions),
 
   spawnedAgents: () => get<{ agents: SpawnedAgent[] }>('/api/spawn').then((d) => d.agents),
+  spawnedAgent: (id: string) => get<SpawnedAgent>(`/api/spawn/${encodeURIComponent(id)}`),
+  spawnedAgentControl: (id: string) => get<SpawnControl>(`/api/spawn/${encodeURIComponent(id)}/control`),
+  setSpawnedAgentControl: (id: string, axis: 'model' | 'effort', value: string) =>
+    patch<SpawnControl>(`/api/spawn/${encodeURIComponent(id)}/control`, { axis, value }),
   cancelSpawnedAgent: (id: string) => del(`/api/spawn/${encodeURIComponent(id)}`),
   clearSpawnedAgents: () => del('/api/spawn'),
   cancelFanout: (parentSession: string) =>

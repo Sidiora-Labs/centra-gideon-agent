@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUpRight, Workflow } from 'lucide-react'
-import { api, ApiError } from '../../shared/data/api'
+import { ArrowUpRight, ChevronDown, Workflow } from 'lucide-react'
+import { api, ApiError, type NodeInspect } from '../../shared/data/api'
 import { messageEnter } from '../../shared/theme/motion'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Meter } from '../../shared/ui/Meter'
@@ -12,6 +12,8 @@ import { fmtElapsed, isTerminal, nodeLook, runLook } from '../workflows/workflow
 import { TextLink } from '../../shared/ui/TextLink'
 import { escalationReasonSentence } from '../workflows/escalationReasons'
 import { isEscalationRecord } from '../workflows/EscalationPanel'
+import { DagView } from '../tasks/DagView'
+import { layoutRunDag } from '../workflows/runDag'
 
 const WORKFLOW_TOOLS = new Set(['workflow_start', 'workflow_status', 'workflow_observe'])
 
@@ -31,6 +33,11 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
   const [vm, setVm] = useState<WorkflowViewModel | null>(null)
   const [gone, setGone] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [graphOpen, setGraphOpen] = useState(false)
+  const [selectedNode, setSelectedNode] = useState('')
+  const [nodeDetail, setNodeDetail] = useState<NodeInspect | null>(null)
+  const [nodeError, setNodeError] = useState('')
+  const selectedNodeId = vm?.nodes.find((node) => node.instance_path === selectedNode)?.node_id || selectedNode
   const latest = useRef(0)
 
   const load = useCallback(async () => {
@@ -46,6 +53,19 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
   }, [refObj.runId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!selectedNodeId) { setNodeDetail(null); setNodeError(''); return }
+    let live = true
+    setNodeDetail(null)
+    setNodeError('')
+    api.workflowRunNodeInspect(refObj.runId, selectedNodeId)
+      .then((detail) => { if (live) setNodeDetail(detail) })
+      .catch((error) => { if (live) setNodeError(error instanceof ApiError && error.status === 409
+        ? 'This node is still running. Its final trace appears when it finishes.'
+        : error instanceof Error ? error.message : 'Could not load node detail.') })
+    return () => { live = false }
+  }, [refObj.runId, selectedNodeId])
 
   const live = !!vm && vm.live
   useWorkflowStream(refObj.runId, live, {
@@ -74,6 +94,7 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
   const look = vm ? runLook(vm.status) : null
   const StatusIcon = look?.icon
   const pct = vm ? Math.round(vm.progress * 100) : 0
+  const dag = vm ? layoutRunDag(vm.nodes) : null
 
   return (
     <motion.div
@@ -103,6 +124,26 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
           <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">
             {vm.doneCount}/{vm.totalCount}
           </span>
+        </div>
+      )}
+
+      {vm && vm.totalCount > 0 && (
+        <div>
+          <button type="button" aria-expanded={graphOpen} onClick={() => setGraphOpen((open) => !open)}
+            className="inline-flex items-center gap-xs text-xs text-primary hover:underline">
+            <ChevronDown size={13} className={graphOpen ? '' : '-rotate-90'} />
+            {graphOpen ? 'Hide run graph' : 'Inspect run graph'}
+          </button>
+          {graphOpen && dag && <div role="region" aria-label="Workflow nodes" className="mt-s max-h-72 overflow-auto rounded-lg border border-outline-variant/50 bg-surface-low p-s">
+            <div style={{ width: dag.width, minWidth: '100%' }}><DagView nodes={dag.nodes} edges={dag.edges} width={dag.width} height={dag.height} onNodeClick={setSelectedNode} /></div>
+            {selectedNode && <div className="mt-s border-t border-outline-variant/50 pt-s text-xs text-on-surface-var">
+              <p className="font-medium text-on-surface">{selectedNode}</p>
+              {nodeError ? <p role="alert" className="mt-xs text-warning">{nodeError}</p>
+                : nodeDetail ? <pre className="mt-xs max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">{JSON.stringify(nodeDetail, null, 2)}</pre>
+                  : <p className="mt-xs">Loading node detail…</p>}
+              <TextLink href={`#/workflows/runs/${encodeURIComponent(refObj.runId)}?node=${encodeURIComponent(selectedNodeId)}`} size="xs">Open full inspector</TextLink>
+            </div>}
+          </div>}
         </div>
       )}
 

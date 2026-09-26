@@ -59,7 +59,7 @@ import { WorkflowProgressCard, workflowRefFromTool } from './chat/WorkflowProgre
 import { ApprovalCard } from './chat/ApprovalCard'
 import { ChatFilePanel } from './chat/ChatFilePanel'
 import { sameSessionTarget, type CommentTarget } from '../shared/ui/content/commentTarget'
-import { ChatActivityPanel } from './chat/ChatActivityPanel'
+import { SessionWorkspace } from './chat/SessionWorkspace'
 import { createScrollToTurnHandler } from './chat/scrollToTurn'
 import { AssistantActions, UserActions } from './chat/MessageActions'
 import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
@@ -432,6 +432,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const glowTargetRef = useRef<HTMLDivElement | null>(null)
   const glowAnchorRef = useRef<HTMLDivElement | null>(null)
   const [activityOpen, setActivityOpen] = useQueryFlag(query, setQuery, 'activity')
+  const [workspacePane, setWorkspacePane] = useQueryParam(query, setQuery, 'workspace', '')
   const [historyOpen, setHistoryOpen] = useQueryFlag(query, setQuery, 'history')
   const turnNodes = useRef<Map<number, HTMLDivElement>>(new Map())
   const [findOpen, setFindOpen] = useState(false)
@@ -859,7 +860,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         const id = String(d.id ?? '')
         if (id) setSubagents((prev) => prev.map((s) => s.id === id
           ? { ...s, done: true, error: (d.error as string | null) ?? null, elapsed: typeof d.elapsed === 'number' ? d.elapsed : undefined, result: String(d.result ?? ''),
-              costUsd: typeof d.cost_usd === 'number' ? d.cost_usd : undefined, tokens: typeof d.tokens === 'number' ? d.tokens : undefined }
+              costUsd: typeof d.cost_usd === 'number' ? d.cost_usd : undefined, tokens: typeof d.tokens === 'number' ? d.tokens : undefined,
+              memoryReceipt: d.memory_receipt && typeof d.memory_receipt === 'object' ? d.memory_receipt as SubagentCard['memoryReceipt'] : undefined }
           : s))
         break
       }
@@ -2044,7 +2046,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             )}
             <HeaderControl icon={Edit3} label="New chat" variant="primary" priority="primary" onClick={() => navigate('chat/new')} />
             {started && (
-              <HeaderControl icon={PanelRight} label="Activity" active={activityOpen} onClick={() => setActivityOpen(!activityOpen)} />
+              <HeaderControl icon={PanelRight} label="Workspace" active={activityOpen || !!workspacePane} onClick={() => { if (activityOpen || workspacePane) { setActivityOpen(false); setWorkspacePane('') } else setWorkspacePane('activity') }} />
             )}
             {!started && (
               <HeaderControl icon={History} label="Chat history" active={historyOpen} onClick={() => setHistoryOpen(!historyOpen)} />
@@ -2195,11 +2197,13 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         {
 }
         <AnimatePresence>
-          {activityOpen && started && (
-            <SidePanel title="Activity" icon={<Activity size={18} className="text-primary" />} storeKey="chat-activity-w"
-              fillHeight urlKey={{ key: 'activity', setQuery }} onClose={() => setActivityOpen(false)}>
-              <ChatActivityPanel activity={activity} onOpenFile={setOpenFile} subagents={subagents}
-                onKillFanout={killFanout}
+          {(activityOpen || !!workspacePane) && started && sessionRef.current && (
+            <SidePanel title="Workspace" icon={<Activity size={18} className="text-primary" />} storeKey="chat-workspace-w"
+              fillHeight onClose={() => { setActivityOpen(false); setWorkspacePane('') }}>
+              <SessionWorkspace sessionKey={sessionRef.current} pane={workspacePane} onPane={setWorkspacePane}
+                turns={turns} activity={activity} onOpenFile={setOpenFile}
+                onOpenArtifact={(slug) => navigate(`artifacts/${encodeURIComponent(slug)}`)}
+                subagents={subagents} onKillFanout={killFanout}
                 side={{ msgs: sideMsgs, busy: sideBusy, onAsk: askSide, onOpen: openSide }} />
             </SidePanel>
           )}
