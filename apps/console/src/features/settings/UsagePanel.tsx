@@ -209,7 +209,7 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
 }
 
 export function UsageTable({ rows, keyField, empty }: {
-  rows: Array<UsageAgg & Record<string, string>>
+  rows: Array<UsageAgg & Partial<Record<'model' | 'source', string>>>
   keyField: 'model' | 'source'
   empty: string
 }) {
