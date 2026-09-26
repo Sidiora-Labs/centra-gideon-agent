@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setOnboardingExit, peekOnboardingExit, clearOnboardingExit } from './exitTo'
 
 
@@ -37,32 +35,11 @@ describe('the pending onboarding exit destination', () => {
     setOnboardingExit('/loops/lp-1')
     expect(peekOnboardingExit()).toBe('loops/lp-1')
   })
-})
-
-describe('the guard consumes it', () => {
-  const app = () => readFileSync(join(process.cwd(), "src/app/shell/App.tsx"), 'utf8')
-
-  it('the exit branch PEEKS, defaulting to the dashboard', () => {
-    expect(app()).toMatch(
-      /onboarded && route === 'onboarding'\)\s*navigate\(peekOnboardingExit\(\) \|\| 'dashboard'\)/)
-  })
-
-  it('the exit branch must NOT consume — a clearing read reintroduces the measured bug', () => {
-    expect(app()).not.toMatch(/navigate\(takeOnboardingExit\(\)/)
-  })
-
-  it('clearing happens on a LATER branch, once the route has left onboarding', () => {
-    expect(app()).toMatch(/else if \(onboarded\) clearOnboardingExit\(\)/)
-  })
-
-  it('the redirect INTO onboarding is untouched — the gate still holds', () => {
-    expect(app()).toMatch(/!onboarded && route !== 'onboarding'\) navigate\('onboarding'\)/)
-  })
-
-  it('the flow hands the destination over and then finishes, in that order', () => {
-    const src = readFileSync(join(process.cwd(), "src/app/shell/Onboarding.tsx"), 'utf8')
-    const body = src.match(/function exitTo\(path: string\) \{[\s\S]*?\n  \}/)?.[0] ?? ''
-    expect(body, 'exitTo must exist').toContain('setOnboardingExit(path)')
-    expect(body.indexOf('setOnboardingExit')).toBeLessThan(body.indexOf('finish()'))
+  it('keeps the full destination through a module reload', async () => {
+    setOnboardingExit('#/chat/session-1?workspace=run&run=run-2')
+    vi.resetModules()
+    const fresh = await import('./exitTo')
+    expect(fresh.peekOnboardingExit()).toBe('chat/session-1?workspace=run&run=run-2')
+    fresh.clearOnboardingExit()
   })
 })

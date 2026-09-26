@@ -39,11 +39,13 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   }, [])
   const setName = useCallback((name: string, handle?: string) => {
     const normalized = name.trim()
-    dispatch({ type: 'edit', name: normalized })
-    writes.current = writes.current.then(async () => {
-      try { await api.saveDashboardConfig({ user_name: normalized, ...(handle === undefined ? {} : { username: handle.trim().slice(0, USERNAME_MAX_LEN) }) }) } catch { /* Keep the optimistic session identity. */ }
+    const write = writes.current.then(async () => {
+      await api.saveDashboardConfig({ user_name: normalized, ...(handle === undefined ? {} : { username: handle.trim().slice(0, USERNAME_MAX_LEN) }) })
+      const saved = await api.dashboardConfig()
+      dispatch({ type: 'edit', name: saved.user_name || '' })
     })
-    return writes.current
+    writes.current = write.catch(() => {})
+    return write
   }, [])
   const clearName = useCallback(() => setName(''), [setName])
   const value = useMemo(() => ({ name: state.name, loaded: state.loaded, onboarded: state.name.trim().length > 0, setName, clearName }), [state.name, state.loaded, setName, clearName])

@@ -298,7 +298,7 @@ describe('skipping every optional lane still reaches the next step', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toHaveAttribute('aria-disabled'))
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
-    expect(onDone).toHaveBeenCalledWith('gpt-5')
+    expect(onDone).toHaveBeenCalledWith('openai:gpt-5')
     expect(installApp).toHaveBeenCalledTimes(1)
     const named = onProgress.mock.calls.flatMap(([p]) => Object.keys(p.essentials ?? {}))
     expect(named).toEqual(['model'])

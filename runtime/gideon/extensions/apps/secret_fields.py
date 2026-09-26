@@ -109,6 +109,9 @@ def preserve_unchanged_secrets(
     for key in sensitive_field_names(schema):
         if key not in incoming:
             continue
+        if incoming[key] is None:
+            incoming[key] = ""
+            continue
         arrived = str(incoming.get(key, "") or "")
         stored = str(existing.get(key, "") or "")
         if arrived == SECRET_MASK or (arrived == "" and stored):
