@@ -622,6 +622,53 @@ describe('ToolError retry and skip availability', () => {
   })
 })
 
+describe('ToolError with real failure segments lacking retry telemetry', () => {
+  const failure = { name: 'browser', target: 'https://app.example', message: 'Navigation failed' }
+
+  it('keeps the actual operation, target and message without inventing an attempt count', () => {
+    const { container } = render(<ToolError {...failure} />)
+    expect(screen.getByText('browser')).toBeTruthy()
+    expect(screen.getByText('https://app.example')).toBeTruthy()
+    expect(screen.getByText('Navigation failed')).toBeTruthy()
+    expect(container.querySelector('[data-slot="tool-error"]')).toBeTruthy()
+    expect(container.querySelector('.tabular-nums')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not show a partial retry budget as if its missing value were known', () => {
+    const view = render(<ToolError {...failure} attempt={2} />)
+    expect(view.container.querySelector('.tabular-nums')).toBeNull()
+    view.rerender(<ToolError {...failure} maxAttempts={4} />)
+    expect(view.container.querySelector('.tabular-nums')).toBeNull()
+    expect(screen.getByText('Navigation failed')).toBeTruthy()
+  })
+
+  it('shows exact retry data when a caller supplies both numbers later', () => {
+    const view = render(<ToolError {...failure} />)
+    expect(view.container.querySelector('.tabular-nums')).toBeNull()
+    view.rerender(<ToolError {...failure} attempt={2} maxAttempts={4} />)
+    expect(screen.getByText('2/4')).toBeTruthy()
+    view.rerender(<ToolError {...failure} />)
+    expect(screen.queryByText('2/4')).toBeNull()
+  })
+
+  it('uses only the caller retry action and state when telemetry is unavailable', () => {
+    const onRetry = vi.fn()
+    const onSkip = vi.fn()
+    const view = render(<ToolError {...failure} onRetry={onRetry} onSkip={onSkip} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    expect(onSkip).not.toHaveBeenCalled()
+    view.rerender(<ToolError {...failure} retrying onRetry={onRetry} onSkip={onSkip} />)
+    const retry = screen.getByRole('button', { name: 'Retrying' }) as HTMLButtonElement
+    expect(retry.disabled).toBe(true)
+    fireEvent.click(retry)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    expect(view.container.querySelector('.tabular-nums')).toBeNull()
+  })
+})
+
 describe('PermissionGrant authority boundary through prop changes', () => {
   it('removes decision buttons when the caller reports an always grant', () => {
     const onGrant = vi.fn()
