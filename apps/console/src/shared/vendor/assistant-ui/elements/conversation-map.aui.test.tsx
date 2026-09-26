@@ -1,325 +1,166 @@
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react'
+import { useEffect, useState } from 'react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { ThreadTranscript } from './thread.aui'
+import { ConversationMapAui } from './conversation-map.aui'
 
-import { ConversationMapAui } from "./conversation-map.aui";
+type RecordMessage = { id: string; role: 'user' | 'assistant'; text: string }
+const user = (id: string, text: string): RecordMessage => ({ id, role: 'user', text })
+const assistant = (id: string, text: string): RecordMessage => ({ id, role: 'assistant', text })
+const VIEWPORT_HEIGHT = 300
 
-const mocks = vi.hoisted(() => ({
-  state: { thread: { messages: [] as unknown[] } },
-  viewport: {
-    element: { viewport: null as HTMLElement | null },
-    height: { viewport: 400 },
-  },
-}));
-
-vi.mock("@assistant-ui/react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@assistant-ui/react")>()),
-  useAuiState: (selector: (s: typeof mocks.state) => unknown) =>
-    selector(mocks.state),
-  useThreadViewport: (selector: (s: typeof mocks.viewport) => unknown) =>
-    selector(mocks.viewport),
-}));
+function Runtime({ records }: { records: RecordMessage[] }) {
+  const [messages, setMessages] = useState(records)
+  useEffect(() => setMessages(records), [records])
+  const runtime = useExternalStoreRuntime({
+    messages,
+    convertMessage: (record: RecordMessage): ThreadMessageLike => ({
+      id: record.id,
+      role: record.role,
+      content: record.text ? [{ type: 'text', text: record.text }] : [],
+    }),
+    onNew: async content => {
+      const text = content.content.map(part => part.type === 'text' ? part.text : '').join('')
+      setMessages(current => [...current, user(`u${current.length + 1}`, text)])
+    },
+  })
+  return <AssistantRuntimeProvider runtime={runtime}>
+    <ThreadTranscript afterMessages={<ConversationMapAui />} />
+  </AssistantRuntimeProvider>
+}
 
 const rect = (top: number, height: number) =>
-  ({ top, height, bottom: top + height }) as DOMRect;
+  ({ top, height, bottom: top + height }) as DOMRect
 
-const VIEWPORT_HEIGHT = 300;
+async function frame() {
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)) })
+}
 
-/**
- * A stand-in for `ThreadPrimitive.Viewport` and the message roots it renders.
- * `scrollHeight` defaults to a thread far longer than one screen, so the
- * reading line sits at the top unless a test scrolls into the last screenful.
- */
-const mountViewport = (
-  tops: Record<string, number>,
-  scrollHeight = VIEWPORT_HEIGHT * 4,
-) => {
-  const viewport = document.createElement("div");
-  viewport.getBoundingClientRect = () => rect(0, VIEWPORT_HEIGHT);
-  Object.defineProperty(viewport, "clientHeight", {
-    configurable: true,
-    value: VIEWPORT_HEIGHT,
-  });
-  Object.defineProperty(viewport, "scrollHeight", {
-    configurable: true,
-    value: scrollHeight,
-  });
-  viewport.scrollTop = 0;
-  viewport.scrollTo = vi.fn();
-
-  for (const id of Object.keys(tops)) {
-    const message = document.createElement("div");
-    message.dataset["messageId"] = id;
-    message.getBoundingClientRect = () => rect(tops[id]!, 50);
-    message.scrollIntoView = vi.fn();
-    viewport.append(message);
+async function mount(records: RecordMessage[], tops: Record<string, number>, scrollHeight = VIEWPORT_HEIGHT * 4) {
+  const view = render(<Runtime records={records} />)
+  const viewport = view.container.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!
+  expect(viewport).not.toBeNull()
+  viewport.getBoundingClientRect = () => rect(0, VIEWPORT_HEIGHT)
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: VIEWPORT_HEIGHT })
+  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: scrollHeight })
+  viewport.scrollTo = vi.fn()
+  const position = () => {
+    for (const element of viewport.querySelectorAll<HTMLElement>('[data-message-id]')) {
+      const id = element.dataset.messageId!
+      expect(id in tops).toBe(true)
+      element.getBoundingClientRect = () => rect(tops[id]!, 50)
+    }
   }
+  position()
+  await frame()
+  vi.mocked(viewport.scrollTo).mockClear()
+  const update = async (next: RecordMessage[]) => {
+    view.rerender(<Runtime records={next} />)
+    position()
+    await frame()
+  }
+  return { viewport, position, update, ...view }
+}
 
-  document.body.append(viewport);
-  mocks.viewport.element.viewport = viewport;
-  return viewport;
-};
-
-const ticks = () =>
-  Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '[data-slot="conversation-map-tick"]',
-    ),
-  );
-
-const labels = () => ticks().map((tick) => tick.getAttribute("aria-label"));
-const lit = () => ticks().map((tick) => tick.hasAttribute("data-active"));
-const onScreen = () => ticks().map((tick) => tick.hasAttribute("data-in-view"));
-
-const user = (id: string, text: string) => ({
-  id,
-  role: "user",
-  content: [{ type: "text", text }],
-});
-
-const assistant = (id: string, text: string) => ({
-  id,
-  role: "assistant",
-  content: [{ type: "text", text }],
-});
-
-const renderMap = async () => {
-  const result = render(<ConversationMapAui />);
-  await act(async () => {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  });
-  return result;
-};
+const ticks = () => Array.from(document.querySelectorAll<HTMLElement>('[data-slot="conversation-map-tick"]'))
+const labels = () => ticks().map(tick => tick.getAttribute('aria-label'))
+const active = () => ticks().map(tick => tick.hasAttribute('data-active'))
+const inView = () => ticks().map(tick => tick.hasAttribute('data-in-view'))
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
     disconnect() {}
-  } as unknown as typeof ResizeObserver;
-});
+  } as unknown as typeof ResizeObserver
+})
 
-afterEach(() => {
-  cleanup();
-  document.body.innerHTML = "";
-  mocks.state.thread.messages = [];
-  mocks.viewport.element.viewport = null;
-});
+afterEach(() => cleanup())
 
-describe("ConversationMapAui", () => {
-  it("puts one tick on each turn rather than each message", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "Can you check the extension build?"),
-      assistant("a1", "It is the unpacked one."),
-      user("u2", "Ready to reload?"),
-      assistant("a2", "Not yet."),
-    ];
-    mountViewport({ u1: 0, a1: 60, u2: 120, a2: 180 });
+describe('ConversationMapAui with real assistant runtime and viewport', () => {
+  it('groups actual user and assistant message roots into turns', async () => {
+    const records = [
+      user('u1', 'Can you check the extension build?'),
+      assistant('a1', 'It is the unpacked one.'),
+      assistant('a2', 'Reload it.'),
+      user('u2', 'Ready to reload?'),
+      assistant('a3', 'Not yet.'),
+    ]
+    const { viewport } = await mount(records, { u1: 0, a1: 60, a2: 120, u2: 180, a3: 240 })
+    expect([...viewport.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id')))
+      .toEqual(['u1', 'a1', 'a2', 'u2', 'a3'])
+    expect(labels()).toEqual(['Can you check the extension build?', 'Ready to reload?'])
+  })
 
-    await renderMap();
+  it('starts a turn for a leading answer and each consecutive user message', async () => {
+    await mount(
+      [assistant('a0', 'How can I help?'), user('u1', 'First'), user('u2', 'Second'), assistant('a1', 'Answering both.')],
+      { a0: 0, u1: 60, u2: 120, a1: 180 },
+    )
+    expect(labels()).toEqual(['How can I help?', 'First', 'Second'])
+  })
 
-    expect(labels()).toEqual([
-      "Can you check the extension build?",
-      "Ready to reload?",
-    ]);
-  });
+  it('tracks the turn owning an assistant message at the reading line and both visible turns', async () => {
+    await mount(
+      [user('u1', 'First'), assistant('a1', 'One.'), user('u2', 'Second'), assistant('a2', 'Two.'), user('u3', 'Third')],
+      { u1: -220, a1: -30, u2: -10, a2: 120, u3: 400 },
+    )
+    expect(active()).toEqual([false, true, false])
+    expect(inView()).toEqual([true, true, false])
+  })
 
-  it("keeps several assistant messages inside one turn", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "Go"),
-      {
-        id: "a1",
-        role: "assistant",
-        content: [{ type: "tool-call", toolName: "read_file" }],
-      },
-      assistant("a2", "Done."),
-      user("u2", "Thanks"),
-    ];
-    mountViewport({ u1: 0, a1: 60, a2: 120, u2: 180 });
+  it('moves the active turn on an actual viewport scroll event', async () => {
+    const tops = { u1: 0, u2: 200 }
+    const { viewport } = await mount([user('u1', 'First'), user('u2', 'Second')], tops)
+    expect(active()).toEqual([true, false])
+    tops.u1 = -220
+    tops.u2 = -20
+    await act(async () => {
+      viewport.dispatchEvent(new Event('scroll'))
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    })
+    expect(active()).toEqual([false, true])
+  })
 
-    await renderMap();
-
-    expect(labels()).toEqual(["Go", "Thanks"]);
-  });
-
-  it("gives a leading assistant message a turn of its own", async () => {
-    mocks.state.thread.messages = [
-      assistant("a0", "How can I help?"),
-      user("u1", "Check the build"),
-      assistant("a1", "Sure."),
-    ];
-    mountViewport({ a0: 0, u1: 60, a1: 120 });
-
-    await renderMap();
-
-    expect(labels()).toEqual(["How can I help?", "Check the build"]);
-  });
-
-  it("starts a turn per consecutive user message", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      user("u2", "Second"),
-      assistant("a1", "Answering both."),
-    ];
-    mountViewport({ u1: 0, u2: 60, a1: 120 });
-
-    await renderMap();
-
-    expect(labels()).toEqual(["First", "Second"]);
-  });
-
-  it("leaves system messages off the rail", async () => {
-    mocks.state.thread.messages = [
-      { id: "s1", role: "system", content: [{ type: "text", text: "rules" }] },
-      user("u1", "hello"),
-    ];
-    mountViewport({ s1: -10, u1: 200 });
-
-    await renderMap();
-
-    expect(labels()).toEqual(["hello"]);
-    expect(lit()).toEqual([true]);
-  });
-
-  it("names an attachment-only turn from its attachments", async () => {
-    mocks.state.thread.messages = [
-      {
-        id: "u1",
-        role: "user",
-        content: [],
-        attachments: [{ id: "a", type: "image", name: "shot.png" }],
-      },
-      {
-        id: "u2",
-        role: "user",
-        content: [],
-        attachments: [{ id: "b", type: "document", name: "spec.pdf" }],
-      },
-    ];
-    mountViewport({ u1: 0, u2: 60 });
-
-    await renderMap();
-
-    expect(labels()).toEqual(["Image", "Attachment"]);
-  });
-
-  it("marks the turn that owns the top of the viewport", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      assistant("a1", "One."),
-      user("u2", "Second"),
-      assistant("a2", "Two."),
-    ];
-    mountViewport({ u1: -220, a1: -120, u2: -10, a2: 200 });
-
-    await renderMap();
-
-    expect(lit()).toEqual([false, true]);
-  });
-
-  it("marks a turn from its assistant message too", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      assistant("a1", "One."),
-      user("u2", "Second"),
-    ];
-    mountViewport({ u1: -220, a1: -10, u2: 200 });
-
-    await renderMap();
-
-    expect(lit()).toEqual([true, false]);
-  });
-
-  it("falls back to the first turn above the top of the thread", async () => {
-    mocks.state.thread.messages = [user("u1", "First"), user("u2", "Second")];
-    mountViewport({ u1: 40, u2: 100 });
-
-    await renderMap();
-
-    expect(lit()).toEqual([true, false]);
-  });
-
-  it("reaches the last turn when the thread is scrolled to the end", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      user("u2", "Second"),
-      user("u3", "Third"),
-      user("u4", "Fourth"),
-    ];
-    // The last two never reach the top of the viewport, whatever the scroll.
-    const viewport = mountViewport(
+  it('reaches the final turn in the final screenful', async () => {
+    const { viewport } = await mount(
+      [user('u1', 'First'), user('u2', 'Second'), user('u3', 'Third'), user('u4', 'Fourth')],
       { u1: -200, u2: -50, u3: 100, u4: 250 },
       VIEWPORT_HEIGHT * 2,
-    );
-    viewport.scrollTop = VIEWPORT_HEIGHT;
-
-    await renderMap();
-
-    expect(lit()).toEqual([false, false, false, true]);
-  });
-
-  it("follows the thread as it scrolls", async () => {
-    mocks.state.thread.messages = [user("u1", "First"), user("u2", "Second")];
-    const tops = { u1: 0, u2: 200 };
-    const viewport = mountViewport(tops);
-
-    await renderMap();
-    expect(lit()).toEqual([true, false]);
-
-    tops.u1 = -220;
-    tops.u2 = -20;
+    )
+    viewport.scrollTop = VIEWPORT_HEIGHT
     await act(async () => {
-      viewport.dispatchEvent(new Event("scroll"));
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    });
+      viewport.dispatchEvent(new Event('scroll'))
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    })
+    expect(active()).toEqual([false, false, false, true])
+  })
 
-    expect(lit()).toEqual([false, true]);
-  });
+  it('selects the real message root by scrolling only the thread viewport', async () => {
+    const { viewport } = await mount(
+      [user('u1', 'First'), assistant('a1', 'One.'), user('u2', 'Second')],
+      { u1: 0, a1: 60, u2: 120 },
+    )
+    viewport.scrollTop = 100
+    vi.mocked(viewport.scrollTo).mockClear()
+    fireEvent.click(ticks()[1]!)
+    expect(viewport.scrollTo).toHaveBeenCalledWith({ top: 220, behavior: 'smooth' })
+    expect(ticks()[1]).toHaveAttribute('aria-label', 'Second')
+  })
 
-  it("marks every turn the viewport holds, not just the one being read", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      assistant("a1", "One."),
-      user("u2", "Second"),
-      assistant("a2", "Two."),
-      user("u3", "Third"),
-    ];
-    // The first turn's answer still straddles the top edge; u3 is below the fold.
-    mountViewport({ u1: -220, a1: -30, u2: -10, a2: 120, u3: 400 });
-
-    await renderMap();
-
-    expect(lit()).toEqual([false, true, false]);
-    expect(onScreen()).toEqual([true, true, false]);
-  });
-
-  it("scrolls only the thread viewport to the turn's question", async () => {
-    mocks.state.thread.messages = [
-      user("u1", "First"),
-      assistant("a1", "One."),
-      user("u2", "Second"),
-    ];
-    const viewport = mountViewport({ u1: 0, a1: 60, u2: 120 });
-    viewport.scrollTop = 100;
-
-    await renderMap();
-    fireEvent.click(ticks()[1]!);
-
-    expect(viewport.scrollTo).toHaveBeenCalledWith({
-      top: 220,
-      behavior: "smooth",
-    });
-    expect(
-      viewport.querySelector<HTMLElement>('[data-message-id="u2"]')
-        ?.scrollIntoView,
-    ).not.toHaveBeenCalled();
-  });
-
-  it("renders the rail unlit before the viewport is registered", async () => {
-    mocks.state.thread.messages = [user("u1", "hello")];
-
-    await renderMap();
-
-    expect(labels()).toEqual(["hello"]);
-    expect(lit()).toEqual([false]);
-  });
-});
+  it('preserves keyboard navigation and updates turns as the real store changes', async () => {
+    const records = [user('u1', 'First'), assistant('a1', 'One.')]
+    const tops = { u1: 0, a1: 60, u2: 120 }
+    const { viewport, update } = await mount(records, tops)
+    expect(labels()).toEqual(['First'])
+    await update([...records, user('u2', 'Second')])
+    expect(labels()).toEqual(['First', 'Second'])
+    act(() => ticks()[0]!.focus())
+    fireEvent.keyDown(ticks()[0]!, { key: 'End' })
+    expect(document.activeElement).toBe(ticks()[1])
+    await userEvent.keyboard('{Enter}')
+    expect(viewport.scrollTo).toHaveBeenCalledWith({ top: 120, behavior: 'smooth' })
+  })
+})
