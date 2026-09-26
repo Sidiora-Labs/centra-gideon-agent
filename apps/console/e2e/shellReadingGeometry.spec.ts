@@ -22,6 +22,8 @@ test('conversation keeps one centered reading column across desktop and mobile',
       const assistant = group.querySelector<HTMLElement>('.gideon-chat-assistant')!
       const workspace = document.querySelector<HTMLElement>('.gideon-workspace')!
       const header = document.querySelector<HTMLElement>('[data-gideon-chat-page] > .gideon-topbar')
+      const headerTitle = header?.querySelector<HTMLElement>('[data-header-left]')
+      const newChat = header?.querySelector<HTMLElement>('[title="New chat"]')
       const groupBox = group.getBoundingClientRect()
       const composerBox = composer.getBoundingClientRect()
       const assistantBox = assistant.getBoundingClientRect()
@@ -33,6 +35,8 @@ test('conversation keeps one centered reading column across desktop and mobile',
         assistantInset: assistantBox.left - workspaceBox.left,
         pageOverflow: document.documentElement.scrollWidth - innerWidth,
         headerWidth: header ? header.clientWidth - parseFloat(headerStyle!.paddingLeft) - parseFloat(headerStyle!.paddingRight) : null,
+        titleWidth: headerTitle?.getBoundingClientRect().width ?? null,
+        primaryReachable: !!newChat && newChat.getBoundingClientRect().width >= 40 && newChat.getBoundingClientRect().right <= innerWidth,
       }
     })
     expect(geometry.groupWidth).toBeLessThanOrEqual(821)
@@ -42,6 +46,8 @@ test('conversation keeps one centered reading column across desktop and mobile',
       expect(geometry.assistantInset).toBeGreaterThan(48)
       expect(geometry.headerWidth).not.toBeNull()
       expect(geometry.headerWidth!).toBeLessThanOrEqual(1122)
+      expect(geometry.titleWidth).toBeGreaterThan(150)
+      expect(geometry.primaryReachable).toBe(true)
     }
     await testInfo.attach(`conversation-${width}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
   }

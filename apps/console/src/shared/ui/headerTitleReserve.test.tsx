@@ -5,7 +5,8 @@ import { titleFloor, titleReserveFor, railCeiling } from './HeaderActions'
 describe('titleFloor', () => {
   it('scales with the header and stays inside the legible band', () => {
     expect(titleFloor(155)).toBe(53)
-    expect(titleFloor(1000)).toBe(96)
+    expect(titleFloor(700)).toBe(238)
+    expect(titleFloor(1000)).toBe(320)
     expect(titleFloor(50)).toBe(48)
   })
 })
@@ -21,6 +22,11 @@ describe('titleReserveFor', () => {
 
   it('never reserves more than the title actually needs', () => {
     expect(titleReserveFor({ hasContent: true, naturalWidth: 51, inner: 155 })).toBe(51)
+  })
+
+  it('keeps a readable desktop title while secondary actions compress', () => {
+    expect(titleReserveFor({ hasContent: true, naturalWidth: 900, inner: 1120 })).toBe(320)
+    expect(titleReserveFor({ hasContent: true, naturalWidth: 180, inner: 1120 })).toBe(180)
   })
 })
 
