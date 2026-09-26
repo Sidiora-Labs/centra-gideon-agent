@@ -53,20 +53,32 @@ function ElicitationCard({ request, onRespond }: {
     onRespond: (action: string, content?: Record<string, unknown>) => boolean;
 }) {
     const formRef = useRef<HTMLFormElement>(null);
-    const [values, setValues] = useState<Record<string, unknown>>(() => Object.fromEntries(Object.entries(request.requestedSchema?.properties ?? {}).filter(([, field]) => field.type === 'boolean').map(([name]) => [name, false])));
     const [error, setError] = useState('');
     const fields = Object.entries(request.requestedSchema?.properties ?? {});
     const supported = Boolean(request.requestedSchema) && fields.every(([, field]) => ['string', 'number', 'integer', 'boolean'].includes(field.type ?? ''));
     const singleEnum = supported && fields.length === 1 && fields[0][1].type === 'string' && fields[0][1].enum?.length ? fields[0] : null;
+    const readValues = () => {
+        const content: Record<string, unknown> = {};
+        for (const [name, field] of fields) {
+            const control = formRef.current?.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | null | undefined;
+            if (!control) continue;
+            if (field.type === 'boolean') {
+                content[name] = (control as HTMLInputElement).checked;
+            } else if (control.value !== '') {
+                content[name] = field.type === 'number' || field.type === 'integer' ? Number(control.value) : control.value;
+            }
+        }
+        return content;
+    };
     const respond = (action: string) => {
-        if (!onRespond(action, action === 'accept' ? values : undefined))
+        if (!onRespond(action, action === 'accept' ? readValues() : undefined))
             setError('Connection unavailable. Please retry.');
     };
     if (supported && !singleEnum) {
         const donorFields: ElicitationField[] = fields.map(([name, field]) => ({
             name,
             label: field.title || name,
-            value: String(values[name] ?? ''),
+            value: field.type === 'boolean' ? 'false' : '',
             kind: field.type === 'boolean' ? 'toggle' : field.enum ? 'choice' : 'text',
             options: field.enum,
             required: request.requestedSchema?.required?.includes(name),
@@ -83,18 +95,13 @@ function ElicitationCard({ request, onRespond }: {
                 const field = request.requestedSchema!.properties![item.name];
                 return <>
                   {field.description && <span className="block text-sm text-on-surface-low">{field.description}</span>}
-                  {field.type === 'boolean' ? <input aria-label={item.label} type="checkbox"
-                    checked={values[item.name] === true}
-                    onChange={event => setValues(previous => ({ ...previous, [item.name]: event.target.checked }))}/>
-                    : field.enum ? <select aria-label={item.label} className="block w-full border bg-surface p-2"
-                      required={item.required} value={String(values[item.name] ?? '')}
-                      onChange={event => setValues(previous => ({ ...previous, [item.name]: event.target.value }))}>
+                  {field.type === 'boolean' ? <input aria-label={item.label} name={item.name} type="checkbox" defaultChecked={false}/>
+                    : field.enum ? <select aria-label={item.label} name={item.name} className="block w-full border bg-surface p-2"
+                      required={item.required} defaultValue="">
                         <option value="">Choose…</option>{field.enum.map(option => <option key={option}>{option}</option>)}
-                      </select> : <input aria-label={item.label} className="block w-full border bg-surface p-2"
+                      </select> : <input aria-label={item.label} name={item.name} className="block w-full border bg-surface p-2"
                         type={field.type === 'string' ? 'text' : 'number'} step={field.type === 'integer' ? 1 : 'any'}
-                        min={field.minimum} max={field.maximum} required={item.required}
-                        value={String(values[item.name] ?? '')}
-                        onChange={event => setValues(previous => ({ ...previous, [item.name]: field.type === 'string' ? event.target.value : event.target.value === '' ? undefined : Number(event.target.value) }))}/>}
+                        min={field.minimum} max={field.maximum} required={item.required} defaultValue=""/>}
                 </>;
             }}/>
           {error && <p role="alert">{error}</p>}

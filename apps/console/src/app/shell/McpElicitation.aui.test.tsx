@@ -124,14 +124,13 @@ describe('source-derived MCP form over the real gateway transport', () => {
     const { python, lines, view } = await connected('multi')
     try {
       await screen.findByRole('form', { name: 'Request from Calendar' })
-      const user = userEvent.setup()
-      await user.selectOptions(screen.getByLabelText('Mode'), 'alpha')
-      await user.type(screen.getByLabelText('Reason'), 'calendar')
-      await user.type(screen.getByLabelText('Count'), '3')
-      await user.type(screen.getByLabelText('Ratio'), '0.5')
-      await user.click(screen.getByLabelText('Confirmed'))
+      fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'alpha' } })
+      fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'calendar' } })
+      fireEvent.change(screen.getByLabelText('Count'), { target: { value: '3' } })
+      fireEvent.change(screen.getByLabelText('Ratio'), { target: { value: '0.5' } })
+      fireEvent.click(screen.getByLabelText('Confirmed'))
       const response = once(lines, 'line')
-      await user.click(screen.getByRole('button', { name: 'Submit' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
       const [raw] = await response
       expect(JSON.parse(raw)).toEqual({ type: 'mcp_elicitation_response', id: 'request-1',
         action: 'accept', content: { mode: 'alpha', reason: 'calendar', count: 3, ratio: 0.5, confirmed: true } })
