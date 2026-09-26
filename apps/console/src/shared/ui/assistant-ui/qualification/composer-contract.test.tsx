@@ -77,6 +77,17 @@ describe('static composer primitive contract', () => {
     expect(screen.queryByText(/tokens/)).toBeNull()
   })
 
+  it('shows a measured window without claiming measured use', () => {
+    const { rerender } = render(<ComposerContext measured={{ percent: null, usedTokens: null, windowTokens: 8192 }} />)
+    expect(screen.getByRole('button', { name: 'Context: unknown' })).toBeInTheDocument()
+    expect(screen.getByText('Window: 8,192 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Breakdown unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('0 / 8,192 tokens')).toBeNull()
+    rerender(<ComposerContext measured={{ percent: null, usedTokens: 41, windowTokens: null }} />)
+    expect(screen.getByText('Used: 41 tokens')).toBeInTheDocument()
+    expect(screen.queryByText(/Window:/)).toBeNull()
+  })
+
   it('renders only supplied measured breakdown and sources', () => {
     render(<ComposerContext measured={{ percent: 37.8, breakdown: [{ label: 'Messages', tokens: 4200, tint: '#123456' }], sources: ['runtime meter'] }} />)
     expect(screen.getByRole('button', { name: 'Context: 38% used' })).toBeInTheDocument()

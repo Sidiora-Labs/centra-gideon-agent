@@ -380,7 +380,7 @@ function ToolFallbackApproval({
   }) {
   const [submitted, setSubmitted] = useState(false);
   const voiceActive = useAuiState((s) => s.thread.voice !== undefined);
-  const canAnswer = useAuiState((s) => s.thread.capabilities.answerToolCall);
+  const canAnswer = Boolean(respondToApproval || (interrupt && resume) || addResult);
   const locked = submitted || voiceActive;
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
