@@ -383,6 +383,32 @@ describe('PermissionGrant exact caller decisions', () => {
     expect(onGrant).not.toHaveBeenCalled()
   })
 
+  it('keeps compact action text separate from accessible names and disabled revision', () => {
+    const onChoice = vi.fn()
+    render(<PermissionGrant capability="Write report" reach={[]} scope="pending" onChoice={onChoice}
+      choices={[
+        { id: 'approved', label: 'Allow', name: 'Allow once for this request' },
+        { id: 'rejected', label: 'Deny', name: 'Deny this request', tone: 'danger' },
+        { id: 'revised', label: 'Request change', name: 'Request a revised action', disabled: true },
+      ]} />)
+    const allow = screen.getByRole('button', { name: 'Allow once for this request' }) as HTMLButtonElement
+    const deny = screen.getByRole('button', { name: 'Deny this request' }) as HTMLButtonElement
+    const revise = screen.getByRole('button', { name: 'Request a revised action' }) as HTMLButtonElement
+    expect(allow.textContent).toBe('Allow')
+    expect(allow.title).toBe('Allow once for this request')
+    expect(allow.className).toContain('text-foreground/55')
+    expect(deny.textContent).toBe('Deny')
+    expect(deny.title).toBe('Deny this request')
+    expect(deny.className).toContain('text-red-600')
+    expect(revise.disabled).toBe(true)
+    expect(revise.title).toBe('Request a revised action')
+    fireEvent.click(allow)
+    fireEvent.click(deny)
+    fireEvent.click(revise)
+    expect(onChoice.mock.calls).toEqual([['approved'], ['rejected']])
+    expect(screen.queryByRole('button', { name: 'Always' })).toBeNull()
+  })
+
   it.each([
     ['approved', 'Allowed once'],
     ['trust', 'Trusted for this chat'],
