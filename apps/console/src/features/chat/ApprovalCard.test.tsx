@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ApprovalCard, REMEMBER_SCOPES } from './ApprovalCard'
 import type { ApprovalSegment } from './chatTypes'
+import { resetDataStore, writeQuery } from '../../shared/data/data'
+import type { AutonomyLadder } from '../../shared/data/api'
 
 
 const seg = (over: Partial<ApprovalSegment> = {}): ApprovalSegment => ({
@@ -9,7 +11,8 @@ const seg = (over: Partial<ApprovalSegment> = {}): ApprovalSegment => ({
 })
 
 const scopeTab = (label: string) => screen.getByRole('tab', { name: label })
-const touchList = () => screen.queryByRole('list', { name: /what this can touch/i })
+const grant = () => screen.getByRole('group', { name: /permission needed to run/i })
+const reach = () => grant().textContent?.split('this grants')[1]?.split('Remember this choice')[0] ?? ''
 
 describe('ApprovalCard — the four zones', () => {
   it('renders what, why, what-it-can-touch and how-far-it-reaches', () => {
@@ -19,13 +22,11 @@ describe('ApprovalCard — the four zones', () => {
         onAct={() => {}}
       />,
     )
-    expect(container.textContent).toContain('bash(rm -rf /tmp/scratch)')
+    expect(grant().getAttribute('data-slot')).toBe('permission-grant')
+    expect(screen.getByRole('group', { name: 'Tool arguments' }).textContent).toBe('rm -rf /tmp/scratch')
     expect(container.textContent).toContain('Clearing the scratch dir before the rebuild')
-    const list = touchList()
-    expect(list).not.toBeNull()
-    const chips = [...list!.querySelectorAll('li')].map((li) => li.textContent?.trim())
-    expect(chips).toContain('Runs a command')
-    expect(chips).not.toContain('Reads only')
+    expect(reach()).toContain('Runs a command')
+    expect(reach()).not.toContain('Reads only')
     expect(screen.getByRole('tablist', { name: 'Remember this choice' })).toBeTruthy()
     expect(container.textContent).toContain('Nothing is remembered. The next tool call asks again.')
   })
@@ -58,7 +59,7 @@ describe('ApprovalCard — the blast-radius zone never over-claims', () => {
   it('renders NO facet zone at all when the inputs establish nothing', () => {
     const { container } = render(<ApprovalCard seg={seg({ tool: 'ponder' })} onAct={() => {}} />)
     expect(container.textContent).toContain('Permission needed')
-    expect(touchList()).toBeNull()
+    expect(container.textContent).not.toContain('this grants')
     for (const negative of ['No writes', 'No network', 'No shell', 'Not read', 'no writes', 'none']) {
       expect(container.textContent, negative).not.toContain(negative)
     }
@@ -66,14 +67,16 @@ describe('ApprovalCard — the blast-radius zone never over-claims', () => {
 
   it('shows only the ESTABLISHED facets, never the full four with on/off states', () => {
     render(<ApprovalCard seg={seg({ tool: 'web_fetch', risk: 'caution' })} onAct={() => {}} />)
-    const chips = [...touchList()!.querySelectorAll('li')].map((li) => li.textContent?.trim())
-    expect(chips).toEqual(['Uses the network'])
+    expect(reach()).toContain('Uses the network')
+    expect(reach()).not.toContain('Runs a command')
+    expect(reach()).not.toContain('Reads only')
   })
 
   it('claims a read only on positive evidence, and both facets for a read-only shell call', () => {
     render(<ApprovalCard seg={seg({ tool: 'bash', risk: 'safe' })} onAct={() => {}} />)
-    const chips = [...touchList()!.querySelectorAll('li')].map((li) => li.textContent?.trim())
-    expect(chips).toEqual(['Runs a command', 'Reads only'])
+    expect(reach()).toContain('Runs a command')
+    expect(reach()).toContain('Reads only')
+    expect(reach()).not.toContain('Uses the network')
   })
 })
 
@@ -165,8 +168,8 @@ describe('ApprovalCard — the brief describes, it never advocates', () => {
     render(<ApprovalCard seg={seg()} onAct={() => {}} />)
     const allow = screen.getByRole('button', { name: /^Allow bash/ })
     const deny = screen.getByRole('button', { name: /^Deny bash/ })
-    expect(allow.style.background).not.toContain('--color-primary')
-    expect(deny.style.background).toContain('--color-danger')
+    expect(allow.className).not.toContain('inkButton')
+    expect(deny.className).toContain('text-red-600')
   })
 
   it('focuses and pre-submits nothing on arrival', () => {
@@ -176,5 +179,88 @@ describe('ApprovalCard — the brief describes, it never advocates', () => {
     expect(buttons.length).toBeGreaterThan(0)
     for (const b of buttons) expect(b.getAttribute('type')).toBe('button')
     expect(document.activeElement).toBe(document.body)
+  })
+})
+
+describe('ApprovalCard — connected PermissionGrant decisions', () => {
+  it('shows a governing rung from the real autonomy query cache when the provider owns this tool', () => {
+    const ladder: AutonomyLadder = {
+      rungs: ['one_tap'],
+      rung_meta: [{ key: 'one_tap', label: 'One tap', hint: 'Ask before running' }],
+      incident_active: false,
+      reversals: [],
+      types: [{
+        key: 'action.shell', floor: 'one_tap', ceiling: 'one_tap', leaves_machine: false,
+        providers: ['bash'], resolved_rung: 'one_tap', granted_rung: 'one_tap',
+        held_by_incident: false, authority: 'Owner choice', granted_at: '', evidence_window: '',
+        demotions: [], eligible: false, next_rung: '', record: '', clean_approvals: 0,
+        rejections: 0, observed_days: 0, cooldown_until: '',
+      }],
+    }
+    writeQuery('autonomy:ladder', ladder, true)
+    try {
+      render(<ApprovalCard seg={seg()} onAct={() => {}} />)
+      expect(screen.getByText('One tap')).toBeInTheDocument()
+      expect(grant().textContent).toContain('Permission needed')
+    } finally {
+      resetDataStore()
+    }
+  })
+
+  it('uses one donor permission card and one set of real approval actions', () => {
+    render(<ApprovalCard seg={seg({ input: 'pwd', purpose: 'Check the current directory' })} onAct={() => {}} />)
+    expect(document.querySelectorAll('[data-slot="permission-grant"]')).toHaveLength(1)
+    expect(grant().textContent).toContain('Check the current directory')
+    expect(screen.getByRole('group', { name: 'Tool arguments' }).textContent).toBe('pwd')
+    expect(screen.getAllByRole('button', { name: /^Allow bash/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Deny bash/ })).toHaveLength(1)
+  })
+
+  it('never claims a requester when the wire has no requester identity', () => {
+    render(<ApprovalCard seg={seg({ tool: 'ponder', risk: undefined })} onAct={() => {}} />)
+    expect(grant().textContent).not.toContain('requested by')
+    expect(grant().textContent).not.toContain('this grants')
+  })
+
+  it('keeps the selected backend scope even when a narrower tool type hides agent trust', () => {
+    const onAct = vi.fn()
+    render(<ApprovalCard seg={seg({ toolKind: 'read' })} onAct={onAct} />)
+    expect(screen.queryByRole('tab', { name: 'This agent' })).toBeNull()
+    fireEvent.click(scopeTab('This chat'))
+    fireEvent.click(screen.getByRole('button', { name: /^Allow bash/ }))
+    expect(onAct).toHaveBeenCalledWith('a1', 'trust')
+  })
+
+  it('falls back to once when the live tool kind removes an already selected agent scope', () => {
+    const onAct = vi.fn()
+    const view = render(<ApprovalCard seg={seg({ toolKind: 'write' })} onAct={onAct} />)
+    fireEvent.click(scopeTab('This agent'))
+    view.rerender(<ApprovalCard seg={seg({ toolKind: 'read' })} onAct={onAct} />)
+    expect(screen.queryByRole('tab', { name: 'This agent' })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Allow bash — just this once/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Allow bash/ }))
+    expect(onAct).toHaveBeenCalledWith('a1', 'approved')
+  })
+
+  it('prevents an empty revision and sends the exact trimmed revision once entered', () => {
+    const onAct = vi.fn()
+    render(<ApprovalCard seg={seg({ canRevise: true })} onAct={onAct} />)
+    const revise = screen.getByRole('button', { name: /^Request a revised bash action/ }) as HTMLButtonElement
+    expect(revise.disabled).toBe(true)
+    fireEvent.change(screen.getByRole('textbox', { name: 'How should this action change?' }), { target: { value: '  limit to /tmp  ' } })
+    expect(revise.disabled).toBe(false)
+    fireEvent.click(revise)
+    expect(onAct).toHaveBeenCalledTimes(1)
+    expect(onAct).toHaveBeenCalledWith('a1', 'revised', 'limit to /tmp')
+  })
+
+  it('shows the actual resolved backend outcome without pending decision controls', () => {
+    const onAct = vi.fn()
+    render(<ApprovalCard seg={seg({ resolved: 'trust' })} onAct={onAct} />)
+    expect(grant().textContent).toContain('trusted for this chat')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Allow bash/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Deny bash/ })).toBeNull()
+    expect(onAct).not.toHaveBeenCalled()
   })
 })
