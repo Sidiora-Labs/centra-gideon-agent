@@ -103,6 +103,25 @@ describe('persisted message timing', () => {
   })
 })
 
+describe('persisted stop outcome', () => {
+  it('shows a status-only donor marker for the settled soft stop without repeating partial words', () => {
+    const view = render(<MessageAssistant stopOutcome={{ state: 'stopped', outcome: 'soft' }}>Partial answer</MessageAssistant>)
+    const marker = view.container.querySelector('[data-slot="stopped-run"]')
+    expect(marker?.textContent).toContain('Stopped')
+    expect(marker?.querySelector('p')).toBeNull()
+    expect(view.container.textContent?.split('Partial answer')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Continue|Discard/ })).toBeNull()
+  })
+
+  it('distinguishes a recorded reset failure and removes the marker when the turn changes', () => {
+    const view = render(<MessageAssistant stopOutcome={{ state: 'stop_failed_reset', outcome: 'hard' }}>Interrupted answer</MessageAssistant>)
+    expect(view.container.querySelector('[data-slot="stopped-run"]')?.textContent).toContain('Stop failed; session reset')
+    view.rerender(<MessageAssistant>Completed answer</MessageAssistant>)
+    expect(view.container.querySelector('[data-slot="stopped-run"]')).toBeNull()
+    expect(view.container.textContent).toContain('Completed answer')
+  })
+})
+
 describe('persisted assistant file changes', () => {
   it('renders an exact applied diff and opens the recorded path without review actions', () => {
     const opened: string[] = []
