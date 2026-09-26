@@ -28,10 +28,24 @@ import { rowSubject } from '../../shared/data/rowSubject'
 import { activePhaseIndex, phaseMinCycles, phaseForCycle, hasDistinctName } from './loopPhases'
 import { loopStatusLabel, loopStatusColor, loopStatusTone, effectiveLoopStatus, shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
 import { PageTitle } from '../../shared/ui/PageTitle'
+import { HeatGraph } from '../../shared/vendor/assistant-ui/elements/heat-graph'
 
 
 const GOAL_GLYPH: Record<string, string> = {
   verifiable: '✓ verifiable', open_ended: '◐ open-ended', monitor: '∞ monitor',
+}
+
+export function findingHeatData(findings: GoalLoop['findings']): { date: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const finding of findings ?? []) {
+    const ts = finding.ts
+    if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) continue
+    const date = new Date(ts * 1000)
+    if (!Number.isFinite(date.getTime())) continue
+    const day = date.toISOString().slice(0, 10)
+    counts.set(day, (counts.get(day) ?? 0) + 1)
+  }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([date, count]) => ({ date, count }))
 }
 
 
@@ -229,7 +243,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
   )
 }
 
-function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void }) {
+export function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void }) {
   const dispStatus = effectiveLoopStatus(loop.status, loop.stop_reason)
   const running = loop.status === 'running'
   const kind = (loop as { kind?: string }).kind
@@ -237,8 +251,9 @@ function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void
   const cycleLabel = loop.max_cycles === 0 ? `cycle ${cycle} · ongoing` : `cycle ${cycle}/${loop.max_cycles}`
   const latest = loop.findings?.length ? loop.findings[loop.findings.length - 1] : null
   const latestText = latest?.key_insight || latest?.summary
+  const heatData = findingHeatData(loop.findings)
   return (
-    <div className="flex flex-col gap-l">
+    <div className="flex min-w-0 flex-col gap-l">
       <Button onClick={onOpenFull}><ExternalLink size={15} /> Open full loop</Button>
 
       <div data-type="body-s" className="flex flex-wrap items-center gap-s">
@@ -257,6 +272,13 @@ function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void
         <div data-type="body-m" className="text-on-surface"><Markdown>{loop.goal}</Markdown></div>
         {loop.success_criteria && <p data-type="body-s" className="mt-2 text-on-surface-low"><span className="text-on-surface-var">Done when:</span> {loop.success_criteria}</p>}
       </div>
+
+      {heatData.length > 0 && <section className="min-w-0" aria-label="Finding activity">
+        <div data-type="caption" className="mb-1.5 uppercase tracking-wide text-on-surface-low">Finding activity</div>
+        <div role="region" aria-label="Finding activity by UTC day" tabIndex={0} className="max-w-full overflow-x-auto focus-visible:outline focus-visible:outline-primary">
+          <div className="min-w-[680px]"><HeatGraph data={heatData} /></div>
+        </div>
+      </section>}
 
       {(loop.sub_goals?.length ?? 0) > 0 && (
         <div>
