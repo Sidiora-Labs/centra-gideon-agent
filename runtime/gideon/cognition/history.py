@@ -103,6 +103,7 @@ class _ConversationArchives:
         prefix = f"{_safe_key(key)}__{clock.strftime('%Y%m%d-%H%M%S')}"
         header = dict(
             _type="archive",
+            session_key=key,
             reason=reason,
             archived_at=clock.isoformat(),
             count=len(lines),
@@ -601,6 +602,9 @@ class ConversationLog:
         )
         if prior.get("memory_mode"):
             header["memory_mode"] = prior["memory_mode"]
+        for field in ("title", "import_source", "import_key"):
+            if prior.get(field):
+                header[field] = prior[field]
         atomic_write(path, JournalDocument.render(header, messages))
         self._invalidate_cache(key)
 
@@ -705,6 +709,10 @@ class HistoryConsolidator:
         self._history_consolidated = self._schedule.history
         self._prefs_offset = self._schedule.preferences
         self._consolidation_count, self._last_promote_monotonic = 0, 0.0
+        self._schedule.recover()
+
+    async def drain(self, timeout: float = 3.0) -> dict:
+        return await self._schedule.drain(timeout)
 
     @property
     def _svc(self):

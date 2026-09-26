@@ -241,12 +241,19 @@ def _write_settings(item: ImportItem) -> WriteResult:
     return DocumentCommit.settings(sys.modules[__name__], item)
 
 
+def _write_conversation(item: ImportItem) -> WriteResult:
+    from gideon.cognition.onboarding_import.transcripts import write_transcript
+
+    return write_transcript(item, sys.modules[__name__])
+
+
 _WRITERS: dict[ImportCategory, Callable[[ImportItem], WriteResult]] = {
     ImportCategory.INSTRUCTIONS: _write_memory,
     ImportCategory.MEMORIES: _write_memory,
     ImportCategory.MCP_SERVERS: _write_mcp_server,
     ImportCategory.SKILLS: _write_skill,
     ImportCategory.SETTINGS: _write_settings,
+    ImportCategory.CONVERSATIONS: _write_conversation,
 }
 
 

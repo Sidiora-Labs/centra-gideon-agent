@@ -60,6 +60,7 @@ def scan(root: Path | str | None = None) -> ScanResult:
         "_scan_mcp",
         "_scan_skills",
         "_scan_settings",
+        "_scan_conversations",
         "_count_withheld_files",
     )
     return SourceCapture.survey(sys.modules[__name__], root, phases)
@@ -96,3 +97,9 @@ def _scan_skills(base: Path, result: ScanResult) -> None:
 def _scan_settings(base: Path, result: ScanResult) -> None:
     capture = SourceCapture(sys.modules[__name__], base, result)
     capture.settings(_SETTINGS_FILE, capture.structured(_SETTINGS_FILE))
+
+
+def _scan_conversations(base: Path, result: ScanResult) -> None:
+    from gideon.cognition.onboarding_import.transcripts import scan_transcripts
+
+    scan_transcripts(base, result, source=NAME, pattern="projects/*/*.jsonl", format="claude")
