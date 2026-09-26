@@ -130,11 +130,15 @@ function ToolFallbackDuration({
 function ToolFallbackTrigger({
   toolName,
   status,
+  label = "Used tool",
+  cancelledLabel = "Cancelled tool",
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   toolName: string;
   status?: ToolCallMessagePartStatus;
+  label?: string;
+  cancelledLabel?: string;
 }) {
   const statusType = status?.type ?? "complete";
   const isRunning = statusType === "running";
@@ -142,7 +146,7 @@ function ToolFallbackTrigger({
     status?.type === "incomplete" && status.reason === "cancelled";
 
   const Icon = statusIconMap[statusType];
-  const label = isCancelled ? "Cancelled tool" : "Used tool";
+  const displayLabel = isCancelled ? cancelledLabel : label;
 
   return (
     <CollapsibleTrigger
@@ -169,7 +173,7 @@ function ToolFallbackTrigger({
           isRunning && "shimmer motion-reduce:animate-none",
         )}
       >
-        {label}: <b>{toolName}</b>
+        {displayLabel}: <b>{toolName}</b>
       </span>
       <ToolFallbackDuration />
       <ChevronDownIcon

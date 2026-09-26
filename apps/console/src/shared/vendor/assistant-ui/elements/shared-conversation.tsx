@@ -17,17 +17,19 @@ export function SharedConversation({
   sharedAt,
   turns,
   onContinue,
+  labels,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "title" | "sharedBy" | "sharedAt" | "turns" | "onContinue"
+  "children" | "title" | "sharedBy" | "sharedAt" | "turns" | "onContinue" | "labels"
 > & {
   title: string;
   sharedBy?: string;
   sharedAt?: string;
   turns: readonly SharedTurn[];
   onContinue?: () => void;
+  labels?: { sharedBy?: (by: string, at: string) => string; readOnly?: string; continue?: string };
 }) {
   return (
     <div
@@ -45,7 +47,7 @@ export function SharedConversation({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[13.5px] font-medium">{title}</span>
           {sharedBy && sharedAt && <span className={cn(mono, "text-foreground/30 truncate")}>
-            shared by {sharedBy} · {sharedAt}
+            {labels?.sharedBy ? labels.sharedBy(sharedBy, sharedAt) : `shared by ${sharedBy} · ${sharedAt}`}
           </span>}
         </div>
       </div>
@@ -67,7 +69,7 @@ export function SharedConversation({
       </div>
 
       <div className="border-foreground/[0.07] flex items-center gap-2 border-t px-4 py-3">
-        <span className={cn(mono, "text-foreground/30")}>read only</span>
+        <span className={cn(mono, "text-foreground/30")}>{labels?.readOnly ?? "read only"}</span>
         {onContinue && <button
           type="button"
           onClick={onContinue}
@@ -76,7 +78,7 @@ export function SharedConversation({
             "ms-auto flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
           )}
         >
-          Continue in your own chat
+          {labels?.continue ?? "Continue in your own chat"}
         </button>}
       </div>
     </div>

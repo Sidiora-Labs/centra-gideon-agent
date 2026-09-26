@@ -88,6 +88,16 @@ describe('static composer primitive contract', () => {
     expect(screen.queryByText(/Window:/)).toBeNull()
   })
 
+  it('labels a partial measured breakdown without summing missing buckets', () => {
+    render(<ComposerContext measured={{ percent: null, usedTokens: 820, windowTokens: 1000, breakdownComplete: false,
+      breakdown: [{ label: 'Input', tokens: 610, tint: '#123456' }, { label: 'Cache read', tokens: 100, tint: '#654321' }] }} />)
+    expect(screen.getByText('820 / 1,000 tokens')).toBeInTheDocument()
+    expect(screen.getByText('610 tokens')).toBeInTheDocument()
+    expect(screen.getByText('100 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Breakdown incomplete')).toBeInTheDocument()
+    expect(screen.queryByText('710 / 1,000 tokens')).toBeNull()
+  })
+
   it('renders only supplied measured breakdown and sources', () => {
     render(<ComposerContext measured={{ percent: 37.8, breakdown: [{ label: 'Messages', tokens: 4200, tint: '#123456' }], sources: ['runtime meter'] }} />)
     expect(screen.getByRole('button', { name: 'Context: 38% used' })).toBeInTheDocument()
