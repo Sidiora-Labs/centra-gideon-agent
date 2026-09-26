@@ -66,8 +66,8 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the disclosure store', () => {
-  it('an install with NO record keeps its full rail (the upgrade marker)', () => {
-    expect(readNavDisclosure()).toEqual({ mode: 'expert', pinned: [] })
+  it('an install with no record starts with familiar navigation', () => {
+    expect(readNavDisclosure()).toEqual({ mode: 'starter', pinned: [] })
   })
 
   it('a record written by onboarding starts on the starter rail', () => {
@@ -77,7 +77,7 @@ describe('the disclosure store', () => {
 
   it('a corrupt or partial record falls back without throwing', () => {
     localStorage.setItem('nav-disclosure', '{not json')
-    expect(readNavDisclosure()).toEqual({ mode: 'expert', pinned: [] })
+    expect(readNavDisclosure()).toEqual({ mode: 'starter', pinned: [] })
     localStorage.setItem('nav-disclosure', '{"pinned":[1,"loops",null]}')
     expect(readNavDisclosure()).toEqual({ mode: 'starter', pinned: ['loops'] })
   })
@@ -90,13 +90,21 @@ describe('the disclosure store', () => {
   })
 
   it('pinning does not silently flip an expert install back to starter', () => {
+    setNavMode('expert')
     pinNavSurface('tools')
     expect(readNavDisclosure().mode).toBe('expert')
+  })
+
+  it('preserves a saved expert preference across fresh reads', () => {
+    localStorage.setItem('nav-disclosure', JSON.stringify({ mode: 'expert', pinned: ['tools'] }))
+    expect(readNavDisclosure()).toEqual({ mode: 'expert', pinned: ['tools'] })
   })
 
   it('isDisclosed: starter shows the starter set, pins, and app tiles — nothing else', () => {
     for (const id of STARTER_NAV_IDS) expect(isDisclosed(id, 'starter', [])).toBe(true)
     expect(isDisclosed('tools', 'starter', [])).toBe(false)
+    expect(isDisclosed('dashboard', 'starter', [])).toBe(false)
+    expect(isDisclosed('rooms', 'starter', [])).toBe(false)
     expect(isDisclosed('tools', 'starter', ['tools'])).toBe(true)
     expect(isDisclosed('app/shell/weather', 'starter', [])).toBe(true)
     expect(isDisclosed('tools', 'expert', [])).toBe(true)
@@ -110,8 +118,6 @@ describe('the disclosure store', () => {
 })
 
 describe('the rail a fresh install sees', () => {
-  beforeEach(() => setNavMode('starter'))
-
   it('shows the starter surfaces and holds the rest back', async () => {
     renderApp()
     const names = await waitFor(() => {
@@ -120,7 +126,9 @@ describe('the rail a fresh install sees', () => {
       return n
     })
     for (const label of ['New conversation', 'Conversations', 'Projects', 'Files', 'Calendar', 'Notifications', 'Apps', 'Manage apps', 'Your account']) expect(names).toContain(label)
-    for (const label of ['Learning', 'Tools', 'Terminal', 'Workflows']) expect(names).not.toContain(label)
+    for (const label of ['Home', 'Chat', 'Rooms', 'Learning', 'Tools', 'Terminal', 'Workflows']) expect(names).not.toContain(label)
+    expect(rail().textContent).not.toMatch(/More/i)
+    expect(readNavDisclosure()).toEqual({ mode: 'starter', pinned: [] })
   })
 
   it('labels the familiar groups in starter navigation', async () => {
@@ -255,8 +263,8 @@ describe('expert mode', () => {
     expect(readNavDisclosure().pinned).toEqual([])
   })
 
-  it('an upgraded install shows every surface from the first paint', async () => {
-    localStorage.clear()
+  it('a saved expert preference shows every surface from the first paint', async () => {
+    setNavMode('expert')
     renderApp()
     await waitFor(() => {
       const names = railLinks()

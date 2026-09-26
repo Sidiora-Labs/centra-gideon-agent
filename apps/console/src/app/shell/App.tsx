@@ -227,6 +227,7 @@ function AppInner() {
 
   useEffect(() => {
     if (navMode !== 'starter') return
+    if (active === 'dashboard') return
     if (isDisclosed(active, navMode, navPinned)) return
     pinNav(active)
   }, [active, navMode, navPinned, pinNav])
