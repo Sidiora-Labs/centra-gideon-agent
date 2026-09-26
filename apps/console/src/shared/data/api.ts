@@ -4977,6 +4977,12 @@ export const api = {
   setToolGroupsEnabled: (enabled: boolean) =>
     patch<Record<string, any>>('/api/config/gideon', { path: 'tools.groups_enabled', value: enabled }),
   recordFeedback: (body: FeedbackRecordBody) => post<{ ok: boolean; id: string; verdict: string }>('/api/feedback', body),
+  chatMessageFeedback: (session: string, visibleIndex: number, verdict: 'up' | 'down', reason = '') =>
+    post<{ ok: boolean; id: string; verdict: 'up' | 'down' }>(
+      `/api/chat/sessions/${encodeURIComponent(session)}/feedback/${visibleIndex}`, { verdict, reason }),
+  chatMessageFeedbackTarget: (session: string, visibleIndex: number) =>
+    get<{ verdict: 'up' | 'down' | null; reason: string }>(
+      `/api/chat/sessions/${encodeURIComponent(session)}/feedback/${visibleIndex}`),
   feedbackTarget: (kind: FeedbackTargetKind, id: string) =>
     get<{ verdict: 'up' | 'down' | null; reason?: string }>(`/api/feedback/target/${kind}/${encodeURIComponent(id)}`),
   feedbackProducers: (windowDays?: number) =>
