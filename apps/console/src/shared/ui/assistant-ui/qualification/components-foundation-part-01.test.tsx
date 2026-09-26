@@ -128,8 +128,8 @@ describe('reasoning effort source behavior', () => {
     const { container } = render(<ReasoningEffort levels={levels} selectedKey="missing" spent={14} />)
     const root = slot(container, 'reasoning-effort')
     expect(within(root).queryAllByRole('button')).toHaveLength(0)
-    expect(within(root).getByText('14 / 0')).toBeInTheDocument()
-    expect(within(root).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+    expect(within(root).queryByText('14 / 0')).toBeNull()
+    expect(within(root).queryByRole('progressbar')).toBeNull()
     expect(within(root).getByText('Low')).not.toHaveAttribute('aria-current')
   })
 
