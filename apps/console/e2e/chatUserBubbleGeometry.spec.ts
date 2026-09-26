@@ -17,15 +17,19 @@ test('a persisted user message keeps a natural bubble width on desktop and mobil
 
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 })
-    const geometry = await bubble.evaluate(element => {
+    const geometry = await bubble.evaluate((element, target) => {
       const box = element.getBoundingClientRect()
       const parent = element.parentElement!.getBoundingClientRect()
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let text = walker.nextNode()
+      while (text && !text.textContent?.includes(target)) text = walker.nextNode()
+      if (!text) throw Error('Persisted user text missing')
       const range = document.createRange()
-      range.selectNodeContents(element.querySelector('span')!)
+      range.selectNodeContents(text)
       return { width: box.width, parentWidth: parent.width,
         rightGap: Math.abs(parent.right - box.right), lines: range.getClientRects().length,
         overflow: element.scrollWidth > element.clientWidth + 1 }
-    })
+    }, prompt)
     expect(geometry.width, `${width}px bubble collapsed`).toBeGreaterThan(180)
     expect(geometry.width, `${width}px bubble fills the transcript`).toBeLessThan(geometry.parentWidth * (width < 640 ? 0.92 : 0.8) + 2)
     expect(geometry.lines, `${width}px short user message wrapped`).toBe(1)
