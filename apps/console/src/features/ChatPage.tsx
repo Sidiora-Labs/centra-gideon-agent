@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ResultAnnouncement } from '../shared/ui/ListControls'
 import { reportActionFailure, reportingWrite } from '../app/shell/reportingWrite'
 import { unavailableWhen, BUSY_REASON } from '../shared/ui/unavailable'
@@ -22,7 +22,8 @@ import { SidePanel } from '../shared/ui/SidePanel'
 import { Button } from '../shared/ui/Button'
 import { Checkbox } from '../shared/ui/forms'
 import { QuietButton } from '../shared/ui/QuietButton'
-import { SelectionToolbar } from '../shared/ui/SelectionPill'
+import { QuoteBlock } from '../shared/vendor/assistant-ui/elements/quote.aui'
+import { EditMessage } from '../shared/vendor/assistant-ui/elements/edit-message'
 import { Segmented } from '../shared/ui/Segmented'
 import { Meter } from '../shared/ui/Meter'
 import { ContextMenu, type ContextMenuItem } from '../shared/ui/motion'
@@ -45,7 +46,6 @@ import { WindowedList } from '../shared/ui/WindowedList'
 import { FieldError } from '../shared/ui/forms'
 import { MessageUser } from '../shared/ui/chat/MessageUser'
 import { MessageAssistant } from '../shared/ui/chat/MessageAssistant'
-import { Spark } from '../shared/ui/Spark'
 import { StreamingIndicator } from '../shared/ui/chat/StreamingIndicator'
 import { ChatPlanGate } from '../shared/ui/chat/ChatPlanGate'
 import { Markdown } from '../shared/ui/Markdown'
@@ -72,21 +72,32 @@ import { branchIndexOf, branchParentKey } from './chat/branchLineage'
 import { buildOptimizerContext } from './chat/optimizerContext'
 import { useIdentity, firstNameOf } from '../app/shell/identity'
 import { usePlatform } from '../app/shell/usePlatform'
+import { useIsMobile } from '../app/shell/useIsMobile'
 import { SnipOverlay } from '../shared/ui/SnipOverlay'
 import { chooseCaptureProvider, cropToPngFile, displayCaptureSupported, grabOneFrame, type SnipRect } from '../shared/ui/composer/displayCapture'
 import { notify } from '../app/shell/appSdk'
-import { spring, stagger, listItemEnter, expr, useReducedMotion } from '../shared/theme/motion'
-import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
+import { spring, expr, useReducedMotion } from '../shared/theme/motion'
+import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
 import { useStreamCoalescer } from './chat/useStreamCoalescer'
-import { FindBar } from '../shared/ui/FindBar'
-import { findSegments } from './chat/findSegments'
-import { FollowupChips, followupAnnouncement } from './chat/FollowupChips'
+import { followupAnnouncement } from './chat/FollowupChips'
 import { CheckWorkChip } from './chat/CheckWorkChip'
 import { SessionMarkerRail } from './chat/SessionMarkerRail'
+import { GideonChatRuntimeProvider, useGideonTurnByAuiId } from './chat/auiRuntime'
+import { ThreadTranscript, useMessage } from '../shared/vendor/assistant-ui/elements/thread.aui'
+import { ThreadList, ThreadListSidebar } from '../shared/vendor/assistant-ui/elements/thread-list.aui'
+import { ThreadFollowupSuggestions } from '../shared/vendor/assistant-ui/elements/follow-up-suggestions.aui'
+import { ReadAloud } from '../shared/vendor/assistant-ui/elements/read-aloud'
+import { ScrollAnchor } from '../shared/vendor/assistant-ui/elements/scroll-anchor'
+import { ConversationMapAui } from '../shared/vendor/assistant-ui/elements/conversation-map.aui'
+import { AssistantModal } from '../shared/vendor/assistant-ui/elements/assistant-modal.aui'
+import { AssistantSidebar } from '../shared/vendor/assistant-ui/elements/assistant-sidebar.aui'
+import { ContextDisplay } from '../shared/vendor/assistant-ui/elements/context-display.aui'
+import { MessagePrimitive } from '../shared/vendor/assistant-ui'
+import { ThreadConversationSearch, ThreadSessionSearch, ThreadChatPreview, ThreadEmptyWelcome, ThreadConnectionNotice, ThreadSharedSnapshots, appendSelectionQuote, readActualContextUsage, measuredContextDisplay, type ActualContextUsage } from './chat/auiThreadSurfaces'
 import { applyCoalescedFlush, insertActivity } from './chat/coalesceReducers'
 import { useQuery, invalidateKeys, peekQuery, writeQuery } from '../shared/data/data'
-import { sessionRecencyMs, sessionActivitySeconds, epochSeconds } from '../shared/data/epoch'
+import { sessionRecencyMs } from '../shared/data/epoch'
 import { sessionTitle } from '../shared/data/sessionTitle'
 import { useComposerData } from '../shared/data/useComposerData'
 import type { ComposerControls, ComposerValue } from '../shared/ui/composer/types'
@@ -96,6 +107,25 @@ import { copyText } from '../app/shell/clipboard'
 import { MoreRow } from '../shared/ui/MoreRow'
 
 type ChatDetail = Awaited<ReturnType<typeof api.chatSessionDetail>>
+type TranscriptRender = {
+  user: (turn: ChatTurn, index: number) => ReactNode
+  assistant: (turn: ChatTurn, index: number) => ReactNode
+  node: (index: number, element: HTMLDivElement | null) => void
+}
+const TranscriptRenderContext = createContext<TranscriptRender | null>(null)
+function AuiTurn({ role }: { role: 'user' | 'assistant' }) {
+  const id = useMessage((message) => message.id)
+  const entry = useGideonTurnByAuiId().get(id)
+  const render = useContext(TranscriptRenderContext)
+  if (!entry || !render || entry.turn.role !== role) return null
+  return <MessagePrimitive.Root data-gideon-turn={entry.index}>
+    <div className="relative" ref={(element) => render.node(entry.index, element)}>
+      {role === 'user' ? render.user(entry.turn, entry.index) : render.assistant(entry.turn, entry.index)}
+    </div>
+  </MessagePrimitive.Root>
+}
+const AuiUserTurn = () => <AuiTurn role="user"/>
+const AuiAssistantTurn = () => <AuiTurn role="assistant"/>
 const detailKey = (key: string) => `chat:detail:${key}`
 const readCachedDetail = (key: string): ChatDetail | null => peekQuery<ChatDetail>(detailKey(key)) ?? null
 function writeCachedDetail(key: string, d: ChatDetail): void {
@@ -181,17 +211,6 @@ function StarterChips({ onPick }: { onPick: (prefill: StarterPrefill) => void })
   )
 }
 
-function relTimeShort(at?: string | number): string {
-  const at_s = epochSeconds(at)
-  if (at_s == null) return ''
-  const s = Math.max(0, Date.now() / 1000 - at_s)
-  if (s < 60) return 'now'
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  if (s < 604800) return `${Math.floor(s / 86400)}d`
-  return `${Math.floor(s / 604800)}w`
-}
-
 function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) => void; onOpen: (key: string) => void }) {
   const { data, error: sessionsError, refresh: refreshSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
   const recent = useMemo(() => {
@@ -208,21 +227,13 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
         <LoadError what="chats" error={sessionsError} onRetry={refreshSessions} />
       ) : data === undefined ? (
         <div className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">Loading…</div>
-      ) : recent.length === 0 ? (
+    ) : recent.length === 0 ? (
         <div className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">No chats yet.</div>
       ) : (
-        <motion.div variants={{ animate: { transition: stagger(0.03) } }} initial="initial" animate="animate" className="flex flex-col gap-0.5">
-           {recent.map((s) => (
-            <motion.button key={s.key} type="button" variants={listItemEnter} onClick={() => onOpen(s.key)}
-              whileHover={{ x: expr(3, 0.3) }} transition={spring.spatialFast}
-              className="group flex items-center gap-s rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-high">
-              <MessageSquare size={14} className="shrink-0 text-on-surface-low group-hover:text-primary transition-colors" />
-              <span className="min-w-0 flex-1 truncate text-on-surface-var text-[0.8125rem] group-hover:text-on-surface">{sessionTitle(s)}</span>
-              <span className="shrink-0 text-on-surface-low text-[0.75rem] tabular-nums">{relTimeShort(sessionActivitySeconds(s))}</span>
-            </motion.button>
-           ))}
-           <MoreRow total={manualCount} shown={20} noun="chats" className="px-2 py-1" />
-        </motion.div>
+        <>
+          <ThreadSessionSearch sessions={recent} activeId="" onSelect={onOpen}/>
+          <MoreRow total={manualCount} shown={20} noun="chats" className="px-2 py-1"/>
+        </>
       )}
       { }
       <button type="button" onClick={() => navigate('chat/history')}
@@ -232,6 +243,10 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
       </button>
     </div>
   )
+}
+
+function HistoryPreviewLayout({ children, preview }: { children: ReactNode; preview?: ReactNode }) {
+  return preview ? <AssistantSidebar thread={preview}>{children}</AssistantSidebar> : <>{children}</>
 }
 
 function SessionPeekBody({ sessionKey, onOpen }: { sessionKey: string; onOpen: () => void }) {
@@ -281,36 +296,12 @@ function SessionPeekBody({ sessionKey, onOpen }: { sessionKey: string; onOpen: (
   const shown = detail.messages.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-12)
   return (
     <div className="flex h-full min-h-0 flex-col gap-m">
-      <div className="flex min-h-0 flex-1 flex-col gap-m overflow-y-auto">
-        {shown.length === 0 && !streamText ? (
-          <p className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">No messages yet — say hi below.</p>
-        ) : shown.map((m, i) => (
-          m.role === 'user' ? (
-            <div key={i} className="ml-6 self-end rounded-lg bg-surface-high px-m py-s">
-              <p className="whitespace-pre-wrap break-words text-on-surface text-[0.8125rem] leading-relaxed">{String(m.content || '').slice(0, 800)}</p>
-            </div>
-          ) : (
-            <div key={i} className="mr-2 min-w-0 text-[0.8125rem]">
-              <Markdown className="[&_p]:text-[0.8125rem]">{parseSwitchToAgent(parseOptions(String(m.content || '').slice(0, 2000)).body).body}</Markdown>
-            </div>
-          )
-        ))}
-        { }
-        {streamText && (
-          <div className="mr-2 min-w-0 text-[0.8125rem]">
-            <Markdown className="[&_p]:text-[0.8125rem]">{streamText}</Markdown>
-          </div>
-        )}
-        {busy && !streamText && (
-          <div className="flex items-center gap-s">
-            <Spark size={16} />
-            <motion.span className="text-on-surface-low text-[0.8125rem]" animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 1.8, ease: 'easeInOut', repeat: Infinity }}>Thinking…</motion.span>
-          </div>
-        )}
-        <div ref={endRef} />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {shown.length === 0 && !streamText && <p className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">No messages yet — say hi below.</p>}
+        <ThreadChatPreview turns={hydrateTurns(shown, false)} streamingText={streamText} busy={busy}
+          renderAssistant={(text) => <Markdown className="[&_p]:text-[0.8125rem]">{parseSwitchToAgent(parseOptions(text.slice(0, 2000)).body).body}</Markdown>}
+          endRef={endRef}/>
       </div>
-      {
-}
       <div className="shrink-0 rounded-lg bg-surface-container p-s shadow-[var(--shadow-composer)]">
         <textarea
           value={input}
@@ -405,6 +396,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [turns, setTurns] = useState<ChatTurn[]>(
     () => (seededDetail ? hydrateTurns(seededDetail.messages || [], false) : []),
   )
+  const { data: threadSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
   const [input, setInput] = useState(seed)
   const [streaming, setStreaming] = useState(false)
   const streamingRef = useRef(false)
@@ -428,12 +420,22 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const scrollRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+  const [unreadTurns, setUnreadTurns] = useState(0)
+  const priorTurnCount = useRef(turns.length)
+  useEffect(() => {
+    const added = turns.length - priorTurnCount.current
+    priorTurnCount.current = turns.length
+    if (added > 0 && scrolledUp) setUnreadTurns((count) => count + added)
+  }, [turns.length, scrolledUp])
+  useEffect(() => { if (!scrolledUp) setUnreadTurns(0) }, [scrolledUp])
+  useEffect(() => { priorTurnCount.current = turns.length; setUnreadTurns(0) }, [sessionId])
   const [wsConnected, setWsConnected] = useState(true)
   const glowTargetRef = useRef<HTMLDivElement | null>(null)
   const glowAnchorRef = useRef<HTMLDivElement | null>(null)
   const [activityOpen, setActivityOpen] = useQueryFlag(query, setQuery, 'activity')
   const [workspacePane, setWorkspacePane] = useQueryParam(query, setQuery, 'workspace', '')
   const [historyOpen, setHistoryOpen] = useQueryFlag(query, setQuery, 'history')
+  const [historySearchMode, setHistorySearchMode] = useState(false)
   const turnNodes = useRef<Map<number, HTMLDivElement>>(new Map())
   const [findOpen, setFindOpen] = useState(false)
   useEffect(() => { setFindOpen(false) }, [sessionId])
@@ -460,6 +462,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const uploadAbortRef = useRef<AbortController | null>(null)
   const [promptHistory, setPromptHistory] = useState<string[]>([])
   const [contextPct, setContextPct] = useState<number | undefined>(undefined)
+  const [contextUsage, setContextUsage] = useState<ActualContextUsage | undefined>(undefined)
+  const contextDisplay = useMemo(() => measuredContextDisplay(contextUsage), [contextUsage])
   const [optimizing, setOptimizing] = useState(false)
   const [preOptimize, setPreOptimize] = useState<string | null>(null)
   const [micError, setMicError] = useState<string | null>(null)
@@ -500,6 +504,32 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shares, setShares] = useState<ChatSessionShare[] | null>(null)
+  const [selectedShare, setSelectedShare] = useState<string | null>(null)
+  const [shareDetail, setShareDetail] = useState<ChatSessionShareDetail | null>(null)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
+  useEffect(() => {
+    setShareOpen(false); setShares(null); setSelectedShare(null); setShareDetail(null); setShareError(null)
+  }, [sessionId])
+  useEffect(() => {
+    if (!shareOpen || !sessionId) return
+    let alive = true
+    setShares(null); setShareError(null)
+    void api.sessionShares(sessionId).then(({ shares: existing }) => {
+      if (alive) { setShares(existing); setSelectedShare((selected) => selected ?? existing[0]?.slug ?? null) }
+    }).catch((error) => { if (alive) setShareError(error instanceof Error ? error.message : 'Could not load private copies') })
+    return () => { alive = false }
+  }, [shareOpen, sessionId])
+  useEffect(() => {
+    if (!shareOpen || !sessionId || !selectedShare) { setShareDetail(null); return }
+    let alive = true
+    setShareDetail(null)
+    void api.sessionShare(sessionId, selectedShare).then((detail) => { if (alive) setShareDetail(detail) })
+      .catch((error) => { if (alive) setShareError(error instanceof Error ? error.message : 'Could not load the private copy') })
+    return () => { alive = false }
+  }, [shareOpen, sessionId, selectedShare])
   const [regenningTitle, setRegenningTitle] = useState(false)
   const breakText = useRef(false)
   const coalescing = useRef(false)
@@ -542,6 +572,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
 
   useEffect(() => {
     sessionRef.current = sessionId
+    setContextPct(undefined)
+    setContextUsage(undefined)
     coalescer.reset(); coalescing.current = false
     setQueued([])
     setSubagents([])
@@ -722,7 +754,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         break
       }
       case 'context_usage':
-        if (d.session === sessionRef.current) setContextPct(typeof d.pct === 'number' ? d.pct : undefined)
+        if (d.session === sessionRef.current) {
+          setContextPct(typeof d.pct === 'number' ? d.pct : undefined)
+          setContextUsage(readActualContextUsage(d.usage))
+        }
         break
       case 'session_title': {
         const key = String(d.key ?? '')
@@ -1311,7 +1346,47 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (sessionRef.current) await api.stopChat(sessionRef.current).catch(reportActionFailure('stop this turn'))
   }
 
-  const [editingTurn, setEditingTurn] = useState<number | null>(null)
+  const [feedbackTarget, setFeedbackTarget] = useState<number | null>(null)
+    const [feedbackBusy, setFeedbackBusy] = useState(false)
+    const [feedbackError, setFeedbackError] = useState<string | null>(null)
+    const [feedbackVerdicts, setFeedbackVerdicts] = useState<Record<number, 'up' | 'down'>>({})
+    const feedbackLoaded = useRef(new Set<number>())
+    const feedbackIndices = turns.filter((turn) => turn.role === 'assistant' && turn.visibleIndex !== undefined).map((turn) => turn.visibleIndex!).join(',')
+    useEffect(() => {
+        feedbackLoaded.current.clear()
+        setFeedbackVerdicts({})
+        setFeedbackTarget(null)
+        setFeedbackError(null)
+    }, [sessionId])
+    useEffect(() => {
+        const key = sessionRef.current
+        if (!key) return
+        for (const index of feedbackIndices.split(',').filter(Boolean).map(Number)) {
+            if (feedbackLoaded.current.has(index)) continue
+            feedbackLoaded.current.add(index)
+            void api.chatMessageFeedbackTarget(key, index).then((result) => {
+                if (sessionRef.current === key && result.verdict) setFeedbackVerdicts((previous) => ({ ...previous, [index]: result.verdict! }))
+            }).catch(() => { feedbackLoaded.current.delete(index) })
+        }
+    }, [feedbackIndices, sessionId])
+    async function saveFeedback(index: number, verdict: 'up' | 'down', reason?: string) {
+        const key = sessionRef.current
+        if (!key || feedbackBusy) return
+        setFeedbackBusy(true)
+        setFeedbackError(null)
+        try {
+            await api.chatMessageFeedback(key, index, verdict, reason)
+            setFeedbackVerdicts((previous) => ({ ...previous, [index]: verdict }))
+            setFeedbackTarget(null)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Could not save feedback'
+            setFeedbackError(message)
+            if (verdict === 'up') notify(message, 'error')
+        } finally {
+            setFeedbackBusy(false)
+        }
+    }
+    const [editingTurn, setEditingTurn] = useState<number | null>(null)
 
   async function regenerate() {
     const s = sessionRef.current
@@ -1483,11 +1558,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   function quoteToComposer(text: string, attribution?: string) {
-    const q = text.trim()
-    if (!q) return
-    const lines = q.split('\n').map((l) => `> ${l}`)
-    const block = attribution ? `> **${attribution} said:**\n${lines.join('\n')}` : lines.join('\n')
-    setInput((prev) => (prev ? `${prev}\n\n${block}\n\n` : `${block}\n\n`))
+    if (!text.trim()) return
+    setInput((prev) => appendSelectionQuote(prev, text, attribution))
     composerRef.current?.querySelector<HTMLElement>('.cm-content')?.focus()
   }
 
@@ -1657,6 +1729,34 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     setLinkCopied(true)
     window.setTimeout(() => setLinkCopied(false), 1600)
   }
+  async function createPrivateCopy() {
+    const key = sessionRef.current
+    if (!key || shareBusy) return
+    setShareBusy(true); setShareError(null)
+    try {
+      const created = await api.shareSession(key)
+      setShares((existing) => [created, ...(existing ?? [])])
+      setSelectedShare(created.slug)
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not create the private copy')
+    } finally { setShareBusy(false) }
+  }
+  async function revokePrivateCopy(share: ChatSessionShare) {
+    const key = sessionRef.current
+    if (!key || shareBusy) return
+    if (!(await confirm({ title: 'Revoke this private copy?', body: 'The read-only artifact and its private link will be removed. This does not change the original chat.', confirmLabel: 'Revoke copy' }))) return
+    setShareBusy(true); setShareError(null)
+    try {
+      await api.revokeSessionShare(key, share.slug)
+      setShares((existing) => (existing ?? []).filter((item) => item.slug !== share.slug))
+      if (selectedShare === share.slug) { setSelectedShare(null); setShareDetail(null) }
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not revoke the private copy')
+    } finally { setShareBusy(false) }
+  }
+  async function copyPrivateCopyLink(share: ChatSessionShare) {
+    if (await copyText(new URL(share.url, location.href).href, 'the private chat copy link')) notify('Private link copied', 'success')
+  }
   async function briefAgent() {
     const s = sessionRef.current
     if (!s) return
@@ -1751,6 +1851,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     await attach([file])
   }
 
+  const composerAttachments = [...new Set([...mentionedFiles, ...attachedPaths])].map((path) => ({ id: path, name: path.split('/').pop() || path, state: 'done' as const }))
   const stage = (
     <div data-tour="chat" className="w-full" style={{ maxWidth: 'var(--content-width)' }}>
       {
@@ -1804,9 +1905,6 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           ))}
         </div>
       )}
-      <MentionChips paths={[...mentionedFiles, ...attachedPaths]}
-        onRemove={(p) => { setMentionedFiles((prev) => prev.filter((x) => x !== p)); setAttachedPaths((prev) => prev.filter((x) => x !== p)) }}
-        onOpen={setOpenFile} />
       <KnowledgeChips items={mentionedKnowledge}
         onRemove={(id) => setMentionedKnowledge((prev) => prev.filter((k) => k.id !== id))} />
       <PasteCards blocks={pasteBlocks} onRemove={removePaste} />
@@ -1901,6 +1999,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             onTaskMode={(m) => setSelection((sel) => ({ ...sel, taskMode: m }))} />
         )}
         <ComposerStage ref={composerRef} value={input} onChange={(v) => { setInput(v); if (preOptimize !== null) setPreOptimize(null); if (followups.length && v.trim().length >= 3) setFollowups([]) }} onSend={() => send()}
+          auiModelSelector draftKey={sessionRef.current ?? `new:${projectId}`} attachments={composerAttachments} onOpenAttachment={setOpenFile} onRemoveAttachment={(path) => { setMentionedFiles((previous) => previous.filter((item) => item !== path)); setAttachedPaths((previous) => previous.filter((item) => item !== path)) }}
           streaming={streaming} onStop={stop} controls={CHAT_CONTROLS} data={data}
           selection={selection} onSelect={applySelection} onAttach={attach} onFocusChange={setComposerFocused}
           naturalVoice={{ ...naturalVoice, onSelect: (c) => void selectNaturalVoice(c) }}
@@ -1931,7 +2030,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           onMentionFile={onMentionFile} onMentionKnowledge={onMentionKnowledge} onLargePaste={onLargePaste}
           openModelSignal={openModelSignal} openAgentSignal={openAgentSignal} openReasoningSignal={openReasoningSignal}
           onOptimize={optimize} optimizing={optimizing} history={promptHistory}
-          onTranscribe={transcribe} onMicError={(m) => { setMicError(m); window.setTimeout(() => setMicError(null), 6000) }} canQueue contextPct={contextPct}
+          onTranscribe={transcribe} onMicError={(m) => { setMicError(m); window.setTimeout(() => setMicError(null), 6000) }} canQueue contextPct={contextPct} contextUsage={contextUsage}
           handsFree={{ confirmationPhrases: voiceCfg.confirmation_phrases, exitPhrases: voiceCfg.exit_phrases, speaking: speakingTurn !== null, muteWhileSpeaking: voiceCfg.duplex_mute_enabled }}
           onHandsFreeSubmit={(t) => void send(t, { inputOrigin: 'voice' })}
           screenShare={{ available: screenShare.available, sharing: screenShare.sharing, disabledReason: screenShare.disabledReason, onToggle: screenShare.toggle }} />
@@ -1950,8 +2049,46 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     </div>
   )
 
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden">
+    const transcriptRender: TranscriptRender = {
+        node: (index, element) => {
+            if (element) turnNodes.current.set(index, element);
+            else turnNodes.current.delete(index);
+        },
+        user: (turn, index) => {
+            const text = turn.segments.filter((segment) => segment.kind === 'text').map((segment) => segment.text).join('');
+            const isLast = index === turns.length - 1;
+            return <>
+              {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
+              {editingTurn === index ? <UserEditor initial={text} discardedReplies={turns.slice(index + 1).filter((later) => later.role === 'assistant').length} onCancel={() => setEditingTurn(null)} onSubmit={(value) => editResend(index, value)}/> : <div className="group/msg">
+                <MessageUser fromComposer={isLast} timestamp={stampOf(turn)} onFileClick={setOpenFile} pastes={turn.pastes} optimized={turn.optimized}>{text}</MessageUser>
+                {turn.files?.length ? <TurnAttachments paths={turn.files} onOpenFile={setOpenFile}/> : null}
+                {turn.rewound?.length ? <RewindDivider snapshots={turn.rewound} canFork={memoryMode === 'persistent'} onFork={(snapshot) => forkRewound(index, snapshot)}/> : null}
+                {!streaming && <UserActions text={text} canFork={memoryMode === 'persistent'} canRewind={!isLast} onRewind={() => rewindTo(index)} onEdit={() => setEditingTurn(index)} onFork={() => forkAt(index)}/>}
+              </div>}
+            </>;
+        },
+        assistant: (turn, index) => {
+            const isLast = index === turns.length - 1;
+            return <>
+              {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
+              <MessageAssistant timestamp={stampOf(turn)} model={sessionBindingRef.current?.model || undefined}
+                onFeedbackUp={turn.visibleIndex === undefined || !sessionRef.current ? undefined : () => { void saveFeedback(turn.visibleIndex!, 'up'); }}
+                onFeedbackDown={turn.visibleIndex === undefined || !sessionRef.current ? undefined : () => { setFeedbackTarget(turn.visibleIndex!); setFeedbackError(null); }}
+                feedbackBusy={feedbackBusy} feedbackVerdict={turn.visibleIndex === undefined ? null : feedbackVerdicts[turn.visibleIndex] ?? null}
+                feedback={feedbackTarget === turn.visibleIndex ? { verdict: 'down' as const, busy: feedbackBusy, error: feedbackError, onSubmit: (_verdict: 'down', reason?: string) => { void saveFeedback(turn.visibleIndex!, 'down', reason); }, onClose: () => { if (!feedbackBusy) { setFeedbackTarget(null); setFeedbackError(null); } } } : undefined}
+                actions={!(isLast && streaming) && <AssistantActions text={turnText(turn)} isLast={isLast} canFork={memoryMode === 'persistent'} variantCount={turn.variantCount} variantIdx={turn.variantIdx} onCopy={() => { }} onRegenerate={regenerate} onFork={() => forkAt(index)} onSwitchVariant={isLast ? switchVariant : undefined} speaking={speakingTurn === index} onSpeak={() => speak(turnText(turn), index)}/>}>
+                <AssistantSegments segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed}/>
+                {speakingTurn === index && <ReadAloud words={turnText(turn).split(/\s+/).filter(Boolean)} playing showText={false} onToggle={() => speak(turnText(turn), index)}/>}
+              </MessageAssistant>
+            </>;
+        },
+    };
+    return (<GideonChatRuntimeProvider sessionId={sessionRef.current} turns={turns} streaming={streaming} queued={queued} sessions={threadSessions} suggestions={followups} onSwitchSession={(key) => { setHistoryOpen(false); navigate(`chat/${key}`) }} onNewSession={() => { setHistoryOpen(false); navigate('chat/new') }} onSend={(text) => send(text)} onStop={stop} onEdit={editResend} onReload={regenerate}
+      onQueue={(text, lane) => ensureSession().then((key) => api.sendChat(text, key, undefined, lane)).then(() => { if (lane === 'steer') setSteered((previous) => [...previous, text]); }).catch(reportActionFailure('send that message'))}
+      onQueueRemove={(id) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => setQueued((previous) => previous.filter((item) => item.id !== id))).catch(reportActionFailure('cancel that queued message')); }}
+      onQueueEdit={(id, text) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => { setQueued((previous) => previous.filter((item) => item.id !== id)); setInput(text); }).catch(reportActionFailure('edit that queued message')); }}
+      onQueueInterrupt={(id) => { const key = sessionRef.current; if (!key) return; return api.interruptChat(key, id).catch(reportActionFailure('interrupt this turn')); }}>
+      <div className="relative flex h-full flex-col overflow-hidden">
       <DotGlow intensity={composerFocused ? 1.6 : 1} composerRef={composerRef} focusRef={glowTargetRef} />
 
       {
@@ -2005,6 +2142,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   {' · '}{fmtTokens(sessionCost.tokens)} tokens
                 </span>
               )}
+              {contextDisplay && <ContextDisplay.Ring key={sessionRef.current ?? 'new'} {...contextDisplay}/>}
               {
 }
               {branchedFrom && (
@@ -2034,6 +2172,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               {sessionRef.current && (
                 <IconButton icon={linkCopied ? Check : Link2} label={linkCopied ? 'Link copied' : 'Copy chat link'} size={40} onClick={copyLink} />
               )}
+              {sessionRef.current && <IconButton icon={Share2} label="Private chat copies" size={40} onClick={() => setShareOpen(true)}/>}
             </div>
           )
         )}
@@ -2078,12 +2217,13 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             </>
           ) : !started ? (
             <div className="gideon-chat-welcome relative flex-1 flex flex-col items-center justify-center px-l">
+              <img src="/illustrations/gideon-workspace.png" alt="" width={1536} height={1024} className="pointer-events-none mb-m h-auto w-[min(38vw,200px)] max-h-[134px] object-contain" />
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring.spatialDefault}
                 className="gideon-chat-intro flex items-center gap-l mb-2xl">
                 <div className="gideon-chat-emblem"><GideonMark size={44} /></div>
                 <div>
                   <p className="gideon-chat-eyebrow" data-type="label-s">Gideon workspace</p>
-                  <h1 data-type="display-s" className="text-on-surface">{greeting(name)}</h1>
+                  <ThreadEmptyWelcome greeting={greeting(name)} suggestions={[]} onPick={setInput}/>
                 </div>
               </motion.div>
               <div className="flex w-full flex-col items-center gap-2xl" style={{ maxWidth: 'var(--content-width)' }}>
@@ -2095,100 +2235,32 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           ) : (
             <>
               <div className="relative min-h-0 flex-1">
-                <div ref={scrollRef} className="absolute inset-0 overflow-y-auto">
-                  <AnimatePresence>
-                  {
-}
-                  {findOpen && (
-                    <FindBar items={turns} segmentsOf={findSegments} nodeOf={(_t, i) => turnNodes.current.get(i)}
-                      scrollRef={scrollRef} label="Find in conversation" onClose={() => setFindOpen(false)} />
-                  )}
-                  </AnimatePresence>
-                  <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode} />
-                  <div className="mx-auto flex flex-col gap-2xl px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
-                  {turns.map((turn, i) => {
-                    const isLast = i === turns.length - 1
-                    const turnTextOf = (t: ChatTurn) => t.segments.map((s) => (s.kind === 'text' ? s.text : '')).join('')
-                    return (
-                      <div key={i} className="relative"
-                        ref={(el) => { if (el) turnNodes.current.set(i, el); else turnNodes.current.delete(i) }}>
-                        {
-}
-                        {isLast && streaming && (
-                          <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2" />
-                        )}
-                        {turn.role === 'user' ? (
-                          editingTurn === i ? (
-                            <UserEditor initial={turnTextOf(turn)} onCancel={() => setEditingTurn(null)} onSubmit={(v) => editResend(i, v)} />
-                          ) : (
-                            <div className="group/msg">
-                              <MessageUser fromComposer={isLast} onFileClick={setOpenFile} pastes={turn.pastes} optimized={turn.optimized}>{turnTextOf(turn)}</MessageUser>
-                              {turn.files && turn.files.length > 0 && <TurnAttachments paths={turn.files} onOpenFile={setOpenFile} />}
-                              {turn.rewound && turn.rewound.length > 0 && (
-                                <RewindDivider snapshots={turn.rewound} canFork={memoryMode === 'persistent'} onFork={(si) => forkRewound(i, si)} />
-                              )}
-                              {!streaming && <UserActions text={turnTextOf(turn)} canFork={memoryMode === 'persistent'}
-                                canRewind={!isLast} onRewind={() => rewindTo(i)} ts={stampOf(turn)}
-                                onEdit={() => setEditingTurn(i)} onFork={() => forkAt(i)} />}
-                            </div>
-                          )
-                        ) : (
-                          <MessageAssistant actions={!(isLast && streaming) && (
-                            <AssistantActions text={turnText(turn)} isLast={isLast} canFork={memoryMode === 'persistent'}
-                              variantCount={turn.variantCount} variantIdx={turn.variantIdx} ts={stampOf(turn)}
-                              onCopy={() => {}} onRegenerate={regenerate} onFork={() => forkAt(i)}
-                              onSwitchVariant={isLast ? switchVariant : undefined}
-                              speaking={speakingTurn === i} onSpeak={() => speak(turnText(turn), i)} />
-                          )}>
-                            <AssistantSegments segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed} />
-                          </MessageAssistant>
-                        )}
-                        {
-}
-                        {turn.role === 'assistant' && isLast && !streaming && followups.length > 0 && (
-                          <FollowupChips items={followups} onPick={(t) => { setInput(t); setFollowups([]) }} onSend={(t) => { setFollowups([]); void send(t) }} />
-                        )}
-                        { }
-                        {turn.role === 'assistant' && isLast && !streaming && checkWorkOffer && (
-                          <CheckWorkChip label={checkWorkOffer.label}
-                            onRun={() => { const p = checkWorkOffer.prompt; setCheckWorkOffer(null); void send(p) }} />
-                        )}
-                      </div>
-                    )
-                  })}
-                  <AnimatePresence>
-                    {streaming && showThinking && (
-                      <StreamingIndicator statusText={statusText} activity={latestActivity} />
-                    )}
-                  </AnimatePresence>
-                  <div ref={endRef} />
-                  {
-}
-                  <div aria-live="polite" className="sr-only">{srAnnounce}</div>
-                  {
-}
-                  <div role="status" aria-live="polite" className="sr-only">
-                    {followupAnnouncement(streaming ? 0 : followups.length)}
-                  </div>
-                  </div>
-                </div>
-                <SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={nodeForTurn} onJumpTo={jumpToTurn}
-                  showReturnToNewest={scrolledUp}
-                  onReturnToNewest={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })} />
+                <TranscriptRenderContext.Provider value={transcriptRender}>
+                  <ThreadTranscript viewportRef={scrollRef} components={{ UserMessage: AuiUserTurn, AssistantMessage: AuiAssistantTurn }}
+                    beforeMessages={<>
+                      <ConversationMapAui side="right" className="max-md:hidden"/>
+                      {findOpen && <ThreadConversationSearch turns={turns} nodeOf={nodeForTurn} onClose={() => setFindOpen(false)}/>}
+                      <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode}/>
+                    </>}
+                    afterMessages={<div className="mx-auto flex w-full flex-col gap-2xl px-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+                      {streaming && showThinking && <StreamingIndicator statusText={statusText} activity={latestActivity}/>}
+                      {!streaming && followups.length > 0 && <ThreadFollowupSuggestions sendOnSelect={false} onPick={(text) => { setInput(text); setFollowups([]); }}/>}
+                      {!streaming && checkWorkOffer && <CheckWorkChip label={checkWorkOffer.label} onRun={() => { const prompt = checkWorkOffer.prompt; setCheckWorkOffer(null); void send(prompt); }}/>}
+                      <div ref={endRef}/>
+                      <div aria-live="polite" className="sr-only">{srAnnounce}</div>
+                      <div role="status" aria-live="polite" className="sr-only">{followupAnnouncement(streaming ? 0 : followups.length)}</div>
+                    </div>}
+                    afterViewport={<ScrollAnchor viewportRef={scrollRef} pinned={!scrolledUp} showJump={scrolledUp} unreadCount={unreadTurns}
+                      onJump={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })}
+                      className="pointer-events-none absolute inset-x-0 bottom-2 z-20 mx-auto h-0 max-w-none border-0 bg-transparent shadow-none"/>}/>
+                </TranscriptRenderContext.Provider>
+                <div className="md:hidden"><SessionMarkerRail turns={turns} scrollRef={scrollRef} nodeOf={nodeForTurn} onJumpTo={jumpToTurn}
+                  showReturnToNewest={false} onReturnToNewest={() => endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })} /></div>
               </div>
               <div className="relative shrink-0 px-l pb-l">
                 {
 }
-                <AnimatePresence>
-                  {!wsConnected && (
-                    <motion.div role="status"
-                      initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={spring.spatialFast}
-                      className="absolute left-1/2 -top-10 z-20 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-pill border bg-surface/95 px-3 h-8 text-[0.75rem] shadow-md backdrop-blur-md"
-                      style={{ color: 'var(--color-warn)', borderColor: 'color-mix(in srgb, var(--color-warn) 40%, transparent)' }}>
-                      <Loader2 size={13} className="animate-spin" /> Reconnecting…
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                <div className="absolute left-1/2 -top-12 z-20 w-full max-w-sm -translate-x-1/2"><ThreadConnectionNotice connected={wsConnected}/></div>
                 <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--content-width)' }}>
                   {stage}
                 </div>
@@ -2199,7 +2271,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
 
         {
 }
-        <AnimatePresenceFilePanel path={openFile} onClose={() => setOpenFile(null)}
+        <AnimatePresenceFilePanel path={openFile} contextTurns={turns} onClose={() => setOpenFile(null)}
           commentTarget={sameSessionTarget((msg) => { send(msg) })} />
 
         {
@@ -2222,7 +2294,12 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           {historyOpen && !started && (
             <SidePanel title="Chat history" icon={<History size={18} className="text-primary" />} storeKey="chat-history-w"
               fillHeight urlKey={{ key: 'history', setQuery }} onClose={() => setHistoryOpen(false)}>
-              <ChatHistorySidePanelBody navigate={navigate} onOpen={(key) => navigate(`chat/${key}`)} />
+              {threadSessions ? <ThreadListSidebar header={<div className="flex gap-1" role="group" aria-label="Conversation views">
+                  <Button size="xs" variant={historySearchMode ? 'ghost' : 'secondary'} onClick={() => setHistorySearchMode(false)}>Recent</Button>
+                  <Button size="xs" variant={historySearchMode ? 'secondary' : 'ghost'} onClick={() => setHistorySearchMode(true)}>Search</Button>
+                </div>} footer={<Button size="xs" variant="ghost" onClick={() => navigate('chat/history')}>View all chats</Button>}>
+                {historySearchMode ? <ThreadSessionSearch sessions={threadSessions} activeId={sessionId ?? ''} onSelect={(key) => navigate(`chat/${key}`)}/> : <ThreadList/>}
+              </ThreadListSidebar> : <ChatHistorySidePanelBody navigate={navigate} onOpen={(key) => navigate(`chat/${key}`)}/>}
             </SidePanel>
           )}
         </AnimatePresence>
@@ -2243,14 +2320,21 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           </div>
         </Modal>
       )}
-    </div>
+      {shareOpen && <Modal title="Private conversation copies" onClose={() => setShareOpen(false)}>
+        {shares === null && !shareError ? <p role="status" className="p-l text-sm text-on-surface-low">Loading private copies…</p>
+          : <ThreadSharedSnapshots shares={shares ?? []} selected={selectedShare} detail={shareDetail} busy={shareBusy} error={shareError}
+              onCreate={() => { void createPrivateCopy() }} onSelect={setSelectedShare}
+              onOpen={(share) => navigate(`artifacts/${encodeURIComponent(share.slug)}`)}
+              onCopy={(share) => { void copyPrivateCopyLink(share) }} onRevoke={(share) => { void revokePrivateCopy(share) }}/>}</Modal>}
+      </div>
+    </GideonChatRuntimeProvider>
   )
 }
 
-function AnimatePresenceFilePanel({ path, onClose, commentTarget }: { path: string | null; onClose: () => void; commentTarget?: CommentTarget }) {
+function AnimatePresenceFilePanel({ path, onClose, commentTarget, contextTurns }: { path: string | null; onClose: () => void; commentTarget?: CommentTarget; contextTurns: readonly ChatTurn[] }) {
   return (
     <AnimatePresence>
-      {path && <ChatFilePanel path={path} onClose={onClose} commentTarget={commentTarget} />}
+      {path && <ChatFilePanel path={path} onClose={onClose} commentTarget={commentTarget} contextTurns={contextTurns} />}
     </AnimatePresence>
   )
 }
@@ -2303,38 +2387,6 @@ function AttachmentPeekModal({ path, name, onOpenFile, onClose }: { path: string
         </div>
       </div>
     </Modal>
-  )
-}
-
-function MentionChips({ paths, onRemove, onOpen }: { paths: string[]; onRemove: (p: string) => void; onOpen: (p: string) => void }) {
-  const [expanded, setExpanded] = useState<string | null>(null)
-  if (!paths.length) return null
-  const base = (p: string) => (p.replace(/\/+$/, '').split('/').pop() || p).replace(/^[0-9a-f]{32}_/, '')
-  return (
-    <div className="mb-2 flex flex-wrap gap-2">
-      {paths.map((p) => {
-        const open = expanded === p
-        return (
-          <div key={p} className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-[0.8125rem]"
-            style={{ background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)' }}>
-            <FileText size={13} className="shrink-0 text-primary" />
-            {
-}
-            <button type="button" aria-expanded={open} onClick={() => setExpanded(open ? null : p)}
-              title={open ? 'Collapse' : 'Show full path'}
-              className="min-w-0 text-left font-mono text-on-surface">
-              {open ? <span className="break-all">{p}</span> : base(p)}
-            </button>
-            {open && (
-              <Button variant="ghost-accent" size="xs" title="Open file" onClick={() => onOpen(p)}
-                className="shrink-0 h-6 px-1.5 text-[0.75rem]">Open</Button>
-            )}
-            <IconButton icon={X} label="Remove file" onClick={() => onRemove(p)} size={20} iconSize={13}
-              tone="danger" className="shrink-0" />
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -2649,27 +2701,20 @@ function RewindDivider({ snapshots, canFork, onFork }: {
   )
 }
 
-function UserEditor({ initial, onSubmit, onCancel }: { initial: string; onSubmit: (v: string) => void; onCancel: () => void }) {
-  const [v, setV] = useState(initial)
-  return (
-    <div className="flex flex-col items-end gap-2">
-      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={Math.min(10, v.split('\n').length + 1)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') { e.preventDefault(); onCancel() }
-          else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSubmit(v) }
-        }}
-        className="w-full resize-none rounded-2xl bg-surface-container px-5 py-4 text-on-surface text-[1.0625rem] leading-relaxed outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-        style={{ maxWidth: 452 }} />
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} className="px-3 text-on-surface-low">Cancel</Button>
-        <Button size="sm" onClick={() => onSubmit(v)} disabled={!v.trim()} className="px-4"
-          disabledReason={!v.trim() ? 'The message cannot be empty' : undefined}>Resend</Button>
-      </div>
-    </div>
-  )
+export function UserEditor({ initial, discardedReplies = 0, onSubmit, onCancel }: { initial: string; discardedReplies?: number; onSubmit: (value: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState(initial)
+  const editorRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { editorRef.current?.querySelector('textarea')?.focus() }, [])
+  return <div ref={editorRef} className="flex justify-end" onKeyDown={(event) => {
+    if (event.key === 'Escape') { event.preventDefault(); onCancel() }
+    else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (value.trim()) onSubmit(value) }
+  }}>
+    <EditMessage value={value} discardedReplies={discardedReplies} editing onValueChange={setValue}
+      onSave={value.trim() ? () => onSubmit(value) : undefined} onCancel={onCancel} className="max-w-[452px]"/>
+  </div>
 }
 
-function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
+export function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
   scrollRef: React.RefObject<HTMLDivElement | null>
   onQuote: (text: string, attribution?: string) => void
   attributionFor: (node: Node | null) => string | undefined
@@ -2724,10 +2769,19 @@ function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
   if (!pos) return null
   const clear = () => { setPos(null); window.getSelection()?.removeAllRanges() }
   return (
-    <SelectionToolbar ref={barRef} x={pos.x} y={pos.y} actions={[
-      { icon: Quote, label: 'Quote', onPress: () => { onQuote(pos.text, pos.attribution); clear() } },
-      { icon: Clipboard, label: 'Copy', onPress: () => { void copyText(pos.text, 'the selection'); clear() } },
-    ]} />
+    <div ref={barRef} className="absolute z-30 flex max-w-[min(20rem,80vw)] -translate-x-1/2 -translate-y-full flex-col gap-1 rounded-lg bg-surface-highest p-1 shadow-lg ring-1 ring-outline-variant/50"
+      style={{ left: pos.x, top: pos.y }}>
+      <QuoteBlock.Root className="mb-0 max-w-full px-2 pt-1">
+        <QuoteBlock.Icon/>
+        <QuoteBlock.Text className="max-w-full">{pos.text}</QuoteBlock.Text>
+      </QuoteBlock.Root>
+      <div className="flex items-center border-t border-outline-variant/50 pt-1">
+        <button type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { onQuote(pos.text, pos.attribution); clear() }}
+          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 text-sm hover:bg-surface-high"><Quote size={13}/>Quote</button>
+        <button type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { void copyText(pos.text, 'the selection'); clear() }}
+          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 text-sm hover:bg-surface-high"><Clipboard size={13}/>Copy</button>
+      </div>
+    </div>
   )
 }
 
@@ -2766,10 +2820,10 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
       if (sdlc) return <SdlcProgressCard key={seg.id || i} refObj={sdlc} />
       const wf = t.done ? workflowRefFromTool(t.tool, t.output) : null
       if (wf) return <WorkflowProgressCard key={seg.id || i} refObj={wf} />
-      return <ToolCard key={seg.id || i} seg={t} />
+      return <ToolCard key={seg.id || i} seg={t} connected />
     }
     if (seg.kind === 'activity') return <ActivityLine key={i} seg={seg as ActivitySegment} />
-    if (seg.kind === 'thinking') return <ThinkingBlock key={i} text={(seg as ThinkingSegment).text} defaultOpen={streaming} />
+    if (seg.kind === 'thinking') return <ThinkingBlock key={i} text={(seg as ThinkingSegment).text} defaultOpen={streaming} connected streaming={!!streaming && i === segments.length - 1} />
     if (seg.kind === 'error') {
       const text = (seg as { text: string }).text
       return isNoModelSetupError(text)
@@ -2914,6 +2968,7 @@ function snippetParts(snippet: string): { text: string; hit: boolean }[] {
 }
 
 function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) => void; query: Record<string, string>; setQuery: RouteProps['setQuery'] }) {
+  const isMobile = useIsMobile()
   const archivedView = (query.archived ?? '') === '1'
   const { data: cachedSessions, error: sessionsError, refresh: refreshSessions } = useQuery<ChatSessionSummary[]>(
     archivedView ? 'chat:sessions:archived' : 'chat:sessions',
@@ -3091,7 +3146,7 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
   async function shareSession(s: ChatSessionSummary) {
     try {
       const res = await api.shareSession(s.key)
-      notify(`Shared as "${res.name}" — read-only, credentials redacted.`, 'success')
+      notify(`Private copy "${res.name}" created — read-only and redacted.`, 'success')
       navigate(`artifacts/${res.slug}`)
     } catch (e) {
       notify(`Couldn't share this chat: ${String((e as Error)?.message || e)}`, 'error')
@@ -3166,7 +3221,7 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
       },
       { icon: <Download size={15} />, label: 'Export as Markdown', onSelect: () => downloadExport(s.key, 'md') },
       { icon: <Download size={15} />, label: 'Export as JSON', onSelect: () => downloadExport(s.key, 'json') },
-      { icon: <Share2 size={15} />, label: 'Share as read-only artifact', onSelect: () => shareSession(s) },
+      { icon: <Share2 size={15} />, label: 'Create private read-only copy', onSelect: () => shareSession(s) },
       { icon: <Trash2 size={15} />, label: 'Delete', danger: true, onSelect: () => del(s) },
     ]
     return (
@@ -3277,6 +3332,13 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
       <div className="flex min-h-0 flex-1">
       {
 }
+      <HistoryPreviewLayout preview={!isMobile && peekKey ? <div className="flex h-full min-h-0 flex-col p-m">
+        <div className="mb-m flex min-w-0 items-center gap-s border-b border-outline-variant/40 pb-s">
+          <span className="min-w-0 flex-1 truncate" data-type="title-s">{peekSession ? sessionTitle(peekSession) : peekKey}</span>
+          <IconButton icon={X} label="Close chat preview" onClick={() => setPeekKey('')} size={28}/>
+        </div>
+        <SessionPeekBody sessionKey={peekKey} onOpen={() => navigate(`chat/${peekKey}`)}/>
+      </div> : undefined}>
       <div className="flex min-w-0 flex-1 min-h-0 flex-col">
         <div className="mx-auto w-full px-l pt-l shrink-0" style={{ maxWidth: 'var(--content-width)' }}>
           {
@@ -3424,18 +3486,12 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
             </div>
           )}
       </div>
+      </HistoryPreviewLayout>
       {
 }
-      <AnimatePresence>
-        {peekKey && (
-          <SidePanel key={peekKey} title={peekSession ? sessionTitle(peekSession) : peekKey} icon={<MessageSquare size={18} className="text-primary" />}
-            storeKey="chat-peek-w" fillHeight urlKey={{ key: 'peek', setQuery }}
-            onExpand={() => navigate(`chat/${peekKey}`)}
-            onClose={() => setPeekKey('')}>
-            <SessionPeekBody sessionKey={peekKey} onOpen={() => navigate(`chat/${peekKey}`)} />
-          </SidePanel>
-        )}
-      </AnimatePresence>
+      {isMobile && peekKey && <AssistantModal open onOpenChange={(open) => { if (!open) setPeekKey('') }} trigger={null}
+        thread={<SessionPeekBody sessionKey={peekKey} onOpen={() => navigate(`chat/${peekKey}`)}/>}
+        history={<ThreadSessionSearch sessions={sessions ?? []} activeId={peekKey} onSelect={setPeekKey}/>}/>}
       </div>
     </div>
   )
