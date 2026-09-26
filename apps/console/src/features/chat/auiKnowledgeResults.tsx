@@ -1,6 +1,8 @@
 import { api, type KnowledgeContextCard, type KnowledgeContextResult, type KnowledgeItem, type ResearchReport, type SemanticEntry } from '../../shared/data/api'
 import { paper, field } from '../../shared/vendor/assistant-ui/elements/surfaces'
 import { MapAnswer } from '../../shared/vendor/assistant-ui/elements/map-answer'
+import { WebSearch } from '../../shared/vendor/assistant-ui/elements/web-search'
+import { RetrievalChunks } from '../../shared/vendor/assistant-ui/elements/retrieval-chunks'
 
 export type KnowledgeOpen = (id: string) => void
 
@@ -38,13 +40,22 @@ export function KnowledgeWebSearch({ result, onOpen }: {
   result: KnowledgeContextResult
   onOpen?: KnowledgeOpen
 }) {
+  const rows = result.results.map((card) => {
+    const url = safeUrl(card.deep_link)
+    return {
+      id: card.id,
+      title: card.title,
+      domain: url ? new URL(url).host : card.provider || card.source_type || '',
+      summary: card.summary,
+      url: url || undefined,
+    }
+  })
   return <section data-slot="web-search" aria-label={`Knowledge search results for ${result.query}`} className="space-y-2">
-    <p className="text-xs text-on-surface-low">{result.results.length} results for “{result.query}”</p>
-    {result.results.map((card) => <div key={card.id} className={`${paper} rounded-xl p-3`}>
-      <KnowledgeCitation card={card} onOpen={onOpen} />
-      {card.summary && <p className="mt-1 text-sm">{card.summary}</p>}
-      {safeUrl(card.deep_link) && <KnowledgeLinkPreview title={card.title} url={card.deep_link} />}
-    </div>)}
+    <WebSearch query={result.query} results={rows} visibleResults={rows.length} searching={false} cycle={0}
+      onSelect={onOpen ? (row) => onOpen(row.id!) : undefined} />
+    <div className="flex flex-wrap gap-1" aria-label="Knowledge citations">
+      {result.results.map((card) => <KnowledgeCitation key={card.id} card={card} onOpen={onOpen} />)}
+    </div>
   </section>
 }
 
@@ -52,13 +63,22 @@ export function KnowledgeRetrievalChunks({ result, onOpen }: {
   result: KnowledgeContextResult
   onOpen?: KnowledgeOpen
 }) {
+  const chunks = result.results.map((card) => ({
+    id: card.id,
+    source: card.title,
+    locator: card.section || '',
+    text: card.content || card.summary || 'No passage text available',
+    tokens: card.tokens,
+    sourceType: card.source_type,
+    lineRange: card.line_range,
+    deepLink: safeUrl(card.deep_link),
+  }))
   return <section data-slot="retrieval-chunks" aria-label="Retrieved passages" className="space-y-2">
-    {result.results.map((card) => <article key={card.id} className={`${paper} rounded-xl p-3`}>
-      <KnowledgeCitation card={card} onOpen={onOpen} />
-      {card.line_range && <span className="ml-2 text-xs text-on-surface-low">Lines {card.line_range[0]}–{card.line_range[1]}</span>}
-      <p className="mt-2 whitespace-pre-wrap text-sm">{card.content || card.summary || 'No passage text available'}</p>
-      <span className="text-xs text-on-surface-low">{card.tokens} tokens</span>
-    </article>)}
+    <RetrievalChunks query={result.query} chunks={chunks} visibleCount={chunks.length} searching={false}
+      onSelect={onOpen ? (chunk) => onOpen(chunk.id) : undefined} />
+    <div className="flex flex-wrap gap-1" aria-label="Knowledge citations">
+      {result.results.map((card) => <KnowledgeCitation key={card.id} card={card} onOpen={onOpen} />)}
+    </div>
   </section>
 }
 

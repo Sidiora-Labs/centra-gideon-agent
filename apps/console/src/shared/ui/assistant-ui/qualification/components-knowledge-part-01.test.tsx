@@ -49,7 +49,8 @@ describe('knowledge result adapters', () => {
   it('names the query and count supplied by the retrieval API', () => {
     render(<KnowledgeWebSearch result={search} />)
     expect(screen.getByRole('region', { name: 'Knowledge search results for worker recovery' })).toBeTruthy()
-    expect(screen.getByText('1 results for “worker recovery”')).toBeTruthy()
+    expect(screen.getByText('worker recovery')).toBeTruthy()
+    expect(screen.getByText('1 results')).toBeTruthy()
     expect(screen.getByText('Recovery was observed.')).toBeTruthy()
     expect(screen.queryByText('Read 3 sources')).toBeNull()
   })
