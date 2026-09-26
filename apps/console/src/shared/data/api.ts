@@ -23,6 +23,47 @@ export function requireWriteAccepted<T>(result: T): T {
   throw new Error(detail || receipt.message || receipt.reason || 'The server refused this change.')
 }
 
+export interface ExperimentAttempt {
+  ordinal: number
+  inputs: Record<string, unknown>
+  state: string
+  run_id: string
+  score: number | null
+  valid: boolean | null
+  observation: string
+  tokens?: number | null
+  cost_usd?: number | null
+  run_error?: string
+}
+export interface ExperimentCampaign {
+  id: string
+  title: string
+  objective: string
+  workflow_name: string
+  metric: string
+  direction: 'maximize' | 'minimize'
+  max_parallel: number
+  max_tokens: number
+  total_tokens: number | null
+  status: string
+  best_attempt: number | null
+  attempts: ExperimentAttempt[]
+  created_at: string
+}
+export interface ExperimentReplay {
+  replay_id: string
+  recorded_run_id: string
+  candidate_run_id: string
+  recorded_events: number
+  candidate_events: number
+  recorded_steps: Array<{ instance_path: string; node_id: string; epoch: number; state: string; attempts: number; events: Array<Record<string, unknown>> }>
+  candidate_steps: Array<{ instance_path: string; node_id: string; epoch: number; state: string; attempts: number; events: Array<Record<string, unknown>> }>
+  matches: boolean
+  divergence: Array<{ path: string; recorded: unknown; candidate: unknown }>
+  truncated: boolean
+  side_effects_executed: false
+}
+
 async function _installReq(path: string, body: unknown): Promise<AppInstallResult> {
   const failure = (error: string): AppInstallResult => ({ ok: false, name: '', error, needs_consent: false, scan: null })
   try {
@@ -3585,6 +3626,14 @@ export interface RewindApplyWire {
 }
 
 export const api = {
+  experimentCampaigns: () => get<{ campaigns: ExperimentCampaign[] }>('/api/experiments/campaigns'),
+  experimentCampaign: (id: string) => get<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}`),
+  createExperimentCampaign: (body: { title: string; objective: string; workflow_name: string; metric: string; direction: 'maximize' | 'minimize'; variants: Record<string, unknown>[]; max_parallel: number; max_tokens: number }) => post<ExperimentCampaign>('/api/experiments/campaigns', body),
+  advanceExperimentCampaign: (id: string) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/advance`, {}),
+  stopExperimentCampaign: (id: string) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/stop`, {}),
+  observeExperimentAttempt: (id: string, ordinal: number, body: { score: number; valid: boolean; observation: string }) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/attempts/${ordinal}/observation`, body),
+  recordExperimentRun: (runId: string) => post<{ id: string; run_id: string; event_count: number }>(`/api/experiments/runs/${encodeURIComponent(runId)}/record`, {}),
+  compareExperimentReplay: (id: string, candidateRun?: string) => get<ExperimentReplay>(`/api/experiments/replays/${encodeURIComponent(id)}${candidateRun ? `?candidate_run=${encodeURIComponent(candidateRun)}` : ''}`),
   agentsInstalled: () => get<AgentDef[]>('/api/agents/installed'),
   savedAgents: () => get<{ agents: Array<{ name: string; description?: string; model?: string }> }>('/api/agents').then((d) => d.agents),
   agents: () => get<{ agents: SavedAgent[]; default_agent: string }>('/api/agents'),

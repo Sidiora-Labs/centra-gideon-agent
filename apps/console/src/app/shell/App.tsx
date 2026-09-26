@@ -7,7 +7,7 @@ import { MotionConfig, motion } from 'framer-motion'
 import { ease, duration, useReducedMotion } from '../../shared/theme/motion'
 import { armCueAudio } from '../../shared/theme/soundCues'
 import { installPushCuePlayback } from './pushCuePlayback'
-import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
+import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FlaskConical, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
 import { NavRail, type NavItem } from '../../shared/ui/NavRail'
 import { ShellCornerLeft, ShellCornerRight } from '../../shared/ui/ShellCorners'
 import { IncidentBanner } from './IncidentBanner'
@@ -57,6 +57,7 @@ const TasksSection = lazyRoute('tasks', () => import('../../features/tasks/Tasks
 const ProjectsSection = lazyRoute('projects', () => import('../../features/projects/ProjectsSection').then((m) => ({ default: m.ProjectsSection })))
 const PromptsSection = lazyRoute('prompts', () => import('../../features/prompts/PromptsSection').then((m) => ({ default: m.PromptsSection })))
 const WorkflowsSection = lazyRoute('workflows', () => import('../../features/workflows/WorkflowsSection').then((m) => ({ default: m.WorkflowsSection })))
+const ExperimentsPage = lazyRoute('experiments', () => import('../../features/experiments/ExperimentsPage').then((m) => ({ default: m.ExperimentsPage })))
 const SkillsPage = lazyRoute('skills', () => import('../../features/skills/SkillsPage').then((m) => ({ default: m.SkillsPage })))
 const ToolsPage = lazyRoute('tools', () => import('../../features/tools/ToolsPage').then((m) => ({ default: m.ToolsPage })))
 const KnowledgeSection = lazyRoute('knowledge', () => import('../../features/knowledge/KnowledgeSection').then((m) => ({ default: m.KnowledgeSection })))
@@ -94,6 +95,7 @@ const NAV: NavItem[] = [
   { id: 'learning', label: 'Learning', icon: Brain, section: 'Capabilities' },
   { id: 'prompts', label: 'Prompts', icon: FileText, section: 'Capabilities' },
   { id: 'workflows', label: 'Workflows', icon: Workflow, section: 'Capabilities' },
+  { id: 'experiments', label: 'Experiments', icon: FlaskConical, section: 'Capabilities' },
   { id: 'apps', label: 'Apps', icon: Blocks, section: 'Apps' },
   { id: 'settings', label: 'Settings', icon: Settings, pinBottom: true },
 ]
@@ -129,6 +131,7 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   terminal: TerminalPage,
   prompts: PromptsSection,
   workflows: WorkflowsSection,
+  experiments: ExperimentsPage,
   skills: SkillsPage,
   learning: LearningPage,
   tools: ToolsPage,
