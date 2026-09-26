@@ -2,8 +2,8 @@ import { useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Slash } from 'lucide-react'
 import { api } from '../../data/api'
-import { fvs } from '../../theme/fontWeight'
 import { composerMenuClass, composerOptionClass, useComposerTypeahead } from './composerTypeahead'
+import { ComposerCommandItem } from '../../vendor/assistant-ui/elements/composer'
 
 interface Cmd { name: string; description: string }
 const commands: { value?: Cmd[]; pending?: Promise<Cmd[]> } = {}
@@ -40,15 +40,11 @@ export function SlashMenu({ query, anchorRef, open, onSelect, onClose, idPrefix,
     className={composerMenuClass} style={menu.position}>
     {results.map((command, index) => {
       const selected = menu.cursor === index
-      return <button key={command.name} type="button" role="option" aria-selected={selected} title={command.description}
+      return <ComposerCommandItem key={command.name} command={{ name: command.name.replace(/^\//, ''), description: command.description, icon: Slash }}
+        active={selected} role="option" aria-selected={selected} title={command.description}
         id={`${idPrefix}-opt-${index}`} onMouseEnter={() => menu.selectCursor(index)}
         onMouseDown={event => { event.preventDefault(); choose(index) }} className={composerOptionClass}
-        style={selected ? { background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' } : undefined}>
-        <Slash size={13} aria-hidden className={`shrink-0 ${selected ? 'text-primary' : 'text-on-surface-low'}`} />
-        <span className="min-w-0 flex-1"><span data-type="label-s" className="block truncate font-mono text-on-surface" style={fvs(500)}>{command.name}</span>
-          {command.description && <span data-type="caption" className="block truncate text-on-surface-low">{command.description}</span>}
-        </span>
-      </button>
+        style={selected ? { background: 'color-mix(in srgb, var(--color-primary) 14%, transparent)' } : undefined} />
     })}
   </div>, document.body)
 }

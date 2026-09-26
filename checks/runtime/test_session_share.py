@@ -19,6 +19,7 @@ being true:
 from __future__ import annotations
 
 import ast
+import shutil
 from pathlib import Path
 
 import pytest
@@ -281,6 +282,24 @@ async def test_private_snapshot_list_and_owner_revoke(routed):
 
 
 @pytest.mark.asyncio
+async def test_revoke_reports_real_storage_delete_failure_without_losing_snapshot(routed, monkeypatch):
+    state, provider = routed
+    async with TestClient(TestServer(_make_app(state, provider))) as client:
+        shared = await (await client.post("/api/chat/sessions/s1/share")).json()
+        path = f"/api/chat/sessions/s1/shares/{shared['slug']}"
+
+        def failed_remove(_path):
+            raise OSError("artifact storage cannot remove this directory")
+
+        with monkeypatch.context() as fault:
+            fault.setattr(shutil, "rmtree", failed_remove)
+            assert (await client.delete(path)).status == 500
+
+        assert provider.get(shared["slug"]) is not None
+        assert (await client.get(path)).status == 200
+
+
+@pytest.mark.asyncio
 async def test_revoke_refuses_other_session_and_unrelated_artifact(routed):
     state, provider = routed
     ordinary = provider.create(name="Notes", content="private", kind="markdown")
@@ -438,6 +457,9 @@ async def test_share_reports_unavailable_artifacts_instead_of_500ing(
     async with TestClient(TestServer(_make_app(state, provider))) as client:
         resp = await client.post("/api/chat/sessions/s1/share")
         assert resp.status == 503
+        assert (await client.get("/api/chat/sessions/s1/shares")).status == 503
+        assert (await client.get("/api/chat/sessions/s1/shares/any-snapshot")).status == 503
+        assert (await client.delete("/api/chat/sessions/s1/shares/any-snapshot")).status == 503
 
 
 def _share_call_sites(sources: dict[str, str]) -> set[tuple[str, str]]:

@@ -4,7 +4,7 @@ Defines the backend-neutral :class:`AgentEvent` that every backend (ACP via
 ``acp/adapter.py``, the native loop, the HTTP model providers) emits and the
 chat runner consumes. ``LLMEvent`` aliases it.
 
-The field set mirrors ``acp.types.AcpEvent`` (identical field names + defaults).
+Common fields mirror ``acp.types.AcpEvent`` so the runner can consume either.
 The event-kind constants live here as the canonical home; ``acp.types`` imports
 them.
 """
@@ -27,11 +27,31 @@ EVENT_AGENT_SWITCHED = "agent_switched"
 
 
 @dataclass
+class ContextUsage:
+    input_tokens: int | None = None
+    total_input_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    context_window_tokens: int | None = None
+
+    def as_payload(self) -> dict[str, int | None]:
+        payload = {
+            "input_tokens": self.input_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "context_window_tokens": self.context_window_tokens,
+        }
+        if self.total_input_tokens is not None:
+            payload["total_input_tokens"] = self.total_input_tokens
+        return payload
+
+
+@dataclass
 class AgentEvent:
     """A neutral event from any agent/model backend's turn stream.
 
-    Field names + defaults match ``acp.types.AcpEvent`` exactly so the chat
-    runner consumes either without change. ``tool_input``/``tool_output`` are
+    Common fields match ``acp.types.AcpEvent`` so the chat runner consumes
+    either without change. ``tool_input``/``tool_output`` are
     typed ``Any`` (the native loop may pass structured values; ACP passes str).
     """
 
@@ -43,6 +63,7 @@ class AgentEvent:
     tool_purpose: str = ""
     risk_level: str = ""
     context_usage_pct: float | None = None
+    context_usage: ContextUsage | None = None
     stop_reason: str = ""
     request_id: str | int = ""
     options: Any = field(default_factory=list)
