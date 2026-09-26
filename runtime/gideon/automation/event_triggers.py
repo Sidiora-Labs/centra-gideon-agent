@@ -70,6 +70,8 @@ class EventTrigger:
     fire_count: int = 0
     debounce_secs: float = _DEFAULT_DEBOUNCE_SECS
     last_fired_at: float = 0.0
+    last_status: str = ""
+    last_error: str = ""
 
     def to_dict(self) -> dict:
         return {item.name: getattr(self, item.name) for item in fields(EventTrigger)}
@@ -86,6 +88,8 @@ class EventTrigger:
             address_glob="",
             event_glob="",
             park_reason="",
+            last_status="",
+            last_error="",
         )
         values: dict = {
             key: str(d.get(key, default)) for key, default in text_defaults.items()
@@ -225,6 +229,15 @@ class EventTriggerStore:
             exhausted = selected.max_fires and selected.fire_count >= selected.max_fires
             if exhausted:
                 selected.enabled = False
+        self.save(rows)
+
+    def record_outcome(self, trigger_id: str, *, status: str, error: str = "") -> None:
+        rows = self.load()
+        selected = next((row for row in rows if row.id == trigger_id), None)
+        if selected is None:
+            return
+        selected.last_status = status
+        selected.last_error = error[:200]
         self.save(rows)
 
 
@@ -535,9 +548,17 @@ class EventTriggerEngine:
 
             detail = provider_failure(t.action_provider, failure).render()
             logger.warning("event-trigger action failed for %s — %s", t.id, detail)
+            self._get_store().record_outcome(t.id, status="failure", error=detail)
         else:
             if not result.ran:
                 logger.debug("event-trigger %s did not run: %s", t.id, result.reason)
+            outcome = result.to_dict()
+            succeeded = result.ran and outcome.get("success", True)
+            self._get_store().record_outcome(
+                t.id,
+                status="success" if succeeded else "failure",
+                error="" if succeeded else str(outcome.get("error") or result.reason or "action failed"),
+            )
 
 
 def emit_event(

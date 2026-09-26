@@ -725,6 +725,8 @@ def status(run_id: str) -> dict[str, Any]:
     run = store.get(run_id)
     if run is None:
         return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    from gideon.automation.workflows.round_protocol import read_rounds
+
     return _ok(
         run_id=run.id,
         workflow=run.workflow_name,
@@ -736,8 +738,72 @@ def status(run_id: str) -> dict[str, Any]:
         elapsed_secs=run.elapsed_seconds,
         project_id=run.project_id,
         policy_overrides=run.policy_overrides,
+        budget=run.budget.to_dict(),
+        round_handoff=(run.extra or {}).get("round_handoff") or {},
+        round_interrupted=bool((run.extra or {}).get("round_interrupted")),
+        rounds=read_rounds(run_id),
         nodes=_nodes_of(run_id),
     )
+
+
+async def resume_interrupted_round(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    """Explicitly re-adopt one interrupted round run at its persisted frontier."""
+    from gideon.automation.workflows.round_protocol import has_round_protocol
+
+    run = store.get(run_id)
+    if run is None:
+        return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    spec = store.read_spec(run_id)
+    if not has_round_protocol(spec) or run.status != RunStatus.RUNNING or not (run.extra or {}).get("round_interrupted"):
+        return _service_failure("WF_RUN_NOT_INTERRUPTED", "this round run is not awaiting explicit resume")
+    if supervisor is None:
+        return _service_failure("WF_NO_SUPERVISOR", "the workflow supervisor is unavailable")
+    if supervisor.controller(run_id) is not None:
+        return _service_failure("WF_RUN_ALREADY_LIVE", "this round run already has a live controller")
+    run.extra.pop("round_interrupted", None)
+    store.save(run)
+    try:
+        await supervisor.launch(run, spec)
+    except Exception as exc:
+        run.extra["round_interrupted"] = True
+        store.save(run)
+        return _service_failure("WF_RUN_LAUNCH_FAILED", f"could not resume the round run: {exc}")
+    return _ok(run_id=run_id, resumed=True, status=RunStatus.RUNNING.value)
+
+
+def extend_round_budget(run_id: str, limits: dict, *, supervisor: Any = None) -> dict[str, Any]:
+    """Raise a paused round run's own persisted soft cap before ordinary resume."""
+    import math
+    from gideon.automation.workflows.round_protocol import has_round_protocol
+
+    run = store.get(run_id)
+    if run is None:
+        return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    if run.status != RunStatus.PAUSED or not has_round_protocol(store.read_spec(run_id)):
+        return _service_failure("WF_RUN_NOT_PAUSED_ROUND", "only a paused round run can extend its budget")
+    try:
+        tokens = int(limits.get("max_tokens", run.budget.max_tokens))
+        cost = float(limits.get("max_cost", run.budget.max_cost))
+    except (TypeError, ValueError):
+        return _service_failure("WF_BUDGET_INVALID", "budget limits must be numeric")
+    def raised(old: float, new: float) -> bool:
+        return old > 0 and (new == 0 or new > old)
+
+    def lowered(old: float, new: float) -> bool:
+        return (old == 0 and new > 0) or (old > 0 and 0 < new < old)
+
+    if (not math.isfinite(cost) or tokens < 0 or cost < 0
+            or lowered(run.budget.max_tokens, tokens) or lowered(run.budget.max_cost, cost)
+            or not (raised(run.budget.max_tokens, tokens) or raised(run.budget.max_cost, cost))):
+        return _service_failure("WF_BUDGET_INVALID", "raise at least one budget limit without lowering another")
+    run.budget.max_tokens = tokens
+    run.budget.max_cost = cost
+    controller = supervisor.controller(run_id) if supervisor is not None else None
+    if controller is not None:
+        controller.run.budget.max_tokens = tokens
+        controller.run.budget.max_cost = cost
+    store.save(run)
+    return resume_run(run_id, supervisor=supervisor)
 
 
 def set_policy_overrides(run_id: str, overrides: dict[str, Any]) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import { InlineError } from '../../shared/ui/InlineError'
 import { TextInput } from '../../shared/ui/forms'
 import { fvs } from '../../shared/theme/fontWeight'
 import { TextLink } from '../../shared/ui/TextLink'
+import { CommitmentDecisionsCard } from './CommitmentDecisionsCard'
 
 export function TriageDigestCard() {
   const digest = useTriageDigest()
@@ -17,7 +18,10 @@ export function TriageDigestCard() {
     <InlineError icon onRetry={refresh}>Couldn't read your digest: {view?.state === 'error' ? view.error : String((error as Error)?.message || error)}</InlineError>
   </Surface>
   if (!view) return null
-  if (['uninstalled', 'off', 'never_run'].includes(view.state)) return <DigestSetup view={view} digest={digest} />
+  if (['uninstalled', 'off', 'never_run'].includes(view.state)) return <>
+    <DigestSetup view={view} digest={digest} />
+    <CommitmentDecisionsCard decisions={view.commitment_decisions || []} onRefresh={refresh} />
+  </>
 
   const autoDone = view.auto_done || []
   const pending = view.pending || []
@@ -43,6 +47,7 @@ export function TriageDigestCard() {
         {view.window_start ? <> since {view.window_start.slice(0, 16).replace('T', ' ')}</> : null}
         {view.dropped ? <> · {view.dropped} filtered by your rules</> : null}
       </p>
+      <CommitmentDecisionsCard decisions={view.commitment_decisions || []} onRefresh={refresh} />
 
       {view.quiet_hours?.known === false ? (
         <p data-type="caption" className="mt-s text-warn">

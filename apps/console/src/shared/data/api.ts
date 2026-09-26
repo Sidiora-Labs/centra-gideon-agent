@@ -1005,6 +1005,10 @@ export interface WorkflowRunDetailData {
   tokens?: number; elapsed_secs?: number
   project_id?: string
   policy_overrides?: Record<string, unknown>
+  budget?: { max_tokens: number; max_cost: number; max_retries: number }
+  round_handoff?: Record<string, { completed_role?: string; next_role?: string; next_allowed_paths?: string[]; stop?: boolean; quarantined_paths?: string[] }>
+  round_interrupted?: boolean
+  rounds?: Array<{ iteration: number; at: string; allow_next: boolean; reason: string; completed_role?: string; next_role?: string; changed_paths: string[]; quarantined_paths: string[]; quarantine_evidence?: Array<{ path: string; content: string; truncated: boolean }>; handback?: boolean; verification: { exit_code?: number | null } }>
   nodes: WorkflowNodeState[]
 }
 export interface WorkflowContinuation {
@@ -2015,7 +2019,7 @@ export interface WeekProjection {
 
 export interface EventFireResult {
   ok: boolean
-  result: { ran: boolean; reason: string; success?: boolean; exit_code?: number; stdout?: string; stderr?: string; error?: string; duration_ms?: number }
+  result: { ran?: boolean; reason: string; dry_run?: boolean; would_fire?: boolean; action?: string; trigger_id?: string; success?: boolean; exit_code?: number; stdout?: string; stderr?: string; error?: string; duration_ms?: number }
 }
 export type KnowledgeType =
   | 'note' | 'fleeting' | 'journal' | 'gist' | 'bookmark'
@@ -2424,6 +2428,14 @@ export interface TriageDigestView {
   machine_did?: TriageLedgerRow[]
   ledger_complete?: boolean
   ledger_rows?: number
+  commitment_decisions?: CommitmentDecision[]
+}
+
+export interface CommitmentDecision {
+  topic: string; agent: string; text: string; action: string; reason: string
+  policy: string; destination: string; decided_at: string; delivered_at: string
+  dismissed_until: string; approved_at: string; run_id: string; error: string
+  context: { recent_sessions?: Array<{ id?: string; created_at?: string }>; learned_routines?: Array<{ key?: string }> }
 }
 
 export interface TriageReplyResult {
@@ -4294,8 +4306,10 @@ export const api = {
   deleteEventTrigger: (id: string) => del(`/api/triggers/event:${encodeURIComponent(id)}`),
   toggleEventTrigger: (id: string, enabled?: boolean) =>
     post<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}/toggle`, enabled === undefined ? {} : { enabled }),
-  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string }) =>
+  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, body ?? {}),
+  dryRunEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
+    post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, { ...(body ?? {}), dry_run: true }),
   testEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/test`, { ...(body ?? {}), test: true }),
   eventTriggerHistory: (id: string) =>
@@ -4320,6 +4334,7 @@ export const api = {
   scheduleHistory: (id: string, limit = 10, offset = 0) => get<{ runs: ScheduleRun[]; total: number }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history?limit=${limit}&offset=${offset}`),
   scheduleRunDetail: (id: string, runId: string) => get<{ run: ScheduleRun }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`).then((d) => d.run),
   triggerVariables: () => get<TriggerVariables>('/api/triggers/variables'),
+  triggerBudget: () => get<{ tokens: number; dollars: number; max_tokens: number; max_dollars: number; status: string; reason: string; paused: boolean; resumes_at: string }>('/api/triggers/budget'),
 
   tasks: (opts: { project?: string; task_list?: string; status?: string; limit?: number; offset?: number; mine?: boolean } = {}) => {
     const qs = new URLSearchParams()
@@ -4828,6 +4843,9 @@ export const api = {
   proactiveDigest: () => get<TriageDigestView>('/api/proactive/digest'),
   proactiveReply: (runId: string, text: string) =>
     post<TriageReplyResult>('/api/proactive/digest/reply', { run_id: runId, text }),
+  proactiveCommitmentReply: (topic: string, action: 'dismiss' | 'approve_background', workflowName?: string, inputs?: Record<string, unknown>) =>
+    post<{ ok: boolean; outcome: string; run_id?: string; decision?: CommitmentDecision }>(
+      '/api/proactive/digest/reply', { commitment_key: topic, action, workflow_name: workflowName, inputs }),
   proactiveInstall: (cron?: string) =>
     post<{ ok: boolean; created: boolean; schedule: TriageSchedule }>(
       '/api/proactive/install', cron ? { cron } : {}),
@@ -5098,7 +5116,7 @@ export const api = {
     body: { decisions: Array<{ key: string; outcome: 'accept' | 'reject'; reason?: string }>; dry_run?: boolean },
   ) =>
     post<WorkflowTriageResult>(`/api/workflows/runs/${encodeURIComponent(id)}/review/triage`, body),
-  resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean }) =>
+  resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean; round_resume?: boolean; round_budget?: { max_tokens: number; max_cost: number } }) =>
     post<{ ok?: boolean; approved?: boolean; node_id?: string; resumed?: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/resume`, body),
   rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean; confirm_cascade?: boolean }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/rewind`, body),

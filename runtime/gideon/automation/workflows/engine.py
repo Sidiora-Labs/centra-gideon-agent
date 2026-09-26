@@ -637,6 +637,7 @@ async def dispatch_action(
     project_id: str = "",
     instance_path: str = "",
     cwd: str = "",
+    action_cwd: str = "",
 ) -> NodeResult:
     """Dispatch to an action provider — zero tokens.
 
@@ -680,12 +681,15 @@ async def dispatch_action(
         payload.setdefault("instance_path", instance_path)
     if project_id:
         payload.setdefault("project_id", project_id)
-    if cwd:
+    if action_cwd:
+        payload["workspace"] = action_cwd
+    elif cwd:
         payload.setdefault("workspace", cwd)
     context = ActionContext(
         event="workflow_node",
         context=str(cfg.get("context", "") or ""),
         payload=payload,
+        execution_cwd=action_cwd,
     )
     try:
         result = await provider.execute(action_config, context, timeout=timeout)
@@ -1888,6 +1892,7 @@ async def dispatch(
     project_id: str = "",
     instance_path: str = "",
     cwd: str = "",
+    action_cwd: str = "",
     tiers: dict[str, str] | None = None,
     completion: Any = None,
     get_provider: Any = None,
@@ -1917,6 +1922,7 @@ async def dispatch(
         project_id=project_id,
         instance_path=instance_path,
         cwd=cwd,
+        action_cwd=action_cwd,
         tiers=tiers,
         completion=completion,
         get_provider=get_provider,
@@ -1970,6 +1976,7 @@ async def _dispatch_inner(
     project_id: str = "",
     instance_path: str = "",
     cwd: str = "",
+    action_cwd: str = "",
     tiers: dict[str, str] | None = None,
     completion: Any = None,
     get_provider: Any = None,
@@ -2013,6 +2020,7 @@ async def _dispatch_inner(
             project_id=project_id,
             instance_path=instance_path,
             cwd=cwd,
+            action_cwd=action_cwd,
         )
     if dispatcher is dispatch_wait:
         return await dispatch_wait(node, ctx, now=clock)

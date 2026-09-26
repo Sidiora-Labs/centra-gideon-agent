@@ -89,6 +89,16 @@ def test_store_crud(store):
     assert store.load() == []
 
 
+def test_last_outcome_persists_and_clears_prior_error(store):
+    store.upsert(EventTrigger(id="a", pattern=MEMORY_UPDATE))
+    store.record_outcome("a", status="failure", error="provider refused")
+    failed = store.load()[0]
+    assert (failed.last_status, failed.last_error) == ("failure", "provider refused")
+    store.record_outcome("a", status="success")
+    succeeded = store.load()[0]
+    assert (succeeded.last_status, succeeded.last_error) == ("success", "")
+
+
 def test_record_fire_auto_disables_at_max(store):
     store.upsert(EventTrigger(id="oneshot", pattern=MEMORY_UPDATE, max_fires=1))
     store.record_fire("oneshot", now=100.0)

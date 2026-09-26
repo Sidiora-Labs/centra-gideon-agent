@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
-import { Plus, Zap, Clock, Pencil, CalendarDays, ChevronDown, ChevronRight, Users, ShieldOff, Trash2 } from 'lucide-react'
+import { Plus, Zap, Clock, Pencil, CalendarDays, ChevronDown, ChevronRight, Users, ShieldOff, Trash2, FlaskConical, Play } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
@@ -18,7 +18,7 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { useQueryParam, useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { api, partitionRunHistory } from '../../shared/data/api'
+import { api, partitionRunHistory, type ActionProvider, type EventPattern } from '../../shared/data/api'
 import { ScheduleDetail } from '../schedule/ScheduleDetail'
 import { LifecycleDetail } from './LifecycleDetail'
 import { StoreTriggerDetail } from './StoreTriggerDetail'
@@ -28,6 +28,10 @@ import { providerRungIndex, useAutonomyLadder } from '../../shared/data/rungs'
 import { relFuture } from '../schedule/scheduleMeta'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { Field, TextInput } from '../../shared/ui/forms'
+import { Combobox } from '../../shared/ui/Combobox'
+import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
+import { EVENT_PATTERN_META } from './triggerMeta'
 
 const FILTERS: Array<{ key: string; label: string }> = [
   { key: 'all', label: 'All' },
@@ -140,7 +144,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
               : open.kind === 'store' && open.store
               ? <StoreTriggerDetail trigger={open.store} onChanged={loadStores} onDeleted={() => { setOpenId(""); loadStores() }} />
               : open.kind === 'event' && open.event
-              ? <EventTriggerSummary t={open} onDeleted={() => { setOpenId(""); loadEvents() }} />
+              ? <EventTriggerSummary t={open} providers={providers} editing={editing} onEditingChange={setEditing} onChanged={loadEvents} onDeleted={() => { setOpenId(""); loadEvents() }} />
               : open.hook
               ? providersErr ? <LoadError what="action providers" error={providersErr} onRetry={refreshProviders} /> : <LifecycleDetail hook={open.hook} providers={providers} editing={editing} onEditingChange={setEditing} onSaved={loadHooks} onDeleted={() => { setOpenId(""); loadHooks() }} />
               : null}
@@ -186,7 +190,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
                   const sd = triggerStatusMeta(t)
                   const menuItems: ContextMenuItem[] = [
                     { icon: <Zap size={15} />, label: 'Open', onSelect: () => setQuery({ open: t.id, edit: null }) },
-                    ...(t.readOnly || t.kind === 'event' ? [] : [{ icon: <Pencil size={15} />, label: 'Edit', onSelect: () => setQuery({ open: t.id, edit: '1' }) }]),
+                    ...(t.readOnly ? [] : [{ icon: <Pencil size={15} />, label: 'Edit', onSelect: () => setQuery({ open: t.id, edit: '1' }) }]),
                   ]
                   return (
                     <ContextMenu key={t.id} items={menuItems}>
@@ -259,15 +263,71 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   )
 }
 
-export function EventTriggerSummary({ t, onDeleted }: { t: Trigger; onDeleted: () => void }) {
+export function EventTriggerSummary({ t, providers, editing, onEditingChange, onChanged, onDeleted }: {
+  t: Trigger; providers?: ActionProvider[]; editing?: boolean; onEditingChange?: (editing: boolean) => void; onChanged?: () => void; onDeleted: () => void
+}) {
   const [busy, setBusy] = useState(false)
+  const [localEditing, setLocalEditing] = useState(false)
+  const activeEditing = editing ?? localEditing
+  const changeEditing = onEditingChange ?? setLocalEditing
+  const [pattern, setPattern] = useState<EventPattern>((t.eventPattern || 'InboxMessage') as EventPattern)
+  const [matcher, setMatcher] = useState(t.eventMatcher || '')
+  const [provider, setProvider] = useState(t.event?.action?.provider || '')
+  const [config, setConfig] = useState<Record<string, unknown>>(t.event?.action?.config || {})
+  const [runResult, setRunResult] = useState('')
+  const [error, setError] = useState('')
   const pm = eventPatternMeta(t.eventPattern)
+  const editPattern = eventPatternMeta(pattern)
   const rows: Array<[string, string]> = [
     ['Fires on', pm.label],
     ...(pm.matcher ? [[pm.matcherLabel, t.eventMatcher || 'anything'] as [string, string]] : []),
     ['Then', t.actionLabel],
     ['Fired', t.runCount != null ? `${t.runCount}×` : '—'],
   ]
+  async function save() {
+    const coerced = coerceActionConfig(providers ?? [], provider, config)
+    if (coerced.error) { setError(coerced.error); return }
+    if (editPattern.matcherRequired && !matcher.trim()) { setError(`${editPattern.matcherLabel} is required`); return }
+    setBusy(true); setError('')
+    try {
+      await api.updateEventTrigger(t.rawId, {
+        pattern,
+        ...(editPattern.matcher ? { [editPattern.matcher]: matcher.trim() } : {}),
+        action: { provider, config: coerced.config },
+      })
+      changeEditing(false)
+      onChanged?.()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save this trigger') }
+    finally { setBusy(false) }
+  }
+  async function toggle() {
+    setBusy(true); setError('')
+    try { await api.toggleEventTrigger(t.rawId, !t.enabled); onChanged?.() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not change this trigger') }
+    finally { setBusy(false) }
+  }
+  async function run(dry: boolean) {
+    setBusy(true); setError(''); setRunResult('')
+    try {
+      const preview: { meta?: Record<string, string> } = pattern === 'InboxSender' ? { meta: { sender: matcher || 'manual' } }
+        : pattern === 'InboxAddress' ? { meta: { address: matcher || 'manual' } } : {}
+      const sample = {
+        key: pattern === 'MemoryKeyPattern' ? matcher || 'manual' : 'manual',
+        value: pattern === 'ContentMatch' ? matcher || 'preview' : 'preview',
+        event_type: pattern === 'AppEvent' ? matcher || 'manual' : pattern,
+        ...preview,
+      }
+      const result = dry
+        ? await api.dryRunEventTrigger(t.rawId, sample)
+        : await api.runEventTrigger(t.rawId, sample)
+      const outcome = result.result as Record<string, unknown> | undefined
+      setRunResult(dry
+        ? `${outcome?.would_fire ? 'Would fire' : 'Would not fire'} · ${String(outcome?.reason || '')}`
+        : result.ok ? 'Action ran' : String(outcome?.reason || 'Action did not run'))
+      onChanged?.()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not run this trigger') }
+    finally { setBusy(false) }
+  }
   async function remove() {
     if (!(await confirmDelete('data-event trigger', t.name))) return
     setBusy(true)
@@ -287,13 +347,27 @@ export function EventTriggerSummary({ t, onDeleted }: { t: Trigger; onDeleted: (
           <div data-type="body-m" className="text-on-surface break-words">{value}</div>
         </div>
       ))}
-      <p className="text-on-surface-low text-[0.8125rem]">
-        Editing a data-event trigger isn’t available here yet — recreate it to change its pattern.
-      </p>
-      {
-}
+      {t.lastError && <p role="alert" className="text-danger text-[0.8125rem]">Latest error: {t.lastError}</p>}
+      {activeEditing && <div className="flex flex-col gap-m rounded-lg bg-surface-container p-m">
+        <Field label="Fires on"><Combobox options={EVENT_PATTERN_META.map((item) => ({ value: item.pattern, label: item.label }))}
+          value={pattern} onChange={(value) => { setPattern(value as EventPattern); setMatcher('') }} placeholder="Choose an event" /></Field>
+        {editPattern.matcher && <Field label={editPattern.matcherLabel} hint={editPattern.matcherHint}>
+          <TextInput value={matcher} onChange={setMatcher} placeholder={editPattern.matcherPlaceholder} />
+        </Field>}
+        <ActionConfig providers={providers ?? []} provider={provider} config={config}
+          onProvider={(name) => { setProvider(name); setConfig(seedActionConfig((providers ?? []).find((item) => item.name === name))) }}
+          onConfig={setConfig} vars={[]} />
+        <div className="flex gap-s"><Button size="sm" onClick={save} loading={busy}>Save changes</Button>
+          <Button size="sm" variant="ghost" onClick={() => changeEditing(false)}>Cancel</Button></div>
+      </div>}
+      {error && <p role="alert" className="text-danger text-[0.8125rem]">{error}</p>}
+      {runResult && <p role="status" className="text-on-surface-low text-[0.8125rem]">{runResult}</p>}
       {!t.readOnly && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button variant="secondary" size="sm" onClick={toggle} disabled={busy}>{t.enabled ? 'Pause' : 'Resume'}</Button>
+          <Button variant="ghost" size="sm" onClick={() => changeEditing(!activeEditing)} disabled={busy}><Pencil size={14} /> Edit</Button>
+          <Button variant="ghost" size="sm" onClick={() => run(true)} disabled={busy}><FlaskConical size={14} /> Dry run</Button>
+          <Button variant="ghost" size="sm" onClick={() => run(false)} disabled={busy}><Play size={14} /> Run now</Button>
           <div className="flex-1" />
           <Button variant="ghost" size="sm" onClick={remove} disabled={busy} disabledReason={BUSY_REASON} className="text-danger">
             <Trash2 size={14} /> Delete
