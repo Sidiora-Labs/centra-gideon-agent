@@ -40,7 +40,7 @@ status = "pending"
 wave = 1
 owner_lane = "integrations-protocols"
 requires = []
-reqs = ["010", "011", "012"]
+reqs = ["req.010", "req.011", "req.012"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.013]
@@ -59,7 +59,7 @@ status = "pending"
 wave = 2
 owner_lane = "integrations-channels"
 requires = []
-reqs = ["013", "128"]
+reqs = ["req.013", "req.128"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.003]
@@ -74,12 +74,15 @@ hosted = "not_applicable"
 
 [task.integrations-terminal]
 title = "integrations-terminal end-to-end implementation"
-status = "pending"
+status = "in_progress"
 wave = 3
 owner_lane = "integrations-terminal"
 requires = []
-reqs = ["003", "004"]
+reqs = ["req.003", "req.004"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/terminal.py", "checks/runtime/test_cli_terminal.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_cli_terminal.py"
+implementation_status = "implemented_focused_pass_live_gateway_unqualified"
 
 [req.131]
 title = "Persistent container workspaces"
@@ -107,6 +110,5 @@ status = "pending"
 wave = 4
 owner_lane = "integrations-distribution"
 requires = []
-reqs = ["131", "133", "134", "135"]
+reqs = ["req.131", "req.133", "req.134", "req.135"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
