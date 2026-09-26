@@ -21,6 +21,8 @@ export interface ToolCallProps {
   query: string;
   request: string;
   result: string;
+  requestLabel?: string;
+  resultLabel?: string;
   running: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,6 +35,8 @@ export function ToolCall({
   query,
   request,
   result,
+  requestLabel = "Request",
+  resultLabel = "Result",
   running,
   open,
   onOpenChange,
@@ -73,12 +77,12 @@ export function ToolCall({
       <CollapsibleContent className={cn(collapsePanel, "outline-none")}>
         <div className={cn(field, "mt-2 overflow-hidden rounded-2xl text-xs")}>
           <div className="px-3.5 pt-2.5 pb-2">
-            <p className={cn(mono, "text-foreground/35 mb-1")}>Request</p>
+            <p className={cn(mono, "text-foreground/35 mb-1")}>{requestLabel}</p>
             <p className="text-foreground/55 font-mono">{request}</p>
           </div>
           <div className="bg-foreground/[0.06] mx-3.5 h-px" />
           <div className="px-3.5 pt-2 pb-2.5">
-            <p className={cn(mono, "text-foreground/35 mb-1")}>Result</p>
+            <p className={cn(mono, "text-foreground/35 mb-1")}>{resultLabel}</p>
             <p className="text-foreground/90">{result}</p>
           </div>
         </div>

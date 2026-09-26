@@ -5,7 +5,7 @@
   "modules": {
     "tool-call.tsx": {
       "source_sha256": "4f41b05a3f64c5bc37f8f67d9b5931cfde1b69140cfbe0a3c2507e9d7cf3a174",
-      "local_sha256": "071dfcceaa40a7c0240410b231457a601b85454b8aecd1540b04f86ae7d4232e"
+      "local_sha256": "26c2c89c359b54c8ceef785fe3dd58b62f5c45d25e38698db2d7af2e9537cdd2"
     },
     "tool-timeline.tsx": {
       "source_sha256": "acdbde86542f4e87fd52fb6e250156a30cb09277e8e0236b23819076bc2fda3d",
@@ -34,6 +34,7 @@
   },
   "adaptations": [
     "local shared helper and collapsible imports",
-    "terminal completion labels use explicit exit code; unknown exit is Finished"
+    "terminal completion labels use explicit exit code; unknown exit is Finished",
+    "ToolCall request and result labels accept caller text while retaining donor English defaults"
   ]
 }
