@@ -1,0 +1,75 @@
+{
+  "donor_revision": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT, AgentbaseAI Inc., 2025",
+  "shared_prerequisites": [
+    "elements/surfaces.tsx",
+    "lib/utils.ts",
+    "utils/range.ts"
+  ],
+  "modules": {
+    "agent-plan.tsx": {
+      "source_sha256": "649fe62e87c0842ea6e569fb748a81424eb49f92ac1d47e162123d6776b7b87f",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "subagent-list.tsx": {
+      "source_sha256": "fa6fe53c5e125c9f4090ca0f4d7f6b2d1948b131fb67e8ca707df90152695a02",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "task-card.tsx": {
+      "source_sha256": "9c005c3bc8fdb1184633b94668989da5f4b7d14a5f35f12d208483d1a151272f",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "agent-status.tsx": {
+      "source_sha256": "3f26a05fd1a1bd443c4e65b8f3a66a35b5eb8ae3bafded574c5dca89cb5bb80a",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "approval-card.tsx": {
+      "source_sha256": "6dbaaac0955afe60b97473c469fa530b338c9ef5bc1e20ffd263ee51bbb2de02",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "recommendation-card.tsx": {
+      "source_sha256": "001cb0fd8cdab3fbfd73e5f4628899aee000e9e93839424c78fdc238de30261a",
+      "adaptation": "@/lib/utils -> ../lib/utils; unknown confidence and handlerless actions hidden"
+    },
+    "artifact-card.tsx": {
+      "source_sha256": "94ee88679af4344bbed24ff05f462cfa68656e12c7b93b5a2733f2a99826bc2a",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "todo-list.tsx": {
+      "source_sha256": "cdc04adf037554a37ae920e7697d47bbd1821def3456e24061c64251613e1eaa",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "agent-card.tsx": {
+      "source_sha256": "98e8467bf23f8c7e6d2caecc0285e60b8e46ff98cc89bb6703763e6cda63b6fe",
+      "adaptation": "@/lib/utils -> ../lib/utils; optional unknown metadata and handlerless action hidden"
+    },
+    "agent-handoff.tsx": {
+      "source_sha256": "08291b474fe732f217d16e12a49c1ceff11f3c4d41f3f363c5341525cec048a4",
+      "adaptation": "@/lib/utils -> ../lib/utils; absent handoff reason hidden"
+    },
+    "background-inbox.tsx": {
+      "source_sha256": "803e058078920286fdd73c3bf9b2d5b3975395a283664378275b8e73be6ae7d5",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "checkpoint-history.tsx": {
+      "source_sha256": "313b48a8b8720a70f76b57c386ee8b4c5b5a2be63a9bc0b11ecd5e8fc8177a0b",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "schedule-card.tsx": {
+      "source_sha256": "63b07fe1b7b0b87b963dea4a4634fc95bb864c18eab4db5d40be5e92a4b024ad",
+      "adaptation": "@/lib/utils -> ../lib/utils; handlerless toggle replaced with status text"
+    },
+    "trace-waterfall.tsx": {
+      "source_sha256": "633fa9dcef2f41ecd190af1787a2c215518fdd23fa0855311ec005a7ec885026",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "cost-meter.tsx": {
+      "source_sha256": "ce6dfcd42759516b7fc4b475a88a9523f7e081a0c7f1df5e5da039533c6e7f89",
+      "adaptation": "@/lib/utils -> ../lib/utils"
+    },
+    "quota-banner.tsx": {
+      "source_sha256": "a3a0eba1fb25d44d29e8cadc80ec2432350d8d4b2498a937d2db924d35e5160f",
+      "adaptation": "@/lib/utils -> ../lib/utils; absent reset date and handlerless upgrade action hidden; reset date label accepts exact cycle end"
+    }
+  }
+}
