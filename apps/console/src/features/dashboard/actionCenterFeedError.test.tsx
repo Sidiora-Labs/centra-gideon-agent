@@ -65,12 +65,12 @@ describe('ActionCenter tells a failed lane apart from an empty queue', () => {
   })
 
   it('a failed lane does not bury the lanes that loaded', async () => {
-    const item = { id: 'i1', sender_name: 'Alice from Ops', message: 'ping' }
+    const item = { id: 'i1', sender_name: 'Alice from Ops', message: 'ping', item_kind: 'message', classification: 'needs_reply' }
     mockApi({ approvals: boom, inboxOpen: () => Promise.resolve([item]) })
     await mount()
     const alert = await waitFor(() => screen.getByRole('alert'))
     expect(alert.textContent).toMatch(/pending approvals/i)
-    expect(screen.getByRole('button', { name: /^Reply:/ }), 'the loaded inbox row survives').toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Open:/ }), 'the loaded inbox row survives').toBeInTheDocument()
     expect(screen.queryByText(ALL_CLEAR)).toBeNull()
   })
 

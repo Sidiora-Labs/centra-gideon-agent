@@ -50,7 +50,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
   const { filtered, filterCount, kindChips } = useMemo(() => projectInbox(visibleItems, filter, kind, q), [visibleItems, filter, kind, q])
 
   const health = status?.health
-  const disabled = status ? !status.enabled : false
+  const disabled = status ? !status.native_source_active && !(status.sources ?? []).some(source => source.active) : false
 
   const narrowed = !!(q.trim() || filter !== 'open' || kind)
 
@@ -154,7 +154,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
 
       <EntranceGroup>
 
-        {status && (() => {
+        {status?.native_source_active && (() => {
           const pollActive = (status.sources ?? []).filter((s) => s.kind === 'poll' && s.active)
           const hasPollProviders = (status.sources ?? []).some((s) => s.kind === 'poll')
           return (
@@ -202,7 +202,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
         )}
 
         {filtered !== null && kind === 'proposal' ? (
-          <ProposalsLens items={filtered} onChanged={reload} />
+          <ProposalsLens items={filtered} reviewedCount={(visibleItems ?? []).filter(item => item.item_kind === 'proposal' && ['handled', 'dismissed'].includes(item.status)).length} onChanged={reload} />
         ) : items === undefined && itemsErr ? (
           <LoadError what="inbox items" error={itemsErr} onRetry={reload} />
         ) : filtered === null ? <ListSkeleton rows={6} what="inbox items" /> : filtered.length === 0 ? (
@@ -213,7 +213,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
               ? (kind ? `No ${kindMeta(kind).label.toLowerCase()} matches the current search or filter.` : 'Try a different search or filter.')
               : disabled
                 ? 'Inbox collects messages, questions, and notifications from your agents and connected sources (filesystem and Slack; email coming). Enable a source to begin.'
-                : 'Messages your agents and connected sources surface for triage land here. You’re all caught up.'}
+                : 'The native inbox is active. Your agents can post here now; no items need attention.'}
             action={disabled && !narrowed
               ? { label: 'Connect a source', onClick: () => navigate('settings/inbox'), icon: SettingsIcon }
               : undefined} />

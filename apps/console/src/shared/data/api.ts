@@ -2320,7 +2320,7 @@ export interface NotificationSettings {
   min_severity: string
 }
 export type NotificationMode = 'never' | 'badge' | 'immediate' | 'digest'
-export type NotificationTarget = 'dashboard' | 'channel_dm' | 'push' | 'native'
+export type NotificationTarget = 'dashboard' | 'push' | 'native'
 export type NotificationSound = 'turn_complete' | 'approval_needed' | 'error' | 'coin_blip' | 'terminal_bell'
 export interface NotificationRuleRow {
   key: string; source: string; kind: string; label: string; severity: number
@@ -4361,6 +4361,17 @@ export const api = {
     return get<{ tasks: TaskItem[] }>(`/api/tasks/ready${s ? `?${s}` : ''}`).then((d) => d.tasks)
   },
   searchTasks: (body: Record<string, unknown>) => post<{ tasks: TaskItem[]; total: number }>('/api/tasks/search', body),
+  allSearchTasks: async (body: Record<string, unknown>) => {
+    const tasks: TaskItem[] = []
+    let total = 0
+    do {
+      const page = await api.searchTasks({ ...body, limit: 500, offset: tasks.length })
+      tasks.push(...page.tasks)
+      total = page.total
+      if (!page.tasks.length) break
+    } while (tasks.length < total)
+    return { tasks, total }
+  },
 
   projects: () => get<{ projects: ProjectItem[] }>('/api/projects').then((d) => d.projects),
   project: (id: string) => get<ProjectItem>(`/api/projects/${encodeURIComponent(id)}`),
@@ -4775,6 +4786,7 @@ export const api = {
   favoriteInboxItem: (id: string, favorited: boolean) =>
     post<{ ok: boolean; favorited: boolean }>(`/api/inbox/${encodeURIComponent(id)}/favorite`, { favorited }),
   dismissAllInbox: () => post<{ ok: boolean; dismissed: number }>('/api/inbox/dismiss-all'),
+  clearReviewedInboxProposals: () => del('/api/inbox/proposals/reviewed'),
   restartInbox: () => post<{ ok: boolean; error?: string }>('/api/inbox/restart'),
   inboxSettings: () => get<{ settings: InboxSettings }>('/api/inbox/settings').then((d) => d.settings),
   saveInboxSettings: (s: Partial<InboxSettings>) => put<{ settings: InboxSettings }>('/api/inbox/settings', s),

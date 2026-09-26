@@ -29,7 +29,7 @@ import { ASSIGNED_EVERYONE, ASSIGNED_MINE, FULL_WIDTH, GOAL_LOOPS_PROJECT, SCOPE
 import { filterTasksByTag, orderTaskRows, preserveLockedTaskRows, taskNoMatchCause, taskRowLocked, taskTagOptions, type TaskNoMatchCause } from './taskGraphState'
 
 const viewOptions = [{ key: 'list', label: 'List view', icon: List }, { key: 'cards', label: 'Cards view', icon: LayoutGrid }, { key: 'board', label: 'Kanban board', icon: Columns3 }, { key: 'dag', label: 'Dependency graph', icon: GitFork }]
-const statusOptions = [{ key: 'all', label: 'All' }, { key: 'ready', label: 'Ready' }, ...['open', 'in_progress', 'blocked', 'done'].map(key => ({ key, label: statusMeta(key).label }))]
+const statusOptions = [{ key: 'all', label: 'All' }, { key: 'ready', label: 'Ready' }, ...['open', 'in_progress', 'blocked', 'done', 'cancelled', 'skipped'].map(key => ({ key, label: statusMeta(key).label }))]
 const sortOptions = [{ key: 'recent', label: 'Recently updated' }, { key: 'due', label: 'Due date' }, { key: 'priority', label: 'Priority' }, { key: 'order', label: 'Manual order' }]
 
 export function TasksListPage({ onCreate, view: viewProp, filter, openId, setView: changeView, setFilter, setOpenId, editing, setEditing,
@@ -75,7 +75,7 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
       ...projects.filter(project => project.name !== GOAL_LOOPS_PROJECT).sort((left, right) => left.name.localeCompare(right.name)).map((project, index) => ({ key: project.name, label: project.name, icon: FolderKanban, count: counts.get(project.name), groupLabel: index === 0 ? 'Projects' : undefined })),
     ] }]
     if (tags.length) available.push({ title: 'Tag', value: tag, defaultKey: '', onChange: setTag, options: [{ key: '', label: 'All tags', icon: Tag, count: tasks?.length }, ...tags.map(option => ({ ...option, icon: Tag }))] })
-    if (!FULL_WIDTH.includes(view) && !q) available.push({ title: 'Status', value: filter, defaultKey: 'all', onChange: setFilter, options: statusOptions.map(option => ({ ...option, count: option.key === 'all' ? tasks?.length : option.key === 'ready' ? ready?.length : tasks?.filter(task => option.key === 'done' ? TERMINAL.has(task.status) : task.status === option.key).length })) })
+    if (!FULL_WIDTH.includes(view) && !q) available.push({ title: 'Status', value: filter, defaultKey: 'all', onChange: setFilter, options: statusOptions.map(option => ({ ...option, count: option.key === 'all' ? tasks?.length : option.key === 'ready' ? ready?.length : tasks?.filter(task => task.status === option.key).length })) })
     if (owner && foreign) available.push({ title: 'Assigned', value: assigned, defaultKey: ASSIGNED_EVERYONE, onChange: setAssigned, options: [{ key: ASSIGNED_EVERYONE, label: 'Everyone', icon: Users, count: tasks?.length }, { key: ASSIGNED_MINE, label: 'Mine', icon: UserRound, count: (tasks?.length ?? 0) - foreign }] })
     if (!FULL_WIDTH.includes(view)) available.push({ title: 'Sort by', value: sortBy, defaultKey: 'recent', onChange: setSortBy, options: sortOptions })
     return available
@@ -143,7 +143,7 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
     <div className={view === 'board' ? 'flex min-h-0 flex-1 flex-col px-l py-l' : 'min-h-0 flex-1 overflow-y-auto'} tabIndex={view === 'dag' ? 0 : undefined} role={view === 'dag' ? 'group' : undefined} aria-label={view === 'dag' ? 'Dependency graph' : undefined}>
       <div className={`mx-auto w-full ${view === 'board' ? 'flex min-h-0 flex-1 flex-col' : 'px-l py-l'}`} style={{ maxWidth: 'var(--content-width)' }}>
         {moveError && <div className="mb-s shrink-0"><InlineError animated icon onDismiss={() => collection.showError('')}>{moveError}</InlineError></div>}
-        {view !== 'board' && isProjectScope && projectLists.length > 0 && <TaskListBar lists={projectLists} active={listProp} repeatableId={projects.find(project => project.name === 'Repeatable')?.id} onPick={list => setListFilter(listProp === list.id ? null : list)} onReset={resetList} />}
+        {view !== 'board' && isProjectScope && projectLists.length > 0 && <TaskListBar lists={projectLists} tasks={tasks ?? []} active={listProp} repeatableId={projects.find(project => project.name === 'Repeatable')?.id} onPick={list => setListFilter(listProp === list.id ? null : list)} onReset={resetList} />}
         {body}
       </div>
     </div>
@@ -156,11 +156,11 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
   </WorkbenchLayout>
 }
 
-function TaskListBar({ lists, repeatableId, active, onPick, onReset }: { lists: TaskListItem[]; repeatableId?: string; active: string; onPick: (list: TaskListItem) => void; onReset: (list: TaskListItem) => void }) {
+function TaskListBar({ lists, tasks, repeatableId, active, onPick, onReset }: { lists: TaskListItem[]; tasks: TaskItem[]; repeatableId?: string; active: string; onPick: (list: TaskListItem) => void; onReset: (list: TaskListItem) => void }) {
   return <div className="mb-m flex flex-wrap items-center gap-s"><span data-type="caption" className="inline-flex items-center gap-xs text-on-surface-low uppercase tracking-wide"><ListChecks size={12} /> Task lists</span>{lists.map(list => {
     const picked = active === list.id
     return <span key={list.id} data-type="body-s" className={`inline-flex min-h-8 items-center gap-xs rounded-md border px-s ${picked ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/30 bg-surface-container text-on-surface-var'}`}>
-      <button type="button" aria-label={`Task list: ${list.name}`} aria-pressed={picked} onClick={() => onPick(list)} className="min-h-6">{list.name}</button>
+      <button type="button" aria-label={`Task list: ${list.name}`} aria-pressed={picked} onClick={() => onPick(list)} className="inline-flex min-h-6 items-center gap-xs">{list.name}<span data-type="caption">{tasks.filter(task => task.task_list_id === list.id).length}</span></button>
       {!!repeatableId && list.project_id === repeatableId && <button type="button" aria-label={`Reset list ${list.name}`} title="Reset this repeatable list (all tasks must be done)" onClick={event => { event.stopPropagation(); onReset(list) }} className="grid size-6 place-items-center rounded-md hover:brightness-125"><RotateCcw size={12} /></button>}
     </span>
   })}</div>
@@ -194,7 +194,7 @@ function TaskRow({ t, index, onOpen, onProject, onTag, selected, selecting, onTo
     <RowHitTarget label={`${t.title} — ${sm.label}`} />
     {reorderable && <span title={taskRowLocked(t) ? 'Project tasks keep their place' : 'Drag to reorder'}><GripVertical size={16} className={`shrink-0 text-on-surface-low ${taskRowLocked(t) ? 'cursor-not-allowed opacity-40' : 'cursor-grab active:cursor-grabbing'}`} /></span>}
     <button type="button" aria-label={`${selected ? 'Deselect' : 'Select'}: ${t.title}`} onClick={event => { event.stopPropagation(); onToggleSelect?.() }} className="-m-0.5 grid size-6 shrink-0 place-items-center"><span className={`grid size-5 place-items-center rounded-md border ${selected ? 'border-primary bg-primary text-on-primary' : `border-outline-variant text-transparent ${selecting ? '' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}`}><Check size={13} /></span></button>
-    <sm.icon size={20} className="shrink-0" style={{ color: sm.tone }} /><div className="min-w-0 flex-1"><span className={`block truncate text-[0.9375rem] font-medium ${done ? 'text-on-surface-low line-through' : 'text-on-surface'}`} title={t.title}>{t.title}</span><MetaLine t={t} onProject={onProject} /></div>
+    <sm.icon size={20} className="shrink-0" style={{ color: sm.tone }} /><div className="min-w-0 flex-1"><span className={`block truncate text-[0.9375rem] font-medium ${t.status === 'done' ? 'text-on-surface-low line-through' : 'text-on-surface'}`} title={t.title}>{t.title}</span><MetaLine t={t} onProject={onProject} /></div>
     {!!t.labels?.length && <div className="hidden shrink-0 gap-xs md:flex">{t.labels.slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}</div>}
   </motion.div></ContextMenu>
 }
@@ -205,7 +205,7 @@ function TaskCard({ t, index, onOpen, onProject, onTag }: { t: TaskItem; index: 
   const badges = [sm, pm, due].filter((badge): badge is { label: string; tone: string } => !!badge)
   return <motion.div initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring.spatialDefault, delay: reduced ? 0 : Math.min(index * 0.03, 0.3) }} whileHover={reduced ? undefined : { y: -expr(4, 0.3), boxShadow: 'var(--shadow-lift)' }} whileTap={reduced ? undefined : { scale: 1 - expr(0.012, 0.3) }} onClick={onOpen} tabIndex={-1}
     className="group relative grid cursor-pointer gap-m rounded-lg border border-outline-variant/30 bg-surface-container/60 p-l transition-colors hover:bg-surface-high has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-inset has-[>button:focus-visible]:ring-primary">
-    <RowHitTarget label={t.title} /><div className="flex items-start gap-s"><sm.icon size={18} style={{ color: sm.tone }} className="mt-0.5 shrink-0" /><span data-type="label-m" className={`min-w-0 flex-1 font-medium leading-snug ${TERMINAL.has(t.status) ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{t.title}</span>{t.assignee && <span data-type="caption" title={`Assigned to ${t.assignee}`} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">@{t.assignee}</span>}</div>
+    <RowHitTarget label={t.title} /><div className="flex items-start gap-s"><sm.icon size={18} style={{ color: sm.tone }} className="mt-0.5 shrink-0" /><span data-type="label-m" className={`min-w-0 flex-1 font-medium leading-snug ${t.status === 'done' ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{t.title}</span>{t.assignee && <span data-type="caption" title={`Assigned to ${t.assignee}`} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var">@{t.assignee}</span>}</div>
     <div className="flex flex-wrap items-center gap-1.5">{badges.map((badge, position) => <span key={position} data-type="caption" className="rounded-md px-2 py-1" style={{ color: badge.tone, background: `color-mix(in srgb, ${badge.tone} 16%, transparent)` }}>{badge.label}</span>)}
       {t.project && <button type="button" onClick={event => { event.stopPropagation(); onProject?.(t.project!) }} title={`Filter by project “${t.project}”`} data-type="caption" className="inline-flex min-h-6 items-center gap-xs rounded-md px-2 hover:brightness-125" style={accentChip}><FolderKanban size={10} />{t.project}</button>}
       {(t.labels ?? []).slice(0, 2).map(label => <button key={label} type="button" data-type="caption" aria-label={`Filter by tag “${label}”`} onClick={event => { event.stopPropagation(); onTag?.(label) }} className="rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary">{label}</button>)}
