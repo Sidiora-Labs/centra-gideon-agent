@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from gideon.integrations.llm.events import ContextUsage
+
 from gideon.sdk.embedding import EmbeddingProvider
 from gideon.sdk.local_model import LocalModel, LocalModelProvider
 from gideon.sdk.model import (
@@ -58,6 +60,7 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         if self.timeout_secs <= 0:
             raise ValueError("timeout_secs must be positive")
         self._last_context_pct: float | None = None
+        self._reported_context_window: int | None = None
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -68,7 +71,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
 
     async def _served_context_window(self, model: str) -> int:
         if self._declared_context_window is not None:
+            self._reported_context_window = self._declared_context_window
             return self._declared_context_window
+        self._reported_context_window = None
         try:
             response = await self._request("GET", "/api/ps")
             for row in response.get("models", []):
@@ -78,6 +83,7 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
                 ):
                     served = declared_context_window(row.get("context_length"))
                     if served is not None:
+                        self._reported_context_window = served
                         return served
         except (httpx.HTTPError, ValueError, RuntimeError):
             pass
@@ -244,11 +250,27 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
                         if prompt_tokens > 0
                         else None
                     )
+                    reported_prompt = row.get("prompt_eval_count")
+                    measured_prompt = (
+                        reported_prompt
+                        if type(reported_prompt) is int and reported_prompt >= 0
+                        else None
+                    )
                     yield LLMEvent(
                         kind=EVENT_COMPLETE,
                         context_usage_pct=self._last_context_pct,
                         input_tokens=int(row.get("prompt_eval_count", 0)),
                         output_tokens=int(row.get("eval_count", 0)),
+                        context_usage=(
+                            ContextUsage(
+                                input_tokens=measured_prompt,
+                                total_input_tokens=measured_prompt,
+                                context_window_tokens=self._reported_context_window,
+                            )
+                            if measured_prompt is not None
+                            or self._reported_context_window is not None
+                            else None
+                        ),
                         stop_reason=str(row.get("done_reason") or "stop"),
                     )
                     return

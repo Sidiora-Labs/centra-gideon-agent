@@ -97,10 +97,24 @@ class _ChatDecoder:
         prompt = wire_value(usage, "prompt_tokens")
         if type(prompt) is int and prompt >= 0:
             details = wire_value(usage, "prompt_tokens_details")
-            cached = wire_value(details, "cached_tokens", 0)
-            cached = min(prompt, max(0, cached)) if type(cached) is int else 0
+            reported_cached = wire_value(details, "cached_tokens")
+            cached = (
+                min(prompt, max(0, reported_cached))
+                if type(reported_cached) is int else 0
+            )
             self.usage.input_tokens = prompt - cached
             self.usage.cache_read_tokens = cached
+            self.usage.measured_total_input_tokens = prompt
+            self.usage.measured_input_tokens = (
+                prompt - cached
+                if type(reported_cached) is int and 0 <= reported_cached <= prompt
+                else None
+            )
+            self.usage.measured_cache_read_tokens = (
+                cached
+                if type(reported_cached) is int and 0 <= reported_cached <= prompt
+                else None
+            )
         output = wire_value(usage, "completion_tokens")
         if type(output) is int and output >= 0:
             self.usage.output_tokens = output
@@ -154,6 +168,7 @@ class OpenAIProvider(ConversationProtocol):
         self.context_window = declared_context_window(
             self._extra_options.pop("context_window", None)
         )
+        self._served_context_window: int | None = None
         self.is_local = is_local_endpoint(base_url)
         self._embedding_model = str(self._extra_options.pop("embedding_model", ""))
         self._client = sdk.AsyncOpenAI(api_key=credential.secret, base_url=base_url)
@@ -173,12 +188,6 @@ class OpenAIProvider(ConversationProtocol):
             )
             from gideon.integrations.model_windows import register_served_context_window
 
-            for item in models:
-                if item.id != self._model:
-                    continue
-                for field in ("context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"):
-                    if register_served_context_window(item.id, item.extra.get(field)):
-                        break
             suitable = [
                 item.id
                 for item in models
@@ -186,6 +195,15 @@ class OpenAIProvider(ConversationProtocol):
             ]
             if models:
                 self._model = suitable[0] if suitable else models[0].id
+            for item in models:
+                if item.id != self._model:
+                    continue
+                for field in ("context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"):
+                    reported = declared_context_window(item.extra.get(field))
+                    if reported is not None:
+                        self._served_context_window = reported
+                        register_served_context_window(item.id, reported)
+                        break
         except Exception:
             logger.debug("Default chat model discovery failed", exc_info=True)
 
@@ -255,7 +273,10 @@ class OpenAIProvider(ConversationProtocol):
             model, override=self.context_window, local=self.is_local
         )
         context = self._record_completion(decoder.answer, context, remember=remember)
-        yield decoder.usage.terminal(context)
+        yield decoder.usage.terminal(
+            context,
+            context_window_tokens=self.context_window or self._served_context_window,
+        )
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)

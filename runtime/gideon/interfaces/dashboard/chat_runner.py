@@ -45,6 +45,7 @@ from gideon.integrations.llm.base import (
     EVENT_TOOL_CALL_UPDATE,
     EVENT_TOOL_RESULT,
 )
+from gideon.integrations.llm.events import ContextUsage
 from gideon.integrations.llm_helpers import (
     PromptBusyExhaustedError,
     humanize_provider_error,
@@ -1610,6 +1611,18 @@ async def _abort_acp_turn(provider: object, reason: str) -> str | None:
         return None
 
 
+def _context_usage_payload(
+    session_key: str, pct: float | None, usage: ContextUsage | None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "session": session_key,
+        "pct": None if pct is None else round(pct, 1),
+    }
+    if usage is not None:
+        payload["usage"] = usage.as_payload()
+    return payload
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,
@@ -2509,6 +2522,7 @@ async def run_chat(
         _turn_model = ""
         _turn_cost_usd = 0.0
         _turn_priced = False
+        _turn_context_usage: ContextUsage | None = None
         _acp_cli = ""
         _prov_id = str(getattr(client, "provider_id", "") or "")
         if _prov_id.startswith("acp:"):
@@ -3530,6 +3544,7 @@ async def run_chat(
                     )
                     needs_session_reset = True
             elif event.kind == EVENT_COMPLETE:
+                _turn_context_usage = getattr(event, "context_usage", None)
                 if event.input_tokens or event.output_tokens:
                     stats = Stats()
                     stats.inc_input_tokens(event.input_tokens)
@@ -3664,7 +3679,7 @@ async def run_chat(
             pct = client.context_usage_pct()
             state.broadcast_ws(
                 "context_usage",
-                {"session": session.key, "pct": None if pct is None else round(pct, 1)},
+                _context_usage_payload(session.key, pct, _turn_context_usage),
             )
 
         _is_empty = is_empty_turn(
@@ -3743,7 +3758,7 @@ async def run_chat(
         pct = client.context_usage_pct()
         state.broadcast_ws(
             "context_usage",
-            {"session": session.key, "pct": None if pct is None else round(pct, 1)},
+            _context_usage_payload(session.key, pct, _turn_context_usage),
         )
         if not is_cancelled_stop(_stop_reason):
             state.sessions.record_success(session_key)
