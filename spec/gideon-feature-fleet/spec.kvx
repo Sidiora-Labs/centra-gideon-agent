@@ -204,7 +204,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Contextual proactive planner for silence notifications contributions and background work. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Due commitments use recent-session context and notification posture to choose silence, defer, dashboard contribution, or notification. Topic decision, policy, destination, delivery, dismissal cooldown, and approved saved-workflow run are persisted; approval uses the existing workflow executor with an idempotency key."
 implementation_limit = "The focused test uses a real HTTP handler and workflow store but does not run the timed heartbeat or a live browser/channel delivery."
 
@@ -217,7 +217,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Persistent multi-agent rounds roles handoffs and interruption recovery. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Reviewed linked-worktree branch/role/check/stop plan; trusted cwd for relative actions; append-only role handoffs and check results; bounded verifier handback; out-of-bound reversion with saved evidence preview; explicit interrupted resume without replay; monotone budget extension; same-worktree run refusal."
 implementation_limit = "The boundary covers tracked and untracked writes inside the reviewed Git worktree; no OS-level filesystem sandbox is claimed for arbitrary absolute-path shell writes. The focused journey uses real workflow action nodes and role handoffs, not a live three-LLM-agent coding run."
 
@@ -230,7 +230,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Intent-based workflow discovery and natural-language launch. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Intent search ranks saved workflow definitions, shows shortlist purpose and required inputs, and requires explicit review/launch; round definitions show the full plan before approval."
 
 
@@ -1062,7 +1062,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Scheduled daily spending limits visible pause and reset resume. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "OSS exposes existing daily budget limits and pause/reset state in Guardrails; hosted keeps spend limits operator-managed, hides customer controls, rejects customer preference writes, and denies GET budget."
 
 
@@ -1351,7 +1351,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Trigger dry-run outcomes and originating-trigger links. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Trigger dry-run reports enforced/bypassed gates and would-fire outcome without dispatch or budget charge; schedule activity links to originating trigger."
 
 
@@ -1363,7 +1363,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Model requirement only for model-using triggers. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_origin = "existing_behavior_retained"
 implementation_note = "Trigger creation validates only selected action-provider schema fields; model binding is not a global trigger prerequisite, while model-using providers retain their own requirements."
 
@@ -1376,7 +1376,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent trigger create and update semantics. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Event triggers now expose edit of pattern/matcher/action, pause/resume, dry-run and run-now using existing create/update/dispatch contracts."
 
 
@@ -1388,7 +1388,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent trigger status and latest error. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Event trigger list/detail project persisted latest run status and error; manual action failures update the same trigger history and latest error fields."
 
 
@@ -1783,14 +1783,14 @@ hosted_delivery = "integrated_main"
 
 [task.automation-proactivity]
 title = "automation-proactivity product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "automation-proactivity"
 requires = []
 reqs = ["015.1", "016.1", "017.1", "085.1", "109.1", "110.1", "111.1", "112.1"]
 feature = "gideon-automation"
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 
 
 [task.automation-tasks]
@@ -1897,7 +1897,7 @@ terminal = "Terminal client uses gateway session streaming, tools and approvals;
 distribution = "OSS single-container packaging serves runtime and console and persists workspace under the mounted data root. Hosted keeps its existing managed process architecture and storage conventions."
 
 [design.integration_result]
-upstream_delivery = "All sixteen feature lanes integrated into OSS main; remote main published through 6760f5a756d20acecb3e5824148dc9e662a6c234. Hosted remaining creative, proactivity and channels are still in progress locally."
+upstream_delivery = "All sixteen feature lanes integrated into OSS main; remote main published through 6760f5a756d20acecb3e5824148dc9e662a6c234. Hosted remaining creative and channels are still in progress locally."
 image = "Combined OSS image sha256:7ff701e61e1f2d37690a2501a5a00379d48c1a094897ca9d6c22cb3721808c70 passed real health, authenticated served console, persistent workspace across container recreation, Chromium PNG rendering as UID 10001, Matrix crypto, QR and bundled bridge import. Final main matches all 4110 source input hashes, aggregate 8a0278ce172683856fdba8010e986ffa0cdace236566e44ef801d0726c6c5a29."
-console = "Combined OSS Vite build passed. TypeScript reports ten preexisting errors in unchanged extensions/modules and wellbeing files, with no new integration diagnostics. Hosted combined source check remains pending."
+console = "Combined OSS Vite build passed. TypeScript reports ten preexisting errors in unchanged extensions/modules and wellbeing files, with no new integration diagnostics. Combined hosted candidate TypeScript passed with zero diagnostics and all nine focused route-policy tests passed; final main source hash comparison remains pending."
 external_services = "Live external vendors, handset pairing, SSH hosts and provider OAuth require their configured environments; focused real local transports and runtime paths are recorded per lane. No deployment performed."
