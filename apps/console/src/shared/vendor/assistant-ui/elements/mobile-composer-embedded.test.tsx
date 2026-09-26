@@ -24,4 +24,15 @@ describe('mobile composer embedded editor', () => {
     expect(onSend).toHaveBeenCalledOnce()
     expect(container.querySelector('[data-slot="mobile-composer"]')).toBeInTheDocument()
   })
+
+  it('suppresses all inner chrome when nested inside the product composer', () => {
+    const onAttach = vi.fn()
+    const { container } = render(<MobileComposer value="draft" editor={<textarea aria-label="Real editor" />}
+      keyboardOpen={false} running={false} actions={[]} onAttach={onAttach} embedded />)
+    expect(screen.queryByRole('button', { name: 'Add an attachment' })).toBeNull()
+    expect(container.querySelector('[data-slot="mobile-composer"]')).toHaveAttribute('data-embedded', 'true')
+    expect(container.querySelector('[data-slot="mobile-composer"] > span[aria-hidden]')).toBeNull()
+    expect(container.querySelector('[data-slot="mobile-composer-field"]')).not.toHaveClass('rounded-[18px]')
+    expect(onAttach).not.toHaveBeenCalled()
+  })
 })
