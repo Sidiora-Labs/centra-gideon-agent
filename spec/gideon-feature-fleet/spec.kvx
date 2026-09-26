@@ -29,10 +29,11 @@ title = "Import Claude Code and Hermes conversation histories"
 acceptance = "The actual Gideon user or operator path delivers: Import Claude Code and Hermes conversation histories. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Import Claude Code and Hermes conversation histories. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "Claude Code and Hermes JSONL history scanner and idempotent separate journals; hosted Knowledge upload/preview/import entry"
 
 
 [req.002]
@@ -40,10 +41,11 @@ title = "Recall exact conversation content removed during compaction"
 acceptance = "The actual Gideon user or operator path delivers: Recall exact conversation content removed during compaction. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Recall exact conversation content removed during compaction. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "native archive search/read tool recalls bounded exact journal rows removed by compaction within current session"
 
 
 [req.003]
@@ -53,8 +55,8 @@ owner_lane = "integrations-terminal"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Full terminal chat interface with live tools approvals session navigation and agent controls. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "merged_feature"
 upstream_behavior = "Gateway WebSocket and REST client drives a curses chat transcript, live tool/approval events, session create/switch/history, agent/model/task/approval controls and stop."
 hosted_behavior = "Authenticated URL plus bearer or cookie terminal client; session and agent controls, live events and approvals; provider and per-chat model controls omitted under hosted policy."
 
@@ -66,8 +68,8 @@ owner_lane = "integrations-terminal"
 hosted = "not_applicable"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Guided terminal setup for providers and models. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "merged_feature"
 upstream_behavior = "Interactive /setup discovers installed provider types or catalog chat apps, installs chosen app with warning consent, gathers schema options with masked secret entry, probes connectivity, lists models, and binds chosen model through gateway APIs."
 
 
@@ -79,7 +81,7 @@ hosted = "not_applicable"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Downloadable default local model for first chat. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Onboarding offers the smallest compatible downloadable local chat model and tracks its queued/running job."
 
 
@@ -90,8 +92,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Persistent rearrangeable workspace for chat runs files diffs and agents. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Workspace URL pane, saved per-session tab order, active/secondary panes and split size; runs, files/links, delivered artifacts and delegated agents wired to live panels."
 
 
@@ -102,8 +104,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Live workflow graphs and node details inside chat. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Chat workflow cards render a live DAG, selectable node inspection and full inspector deep link."
 
 
@@ -114,8 +116,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Session shelf for delivered artifacts separate from working files. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Session shelf lists delivered artifacts by session event or run outbox and opens existing artifact viewer; working files remain in Files & links. Exact originating turn is not shown where runtime event metadata omits it."
 
 
@@ -126,8 +128,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Inspect interrupt and adjust supported model or effort on live delegated agents. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Per-child inspect and interrupt use stable spawn ID; live model/effort selectors appear only for provider-advertised choices and PATCH acknowledgement, with refusal feedback. Hosted model controls stay operator-managed."
 
 
@@ -138,7 +140,7 @@ owner_lane = "integrations-protocols"
 hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Inbound ACP server for compatible editors. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
 upstream_behavior = "gideon acp launches an inbound stdio JSON-RPC server with initialize, session creation, streaming prompts, permission decisions, cancellation, and shutdown against Gideon's configured provider."
 hosted_behavior = "Same local operator-managed editor entrypoint; no public customer editor configuration."
@@ -151,7 +153,7 @@ owner_lane = "integrations-protocols"
 hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Standard A2A task operations. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
 upstream_behavior = "Published-workflow A2A now serves well-known card and authenticated JSON-RPC message/send, message/stream, tasks/get, tasks/list, tasks/cancel, and tasks/resubscribe; REST binding remains. Starts use the live workflow supervisor, cancellation reaches the live controller, and task reads/lists are caller-scoped."
 hosted_behavior = "Signed edge admits only the exact new protocol routes and retains existing A2A authentication, opt-in publication, rate/body limits, and headless policy."
@@ -164,7 +166,7 @@ owner_lane = "integrations-protocols"
 hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: MCP OAuth resources prompts and delegated connections. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
 upstream_behavior = "MCP SDK client supports OAuth discovery, browser or manual callback authorization, token persistence/refresh, resources, prompts, and model-callable delegated resource/prompt tools. Authenticated dashboard routes expose resource and prompt operations."
 hosted_behavior = "Preserves hosted connection headers and child environment scrubbing; OAuth setup remains operator managed through mcp-auth --manual for headless containers, and new dashboard routes pass the signed edge policy."
@@ -189,7 +191,7 @@ owner_lane = "automation-apps"
 hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Plugin hooks observers background services and richer installation. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Manifest lifecycle hooks reconcile into ScriptHookStore; existing event observers, background workers, provider/UI contributions remain; catalog and warning consent disclose hooks. Hosted hook installs require operator-curated signed bundles."
 
@@ -271,7 +273,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Resource-aware experiment campaigns with attempts observations and results. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "merged_feature"
+hosted_delivery = "integrated_main"
 implementation_note = "Persistent bounded campaigns launch real workflow runs, retain attempts and observations, and show results in the console."
 implementation_limit = "No external-provider or live-browser campaign qualification in this build pass."
 
@@ -284,7 +286,7 @@ hosted = "not_applicable"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Local and SSH machine resource registry. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "merged_feature"
+hosted_delivery = "integrated_main"
 implementation_note = "OSS local and SSH machine registry with validation and configured strict-host-key SSH probe; local probe and persistence tested."
 implementation_limit = "No external SSH target was available for live probe validation."
 
@@ -297,7 +299,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Recorded run replay and divergence inspection. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "merged_feature"
+hosted_delivery = "integrated_main"
 implementation_note = "A recorded run journal is deterministically replayed into ordered step states; console exposes step evidence and candidate path/field divergence."
 implementation_limit = "Replay is side-effect-free trajectory reconstruction; it does not re-execute model or tool calls under a changed engine."
 
@@ -310,7 +312,7 @@ hosted = "not_applicable"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Offline agent-strategy experiment workspace. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "merged_feature"
+hosted_delivery = "integrated_main"
 implementation_note = "OSS offline strategy CLI executes isolated local jobs and persists per-attempt outputs, scores, and results; a real JSON-parser job passed."
 implementation_limit = "No external model/provider strategy run was qualified."
 
@@ -323,7 +325,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Turn-boundary runtime configuration replacement. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "ConversationDirectory stages a replacement provider factory, retains active turns, and swaps stale sessions at the next lease boundary; native state and next-turn reasoning effort carry over. Hosted provider selection remains operator-managed."
 
 
@@ -335,7 +337,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Recover empty thinking-only and post-tool empty responses. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Native exchange retries thinking-only, post-tool-empty, and plain empty responses within a bounded turn budget, then fails explicitly."
 
 
@@ -347,7 +349,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Revise proposed actions before execution. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Native pending approval accepts a user revision through existing dashboard POST approval route and ApprovalCard; original action does not run and revised proposal requires normal approval. ACP approvals do not advertise revision."
 
 
@@ -359,7 +361,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Use provider-served context windows. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "OpenAI-compatible provider captures reliable served /models context length; headroom uses it when available and declared catalog context remains fallback for providers without served metadata."
 
 
@@ -371,7 +373,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Multiple provider-supported prompt cache boundaries. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Native prompt cache marks three stable message boundaries; Anthropic wire translation adds a legal tool-schema boundary."
 
 
@@ -383,7 +385,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Recoverable provider fallback. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Native retryable pre-output failure advances through operator-configured chat resolution chain on the model axis, with bounded attempts."
 
 
@@ -395,7 +397,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Performance quality and cost informed routing. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Learned route combines observed quality, latency, and price where samples are sufficient; prior safe fallback remains."
 
 
@@ -407,7 +409,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Roll child and stage usage into parent totals. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Existing subagent usage books to parent session and workflow reader totals stage ledger; native turn accounting now sums all model attempts and cache usage."
 
 
@@ -419,7 +421,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Distinguish absent usage zero cost and no model calls. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Turn ledger records model_calls and measured/partial/absent/no_model_calls status so absent usage, measured zero cost, and no call remain distinct."
 
 
@@ -428,10 +430,11 @@ title = "Render zero elapsed duration as 0s"
 acceptance = "The actual Gideon user or operator path delivers: Render zero elapsed duration as 0s. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Render zero elapsed duration as 0s. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Elapsed formatter and run/node views render zero as 0s."
 
 
 [req.035]
@@ -441,7 +444,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Complete history restoration beyond 500 messages. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -452,7 +455,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Preserve conversation content through long responses and edit resend. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -463,7 +466,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Recover streaming after lost terminal events. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -474,7 +477,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Recover composer after immediate failure while preserving drafts. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -485,7 +488,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Preserve active run across session creation remount. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -496,7 +499,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Render completed answers exactly once. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -507,8 +510,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Search result scroll highlight and source. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Session search shows match snippet and source, scrolls to selected turn, briefly rings the turn and highlights visible match text."
 
 
@@ -519,8 +522,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Short per-turn navigation labels. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Short turn labels appear in map previews and mobile map rows."
 
 
@@ -531,8 +534,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Improved session map layout and navigation. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Map rail gains bounded desktop scrolling and full-width mobile navigation with turn labels."
 
 
@@ -543,8 +546,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Preserve starter agent and model selections. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "OSS existing starter selection preserved; hosted starter applies/saves agent and effort while omitting forbidden customer model selection."
 
 
@@ -555,8 +558,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Preserve destination deep links through connection screens. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "App/provisioning and hosted OAuth/email handoffs now retain exact requested hash/query through return_to; CloudRuntimeBoundary restores it on active runtime or provisioning Enter. Onboarding focused lifecycle/exit tests pass 10/10; no live OAuth browser proof."
 
 
@@ -567,8 +570,8 @@ owner_lane = "experience-workspace"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Improve automatic chat titles. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 implementation_note = "Title prompt combines first user intent with recent turns; generated title parsing and safe short fallback improved."
 
 
@@ -577,10 +580,11 @@ title = "Ordered background memory extraction"
 acceptance = "The actual Gideon user or operator path delivers: Ordered background memory extraction. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Ordered background memory extraction. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "bounded ordered extraction, startup journal recovery, retry, and timed shutdown drain with durable unfinished count"
 
 
 [req.048]
@@ -588,10 +592,11 @@ title = "Delegated-run memory contributions"
 acceptance = "The actual Gideon user or operator path delivers: Delegated-run memory contributions. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Delegated-run memory contributions. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "delegated result writes episodic memory and durable receipt exposed by spawn status/completion event; ChatPage, ChatActivityPanel, and SessionWorkspace display the settled receipt"
 
 
 [req.049]
@@ -599,10 +604,12 @@ title = "Persist entity aliases"
 acceptance = "The actual Gideon user or operator path delivers: Persist entity aliases. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Persist entity aliases. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "aliases normalize in extractor, merge in knowledge store, and flow through pipeline"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.050]
@@ -610,10 +617,12 @@ title = "Persist model-proposed typed knowledge relationships"
 acceptance = "The actual Gideon user or operator path delivers: Persist model-proposed typed knowledge relationships. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Persist model-proposed typed knowledge relationships. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "model-proposed typed relationships normalize and persist during knowledge pipeline"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.051]
@@ -621,10 +630,11 @@ title = "Entity deletion interface and persistent tombstones"
 acceptance = "The actual Gideon user or operator path delivers: Entity deletion interface and persistent tombstones. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Entity deletion interface and persistent tombstones. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "Studio entity delete confirmation, DELETE API, graph tombstone and guard against recreation; hosted exact route allow"
 
 
 [req.052]
@@ -632,10 +642,12 @@ title = "Knowledge regeneration failures and useful retries"
 acceptance = "The actual Gideon user or operator path delivers: Knowledge regeneration failures and useful retries. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Knowledge regeneration failures and useful retries. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "knowledge regeneration failure/partial state and retry API/UI"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.053]
@@ -643,10 +655,12 @@ title = "Bounded reranking calls"
 acceptance = "The actual Gideon user or operator path delivers: Bounded reranking calls. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Bounded reranking calls. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "reranker caps candidates and applies completion deadline"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.054]
@@ -654,10 +668,12 @@ title = "Meta-refresh page ingestion"
 acceptance = "The actual Gideon user or operator path delivers: Meta-refresh page ingestion. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Meta-refresh page ingestion. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "web URL ingestion follows meta-refresh target"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.055]
@@ -665,10 +681,12 @@ title = "Expose ingestion contradictions"
 acceptance = "The actual Gideon user or operator path delivers: Expose ingestion contradictions. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Expose ingestion contradictions. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "ingestion conflicts API and Knowledge Conflicts view"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.056]
@@ -676,10 +694,11 @@ title = "Large-document OCR and partial-extraction reporting"
 acceptance = "The actual Gideon user or operator path delivers: Large-document OCR and partial-extraction reporting. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Large-document OCR and partial-extraction reporting. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "PDF ingestion reports partial extraction and skipped OCR pages while preserving resource limits"
 
 
 [req.057]
@@ -687,10 +706,12 @@ title = "Capture dynamically rendered monitored pages"
 acceptance = "The actual Gideon user or operator path delivers: Capture dynamically rendered monitored pages. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Capture dynamically rendered monitored pages. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "monitored web source can use render tier and user can allow/retry dynamic page capture"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.058]
@@ -722,10 +743,12 @@ title = "General-loop pause resume and workflow lifecycle"
 acceptance = "The actual Gideon user or operator path delivers: General-loop pause resume and workflow lifecycle. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: General-loop pause resume and workflow lifecycle. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Workflow general-loop start, pause, resume and lifecycle controls were already connected through service and run detail."
 
 
 [req.061]
@@ -733,10 +756,11 @@ title = "Correct workflow failure attribution and actual cause"
 acceptance = "The actual Gideon user or operator path delivers: Correct workflow failure attribution and actual cause. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Correct workflow failure attribution and actual cause. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Terminal failure now attributes the deepest actual failing node cause."
 
 
 [req.062]
@@ -744,10 +768,11 @@ title = "Reliable failed-stage retry"
 acceptance = "The actual Gideon user or operator path delivers: Reliable failed-stage retry. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Reliable failed-stage retry. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Failed stage claims release their exact holder and configured transient/network retries record attempts; nonretryable failures remain failures."
 
 
 [req.063]
@@ -755,10 +780,12 @@ title = "Previous-iteration bindings including first-cycle defaults"
 acceptance = "The actual Gideon user or operator path delivers: Previous-iteration bindings including first-cycle defaults. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Previous-iteration bindings including first-cycle defaults. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Loop previous-output bindings and explicit first-iteration defaults were already present in controller and template lint."
 
 
 [req.064]
@@ -766,10 +793,12 @@ title = "Consistent fan-out totals"
 acceptance = "The actual Gideon user or operator path delivers: Consistent fan-out totals. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent fan-out totals. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Fan-out item_total already flows from readiness through controller, projection, fold and UI."
 
 
 [req.065]
@@ -777,10 +806,11 @@ title = "Distinct best-of-N candidate answers"
 acceptance = "The actual Gideon user or operator path delivers: Distinct best-of-N candidate answers. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Distinct best-of-N candidate answers. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Best-of-N resamples duplicate candidates once within a bound, accounts for all provider usage, and reports exhausted diversity."
 
 
 [req.066]
@@ -788,10 +818,11 @@ title = "Output schema mismatch notices"
 acceptance = "The actual Gideon user or operator path delivers: Output schema mismatch notices. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Output schema mismatch notices. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Inference and stage outputs now check declared schemas and show degraded mismatch notices."
 
 
 [req.067]
@@ -799,10 +830,11 @@ title = "Enforced declared workflow input types"
 acceptance = "The actual Gideon user or operator path delivers: Enforced declared workflow input types. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Enforced declared workflow input types. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Declared workflow inputs coerce valid form values and reject invalid types before persistence; large integers retain precision."
 
 
 [req.068]
@@ -810,10 +842,11 @@ title = "Interrupted workflow resume without repeated effects"
 acceptance = "The actual Gideon user or operator path delivers: Interrupted workflow resume without repeated effects. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Interrupted workflow resume without repeated effects. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Resume preflight fences same-epoch attempted or committed effects without a replayable completed step, preventing duplicate external actions after ambiguous interruption."
 
 
 [req.069]
@@ -821,10 +854,12 @@ title = "Escalation details in progress and run views"
 acceptance = "The actual Gideon user or operator path delivers: Escalation details in progress and run views. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Escalation details in progress and run views. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Escalation artifact is saved as run attention and rendered with error detail in the run progress view."
 
 
 [req.070]
@@ -832,10 +867,12 @@ title = "Remove terminal-run continuation controls"
 acceptance = "The actual Gideon user or operator path delivers: Remove terminal-run continuation controls. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Remove terminal-run continuation controls. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Terminal run actions were already hidden in UI and refused by service."
 
 
 [req.071]
@@ -843,10 +880,11 @@ title = "Loop draft start timeout task title and approval response repairs"
 acceptance = "The actual Gideon user or operator path delivers: Loop draft start timeout task title and approval response repairs. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Loop draft start timeout task title and approval response repairs. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Existing draft start, task label and approval response paths remain connected; per-node total timeout is now enforced."
 
 
 [req.072]
@@ -854,10 +892,11 @@ title = "Associate findings with canonical tasks"
 acceptance = "The actual Gideon user or operator path delivers: Associate findings with canonical tasks. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Associate findings with canonical tasks. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Backend already persists canonical task_id for task-worker findings; CycleDetail now links finding to its loaded canonical task."
 
 
 [req.073]
@@ -868,7 +907,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent prompt defaults required values includes and substitutions. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Prompt runtime uses centralized include/default/required/substitution rendering; missing or blank required values fail."
 
 
@@ -877,10 +916,11 @@ title = "Show actual redacted workflow node prompt"
 acceptance = "The actual Gideon user or operator path delivers: Show actual redacted workflow node prompt. State persists and failures are visible where relevant."
 owner_lane = "automation-workflows"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Show actual redacted workflow node prompt. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Node inspection now returns the actual stored prompt, including large prompts, through existing recursive HTTP redaction."
 
 
 [req.075]
@@ -891,7 +931,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Relevant skill routing and context overflow reporting. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Existing cognition context allocates relevant skills and reports context overflow; new headroom source uses provider-served window where available."
 
 
@@ -902,7 +942,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Reconcile agent configuration with files. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -913,7 +953,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Explicit native compact command. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -924,7 +964,7 @@ owner_lane = "runtime-sessions"
 hosted = "customer"
 implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Dynamic active agents directory. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -933,10 +973,11 @@ title = "Complete task pagination across lists DAGs and prerequisite pickers"
 acceptance = "The actual Gideon user or operator path delivers: Complete task pagination across lists DAGs and prerequisite pickers. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Complete task pagination across lists DAGs and prerequisite pickers. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Task search and Ready projection traverse all provider pages; task lists, DAG, and prerequisite choices consume the complete task collection."
 
 
 [req.080]
@@ -944,10 +985,11 @@ title = "Scoped task progress and critical paths"
 acceptance = "The actual Gideon user or operator path delivers: Scoped task progress and critical paths. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Scoped task progress and critical paths. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "DAG progress and critical path are calculated from the visible scope."
 
 
 [req.081]
@@ -955,10 +997,11 @@ title = "Cancelled tasks distinct from completed"
 acceptance = "The actual Gideon user or operator path delivers: Cancelled tasks distinct from completed. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Cancelled tasks distinct from completed. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Cancelled and skipped remain distinct from completed in filters, counts, and styling."
 
 
 [req.082]
@@ -966,10 +1009,11 @@ title = "Refused task save feedback and fitting controls"
 acceptance = "The actual Gideon user or operator path delivers: Refused task save feedback and fitting controls. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Refused task save feedback and fitting controls. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Refused task saves retain visible error feedback; compact form controls fit narrow panels."
 
 
 [req.083]
@@ -977,10 +1021,11 @@ title = "Preserve execution-owned fields on task reset"
 acceptance = "The actual Gideon user or operator path delivers: Preserve execution-owned fields on task reset. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Preserve execution-owned fields on task reset. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Repeatable-list reset preserves execution-owned managed task fields."
 
 
 [req.084]
@@ -988,10 +1033,11 @@ title = "Consistent task-list names and counts"
 acceptance = "The actual Gideon user or operator path delivers: Consistent task-list names and counts. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent task-list names and counts. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Task-list names and counts use the same complete task collection."
 
 
 [req.085]
@@ -1013,7 +1059,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Synchronize provider configuration bindings and settings. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Provider form reads back saved configuration; backend rejects malformed provider documents instead of overwriting them."
 
 
@@ -1025,7 +1071,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Clear explicitly emptied credentials. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Explicit clear uses null and removes a stored secret; blank or masked values preserve it."
 
 
@@ -1037,7 +1083,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Complete colon-containing model labels. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Model labels wrap instead of truncating colon-containing identifiers; bound summary carries the full provider:model ID."
 
 
@@ -1049,7 +1095,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Actual selected model in onboarding. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Onboarding readiness reports the actual active chat model and summary shows it."
 
 
@@ -1061,7 +1107,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Subscribe to queued model downloads. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Download UI subscribes to queued as well as running jobs."
 
 
@@ -1073,7 +1119,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Manual configuration for installed unconfigured providers. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "An installed unconfigured chat provider can enter manual configuration."
 
 
@@ -1085,7 +1131,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Visible provider-add outcome. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Provider addition shows a visible outcome."
 
 
@@ -1097,7 +1143,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Remove nonexistent search-provider bindings. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Active search bindings are pruned when providers no longer exist."
 
 
@@ -1109,7 +1155,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: URL-based resumable onboarding navigation. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Onboarding step is URL-addressable and draft persists through refresh."
 
 
@@ -1121,7 +1167,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Onboarding focus and scrolling. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Active onboarding step scrolls into view and retains focus semantics."
 
 
@@ -1133,7 +1179,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Catalog source failure versus empty catalog. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Failed configured Git app sources surface a catalog source error rather than appearing empty."
 
 
@@ -1145,7 +1191,7 @@ hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Unicode assistant names and truthful saved values. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Assistant names accept Unicode letters/marks/numbers; identity and settings use the server-saved value and surface failures."
 
 
@@ -1157,7 +1203,7 @@ hosted = "operator_managed"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Functional settings and lossless writes. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Settings await durable saves, read back stored values, and preserve provider credentials unless explicitly cleared."
 
 
@@ -1168,7 +1214,7 @@ owner_lane = "experience-polish"
 hosted = "customer"
 implementation_status = "owned_code_implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Distinct loading empty failed disabled unchanged and successful interface states. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Existing shared ListScaffold loading, empty and error views and Toaster success/error announcements remain in use. Buttons now expose distinct ready, disabled and loading states and announce the disabled or loading reason while preserving their action name. Empty and failed views have explicit state markers; failure icon contrast is stronger."
 
@@ -1178,10 +1224,11 @@ title = "Consistent Needs you count and contents"
 acceptance = "The actual Gideon user or operator path delivers: Consistent Needs you count and contents. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent Needs you count and contents. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Needs-you count is based on actionable, deduplicated approvals, inbox items, and proposals."
 
 
 [req.101]
@@ -1189,10 +1236,11 @@ title = "Attention links to exact inbox items"
 acceptance = "The actual Gideon user or operator path delivers: Attention links to exact inbox items. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Attention links to exact inbox items. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Action Center and Mission Control open exact inbox item permalinks; Mission Control joins real lane card IDs to loaded rows."
 
 
 [req.102]
@@ -1200,10 +1248,11 @@ title = "Accurate active native inbox empty state"
 acceptance = "The actual Gideon user or operator path delivers: Accurate active native inbox empty state. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Accurate active native inbox empty state. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Active native source shows an active empty inbox rather than a disconnected state."
 
 
 [req.103]
@@ -1211,10 +1260,12 @@ title = "Room-member read failure rather than endless spinner"
 acceptance = "The actual Gideon user or operator path delivers: Room-member read failure rather than endless spinner. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Room-member read failure rather than endless spinner. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Room member and conversation reads have failure/retry paths and settle loading state."
 
 
 [req.104]
@@ -1222,10 +1273,11 @@ title = "Proposal decision outcomes and target names"
 acceptance = "The actual Gideon user or operator path delivers: Proposal decision outcomes and target names. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Proposal decision outcomes and target names. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Proposal outcomes and target names use actual apply response and proposal target."
 
 
 [req.105]
@@ -1233,10 +1285,11 @@ title = "No proposal refill and clear reviewed proposals"
 acceptance = "The actual Gideon user or operator path delivers: No proposal refill and clear reviewed proposals. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: No proposal refill and clear reviewed proposals. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Reviewed proposals can be cleared through durable DELETE route without backfill."
 
 
 [req.106]
@@ -1244,10 +1297,11 @@ title = "Notification rules control promised delivery"
 acceptance = "The actual Gideon user or operator path delivers: Notification rules control promised delivery. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Notification rules control promised delivery. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Notification rule UI/runtime offer only implemented dashboard, push, and native delivery targets."
 
 
 [req.107]
@@ -1255,10 +1309,11 @@ title = "Mention escalation matches user name"
 acceptance = "The actual Gideon user or operator path delivers: Mention escalation matches user name. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Mention escalation matches user name. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Mention escalation matches configured dashboard user name."
 
 
 [req.108]
@@ -1266,10 +1321,11 @@ title = "Notification filter reset action"
 acceptance = "The actual Gideon user or operator path delivers: Notification filter reset action. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Notification filter reset action. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_note = "Notification filter reset remains available when current filter is empty."
 
 
 [req.109]
@@ -1321,10 +1377,12 @@ title = "Learning inactivity begins at first pass"
 acceptance = "The actual Gideon user or operator path delivers: Learning inactivity begins at first pass. State persists and failures are visible where relevant."
 owner_lane = "automation-tasks"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Learning inactivity begins at first pass. State persists and failures are visible where relevant."
 upstream_delivery = "in_progress"
 hosted_delivery = "in_progress"
+implementation_origin = "existing_behavior_retained"
+implementation_note = "Learning inactivity begins at earliest persisted pass; three existing boundary tests pass in both trees."
 
 
 [req.114]
@@ -1334,7 +1392,7 @@ owner_lane = "automation-apps"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Close terminally failed app installation dialogs. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Confirmed install attempts clear stale blocked dialogs before terminal failures or exceptions."
 
@@ -1346,7 +1404,7 @@ owner_lane = "automation-apps"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Custom app configuration widgets. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "App config renders schema-declared prompt widgets using the shared widget map."
 
@@ -1356,11 +1414,12 @@ title = "Advanced configuration disclosure and required fields"
 acceptance = "The actual Gideon user or operator path delivers: Advanced configuration disclosure and required fields. State persists and failures are visible where relevant."
 owner_lane = "automation-apps"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Advanced configuration disclosure and required fields. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "SchemaFieldDisclosure keeps required advanced fields visible and exposes optional advanced fields in a disclosure."
+implementation_origin = "existing_behavior_retained"
 
 
 [req.117]
@@ -1370,7 +1429,7 @@ owner_lane = "automation-apps"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: New skills work on first creation. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "New skill frontmatter name is normalized to the chosen route name and marked dashboard source; first-create route test passes."
 
@@ -1380,11 +1439,12 @@ title = "Hide internal prompts from user-facing skill lists"
 acceptance = "The actual Gideon user or operator path delivers: Hide internal prompts from user-facing skill lists. State persists and failures are visible where relevant."
 owner_lane = "automation-apps"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Hide internal prompts from user-facing skill lists. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "User prompt pickers request only user prompts; skill listing enumerates SKILL.md files."
+implementation_origin = "existing_behavior_retained"
 
 
 [req.119]
@@ -1394,7 +1454,7 @@ owner_lane = "automation-apps"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: One-click staged agent-pack activation and active-state reporting. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "PackRow activates always-tier roster and staged triggers in one action; installed API reports live roster and trigger state, resolving staged IDs to live IDs."
 
@@ -1404,11 +1464,12 @@ title = "Markdown app and tool descriptions"
 acceptance = "The actual Gideon user or operator path delivers: Markdown app and tool descriptions. State persists and failures are visible where relevant."
 owner_lane = "automation-apps"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Markdown app and tool descriptions. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "App cards/details and tool/parameter descriptions render Markdown."
+implementation_origin = "existing_behavior_retained"
 
 
 [req.121]
@@ -1418,7 +1479,7 @@ owner_lane = "automation-apps"
 hosted = "customer"
 implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Widget form submission and failure feedback. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Trusted widget form submit forwards scoped fields; invalid actions and serialization failures render visible widget errors."
 
@@ -1514,7 +1575,7 @@ owner_lane = "experience-polish"
 hosted = "customer"
 implementation_status = "owned_code_implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Keyboard control semantics contrast and dialog geometry. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Enter submits only a focused prompt text input; it no longer intercepts focused Cancel or other action controls. Long prompt content scrolls above a fixed footer, modal titles wrap, and mobile sheets use density-scaled padding. Hosted i18n and theme implementations remain intact."
 
@@ -1526,7 +1587,7 @@ owner_lane = "experience-polish"
 hosted = "customer"
 implementation_status = "owned_code_implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Consistent density-controlled spacing. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 implementation_note = "Shell margins, corner and welcome spacing, shared skeleton layouts, dialogs, hosted suggestion cards, and the dashboard mobile pulse spacer/recent-chat offset use existing density tokens. Default comfortable geometry is preserved while dense and CLI modes tighten those dashboard dimensions. Shared list-state text/skeleton row spacing and prompt/dialog field spacing now use the same density tokens."
 
@@ -1536,10 +1597,11 @@ title = "Persistent container workspaces"
 acceptance = "The actual Gideon user or operator path delivers: Persistent container workspaces. State persists and failures are visible where relevant."
 owner_lane = "integrations-distribution"
 hosted = "operator_managed"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Persistent container workspaces. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
+implementation_note = "Single image sets GIDEON_WORKSPACE=/data/workspace and persists it with /data volume; hosted already mounts /data and owns its workspace."
 
 
 [req.132]
@@ -1547,10 +1609,12 @@ title = "Accepted skills in portable exports and imports"
 acceptance = "The actual Gideon user or operator path delivers: Accepted skills in portable exports and imports. State persists and failures are visible where relevant."
 owner_lane = "runtime-memory"
 hosted = "customer"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Accepted skills in portable exports and imports. State persists and failures are visible where relevant."
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
+implementation_note = "portable export/import carries accepted skills tree and overlays"
+implementation_origin = "existing_behavior_retained"
 
 
 [req.133]
@@ -1558,10 +1622,11 @@ title = "Manual backup status updates"
 acceptance = "The actual Gideon user or operator path delivers: Manual backup status updates. State persists and failures are visible where relevant."
 owner_lane = "integrations-distribution"
 hosted = "operator_managed"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Manual backup status updates. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
+implementation_note = "Manual snapshot CLI persists latest job status, and backup panel refreshes after manual runs; existing API run path already persisted status."
 
 
 [req.134]
@@ -1569,10 +1634,11 @@ title = "Single-container installation"
 acceptance = "The actual Gideon user or operator path delivers: Single-container installation. State persists and failures are visible where relevant."
 owner_lane = "integrations-distribution"
 hosted = "not_applicable"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Single-container installation. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
+implementation_note = "OSS single Docker build target packages the console and gateway and exposes one runnable container command; hosted retains specialized operator-managed image."
 
 
 [req.135]
@@ -1580,34 +1646,35 @@ title = "Repair nonexistent installation commands"
 acceptance = "The actual Gideon user or operator path delivers: Repair nonexistent installation commands. State persists and failures are visible where relevant."
 owner_lane = "integrations-distribution"
 hosted = "not_applicable"
-implementation_status = "in_progress"
+implementation_status = "implemented"
 ac_1 = "The actual Gideon user or operator path delivers: Repair nonexistent installation commands. State persists and failures are visible where relevant."
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
+implementation_note = "Installer, environment template, container guide, getting-started guide, and backup panel use actual build/run/restore commands; hosted operator UI no longer advertises invalid restore command."
 
 
 [task.runtime-memory]
 title = "runtime-memory product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "runtime-memory"
 requires = []
 reqs = ["001.1", "002.1", "047.1", "048.1", "049.1", "050.1", "051.1", "052.1", "053.1", "054.1", "055.1", "056.1", "057.1", "132.1"]
 feature = "gideon-runtime"
-upstream_delivery = "merged_feature"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 
 
 [task.runtime-models]
 title = "runtime-models product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "runtime-models"
 requires = []
 reqs = ["025.1", "026.1", "027.1", "028.1", "029.1", "030.1", "031.1", "032.1", "033.1", "073.1", "075.1"]
 feature = "gideon-runtime"
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 
 
 [task.runtime-sessions]
@@ -1618,44 +1685,44 @@ owner_lane = "runtime-sessions"
 requires = []
 reqs = ["035.1", "036.1", "037.1", "038.1", "039.1", "040.1", "076.1", "077.1", "078.1"]
 feature = "gideon-runtime"
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
 [task.runtime-experiments]
 title = "runtime-experiments product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "runtime-experiments"
 requires = []
 reqs = ["021.1", "022.1", "023.1", "024.1"]
 feature = "gideon-runtime"
 upstream_delivery = "integrated_main"
-hosted_delivery = "merged_feature"
+hosted_delivery = "integrated_main"
 
 
 [task.experience-workspace]
 title = "experience-workspace product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "experience-workspace"
 requires = []
 reqs = ["006.1", "007.1", "008.1", "009.1", "041.1", "042.1", "043.1", "044.1", "045.1", "046.1"]
 feature = "gideon-experience"
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "integrated_main"
 
 
 [task.experience-onboarding]
 title = "experience-onboarding product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "experience-onboarding"
 requires = []
 reqs = ["005.1", "086.1", "087.1", "088.1", "089.1", "090.1", "091.1", "092.1", "093.1", "094.1", "095.1", "096.1", "097.1", "098.1"]
 feature = "gideon-experience"
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 
 
 [task.experience-creative]
@@ -1678,7 +1745,7 @@ owner_lane = "experience-polish"
 requires = []
 reqs = ["099.1", "129.1", "130.1"]
 feature = "gideon-experience"
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -1726,7 +1793,7 @@ owner_lane = "automation-apps"
 requires = []
 reqs = ["014.1", "114.1", "115.1", "116.1", "117.1", "118.1", "119.1", "120.1", "121.1"]
 feature = "gideon-automation"
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "in_progress"
 
 
@@ -1738,7 +1805,7 @@ owner_lane = "integrations-protocols"
 requires = []
 reqs = ["010.1", "011.1", "012.1"]
 feature = "gideon-integrations"
-upstream_delivery = "merged_feature"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
 
 
@@ -1762,8 +1829,8 @@ owner_lane = "integrations-terminal"
 requires = []
 reqs = ["003.1", "004.1"]
 feature = "gideon-integrations"
-upstream_delivery = "in_progress"
-hosted_delivery = "in_progress"
+upstream_delivery = "integrated_main"
+hosted_delivery = "merged_feature"
 
 
 [task.integrations-distribution]
@@ -1774,7 +1841,7 @@ owner_lane = "integrations-distribution"
 requires = []
 reqs = ["131.1", "133.1", "134.1", "135.1"]
 feature = "gideon-integrations"
-upstream_delivery = "in_progress"
+upstream_delivery = "integrated_main"
 hosted_delivery = "merged_feature"
 
 
