@@ -1,0 +1,17 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "launcher-bubble.tsx": "affe9e5654c79992d28645b18d5a4dd991e011c374724994944cea7fc1581119",
+    "canvas-split.tsx": "70387b1f2823aae5b49c02e88aae9155f7b1b203b436010deeb5c981620b08c3",
+    "shared-conversation.tsx": "2fee5047294f5a3d715860892d3936982f0f0458ab60362fc315815a1d8c65ff"
+  },
+  "adaptations": [
+    "optional launcher reply time",
+    "optional canvas version and saved state",
+    "caller canvas actions and only available controls",
+    "optional owner share metadata",
+    "hide unavailable continue action"
+  ]
+}
