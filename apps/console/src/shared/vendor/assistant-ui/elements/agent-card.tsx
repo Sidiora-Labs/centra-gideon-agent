@@ -20,11 +20,11 @@ export function AgentCard({
   skills,
   connected,
   onConnect,
+  children,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  | "children"
   | "name"
   | "description"
   | "provider"
@@ -73,11 +73,11 @@ export function AgentCard({
         </div>
       </div>
 
-      <p className="text-foreground/60 text-xs leading-relaxed">
+      {description && <p className="text-foreground/60 text-xs leading-relaxed">
         {description}
-      </p>
+      </p>}
 
-      <div className="flex flex-col gap-1.5">
+      {skills.length > 0 && <div className="flex flex-col gap-1.5">
         {skills.map((skill) => (
           <div key={skill.name} className="flex items-baseline gap-2">
             <span
@@ -89,12 +89,14 @@ export function AgentCard({
             >
               {skill.name}
             </span>
-            <span className="text-foreground/45 min-w-0 flex-1 truncate text-xs">
+            {skill.description && <span className="text-foreground/45 min-w-0 flex-1 truncate text-xs">
               {skill.description}
-            </span>
+            </span>}
           </div>
         ))}
-      </div>
+      </div>}
+
+      {children}
 
       {(endpoint || model) && <div className="border-foreground/[0.07] flex items-center gap-2 border-t pt-3">
         <span
