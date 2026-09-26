@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("node:http"), https = require("node:https"), dns = require("node:dns");
+const { hostedGatewayUrl } = require("./hosted");
 const { TRUST_LOOPBACK, TRUST_REFUSED, parseGatewayUrl, parsePairingUrl, transportPolicy,
   resolveHostTrust, addressFingerprint } = require("./address");
 const { activeEndpoint, addEndpoint, endpointScope, clearEndpointState, findEndpoint,
@@ -195,7 +196,8 @@ function probeEndpoint(baseUrl, { timeoutMs = PROBE_TIMEOUT_MS, httpMod = http, 
   return new Promise((resolve) => {
     let settled = false;
     const done = (...args) => { if (!settled) { settled = true; resolve(payload(...args)); } };
-    const target = new URL(HEALTH_PATH, address.origin);
+    const hosted = address.origin === hostedGatewayUrl();
+    const target = new URL(hosted ? "/gideon/v1/healthz" : HEALTH_PATH, address.origin);
     const transport = target.protocol === "https:" ? httpsMod : httpMod;
     const request = transport.get({ protocol: target.protocol, hostname: target.hostname,
       port: target.port || (target.protocol === "https:" ? 443 : 80), path: target.pathname,
@@ -213,8 +215,8 @@ function probeEndpoint(baseUrl, { timeoutMs = PROBE_TIMEOUT_MS, httpMod = http, 
           let data;
           try { data = JSON.parse(content); }
           catch { return done(HEALTH_NOT_A_GATEWAY, status, "body_not_json"); }
-          if (data?.status !== "ok" || typeof data.version !== "string") return done(HEALTH_NOT_A_GATEWAY, status, "unexpected_shape");
-          done(HEALTH_REACHABLE, status, "", data.version);
+          if (data?.status !== "ok" || (hosted ? data.role !== "central" : typeof data.version !== "string")) return done(HEALTH_NOT_A_GATEWAY, status, "unexpected_shape");
+          done(HEALTH_REACHABLE, status, "", data.version || "hosted");
         });
       });
     request.on("timeout", () => { done(HEALTH_TIMEOUT, 0, `${timeoutMs}ms`); request.destroy(); });

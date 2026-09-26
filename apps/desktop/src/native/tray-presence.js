@@ -27,13 +27,14 @@ function composeTrayTitle({ capturing = false, approvals = 0 } = {}) {
   return capturing ? "● Listening" : Number(approvals) > 0 ? String(Number(approvals)) : "";
 }
 
-function composeTrayTooltip({ capturing = false, approvals = 0, running = [], connected = false } = {}) {
+function composeTrayTooltip({ capturing = false, approvals = 0, running = [], connected = false, mode = "local" } = {}) {
   if (capturing) return "Gideon is listening — press the shortcut again to stop";
+  if (mode === "hosted") return "Gideon — hosted workspace";
   if (!connected) return "Gideon — not connected to the gateway";
   return `Gideon — ${approvals} approval${approvals === 1 ? "" : "s"} waiting, ${running.length} loop${running.length === 1 ? "" : "s"} running`;
 }
 
-function buildTrayMenuTemplate({ presence = EMPTY_PRESENCE, loginItem = { supported: false, enabled: false }, actions = {}, tiles = [] } = {}) {
+function buildTrayMenuTemplate({ presence = EMPTY_PRESENCE, loginItem = { supported: false, enabled: false }, actions = {}, tiles = [], mode = "local" } = {}) {
   const { approvals, running, connected } = { ...EMPTY_PRESENCE, ...presence };
   const call = (name, ...arguments_) => { if (actions[name]) return actions[name](...arguments_); };
   const status = [{ label: "Gideon — " + (connected ? "connected" : "not connected"), enabled: false }];
@@ -48,6 +49,9 @@ function buildTrayMenuTemplate({ presence = EMPTY_PRESENCE, loginItem = { suppor
     .map((tile) => ({ label: tile.label, click: tile.click || (() => {}) }));
   const settings = [{ label: "Open at Login", type: "checkbox", checked: Boolean(loginItem.enabled), enabled: Boolean(loginItem.supported),
     click: (item) => call("toggleLoginItem", item ? Boolean(item.checked) : !loginItem.enabled) }];
+  if (mode === "hosted") return [[{ label: "Open Gideon", click: () => call("open") }], settings,
+    [{ label: "Quit Gideon", click: () => call("quit") }]]
+    .flatMap((section, index) => index ? [separator(), ...section] : section);
   return [status, work, navigation, ambient, settings, [{ label: "Quit Gideon", click: () => call("quit") }]]
     .filter((section) => section.length).flatMap((section, index) => index ? [separator(), ...section] : section);
 }
@@ -102,10 +106,11 @@ class TrayController {
     if (!this.handle) return;
     const { presence, capturing } = this.state;
     try {
-      const menu = this.dependencies.MenuCtor.buildFromTemplate(buildTrayMenuTemplate({ ...this.state, actions: this.actions }));
+      const mode = this.dependencies.mode || "local";
+      const menu = this.dependencies.MenuCtor.buildFromTemplate(buildTrayMenuTemplate({ ...this.state, actions: this.actions, mode }));
       this.handle.setContextMenu(menu);
-      this.handle.setTitle(composeTrayTitle({ capturing, approvals: presence.approvals }));
-      this.handle.setToolTip(composeTrayTooltip({ capturing, ...presence }));
+      if (this.dependencies.platform !== "win32") this.handle.setTitle(composeTrayTitle({ capturing, approvals: presence.approvals }));
+      this.handle.setToolTip(composeTrayTooltip({ capturing, ...presence, mode }));
     } catch (error) { this.log(`tray render skipped: ${error.message}`); }
   }
 

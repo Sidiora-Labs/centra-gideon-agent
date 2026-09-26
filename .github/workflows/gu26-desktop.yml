@@ -1,0 +1,72 @@
+name: Gideon hosted Windows desktop proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GIDEON_CLOUD_URL: ${{ vars.GIDEON_CLOUD_URL || 'https://gideon.workmates.app' }}
+      GIDEON_SMOKE_EMAIL: ${{ secrets.GIDEON_SMOKE_EMAIL }}
+      GIDEON_SMOKE_PASSWORD: ${{ secrets.GIDEON_SMOKE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require approved hosted configuration and smoke account
+        shell: pwsh
+        run: |
+          if (-not $env:GIDEON_CLOUD_URL) { throw 'Configure the GIDEON_CLOUD_URL repository variable with the approved HTTPS origin.' }
+          if (-not $env:GIDEON_SMOKE_EMAIL -or -not $env:GIDEON_SMOKE_PASSWORD) { throw 'Configure GIDEON_SMOKE_EMAIL and GIDEON_SMOKE_PASSWORD secrets for a provisioned hosted account.' }
+          $uri = [uri]$env:GIDEON_CLOUD_URL
+          if ($uri.Scheme -ne 'https' -or $uri.AbsoluteUri -ne "$($uri.GetLeftPart('Authority'))/" -or $uri.UserInfo) { throw 'GIDEON_CLOUD_URL must be a bare HTTPS origin.' }
+      - name: Install locked desktop dependencies
+        run: npm ci
+      - name: Build hosted Windows x64 NSIS installer
+        run: npm run --workspace apps/desktop dist:win
+      - name: Install the actual NSIS artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/dist/Gideon-Setup-*-x64.exe
+          if (@($installer).Count -ne 1) { throw 'Expected one Gideon x64 NSIS installer.' }
+          $install = Join-Path $env:RUNNER_TEMP 'GideonInstall'
+          $proof = Join-Path $env:RUNNER_TEMP 'GideonDesktopProof'
+          New-Item -ItemType Directory -Force $proof | Out-Null
+          "GIDEON_INSTALL_DIR=$install" >> $env:GITHUB_ENV
+          "GIDEON_PROOF_DIR=$proof" >> $env:GITHUB_ENV
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$install") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS install failed with exit code $($process.ExitCode)." }
+          if (-not (Test-Path (Join-Path $install 'Gideon.exe'))) { throw 'NSIS did not install Gideon.exe.' }
+      - name: Inspect installed resources and checksum
+        run: node apps/desktop/tooling/verify-windows-artifact.mjs apps/desktop/dist "$env:GIDEON_INSTALL_DIR" "$env:GIDEON_CLOUD_URL" "$env:GIDEON_PROOF_DIR"
+      - name: Drive installed Electron through hosted sign-in and reopen
+        run: node apps/desktop/test/electron/windowsHostedSmoke.js "$env:GIDEON_INSTALL_DIR/Gideon.exe" "$env:GIDEON_CLOUD_URL" "$env:GIDEON_PROOF_DIR"
+      - name: Uninstall and record native result
+        shell: pwsh
+        run: |
+          $uninstall = Join-Path $env:GIDEON_INSTALL_DIR 'Uninstall Gideon.exe'
+          if (-not (Test-Path $uninstall)) { throw 'NSIS uninstaller was not installed.' }
+          $process = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed with exit code $($process.ExitCode)." }
+          if (Test-Path (Join-Path $env:GIDEON_INSTALL_DIR 'Gideon.exe')) { throw 'Gideon.exe remained after uninstall.' }
+          $report = Join-Path $env:GIDEON_PROOF_DIR 'windows-proof.json'
+          $proof = Get-Content $report -Raw | ConvertFrom-Json
+          $proof | Add-Member -NotePropertyName uninstall -NotePropertyValue 'passed'
+          $proof | ConvertTo-Json -Depth 8 | Set-Content $report
+      - name: Upload Windows installer and proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gideon-windows-x64-proof
+          path: |
+            apps/desktop/dist/Gideon-Setup-*-x64.exe
+            apps/desktop/dist/SHA256SUMS.txt
+            ${{ runner.temp }}/GideonDesktopProof/SHA256SUMS.txt
+            ${{ runner.temp }}/GideonDesktopProof/windows-proof.json
+          if-no-files-found: warn

@@ -28,27 +28,38 @@ function navigationDecision(candidate, origin, allowLocalDocument = false) {
   return { allowed, external: !allowed && ["http:", "https:"].includes(address.protocol) ? address.href : "", origin: address.origin };
 }
 
+function hostedOAuthStart(candidate, hostedOrigin) {
+  try {
+    const address = new URL(candidate), destination = new URL(address.searchParams.get("redirect_to") || "");
+    return address.protocol === "https:" && !address.username && !address.password &&
+      address.pathname === "/auth/v1/authorize" && ["google", "github"].includes(address.searchParams.get("provider")) &&
+      destination.protocol === "https:" && destination.origin === hostedOrigin;
+  } catch { return false; }
+}
+
 class WindowWorkspace {
   constructor(electron, actions) {
     this.electron = electron;
     this.actions = actions;
     this.windows = new WeakMap();
+    this.oauthWindows = new WeakMap();
   }
 
   getState(window) { return this.windows.get(window); }
   hasBridge(window) { return Boolean(this.getState(window)?.bridge); }
 
   create() {
+    const customTitle = process.platform !== "win32";
     return new this.electron.BaseWindow({ width: 1280, height: 860, minWidth: 550, minHeight: 600,
-      tabbingIdentifier: "gideon", titleBarStyle: "hidden", backgroundColor: "#0a1320" });
+      ...(customTitle ? { tabbingIdentifier: "gideon", titleBarStyle: "hidden" } : {}), backgroundColor: "#0a1320" });
   }
 
   layout(window) {
     const current = this.getState(window);
     if (!current?.content || window.isDestroyed()) return;
     const { width, height } = window.getContentBounds();
-    const offset = window.isFullScreen() ? 0 : TAB_BAR_HEIGHT;
-    current.drag.setBounds({ x: 0, y: 0, width, height: offset });
+    const offset = current.drag && !window.isFullScreen() ? TAB_BAR_HEIGHT : 0;
+    current.drag?.setBounds({ x: 0, y: 0, width, height: offset });
     current.content.setBounds({ x: 0, y: offset, width, height: height - offset });
   }
 
@@ -84,6 +95,7 @@ class WindowWorkspace {
     for (const event of ["resize", "enter-full-screen", "leave-full-screen"]) window.on(event, () => this.layout(window));
     window.on("focus", () => this.synchronizeTheme(window));
     window.on("closed", () => { this.releaseViews(window); this.windows.delete(window); });
+    if (process.platform === "win32") return;
     window.on("system-context-menu", (event, point) => {
       event.preventDefault();
       this.electron.Menu.buildFromTemplate([
@@ -108,18 +120,21 @@ class WindowWorkspace {
       ...(attachBridge ? { preload: path.join(__dirname, "../bridge/dashboard-preload.js") } : {}),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
     } });
-    const drag = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    const drag = process.platform !== "win32"
+      ? new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } }) : null;
     current.bridge = attachBridge;
     current.content = content;
     current.drag = drag;
-    for (const view of [content, drag]) {
+    for (const view of [content, drag].filter(Boolean)) {
       view.setBackgroundColor("#00000000");
       window.contentView.addChildView(view);
     }
-    drag.webContents.on("did-finish-load", () => {
-      drag.webContents.insertCSS("html { -webkit-app-region: drag; height: 100%; }");
-    });
-    drag.webContents.loadURL("about:blank");
+    if (drag) {
+      drag.webContents.on("did-finish-load", () => {
+        drag.webContents.insertCSS("html { -webkit-app-region: drag; height: 100%; }");
+      });
+      drag.webContents.loadURL("about:blank");
+    }
     window.webContents = content.webContents;
     this.layout(window);
     this.wirePage(window, content.webContents);
@@ -132,16 +147,49 @@ class WindowWorkspace {
     catch { return ""; }
   }
 
+  openHostedOAuth(window, address) {
+    if (this.oauthWindows.has(window)) { this.oauthWindows.get(window).focus(); return; }
+    const auth = new this.electron.BrowserWindow({ parent: window, width: 520, height: 720, title: "Sign in to Gideon",
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
+        webviewTag: false } });
+    this.oauthWindows.set(window, auth);
+    auth.on("closed", () => this.oauthWindows.delete(window));
+    auth.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    const guard = (event, next) => {
+      const decision = navigationDecision(next, this.origin());
+      if (decision.allowed && decision.origin === this.origin()) {
+        event.preventDefault();
+        if (!window.isDestroyed()) window.webContents.loadURL(next);
+        auth.close();
+      } else {
+        try { if (new URL(next).protocol !== "https:") event.preventDefault(); }
+        catch { event.preventDefault(); }
+      }
+    };
+    auth.webContents.on("will-navigate", guard);
+    auth.webContents.on("will-redirect", guard);
+    auth.loadURL(address);
+  }
+
   wirePage(window, page) {
     attachContextMenu(page);
     const allowedOrigin = () => this.origin();
     page.setWindowOpenHandler(({ url }) => {
+      if (this.actions.hostedMode?.() && hostedOAuthStart(url, allowedOrigin())) {
+        this.openHostedOAuth(window, url);
+        return { action: "deny" };
+      }
       const decision = navigationDecision(url, allowedOrigin());
       if (decision.external) this.electron.shell.openExternal(decision.external);
       return { action: decision.allowed ? "allow" : "deny" };
     });
     const guardNavigation = (event, url) => {
       const origin = allowedOrigin();
+      if (this.actions.hostedMode?.() && hostedOAuthStart(url, origin)) {
+        event.preventDefault();
+        this.openHostedOAuth(window, url);
+        return;
+      }
       const decision = navigationDecision(url, origin, true);
       if (decision.allowed) return;
       event.preventDefault();
@@ -168,6 +216,7 @@ class WindowWorkspace {
   }
 
   decoratePage(window, page) {
+    if (process.platform === "win32") return;
     page.insertCSS(`#gideon-window-drag{position:fixed;top:0;left:0;right:0;height:52px;-webkit-app-region:drag;z-index:99999;pointer-events:none}
       a,button,input,select,textarea,[role="button"],[tabindex]{-webkit-app-region:no-drag}`);
     page.executeJavaScript(`(() => {
@@ -185,8 +234,9 @@ class WindowWorkspace {
     if (!main || main.isDestroyed() || !target) return;
     main.show();
     const tab = this.create();
-    const page = this.mount(tab, { attachBridge: shouldAttachBridge(target) });
-    main.addTabbedWindow(tab);
+    const page = this.mount(tab, { attachBridge: !this.actions.hostedMode?.() && shouldAttachBridge(target) });
+    if (process.platform === "win32") { tab.show(); tab.focus(); }
+    else main.addTabbedWindow(tab);
     page.loadFile(path.join(__dirname, "../../views/loading.html"));
     try {
       await (target === this.actions.local() ? this.actions.waitLocal(tab) : this.actions.waitRemote(tab, target));
@@ -214,8 +264,9 @@ class WindowWorkspace {
     if (focused.isDestroyed()) return;
     const prompt = new this.electron.BrowserWindow({ width: 420, height: 190, resizable: false, useContentSize: true,
       parent: focused, modal: true, backgroundColor: "#00000000", webPreferences: { nodeIntegration: false, contextIsolation: true } });
+    const subject = process.platform === "win32" ? "Window" : "Tab";
     const document = `<!doctype html><html><head><style>${modalStyles(colors, this.electron.nativeTheme.shouldUseDarkColors)}</style></head>
-      <body><form><label for="name">Tab name</label><input id="name" value="${escapeAttribute(currentName)}" autofocus>
+      <body><form><label for="name">${subject} name</label><input id="name" value="${escapeAttribute(currentName)}" autofocus>
       <div class="row"><button type="button" class="cancel" onclick="window.close()">Cancel</button><button class="ok">Rename</button></div></form>
       <script>document.querySelector('form').addEventListener('submit', event => {event.preventDefault(); document.title=document.getElementById('name').value.trim(); window.close()});
       document.addEventListener('keydown', event => {if(event.key==='Escape')window.close()});</script></body></html>`;
@@ -230,6 +281,7 @@ class WindowWorkspace {
   }
 
   merge() {
+    if (process.platform === "win32") return;
     const main = this.actions.main();
     if (!main || main.isDestroyed()) return;
     main.show();
@@ -244,4 +296,4 @@ class WindowWorkspace {
   }
 }
 
-module.exports = { WindowWorkspace, modalStyles, navigationDecision };
+module.exports = { WindowWorkspace, modalStyles, navigationDecision, hostedOAuthStart };
