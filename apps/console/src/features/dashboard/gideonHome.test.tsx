@@ -30,6 +30,16 @@ describe('Gideon home introduction', () => {
     await userEvent.keyboard(' ')
     expect(navigate.mock.calls).toEqual([['chat/new'], ['apps']])
   })
+
+  it('gives the intro usable desktop width and keeps actions on one row', () => {
+    render(<GideonHomeIntro navigate={vi.fn()} />)
+    const heading = screen.getByRole('heading', { name: 'What would you like to do?' })
+    expect(heading.parentElement?.style.maxWidth).toBe('44rem')
+    const actions = screen.getByRole('button', { name: 'New conversation' }).parentElement
+    expect(actions?.classList.contains('sm:flex-row')).toBe(true)
+    expect(screen.getByRole('button', { name: 'New conversation' }).classList.contains('whitespace-nowrap')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Explore apps' }).classList.contains('whitespace-nowrap')).toBe(true)
+  })
 })
 
 describe('dashboard overview disclosure', () => {
@@ -74,8 +84,14 @@ describe('dashboard consumer', () => {
     expect(screen.getByText('Active work')).toBeTruthy()
     expect(screen.getByText('Your overview')).toBeTruthy()
     expect(screen.queryByText('Dashboard composition')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Activity' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'System status' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /loops running/i })).toBeNull()
     await userEvent.click(screen.getByText('Your overview'))
     expect(screen.getByText('Dashboard composition')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'System status' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /loops running/i })).toBeTruthy()
   })
 
   it('opens the assistant bubble and starts a real conversation route', async () => {
