@@ -5,6 +5,13 @@ import { AlertTriangleIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { field, inkButton, mono, paper } from "./surfaces";
 
+export interface EditMessageLabels {
+  edit?: string;
+  cancel?: string;
+  send?: string;
+  discardedReplies?: (count: number) => string;
+}
+
 export function EditMessage({
   value,
   discardedReplies,
@@ -13,6 +20,7 @@ export function EditMessage({
   onSave,
   onCancel,
   onStartEdit,
+  labels,
   className,
   ...props
 }: Omit<
@@ -25,6 +33,7 @@ export function EditMessage({
   | "onSave"
   | "onCancel"
   | "onStartEdit"
+  | "labels"
 > & {
   value: string;
   discardedReplies: number;
@@ -33,6 +42,7 @@ export function EditMessage({
   onSave?: () => void;
   onCancel?: () => void;
   onStartEdit?: () => void;
+  labels?: EditMessageLabels;
 }) {
   if (!editing) {
     return (
@@ -72,7 +82,7 @@ export function EditMessage({
         onChange={(event) => onValueChange?.(event.target.value)}
         disabled={!onValueChange}
         rows={2}
-        aria-label="Edit your message"
+        aria-label={labels?.edit ?? "Edit your message"}
         className={cn(
           field,
           "text-foreground/90 focus-visible:ring-foreground/20 resize-none rounded-xl px-3 py-2.5 text-[13.5px] leading-relaxed outline-none focus-visible:ring-1",
@@ -83,8 +93,8 @@ export function EditMessage({
         <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
           <AlertTriangleIcon className="size-3.5 shrink-0" />
           <span className={cn(mono, "tabular-nums")}>
-            sending discards {discardedReplies}{" "}
-            {discardedReplies === 1 ? "reply" : "replies"}
+            {labels?.discardedReplies?.(discardedReplies) ??
+              `sending discards ${discardedReplies} ${discardedReplies === 1 ? "reply" : "replies"}`}
           </span>
         </div>
       )}
@@ -96,7 +106,7 @@ export function EditMessage({
           disabled={!onCancel}
           className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
         >
-          Cancel
+          {labels?.cancel ?? "Cancel"}
         </button>
         <button
           type="button"
@@ -107,7 +117,7 @@ export function EditMessage({
             "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
           )}
         >
-          Send
+          {labels?.send ?? "Send"}
         </button>
       </div>
     </div>

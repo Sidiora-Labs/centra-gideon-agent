@@ -572,3 +572,263 @@ describe("EditMessage donor revision surface", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("MessageQueue with live queued and streaming producer values", () => {
+  const queued = [{ id: "queued-a", text: "First queued prompt" }, { id: "queued-b", text: "Second queued prompt" }];
+
+  it("shows queued work without inventing an active run while idle", () => {
+    render(<MessageQueue queued={queued} />);
+    expect(screen.getByText("2 queued")).toBeTruthy();
+    expect(screen.getByText("Waiting to send")).toBeTruthy();
+    expect(screen.getByText("First queued prompt")).toBeTruthy();
+    expect(screen.getByText("Second queued prompt")).toBeTruthy();
+    expect(screen.queryByText("running")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop current response" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send .* next/ })).toBeNull();
+  });
+
+  it("uses the caller's real queue status and changes it when streaming begins", () => {
+    const { rerender } = render(<MessageQueue queued={queued} queueHint="Waiting for connection" />);
+    expect(screen.getByText("Waiting for connection")).toBeTruthy();
+    rerender(<MessageQueue running="Generating response" queued={queued}
+      queueHint="Sends after the current response" />);
+    expect(screen.getByText("Generating response")).toBeTruthy();
+    expect(screen.getByText("running")).toBeTruthy();
+    expect(screen.getByText("Sends after the current response")).toBeTruthy();
+    expect(screen.queryByText("Waiting for connection")).toBeNull();
+  });
+
+  it("routes per-item send-next, edit and cancel to each stable queue ID", () => {
+    const onInterruptQueued = vi.fn();
+    const onEdit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(<MessageQueue running="Generating response" queued={queued}
+      onInterruptQueued={onInterruptQueued} onEdit={onEdit} onCancel={onCancel} />);
+    const rows = container.querySelectorAll('[data-slot="message-queue"] li');
+    expect(rows).toHaveLength(2);
+    fireEvent.click(within(rows[1] as HTMLElement).getByRole("button", { name: 'Send "Second queued prompt" next' }));
+    fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: 'Edit "First queued prompt" in the queue' }));
+    fireEvent.click(within(rows[1] as HTMLElement).getByRole("button", { name: 'Remove "Second queued prompt" from the queue' }));
+    expect(onInterruptQueued.mock.calls).toEqual([["queued-b"]]);
+    expect(onEdit.mock.calls).toEqual([["queued-a"]]);
+    expect(onCancel.mock.calls).toEqual([["queued-b"]]);
+  });
+
+  it("keeps stop-current separate from sending a queued item next", () => {
+    const onInterrupt = vi.fn();
+    const onInterruptQueued = vi.fn();
+    render(<MessageQueue running="Current response" queued={queued}
+      onInterrupt={onInterrupt} onInterruptQueued={onInterruptQueued} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop current response" }));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(onInterruptQueued).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: 'Send "First queued prompt" next' }));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(onInterruptQueued).toHaveBeenCalledWith("queued-a");
+  });
+
+  it("uses caller labels for hosted queue counts, status and each real action", () => {
+    const onInterrupt = vi.fn();
+    const onInterruptQueued = vi.fn();
+    const onEdit = vi.fn();
+    const onCancel = vi.fn();
+    const labels = {
+      running: "läuft",
+      queuedCount: (count: number) => `${count} in Warteschlange`,
+      stopCurrent: "Antwort stoppen",
+      sendNext: (text: string) => `${text} als Nächstes senden`,
+      edit: (text: string) => `${text} bearbeiten`,
+      remove: (text: string) => `${text} entfernen`,
+    };
+    render(<MessageQueue running="Antwort wird erstellt" queued={queued} labels={labels}
+      queueHint="Wartet auf die Antwort" onInterrupt={onInterrupt}
+      onInterruptQueued={onInterruptQueued} onEdit={onEdit} onCancel={onCancel} />);
+    expect(screen.getByText("läuft")).toBeTruthy();
+    expect(screen.getByText("2 in Warteschlange")).toBeTruthy();
+    expect(screen.getByText("Wartet auf die Antwort")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Antwort stoppen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Second queued prompt als Nächstes senden" }));
+    fireEvent.click(screen.getByRole("button", { name: "First queued prompt bearbeiten" }));
+    fireEvent.click(screen.getByRole("button", { name: "Second queued prompt entfernen" }));
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(onInterruptQueued).toHaveBeenCalledWith("queued-b");
+    expect(onEdit).toHaveBeenCalledWith("queued-a");
+    expect(onCancel).toHaveBeenCalledWith("queued-b");
+  });
+});
+
+describe("MessageBranches with real variant counts and no invented bodies", () => {
+  it("shows control-only count and current index without rendering a response body", () => {
+    const onIndexChange = vi.fn();
+    const { container } = render(<MessageBranches count={3} index={1} showBody={false}
+      onIndexChange={onIndexChange} />);
+    expect(screen.getByText("2 / 3")).toBeTruthy();
+    expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show previous response" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show next response" }));
+    expect(onIndexChange.mock.calls).toEqual([[0], [2]]);
+  });
+
+  it("wraps count-only navigation using recorded endpoints", () => {
+    const onIndexChange = vi.fn();
+    const { rerender } = render(<MessageBranches count={3} index={0} showBody={false}
+      onIndexChange={onIndexChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show previous response" }));
+    expect(onIndexChange).toHaveBeenCalledWith(2);
+    rerender(<MessageBranches count={3} index={2} showBody={false} onIndexChange={onIndexChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show next response" }));
+    expect(onIndexChange).toHaveBeenCalledWith(0);
+    expect(screen.getByText("3 / 3")).toBeTruthy();
+  });
+
+  it("disables switching without a real latest-turn callback", () => {
+    const { container, rerender } = render(<MessageBranches count={2} index={0} showBody={false} />);
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+    expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
+    rerender(<MessageBranches count={0} index={0} showBody={false} onIndexChange={vi.fn()} />);
+    expect(screen.getByText("0 / 0")).toBeTruthy();
+    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("never inserts a fallback body when only a count was supplied", () => {
+    const { container } = render(<MessageBranches count={2} index={0} onIndexChange={vi.fn()} />);
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+    expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
+  });
+
+  it("shows no variant count or body before the owner provides either source", () => {
+    const { container } = render(<MessageBranches index={0} />);
+    expect(screen.getByText("0 / 0")).toBeTruthy();
+    expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
+    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("uses caller navigation labels without changing the recorded variant index", () => {
+    const onIndexChange = vi.fn();
+    render(<MessageBranches count={2} index={0} showBody={false} onIndexChange={onIndexChange}
+      labels={{ previous: "Vorherige Antwort", next: "Nächste Antwort" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Vorherige Antwort" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nächste Antwort" }));
+    expect(onIndexChange.mock.calls).toEqual([[1], [1]]);
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+  });
+});
+
+describe("MessageActions with persisted feedback and caller-owned controls", () => {
+  it("shows only live callbacks and preserves fork/speak children", () => {
+    const fork = vi.fn();
+    render(<MessageActions><button type="button" onClick={fork}>Fork conversation</button></MessageActions>);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Copy response" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark response helpful" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate response" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More response actions" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Fork conversation" }));
+    expect(fork).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps persisted helpful feedback pressed without offering an unsupported unvote", () => {
+    const onReactionChange = vi.fn();
+    render(<MessageActions reaction="up" allowClearReaction={false}
+      onReactionChange={onReactionChange} />);
+    const helpful = screen.getByRole("button", { name: "Mark response helpful" });
+    const unhelpful = screen.getByRole("button", { name: "Mark response unhelpful" });
+    expect(helpful.getAttribute("aria-pressed")).toBe("true");
+    expect(helpful.hasAttribute("disabled")).toBe(true);
+    expect(unhelpful.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(helpful);
+    expect(onReactionChange).not.toHaveBeenCalled();
+    fireEvent.click(unhelpful);
+    expect(onReactionChange.mock.calls).toEqual([["down"]]);
+  });
+
+  it("keeps persisted unhelpful feedback pressed but allows a real replacement", () => {
+    const onReactionChange = vi.fn();
+    render(<MessageActions reaction="down" allowClearReaction={false}
+      onReactionChange={onReactionChange} />);
+    const unhelpful = screen.getByRole("button", { name: "Mark response unhelpful" });
+    expect(unhelpful.getAttribute("aria-pressed")).toBe("true");
+    expect(unhelpful.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Mark response helpful" }));
+    expect(onReactionChange.mock.calls).toEqual([["up"]]);
+  });
+
+  it("blocks both verdict controls during the real feedback request", () => {
+    const onReactionChange = vi.fn();
+    render(<MessageActions reaction="up" reactionBusy allowClearReaction={false}
+      onReactionChange={onReactionChange} />);
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.hasAttribute("disabled")).toBe(true);
+      expect(button.getAttribute("aria-busy")).toBe("true");
+      fireEvent.click(button);
+    }
+    expect(onReactionChange).not.toHaveBeenCalled();
+  });
+
+  it("shows independently supplied copy/regenerate controls without invented More", () => {
+    const onCopy = vi.fn();
+    const onRegenerate = vi.fn();
+    render(<MessageActions onCopy={onCopy} onRegenerate={onRegenerate} />);
+    expect(screen.queryByRole("button", { name: "Mark response helpful" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More response actions" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate response" }));
+    expect(onCopy).toHaveBeenCalledTimes(1);
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses caller action labels while retaining each real callback and copied state", () => {
+    const onCopy = vi.fn();
+    const onReactionChange = vi.fn();
+    const onRegenerate = vi.fn();
+    const onMore = vi.fn();
+    const labels = { copy: "Kopieren", copied: "Kopiert", helpful: "Hilfreich",
+      unhelpful: "Nicht hilfreich", regenerate: "Erneuern", more: "Weitere Aktionen" };
+    const { rerender } = render(<MessageActions labels={labels} onCopy={onCopy}
+      onReactionChange={onReactionChange} onRegenerate={onRegenerate} onMore={onMore} />);
+    fireEvent.click(screen.getByRole("button", { name: "Kopieren" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hilfreich" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nicht hilfreich" }));
+    fireEvent.click(screen.getByRole("button", { name: "Erneuern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Weitere Aktionen" }));
+    expect(onCopy).toHaveBeenCalledTimes(1);
+    expect(onReactionChange.mock.calls).toEqual([["up"], ["down"]]);
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+    expect(onMore).toHaveBeenCalledTimes(1);
+    rerender(<MessageActions copied labels={labels} onCopy={onCopy} />);
+    expect(screen.getByRole("button", { name: "Kopiert" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Kopieren" })).toBeNull();
+  });
+});
+
+describe("EditMessage hosted labels while retaining donor defaults", () => {
+  it("uses supplied visible labels and reports the true discarded count", () => {
+    const onValueChange = vi.fn();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    const discardedReplies = vi.fn((count: number) => `Replaces ${count} later replies`);
+    render(<EditMessage value="Original prompt" discardedReplies={2} editing
+      onValueChange={onValueChange} onSave={onSave} onCancel={onCancel}
+      labels={{ edit: "Nachricht bearbeiten", cancel: "Abbrechen", send: "Erneut senden", discardedReplies }} />);
+    const editor = screen.getByRole("textbox", { name: "Nachricht bearbeiten" });
+    fireEvent.change(editor, { target: { value: "Revised prompt" } });
+    expect(onValueChange).toHaveBeenCalledWith("Revised prompt");
+    expect(screen.getByText("Replaces 2 later replies")).toBeTruthy();
+    expect(discardedReplies).toHaveBeenCalledWith(2);
+    fireEvent.click(screen.getByRole("button", { name: "Erneut senden" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps caller labels optional and never calls a discard formatter for zero replies", () => {
+    const discardedReplies = vi.fn((count: number) => `${count} replies`);
+    render(<EditMessage value="Edited request" discardedReplies={0} editing
+      onSave={vi.fn()} labels={{ send: "Resend", discardedReplies }} />);
+    expect(screen.getByRole("textbox", { name: "Edit your message" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Resend" })).toBeTruthy();
+    expect(discardedReplies).not.toHaveBeenCalled();
+  });
+});

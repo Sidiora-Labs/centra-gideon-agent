@@ -18,6 +18,9 @@ export function MobileComposer({
   onSend,
   onStop,
   onFocus,
+  showAttach = true,
+  flat = false,
+  embedded = false,
   className,
   ...props
 }: Omit<
@@ -35,6 +38,9 @@ export function MobileComposer({
   | "onSend"
   | "onStop"
   | "onFocus"
+  | "showAttach"
+  | "flat"
+  | "embedded"
 > & {
   value: string;
   editor?: ReactNode;
@@ -48,10 +54,14 @@ export function MobileComposer({
   onSend?: () => void;
   onStop?: () => void;
   onFocus?: () => void;
+  showAttach?: boolean;
+  flat?: boolean;
+  embedded?: boolean;
 }) {
   return (
     <div
       data-slot="mobile-composer"
+      data-embedded={embedded || undefined}
       className={cn(
         "bg-background border-foreground/[0.07] flex w-full max-w-[19rem] flex-col gap-2.5 rounded-t-[20px] border-t px-3 pt-3",
         keyboardOpen ? "pb-3" : "pb-6",
@@ -60,8 +70,8 @@ export function MobileComposer({
 
       {...props}
     >
-      {!keyboardOpen && (
-        <div className="fade-in animate-in -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 duration-200">
+      {!keyboardOpen && actions.length > 0 && (
+        <div data-slot="mobile-composer-actions" className="fade-in animate-in -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 duration-200">
           {actions.map((action) => (
             <button
               key={action}
@@ -81,7 +91,7 @@ export function MobileComposer({
       )}
 
       <div className="flex items-end gap-2">
-        <button
+        {showAttach && !embedded && <button
           type="button"
           aria-label="Add an attachment"
           onClick={onAttach}
@@ -93,12 +103,14 @@ export function MobileComposer({
           )}
         >
           <PlusIcon className="size-4" />
-        </button>
+        </button>}
 
         <div
+          data-slot="mobile-composer-field"
           className={cn(
-            field,
-            "flex min-w-0 flex-1 items-center gap-2 rounded-[18px] px-3 py-2",
+            !flat && !embedded && field,
+            "flex min-w-0 flex-1 items-center gap-2",
+            !flat && !embedded && "rounded-[18px] px-3 py-2",
           )}
         >
           {editor === undefined ? <input
@@ -140,7 +152,7 @@ export function MobileComposer({
         )}
       </div>
 
-      {!keyboardOpen && (
+      {!keyboardOpen && !embedded && (
         <span
           aria-hidden
           className="bg-foreground/15 mx-auto h-1 w-28 rounded-full"

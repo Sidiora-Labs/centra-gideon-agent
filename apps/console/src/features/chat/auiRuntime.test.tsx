@@ -1,7 +1,7 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAui, type AppendMessage, type AssistantClient } from '@assistant-ui/react'
-import { assistantTurn, userTurn, type ChatTurn } from './chatTypes'
+import { appendThinking, assistantTurn, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
 import {
   GideonChatRuntimeProvider, appendText, convertGideonTurn, gideonAuiId, makeGideonQueueAdapter, reloadLatestGideonAnswer,
   useGideonTurnByAuiId, type GideonChatRuntimeProps, type GideonTurnRef,
@@ -89,6 +89,72 @@ describe('Gideon assistant-ui runtime', () => {
     expect(ui.aui().thread.getState().messages.map((message) => message.id)).toEqual(history.map((_, index) => gideonAuiId('session/b', index)))
     expect(ui.turnByAuiId().has(previousId)).toBe(false)
     expect(ui.turnByAuiId().get(gideonAuiId('session/b', 3))?.turn).toBe(history[3])
+  })
+
+  it('keeps gateway message identity when hydration changes visible history indices', async () => {
+    const history: HistMsg[] = [
+      { role: 'user', content: 'Inspect the file', ts: '2026-09-26T12:00:00Z' },
+      { role: 'assistant', content: 'Opening it' },
+    ]
+    const first = hydrateTurns(history, true)
+    const ui = setup({ sessionId: 'gateway/thread-7', turns: first, streaming: true })
+    const messageId = gideonAuiId('gateway/thread-7', 1)
+    expect(first[1].visibleIndex).toBe(1)
+    expect(ui.aui().thread.getState().messages[1].id).toBe(messageId)
+
+    const grown = hydrateTurns([...history, { role: 'assistant', content: 'Found it' }], true)
+    expect(grown).toHaveLength(first.length)
+    expect(grown[1].visibleIndex).toBe(2)
+    await act(async () => ui.rerender({ turns: grown, streaming: true }))
+    expect(ui.aui().thread.getState().messages[1].id).toBe(messageId)
+    expect(ui.turnByAuiId().get(messageId)).toEqual({ turn: grown[1], index: 1 })
+    expect(ui.aui().thread.getState().messages[1].content).toEqual([
+      { type: 'text', text: 'Opening it' }, { type: 'text', text: 'Found it' },
+    ])
+  })
+
+  it('projects live reasoning and a gateway tool error through the connected runtime', async () => {
+    const history: HistMsg[] = [
+      { role: 'user', content: 'Read report.txt' },
+      { role: 'assistant', content: 'Checking' },
+      { role: 'tool', content: 'read_file', meta: { tool_call_id: 'call-7', tool: 'read_file', input: '{"path":"report.txt"}' } },
+    ]
+    const first = hydrateTurns(history, true)
+    first[1] = { ...first[1], segments: [
+      ...appendThinking([first[1].segments[0]], 'Looking for the report'),
+      ...first[1].segments.slice(1),
+    ] }
+    const ui = setup({ turns: first, streaming: true })
+    const messageId = gideonAuiId('session/a', 1)
+    const streamingParts = ui.aui().thread.getState().messages[1].content
+    expect(streamingParts).toHaveLength(3)
+    expect(streamingParts[0]).toEqual({ type: 'text', text: 'Checking' })
+    expect(streamingParts[1]).toEqual({ type: 'reasoning', text: 'Looking for the report' })
+    expect(streamingParts[2]).toMatchObject({
+      type: 'tool-call', toolCallId: 'call-7', toolName: 'read_file',
+      argsText: '{"path":"report.txt"}', args: { path: 'report.txt' }, isError: false,
+    })
+    expect(streamingParts[2]).toHaveProperty('result', undefined)
+
+    const agentError = { code: 'ENOENT', what: 'File missing', why: 'No report exists', fix: 'Check the path' }
+    const finished = hydrateTurns([...history, {
+      role: 'tool', content: 'read_file', meta: { tool_call_id: 'call-7', done: true, output: 'not found', agent_error: agentError },
+    }], false)
+    finished[1] = { ...finished[1], segments: [
+      ...appendThinking([finished[1].segments[0]], 'Looking for the report'),
+      ...finished[1].segments.slice(1),
+    ] }
+    await act(async () => ui.rerender({ turns: finished, streaming: false }))
+    const message = ui.aui().thread.getState().messages[1]
+    expect(message.id).toBe(messageId)
+    expect(message.content[1]).toEqual({ type: 'reasoning', text: 'Looking for the report' })
+    expect(message.content[2]).toMatchObject({
+      type: 'tool-call', toolCallId: 'call-7', toolName: 'read_file',
+      argsText: '{"path":"report.txt"}', args: { path: 'report.txt' },
+      result: 'not found', isError: true,
+    })
+    expect(ui.turnByAuiId().get(messageId)?.turn.segments[1]).toEqual({ kind: 'thinking', text: 'Looking for the report' })
+    expect(ui.turnByAuiId().get(messageId)?.turn.segments[2]).toMatchObject({ id: 'call-7', agentError, done: true })
   })
 
   it('converts actual text, reasoning, tool, activity, approval and error segments without inventing results', () => {

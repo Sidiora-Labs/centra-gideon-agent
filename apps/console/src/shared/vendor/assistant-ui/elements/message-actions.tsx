@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import {
   CheckIcon,
   CopyIcon,
@@ -14,27 +14,44 @@ import { ghostButton, iconSwap, iconSwapIn, iconSwapOut } from "./surfaces";
 
 export type Reaction = "up" | "down" | null;
 
+export interface MessageActionLabels {
+  copy?: string;
+  copied?: string;
+  helpful?: string;
+  unhelpful?: string;
+  regenerate?: string;
+  more?: string;
+}
+
 export interface MessageActionsProps extends Omit<
   ComponentProps<"div">,
-  "children"
+  "children" | "onCopy"
 > {
-  copied: boolean;
-  reaction: Reaction;
-  regenerating: boolean;
-  onCopy: () => void;
-  onReactionChange: (reaction: Reaction) => void;
-  onRegenerate: () => void;
-  onMore: () => void;
+  copied?: boolean;
+  reaction?: Reaction;
+  regenerating?: boolean;
+  reactionBusy?: boolean;
+  allowClearReaction?: boolean;
+  onCopy?: () => void;
+  onReactionChange?: (reaction: Reaction) => void;
+  onRegenerate?: () => void;
+  onMore?: () => void;
+  children?: ReactNode;
+  labels?: MessageActionLabels;
 }
 
 export function MessageActions({
-  copied,
-  reaction,
-  regenerating,
+  copied = false,
+  reaction = null,
+  regenerating = false,
+  reactionBusy = false,
+  allowClearReaction = true,
   onCopy,
   onReactionChange,
   onRegenerate,
   onMore,
+  children,
+  labels,
   className,
   ...props
 }: MessageActionsProps) {
@@ -47,9 +64,9 @@ export function MessageActions({
 
       {...props}
     >
-      <button
+      {onCopy && <button
         type="button"
-        aria-label={copied ? "Copied response" : "Copy response"}
+        aria-label={copied ? (labels?.copied ?? "Copied response") : (labels?.copy ?? "Copy response")}
         onClick={onCopy}
         className={cn(
           buttonClassName,
@@ -71,12 +88,14 @@ export function MessageActions({
             copied ? iconSwapIn : iconSwapOut,
           )}
         />
-      </button>
-      <button
+      </button>}
+      {onReactionChange && <button
         type="button"
-        aria-label="Mark response helpful"
+        aria-label={labels?.helpful ?? "Mark response helpful"}
         aria-pressed={reaction === "up"}
-        onClick={() => onReactionChange(reaction === "up" ? null : "up")}
+        aria-busy={reactionBusy}
+        disabled={reactionBusy || (!allowClearReaction && reaction === "up")}
+        onClick={() => onReactionChange(reaction === "up" && allowClearReaction ? null : "up")}
         className={cn(
           buttonClassName,
           reaction === "up" &&
@@ -84,12 +103,14 @@ export function MessageActions({
         )}
       >
         <ThumbsUpIcon className="size-3.5" />
-      </button>
-      <button
+      </button>}
+      {onReactionChange && <button
         type="button"
-        aria-label="Mark response unhelpful"
+        aria-label={labels?.unhelpful ?? "Mark response unhelpful"}
         aria-pressed={reaction === "down"}
-        onClick={() => onReactionChange(reaction === "down" ? null : "down")}
+        aria-busy={reactionBusy}
+        disabled={reactionBusy || (!allowClearReaction && reaction === "down")}
+        onClick={() => onReactionChange(reaction === "down" && allowClearReaction ? null : "down")}
         className={cn(
           buttonClassName,
           reaction === "down" &&
@@ -97,10 +118,10 @@ export function MessageActions({
         )}
       >
         <ThumbsDownIcon className="size-3.5" />
-      </button>
-      <button
+      </button>}
+      {onRegenerate && <button
         type="button"
-        aria-label="Regenerate response"
+        aria-label={labels?.regenerate ?? "Regenerate response"}
         onClick={onRegenerate}
         disabled={regenerating}
         aria-busy={regenerating}
@@ -112,15 +133,16 @@ export function MessageActions({
             regenerating && "animate-spin motion-reduce:animate-none",
           )}
         />
-      </button>
-      <button
+      </button>}
+      {onMore && <button
         type="button"
-        aria-label="More response actions"
+        aria-label={labels?.more ?? "More response actions"}
         onClick={onMore}
         className={buttonClassName}
       >
         <EllipsisIcon className="size-3.5" />
-      </button>
+      </button>}
+      {children}
     </div>
   );
 }

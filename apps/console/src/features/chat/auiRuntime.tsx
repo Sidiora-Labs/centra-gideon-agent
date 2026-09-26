@@ -58,7 +58,7 @@ function segmentPart(segment: Segment) {
       toolName: segment.tool,
       argsText: segment.input ?? '{}',
       result: segment.done ? segment.output : undefined,
-      isError: segment.ok === false,
+      isError: segment.ok === false || Boolean(segment.agentError),
     }
     default: return { type: 'data' as const, name: `gideon-${segment.kind}`, data: segment }
   }

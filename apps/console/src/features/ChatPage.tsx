@@ -13,7 +13,7 @@ const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, PlayCircle, GitBranch, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
+import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { SquareIconButton } from '../shared/ui/SquareIconButton'
 import { SearchField } from '../shared/ui/SearchField'
@@ -24,6 +24,9 @@ import { Checkbox } from '../shared/ui/forms'
 import { QuietButton } from '../shared/ui/QuietButton'
 import { QuoteBlock } from '../shared/vendor/assistant-ui/elements/quote.aui'
 import { EditMessage } from '../shared/vendor/assistant-ui/elements/edit-message'
+import { MessageActions } from '../shared/vendor/assistant-ui/elements/message-actions'
+import { MessageBranches } from '../shared/vendor/assistant-ui/elements/message-branches'
+import { MessageQueue } from '../shared/vendor/assistant-ui/elements/message-queue'
 import { Segmented } from '../shared/ui/Segmented'
 import { Meter } from '../shared/ui/Meter'
 import { ContextMenu, type ContextMenuItem } from '../shared/ui/motion'
@@ -50,7 +53,7 @@ import { StreamingIndicator } from '../shared/ui/chat/StreamingIndicator'
 import { ChatPlanGate } from '../shared/ui/chat/ChatPlanGate'
 import { Markdown } from '../shared/ui/Markdown'
 import { useWidgetActionBridge, takePendingWidgetAction } from '../shared/ui/widget/useWidgetActionBridge'
-import { InlineError } from '../shared/ui/InlineError'
+import { ErrorState } from '../shared/vendor/assistant-ui/elements/error-state'
 import { NoModelSetupState, isNoModelSetupError, MODELS_PATH } from './chat/NoModelSetupState'
 import { ToolCard } from './chat/ToolCard'
 import { onToolResultFull } from './chat/toolResultBridge'
@@ -61,7 +64,7 @@ import { ChatFilePanel } from './chat/ChatFilePanel'
 import { sameSessionTarget, type CommentTarget } from '../shared/ui/content/commentTarget'
 import { SessionWorkspace } from './chat/SessionWorkspace'
 import { createScrollToTurnHandler } from './chat/scrollToTurn'
-import { AssistantActions, UserActions } from './chat/MessageActions'
+import { UserActions } from './chat/MessageActions'
 import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
 import { type PasteBlock, shouldCollapsePaste, makePasteId, markerFor, expandPasteMarkers, pruneBlocks } from './chat/pasteBlocks'
 import { Modal } from '../shared/ui/Modal'
@@ -76,7 +79,7 @@ import { useIsMobile } from '../app/shell/useIsMobile'
 import { SnipOverlay } from '../shared/ui/SnipOverlay'
 import { chooseCaptureProvider, cropToPngFile, displayCaptureSupported, grabOneFrame, type SnipRect } from '../shared/ui/composer/displayCapture'
 import { notify } from '../app/shell/appSdk'
-import { spring, expr, useReducedMotion } from '../shared/theme/motion'
+import { spring } from '../shared/theme/motion'
 import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
 import { useStreamCoalescer } from './chat/useStreamCoalescer'
@@ -1933,15 +1936,19 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       )}
       {
 }
-      <QueueStack items={queued} canInterrupt={streaming}
+      {queued.length > 0 && <MessageQueue queued={queued.map((item) => ({ id: item.id, text: item.content }))}
+        running={streaming ? (statusText || 'Assistant is responding…') : undefined}
+        queueHint={streaming ? 'Sends when this finishes' : 'Waiting to send'}
         onCancel={(id) => { setQueued((prev) => prev.filter((q) => q.id !== id)); const s = sessionRef.current; if (s) api.cancelQueued(s, id).catch(reportActionFailure('cancel that queued message')) }}
-        onEdit={(id, content) => {
+        onEdit={(id) => {
+          const item = queued.find((entry) => entry.id === id)
+          if (!item) return
           setQueued((prev) => prev.filter((q) => q.id !== id)); const s = sessionRef.current; if (s) api.cancelQueued(s, id).catch(reportActionFailure('cancel that queued message'))
-          setInput((cur) => (cur.trim() ? cur : content))
+          setInput((cur) => (cur.trim() ? cur : item.content))
         }}
-        onInterrupt={(id) => {
+        onInterruptQueued={streaming ? (id) => {
           const s = sessionRef.current; if (s) api.interruptChat(s, id).catch(reportActionFailure('interrupt this turn'))
-        }} />
+        } : undefined}/>}
       <div className="relative">
         {
 }
@@ -2072,11 +2079,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             return <>
               {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
               <MessageAssistant timestamp={stampOf(turn)} model={sessionBindingRef.current?.model || undefined}
-                onFeedbackUp={turn.visibleIndex === undefined || !sessionRef.current ? undefined : () => { void saveFeedback(turn.visibleIndex!, 'up'); }}
-                onFeedbackDown={turn.visibleIndex === undefined || !sessionRef.current ? undefined : () => { setFeedbackTarget(turn.visibleIndex!); setFeedbackError(null); }}
-                feedbackBusy={feedbackBusy} feedbackVerdict={turn.visibleIndex === undefined ? null : feedbackVerdicts[turn.visibleIndex] ?? null}
                 feedback={feedbackTarget === turn.visibleIndex ? { verdict: 'down' as const, busy: feedbackBusy, error: feedbackError, onSubmit: (_verdict: 'down', reason?: string) => { void saveFeedback(turn.visibleIndex!, 'down', reason); }, onClose: () => { if (!feedbackBusy) { setFeedbackTarget(null); setFeedbackError(null); } } } : undefined}
-                actions={!(isLast && streaming) && <AssistantActions text={turnText(turn)} isLast={isLast} canFork={memoryMode === 'persistent'} variantCount={turn.variantCount} variantIdx={turn.variantIdx} onCopy={() => { }} onRegenerate={regenerate} onFork={() => forkAt(index)} onSwitchVariant={isLast ? switchVariant : undefined} speaking={speakingTurn === index} onSpeak={() => speak(turnText(turn), index)}/>}>
+                actions={!(isLast && streaming) && <ThreadAssistantTurnActions text={turnText(turn)} canFork={memoryMode === 'persistent'} variantCount={turn.variantCount} variantIdx={turn.variantIdx}
+                  onRegenerate={isLast ? regenerate : undefined} onFork={() => forkAt(index)} onSwitchVariant={isLast ? switchVariant : undefined} speaking={speakingTurn === index} onSpeak={() => speak(turnText(turn), index)}
+                  reaction={turn.visibleIndex === undefined ? null : feedbackVerdicts[turn.visibleIndex] ?? null} reactionBusy={feedbackBusy}
+                  onFeedback={turn.visibleIndex === undefined || !sessionRef.current ? undefined : (verdict) => {
+                    if (verdict === 'up') void saveFeedback(turn.visibleIndex!, 'up')
+                    else { setFeedbackTarget(turn.visibleIndex!); setFeedbackError(null) }
+                  }}/>}>
                 <AssistantSegments segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed}/>
                 {speakingTurn === index && <ReadAloud words={turnText(turn).split(/\s+/).filter(Boolean)} playing showText={false} onToggle={() => speak(turnText(turn), index)}/>}
               </MessageAssistant>
@@ -2542,73 +2552,6 @@ function KnowledgeChips({ items, onRemove }: { items: { id: string; name: string
   )
 }
 
-function QueueStack({ items, onCancel, onEdit, onInterrupt, canInterrupt = false }: {
-  items: { id: string; content: string }[]
-  onCancel: (id: string) => void
-  onEdit: (id: string, content: string) => void
-  onInterrupt?: (id: string) => void
-  canInterrupt?: boolean
-}) {
-  const reduce = useReducedMotion()
-  const [expanded, setExpanded] = useState(false)
-  if (!items.length) return null
-  const stacked = !reduce && items.length > 1 && !expanded
-  const peekY = expr(7, 0.4)
-  const peekScale = expr(0.04, 0.5)
-  const maxPeek = 3
-
-  const header = (
-    <button type="button" onClick={() => items.length > 1 && setExpanded((e) => !e)}
-      className={`flex items-center gap-1.5 px-1 text-[0.75rem] uppercase tracking-wide text-on-surface-low ${items.length > 1 ? 'hover:text-on-surface-var' : 'cursor-default'}`}>
-      <Clock size={11} className="shrink-0" /> {items.length} queued · sent one at a time as each turn finishes
-      {items.length > 1 && <ChevronDown size={11} className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
-    </button>
-  )
-
-  const card = (q: { id: string; content: string }, i: number, depth: number) => (
-    <motion.div key={q.id} layout
-      initial={reduce ? false : { opacity: 0, y: 8 }}
-      animate={stacked
-        ? { opacity: depth === 0 ? 1 : Math.max(0, 1 - depth * 0.28), y: -depth * peekY, scale: 1 - depth * peekScale }
-        : { opacity: 1, y: 0, scale: 1 }}
-      exit={reduce ? undefined : { opacity: 0, y: 8, transition: spring.spatialFast }}
-      transition={spring.spatialDefault}
-      style={stacked ? { position: depth === 0 ? 'relative' : 'absolute', insetInline: 0, top: 0, zIndex: maxPeek - depth } : undefined}
-      className="group/q flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface-high/60 px-2.5 py-1.5 text-[0.8125rem]">
-      <span className="shrink-0 tabular-nums text-on-surface-low">{i + 1}</span>
-      <span className="min-w-0 flex-1 truncate text-on-surface" title={q.content}>{q.content}</span>
-      { }
-      {(!stacked || depth === 0) && (
-        <span className="flex shrink-0 items-center gap-0.5">
-          {canInterrupt && onInterrupt && (
-            <IconButton icon={PlayCircle} label="Interrupt now — stop the current turn and run this next" onClick={() => onInterrupt(q.id)} size={20} iconSize={13}
-              className="opacity-0 transition-opacity hover:text-primary group-hover/q:opacity-100 focus-within:opacity-100" />
-          )}
-          <IconButton icon={Pencil} label="Edit queued message" onClick={() => onEdit(q.id, q.content)} size={20} iconSize={12}
-            className="opacity-0 transition-opacity hover:text-primary group-hover/q:opacity-100 focus-within:opacity-100" />
-          <IconButton icon={X} label="Cancel queued message" onClick={() => onCancel(q.id)} size={20} iconSize={13}
-            tone="danger" />
-        </span>
-      )}
-    </motion.div>
-  )
-
-  return (
-    <div className="mb-2 flex flex-col gap-1.5">
-      {header}
-      {stacked ? (
-        <div className="relative" style={{ paddingTop: Math.min(items.length - 1, maxPeek) * peekY }}>
-          {items.slice(0, maxPeek + 1).map((q, i) => card(q, i, i)).reverse()}
-        </div>
-      ) : (
-        <AnimatePresence initial={false}>
-          <div className="flex flex-col gap-1.5">{items.map((q, i) => card(q, i, 0))}</div>
-        </AnimatePresence>
-      )}
-    </div>
-  )
-}
-
 function MessagesSkeleton() {
   const rows = [
     { me: true, w: 'w-1/3' }, { me: false, w: 'w-3/4' },
@@ -2701,6 +2644,34 @@ function RewindDivider({ snapshots, canFork, onFork }: {
   )
 }
 
+export function ThreadAssistantTurnActions({ text, canFork, variantCount = 0, variantIdx = 0, speaking, reaction, reactionBusy, onRegenerate, onFork, onSpeak, onSwitchVariant, onFeedback }: {
+  text: string
+  canFork: boolean
+  variantCount?: number
+  variantIdx?: number
+  speaking: boolean
+  reaction: 'up' | 'down' | null
+  reactionBusy: boolean
+  onRegenerate?: () => void
+  onFork: () => void
+  onSpeak: () => void
+  onSwitchVariant?: (index: number) => void
+  onFeedback?: (verdict: 'up' | 'down') => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => { void copyText(text, 'this message').then((success) => {
+    if (success) { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }
+  }) }
+  return <div className="mt-m flex flex-wrap items-center gap-1.5">
+    {variantCount > 1 && onSwitchVariant && <MessageBranches count={variantCount} index={variantIdx} showBody={false} onIndexChange={onSwitchVariant}/>}
+    <MessageActions copied={copied} reaction={reaction} reactionBusy={reactionBusy} allowClearReaction={false} onCopy={copy}
+      onReactionChange={onFeedback ? (next) => { if (next) onFeedback(next) } : undefined} onRegenerate={onRegenerate}>
+      {canFork && <IconButton icon={GitBranch} label="Branch from here" onClick={onFork} size={28} iconSize={14}/>}
+      <IconButton icon={speaking ? Square : Volume2} label={speaking ? 'Stop' : 'Speak'} onClick={onSpeak} size={28} iconSize={14}/>
+    </MessageActions>
+  </div>
+}
+
 export function UserEditor({ initial, discardedReplies = 0, onSubmit, onCancel }: { initial: string; discardedReplies?: number; onSubmit: (value: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState(initial)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -2709,7 +2680,7 @@ export function UserEditor({ initial, discardedReplies = 0, onSubmit, onCancel }
     if (event.key === 'Escape') { event.preventDefault(); onCancel() }
     else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (value.trim()) onSubmit(value) }
   }}>
-    <EditMessage value={value} discardedReplies={discardedReplies} editing onValueChange={setValue}
+    <EditMessage value={value} discardedReplies={discardedReplies} editing labels={{ send: 'Resend' }} onValueChange={setValue}
       onSave={value.trim() ? () => onSubmit(value) : undefined} onCancel={onCancel} className="max-w-[452px]"/>
   </div>
 }
@@ -2824,12 +2795,7 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
     }
     if (seg.kind === 'activity') return <ActivityLine key={i} seg={seg as ActivitySegment} />
     if (seg.kind === 'thinking') return <ThinkingBlock key={i} text={(seg as ThinkingSegment).text} defaultOpen={streaming} connected streaming={!!streaming && i === segments.length - 1} />
-    if (seg.kind === 'error') {
-      const text = (seg as { text: string }).text
-      return isNoModelSetupError(text)
-        ? <NoModelSetupState key={i} detail={text} onSetup={onSetupModel} />
-        : <InlineError key={i} icon multiline className="my-1">{text}</InlineError>
-    }
+    if (seg.kind === 'error') return <ThreadErrorSegment key={i} text={(seg as { text: string }).text} onSetupModel={onSetupModel}/>
     if (seg.kind === 'approval') {
       const ap = seg as ApprovalSegment
       return <ApprovalCard key={ap.id || i} seg={ap} onAct={onApprove} />
@@ -2895,6 +2861,12 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
 
     </>
   )
+}
+
+export function ThreadErrorSegment({ text, onSetupModel }: { text: string; onSetupModel: () => void }) {
+  return isNoModelSetupError(text)
+    ? <NoModelSetupState detail={text} onSetup={onSetupModel}/>
+    : <ErrorState title="Error" detail={text} retrying={false} className="my-1"/>
 }
 
 function AgentWork({ stepCount, toolNames, children }: { stepCount: number; toolNames: string[]; children: React.ReactNode }) {
