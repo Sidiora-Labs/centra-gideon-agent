@@ -28,6 +28,11 @@ describe('titleReserveFor', () => {
     expect(titleReserveFor({ hasContent: true, naturalWidth: 900, inner: 1120 })).toBe(320)
     expect(titleReserveFor({ hasContent: true, naturalWidth: 180, inner: 1120 })).toBe(180)
   })
+
+  it('does not reserve title space twice when tablet actions wrap onto another row', () => {
+    expect(titleReserveFor({ hasContent: true, naturalWidth: 497, inner: 497, sharesRow: false })).toBe(0)
+    expect(titleReserveFor({ hasContent: true, naturalWidth: 497, inner: 497, sharesRow: true })).toBe(169)
+  })
 })
 
 describe('railCeiling', () => {
