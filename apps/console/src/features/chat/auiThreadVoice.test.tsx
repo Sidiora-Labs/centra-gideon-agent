@@ -7,7 +7,7 @@ import { MessageAssistant } from '../../shared/ui/chat/MessageAssistant'
 import { MessageUser } from '../../shared/ui/chat/MessageUser'
 import { ThreadAssistantTurnActions, ThreadErrorSegment } from '../ChatPage'
 import { GideonChatRuntimeProvider, useGideonTurnByAuiId } from './auiRuntime'
-import { assistantTurn, turnText, userTurn, type ChatTurn } from './chatTypes'
+import { assistantTurn, hydrateTurns, turnText, userTurn, type ChatTurn } from './chatTypes'
 
 afterEach(cleanup)
 
@@ -91,5 +91,39 @@ describe('connected Gideon thread', () => {
     expect(container.querySelector('[data-slot="error-state"]')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('Provider request failed')
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+  })
+
+  it('renders persisted file changes once, hides truncated counts, and opens the actual path', () => {
+    const turns = hydrateTurns([{ role: 'assistant', content: 'Updated two files', ts: '2026-09-26T12:05:00Z', meta: {
+      file_changes: [
+        { path: 'src/main.ts', before: 'const value = 1\n', after: 'const value = 2\n' },
+        { path: 'README.md', before: 'Earlier notes\n… [truncated]', after: 'Current notes\n' },
+      ],
+    } }])
+    function Host() {
+      const [opened, setOpened] = useState('')
+      function FileAssistantSlot() {
+        const id = useMessage((message) => message.id)
+        const record = useGideonTurnByAuiId().get(id)
+        return <MessagePrimitive.Root>
+          {record && <MessageAssistant fileChanges={record.turn.fileChanges} onOpenFile={setOpened}>{turnText(record.turn)}</MessageAssistant>}
+        </MessagePrimitive.Root>
+      }
+      return <GideonChatRuntimeProvider sessionId="persisted-files" turns={turns} streaming={false}
+        onSend={() => {}} onStop={() => {}} onEdit={() => {}} onReload={() => {}}>
+        <ThreadTranscript components={{ AssistantMessage: FileAssistantSlot }}/>
+        <output data-testid="opened-file">{opened}</output>
+      </GideonChatRuntimeProvider>
+    }
+    const { container } = render(<Host/>)
+    expect(container.querySelectorAll('[data-slot="file-tree"]')).toHaveLength(1)
+    expect(screen.getByText('2 files changed')).toBeTruthy()
+    expect(container.querySelector('[data-slot="file-tree"]')?.firstElementChild?.textContent).toBe('2 files changed')
+    expect(screen.getByTitle('README.md').textContent).not.toMatch(/[+−]\d/)
+    expect(container.querySelectorAll('[data-slot="reviewable-diff"]')).toHaveLength(1)
+    expect(screen.getByText('Applied')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^(Keep|Discard|Apply)/ })).toBeNull()
+    fireEvent.click(screen.getByTitle('src/main.ts'))
+    expect(screen.getByTestId('opened-file').textContent).toBe('src/main.ts')
   })
 })

@@ -13,7 +13,7 @@ const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, FileText, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
+import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { SquareIconButton } from '../shared/ui/SquareIconButton'
 import { SearchField } from '../shared/ui/SearchField'
@@ -2079,6 +2079,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             return <>
               {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
               <MessageAssistant timestamp={stampOf(turn)} model={sessionBindingRef.current?.model || undefined}
+                fileChanges={turn.fileChanges} onOpenFile={setOpenFile}
                 feedback={feedbackTarget === turn.visibleIndex ? { verdict: 'down' as const, busy: feedbackBusy, error: feedbackError, onSubmit: (_verdict: 'down', reason?: string) => { void saveFeedback(turn.visibleIndex!, 'down', reason); }, onClose: () => { if (!feedbackBusy) { setFeedbackTarget(null); setFeedbackError(null); } } } : undefined}
                 actions={!(isLast && streaming) && <ThreadAssistantTurnActions text={turnText(turn)} canFork={memoryMode === 'persistent'} variantCount={turn.variantCount} variantIdx={turn.variantIdx}
                   onRegenerate={isLast ? regenerate : undefined} onFork={() => forkAt(index)} onSwitchVariant={isLast ? switchVariant : undefined} speaking={speakingTurn === index} onSpeak={() => speak(turnText(turn), index)}
@@ -2095,9 +2096,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     };
     return (<GideonChatRuntimeProvider sessionId={sessionRef.current} turns={turns} streaming={streaming} queued={queued} sessions={threadSessions} suggestions={followups} onSwitchSession={(key) => { setHistoryOpen(false); navigate(`chat/${key}`) }} onNewSession={() => { setHistoryOpen(false); navigate('chat/new') }} onSend={(text) => send(text)} onStop={stop} onEdit={editResend} onReload={regenerate}
       onQueue={(text, lane) => ensureSession().then((key) => api.sendChat(text, key, undefined, lane)).then(() => { if (lane === 'steer') setSteered((previous) => [...previous, text]); }).catch(reportActionFailure('send that message'))}
-      onQueueRemove={(id) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => setQueued((previous) => previous.filter((item) => item.id !== id))).catch(reportActionFailure('cancel that queued message')); }}
+      onQueueRemove={(id) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => { setQueued((previous) => previous.filter((item) => item.id !== id)) }).catch(reportActionFailure('cancel that queued message')); }}
       onQueueEdit={(id, text) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => { setQueued((previous) => previous.filter((item) => item.id !== id)); setInput(text); }).catch(reportActionFailure('edit that queued message')); }}
-      onQueueInterrupt={(id) => { const key = sessionRef.current; if (!key) return; return api.interruptChat(key, id).catch(reportActionFailure('interrupt this turn')); }}>
+      onQueueInterrupt={(id) => { const key = sessionRef.current; if (!key) return; return api.interruptChat(key, id).then(() => {}).catch(reportActionFailure('interrupt this turn')); }}>
       <div className="relative flex h-full flex-col overflow-hidden">
       <DotGlow intensity={composerFocused ? 1.6 : 1} composerRef={composerRef} focusRef={glowTargetRef} />
 
