@@ -202,7 +202,7 @@
     },
     {
       "path": "elements/mobile-composer.tsx",
-      "sha256": "3070802af7a6c8c7825583a0e41b3840ea51363c74a7124b6432dc9936143317",
+      "sha256": "3c82b07cd2bffc5bdfc08ce9c2a4516bc2ec90f05096d59f247d5668c8723920",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/mobile-composer.tsx",
       "donorSha256": "223cfd8a80b2b628eb98690594ebb289e9290ca460d0ceff710e9fb964a04862",
       "status": "adapted"
