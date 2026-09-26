@@ -812,7 +812,7 @@ export interface TagColumn { id: string; name?: string; tag_ids?: string[]; mode
 export interface ChatFileChange { path: string; before: string; after: string }
 export interface ChatHistoryMsg {
   role: string; content: string; ts?: string; cls?: string
-  meta?: { tool_call_id?: string; input?: string; purpose?: string; output?: string; done?: boolean; tool?: string; memory_citations?: { n: number; id: string | null; preview?: string }[]; skills_used?: { name: string; state: string; loaded_tokens: number }[]; file_changes?: ChatFileChange[] }
+  meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; input?: string; purpose?: string; output?: string; done?: boolean; tool?: string; files?: string[]; memory_citations?: { n: number; id: string | null; preview?: string }[]; skills_used?: { name: string; state: string; loaded_tokens: number }[]; file_changes?: ChatFileChange[] }
 }
 
 export interface NotificationItem {

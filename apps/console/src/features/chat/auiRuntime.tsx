@@ -64,6 +64,20 @@ function segmentPart(segment: Segment) {
   }
 }
 
+function fileAttachment(path: string) {
+  if (!path || path !== path.trim() || /[\u0000-\u001f\u007f\\]/.test(path)
+    || path.includes('://') || path.includes('//') || path.endsWith('/')
+    || path.split('/').some((part) => part === '.' || part === '..')) return null
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  return {
+    id: path,
+    type: 'file' as const,
+    name,
+    status: { type: 'complete' as const },
+    content: [{ type: 'text' as const, text: path }],
+  }
+}
+
 export function convertGideonTurn(turn: ChatTurn, ordinal: number, sessionId: string | null, streaming: boolean): ThreadMessageLike {
   const createdAt = turn.ts ? new Date(turn.ts) : undefined
   const isCurrent = streaming && turn.role === 'assistant'
@@ -78,7 +92,11 @@ export function convertGideonTurn(turn: ChatTurn, ordinal: number, sessionId: st
         return notice ? [part, { type: 'data' as const, name: 'gideon-guardrail-notice', data: notice }] : [part]
       }),
       ...(turn.fileChanges?.length ? [{ type: 'data' as const, name: 'gideon-file-changes', data: turn.fileChanges }] : []),
+      ...(turn.stopOutcome ? [{ type: 'data' as const, name: 'gideon-stop-outcome', data: turn.stopOutcome }] : []),
     ],
+    ...(turn.role === 'user' && turn.files?.length ? {
+      attachments: [...new Set(turn.files)].map(fileAttachment).filter((attachment) => attachment !== null),
+    } : {}),
     ...(createdAt && !Number.isNaN(createdAt.getTime()) ? { createdAt } : {}),
     ...(turn.role === 'assistant' ? {
       status: isCurrent ? { type: 'running' as const }

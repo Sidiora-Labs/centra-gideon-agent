@@ -50,14 +50,16 @@ export function VoiceConversation({
   | "onEnd"
 > & {
   mode: VoiceMode;
-  amplitude: number;
+  amplitude?: number;
   transcript: readonly VoiceTurn[];
   muted?: boolean;
   onToggleMute?: () => void;
   onInterrupt?: () => void;
   onEnd?: () => void;
 }) {
-  const level = clamp(amplitude, 0, 1);
+  const level = amplitude === undefined || !Number.isFinite(amplitude)
+    ? undefined
+    : clamp(amplitude, 0, 1);
   const active = mode === "listening" || mode === "speaking";
   const canInterrupt = mode === "speaking" && onInterrupt !== undefined;
 
@@ -90,7 +92,7 @@ export function VoiceConversation({
           style={{
             width: "6rem",
             height: "6rem",
-            transform: `scale(${active ? 0.72 + level * 0.28 : 0.62})`,
+            transform: level === undefined ? undefined : `scale(${active ? 0.72 + level * 0.28 : 0.62})`,
             opacity: active ? 1 : 0.5,
           }}
         />
@@ -105,7 +107,7 @@ export function VoiceConversation({
           style={{
             width: "4.25rem",
             height: "4.25rem",
-            transform: `scale(${active ? 0.8 + level * 0.22 : 0.7})`,
+            transform: level === undefined ? undefined : `scale(${active ? 0.8 + level * 0.22 : 0.7})`,
           }}
         />
         <span
@@ -117,7 +119,7 @@ export function VoiceConversation({
             mode === "thinking" && "bg-foreground/30 animate-pulse",
             mode === "speaking" && "bg-blue-500 dark:bg-blue-400",
           )}
-          style={{ transform: `scale(${active ? 0.9 + level * 0.2 : 0.85})` }}
+          style={{ transform: level === undefined ? undefined : `scale(${active ? 0.9 + level * 0.2 : 0.85})` }}
         />
       </button>
 

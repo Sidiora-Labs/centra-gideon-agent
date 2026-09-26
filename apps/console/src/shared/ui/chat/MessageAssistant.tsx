@@ -8,8 +8,10 @@ import { FeedbackDialog } from '../../vendor/assistant-ui/elements/feedback-dial
 import { FileTree, type FileTreeNode } from '../../vendor/assistant-ui/elements/file-tree'
 import { ClaudeLogo, GeminiLogo, OpenAILogo } from '../../vendor/assistant-ui/elements/logos'
 import { ReviewableDiff } from '../../vendor/assistant-ui/elements/reviewable-diff'
+import { StoppedRun } from '../../vendor/assistant-ui/elements/stopped-run'
 import type { DiffLine } from '../../vendor/assistant-ui/elements/code-diff'
 import type { ChatFileChange } from '../../data/api'
+import type { StopOutcome } from '../../../features/chat/chatTypes'
 import './chatPresentation.css'
 
 export interface MessageFeedback {
@@ -21,7 +23,7 @@ export interface MessageFeedback {
 }
 
 /** Assistant content and caller-owned actions share the transcript column. */
-export function MessageAssistant({ children, actions, timestamp, feedback, model, onFeedbackUp, onFeedbackDown, feedbackBusy, feedbackVerdict, fileChanges, onOpenFile }: {
+export function MessageAssistant({ children, actions, timestamp, feedback, model, onFeedbackUp, onFeedbackDown, feedbackBusy, feedbackVerdict, fileChanges, onOpenFile, stopOutcome }: {
   children: React.ReactNode
   actions?: React.ReactNode
   timestamp?: string
@@ -33,6 +35,7 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
   feedbackVerdict?: 'up' | 'down' | null
   fileChanges?: readonly ChatFileChange[]
   onOpenFile?: (path: string) => void
+  stopOutcome?: StopOutcome
 }) {
   const time = clockTime(timestamp)
   const modelLogo = model ? logoForModel(model) : null
@@ -53,6 +56,9 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
       >
         {children}
       </div>
+      {stopOutcome && <StoppedRun words={[]} showWords={false}
+        reason={stopOutcome.state === 'stopped' ? 'Stopped' : 'Stop failed; session reset'}
+        className="mt-2 max-w-none" />}
       {changedFiles.length > 0 && <div className="mt-3 flex flex-col gap-1.5" aria-label="File changes">
         <FileTree nodes={changedFiles.map(({ change, complete, diff }): FileTreeNode => ({
           path: change.path, name: change.path, depth: 0, kind: 'file', snapshotComplete: complete,
