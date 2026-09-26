@@ -13,9 +13,13 @@
   background: var(--color-surface);
 }
 
+[data-gideon-chat-page] {
+  --gideon-chat-reading-width: 820px;
+}
+
 [data-gideon-chat-content] [data-slot='aui_message-group'] {
   box-sizing: border-box;
-  width: min(100%, var(--content-width));
+  width: min(100%, var(--gideon-chat-reading-width));
   margin-inline: auto;
   padding-inline: var(--spacing-l);
 }
@@ -54,7 +58,7 @@
 
 .gideon-chat-intro {
   width: 100%;
-  max-width: var(--content-width);
+  max-width: var(--gideon-chat-reading-width, 820px);
   justify-content: flex-start;
   margin-inline: auto;
   margin-bottom: var(--spacing-3xl);

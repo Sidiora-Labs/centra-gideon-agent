@@ -1846,7 +1846,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
 
   const composerAttachments = [...new Set([...mentionedFiles, ...attachedPaths])].map((path) => ({ id: path, name: path.split('/').pop() || path, state: 'done' as const }))
   const stage = (
-    <div data-tour="chat" className="w-full" style={{ maxWidth: 'var(--content-width)' }}>
+    <div data-tour="chat" className="w-full" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
       {
 }
       {memoryMode !== 'persistent' && (
@@ -2179,7 +2179,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           )
         )}
         right={
-          <HeaderActions className="max-w-[70vw]">
+          <HeaderActions className="max-w-[70vw]" preferLabeledOverflow={!isMobile}>
             <HeaderModePill ariaLabel="Task mode" value={selection.taskMode ?? 'agent'}
               options={TASK_MODE_SLIDER} onChange={(v) => applySelection({ taskMode: v as TaskMode })} />
             <HeaderModePill ariaLabel="Permission mode" value={selection.approval ?? 'normal'}
@@ -2193,9 +2193,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             {started && sessionRef.current && (
               <HeaderControl icon={Sparkles} label="Save as starter" priority="low" onClick={saveAsTemplate} />
             )}
-            <HeaderControl icon={Edit3} label="New chat" variant="primary" priority="primary" onClick={() => navigate('chat/new')} />
+            <HeaderControl icon={Edit3} label="New chat" variant="primary" priority="primary" preserveLabel={!isMobile} onClick={() => navigate('chat/new')} />
             {started && (
-              <HeaderControl icon={PanelRight} label="Workspace" active={activityOpen || !!workspacePane} onClick={() => { if (activityOpen || workspacePane) { setActivityOpen(false); setWorkspacePane('') } else setWorkspacePane('activity') }} />
+              <HeaderControl icon={PanelRight} label="Workspace" priority="primary" preserveLabel={!isMobile} active={activityOpen || !!workspacePane} onClick={() => { if (activityOpen || workspacePane) { setActivityOpen(false); setWorkspacePane('') } else setWorkspacePane('activity') }} />
             )}
             {!started && (
               <HeaderControl icon={History} label="Chat history" active={historyOpen} onClick={() => setHistoryOpen(!historyOpen)} />
@@ -2212,7 +2212,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                 <MessagesSkeleton />
               </div>
               <div className="relative shrink-0 px-l pb-l">
-                <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--content-width)' }}>
+                <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
                   {stage}
                 </div>
               </div>
@@ -2228,7 +2228,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   <ThreadEmptyWelcome greeting={greeting(name)} suggestions={[]} onPick={setInput}/>
                 </div>
               </motion.div>
-              <div className="flex w-full flex-col items-center gap-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+              <div className="flex w-full flex-col items-center gap-2xl" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
                 {stage}
                 <StarterChips onPick={applyTemplate} />
                 <SuggestionChips onPick={(s) => setInput(s)} />
@@ -2244,7 +2244,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                       {findOpen && <ThreadConversationSearch turns={turns} nodeOf={nodeForTurn} onClose={() => setFindOpen(false)}/>}
                       <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode}/>
                     </>}
-                    afterMessages={<div className="mx-auto flex w-full flex-col gap-2xl px-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+                    afterMessages={<div className="mx-auto flex w-full flex-col gap-2xl px-l pb-2xl" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
                       {streaming && showThinking && <StreamingIndicator statusText={statusText} activity={latestActivity}/>}
                       {!streaming && followups.length > 0 && <ThreadFollowupSuggestions sendOnSelect={false} onPick={(text) => { setInput(text); setFollowups([]); }}/>}
                       {!streaming && checkWorkOffer && <CheckWorkChip label={checkWorkOffer.label} onRun={() => { const prompt = checkWorkOffer.prompt; setCheckWorkOffer(null); void send(prompt); }}/>}
@@ -2263,7 +2263,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                 {
 }
                 <div className="absolute left-1/2 -top-12 z-20 w-full max-w-sm -translate-x-1/2"><ThreadConnectionNotice connected={wsConnected}/></div>
-                <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--content-width)' }}>
+                <div className="mx-auto flex flex-col items-center" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
                   {stage}
                 </div>
               </div>
@@ -2550,7 +2550,7 @@ function MessagesSkeleton() {
     { me: true, w: 'w-2/5' }, { me: false, w: 'w-2/3' },
   ]
   return (
-    <div className="mx-auto flex flex-col gap-2xl px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}
+    <div className="mx-auto flex flex-col gap-2xl px-l py-2xl" style={{ maxWidth: 'var(--gideon-chat-reading-width, 820px)' }}
       role="status" aria-busy="true" >
         <LoadingStatus what="conversation" />
       {rows.map((r, i) => (
