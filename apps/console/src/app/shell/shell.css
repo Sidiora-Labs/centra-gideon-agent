@@ -94,7 +94,7 @@
   background: var(--color-surface-low);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .gideon-shell .gideon-topbar {
     height: auto !important;
     min-height: 0;

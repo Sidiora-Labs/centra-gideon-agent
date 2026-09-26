@@ -13,7 +13,7 @@ test('conversation keeps one centered reading column across desktop and mobile',
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await expect(page.getByText(SCRIPTED.reply, { exact: false }).first()).toBeVisible({ timeout: 60_000 })
 
-  for (const width of [2560, 1440, 390]) {
+  for (const width of [2560, 1440, 769, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1080 })
     await page.evaluate(() => document.documentElement.style.setProperty('--content-width', '100%'))
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
@@ -51,7 +51,7 @@ test('conversation keeps one centered reading column across desktop and mobile',
     expect(geometry.centerDrift).toBeLessThan(3)
     expect(geometry.pageOverflow).toBeLessThanOrEqual(1)
     if (width > 768) {
-      expect(geometry.assistantInset).toBeGreaterThan(48)
+      if (width > 1100) expect(geometry.assistantInset).toBeGreaterThan(48)
       expect(geometry.headerWidth).not.toBeNull()
       expect(geometry.headerWidth!).toBeLessThanOrEqual(1122)
       expect(geometry.titleWidth).toBeGreaterThan(150)
