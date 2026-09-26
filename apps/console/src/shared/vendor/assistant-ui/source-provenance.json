@@ -1,0 +1,442 @@
+{
+  "donor": "assistant-ui",
+  "donorCommit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "licenseSha256": "71fd4b7b76d27a09af2e8b2bedf14e51f4c229e32b59654d327cc24dc63e60d7",
+  "files": [
+    {
+      "path": "elements/assistant-modal.aui.tsx",
+      "sha256": "57f56556515e0cb0ffde67591bfa3e6924a59edd752935c2293a0c663d4d78c4",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/assistant-modal.aui.tsx",
+      "donorSha256": "c2ba9ac361c938ed24763101f32ca6a8f2fe5c9d0210d3bfff976ceb7c956fdd",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/assistant-sidebar.aui.tsx",
+      "sha256": "fa3fc02e0ceea5bfb5e5cc033a0d02b32d843d25958e985038e828f43f3f12b5",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/assistant-sidebar.aui.tsx",
+      "donorSha256": "e9ee60e29e33b905277d6327315867031c2669085fb43705b24b9c42b7345aa5",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/attachment.aui.tsx",
+      "sha256": "8d628882ad6949c84b15a79b42b5fecd2698de661d1c865a225da1eb5737ffb1",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/attachment.aui.tsx",
+      "donorSha256": "f5f22a132d4e656854f62099a321d1f671ee9441b6f2c4a4efcdfbd4e115086a",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/canvas-split.tsx",
+      "sha256": "7db87e3cbcbe64899b686ab3161491c2c0988f6ae8be2ea433b5547298b6ad5d",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/canvas-split.tsx",
+      "donorSha256": "70387b1f2823aae5b49c02e88aae9155f7b1b203b436010deeb5c981620b08c3",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/chat-panel.tsx",
+      "sha256": "a6e4287ff0bc049378c7267ee0d25a005d253167005d17e4199a8ad720d55658",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/chat-panel.tsx",
+      "donorSha256": "0dacb1283e7b1236fe6a09a4c4884a7e9188d57e3cda851c474a1d45d8dcc71c",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/command-palette.tsx",
+      "sha256": "2cd5629974f782898f5cf1dc7ca953bd940aa1c3265a55961898e0444884ca18",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/command-palette.tsx",
+      "donorSha256": "c7740b671089827501991165b28687575507770dbdf4c4ae6ebc5f35e56cfdab",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/composer-trigger-popover.aui.tsx",
+      "sha256": "3f28c03b9733ab58fdb80154984e2f256bdc8faacf31a26c127dcc22625b95bd",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/composer-trigger-popover.aui.tsx",
+      "donorSha256": "592d5681d4fe197174d54a0fc7243ef64155f0d2c7bd878117a04f6d050fad81",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/composer.tsx",
+      "sha256": "5956737d88e48db835a62c31d7622ef47f12302797e6a57ee05260f4de10d34a",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/composer.tsx",
+      "donorSha256": "361a15d0f2f07a251c20d61b8a260c043e23440222e9bc5bc78954be37d38dec",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/connection-state.tsx",
+      "sha256": "340094dfe2eb1ba79dee85ea4a37783635753d2fdc26781e37f865454973df34",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/connection-state.tsx",
+      "donorSha256": "ab5f63104fde39c3c3ac458edb85155639a59dc68ea84d41bcd850d85b232d59",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/context-breakdown.tsx",
+      "sha256": "37f64629225045939ac5d7f50b34cdeb5058957cf95d8f79a8908bb68eaf1402",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/context-breakdown.tsx",
+      "donorSha256": "a0fffb0f3e888eadb61a48898ff1af60775ea40559d4904137b84572274b5c1d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/context-display.aui.tsx",
+      "sha256": "3f24f35b9efedf0bd265b8eb3e8a108d31af712a2fb58493b69cd6d1d6f3522b",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/context-display.aui.tsx",
+      "donorSha256": "3f24f35b9efedf0bd265b8eb3e8a108d31af712a2fb58493b69cd6d1d6f3522b",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/context-display.tsx",
+      "sha256": "c8a68dd19a3daa2bcdcda9c7358ca00ddf5acf2204aa7cb7d64b3d0620cfd094",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/context-display.tsx",
+      "donorSha256": "3c1dd61b372e73cf28a13be86e57ae5d6546d37a50db4da7894c178f7b8eb861",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/conversation-map.aui.tsx",
+      "sha256": "37c98b4eb5aad07baf1716099a1a59e6032aa17e2f709904b08d41f556d41342",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/conversation-map.aui.tsx",
+      "donorSha256": "a55c0712720a84de614da04137ab4a8adfa9bd192fc780852e764dbc3d512667",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/conversation-map.tsx",
+      "sha256": "96f5f9371df7c1af0dd15654db4aebbbacc608e35fe2a9f6cc28d16afb5b6865",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/conversation-map.tsx",
+      "donorSha256": "32449528015bcc6c0f35321a1f0a502759696f73e220d1be5e6f44c857d16c36",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/conversation-search.tsx",
+      "sha256": "53c3335c0130b8e3b69f98e592b054ad6e0372314afe5387c1a724e9e6140182",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/conversation-search.tsx",
+      "donorSha256": "8bd2edb087b91105de823929904adfcf0ada5c9adbc042892acaf9ac8fa3477a",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/directive-text.aui.tsx",
+      "sha256": "28fc43782ff1fe261df5c6c55717f0bd9256ed9ee702edd32d638e8a9fbdd0e4",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/directive-text.aui.tsx",
+      "donorSha256": "28fc43782ff1fe261df5c6c55717f0bd9256ed9ee702edd32d638e8a9fbdd0e4",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/directive-text.tsx",
+      "sha256": "cc19144dc6f8d292ff0f533b01cd5a5cb95d4361d8e6de5152a927d4561d343d",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/directive-text.tsx",
+      "donorSha256": "7865b18353476c4963a1f59cd6c0d72a994899ee2acf27eeb849e7942bf0b3d4",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/draft-restore.tsx",
+      "sha256": "dd2c0164eeb636ba08e36b62280e21e8119d0a097ed090d4c11792be12970e55",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/draft-restore.tsx",
+      "donorSha256": "df75dfcc09ff2e4a89ec2fa9783d996006c190d674648c5e7caef968555b740d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/empty-state.tsx",
+      "sha256": "024cc9e85feac65468a59c6f2bdac9da2748b35537c2b3deed196d5ae4d2f0ec",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/empty-state.tsx",
+      "donorSha256": "1f09566634f8c894fd37cfff15fd66f1a40570f477c46460b45c1192d7b52532",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/file.tsx",
+      "sha256": "a44794afd1f493c96a2c1971857b97646ee97717ac5a0e9ee90bd014631f003a",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/file.tsx",
+      "donorSha256": "7a0dc1833c193148ce52ef27dee0ba7ce1c4f2f3a947e045418ca97bb407f8db",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/follow-up-suggestions.aui.tsx",
+      "sha256": "d5f3752e8a49c7c56479a50ce09e6bcbf4d9ac7814867253d6fe55b33aca2bd7",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/follow-up-suggestions.aui.tsx",
+      "donorSha256": "f0db1e9cfc5f648adeb57c8ac61fbeca4ebbb4d55267a9c107709af01b73abb4",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/guardrail-notice.tsx",
+      "sha256": "ea164c09dc9b371281e485faa94547cbc27c8876bddddaaf35f7f19a1082ac87",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/guardrail-notice.tsx",
+      "donorSha256": "66d0e80718f9ee1ee05066070f8bb6d70f48459d464471498f9440d1a4cc0893",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/image.tsx",
+      "sha256": "fd7dda3a212697db6d5694b8df6c80f16559284940a1ca9036f97691125700b9",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/image.tsx",
+      "donorSha256": "3e88d0dbc830f10f2ac67fe3e404896a7ea7fd7b65cc827ef4b2ede9e16638b3",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/launcher-bubble.tsx",
+      "sha256": "0760fa424c13e8bafd389397d6f3083fab8588729baa90546e316d708a2bc833",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/launcher-bubble.tsx",
+      "donorSha256": "affe9e5654c79992d28645b18d5a4dd991e011c374724994944cea7fc1581119",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/loading-state.tsx",
+      "sha256": "36548ab5ae8128fd03435623d6abdf8cc52659ca99a8079200f733f941454cbf",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/loading-state.tsx",
+      "donorSha256": "312b86f810f1ef3df45db7495a7e9b6b837fbbf445a151d3aca1ec6cfc69f031",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/logos.tsx",
+      "sha256": "63ecebfd780689f9af364ea107398dbaf0fc116df06989a8ce4a81d9cd6bea51",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/logos.tsx",
+      "donorSha256": "63ecebfd780689f9af364ea107398dbaf0fc116df06989a8ce4a81d9cd6bea51",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/mcp-config.aui.tsx",
+      "sha256": "10f80fcf3e37ad240cff6e92cf6f0490c83bcace681adf3098f30c03c0258a45",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/mcp-config.aui.tsx",
+      "donorSha256": "5d288e8fb0bf7f81aaec7e178363dac7d7fd45f77a4c0b6224ab853eb5522b1d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/message-timing.aui.tsx",
+      "sha256": "46df46277d8367bb8a57afbe4571c295072488ee1f7cea8e92c2f29e8d415c5a",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/message-timing.aui.tsx",
+      "donorSha256": "92a57b030869faad581b6dedb22bfd6bf50c01d13ea48484d33dda0a3d9f761d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/mobile-composer.tsx",
+      "sha256": "3070802af7a6c8c7825583a0e41b3840ea51363c74a7124b6432dc9936143317",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/mobile-composer.tsx",
+      "donorSha256": "223cfd8a80b2b628eb98690594ebb289e9290ca460d0ceff710e9fb964a04862",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/model-selector.aui.tsx",
+      "sha256": "3d76a743c0b46b7e092a973bab3b74e7f12cf484fa3a2996ca1ea012d8dca445",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/model-selector.aui.tsx",
+      "donorSha256": "fa58d6cb2392e7d57d58d7d560008953f95025b1bd0a58b7539a61f7283557c1",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/model-selector.tsx",
+      "sha256": "79f4a1e2282d94269fc8cef43924253de693a33d68efd96d8ca0a4b67f987171",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/model-selector.tsx",
+      "donorSha256": "a8bac306c2fc953fa02c0c49c6f83824bb9d00e25d4998c6c6db07a14d164d2d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/onboarding.tsx",
+      "sha256": "3ca3a8cc78e8abab34726f31b620e052213c3186ee1b2ccdba5bdd65016c9070",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/onboarding.tsx",
+      "donorSha256": "c94766e2380d04e14177de31ba3a80c6cfd4d54a578f18c3a8b40dc0cfacdfa2",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/prompt-library.tsx",
+      "sha256": "252a8b322e9d5958f0a67b3ba606aa972587078ddb5fb9a9a79f8c80e0344ca3",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/prompt-library.tsx",
+      "donorSha256": "d0783c987ea6911ea8bc128cf5c03430c9910c4b0b7014be3919263713444ef0",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/quote.aui.tsx",
+      "sha256": "24e21e1de0d668f05d9b8e7593349e0ad243e6510b5ff3e66ba5ebdbdf408673",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/quote.aui.tsx",
+      "donorSha256": "4fa31736910936811a5fa1244cf2e7c49ea2e0524da2a4156ade5dc8d3cf8ec8",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/read-aloud.tsx",
+      "sha256": "30d595c121978b7bc26c0c1c2afb59e1eb346daffb9a65584c34619c0bbbac5b",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/read-aloud.tsx",
+      "donorSha256": "63b925c827138af93dc8f5ff98b83ea39fa73a87038129d8ce06548cc70d2e19",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/reasoning-effort.tsx",
+      "sha256": "7021182da9c95def5744c4a6a3317e5c0062eeb6974aa19e6fc0e3a418ff474b",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/reasoning-effort.tsx",
+      "donorSha256": "100148236c6e236c6076f6ee191d328ff88134c822c63e0e63ae5019d4435e92",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/reasoning.aui.tsx",
+      "sha256": "f0be4fe25dafb9cabf1df2bcc947c38aee353c17f44237650e222f95dd43df10",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/reasoning.aui.tsx",
+      "donorSha256": "96738041df6542b9aca4085b0ee539100aa5836bdd359b69c2dabb63747e863b",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/reasoning.tsx",
+      "sha256": "3baf11483647c6fb78afad4028394fe661249db508edd45f0b4ed12a1fee0071",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/reasoning.tsx",
+      "donorSha256": "e59cdb4c4ccd6da31fb170603fbec624e2b7988a7ef2711e5a24ee455615ea20",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/scroll-anchor.tsx",
+      "sha256": "a6fa669c2bdc10b9f8500f34d8a69b2f36232f88ce2459c941f300bfbc89654d",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/scroll-anchor.tsx",
+      "donorSha256": "74ae84ceb0c8b43dce1d17cdca9a4638ff13d17c338c7b53b7c35af5b4724d16",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/settings-panel.tsx",
+      "sha256": "bca86b6eccf81728680b2e1654a04c7d405f94b4be0c57c73bfe904d3a5dfa56",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/settings-panel.tsx",
+      "donorSha256": "73446d7fe67f53e6aff342e04ae333baff16b320169463194b7410c77e4619b2",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/shared-conversation.tsx",
+      "sha256": "9335c5a74a0934183f12733426e62bd03b787dfe0af89abec8553cd32cd2b1ee",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/shared-conversation.tsx",
+      "donorSha256": "2fee5047294f5a3d715860892d3936982f0f0458ab60362fc315815a1d8c65ff",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/sources.aui.tsx",
+      "sha256": "62eab84e132526955ff81e80a9d160e2b2e3ba5b82f42717895011c091793004",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/sources.aui.tsx",
+      "donorSha256": "0f2a85db1a4134230cdf07ed55b6fdc31b2c7853e1dea7d749d2fce92593fb60",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/streaming-text.tsx",
+      "sha256": "d2968efdf721cd5ce95be620ee492a05274cd6f8520d360d90c3089435f02d7c",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/streaming-text.tsx",
+      "donorSha256": "d7aec7e7ba1977105095ff2554d266e040a707eb60709535ae194a72db30592d",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/surfaces.tsx",
+      "sha256": "7bcc6a2fef2ad35660729457bb0d9a48a129b25b9502001dd0f22554abc9705c",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/surfaces.tsx",
+      "donorSha256": "a82542ec08f0afd0565b220a1d32235b1fd7c08b394c55977119665da3860d3a",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/thinking-indicator.tsx",
+      "sha256": "4235c8aca2812efd10c361be06f36a513433591d17f037e43f3f2ef0d27f21bc",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thinking-indicator.tsx",
+      "donorSha256": "f28078b74fdd9dcc121c05c6ef64500be5d53fb0b94cd4ace25cd2f7352489d6",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/thread-full.aui.tsx",
+      "sha256": "c27ad43a2cb148131eba462f109d93a4492b57f910646dbc618300f80c66692d",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thread.aui.tsx",
+      "donorSha256": "64cb85b4076644dd319325b319264ec8e998e619a97c19e0f001d3fa5a03a016",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/thread-list.aui.tsx",
+      "sha256": "17aad142494ef5a411dd6c5133f9e26dc73ab8bbf489da51a82920a1d275c298",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thread-list.aui.tsx",
+      "donorSha256": "ab9d03a356cf554b5aa7969ed9d03a553644dbbeb2fc52b5a1d9f1056e056d52",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/thread-markdown-bridge.tsx",
+      "sha256": "6a23f18a8c01ab5168483c7894f0cd92531bac7b2958f79e4a7ece5e62f1004d",
+      "donorPath": null,
+      "donorSha256": null,
+      "status": "local production bridge"
+    },
+    {
+      "path": "elements/thread-search.tsx",
+      "sha256": "dfeb10b32d6efefca9b994ac75e779ce9b9c8ac90b8fb01f5940a52307d4a08a",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thread-search.tsx",
+      "donorSha256": "457b1632856f405b45a8b817827f9a11ad9598e484a3dc33313e153d73feec71",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/thread.aui.tsx",
+      "sha256": "077a282cc1129f8347a345aab91656f2e9693593b8f93bca69ff301061bb90d6",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thread.aui.tsx",
+      "donorSha256": "64cb85b4076644dd319325b319264ec8e998e619a97c19e0f001d3fa5a03a016",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/threadlist-sidebar.aui.tsx",
+      "sha256": "a3fdcb47c8077a6715813f0fa52ee5c86e43b25503db6024c942cf50c50831f1",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/threadlist-sidebar.aui.tsx",
+      "donorSha256": "d75df1f643df5fd6e250639e51ede972e4cca019de36d2f28d2632b742649fa3",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/tool-fallback.aui.tsx",
+      "sha256": "e32b60dcc436bb77e8c219b9ceebdc5c27155bc9bd0c10b5ee4cbf23c155cb2c",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/tool-fallback.aui.tsx",
+      "donorSha256": "f5675f389a6fa28a2363f666e0f42fbff17c8df229bf291f83002e18521689c9",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/tool-group.aui.tsx",
+      "sha256": "fe6b1030ec02de301f0a6ab8514e34776f815734a63c411748433ae842876f1c",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/tool-group.aui.tsx",
+      "donorSha256": "6fa7eb02ceefeb956cac1e34ab12bf95919e52036f58083d4dbd1aa69fb310e8",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/tooltip-icon-button.tsx",
+      "sha256": "ff79d590b3075fe1e9b051bd2f94bbc4217c414f7c72e8f39deda5b9072346ee",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/tooltip-icon-button.tsx",
+      "donorSha256": "98580531a6f5a213cccd6964c0c75fd097d97b77bcca05f904df562512273363",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/typing-indicator.tsx",
+      "sha256": "3a048fbe02485d479958fa4e8d82dbbf7da3c2d8a6e5dd8f5ea988d92b53dcf0",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/typing-indicator.tsx",
+      "donorSha256": "3fbafcfae07583a14e38cf4bfce4d0187b0a04a1a3fb51291f6fb8aea98aa516",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/voice-conversation.tsx",
+      "sha256": "dce294f4e27054c674f4975b6510cedea2edbcd361c52950bc29ae3315511ba1",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/voice-conversation.tsx",
+      "donorSha256": "a57d73871acdb1e4d9d1c1280333f197e9989cf0e7c3c19a5ee76536033d861e",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/voice.aui.tsx",
+      "sha256": "6317b79f663ca31e26bb7dd9b5542ffa86432212f051c8411a0cee06a8a2fac3",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/voice.aui.tsx",
+      "donorSha256": "0af409487370405d42aa19507089d867fcafa35bcee24d832ea6db989140f5b2",
+      "status": "adapted"
+    },
+    {
+      "path": "elements/voice.tsx",
+      "sha256": "6994673adc903739fa664a749b01d08ef51dc79f8e90b2dce5325cd4d8c68ea6",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/voice.tsx",
+      "donorSha256": "b6f8ec3a137d2dd2ecb5ec514f5fc9245de84f030e65ea1333c42ddb27da0a38",
+      "status": "adapted"
+    },
+    {
+      "path": "hooks/use-attachment-src.ts",
+      "sha256": "dfb621f1a18f4013994aa29815beddb436020105164526ab7c86b0b0a32040a1",
+      "donorPath": "packages/ui/src/hooks/use-attachment-src.ts",
+      "donorSha256": "dfb621f1a18f4013994aa29815beddb436020105164526ab7c86b0b0a32040a1",
+      "status": "adapted"
+    },
+    {
+      "path": "ui-compat.tsx",
+      "sha256": "a8f65942760281831e75d0b5b944a22a49695ace83ab2382d6fc29bce9ba722a",
+      "donorPath": null,
+      "donorSha256": null,
+      "status": "local production bridge"
+    },
+    {
+      "path": "lib/utils.ts",
+      "sha256": "55bbdc94cef3e0c8a8bba386e94f97228dd2c967fe61466fc565378890550c08",
+      "donorPath": null,
+      "donorSha256": null,
+      "status": "local production bridge"
+    },
+    {
+      "path": "utils/range.ts",
+      "sha256": "3506d5f07865c042a4ef9b96904f687d19372a14e7dfccf946749860a3606182",
+      "donorPath": null,
+      "donorSha256": null,
+      "status": "local production bridge"
+    }
+  ]
+}
