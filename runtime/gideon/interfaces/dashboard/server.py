@@ -934,6 +934,12 @@ async def start_dashboard(
     app.router.add_get("/api/mcp/probe", handlers.api_mcp_probe_cached)
     app.router.add_post("/api/mcp/probe/{name}", handlers.api_mcp_probe_one)
     app.router.add_get("/api/mcp/pool-stats", handlers.api_mcp_pool_stats)
+    from gideon.interfaces.dashboard.handlers import mcp_protocol
+
+    app.router.add_get("/api/mcp/servers/{name}/resources", mcp_protocol.resources_list)
+    app.router.add_get("/api/mcp/servers/{name}/resources/read", mcp_protocol.resource_read)
+    app.router.add_get("/api/mcp/servers/{name}/prompts", mcp_protocol.prompts_list)
+    app.router.add_post("/api/mcp/servers/{name}/prompts/get", mcp_protocol.prompt_get)
     app.router.add_get("/api/mcp/importable", handlers.api_mcp_importable)
     app.router.add_post("/api/mcp/sync", handlers.api_mcp_sync)
     app.router.add_post("/api/mcp/apply", handlers.api_mcp_apply)
