@@ -31,8 +31,18 @@ describe('mobile composer embedded editor', () => {
       keyboardOpen={false} running={false} actions={[]} onAttach={onAttach} embedded />)
     expect(screen.queryByRole('button', { name: 'Add an attachment' })).toBeNull()
     expect(container.querySelector('[data-slot="mobile-composer"]')).toHaveAttribute('data-embedded', 'true')
+    expect(container.querySelector('[data-slot="mobile-composer-actions"]')).toBeNull()
     expect(container.querySelector('[data-slot="mobile-composer"] > span[aria-hidden]')).toBeNull()
     expect(container.querySelector('[data-slot="mobile-composer-field"]')).not.toHaveClass('rounded-[18px]')
     expect(onAttach).not.toHaveBeenCalled()
+  })
+
+  it('keeps caller-provided mobile actions when the keyboard is closed', () => {
+    const onAction = vi.fn()
+    const { container } = render(<MobileComposer value="" keyboardOpen={false} running={false}
+      actions={['Plan']} onAction={onAction} embedded />)
+    expect(container.querySelector('[data-slot="mobile-composer-actions"]')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    expect(onAction).toHaveBeenCalledWith('Plan')
   })
 })
