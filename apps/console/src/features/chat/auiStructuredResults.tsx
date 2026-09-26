@@ -29,15 +29,15 @@ export function artifactTableRows(artifact: Artifact): Row[] | null {
   return parsed as Row[]
 }
 
-export function StructuredArtifactTable({ artifact, onOpen }: { artifact: Artifact; onOpen?: (slug: string) => void }) {
+export function StructuredArtifactTable({ artifact, onOpen, showTitle = true }: { artifact: Artifact; onOpen?: (slug: string) => void; showTitle?: boolean }) {
   const rows = artifactTableRows(artifact)
   if (!rows) return <p data-slot="data-table" className="text-sm text-on-surface-low">No tabular JSON in {artifact.name}.</p>
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
   return <section aria-label={`Data table from ${artifact.name}`} className="space-y-2">
-    <div className="flex items-center justify-between gap-2">
-      <strong>{artifact.name}</strong>
+    {(showTitle || onOpen) && <div className="flex items-center justify-between gap-2">
+      {showTitle && <strong>{artifact.name}</strong>}
       {onOpen && <button type="button" onClick={() => onOpen(artifact.slug)} className="underline">Open artifact</button>}
-    </div>
+    </div>}
     <DataTable rows={rows} columns={columns.map(key => ({ key, label: key }))} />
   </section>
 }
