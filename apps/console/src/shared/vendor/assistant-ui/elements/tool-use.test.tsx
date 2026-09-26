@@ -11,9 +11,11 @@ import { FileTree, type FileTreeNode } from "./file-tree";
 
 afterEach(cleanup);
 
-function ControlledToolCall({ running = false, initialOpen = false }: {
+function ControlledToolCall({ running = false, initialOpen = false, requestLabel, resultLabel }: {
   running?: boolean;
   initialOpen?: boolean;
+  requestLabel?: string;
+  resultLabel?: string;
 }) {
   const [open, setOpen] = useState(initialOpen);
   return (
@@ -23,6 +25,8 @@ function ControlledToolCall({ running = false, initialOpen = false }: {
       query="src"
       request="Find the configuration file"
       result="Found src/config.ts"
+      requestLabel={requestLabel}
+      resultLabel={resultLabel}
       running={running}
       open={open}
       onOpenChange={setOpen}
@@ -77,6 +81,26 @@ describe("donor ToolCall", () => {
     expect(container.querySelector('[data-slot="collapsible-content"]')).not.toBeNull();
     fireEvent.click(screen.getByRole("button"));
     expect(screen.queryByText("Found src/config.ts")).not.toBeInTheDocument();
+  });
+
+  it("shows caller-supplied request and result labels beside unchanged data", () => {
+    render(<ControlledToolCall initialOpen requestLabel="Anfrage" resultLabel="Ergebnis" />);
+    expect(screen.getByText("Anfrage")).toBeInTheDocument();
+    expect(screen.getByText("Ergebnis")).toBeInTheDocument();
+    expect(screen.queryByText("Request")).not.toBeInTheDocument();
+    expect(screen.queryByText("Result")).not.toBeInTheDocument();
+    expect(screen.getByText("Find the configuration file")).toBeInTheDocument();
+    expect(screen.getByText("Found src/config.ts")).toBeInTheDocument();
+  });
+
+  it("keeps each donor English default when only the other label is supplied", () => {
+    const { rerender } = render(<ControlledToolCall initialOpen requestLabel="Anfrage" />);
+    expect(screen.getByText("Anfrage")).toBeInTheDocument();
+    expect(screen.getByText("Result")).toBeInTheDocument();
+    rerender(<ControlledToolCall initialOpen resultLabel="Ergebnis" />);
+    expect(screen.getByText("Request")).toBeInTheDocument();
+    expect(screen.getByText("Ergebnis")).toBeInTheDocument();
+    expect(screen.getByText("Found src/config.ts")).toBeInTheDocument();
   });
 
   it("shows active label while running and keeps completion badge hidden", () => {
