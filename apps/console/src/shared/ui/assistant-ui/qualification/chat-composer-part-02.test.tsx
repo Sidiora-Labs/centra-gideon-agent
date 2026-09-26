@@ -4,7 +4,7 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from '../../Composer'
 import { PromptPalette } from '../../../../features/chat/PromptPalette'
-import { api } from '../../../data/api'
+import { api, type PromptVariable } from '../../../data/api'
 import { writeQuery } from '../../../data/data'
 import type { ComposerProps } from '../../composer/types'
 
@@ -213,5 +213,80 @@ describe('real prompt library producer', () => {
     expect(await screen.findByText('Prompt unavailable')).toBeInTheDocument()
     expect(onInsert).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed producer load and uses the filtered first match on Enter', async () => {
+    const list = vi.spyOn(api, 'prompts').mockRejectedValueOnce(new Error('Catalogue offline')).mockResolvedValueOnce([
+      { name: 'plan', title: 'Plan a change', variables: [] },
+      { name: 'review', title: 'Review code', variables: [] },
+    ])
+    vi.spyOn(api, 'prompt').mockResolvedValue({ name: 'review', title: 'Review code', variables: [] })
+    vi.spyOn(api, 'renderPrompt').mockResolvedValue({ name: 'review', rendered: 'Review the change' })
+    const onInsert = vi.fn()
+    render(<PromptPalette onInsert={onInsert} onClose={vi.fn()} />)
+    expect(await screen.findByText('Catalogue offline')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Retry/ }))
+    expect(await screen.findByRole('option', { name: 'Review code' })).toBeInTheDocument()
+    expect(list).toHaveBeenCalledTimes(2)
+    const search = screen.getByRole('searchbox', { name: 'Search prompts' })
+    fireEvent.change(search, { target: { value: 'missing' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search).toHaveValue('')
+    fireEvent.change(search, { target: { value: 'review' } })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    await waitFor(() => expect(onInsert).toHaveBeenCalledExactlyOnceWith('Review the change'))
+    expect(api.prompt).toHaveBeenCalledExactlyOnceWith('review')
+  })
+
+  it('renders real variable types, previews values, and sends the completed template', async () => {
+    const variables: PromptVariable[] = [
+      { name: 'goal', type: 'text', required: true },
+      { name: 'count', type: 'number', default: 2 },
+      { name: 'mode', type: 'select', options: ['quick', 'deep'] },
+      { name: 'approved', type: 'boolean', default: false },
+      { name: 'notes', type: 'textarea' },
+    ]
+    vi.spyOn(api, 'prompts').mockResolvedValue([{ name: 'plan', title: 'Plan a change', variables }])
+    vi.spyOn(api, 'prompt').mockResolvedValue({ name: 'plan', title: 'Plan a change', merged_variables: variables })
+    vi.spyOn(api, 'renderPrompt').mockImplementation(async (_name, values) => ({ name: 'plan', rendered: JSON.stringify(values) }))
+    const onInsert = vi.fn()
+    const onSend = vi.fn()
+    const onClose = vi.fn()
+    render(<PromptPalette onInsert={onInsert} onSend={onSend} onClose={onClose} />)
+    fireEvent.click(await screen.findByRole('option', { name: /Plan a change/ }))
+    expect(await screen.findByText('All prompts')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.change(screen.getByRole('textbox', { name: /goal/ }), { target: { value: 'Deploy' } })
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '3' } })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } })
+    fireEvent.click(screen.getByRole('switch'))
+    const notes = screen.getByRole('textbox', { name: /notes/ })
+    fireEvent.change(notes, { target: { value: 'Check logs' } })
+    expect(screen.getByRole('button', { name: 'Send' })).not.toHaveAttribute('aria-disabled', 'true')
+    await waitFor(() => expect(screen.getByText(/"goal":"Deploy"/)).toBeInTheDocument())
+    fireEvent.keyDown(notes, { key: 'Enter', ctrlKey: true })
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(onSend.mock.calls[0][0])).toEqual({ count: 3, approved: true, goal: 'Deploy', mode: 'deep', notes: 'Check logs' })
+    expect(api.renderPrompt).toHaveBeenLastCalledWith('plan', { count: 3, approved: true, goal: 'Deploy', mode: 'deep', notes: 'Check logs' })
+    expect(onInsert).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the filled template open when the render producer rejects insertion', async () => {
+    const variables: PromptVariable[] = [{ name: 'goal', type: 'text', required: true }]
+    vi.spyOn(api, 'prompts').mockResolvedValue([{ name: 'plan', title: 'Plan a change', variables }])
+    vi.spyOn(api, 'prompt').mockResolvedValue({ name: 'plan', title: 'Plan a change', variables })
+    vi.spyOn(api, 'renderPrompt').mockRejectedValue(new Error('Render unavailable'))
+    const onInsert = vi.fn()
+    const onClose = vi.fn()
+    render(<PromptPalette onInsert={onInsert} onClose={onClose} />)
+    fireEvent.click(await screen.findByRole('option', { name: /Plan a change/ }))
+    fireEvent.change(await screen.findByRole('textbox', { name: /goal/ }), { target: { value: 'Deploy' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
+    expect(await screen.findByText('Render unavailable')).toBeInTheDocument()
+    expect(api.renderPrompt).toHaveBeenCalledWith('plan', { goal: 'Deploy' })
+    expect(onInsert).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText('All prompts')).toBeInTheDocument()
   })
 })
