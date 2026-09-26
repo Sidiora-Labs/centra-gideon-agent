@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { PanelLeftClose, PanelLeftOpen, SquareTerminal } from 'lucide-react'
-import { spring } from '../theme/motion'
 import { ThemeControl } from './TopBar'
 import { WidthPill } from './WidthPill'
 import { NotificationBell } from './NotificationBell'
@@ -21,11 +19,9 @@ export function ShellCornerLeft({ collapsed, onToggle }: { collapsed: boolean; o
         className="grid h-9 w-8 place-items-center rounded-r-lg border border-l-0 border-outline-variant/40 bg-surface-low/80 text-on-surface-low backdrop-blur-sm transition-colors hover:bg-surface-low hover:text-on-surface">
         {
 }
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span key={collapsed ? 'open' : 'close'} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={spring.spatialFast} className="grid place-items-center">
-            {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-          </motion.span>
-        </AnimatePresence>
+        <span className="grid place-items-center">
+          {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+        </span>
       </button>
     </div>
   )
