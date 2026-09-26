@@ -114,6 +114,33 @@ describe('label-led rail navigation', () => {
     { id: 'settings', label: 'Your account', icon: ListChecks, pinBottom: true },
   ]
 
+  it('uses a readable 248px default while honoring saved widths', () => {
+    localStorage.removeItem('nav-width-v2')
+    const props = { items: links, activeId: 'chat/new', onSearch: () => {}, onSelect: () => {}, collapsed: false }
+    const fresh = render(<NavRail {...props} />)
+    expect(fresh.getByRole('separator')).toHaveAttribute('aria-valuenow', '248')
+    expect(fresh.getByRole('navigation').parentElement).toHaveStyle({ width: '248px' })
+    expect(fresh.getByRole('button', { name: 'New conversation' })).toHaveTextContent('New conversation')
+    fresh.unmount()
+    localStorage.setItem('nav-width-v2', '224')
+    const saved = render(<NavRail {...props} />)
+    expect(saved.getByRole('separator')).toHaveAttribute('aria-valuenow', '224')
+  })
+
+  it('migrates only the old implicit 196px default once', () => {
+    localStorage.setItem('nav-width-v2', '196')
+    localStorage.removeItem('nav-width-v2-default-migrated')
+    const props = { items: links, activeId: 'chat/new', onSearch: () => {}, onSelect: () => {}, collapsed: false }
+    const migrated = render(<NavRail {...props} />)
+    expect(migrated.getByRole('separator')).toHaveAttribute('aria-valuenow', '248')
+    expect(localStorage.getItem('nav-width-v2')).toBe('248')
+    expect(localStorage.getItem('nav-width-v2-default-migrated')).toBe('1')
+    migrated.unmount()
+    localStorage.setItem('nav-width-v2', '196')
+    const deliberate = render(<NavRail {...props} />)
+    expect(deliberate.getByRole('separator')).toHaveAttribute('aria-valuenow', '196')
+  })
+
   it('keeps the explicit search callback separate from route selection', () => {
     const onSearch = vi.fn()
     const onSelect = vi.fn()
