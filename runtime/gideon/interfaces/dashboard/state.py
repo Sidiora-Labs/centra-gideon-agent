@@ -776,8 +776,11 @@ class ConsoleState(WebSocketState):
         """
         from gideon.interfaces.dashboard.chat import _history_key_for
 
-        session = self._sessions.get(session_key) or self._sessions.get(
-            _history_key_for(session_key)
+        history_key = _history_key_for(session_key)
+        session = (
+            self._sessions.get(session_key)
+            or self._sessions.get(history_key.removeprefix("dashboard:"))
+            or self._sessions.get(history_key)
         )
         return str(getattr(session, "_app", "") or "") if session is not None else ""
 

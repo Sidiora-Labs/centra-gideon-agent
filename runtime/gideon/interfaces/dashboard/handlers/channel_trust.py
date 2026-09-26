@@ -67,3 +67,14 @@ async def api_channel_trust_revoke(request: web.Request) -> web.Response:
     channel_trust.deny_sender(provider, sender_id)
     logger.info("channel trust: revoked sender on provider=%s", provider)
     return web.json_response({"ok": True, "provider": provider, "sender_id": sender_id})
+
+
+async def api_telegram_pairing(request: web.Request) -> web.Response:
+    if request.get("app"):
+        return json_error("owner_required", status=403)
+    code = channel_trust.create_pairing_code("telegram")
+    response = web.json_response(
+        {"code": code, "expires_in": channel_trust.PAIRING_CODE_TTL_SECS}
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response

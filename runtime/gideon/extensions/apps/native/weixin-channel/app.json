@@ -1,0 +1,23 @@
+{
+  "name": "weixin-channel",
+  "version": "1.0.0",
+  "displayName": "Personal WeChat",
+  "description": "Save settings in Configure, then scan the pairing QR shown there. Operators can also view it in gateway logs.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.weixin:create_provider",
+    "capabilities": ["messaging", "qr-pairing"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "base_url": {"type": "string", "default": "https://ilinkai.weixin.qq.com", "x-meta": {"label": "iLink operator URL"}},
+        "token": {"type": "string", "default": "", "x-meta": {"label": "Bot token", "sensitive": true}},
+        "route_tag": {"type": "string", "default": "", "x-meta": {"label": "Route tag"}}
+      }
+    }
+  }
+}

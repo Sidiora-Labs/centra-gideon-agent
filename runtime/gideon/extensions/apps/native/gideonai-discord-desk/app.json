@@ -1,0 +1,74 @@
+{
+  "name": "gideonai-discord-desk",
+  "version": "0.1.0",
+  "displayName": "Discord Desk",
+  "description": "Discord Desk pairs a Discord bot with Gideon for DM and server conversations. Converse in tracked channels, receive results with approval buttons, and fire automations from inbound messages.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": [
+    "channel",
+    "bundled"
+  ],
+  "cli": {
+    "setup": "discord_desk_setup:run",
+    "doctor": "discord_desk_doctor:probe"
+  },
+  "loggerRoots": [
+    "discord_desk"
+  ],
+  "provider": {
+    "type": "channel",
+    "implementation": "discord_desk.transport:create_provider",
+    "capabilities": [
+      "messaging",
+      "reactions",
+      "threads"
+    ],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "bot_token": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Bot Token",
+            "help": "Discord bot token from the Developer Portal (Bot → Reset Token). Sent as 'Authorization: Bot <token>'.",
+            "sensitive": true
+          }
+        },
+        "application_id": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Application ID",
+            "help": "The Discord application's ID (Developer Portal → General Information). Public, not a secret — used for the bot invite URL."
+          }
+        },
+        "dm_activation": {
+          "type": "string",
+          "default": "always",
+          "enum": [
+            "always",
+            "mention",
+            "off"
+          ],
+          "x-meta": {
+            "label": "DM Activation",
+            "help": "Default activation mode for direct messages."
+          }
+        }
+      }
+    }
+  },
+  "providers": [
+    {
+      "type": "trigger_source",
+      "implementation": "discord_desk.trigger_source:create_provider",
+      "capabilities": [
+        "direct_message",
+        "guild_message"
+      ]
+    }
+  ],
+  "native": true
+}

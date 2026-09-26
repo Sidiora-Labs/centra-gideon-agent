@@ -1,0 +1,164 @@
+{
+  "name": "gideonai-slack-desk",
+  "version": "0.1.0",
+  "displayName": "GideonAI Slack Desk",
+  "description": "Slack desk for Gideon agents. Monitor channels, answer mentions, and act on threads and DMs.",
+  "icon": "Slack",
+  "author": "Gideon",
+  "tags": [
+    "channel",
+    "bundled"
+  ],
+  "cli": {
+    "setup": "cli_setup:run",
+    "doctor": "cli_doctor:probe"
+  },
+  "loggerRoots": [
+    "slack_desk_runtime"
+  ],
+  "dependencies": {
+    "pythonDependencies": [
+      "slack-sdk>=3.27,<4"
+    ]
+  },
+  "provider": {
+    "type": "channel",
+    "implementation": "slack_desk_runtime.transport:create_provider",
+    "capabilities": [
+      "messaging",
+      "reactions",
+      "threads"
+    ],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "bot_token": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Bot Token",
+            "help": "Slack Bot User OAuth Token (xoxb-...).",
+            "sensitive": true
+          }
+        },
+        "app_token": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "App Token",
+            "help": "Slack App-Level Token for Socket Mode (xapp-...).",
+            "sensitive": true
+          }
+        },
+        "allowed_users": {
+          "type": "array",
+          "default": [],
+          "x-meta": {
+            "label": "Allowed Users",
+            "help": "Slack users allowed to interact. Each entry: {slack_id, name}."
+          }
+        },
+        "tracking_channels": {
+          "type": "array",
+          "default": [],
+          "x-meta": {
+            "label": "Tracking Channels",
+            "help": "Slack channels to monitor. Each entry: {channel_id, name}."
+          }
+        },
+        "open_channels": {
+          "type": "array",
+          "default": [],
+          "x-meta": {
+            "label": "Open Channels",
+            "help": "Channel IDs where all users are authorized without allowlist."
+          }
+        },
+        "command": {
+          "type": "string",
+          "default": "gideon",
+          "x-meta": {
+            "label": "Command",
+            "help": "Slack slash command trigger word."
+          }
+        },
+        "trusted_bot_ids": {
+          "type": "array",
+          "default": [],
+          "x-meta": {
+            "label": "Trusted Bot IDs",
+            "help": "Bot IDs allowed to bypass the bot filter for multi-node mesh."
+          }
+        },
+        "allowed_enterprise_ids": {
+          "type": "array",
+          "default": [],
+          "x-meta": {
+            "label": "Allowed Enterprise IDs",
+            "help": "Slack Enterprise Grid org IDs to allow for workspace validation."
+          }
+        },
+        "reactions": {
+          "type": "object",
+          "default": {},
+          "x-meta": {
+            "label": "Reactions",
+            "help": "Override phase reaction emojis (queued/thinking/coding/browsing/tool/done/error). null suppresses a phase."
+          }
+        },
+        "reactions_enabled": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "Reactions Enabled",
+            "help": "Show phase-aware emoji reactions during processing."
+          }
+        },
+        "channels": {
+          "type": "object",
+          "default": {},
+          "x-meta": {
+            "label": "Per-channel Config",
+            "help": "Per-channel activation overrides: {channel_id: {activation, agent}}."
+          }
+        },
+        "dm_activation": {
+          "type": "string",
+          "default": "always",
+          "enum": [
+            "always",
+            "mention",
+            "observe",
+            "review",
+            "off"
+          ],
+          "x-meta": {
+            "label": "DM Activation",
+            "help": "Default activation mode for direct messages."
+          }
+        }
+      }
+    }
+  },
+  "providers": [
+    {
+      "type": "inbox",
+      "implementation": "slack_desk_runtime.inbox_source:create_provider",
+      "capabilities": [
+        "poll",
+        "reply",
+        "reactions",
+        "history"
+      ]
+    },
+    {
+      "type": "trigger_source",
+      "implementation": "slack_desk_runtime.trigger_source:create_provider",
+      "capabilities": [
+        "direct_message",
+        "channel_message"
+      ]
+    }
+  ],
+  "native": true
+}

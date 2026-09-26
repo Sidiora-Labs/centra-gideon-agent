@@ -1,0 +1,380 @@
+{
+  "name": "telegram-channel",
+  "version": "1.0.0",
+  "displayName": "Telegram",
+  "description": "Talk with Gideon in Telegram. Use separate conversation topics, exchange voice notes and files, receive scheduled updates, and approve actions from your chat.",
+  "icon": "Send",
+  "author": "Gideon",
+  "tags": [
+    "channel",
+    "bundled"
+  ],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.telegram.transport:create_provider",
+    "capabilities": [
+      "messaging",
+      "threads",
+      "attachments",
+      "voice",
+      "approvals",
+      "topics",
+      "interactive-questions",
+      "group-observation",
+      "drafts",
+      "rich-messages"
+    ],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Connect Telegram"
+          }
+        },
+        "bot_token": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "BotFather token",
+            "sensitive": true,
+            "help": "Create your bot in Telegram with @BotFather. Hosted tokens are stored in Connections."
+          }
+        },
+        "owner_id": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Your Telegram user ID",
+            "help": "Your numeric Telegram user ID. Generate a pairing code above and send it to your bot. Only the paired owner approves actions and answers interactive questions."
+          }
+        },
+        "require_mention": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "Require a mention in groups"
+          }
+        },
+        "voice_replies": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Reply with voice notes"
+          }
+        },
+        "silent": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Silent notifications"
+          }
+        },
+        "link_preview": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Show link previews"
+          }
+        },
+        "home_channel": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Default notification chat",
+            "help": "Optional paired DM or tracked group ID."
+          }
+        },
+        "allowed_topics": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Allowed topics",
+            "help": "Optional comma-separated chat_id:topic_id list. Empty allows all topics in tracked groups."
+          }
+        },
+        "observe_groups": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Remember unmentioned group context"
+          }
+        },
+        "ignore_root_dm": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Use the root DM as a lobby"
+          }
+        },
+        "disable_topic_auto_rename": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Keep manual topic names"
+          }
+        },
+        "skip_stt": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Pass audio directly without transcription"
+          }
+        },
+        "rich_messages": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Native rich replies"
+          }
+        },
+        "rich_drafts": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Native rich draft previews"
+          }
+        },
+        "reactions": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Show processing reactions"
+          }
+        },
+        "pin_turn": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "Pin incoming messages while working"
+          }
+        },
+        "status_indicator": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Show connection status on bot profile"
+          }
+        },
+        "doh_fallback": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "Recover from DNS connection failures"
+          }
+        },
+        "guest_mode": {
+          "type": "boolean",
+          "default": false,
+          "x-meta": {
+            "label": "Allow explicitly mentioned guest groups"
+          }
+        },
+        "streaming": {
+          "type": "string",
+          "default": "edit",
+          "x-meta": {
+            "label": "Streaming transport",
+            "help": "edit, auto, draft, or off"
+          }
+        },
+        "notifications": {
+          "type": "string",
+          "default": "important",
+          "x-meta": {
+            "label": "Notification mode",
+            "help": "important or all; silent notifications overrides both"
+          }
+        },
+        "fallback_ips": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Fallback API addresses",
+            "help": "Optional comma-separated public IPv4 addresses; Telegram TLS identity remains verified"
+          }
+        },
+        "status_online": {
+          "type": "string",
+          "default": "Online",
+          "x-meta": {
+            "label": "Connected profile text",
+            "help": ""
+          }
+        },
+        "status_offline": {
+          "type": "string",
+          "default": "Offline",
+          "x-meta": {
+            "label": "Disconnected profile text",
+            "help": ""
+          }
+        },
+        "dm_topics": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Permanent DM topics",
+            "help": "JSON list: [{\"chat_id\":123,\"topics\":[{\"name\":\"Research\",\"skill\":\"skill-id\"}]}]"
+          }
+        },
+        "group_topics": {
+          "type": "string",
+          "default": "{}",
+          "x-meta": {
+            "label": "Forum topic skills",
+            "help": "JSON object keyed by chat_id:topic_id, values {\"skill\":\"skill-id\"}"
+          }
+        },
+        "channel_prompts": {
+          "type": "string",
+          "default": "{}",
+          "x-meta": {
+            "label": "Channel instructions",
+            "help": "JSON object keyed by chat_id, topic_id, or chat_id:topic_id; topic instructions override group instructions"
+          }
+        },
+        "mention_patterns": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Additional mention patterns",
+            "help": "JSON list of case-insensitive regular expressions; invalid or expensive patterns are skipped."
+          }
+        },
+        "ignored_threads": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Ignored topics",
+            "help": "JSON list of chat_id:topic_id identifiers"
+          }
+        },
+        "allow_admin_from": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "DM command administrators",
+            "help": "JSON list of user IDs; paired owner remains an administrator"
+          }
+        },
+        "group_allow_admin_from": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Group command administrators",
+            "help": "JSON list of user IDs"
+          }
+        },
+        "user_allowed_commands": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Commands for other DM users",
+            "help": "JSON list of command names without /"
+          }
+        },
+        "group_user_allowed_commands": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Commands for other group users",
+            "help": "JSON list of command names without /"
+          }
+        },
+        "allow_from": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Additional allowed users",
+            "help": "JSON list of user IDs for DMs and groups. * opens access to everyone"
+          }
+        },
+        "group_allow_from": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Additional group users",
+            "help": "JSON list of user IDs allowed only in groups"
+          }
+        },
+        "group_allowed_chats": {
+          "type": "string",
+          "default": "[]",
+          "x-meta": {
+            "label": "Additional allowed groups",
+            "help": "JSON list of group IDs. Every member may converse; * allows all groups"
+          }
+        },
+        "transport": {
+          "type": "string",
+          "default": "polling",
+          "x-meta": {
+            "label": "Update transport",
+            "help": "polling or webhook"
+          }
+        },
+        "webhook_url": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Public webhook URL",
+            "help": "Hosted setup: POST /gideon/v1/telegram/webhook/setup while signed in, then use the returned path on your Gideon domain."
+          }
+        },
+        "webhook_secret": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Webhook verification secret",
+            "help": "Store the secret_token returned by hosted webhook setup in Connections. Renew before its returned expiry.",
+            "sensitive": true
+          }
+        },
+        "home_topic": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Default notification topic",
+            "help": "Set with /sethome inside your Telegram topic."
+          }
+        },
+        "command_menu": {
+          "type": "string",
+          "default": "{}",
+          "x-meta": {
+            "label": "Command menu ordering",
+            "help": "JSON with max_commands (1\u2013100), priority (command names), priority_mode (prepend or append)."
+          }
+        },
+        "exclusive_bot_mentions": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "Ignore messages addressed to other bots"
+          }
+        },
+        "additional_bots": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Additional bots",
+            "sensitive": true,
+            "help": "Encrypted JSON list. Each bot needs bot_token and may override owner_id and other Telegram settings. Bots have separate conversations and topics. Enabled here controls all bots."
+          }
+        },
+        "bot_preferences": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Per-bot preferences",
+            "help": "JSON preferences for additional bots; updated automatically by their voice and home commands."
+          }
+        }
+      }
+    }
+  }
+}

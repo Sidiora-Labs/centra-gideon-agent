@@ -1,0 +1,24 @@
+{
+  "name": "whatsapp-channel",
+  "version": "1.0.0",
+  "displayName": "WhatsApp",
+  "description": "Save bridge settings in Configure, then scan the pairing QR with WhatsApp Linked Devices.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.whatsapp:create_provider",
+    "capabilities": ["messaging", "qr-pairing"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "bridge_url": {"type": "string", "default": "ws://127.0.0.1:3001", "x-meta": {"label": "Bridge URL"}},
+        "bridge_token": {"type": "string", "default": "", "x-meta": {"label": "Remote bridge token", "sensitive": true}},
+        "auto_bridge": {"type": "boolean", "default": true, "x-meta": {"label": "Start local bridge"}},
+        "group_policy": {"type": "string", "default": "mention", "enum": ["mention", "open"], "x-meta": {"label": "Group activation"}}
+      }
+    }
+  }
+}

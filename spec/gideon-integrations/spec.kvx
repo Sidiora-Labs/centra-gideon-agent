@@ -67,13 +67,14 @@ ac_1 = "Implement the complete reachable feature: Independent outbound channel q
 
 [task.integrations-channels]
 title = "integrations-channels end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "integrations-channels"
 requires = []
 reqs = ["013.1", "128.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
+touches = ["pyproject.toml", "runtime/gideon/integrations/messaging_channels", "runtime/gideon/integrations/outbound_queue.py", "runtime/gideon/integrations/channel_delivery.py", "runtime/gideon/integrations/channel_inbound.py", "runtime/gideon/integrations/channel_transports/__init__.py", "runtime/gideon/integrations/channel_transports/manager.py", "runtime/gideon/integrations/telegram", "runtime/gideon/extensions/apps/native/telegram-channel", "runtime/gideon/extensions/apps/native/gideonai-slack-desk", "runtime/gideon/extensions/apps/native/gideonai-discord-desk", "runtime/gideon/extensions/apps/native/gideonai-mail-desk", "runtime/gideon/extensions/apps/native/matrix-channel", "runtime/gideon/extensions/apps/native/wecom-channel", "runtime/gideon/extensions/apps/native/dingtalk-channel", "runtime/gideon/extensions/apps/native/qq-channel", "runtime/gideon/extensions/apps/native/feishu-channel", "runtime/gideon/extensions/apps/native/mochat-channel", "runtime/gideon/extensions/apps/native/whatsapp-channel", "runtime/gideon/extensions/apps/native/weixin-channel", "runtime/gideon/interfaces/dashboard/handlers/channel_trust.py", "runtime/gideon/interfaces/dashboard/server.py", "runtime/gideon/interfaces/dashboard/state.py", "checks/runtime/test_channel_delivery_per_provider.py", "checks/runtime/test_channel_outbound_queue_real_path.py", "checks/runtime/test_twelve_channel_registration.py", "checks/runtime/test_telegram_native.py", "checks/runtime/fixtures/telegram/agentcore.json", "infrastructure/docker/Dockerfile.backend", "runtime/gideon/interfaces/dashboard/handlers/apps.py", "apps/console/src/features/apps/AppsSection.tsx", "apps/console/src/features/apps/ChannelPairingStatus.tsx", "apps/console/src/features/apps/channelPairingJourney.test.tsx", "checks/runtime/test_channel_pairing_journey.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_twelve_channel_registration.py checks/runtime/test_telegram_native.py checks/runtime/test_channel_outbound_queue_real_path.py checks/runtime/test_channel_delivery_per_provider.py checks/runtime/test_channel_inbound_chokepoint.py checks/runtime/test_channel_inbound_policy_gate.py checks/runtime/test_channel_contract.py runtime/gideon/extensions/apps/native/gideonai-slack-desk/tests/test_conformance.py runtime/gideon/extensions/apps/native/gideonai-discord-desk/tests/test_channel_conformance.py runtime/gideon/extensions/apps/native/gideonai-mail-desk/tests/test_mail_desk_conformance.py checks/runtime/test_channel_pairing_journey.py"
 [req.003]
 title = "Full terminal chat interface with live tools approvals session navigation and agent controls"
 acceptance = "Implement the complete reachable feature: Full terminal chat interface with live tools approvals session navigation and agent controls"

@@ -6,6 +6,8 @@ import logging
 from threading import RLock
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from gideon.integrations.outbound_queue import QueuedDelivery
+
 logger = logging.getLogger(__name__)
 
 
@@ -196,6 +198,7 @@ class ChannelDelivery(Protocol):
 
 
 _REGISTRY: dict[str, ChannelDelivery] = {}
+_QUEUES: dict[str, QueuedDelivery] = {}
 _REGISTRY_LOCK = RLock()
 _PROVIDER_SUFFIXES = ("_runtime", "_channel", "_delivery")
 
@@ -211,18 +214,30 @@ def provider_of(delivery: Any) -> str:
 
 def register(delivery: ChannelDelivery | None, provider: str = "") -> str:
     """Publish one provider change, or clear all providers during shutdown."""
-    global _REGISTRY
+    global _REGISTRY, _QUEUES
     key = provider or (provider_of(delivery) if delivery is not None else "")
     with _REGISTRY_LOCK:
         updated = dict(_REGISTRY)
+        queues = dict(_QUEUES)
+        retired_queues = list(queues.values()) if not key and delivery is None else []
         previous = updated.get(key)
+        previous_queue = queues.get(key)
         if delivery is not None:
             updated[key] = delivery
+            if previous is not delivery:
+                queues[key] = QueuedDelivery(key, delivery)
         elif key:
             updated.pop(key, None)
+            queues.pop(key, None)
         else:
             updated.clear()
+            queues.clear()
         _REGISTRY = updated
+        _QUEUES = queues
+        if previous_queue is not None and previous is not delivery:
+            previous_queue.retire()
+        for queue in retired_queues:
+            queue.retire()
     if delivery is not None and previous is not None and previous is not delivery:
         logger.debug("channel delivery re-registered for %s", key)
     return key
@@ -230,15 +245,24 @@ def register(delivery: ChannelDelivery | None, provider: str = "") -> str:
 
 def delivery_for(provider: str) -> ChannelDelivery | None:
     """Resolve an origin provider; an absent origin never selects another channel."""
-    snapshot = _REGISTRY
+    snapshot = _QUEUES
     return snapshot.get(provider) if provider else None
+
+
+def raw_delivery_for(provider: str) -> ChannelDelivery | None:
+    return _REGISTRY.get(provider) if provider else None
 
 
 def owner_reachable() -> ChannelDelivery | None:
     """Choose the alphabetically first connected provider for owner-directed work."""
-    snapshot = _REGISTRY
-    first = min(snapshot, default=None)
-    return snapshot[first] if first is not None else None
+    from gideon.integrations.channel_transports import get_transport
+
+    snapshot = _QUEUES
+    for provider in sorted(snapshot):
+        transport = get_transport(provider)
+        if transport is None or transport.connected:
+            return snapshot[provider]
+    return None
 
 
 def registered_providers() -> list[str]:

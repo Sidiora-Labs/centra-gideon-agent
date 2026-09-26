@@ -1,0 +1,22 @@
+{
+  "name": "qq-channel",
+  "version": "1.0.0",
+  "displayName": "QQ",
+  "description": "Connect QQ direct messages and group mentions through the bot gateway.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.qq:create_provider",
+    "capabilities": ["messaging"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "app_id": {"type": "string", "default": "", "x-meta": {"label": "QQ bot app ID"}},
+        "secret": {"type": "string", "default": "", "x-meta": {"label": "QQ bot secret", "sensitive": true}}
+      }
+    }
+  }
+}

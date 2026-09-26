@@ -1,0 +1,22 @@
+{
+  "name": "dingtalk-channel",
+  "version": "1.0.0",
+  "displayName": "DingTalk",
+  "description": "Connect a DingTalk robot through Stream Mode and authenticated replies.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.dingtalk:create_provider",
+    "capabilities": ["messaging"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "client_id": {"type": "string", "default": "", "x-meta": {"label": "Robot app key"}},
+        "client_secret": {"type": "string", "default": "", "x-meta": {"label": "Robot app secret", "sensitive": true}}
+      }
+    }
+  }
+}
