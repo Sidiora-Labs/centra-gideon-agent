@@ -237,6 +237,16 @@ class McpServerConn:
             )
         return ok, output
 
+    async def protocol_call(self, kind: str, **payload: Any) -> dict[str, Any]:
+        """Run a resource or prompt request on the actor's owning event loop."""
+        if not await self.ensure_started():
+            raise RuntimeError(f"MCP server '{self.name}' not connected: {self._error}")
+        self.touch()
+        assert self._requests is not None
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        await self._requests.put((kind, payload, fut))
+        return await asyncio.wait_for(fut, timeout=_CALL_TIMEOUT_SECS)
+
     async def shutdown(self) -> None:
         self._closing = True
         if self._task and not self._task.done():
@@ -303,17 +313,27 @@ class McpServerConn:
         """Enter the right transport context for this server's spec."""
         url = self.spec.get("url") or self.spec.get("endpoint")
         if url:
+            headers = self.spec.get("headers") or {}
+            if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
+                raise ValueError("MCP headers must be a string mapping")
+            auth = None
+            if self.spec.get("oauth") is not None:
+                from gideon.integrations.mcp_oauth import oauth_provider
+
+                if not str(url).startswith("https://"):
+                    raise ValueError("MCP OAuth requires HTTPS")
+                auth = oauth_provider(self.name, str(url), self.spec)
             transport = (self.spec.get("transport") or "").lower()
             if transport in ("http", "streamable-http", "streamable_http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
                 read, write, _ = await stack.enter_async_context(
-                    streamablehttp_client(url)
+                    streamablehttp_client(url, headers=headers, auth=auth)
                 )
                 return read, write
             from mcp.client.sse import sse_client
 
-            read, write = await stack.enter_async_context(sse_client(url))
+            read, write = await stack.enter_async_context(sse_client(url, headers=headers, auth=auth))
             return read, write
 
         import os
@@ -361,19 +381,34 @@ class McpServerConn:
         assert self._requests is not None
         while not self._closing:
             kind, payload, fut = await self._requests.get()
-            if kind != "call":
-                if not fut.done():
-                    fut.set_result((False, f"unknown request: {kind}"))
-                continue
             try:
-                result = await session.call_tool(payload["tool"], payload["arguments"])
+                if kind == "call":
+                    result = await session.call_tool(payload["tool"], payload["arguments"])
+                    value: Any = (not getattr(result, "isError", False), _coerce_output(result))
+                elif kind == "resources/list":
+                    result = await session.list_resources(cursor=payload.get("cursor"))
+                    value = result.model_dump(mode="json")
+                elif kind == "resources/read":
+                    from pydantic import AnyUrl
+
+                    result = await session.read_resource(AnyUrl(payload["uri"]))
+                    value = result.model_dump(mode="json")
+                elif kind == "prompts/list":
+                    result = await session.list_prompts(cursor=payload.get("cursor"))
+                    value = result.model_dump(mode="json")
+                elif kind == "prompts/get":
+                    result = await session.get_prompt(payload["name"], payload.get("arguments") or {})
+                    value = result.model_dump(mode="json")
+                else:
+                    raise ValueError(f"unknown request: {kind}")
                 if not fut.done():
-                    fut.set_result(
-                        (not getattr(result, "isError", False), _coerce_output(result))
-                    )
+                    fut.set_result(value)
             except Exception as exc:  # noqa: BLE001
                 if not fut.done():
-                    fut.set_result((False, str(exc)[:500]))
+                    if kind == "call":
+                        fut.set_result((False, str(exc)[:500]))
+                    else:
+                        fut.set_exception(exc)
 
 
 def _coerce_output(result: Any) -> str:
@@ -427,6 +462,8 @@ def _spec_hash(spec: dict[str, Any]) -> str:
         "url": spec.get("url", ""),
         "transport": spec.get("transport", ""),
         "allowElicitation": spec.get("allowElicitation") is True,
+        "oauth": spec.get("oauth", {}),
+        "headers": spec.get("headers", {}),
     }
     blob = json.dumps(material, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
@@ -490,7 +527,7 @@ class McpClientRegistry:
         Returns ``None`` for an unknown server."""
         spec = self._specs.get(name)
         if spec is None:
-            return next((c for k, c in self._conns.items() if k[0] == name), None)
+            return None
         key = _conn_key(name, spec, session_key)
         conn = self._conns.get(key)
         if conn is None:
@@ -527,7 +564,7 @@ class McpClientRegistry:
         for key in list(self._conns):
             name, scope, _hash = key
             gone = name not in self._specs
-            stale_hash = scope == "" and key not in want_canonical
+            stale_hash = key[2] != _spec_hash(self._specs[name]) if not gone else False
             if gone or stale_hash:
                 conn = self._conns.pop(key)
                 asyncio.ensure_future(conn.shutdown())
