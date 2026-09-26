@@ -67,6 +67,26 @@ afterEach(() => {
 })
 
 describe('responsive SidePanel', () => {
+  it('uses the real workspace width when a navigation rail would leave a narrow main pane', () => {
+    const host = render(<PanelHost />)
+    const shell = host.container.querySelector('.gideon-shell') as HTMLElement
+    let available = 521
+    Object.defineProperty(shell, 'clientWidth', { configurable: true, get: () => available })
+    fireEvent.click(screen.getByRole('button', { name: 'Open details' }))
+    expect(screen.queryByRole('region')).toBeNull()
+    const sheet = screen.getByRole('dialog', { name: /A very long saved workflow title/ })
+    expect(sheet).toContainElement(screen.getByRole('textbox', { name: 'Panel search' }))
+    expect(screen.getByText('Workspace remains available')).toBeInTheDocument()
+
+    available = 776
+    viewport(1024)
+    const dock = screen.getByRole('region', { name: /A very long saved workflow title/ })
+    const separator = within(dock).getByRole('separator')
+    expect(Number(separator.getAttribute('aria-valuemax'))).toBeLessThanOrEqual(388)
+    expect(Number(separator.getAttribute('aria-valuenow'))).toBeLessThanOrEqual(388)
+    expect(dock).toContainElement(screen.getByRole('textbox', { name: 'Panel search' }))
+  })
+
   it('reserves half a 769px viewport, resizes at larger widths, and moves the same body into a mobile sheet', () => {
     const host = render(<PanelHost />)
     const trigger = screen.getByRole('button', { name: 'Open details' })
