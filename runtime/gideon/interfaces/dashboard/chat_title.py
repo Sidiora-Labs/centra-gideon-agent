@@ -1,6 +1,7 @@
 """Title generation — auto-title and rename."""
 
 import logging
+import re
 
 from aiohttp import web
 
@@ -33,14 +34,19 @@ def _build_title_prompt(messages: list[dict[str, str]]) -> str | None:
     """
     from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
 
-    lines: list[str] = []
-    for m in messages[:10]:
+    usable: list[tuple[str, str]] = []
+    for m in messages:
         role = m.get("role", "")
-        content = m.get("content", "")
+        content = str(m.get("content", "") or "").strip()
         if role in ("user", "assistant") and content:
-            lines.append(f"{role}: {content[:200]}")
-    if not lines:
+            usable.append((role, content))
+    if not usable:
         return None
+    first_user = next((item for item in usable if item[0] == "user"), None)
+    context = usable[-8:]
+    if first_user and first_user not in context:
+        context.insert(0, first_user)
+    lines = [f"{role}: {content[:280]}" for role, content in context]
     return render_use_case_prompt("title", {"transcript": "\n".join(lines)})
 
 
@@ -67,8 +73,9 @@ async def _stream_background_prompt(state: ConsoleState, prompt: str) -> str:
 
 def _parse_title(text: str) -> str:
     """Extract + sanitize the title from a raw title-generation response."""
-    title = text.strip().strip('"').strip("'").strip(".")
-    title = title.split("\n")[0].strip()
+    title = text.strip().split("\n")[0].strip()
+    title = re.sub(r"^(?:#{1,6}\s*|title\s*:\s*)", "", title, flags=re.IGNORECASE)
+    title = title.strip().strip('"').strip("'").strip("`").strip(".").strip()
     if not title or title.upper() == "SKIP":
         logger.info("Title generation returned SKIP/empty — topic not clear yet")
         return ""
@@ -80,8 +87,25 @@ def _parse_title(text: str) -> str:
         return ""
     title, _ = redact_exfiltration_urls(title)
     title, _ = redact_credentials(title)
+    title = re.sub(r"\s+", " ", title).strip()
     logger.info("Title generated: %r", title[:80])
     return title[:60]
+
+
+def _fallback_title(messages: list[dict[str, str]]) -> str:
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        raw = str(message.get("content", "") or "")
+        cleaned = re.sub(r"```.*?```", " ", raw, flags=re.DOTALL)
+        cleaned = re.sub(r"https?://\S+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" #>*-\n\t")
+        cleaned, _ = redact_exfiltration_urls(cleaned)
+        cleaned, _ = redact_credentials(cleaned)
+        words = cleaned.split()
+        if words:
+            return " ".join(words[:9])[:60].rstrip(" ,.;:")
+    return "Untitled chat"
 
 
 async def _generate_title_via_provider(
@@ -241,10 +265,7 @@ async def _maybe_auto_title(state: ConsoleState, session: _ChatSession) -> None:
     user_count = sum(1 for m in session.messages if m.get("role") == "user")
     if user_count < 1 or user_count > _TITLE_MAX_ATTEMPTS:
         if user_count > _TITLE_MAX_ATTEMPTS and not session._titled:
-            first_user = next(
-                (m["content"] for m in session.messages if m.get("role") == "user"), ""
-            )
-            _apply_title(state, session, first_user[:60] or session.key)
+            _apply_title(state, session, _fallback_title(session.messages))
         return
     logger.info(
         "Auto-title: attempting for session %s (turn %d)", session.key, user_count
@@ -281,8 +302,7 @@ async def api_chat_session_generate_title(request: web.Request) -> web.Response:
         title = await _generate_title_via_provider(state, session.messages)
     except Exception:
         logger.debug("Title generation failed for session %s", name, exc_info=True)
-        user_msgs = [m for m in session.messages if m.get("role") == "user"]
-        title = user_msgs[0].get("content", "")[:60] if user_msgs else ""
+        title = _fallback_title(session.messages)
 
     if title:
         _apply_title(state, session, title)
