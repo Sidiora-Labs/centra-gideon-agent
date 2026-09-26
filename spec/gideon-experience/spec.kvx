@@ -284,7 +284,7 @@ ac_1 = "Implement the complete reachable feature: Working artifact empty-state a
 
 [task.experience-creative]
 title = "experience-creative end-to-end implementation"
-status = "in_progress"
+status = "done"
 wave = 3
 owner_lane = "experience-creative"
 requires = []
