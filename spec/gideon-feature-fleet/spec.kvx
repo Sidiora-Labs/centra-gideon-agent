@@ -177,10 +177,10 @@ title = "Missing messaging integrations across twelve requested channels"
 acceptance = "The actual Gideon user or operator path delivers: Missing messaging integrations across twelve requested channels. State persists and failures are visible where relevant."
 owner_lane = "integrations-channels"
 hosted = "operator_managed"
-implementation_status = "implemented"
+implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Missing messaging integrations across twelve requested channels. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Twelve registered messaging transports with configured authenticated ingress, central channel admission, and outbound reply paths."
 
 
@@ -1581,10 +1581,10 @@ title = "Independent outbound channel queues and retry"
 acceptance = "The actual Gideon user or operator path delivers: Independent outbound channel queues and retry. State persists and failures are visible where relevant."
 owner_lane = "integrations-channels"
 hosted = "operator_managed"
-implementation_status = "implemented"
+implementation_status = "in_progress"
 ac_1 = "The actual Gideon user or operator path delivers: Independent outbound channel queues and retry. State persists and failures are visible where relevant."
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 implementation_note = "Bounded independent outbound workers per registered provider, four attempts, explicit exhausted failures and retirement of active/pending sends."
 
 
@@ -1831,14 +1831,14 @@ hosted_delivery = "integrated_main"
 
 [task.integrations-channels]
 title = "integrations-channels product slice"
-status = "in_progress"
+status = "done"
 wave = 1
 owner_lane = "integrations-channels"
 requires = []
 reqs = ["013.1", "128.1"]
 feature = "gideon-integrations"
 upstream_delivery = "integrated_main"
-hosted_delivery = "in_progress"
+hosted_delivery = "integrated_main"
 
 
 [task.integrations-terminal]
@@ -1897,7 +1897,7 @@ terminal = "Terminal client uses gateway session streaming, tools and approvals;
 distribution = "OSS single-container packaging serves runtime and console and persists workspace under the mounted data root. Hosted keeps its existing managed process architecture and storage conventions."
 
 [design.integration_result]
-upstream_delivery = "All sixteen feature lanes integrated into OSS main; remote main published through 6760f5a756d20acecb3e5824148dc9e662a6c234. Hosted remaining creative and channels are still in progress locally."
+upstream_delivery = "All sixteen feature lanes integrated into OSS main; remote main published through 6760f5a756d20acecb3e5824148dc9e662a6c234. Hosted creative is the only remaining local integration; all other hosted lanes are integrated."
 image = "Combined OSS image sha256:7ff701e61e1f2d37690a2501a5a00379d48c1a094897ca9d6c22cb3721808c70 passed real health, authenticated served console, persistent workspace across container recreation, Chromium PNG rendering as UID 10001, Matrix crypto, QR and bundled bridge import. Final main matches all 4110 source input hashes, aggregate 8a0278ce172683856fdba8010e986ffa0cdace236566e44ef801d0726c6c5a29."
 console = "Combined OSS Vite build passed. TypeScript reports ten preexisting errors in unchanged extensions/modules and wellbeing files, with no new integration diagnostics. Combined hosted candidate TypeScript passed with zero diagnostics and all nine focused route-policy tests passed; final main source hash comparison remains pending."
 external_services = "Live external vendors, handset pairing, SSH hosts and provider OAuth require their configured environments; focused real local transports and runtime paths are recorded per lane. No deployment performed."
