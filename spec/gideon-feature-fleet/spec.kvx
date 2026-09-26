@@ -16,6 +16,11 @@ branch_policy = "Local task commits, feature merges and main integration are aut
 [design.hosted]
 contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
 
+[design.commit_messages]
+format = "<unique_worker_id> <unique_feature_manager_id> <UTC_date> <branch_name> <git_tree_hash> concise actual code behavior"
+signature = "Signed By Gideon Agent | Powered by GPT Astra 6 and Codify"
+enforcement = "Shared repository prepare-commit-msg and commit-msg hooks, plus all-commit metadata inspection before integration. No hook bypass or unsigned task/merge commit. Root reconciled setup snapshots without changing their file trees."
+
 [design.delivery]
 contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
 
@@ -966,7 +971,7 @@ implementation_status = "pending"
 
 [task.runtime-memory]
 title = "runtime-memory product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "runtime-memory"
 requires = []
@@ -975,7 +980,7 @@ feature = "gideon-runtime"
 
 [task.runtime-models]
 title = "runtime-models product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "runtime-models"
 requires = []
@@ -984,7 +989,7 @@ feature = "gideon-runtime"
 
 [task.runtime-sessions]
 title = "runtime-sessions product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "runtime-sessions"
 requires = []
@@ -993,7 +998,7 @@ feature = "gideon-runtime"
 
 [task.runtime-experiments]
 title = "runtime-experiments product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "runtime-experiments"
 requires = []
@@ -1002,7 +1007,7 @@ feature = "gideon-runtime"
 
 [task.experience-workspace]
 title = "experience-workspace product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "experience-workspace"
 requires = []
@@ -1011,7 +1016,7 @@ feature = "gideon-experience"
 
 [task.experience-onboarding]
 title = "experience-onboarding product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "experience-onboarding"
 requires = []
@@ -1020,7 +1025,7 @@ feature = "gideon-experience"
 
 [task.experience-creative]
 title = "experience-creative product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "experience-creative"
 requires = []
@@ -1029,7 +1034,7 @@ feature = "gideon-experience"
 
 [task.experience-polish]
 title = "experience-polish product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "experience-polish"
 requires = []
@@ -1038,7 +1043,7 @@ feature = "gideon-experience"
 
 [task.automation-workflows]
 title = "automation-workflows product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "automation-workflows"
 requires = []
@@ -1047,7 +1052,7 @@ feature = "gideon-automation"
 
 [task.automation-proactivity]
 title = "automation-proactivity product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "automation-proactivity"
 requires = []
@@ -1056,7 +1061,7 @@ feature = "gideon-automation"
 
 [task.automation-tasks]
 title = "automation-tasks product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "automation-tasks"
 requires = []
@@ -1065,7 +1070,7 @@ feature = "gideon-automation"
 
 [task.automation-apps]
 title = "automation-apps product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "automation-apps"
 requires = []
@@ -1074,7 +1079,7 @@ feature = "gideon-automation"
 
 [task.integrations-protocols]
 title = "integrations-protocols product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "integrations-protocols"
 requires = []
@@ -1083,7 +1088,7 @@ feature = "gideon-integrations"
 
 [task.integrations-channels]
 title = "integrations-channels product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "integrations-channels"
 requires = []
@@ -1092,7 +1097,7 @@ feature = "gideon-integrations"
 
 [task.integrations-terminal]
 title = "integrations-terminal product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "integrations-terminal"
 requires = []
@@ -1101,7 +1106,7 @@ feature = "gideon-integrations"
 
 [task.integrations-distribution]
 title = "integrations-distribution product slice"
-status = "pending"
+status = "in_progress"
 wave = 1
 owner_lane = "integrations-distribution"
 requires = []
@@ -1114,3 +1119,27 @@ status = "pending"
 wave = 2
 owner_lane = "root"
 requires = ["runtime-memory", "runtime-models", "runtime-sessions", "runtime-experiments", "experience-workspace", "experience-onboarding", "experience-creative", "experience-polish", "automation-workflows", "automation-proactivity", "automation-tasks", "automation-apps", "integrations-protocols", "integrations-channels", "integrations-terminal", "integrations-distribution"]
+
+[design.runtime]
+imports = "Normalize supported exported conversations into existing session/history stores with source chronology, preview selection and resumable identity; archive recall returns original stored text and origin references within caller budgets."
+memory = "Ordered session extraction drains independently of interactive turns; delegated contributions retain run identity; aliases, typed edges and deletion tombstones persist in canonical knowledge stores."
+model_loop = "Read served context limits once through the common resolver; recovery does not replay completed tools; cache and usage fields survive child and workflow accounting; configuration replacement occurs between turns."
+experiments = "Campaigns, machine resources, replay and offline candidates have persisted identifiers, reachable operator interfaces, actual execution or recorded trajectories and inspectable results. Hosted exposes only managed campaigns and replay."
+
+[design.experience]
+workspace = "Session-scoped panel layout persists; live workflow cards retain run/node identity; deliverables resolve canonical artifact versions; delegated controls address stable run IDs."
+conversation = "Storage restores the complete transcript while prompt assembly remains bounded. Stream recovery reconciles authoritative terminal state without stealing a newer send or duplicating final text."
+onboarding = "URLs and saved progress identify the current step. Local model setup is OSS-only. Hosted retains existing managed bindings and only exposes customer-owned preferences."
+creative = "Presentation, design and research journeys consume actual input, produce canonical artifacts and expose editing/rendering/results; voice and file flows extend current working providers and viewers."
+
+[design.automation]
+workflows = "Use existing WorkflowDef, WorkflowRun and journals. Node failure attribution, binding defaults, retry ownership, output notices, declared input types, terminal states and committed effects are reflected through actual API and console consumers."
+rounds = "Role rounds and planner decisions reuse existing workflows, proposals, triggers, attention and delivery contracts; persist handoff ownership and resumable state instead of adding a second execution engine."
+tasks = "Task list, DAG, prerequisite and scoped progress consumers see the complete relevant set. Inbox actions and counts retain exact source IDs; trigger and notification outcomes correspond to real dispatch."
+apps = "App contributions attach to existing hook, provider, widget and pack lifecycles. Installation and form outcomes are visible; staged roster activation reports actual activated agents."
+
+[design.integrations]
+protocols = "ACP server, A2A task lifecycle and MCP resources/prompts/OAuth connect to existing sessions and task execution with functional request/response and cancellation semantics."
+channels = "Use existing installed adapter implementations when present; implement missing platform transports through ChannelMessage/OutboundMessage contracts. Per-channel queues isolate delivery and preserve ordered retry outcomes."
+terminal = "Terminal client uses gateway session streaming, tools and approvals; hosted accepts existing authenticated identity and omits operator model setup."
+distribution = "OSS single-container packaging serves runtime and console and persists workspace under the mounted data root. Hosted keeps its existing managed process architecture and storage conventions."
