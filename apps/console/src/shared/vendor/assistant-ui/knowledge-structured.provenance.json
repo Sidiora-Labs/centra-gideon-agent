@@ -109,13 +109,13 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/comparison-card.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/comparison-card.tsx",
       "donor_sha256": "ab1221f25b862bbd0a86fcb59c31b14a6af91d9b5bdedbece96cbbbf9960f32d",
-      "local_sha256": "41a4b106802e7d77b7dc7c0817eb8e5fd84e5e634088a1ebfcc6d15145460557"
+      "local_sha256": "abf16c6cf4bce96ccf60059d41f16cdb40b9c96f7945dcea8d5097ba51aa5581"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/timeline.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/timeline.tsx",
       "donor_sha256": "605316d8ee1f3e511b9bebe203b58b2533489f02b5f3692fbe5b8a7f7235035d",
-      "local_sha256": "3360b17525f4e64f1424ff826c6772982cdb939b4fadd940f340579b473adf3d"
+      "local_sha256": "c6f3610d162ea31d678ac52424d6ba548d8d4229c6c387f733b617b10673b2a9"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/job-progress.tsx",

@@ -33,8 +33,8 @@
     },
     "artifact-card.tsx": {
       "source_sha256": "94ee88679af4344bbed24ff05f462cfa68656e12c7b93b5a2733f2a99826bc2a",
-      "adapted_sha256": "807f441aabcbd1302b77fa31a825a724c0f78286b57e55c64fe3e87ff728356b",
-      "adaptation": "@/lib/utils -> ../lib/utils; optional embedded preview, kind icon and recorded metadata slots preserve the compact donor card"
+      "adapted_sha256": "a497e9b1fadbf5f0cd2aa83482a0e1f40ca5996dd45493d00982c62e9f47a7ec",
+      "adaptation": "@/lib/utils -> ../lib/utils; optional embedded preview, kind icon and recorded metadata slots preserve the compact donor card; embedded titles and metadata wrap in narrow grids"
     },
     "todo-list.tsx": {
       "source_sha256": "cdc04adf037554a37ae920e7697d47bbd1821def3456e24061c64251613e1eaa",
