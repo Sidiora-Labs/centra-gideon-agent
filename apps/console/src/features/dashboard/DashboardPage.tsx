@@ -35,9 +35,11 @@ import { useComposerData } from '../../shared/data/useComposerData'
 import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { InlineError } from '../../shared/ui/InlineError'
+import { LauncherBubble } from '../../shared/vendor/assistant-ui/elements/launcher-bubble'
 
 export function DashboardPage(route: RouteProps) {
   const { name } = useIdentity()
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const composition = useComposition()
   const custom = composition.selected && !composition.selected.preset
   return (
@@ -170,6 +172,15 @@ export function DashboardPage(route: RouteProps) {
         {!custom && <div className="hidden shrink-0 px-l pb-m pt-xs lg:block">
           <SystemRailIsland {...route} />
         </div>}
+        <LauncherBubble
+          className="fixed bottom-6 right-6 z-30"
+          open={assistantOpen}
+          unread={0}
+          greeting="How can I help?"
+          prompts={[]}
+          onToggle={() => setAssistantOpen((open) => !open)}
+          onStart={() => route.navigate('chat/new')}
+        />
       </div>
     </DashboardLiveProvider>
   )

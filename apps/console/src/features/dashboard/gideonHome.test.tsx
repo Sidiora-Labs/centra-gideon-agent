@@ -77,6 +77,26 @@ describe('dashboard consumer', () => {
     await userEvent.click(screen.getByText('Your overview'))
     expect(screen.getByText('Dashboard composition')).toBeTruthy()
   })
+
+  it('opens the assistant bubble and starts a real conversation route', async () => {
+    const navigate = vi.fn()
+    render(<DashboardPage sub="" query={{}} navEpoch={0} navigate={navigate} setQuery={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Open the assistant' }))
+    expect(screen.getByText('How can I help?')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Close the assistant' }).getAttribute('aria-expanded')).toBe('true')
+    await userEvent.click(screen.getByRole('button', { name: 'Start a conversation' }))
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('chat/new')
+  })
+
+  it('closes the assistant bubble without starting a conversation', async () => {
+    const navigate = vi.fn()
+    render(<DashboardPage sub="" query={{}} navEpoch={0} navigate={navigate} setQuery={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Open the assistant' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Close the assistant' }))
+    expect(screen.queryByText('How can I help?')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start a conversation' })).toBeNull()
+    expect(navigate).not.toHaveBeenCalled()
+  })
 })
 
 describe('overview when preference storage is unavailable', () => {
