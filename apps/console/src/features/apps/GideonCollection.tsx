@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import type { RouteProps } from '../../app/shell/useQueryState'
+import { GideonAppMark, type AppMarkName } from './GideonAppMarks'
 import './gideonCollection.css'
 
 type Category = 'Create' | 'Think' | 'Everyday' | 'Build'
 interface CollectionApp {
-  name: string
+  name: AppMarkName
   category: Category
   promise: string
   description: string
@@ -33,6 +34,11 @@ export const GIDEON_APPS: readonly CollectionApp[] = [
 ]
 
 const CATEGORIES = ['All', 'Create', 'Think', 'Everyday', 'Build'] as const
+const FEATURE_ART: Partial<Record<AppMarkName, string>> = {
+  Research: '/illustrations/gideon-research.png',
+  Slides: '/illustrations/gideon-slides.png',
+  Studio: '/illustrations/gideon-studio.png',
+}
 
 export function GideonCollection({ navigate, connectionsRoute = 'settings/apps' }: Pick<RouteProps, 'navigate'> & { connectionsRoute?: string }) {
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>('All')
@@ -49,10 +55,15 @@ export function GideonCollection({ navigate, connectionsRoute = 'settings/apps' 
       <button type="button" className="gideon-collection-manage" onClick={() => navigate('apps/manage')}>Manage apps</button>
     </nav>
     <div className="gideon-collection-grid">
-      {shown.map((app) => <button key={app.name} type="button" className="gideon-collection-card"
+      {shown.map((app) => <button key={app.name} type="button" className="gideon-collection-card" data-category={app.category} data-art={FEATURE_ART[app.name] ? 'illustration' : 'mark'}
         onClick={() => navigate(app.name === 'Connections' ? connectionsRoute : app.route)} aria-label={`${app.name}: ${app.action}`}>
-        <span className="gideon-collection-card-top">{app.category}<span aria-hidden="true">↗</span></span>
-        <strong>{app.name}</strong>
+        <span className="gideon-collection-card-top">{app.category}<span aria-hidden="true">{String(GIDEON_APPS.indexOf(app) + 1).padStart(2, '0')}</span></span>
+        <span className="gideon-collection-card-identity">
+          <strong>{app.name}</strong>
+          {FEATURE_ART[app.name]
+            ? <img className="gideon-collection-feature-art" src={FEATURE_ART[app.name]} width="1536" height="1024" alt="" />
+            : <GideonAppMark name={app.name} />}
+        </span>
         <span className="gideon-collection-promise">{app.promise}</span>
         <span className="gideon-collection-description">{app.description}</span>
         <span className="gideon-collection-card-foot">{app.action}<span aria-hidden="true">→</span></span>
