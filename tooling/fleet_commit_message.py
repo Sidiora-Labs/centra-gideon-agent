@@ -19,7 +19,7 @@ if mode=='prepare':
  lines=[x.strip() for x in body.splitlines() if x.strip() and not x.startswith('#') and x.strip()!=SIGN]
  summary=lines[0] if lines else ''
  if summary.startswith('gf26-'):summary=' '.join(summary.split(' ')[5:])
- if summary.startswith(('Merge ', 'merge ')):
+ if summary.startswith(('Merge ', 'merge ', 'land ')):
   try:
    incoming=git('log','-1','--format=%s','MERGE_HEAD')
    if incoming.startswith('gf26-'):incoming=' '.join(incoming.split(' ')[5:])
