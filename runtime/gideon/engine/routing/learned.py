@@ -65,7 +65,8 @@ def _bands(
 
 
 def _cost_order(
-    band: list[int], refs: list[str], cost_of: Callable[[str], float] | None
+    band: list[int], refs: list[str], cost_of: Callable[[str], float] | None,
+    latency: dict[int, float] | None = None,
 ) -> list[int]:
     slots = sorted(band)
     if cost_of is None or len(slots) < 2:
@@ -78,7 +79,20 @@ def _cost_order(
             value = None
         if value is not None:
             prices[index] = value
-    ranked = iter(sorted(prices, key=lambda index: (prices[index], index)))
+    observed = latency or {}
+    if len(prices) > 1 and all(index in observed for index in prices):
+        price_low, price_high = min(prices.values()), max(prices.values())
+        time_low = min(observed[index] for index in prices)
+        time_high = max(observed[index] for index in prices)
+        def rank(index: int) -> tuple[float, int]:
+            price_range = price_high - price_low
+            time_range = time_high - time_low
+            price_score = (prices[index] - price_low) / price_range if price_range else 0.0
+            time_score = (observed[index] - time_low) / time_range if time_range else 0.0
+            return (0.7 * price_score + 0.3 * time_score, index)
+        ranked = iter(sorted(prices, key=rank))
+    else:
+        ranked = iter(sorted(prices, key=lambda index: (prices[index], index)))
     return [next(ranked) if index in prices else index for index in slots]
 
 
@@ -86,21 +100,27 @@ def _cost_order(
 class RankedSlots:
     refs: list[str]
     scores: dict[int, float]
+    latency: dict[int, float]
 
     @classmethod
     def measure(cls, refs, rows, min_samples, local_keys, margin):
         from gideon.engine.routing.policy import is_local_ref
 
         scores = {}
+        latency = {}
         for slot, ref in enumerate(refs):
-            value = _opinion(rows.get(ref), min_samples=min_samples)
+            row = rows.get(ref)
+            value = _opinion(row, min_samples=min_samples)
             if value is not None:
                 scores[slot] = (
                     value
                     if is_local_ref(ref, local_keys=local_keys)
                     else value - margin
                 )
-        return cls(refs, scores)
+                measured = _num(row.get("avg_ms")) if isinstance(row, dict) else None
+                if measured is not None and measured > 0:
+                    latency[slot] = measured
+        return cls(refs, scores, latency)
 
     def arrange(self, width, cost_of):
         if len(self.scores) < 2:
@@ -109,7 +129,7 @@ class RankedSlots:
         chosen = iter(
             index
             for band in _bands(descending, self.scores, width)
-            for index in _cost_order(band, self.refs, cost_of)
+            for index in _cost_order(band, self.refs, cost_of, self.latency)
         )
         result = [
             self.refs[next(chosen)] if slot in self.scores else ref

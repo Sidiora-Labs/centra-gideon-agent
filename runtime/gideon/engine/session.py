@@ -113,6 +113,7 @@ def _resolve_acp_spawn_cwd(cwd: str | None) -> Path:
 @dataclass
 class _Session:
     provider: ModelProvider
+    generation: int = 0
     last_used: float = field(default_factory=time.monotonic)
     is_new: bool = True
     prompt_count: int = 0
@@ -212,6 +213,8 @@ class ConversationDirectory:
     def __init__(self, cfg: AppConfig, provider_factory: ProviderFactory | None = None):
         self._cfg = cfg
         self._provider_factory = provider_factory
+        self._factory_generation = 0
+        self._reload_states: dict[str, dict] = {}
         self._sessions: dict[str, _Session] = {}
         self._lock = asyncio.Lock()
         self._start_sem = asyncio.Semaphore(4)
@@ -297,22 +300,20 @@ class ConversationDirectory:
 
     async def reload_provider_factory(self) -> None:
         replacement = AppConfig.load()
+        candidate = replacement.create_provider_factory()
         async with self._pool_fill_lock:
             async with self._lock:
                 self._cfg = replacement
-                self._provider_factory = replacement.create_provider_factory()
+                self._provider_factory = candidate
+                self._factory_generation += 1
                 self._pool_size = self._bounded_pool_size(replacement.session.pool_size)
                 self._pool_agent = (
                     replacement.session.pool_agent or replacement.default_agent
                 )
                 self._pool_cwd = default_workspace_dir()
                 old_pool = self._take_pool_entries()
-                for provider, _ in old_pool:
-                    await self._close_quietly(provider)
-                old_sessions = list(self._sessions.values())
-                self._sessions.clear()
-        for entry in old_sessions:
-            await self._close_quietly(entry.provider)
+        for provider, _ in old_pool:
+            await self._close_quietly(provider)
         self._pool_started = False
         health = self._pool_health_task
         self._pool_health_task = None
@@ -361,7 +362,9 @@ class ConversationDirectory:
             return
         async with self._lock:
             if BACKGROUND_KEY not in self._sessions:
-                self._sessions[BACKGROUND_KEY] = _Session(provider, is_new=False)
+                self._sessions[BACKGROUND_KEY] = _Session(
+                    provider, generation=self._factory_generation, is_new=False
+                )
                 return
             await provider.shutdown()
 
@@ -763,11 +766,14 @@ class ConversationDirectory:
             extra_factory_kwargs.setdefault("model_axis", "background")
         reuse = None
         stale = None
+        stale_entry = None
         try:
             async with self._lock:
                 entry = self._sessions.get(key) if key not in self._compacting else None
                 if entry is not None:
-                    if _process_live(entry.provider):
+                    if entry.generation != self._factory_generation:
+                        stale_entry = entry
+                    elif _process_live(entry.provider):
                         reuse = entry, entry.touch()
                     else:
                         stale = self._sessions.pop(key).provider
@@ -777,6 +783,30 @@ class ConversationDirectory:
         finally:
             if stale is not None:
                 await self._close_quietly(stale)
+        if stale_entry is not None:
+            await stale_entry.semaphore.acquire()
+            retired = False
+            try:
+                async with self._lock:
+                    if self._sessions.get(key) is stale_entry:
+                        self._sessions.pop(key)
+                        retired = True
+                        self._remember_provider(key, stale_entry.provider)
+                        exporter = getattr(stale_entry.provider, "export_turn_state", None)
+                        if callable(exporter):
+                            try:
+                                self._reload_states[key] = exporter()
+                            except Exception:
+                                logger.warning("Could not preserve session state during reload", exc_info=True)
+            finally:
+                stale_entry.semaphore.release()
+            if retired:
+                await self._close_quietly(stale_entry.provider)
+            return await self.get_or_create(
+                key, agent=agent, channel_id=channel_id,
+                approval_policy=approval_policy, model=model, cwd=cwd,
+                extra_env=extra_env, **extra_factory_kwargs,
+            )
         if reuse is not None:
             entry, initial = reuse
             await entry.semaphore.acquire()
@@ -795,8 +825,13 @@ class ConversationDirectory:
                     self._sessions.get(key) if key not in self._compacting else None
                 )
                 if winner is None:
+                    saved_state = self._reload_states.pop(key, None)
+                    restorer = getattr(provider, "restore_turn_state", None)
+                    if saved_state is not None and callable(restorer):
+                        restorer(saved_state)
                     entry = _Session(
                         provider,
+                        generation=self._factory_generation,
                         is_new=False,
                         approval_policy=approval_policy,
                         agent=agent or "",

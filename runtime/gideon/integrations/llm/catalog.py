@@ -267,7 +267,10 @@ def _decode_model_rows(document: object) -> list[ModelInfo]:
                 id=identifier,
                 name=identifier,
                 capabilities=infer_capabilities(identifier),
-                extra={"owned_by": owner} if owner else {},
+                extra={
+                    key: value for key, value in row.items()
+                    if key in {"owned_by", "context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"}
+                },
             )
         )
     return models
