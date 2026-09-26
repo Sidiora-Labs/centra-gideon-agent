@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
+import { Field, Select, TextArea, TextInput, useFieldLabelId } from '../../../shared/ui/forms'
 import { Download, Plus, Scale } from 'lucide-react'
 
 type Values = { muscle_percent: number; fat_percent: number; bone_mass: { value: number; unit: string }; temperature: { value: number; unit: string } }
@@ -21,6 +21,11 @@ function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
   if (value.toLowerCase().startsWith('hi')) return 'hi'
   if (value.toLowerCase().startsWith('zh')) return 'zh-CN'
   return 'en'
+}
+
+function DecimalInput({ value, onChange, min, max }: { value: string; onChange: (value: string) => void; min?: number; max?: number }) {
+  const label = useFieldLabelId()
+  return <input aria-labelledby={label} className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" required type="number" step="any" min={min} max={max} value={value} onChange={event => onChange(event.target.value)} />
 }
 
 export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) {
@@ -85,11 +90,11 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
     {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
       <Field label={w[6]}><TextInput required value={observed} onChange={setObserved} placeholder="2026-09-25T08:00:00Z" /></Field>
       <Field label={w[7]}><TextInput required disabled={!!selected} value={source} onChange={setSource} /></Field>
-      <Field label={w[8]}><TextInput required type="number" min={0} max={100} value={muscle} onChange={setMuscle} /></Field>
-      <Field label={w[9]}><TextInput required type="number" min={0} max={100} value={fat} onChange={setFat} /></Field>
-      <Field label={w[10]}><TextInput required type="number" min={0} value={bone} onChange={setBone} /></Field>
+      <Field label={w[8]}><DecimalInput min={0} max={100} value={muscle} onChange={setMuscle} /></Field>
+      <Field label={w[9]}><DecimalInput min={0} max={100} value={fat} onChange={setFat} /></Field>
+      <Field label={w[10]}><DecimalInput min={0} value={bone} onChange={setBone} /></Field>
       <Field label={w[11]}><Select ariaLabel={w[11]} value={boneUnit} onChange={setBoneUnit} options={['kg', 'g', 'lb'].map(value => ({ value, label: value }))} /></Field>
-      <Field label={w[12]}><TextInput required type="number" value={temperature} onChange={setTemperature} /></Field>
+      <Field label={w[12]}><DecimalInput value={temperature} onChange={setTemperature} /></Field>
       <Field label={w[13]}><Select ariaLabel={w[13]} value={temperatureUnit} onChange={setTemperatureUnit} options={['C', 'F', 'K'].map(value => ({ value, label: value }))} /></Field>
       <Field label={w[14]}><TextArea value={notes} onChange={setNotes} /></Field>
       <Button type="submit" disabled={busy}>{selected ? w[15] : w[16]}</Button>

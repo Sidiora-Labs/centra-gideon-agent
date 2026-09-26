@@ -215,3 +215,44 @@ export function StrListField({ label, hint, cfg, field, patch, placeholder = 'Ad
     </Field>
   )
 }
+
+export interface SettingsNavigationItem { id: string; label: string }
+
+const SETTINGS_GROUPS: { title: string; ids: readonly string[] }[] = [
+  { title: 'Personal', ids: ['account', 'design', 'chat', 'notifications', 'voice', 'memory', 'agent', 'inbox', 'documents', 'feedback', 'legibility', 'ambient'] },
+  { title: 'Connections & abilities', ids: ['providers', 'models', 'search', 'prompts', 'apps', 'secrets', 'devices', 'sender-trust', 'external-access', 'routing', 'sources', 'packs', 'companion', 'evals'] },
+  { title: 'Data & system', ids: [] },
+]
+
+export function SettingsNavigation({ items, current, go }: {
+  items: readonly SettingsNavigationItem[]
+  current: string
+  go: (id: string) => void
+}) {
+  const grouped = SETTINGS_GROUPS.map((group, index) => ({
+    title: group.title,
+    items: items.filter((item) => index === 2
+      ? !SETTINGS_GROUPS[0].ids.includes(item.id) && !SETTINGS_GROUPS[1].ids.includes(item.id)
+      : group.ids.includes(item.id)),
+  })).filter((group) => group.items.length > 0)
+  return <>
+    <label className="flex flex-col gap-xs border-b border-outline-variant p-m text-sm text-on-surface-low md:hidden">
+      Settings section
+      <select aria-label="Settings section" value={current} onChange={(event) => go(event.target.value)}
+        className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface">
+        {grouped.map((group) => <optgroup key={group.title} label={group.title}>
+          {group.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </optgroup>)}
+      </select>
+    </label>
+    <nav aria-label="Settings sections" className="hidden w-60 shrink-0 overflow-y-auto border-r border-outline-variant px-s py-l md:block">
+      {grouped.map((group) => <section key={group.title} className="mb-l">
+        <h2 className="px-s pb-xs text-[11px] uppercase tracking-widest text-on-surface-low">{group.title}</h2>
+        {group.items.map((item) => <button key={item.id} type="button" aria-current={current === item.id ? 'page' : undefined}
+          onClick={() => go(item.id)} className="block w-full rounded-lg px-s py-xs text-left text-sm text-on-surface hover:bg-surface-high aria-[current=page]:bg-surface-high">
+          {item.label}
+        </button>)}
+      </section>)}
+    </nav>
+  </>
+}

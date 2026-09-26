@@ -2,7 +2,10 @@ import { useSyncExternalStore } from 'react'
 
 export type NavMode = 'starter' | 'expert'
 export interface NavDisclosure { mode: NavMode; pinned: string[] }
-export const STARTER_NAV_IDS: readonly string[] = ['dashboard', 'chat', 'rooms', 'inbox', 'apps', 'settings']
+export const STARTER_NAV_IDS: readonly string[] = [
+  'chat/new', 'chat/history', 'projects', 'files', 'capabilities/communications?view=calendar',
+  'inbox', 'apps', 'apps/manage', 'settings', 'dashboard', 'rooms',
+]
 const starter = new Set(STARTER_NAV_IDS)
 const KEY = 'nav-disclosure', EVENT = 'ne:nav-disclosure'
 const absent = (): NavDisclosure => ({ mode: 'expert', pinned: [] })

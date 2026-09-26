@@ -3,7 +3,7 @@
 
 /* ════════════════════════════════════════════════════════════════════════
    Gideon — design token core (Tailwind v4 @theme)
-   Graphite surfaces and the Gideon blue accent. Everything here is token-driven + theme-customizable
+   Graphite surfaces and the Gideon neutral accent. Everything here is token-driven + theme-customizable
    (schemes + per-token overrides). Dark is default; .light overrides.
    ════════════════════════════════════════════════════════════════════════ */
 @theme {
@@ -13,34 +13,34 @@
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
                                     
-  --color-canvas: #0b0f17;
-  --color-surface: #111722;
-  --color-surface-low: #141b26;
-  --color-surface-container: #171f2b;
-  --color-surface-high: #222c3c;
-  --color-surface-highest: #2c3748;
-  --color-rail: #0c111a;
+  --color-canvas: #19191c;
+  --color-surface: #202024;
+  --color-surface-low: #202024;
+  --color-surface-container: #202024;
+  --color-surface-high: #29292e;
+  --color-surface-highest: #303036;
+  --color-rail: #111113;
 
                                 
-  --color-on-surface: #ecf0f7;
-  --color-on-surface-low: #a8b3c4;
-  --color-on-surface-var: #c3cddb;
-  --color-outline: #8490a4;
-  --color-outline-variant: #334056;
+  --color-on-surface: #eeeeef;
+  --color-on-surface-low: #a2a2ad;
+  --color-on-surface-var: #c7c7d0;
+  --color-outline: #84848f;
+  --color-outline-variant: #34343b;
 
-  /* ── color: Gideon brand (dark) ── */
-  --color-primary: #8faaff;
-  --color-on-primary: #101d47;
-  --color-primary-container: #203260;
-  --color-on-primary-container: #e4ebff;
-  --color-primary-emphasis: #b3c5ff;
-  --color-secondary: #89c9ed; /* cool secondary */
+  /* ── color: Gideon neutral brand (dark) ── */
+  --color-primary: #d9dbeb;
+  --color-on-primary: #1c1d26;
+  --color-primary-container: #343546;
+  --color-on-primary-container: #eeeeef;
+  --color-primary-emphasis: #e4e5f0;
+  --color-secondary: #b5b8ce; /* neutral secondary */
 
                              
   --color-ok: #0ebc5f;
   --color-warn: #ff8d41;
   --color-danger: #f66c66;
-  --color-info: #629efe;
+  --color-info: #aeb8e6;
                                                                               
                                                                               
                                                               
@@ -118,12 +118,12 @@
   --color-on-primary-tint: var(--color-primary-emphasis);
 
   /* ── brand gradient stops ── */
-  --grad-1: #3753b5;
-  --grad-2: #8faaff;
-  --grad-3: #a8c7fa;
-  --grad-4: #89c9ed;
-  --glow-a: #8faaff;
-  --glow-b: #a8c7fa;
+  --grad-1: #777d9f;
+  --grad-2: #d9dbeb;
+  --grad-3: #aeb8e6;
+  --grad-4: #b5b8ce;
+  --glow-a: #d9dbeb;
+  --glow-b: #aeb8e6;
 
                                                                                        
                                                                                   
@@ -212,7 +212,7 @@
                                                                              
                                                                                     
   --ring-stop-1: var(--grad-1);
-  --ring-stop-2: #eef3ff;
+  --ring-stop-2: #eeeeef;
   --ring-stop-3: var(--grad-2);
   --ring-stop-4: var(--grad-4);
 
@@ -237,23 +237,23 @@
 
 /* ── light mode overrides ── */
 .light {
-  --color-canvas: #f1f4fa;
-  --color-surface: #ffffff;
-  --color-surface-low: #f4f6fa;
-  --color-surface-container: #ffffff;
-  --color-surface-high: #e9eef6;
-  --color-surface-highest: #dfe6f0;
-  --color-rail: #e7edf5;
-  --color-on-surface: #172238;
-  --color-on-surface-low: #4b5b70;
-  --color-on-surface-var: #56657a;
-  --color-outline: #7e8da3;
-  --color-outline-variant: #d7dfeb;
-  --color-primary: #244cff;
+  --color-canvas: #fcfcfd;
+  --color-surface: #f5f5f7;
+  --color-surface-low: #f5f5f7;
+  --color-surface-container: #f5f5f7;
+  --color-surface-high: #ededf0;
+  --color-surface-highest: #e7e7ec;
+  --color-rail: #f3f3f5;
+  --color-on-surface: #202027;
+  --color-on-surface-low: #62626f;
+  --color-on-surface-var: #555561;
+  --color-outline: #757582;
+  --color-outline-variant: #dddde5;
+  --color-primary: #343e69;
   --color-on-primary: #ffffff;
-  --color-primary-container: #e1e8ff;
+  --color-primary-container: #e5e7f0;
   --color-on-primary-container: #142347;
-  --color-primary-emphasis: #193bc4;
+  --color-primary-emphasis: #303a63;
                                                                                                    
                                       
 
@@ -287,7 +287,7 @@
                                                                                               
                                                                                                   
                                                                                      
-  --color-info: #1059bc;
+  --color-info: #3f5185;
                                                                                         
                                                                      
   --color-on-danger: #ffffff;
@@ -297,13 +297,13 @@
                                                                         
                                                                       
   --ring-stop-2: #142347;
-  --color-secondary: #27688e;
-  --grad-1: #3753b5;
-  --grad-2: #244cff;
-  --grad-3: #416cce;
-  --grad-4: #27688e;
-  --glow-a: #244cff;
-  --glow-b: #416cce;
+  --color-secondary: #4a527e;
+  --grad-1: #777d9f;
+  --grad-2: #343e69;
+  --grad-3: #59648f;
+  --grad-4: #b5b8ce;
+  --glow-a: #343e69;
+  --glow-b: #59648f;
   color-scheme: light;
 }
 

@@ -51,6 +51,7 @@ import { ConfigSectionsPanel } from './ConfigSectionsPanel'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { fvs } from '../../shared/theme/fontWeight'
 import { PageTitle } from '../../shared/ui/PageTitle'
+import { SettingsNavigation } from './settingsUI'
 
 interface PanelCtx {
   go: (id: string) => void
@@ -61,7 +62,7 @@ interface PanelCtx {
 
 interface SubPage { id: string; label: string; icon: LucideIcon; render: (ctx: PanelCtx) => React.ReactNode }
 
-const SUBPAGES: SubPage[] = [
+export const SUBPAGES: SubPage[] = [
   { id: 'account', label: 'Account', icon: User, render: () => <AccountPanel /> },
   { id: 'design', label: 'Design', icon: Palette, render: () => <DesignPanel /> },
   { id: 'chat', label: 'Chat', icon: MessageSquare, render: () => <ChatPanel /> },
@@ -141,9 +142,12 @@ export function SettingsPage({ sub, navigate, query, setQuery }: RouteProps) {
           </div>
         }
       />
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto px-2xl py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
-          {current.render({ go, navigate, query, setQuery })}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+        <SettingsNavigation items={SUBPAGES} current={current.id} go={go} />
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto px-2xl py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+            {current.render({ go, navigate, query, setQuery })}
+          </div>
         </div>
       </div>
     </div>

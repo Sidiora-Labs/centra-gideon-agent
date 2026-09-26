@@ -52,11 +52,11 @@ function scheme(id: string, label: string, s: {
 
 export const SCHEMES: Scheme[] = [
   scheme('gideon', 'Gideon', {
-    primary: ['#8faaff', '#244cff'], primaryEmphasis: ['#b3c5ff', '#193bc4'],
-    onPrimary: ['#101d47', '#ffffff'], primaryContainer: ['#203260', '#e1e8ff'],
-    secondary: ['#89c9ed', '#27688e'], info: ['#629efe', '#1059bc'],
-    gradient: ['#3753b5', '#8faaff', '#a8c7fa', '#89c9ed'],
-    glowA: ['#8faaff', '#244cff'], glowB: ['#a8c7fa', '#416cce'],
+    primary: ['#d9dbeb', '#343e69'], primaryEmphasis: ['#e4e5f0', '#303a63'],
+    onPrimary: ['#1c1d26', '#ffffff'], primaryContainer: ['#343546', '#e5e7f0'],
+    secondary: ['#b5b8ce', '#4a527e'], info: ['#aeb8e6', '#3f5185'],
+    gradient: ['#777d9f', '#d9dbeb', '#aeb8e6', '#b5b8ce'],
+    glowA: ['#d9dbeb', '#343e69'], glowB: ['#aeb8e6', '#59648f'],
   }),
   // Coral remains available alongside the Gideon default.
   // Light primary/emphasis/info mirror tokenRegistry's AA-verified shades
