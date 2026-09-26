@@ -21,9 +21,9 @@ const priorMessages: ThreadMessageLike[] = [
 
 let aui: ReturnType<typeof useAui>;
 let helpers: VoiceSessionHelpers;
-let disconnectProvider: ReturnType<typeof vi.fn>;
-let muteProvider: ReturnType<typeof vi.fn>;
-let unmuteProvider: ReturnType<typeof vi.fn>;
+let disconnectProvider: () => void;
+let muteProvider: () => void;
+let unmuteProvider: () => void;
 
 function Runtime({ initialMessages = [] }: { initialMessages?: ThreadMessageLike[] }) {
   const [messages, updateMessages] = useState(initialMessages);
@@ -66,9 +66,9 @@ afterEach(() => { cleanup(); });
 
 describe("VoiceConversation with the actual AUI voice session", () => {
   beforeEach(() => {
-    disconnectProvider = vi.fn();
-    muteProvider = vi.fn();
-    unmuteProvider = vi.fn();
+    disconnectProvider = vi.fn<() => void>();
+    muteProvider = vi.fn<() => void>();
+    unmuteProvider = vi.fn<() => void>();
   });
 
   it("renders the real starting, listening, and speaking session with only new voice turns", async () => {
