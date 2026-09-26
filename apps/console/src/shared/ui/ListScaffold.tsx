@@ -26,9 +26,9 @@ function CollectionMessage({ title, detail, emblem, action, alert = false }: {
 }) {
   return <div role={alert ? 'alert' : undefined} data-visual-state={alert ? 'failed' : 'empty'} className="flex flex-col items-center gap-l py-2xl text-center">
     {emblem}
-    <div className="space-y-1">
+    <div className="space-y-xs">
       <h2 data-type="headline-s" className="text-on-surface">{title}</h2>
-      {detail && <p data-type="body-m" className="mt-1 max-w-[420px] text-on-surface-low">{detail}</p>}
+      {detail && <p data-type="body-m" className="mt-xs max-w-[420px] text-on-surface-low">{detail}</p>}
     </div>
     {action}
   </div>
@@ -116,7 +116,7 @@ export function FormSkeleton({ sections = 2, rows = 3, title = true, what }: { s
     {repeat(sections, section => <section key={section} className="mb-2xl">
       <Skeleton className="mb-m h-4 w-32" />
       <Surface tone="container" radius="lg" className="px-l py-xs">
-        {repeat(rows, row => <div key={row} className="flex items-center justify-between gap-l border-b border-outline-variant/20 py-3 last:border-0">
+        {repeat(rows, row => <div key={row} className="flex items-center justify-between gap-l border-b border-outline-variant/20 py-m last:border-0">
           <div className="min-w-0 flex-1 space-y-xs"><Skeleton className="h-3.5 w-1/3" /><Skeleton className="h-3 w-1/2" /></div>
           <Skeleton className="h-6 w-16 shrink-0 rounded-pill" />
         </div>)}

@@ -40,7 +40,7 @@ describe('EmptyState', () => {
   it('hint rides the on-ramp type role and the 420px measure', () => {
     const { container } = render(<EmptyState title="t" hint="a subline" />)
     const p = container.querySelector('p')
-    expectTokens(p, ['mt-1', 'max-w-[420px]', 'text-on-surface-low'])
+    expectTokens(p, ['mt-xs', 'max-w-[420px]', 'text-on-surface-low'])
     expect(p?.getAttribute('data-type')).toBe('body-m')
     expect(classOf(p)).not.toContain('text-[0.875rem]')
     expect(render(<EmptyState title="t" />).container.querySelector('p')).toBeNull()
