@@ -547,6 +547,7 @@ export interface AppQualityWire {
   designSystem?: 'v2' | 'legacy' | 'n/a'
   a11y?: boolean
 }
+export interface AppHookSummary { name: string; event: string; provider: string }
 export interface AppSummary {
   name: string; displayName: string; version: string; description: string
   enabled: boolean; origin: string; source?: string; icon: string
@@ -565,6 +566,7 @@ export interface AppSummary {
   updateAvailable?: boolean
   latestVersion?: string
   quality?: AppQualityWire
+  hooks?: AppHookSummary[]
 }
 export interface AppDetail {
   name: string
@@ -596,6 +598,7 @@ export interface AppCatalogEntry {
   hasUI?: boolean
   uiComponents?: string
   quality?: AppQualityWire
+  hooks?: AppHookSummary[]
 }
 export interface AppCatalog {
   bundled: AppCatalogEntry[]
@@ -623,6 +626,7 @@ export interface AppInstallResult {
   restart_required?: boolean
   log_excerpt?: string
   fix_prompt?: string
+  hooks?: AppHookSummary[]
 }
 export interface SkillInstallResult {
   ok?: boolean; path?: string; error?: string
@@ -3507,7 +3511,9 @@ export interface InstalledPackRec {
   installed_at: string
   pack_owned?: string[]
   component_locks?: Record<string, { source: string; computedHash: string; path: string }>
-  roster?: Array<{ slug?: string; target?: string; tier?: string }>
+  roster?: Array<{ slug?: string; target?: string; tier?: string; activation?: string }>
+  roster_active?: string[]
+  triggers_added?: string[]
   staged_triggers: string[]
 }
 

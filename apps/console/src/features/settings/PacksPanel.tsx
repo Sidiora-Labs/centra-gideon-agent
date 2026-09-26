@@ -287,10 +287,9 @@ function ConnectorLine({ c }: { c: InstalledPackRec['connectors'][number] }) {
 export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec; onChanged?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [update, setUpdate] = useState<PackUpdateRec | null>(null)
-  const state = pack as InstalledPackRec & { roster_active?: string[]; triggers_added?: string[] }
-  const always = (pack.roster ?? []).filter((row) => (row as { activation?: string }).activation === 'always')
-  const rosterReady = always.length === 0 || always.every((row) => state.roster_active?.includes(row.target || row.slug || ''))
-  const triggersReady = !pack.staged_triggers?.length || pack.staged_triggers.every((id) => state.triggers_added?.includes(id))
+  const always = (pack.roster ?? []).filter((row) => row.activation === 'always')
+  const rosterReady = always.length === 0 || always.every((row) => pack.roster_active?.includes(row.target || row.slug || ''))
+  const triggersReady = !pack.staged_triggers?.length || pack.staged_triggers.every((id) => pack.triggers_added?.includes(id))
   const hasStaged = always.length > 0 || !!pack.staged_triggers?.length
   const active = hasStaged && rosterReady && triggersReady
   const checkUpdate = () => {
@@ -352,7 +351,7 @@ export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec
             <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={finishSetup}>Finish setup</Button>
           )}
           {hasStaged && (active
-            ? <span data-type="caption" className="text-ok">Active · {state.roster_active?.length ?? 0} agents, {state.triggers_added?.length ?? 0} triggers added disabled</span>
+            ? <span data-type="caption" className="text-ok">Active · {pack.roster_active?.length ?? 0} agents, {pack.triggers_added?.length ?? 0} triggers added disabled</span>
             : <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={activatePack}>Activate pack</Button>)}
           <Button variant="ghost" size="sm" loading={busy} loadingLabel="Checking…" onClick={checkUpdate}>
             Check for update

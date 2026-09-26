@@ -31,7 +31,7 @@ export function isBlockingResult(r: GuardedResult | null | undefined): boolean {
 }
 
 export function guardedFromApp(r: AppInstallResult): GuardedResult {
-  const hooks = (r as AppInstallResult & { hooks?: GuardedResult['hooks'] }).hooks
+  const hooks = r.hooks
   return { ok: r.ok, needsConsent: !!r.needs_consent, scan: r.scan, error: r.error,
             clientInstall: r.needs_client_install ? (r.client_install ?? {}) : null,
             restartRequired: !!r.restart_required,
