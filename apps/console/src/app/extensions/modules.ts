@@ -32,11 +32,13 @@ export async function resolveModuleSource(
 ): Promise<string> {
   const [imports] = await parse(source)
   const replacements = imports.flatMap((entry) => {
-    if (!entry.n) return []
-    let target = resolve(entry.n)
-    if (!target && /^(?:\.\.?\/|\/)/.test(entry.n)) target = new URL(entry.n, sourceUrl).href
+    if (entry.type === 'import-meta' || (entry.type === 'dynamic' && entry.glob)) return []
+    const specifier = entry.specifier
+    if (!specifier) return []
+    let target = resolve(specifier)
+    if (!target && /^(?:\.\.?\/|\/)/.test(specifier)) target = new URL(specifier, sourceUrl).href
     if (!target) return []
-    return [{ start: entry.s, end: entry.e, value: entry.d >= 0 ? JSON.stringify(target) : target }]
+    return [{ start: entry.start, end: entry.end, value: entry.type === 'dynamic' ? JSON.stringify(target) : target }]
   })
   let rewritten = source
   for (const { start, end, value } of replacements.sort((a, b) => b.start - a.start)) {
