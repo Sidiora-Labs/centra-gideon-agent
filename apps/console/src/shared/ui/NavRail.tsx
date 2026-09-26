@@ -27,11 +27,12 @@ export interface NavDisclosureControl {
 }
 
 const W_KEY = 'nav-width-v2'
+const W_MIGRATION_KEY = 'nav-width-v2-default-migrated'
 const MIN_W = 172
 const MAX_W = 380
 const COLLAPSED_W = 64
 const OVERLAY_W = 264
-const DEFAULT_W = 196
+const DEFAULT_W = 248
 
 export function NavRail({
   items, activeId, onSelect, onSearch, collapsed, overlay = false, overlayOpen = false, onScrimClick, disclosure,
@@ -49,6 +50,7 @@ export function NavRail({
   const { wordmarkLabel } = usePersonality()
   const [width, setWidth] = useState(() => {
     const v = Number(localStorage.getItem(W_KEY))
+    if (v === 196 && localStorage.getItem(W_MIGRATION_KEY) !== '1') return DEFAULT_W
     return v >= MIN_W && v <= MAX_W ? v : DEFAULT_W
   })
   const dragging = useRef(false)
@@ -59,7 +61,11 @@ export function NavRail({
     return new FocusScope(captureFocus()).attach(overlayRef.current)
   }, [overlay, overlayOpen])
 
-  useEffect(() => { if (!collapsed) localStorage.setItem(W_KEY, String(width)) }, [width, collapsed])
+  useEffect(() => {
+    if (collapsed) return
+    localStorage.setItem(W_KEY, String(width))
+    localStorage.setItem(W_MIGRATION_KEY, '1')
+  }, [width, collapsed])
 
   useEffect(() => {
     if (collapsed) return

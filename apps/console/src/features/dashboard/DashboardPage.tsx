@@ -3,7 +3,7 @@ import { CoreWidgets } from '../capabilities/platform/CoreWidgets'
 import { useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  MessageSquare, History, type LucideIcon,
+  MessageSquare, History, Activity, type LucideIcon,
   MessageSquarePlus, ListTodo, BookOpen, FolderKanban, FileCode2, TerminalSquare, Sparkles, Compass,
   Package, HardDrive, Orbit, Monitor,
 } from 'lucide-react'
@@ -35,9 +35,11 @@ import { useComposerData } from '../../shared/data/useComposerData'
 import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { InlineError } from '../../shared/ui/InlineError'
+import { LauncherBubble } from '../../shared/vendor/assistant-ui/elements/launcher-bubble'
 
 export function DashboardPage(route: RouteProps) {
   const { name } = useIdentity()
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const composition = useComposition()
   const custom = composition.selected && !composition.selected.preset
   return (
@@ -45,17 +47,9 @@ export function DashboardPage(route: RouteProps) {
       <div className="flex h-full flex-col overflow-hidden">
         {
 }
-        <TopBar
-          contentAligned
-          left={(
-            <h1 data-type="headline-s" className="min-w-0 truncate text-on-surface">{greetingFor(name)}</h1>
-          )}
-          right={(
-            <div className="hidden lg:block">
-              <HeroPulse variant="header" {...route} />
-            </div>
-          )}
-        />
+        <TopBar contentAligned left={(
+          <h1 data-type="headline-s" className="min-w-0 truncate text-on-surface">{greetingFor(name)}</h1>
+        )} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           {
 }
@@ -65,8 +59,6 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <EntranceRegion className="lg:hidden" style={{ minHeight: 'calc(36px * var(--space-scale))' }}><HeroPulse {...route} /></EntranceRegion>
-
             {
 }
 
@@ -86,6 +78,8 @@ export function DashboardPage(route: RouteProps) {
             </EntranceRegion>
 
             <OverviewDisclosure>
+              <Section label="Activity" icon={Activity}><HeroPulse {...route} /></Section>
+              <Section label="System status" icon={HardDrive}><SystemRailIsland {...route} /></Section>
               <CompositionEditor model={composition} />
               <PinnedTiles viewId={composition.selected?.id || 'overview'} />
             {custom ? <CoreWidgets tiles={composition.selected!.tiles} route={route} /> : <>
@@ -158,31 +152,34 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <EntranceRegion className="min-w-0 lg:hidden">
-              <SystemRailIsland {...route} />
-            </EntranceRegion>
             </>}
             </OverviewDisclosure>
           </EntranceGroup>
         </div>
         {
 }
-        {!custom && <div className="hidden shrink-0 px-l pb-m pt-xs lg:block">
-          <SystemRailIsland {...route} />
-        </div>}
+        <LauncherBubble
+          className="fixed bottom-6 right-6 z-30"
+          open={assistantOpen}
+          unread={0}
+          greeting="How can I help?"
+          prompts={[]}
+          onToggle={() => setAssistantOpen((open) => !open)}
+          onStart={() => route.navigate('chat/new')}
+        />
       </div>
     </DashboardLiveProvider>
   )
 }
 
 export function GideonHomeIntro({ navigate }: Pick<RouteProps, 'navigate'>) {
-  return <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-s py-l text-center">
+  return <div className="mx-auto flex w-full flex-col items-center gap-s py-l text-center" style={{ maxWidth: '44rem' }}>
     <p className="text-xs uppercase tracking-[.16em] text-on-surface-low">Your space</p>
     <h2 className="text-3xl font-medium tracking-tight text-on-surface">What would you like to do?</h2>
     <p className="text-sm text-on-surface-low">Start a conversation, or pick up your work.</p>
-    <div className="mt-m flex flex-wrap justify-center gap-s">
-      <button type="button" onClick={() => navigate('chat/new')} className="rounded-lg bg-primary px-m py-s text-on-primary">New conversation</button>
-      <button type="button" onClick={() => navigate('apps')} className="rounded-lg border border-outline-variant px-m py-s text-on-surface">Explore apps</button>
+    <div className="mt-m flex flex-col items-stretch gap-s sm:flex-row sm:items-center sm:justify-center">
+      <button type="button" onClick={() => navigate('chat/new')} className="whitespace-nowrap rounded-lg bg-primary px-m py-s text-on-primary">New conversation</button>
+      <button type="button" onClick={() => navigate('apps')} className="whitespace-nowrap rounded-lg border border-outline-variant px-m py-s text-on-surface">Explore apps</button>
     </div>
   </div>
 }

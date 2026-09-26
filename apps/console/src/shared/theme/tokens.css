@@ -803,3 +803,29 @@ input[type="checkbox"] {
   background-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
   color: var(--color-on-surface);
 }
+
+@custom-variant dark (&:where(:root:not(.light), :root:not(.light) *));
+@theme inline {
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-on-surface);
+  --color-muted: var(--color-surface-high);
+  --color-muted-foreground: var(--color-on-surface-low);
+  --color-card: var(--color-surface-container);
+  --color-card-foreground: var(--color-on-surface);
+  --color-popover: var(--color-surface-container);
+  --color-popover-foreground: var(--color-on-surface);
+  --color-border: var(--color-outline-variant);
+  --color-border-strong: var(--color-outline);
+  --color-input: var(--color-outline-variant);
+  --color-ring: var(--color-primary);
+  --color-primary-foreground: var(--color-on-primary);
+  --color-secondary-foreground: var(--color-on-surface);
+  --color-accent: var(--color-surface-highest);
+  --color-accent-foreground: var(--color-on-surface);
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: var(--color-on-danger);
+}
+
+[data-slot="canvas-split"] {
+  max-width: var(--container-3xl, 48rem);
+}
