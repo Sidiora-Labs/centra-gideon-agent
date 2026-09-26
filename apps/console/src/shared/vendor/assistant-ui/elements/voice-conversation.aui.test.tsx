@@ -1,180 +1,125 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { VoiceSessionState } from "@assistant-ui/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  AssistantRuntimeProvider,
+  createVoiceSession,
+  useAui,
+  useExternalStoreRuntime,
+  type RealtimeVoiceAdapter,
+  type ThreadMessageLike,
+  type VoiceSessionHelpers,
+} from "@assistant-ui/react";
+import { useState } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VoiceConversation } from "./voice-conversation.aui";
 
-type MockMessage = {
-  id: string;
-  role: "user" | "assistant";
-  metadata: { modality?: "voice" };
-  content: { type: string; text?: string }[];
-};
+const priorMessages: ThreadMessageLike[] = [
+  { id: "typed", role: "user", content: [{ type: "text", text: "Typed message" }] },
+  { id: "earlier-user", role: "user", content: [{ type: "text", text: "Earlier question" }], metadata: { modality: "voice" } },
+  { id: "earlier-assistant", role: "assistant", content: [{ type: "text", text: "Earlier answer" }], metadata: { modality: "voice" } },
+];
 
-const mocks = vi.hoisted(() => ({
-  state: {
-    thread: {
-      messages: [] as MockMessage[],
+let aui: ReturnType<typeof useAui>;
+let helpers: VoiceSessionHelpers;
+let disconnectProvider: ReturnType<typeof vi.fn>;
+let muteProvider: ReturnType<typeof vi.fn>;
+let unmuteProvider: ReturnType<typeof vi.fn>;
+
+function Runtime({ initialMessages = [] }: { initialMessages?: ThreadMessageLike[] }) {
+  const [messages, updateMessages] = useState(initialMessages);
+  const voice: RealtimeVoiceAdapter = {
+    connect: ({ abortSignal }) => createVoiceSession({ abortSignal }, async (nextHelpers) => {
+      helpers = nextHelpers;
+      return { disconnect: disconnectProvider, mute: muteProvider, unmute: unmuteProvider };
+    }),
+  };
+  const runtime = useExternalStoreRuntime({
+    messages,
+    convertMessage: (message: ThreadMessageLike) => message,
+    onNew: async (message) => {
+      updateMessages((current) => [...current, { role: "user", content: message.content }]);
     },
-  },
-  voice: undefined as VoiceSessionState | undefined,
-  volume: 0,
-  controls: {
-    disconnect: vi.fn(),
-    mute: vi.fn(),
-    unmute: vi.fn(),
-  },
-}));
+    onVoiceTranscript: (message) => {
+      updateMessages((current) => [...current, message]);
+    },
+    adapters: { voice },
+  });
+  return <AssistantRuntimeProvider runtime={runtime}><RuntimeAccess /><VoiceConversation /></AssistantRuntimeProvider>;
+}
 
-vi.mock("@assistant-ui/react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@assistant-ui/react")>()),
-  useAuiState: (selector: (s: typeof mocks.state) => unknown) =>
-    selector(mocks.state),
-  useVoiceState: () => mocks.voice,
-  useVoiceVolume: () => mocks.volume,
-  useVoiceControls: () => mocks.controls,
-}));
+function RuntimeAccess() {
+  aui = useAui();
+  return null;
+}
 
-const running: VoiceSessionState = {
-  status: { type: "running" },
-  isMuted: false,
-  mode: "listening",
-  canSendText: false,
+const connect = async () => {
+  await act(async () => { aui.thread.connectVoice(); await Promise.resolve(); });
+};
+const running = async () => {
+  await act(async () => { helpers.setStatus({ type: "running" }); helpers.emitMode("listening"); });
+};
+const speak = async (role: "user" | "assistant", text: string) => {
+  await act(async () => { helpers.emitTranscript({ role, text, isFinal: true }); await Promise.resolve(); });
 };
 
-const setVoice = (voice: VoiceSessionState | undefined) => {
-  mocks.voice = voice;
-};
+afterEach(() => { cleanup(); });
 
-const voiceMessage = (
-  id: string,
-  role: MockMessage["role"],
-  text: string,
-): MockMessage => ({
-  id,
-  role,
-  metadata: { modality: "voice" },
-  content: [{ type: "text", text }],
-});
-
-afterEach(() => {
-  cleanup();
-  mocks.state.thread.messages = [];
-  setVoice(undefined);
-  mocks.volume = 0;
-});
-
-describe("VoiceConversation", () => {
-  it("renders nothing without a session", () => {
-    const { container } = render(<VoiceConversation />);
-
-    expect(container.childElementCount).toBe(0);
+describe("VoiceConversation with the actual AUI voice session", () => {
+  beforeEach(() => {
+    disconnectProvider = vi.fn();
+    muteProvider = vi.fn();
+    unmuteProvider = vi.fn();
   });
 
-  it("maps a starting session to the connecting caption", () => {
-    setVoice({ ...running, status: { type: "starting" } });
-
-    render(<VoiceConversation />);
-
-    expect(screen.getByText("Connecting")).toBeTruthy();
+  it("renders the real starting, listening, and speaking session with only new voice turns", async () => {
+    render(<Runtime initialMessages={priorMessages} />);
+    expect(document.querySelector('[data-slot="voice-conversation"]')).toBeNull();
+    await connect();
+    const panel = document.querySelector<HTMLElement>('[data-slot="voice-conversation"]')!;
+    expect(within(panel).getByText("Connecting")).toBeInTheDocument();
+    expect(within(panel).queryByText("Earlier question")).toBeNull();
+    await running();
+    expect(within(panel).getByText("Listening")).toBeInTheDocument();
+    await speak("user", "Hello");
+    await speak("assistant", "Hi there");
+    expect(within(panel).getByText("Hello")).toBeInTheDocument();
+    expect(within(panel).getByText("Hi there")).toBeInTheDocument();
+    expect(within(panel).queryByText("Typed message")).toBeNull();
+    await speak("user", "Second question");
+    expect(within(panel).queryByText("Hello")).toBeNull();
+    expect(within(panel).getByText("Hi there")).toBeInTheDocument();
+    expect(within(panel).getByText("Second question")).toBeInTheDocument();
+    await act(async () => { helpers.emitMode("speaking"); });
+    expect(within(panel).getByText("Speaking")).toBeInTheDocument();
   });
 
-  it("shows only the voice turns spoken since the session connected", () => {
-    mocks.state.thread.messages = [
-      {
-        id: "typed",
-        role: "user",
-        metadata: {},
-        content: [{ type: "text", text: "Typed message" }],
-      },
-      voiceMessage("earlier-user", "user", "Earlier question"),
-      voiceMessage("earlier-assistant", "assistant", "Earlier answer"),
-    ];
-    const { rerender } = render(<VoiceConversation />);
-
-    setVoice({ ...running, mode: "speaking" });
-    rerender(<VoiceConversation />);
-
-    expect(screen.getByText("Speaking")).toBeTruthy();
-    expect(screen.queryByText("Earlier answer")).toBeNull();
-
-    mocks.state.thread.messages = [
-      ...mocks.state.thread.messages,
-      voiceMessage("voice-user", "user", "Hello"),
-      voiceMessage("voice-assistant", "assistant", "Hi there"),
-    ];
-    rerender(<VoiceConversation />);
-
-    expect(screen.getByText("Hello")).toBeTruthy();
-    expect(screen.getByText("Hi there")).toBeTruthy();
-    expect(screen.queryByText("Earlier question")).toBeNull();
-    expect(screen.queryByText("Typed message")).toBeNull();
-  });
-
-  it("keeps the latest exchange on screen", () => {
-    const { rerender } = render(<VoiceConversation />);
-    setVoice(running);
-    rerender(<VoiceConversation />);
-
-    mocks.state.thread.messages = [
-      voiceMessage("u1", "user", "First question"),
-      voiceMessage("a1", "assistant", "First answer"),
-      voiceMessage("u2", "user", "Second question"),
-    ];
-    rerender(<VoiceConversation />);
-
-    expect(screen.queryByText("First question")).toBeNull();
-    expect(screen.getByText("First answer")).toBeTruthy();
-    expect(screen.getByText("Second question")).toBeTruthy();
-  });
-
-  it("opens a redial with an empty transcript", () => {
-    const { rerender } = render(<VoiceConversation />);
-    setVoice(running);
-    rerender(<VoiceConversation />);
-    mocks.state.thread.messages = [voiceMessage("u1", "user", "First call")];
-    rerender(<VoiceConversation />);
-    expect(screen.getByText("First call")).toBeTruthy();
-
-    setVoice(undefined);
-    rerender(<VoiceConversation />);
-    setVoice(running);
-    rerender(<VoiceConversation />);
-    expect(screen.queryByText("First call")).toBeNull();
-
-    mocks.state.thread.messages = [
-      ...mocks.state.thread.messages,
-      voiceMessage("u2", "user", "Second call"),
-    ];
-    rerender(<VoiceConversation />);
-    expect(screen.getByText("Second call")).toBeTruthy();
-    expect(screen.queryByText("First call")).toBeNull();
-  });
-
-  it("toggles mute through the voice controls", () => {
-    setVoice(running);
-    const { rerender } = render(<VoiceConversation />);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Turn the microphone off" }),
-    );
-    expect(mocks.controls.mute).toHaveBeenCalledOnce();
-
-    setVoice({ ...running, isMuted: true });
-    rerender(<VoiceConversation />);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Turn the microphone on" }),
-    );
-    expect(mocks.controls.unmute).toHaveBeenCalledOnce();
-  });
-
-  it("ends the session through the voice controls", () => {
-    setVoice(running);
-
-    render(<VoiceConversation />);
+  it("routes mute, unmute, and end through the actual session controls", async () => {
+    render(<Runtime />);
+    await connect();
+    await running();
+    fireEvent.click(screen.getByRole("button", { name: "Turn the microphone off" }));
+    expect(muteProvider).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Turn the microphone on" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Turn the microphone on" }));
+    expect(unmuteProvider).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "End the call" }));
+    expect(disconnectProvider).toHaveBeenCalledOnce();
+    expect(document.querySelector('[data-slot="voice-conversation"]')).toBeNull();
+  });
 
-    expect(mocks.controls.disconnect).toHaveBeenCalledOnce();
+  it("starts a redial with an empty transcript after the prior session ends", async () => {
+    render(<Runtime />);
+    await connect();
+    await running();
+    await speak("user", "First call");
+    expect(screen.getByText("First call")).toBeInTheDocument();
+    await act(async () => { aui.thread.disconnectVoice(); });
+    expect(document.querySelector('[data-slot="voice-conversation"]')).toBeNull();
+    await connect();
+    await running();
+    expect(screen.queryByText("First call")).toBeNull();
+    await speak("user", "Second call");
+    expect(screen.getByText("Second call")).toBeInTheDocument();
+    expect(screen.queryByText("First call")).toBeNull();
   });
 });

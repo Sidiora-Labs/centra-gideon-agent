@@ -398,7 +398,7 @@
     },
     {
       "path": "elements/voice-conversation.tsx",
-      "sha256": "dce294f4e27054c674f4975b6510cedea2edbcd361c52950bc29ae3315511ba1",
+      "sha256": "d2a2d7d17b42d09eb8a9faeef6fee01290ba3dd81bad682e10a3b15bef279cdc",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/voice-conversation.tsx",
       "donorSha256": "a57d73871acdb1e4d9d1c1280333f197e9989cf0e7c3c19a5ee76536033d861e",
       "status": "adapted"
