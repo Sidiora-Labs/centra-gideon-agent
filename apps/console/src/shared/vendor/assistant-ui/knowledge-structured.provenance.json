@@ -127,7 +127,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/score-breakdown.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/score-breakdown.tsx",
       "donor_sha256": "006521c880bd82eab6eb8620a454a0345eaeb2273ae638966195c439e04025f8",
-      "local_sha256": "171e522ec522479df9a762afc7398de22a99797b4010d575a64f703c0630ccc6"
+      "local_sha256": "cd3967ba9582c193f907f1fa0f796d8ccaaaaa37b6ddc3eae106660f43e13f77"
     },
     {
       "donor_path": "packages/heat-graph/src/components/Root.tsx",
