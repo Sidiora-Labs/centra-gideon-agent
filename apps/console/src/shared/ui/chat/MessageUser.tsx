@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { Sparkles, ChevronRight } from 'lucide-react'
 import { messageEnter, spring } from '../../theme/motion'
 import { MessageBody, type TurnPaste } from '../../../features/chat/PasteChip'
+import { clockTime, fullStamp, isoStamp } from '../../data/epoch'
 import './chatPresentation.css'
 
 const travelEnter = () => ({
@@ -15,16 +16,20 @@ const travelEnter = () => ({
  *  markdown (same renderer as assistant turns), with first/last-child margins
  *  collapsed so a one-line message sits snug. `fromComposer` makes the newest
  *  sent bubble travel up from the composer (Stage 3 glow-travel). */
-export function MessageUser({ children, fromComposer = false, onFileClick, pastes, optimized }: { children: string; fromComposer?: boolean; onFileClick?: (path: string) => void; pastes?: TurnPaste[]; optimized?: string }) {
+export function MessageUser({ children, fromComposer = false, onFileClick, pastes, optimized, timestamp }: { children: string; fromComposer?: boolean; onFileClick?: (path: string) => void; pastes?: TurnPaste[]; optimized?: string; timestamp?: string }) {
+  const time = clockTime(timestamp)
   return (
     <motion.div variants={fromComposer ? travelEnter() : messageEnter} initial="initial" animate="animate" className="flex justify-end">
-      <div
-        className="gideon-chat-user text-on-surface [&_>div>*:first-child]:mt-0 [&_>div>*:last-child]:mb-0"
-        data-type="body-m"
-        style={fvs(400)}
-      >
-        <MessageBody text={children} pastes={pastes} onFileClick={onFileClick} />
-        {optimized && <OptimizedDisclosure optimized={optimized} onFileClick={onFileClick} />}
+      <div className="flex min-w-0 flex-col items-end gap-1">
+        <div
+          className="gideon-chat-user text-on-surface [&_>div>*:first-child]:mt-0 [&_>div>*:last-child]:mb-0"
+          data-type="body-m"
+          style={fvs(400)}
+        >
+          <MessageBody text={children} pastes={pastes} onFileClick={onFileClick} />
+          {optimized && <OptimizedDisclosure optimized={optimized} onFileClick={onFileClick} />}
+        </div>
+        {time && <time dateTime={isoStamp(timestamp)} title={fullStamp(timestamp)} data-type="caption" className="text-on-surface-low">{time}</time>}
       </div>
     </motion.div>
   )
