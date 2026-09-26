@@ -5,7 +5,7 @@ import { ImageGeneration } from '../../../shared/vendor/assistant-ui/elements/im
 
 export type MediaJob = { progress?: number; id: string; operation?: string; input?: { prompt?: string; title?: string; url?: string; kind?: string } | null; sketch_id: string; revision: number; status: string; state_revision: number; attempt: number; error: string | null; result: { artifact_id?: string; version?: number; adapter_id?: string } | null; events: { status: string; at: string; detail: string; attempt?: number; result?: { artifact_id?: string; version?: number; adapter_id?: string } | null }[] }
 const base = '/api/capabilities/media/jobs'
-export function mediaArtifactRawUrl(result: MediaJob['result']): string | null {
+export function mediaArtifactRawUrl(result: MediaJob['result'] | undefined): string | null {
   if (!result?.artifact_id) return null
   const url = `/api/artifacts/${encodeURIComponent(result.artifact_id)}/raw`
   return result.version !== undefined && Number.isSafeInteger(result.version) && result.version > 0

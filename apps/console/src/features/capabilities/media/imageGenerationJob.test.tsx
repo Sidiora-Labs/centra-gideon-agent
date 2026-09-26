@@ -113,5 +113,6 @@ describe('canonical media artifact URLs', () => {
     expect(mediaArtifactRawUrl({ artifact_id: 'current', version: 1.5 })).toBe('/api/artifacts/current/raw')
     expect(mediaArtifactRawUrl({ artifact_id: '' })).toBeNull()
     expect(mediaArtifactRawUrl(null)).toBeNull()
+    expect(mediaArtifactRawUrl(undefined)).toBeNull()
   })
 })
