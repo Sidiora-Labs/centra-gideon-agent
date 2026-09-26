@@ -127,7 +127,7 @@ describe('a generated document is labelled by its real kind', () => {
 })
 
 describe('a card draws a thumbnail only when a browser can decode one', () => {
-  for (const kind of ['docx', 'xlsx', 'pptx', 'pdf', 'video']) {
+  for (const kind of ['docx', 'xlsx', 'pptx', 'pdf', 'video'] as const) {
     it(`${kind} shows its kind icon, not a broken image`, async () => {
       render(<ArtifactCard art={art(kind)} onOpen={() => {}} />)
       const pane = previewPane()
