@@ -17,13 +17,14 @@
     "elements/shiki-highlighter.aui.tsx": "f3b0c83d58234376a60fe3296c42da4fc7cad64260789a91a13f4997cc7dbceb",
     "elements/mermaid-diagram.aui.tsx": "5a67938ae2045c68d04feb5c8e327c06f2ab80b5bdadd0410fdc28bc62b03724",
     "elements/shiki-highlighter.tsx": "3a75851baba855bcd3e12a4efdc7d64feb8433b614210f5ff883543982716e58",
-    "elements/mermaid-diagram.tsx": "0b5aca50b56a2e4aa77fe0df61c770a64f2b1035b8caf3f1a72c7965ca8ebfb3",
+    "elements/mermaid-diagram.tsx": "565a085eb80124599dad3d5280fbcd5f2cd96f582a09e4fb3deb3a29f8ca80bc",
     "hooks/use-copy-to-clipboard.ts": "1f3b8a1bab79cef961f62eb25d6b58a0d16c957d63ba1faf086ad09c99712c0a"
   },
   "adaptations": [
     "replace donor absolute imports with relative shared vendor imports",
     "use W09-owned tooltip button and compatibility layer without duplicating them",
-    "use the same pinned beautiful-mermaid and Shiki runtime dependencies as the donor"
+    "use the same pinned beautiful-mermaid and Shiki runtime dependencies as the donor",
+    "simplify unreachable viewport and parser error branches in Mermaid zoom, retaining native pointer capture when supported"
   ],
   "donor_paths": {
     "elements/markdown-text.tsx": "packages/ui/src/components/react/assistant-ui/elements/markdown-text.tsx",
