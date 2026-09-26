@@ -18,6 +18,8 @@ export function MobileComposer({
   onSend,
   onStop,
   onFocus,
+  showAttach = true,
+  flat = false,
   className,
   ...props
 }: Omit<
@@ -35,6 +37,8 @@ export function MobileComposer({
   | "onSend"
   | "onStop"
   | "onFocus"
+  | "showAttach"
+  | "flat"
 > & {
   value: string;
   editor?: ReactNode;
@@ -48,6 +52,8 @@ export function MobileComposer({
   onSend?: () => void;
   onStop?: () => void;
   onFocus?: () => void;
+  showAttach?: boolean;
+  flat?: boolean;
 }) {
   return (
     <div
@@ -81,7 +87,7 @@ export function MobileComposer({
       )}
 
       <div className="flex items-end gap-2">
-        <button
+        {showAttach && <button
           type="button"
           aria-label="Add an attachment"
           onClick={onAttach}
@@ -93,12 +99,13 @@ export function MobileComposer({
           )}
         >
           <PlusIcon className="size-4" />
-        </button>
+        </button>}
 
         <div
           className={cn(
-            field,
-            "flex min-w-0 flex-1 items-center gap-2 rounded-[18px] px-3 py-2",
+            !flat && field,
+            "flex min-w-0 flex-1 items-center gap-2",
+            !flat && "rounded-[18px] px-3 py-2",
           )}
         >
           {editor === undefined ? <input
