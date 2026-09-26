@@ -10,13 +10,13 @@ import { cn } from "./lib/utils";
 export const TooltipProvider = TooltipPrimitive.Provider;
 export const Tooltip = TooltipPrimitive.Root;
 export const TooltipTrigger = TooltipPrimitive.Trigger;
-export function TooltipContent({ side = "top", sideOffset = 6, className, children }: {
+export function TooltipContent({ side = "top", sideOffset = 6, className, children, ...props }: ComponentProps<"div"> & {
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
   className?: string;
   children?: ReactNode;
 }) {
-  return <TooltipPrimitive.Portal><TooltipPrimitive.Positioner side={side} sideOffset={sideOffset}><TooltipPrimitive.Popup className={className}>{children}</TooltipPrimitive.Popup></TooltipPrimitive.Positioner></TooltipPrimitive.Portal>;
+  return <TooltipPrimitive.Portal><TooltipPrimitive.Positioner side={side} sideOffset={sideOffset}><TooltipPrimitive.Popup className={className} {...props}>{children}</TooltipPrimitive.Popup></TooltipPrimitive.Positioner></TooltipPrimitive.Portal>;
 }
 
 export const Dialog = DialogPrimitive.Root;
