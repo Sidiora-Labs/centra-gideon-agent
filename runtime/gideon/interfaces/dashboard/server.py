@@ -1320,6 +1320,10 @@ async def start_dashboard(
 
     register_workflow_routes(app)
 
+    from gideon.interfaces.dashboard.handlers.experiments import register_experiment_routes
+
+    register_experiment_routes(app)
+
     from gideon.interfaces.dashboard.handlers.loop_routes import (
         register_unified_loop_routes,
     )

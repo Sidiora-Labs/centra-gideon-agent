@@ -314,10 +314,11 @@ ac_1 = "Implement the complete reachable feature: Offline agent-strategy experim
 
 [task.runtime-experiments]
 title = "runtime-experiments end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "runtime-experiments"
 requires = []
 reqs = ["021.1", "022.1", "023.1", "024.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
+touches = ["runtime/gideon/assurance/experiments/__init__.py", "runtime/gideon/assurance/experiments/campaigns.py", "runtime/gideon/assurance/experiments/replay.py", "runtime/gideon/assurance/experiments/machines.py", "runtime/gideon/assurance/experiments/strategy.py", "runtime/gideon/interfaces/dashboard/handlers/experiments.py", "runtime/gideon/interfaces/dashboard/server.py", "apps/console/src/features/experiments/ExperimentsPage.tsx", "apps/console/src/app/shell/App.tsx", "apps/console/src/shared/data/api.ts", "checks/runtime/test_experiment_campaigns.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m unittest discover -s checks/runtime -p test_experiment_campaigns.py -q"
