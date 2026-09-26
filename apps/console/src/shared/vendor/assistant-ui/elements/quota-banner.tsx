@@ -27,7 +27,7 @@ export function QuotaBanner({
   used: number;
   limit: number;
   unit: string;
-  resetsIn: string;
+  resetsIn?: string;
   upgradeLabel: string;
   onUpgrade?: () => void;
 }) {
@@ -55,9 +55,9 @@ export function QuotaBanner({
         >
           {left} {unit} left
         </span>
-        <span className={cn(mono, "text-foreground/30 ms-auto tabular-nums")}>
-          resets in {resetsIn}
-        </span>
+        {resetsIn && <span className={cn(mono, "text-foreground/30 ms-auto tabular-nums")}>
+          resets {resetsIn}
+        </span>}
       </div>
 
       <span
@@ -82,7 +82,7 @@ export function QuotaBanner({
         <span className={cn(mono, "text-foreground/30 tabular-nums")}>
           {used} of {limit} used
         </span>
-        <button
+        {onUpgrade && <button
           type="button"
           onClick={onUpgrade}
           className={cn(
@@ -91,7 +91,7 @@ export function QuotaBanner({
           )}
         >
           {upgradeLabel}
-        </button>
+        </button>}
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ export function AgentHandoff({
 > & {
   from: string;
   to: string;
-  reason: string;
+  reason?: string;
   carried: readonly string[];
   settled: boolean;
 }) {
@@ -62,7 +62,7 @@ export function AgentHandoff({
         </span>
       </div>
 
-      <p className="text-foreground/55 text-xs leading-relaxed">{reason}</p>
+      {reason && <p className="text-foreground/55 text-xs leading-relaxed">{reason}</p>}
 
       {carried.length > 0 && (
         <div className="flex flex-col gap-1">

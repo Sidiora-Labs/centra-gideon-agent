@@ -56,7 +56,7 @@ export function ScheduleCard({
           <span className="truncate text-[13.5px] font-medium">{name}</span>
           <span className={cn(mono, "text-foreground/30")}>{cadence}</span>
         </div>
-        <button
+        {onToggle ? <button
           type="button"
           role="switch"
           aria-checked={enabled}
@@ -73,7 +73,7 @@ export function ScheduleCard({
               enabled && "translate-x-4",
             )}
           />
-        </button>
+        </button> : <span className={cn(mono, "text-foreground/45 text-xs")}>{enabled ? "Enabled" : "Paused"}</span>}
       </div>
 
       <div

@@ -38,11 +38,11 @@ export function AgentCard({
   name: string;
   description: string;
   provider: string;
-  version: string;
-  model: string;
-  endpoint: string;
+  version?: string;
+  model?: string;
+  endpoint?: string;
   skills: readonly AgentSkill[];
-  connected: boolean;
+  connected?: boolean;
   onConnect?: () => void;
 }) {
   return (
@@ -63,9 +63,9 @@ export function AgentCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-baseline gap-2">
             <span className="truncate text-[13.5px] font-medium">{name}</span>
-            <span className={cn(mono, "text-foreground/30 shrink-0")}>
-              v{version}
-            </span>
+          {version && <span className={cn(mono, "text-foreground/30 shrink-0")}>
+            v{version}
+          </span>}
           </span>
           <span className="text-foreground/45 truncate text-xs">
             {provider}
@@ -96,16 +96,16 @@ export function AgentCard({
         ))}
       </div>
 
-      <div className="border-foreground/[0.07] flex items-center gap-2 border-t pt-3">
+      {(endpoint || model) && <div className="border-foreground/[0.07] flex items-center gap-2 border-t pt-3">
         <span
           className={cn(mono, "text-foreground/30 min-w-0 flex-1 truncate")}
         >
           {endpoint}
         </span>
         <span className={cn(mono, "text-foreground/30 shrink-0")}>{model}</span>
-      </div>
+      </div>}
 
-      <button
+      {(onConnect || connected) && <button
         type="button"
         onClick={onConnect}
         disabled={connected}
@@ -124,7 +124,7 @@ export function AgentCard({
         ) : (
           "Connect"
         )}
-      </button>
+      </button>}
     </div>
   );
 }
