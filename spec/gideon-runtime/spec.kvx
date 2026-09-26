@@ -11,7 +11,7 @@ agent_model = "gpt-6-sol"
 
 [design.integration]
 contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
-branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+branch_policy = "Local task commits, feature merges and main integration are authorized. Leader pushes OSS origin/main as integrated commits land. Hosted commits remain local. No PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
 
 [design.hosted]
 contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."

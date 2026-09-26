@@ -41,7 +41,7 @@ model = "gpt-6-sol"
 task_driven = "Implement the current numbered requirements, extending existing end-to-end Gideon paths."
 source_of_truth = "Root alone owns authoritative requirement state; workers report per-item completion and managers integrate their branches."
 [hard_rules]
-local_integration = "User authorizes local task commits and cg fleet main merges. No remote pushes or deployment. Do not stage dependencies or unrelated preexisting changes."
+local_integration = "User authorizes local task commits and cg fleet main merges. Leader alone pushes OSS origin/main after integration; hosted commits stay local and deployment is excluded. Do not stage dependencies or unrelated preexisting changes."
 identity = "Use Gideon identity only in source, comments, specs and commit messages."
 hosted = "Preserve operator-managed provider/model/infrastructure policy and all existing hosted changes."
 
