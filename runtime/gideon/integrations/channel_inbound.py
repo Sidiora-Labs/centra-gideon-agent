@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -25,13 +25,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _ADMISSION_CACHE_MAX = 512
 _ADMITTED: OrderedDict[str, TrustVerdict] = OrderedDict()
+_DELIVERED: OrderedDict[str, None] = OrderedDict()
 _ADMISSION_LOCK = RLock()
 
 
 def _message_key(provider: str, msg: ChannelMessage) -> str:
     identity: tuple[str, ...]
     if msg.message_id:
-        identity = (provider, "id", msg.message_id)
+        identity = (provider, "id", msg.channel_id, msg.message_id)
     else:
         body = (msg.text or "").encode("utf-8")
         fingerprint = hashlib.sha256(body).hexdigest()[:32]
@@ -50,6 +51,17 @@ def _remember(key: str, verdict: TrustVerdict) -> None:
 def reset_admissions() -> None:
     with _ADMISSION_LOCK:
         _ADMITTED.clear()
+        _DELIVERED.clear()
+
+
+def _reserve_delivery(identity: str) -> bool:
+    with _ADMISSION_LOCK:
+        if identity in _DELIVERED:
+            return False
+        _DELIVERED[identity] = None
+        while len(_DELIVERED) > _ADMISSION_CACHE_MAX:
+            _DELIVERED.popitem(last=False)
+        return True
 
 
 def admit(
@@ -69,7 +81,12 @@ def admit(
         decision.reason,
         decision.allowed,
     )
-    return decision
+    return replace(
+        decision,
+        canned_reply="",
+        fired_notification=False,
+        meta={**decision.meta, "duplicate": True},
+    )
 
 
 def _decide(
@@ -98,6 +115,9 @@ class _SessionIngress:
         thread = self.message.thread_id or self.message.channel_id
         linked = self.state.get_linked_session(thread)
         if linked is not None:
+            if not getattr(linked, "_app", ""):
+                linked._app = self.provider
+            self.state.link_channel(linked.key, thread, self.message.channel_id)
             return linked
         created = self.state.get_or_create_session(app=self.provider)
         self.state.link_channel(created.key, thread, self.message.channel_id)
@@ -118,7 +138,19 @@ class _SessionIngress:
             "content": displayed,
             "cls": "msg msg-u",
         }
-        session.append(payload["role"], payload["content"], payload["cls"])
+        paths = [str(item["path"]) for item in self.message.attachments if item.get("path")]
+        if paths:
+            payload["meta"] = {"files": paths}
+            raw_files = [
+                str(item["path"])
+                for item in self.message.attachments
+                if item.get("path") and item.get("skip_extract")
+            ]
+            if raw_files:
+                payload["meta"]["raw_files"] = raw_files
+            session.append(payload["role"], payload["content"], payload["cls"], meta=payload["meta"])
+        else:
+            session.append(payload["role"], payload["content"], payload["cls"])
         broadcast = getattr(self.state, "broadcast_ws", None)
         if broadcast is not None:
             broadcast("chat_message", payload)
@@ -153,9 +185,16 @@ async def deliver_inbound(
         getattr(services, "dashboard_state", None), provider, msg, is_dm=is_dm
     )
     if decision.allowed:
-        await _route_to_session(
-            services, provider, msg, decision.fenced_text or msg.text, turn_runner
-        )
+        identity = _message_key(provider, msg)
+        if _reserve_delivery(identity):
+            try:
+                await _route_to_session(
+                    services, provider, msg, decision.fenced_text or msg.text, turn_runner
+                )
+            except Exception:
+                with _ADMISSION_LOCK:
+                    _DELIVERED.pop(identity, None)
+                raise
     return decision
 
 

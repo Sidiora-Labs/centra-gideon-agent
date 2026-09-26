@@ -1,0 +1,25 @@
+{
+  "name": "mochat-channel",
+  "version": "1.0.0",
+  "displayName": "MoChat",
+  "description": "Connect configured MoChat sessions and panels through authenticated message APIs.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.mochat:create_provider",
+    "capabilities": ["messaging"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "base_url": {"type": "string", "default": "", "x-meta": {"label": "MoChat API URL"}},
+        "claw_token": {"type": "string", "default": "", "x-meta": {"label": "MoChat API token", "sensitive": true}},
+        "sessions": {"type": "string", "default": "", "x-meta": {"label": "Session IDs", "help": "Comma-separated sessions to receive and answer."}},
+        "panels": {"type": "string", "default": "", "x-meta": {"label": "Panel IDs", "help": "Comma-separated panels to receive and answer."}},
+        "agent_user_id": {"type": "string", "default": "", "x-meta": {"label": "Bot user ID"}}
+      }
+    }
+  }
+}

@@ -41,6 +41,17 @@ from gideon.security.security import (
 
 logger = logging.getLogger(__name__)
 
+_LIVE_CHANNEL_CONFIG_APPS = frozenset({
+    "matrix-channel",
+    "wecom-channel",
+    "dingtalk-channel",
+    "qq-channel",
+    "feishu-channel",
+    "mochat-channel",
+    "whatsapp-channel",
+    "weixin-channel",
+})
+
 
 def _redact(text: str) -> str:
     """Redact exfil URLs + credentials from LLM-derived agent output before it
@@ -725,6 +736,26 @@ async def api_app_config_put(request: web.Request) -> web.Response:
     except AppConfigError as exc:
         _sel_log("apps.config", "error", name, request, error=str(exc))
         return web.json_response({"error": str(exc)}, status=400)
+    if name in _LIVE_CHANNEL_CONFIG_APPS:
+        from gideon.extensions.providers.registry import get_provider_registry
+
+        registry = get_provider_registry()
+        extension = registry.get(name)
+        if extension is not None and extension.enabled:
+            current = extension.provider_instance
+            services = getattr(current, "services", None)
+            if current is not None:
+                await current.disconnect()
+            registry.disable(name)
+            if not registry.enable(name):
+                return web.json_response({"error": extension.error or "Channel could not restart"}, status=500)
+            updated = registry.get(name)
+            if services is not None and updated is not None and updated.provider_instance is not None:
+                try:
+                    await updated.provider_instance.start_inbound(services)
+                except Exception as exc:
+                    logger.exception("Could not start pairing channel %s after configuration", name)
+                    return web.json_response({"error": str(exc)}, status=500)
     _sel_log("apps.config", "ok", name, request)
     masked, secret_set = mask_secrets(saved, schema)
     return web.json_response(

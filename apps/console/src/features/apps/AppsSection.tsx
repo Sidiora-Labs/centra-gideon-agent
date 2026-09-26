@@ -45,6 +45,7 @@ import { QualityBadges } from './qualityBadges'
 import { StoreSideRail, type RailOption } from './StoreSideRail'
 import { artGradient } from './appArt'
 import { AppConfigFields, useAppConfig } from './appConfigForm'
+import { ChannelPairingStatus } from './ChannelPairingStatus'
 import { isInNav, setInNav } from './navApps'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { ScanReport, ConsentModal, PermissionList, PermissionConsent, CronConsentList } from './installConsent'
@@ -1326,6 +1327,7 @@ export function AppConfigDialog({ displayName, onClose, children }: { displayNam
 
 export function ConfigModal({ name, displayName, onClose }: { name: string; displayName: string; onClose: () => void }) {
   const cfg = useAppConfig(name)
+  const showsPairing = name === 'weixin-channel' || name === 'whatsapp-channel'
 
   return (
     <AppConfigDialog displayName={displayName} onClose={onClose}>
@@ -1338,6 +1340,7 @@ export function ConfigModal({ name, displayName, onClose }: { name: string; disp
           ) : (
             <AppConfigFields appName={name} props={cfg.props} cur={cfg.cur} set={cfg.set} secretSet={cfg.secretSet} required={cfg.required} />
           )}
+        {showsPairing && <ChannelPairingStatus appName={name} savedAt={cfg.savedAt} />}
         {
 }
         {cfg.err && <FieldError>{cfg.err}</FieldError>}
@@ -1349,7 +1352,7 @@ export function ConfigModal({ name, displayName, onClose }: { name: string; disp
             disabledReason={cfg.error ? 'The configuration failed to load'
               : cfg.loading ? 'Still loading the configuration'
               : cfg.missing.length > 0 ? `Fill in ${cfg.missingLabels.join(', ')}` : undefined}
-            onClick={() => cfg.save(onClose)}>Save</Button>
+            onClick={() => cfg.save(showsPairing ? undefined : onClose)}>Save</Button>
         </div>
       </div>
     </AppConfigDialog>

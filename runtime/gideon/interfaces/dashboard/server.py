@@ -1242,6 +1242,7 @@ async def start_dashboard(
     from gideon.interfaces.dashboard.handlers.channel_trust import (
         api_channel_trust,
         api_channel_trust_revoke,
+        api_telegram_pairing,
     )
     from gideon.interfaces.dashboard.handlers.channels import (
         api_channel_connect,
@@ -1253,6 +1254,7 @@ async def start_dashboard(
 
     app.router.add_get("/api/channels", api_channels_list)
     app.router.add_get("/api/channels/trust", api_channel_trust)
+    app.router.add_post("/api/channels/telegram/pairing", api_telegram_pairing)
     app.router.add_delete(
         "/api/channels/trust/{provider}/senders/{sender_id}", api_channel_trust_revoke
     )

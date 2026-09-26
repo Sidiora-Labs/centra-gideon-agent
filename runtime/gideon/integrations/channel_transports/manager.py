@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import TYPE_CHECKING, Any
 
-from gideon.integrations.channel_transports import get_transport, list_transports
+from gideon.integrations.channel_transports import get_transport, list_transports, queued_transport
 from gideon.integrations.channel_transports.base import (
     ChannelTransportProvider,
     OutboundMessage,
@@ -13,6 +14,8 @@ from gideon.integrations.channel_transports.base import (
 
 if TYPE_CHECKING:
     from gideon.interfaces.dashboard.state import ConsoleState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -88,4 +91,11 @@ class ChannelManager:
 
     async def send(self, name: str, message: OutboundMessage) -> bool:
         selected = self._resolve(name)
-        return False if selected is None else await selected.send(message)
+        sender = queued_transport(name) if selected is not None else None
+        if sender is None:
+            return False
+        try:
+            return bool(await sender.send(message))
+        except Exception:
+            logger.exception("channel transport send failed: %s", name)
+            return False
