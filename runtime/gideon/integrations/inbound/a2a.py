@@ -70,8 +70,10 @@ logger = logging.getLogger(__name__)
 SURFACE = "a2a"
 
 ROUTE_CARD = "/a2a/agent-card"
+ROUTE_WELL_KNOWN_CARD = "/.well-known/agent.json"
 ROUTE_TASKS = "/a2a/tasks"
 ROUTE_TASK = "/a2a/tasks/{task_id}"
+ROUTE_RPC = "/a2a"
 
 PROTOCOL_VERSION = "0.2.5"
 
@@ -509,8 +511,10 @@ def _skill_id_of(body: dict[str, Any]) -> str:
         value = body.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    metadata = body.get("metadata")
-    if isinstance(metadata, dict):
+    message = body.get("message")
+    for metadata in (body.get("metadata"), message.get("metadata") if isinstance(message, dict) else None):
+        if not isinstance(metadata, dict):
+            continue
         for key in ("skillId", "skill", "skill_id"):
             value = metadata.get(key)
             if isinstance(value, str) and value.strip():
@@ -524,6 +528,24 @@ def _inputs_of(body: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, dict):
             return dict(value)
     return {}
+
+
+def _message_text(body: dict[str, Any]) -> str:
+    message = body.get("message")
+    if not isinstance(message, dict):
+        return ""
+    return "\n".join(
+        str(part.get("text"))
+        for part in message.get("parts", [])
+        if isinstance(part, dict) and part.get("kind") == "text" and isinstance(part.get("text"), str)
+    ).strip()
+
+
+def _owned_run(run_id: str, client_id: str) -> bool:
+    from gideon.automation.workflows import store
+
+    run = store.get(run_id)
+    return bool(run and run.origin.session_key == session_key_for(client_id))
 
 
 def _caller_key_of(body: dict[str, Any]) -> str:
@@ -665,7 +687,7 @@ def task_snapshot(
 
 
 async def _start_task(
-    body: dict[str, Any], *, client_id: str
+    body: dict[str, Any], *, client_id: str, supervisor: Any = None
 ) -> tuple[dict[str, Any] | None, web.Response | None]:
     """Start one run for an A2A task. ``(started_status, refusal)``."""
     from gideon.automation.workflows.models import OriginKind
@@ -691,13 +713,31 @@ async def _start_task(
             status=404,
             headers=_NO_STORE,
         )
+    if supervisor is None:
+        return None, json_error(
+            "service_unavailable",
+            message="workflow supervisor is unavailable",
+            status=503,
+            headers=_NO_STORE,
+        )
+    inputs = _inputs_of(body)
+    if not inputs:
+        text = _message_text(body)
+        skill = next((s for s in skills if s.get("id") == skill_id), {})
+        declared = skill.get("inputs") or []
+        required_text = [field for field in declared if field.get("required") and field.get("type") == "string"]
+        if text and len(required_text) == 1:
+            inputs = {str(required_text[0]["name"]): text}
+        elif text and not declared:
+            inputs = {"prompt": text}
     started = await start_run(
         name=skill_id,
-        inputs=_inputs_of(body),
+        inputs=inputs,
         mode="background",
         origin_kind=OriginKind.API,
         session_key=session_key_for(client_id),
-        idempotency_key=_caller_key_of(body),
+        idempotency_key=(f"{session_key_for(client_id)}:{_caller_key_of(body)}" if _caller_key_of(body) else ""),
+        supervisor=supervisor,
     )
     if not started.get("ok"):
         return None, json_error(
@@ -747,7 +787,8 @@ async def handle_tasks(request: web.Request) -> web.StreamResponse:
             client_id=client_id,
         )
 
-    started, start_refusal = await _start_task(body, client_id=client_id)
+    state = request.app.get("state")
+    started, start_refusal = await _start_task(body, client_id=client_id, supervisor=getattr(state, "workflows", None))
     if start_refusal is not None:
         return _refuse(
             start_refusal,
@@ -796,6 +837,7 @@ async def _stream_task(
     client_id: str,
     skill_id: str,
     caps: caps_mod.Caps,
+    rpc_id: Any = None,
 ) -> web.StreamResponse:
     """SSE the task's lifecycle as A2A ``status-update`` / ``artifact-update`` events.
 
@@ -829,28 +871,34 @@ async def _stream_task(
             timed_out = time.monotonic() >= deadline
             state = str(task["status"]["state"])
             if state != last or final:
-                await _sse(
-                    response,
+                event = (
                     {
                         "taskId": run_id,
                         "contextId": task["contextId"],
                         "kind": "status-update",
                         "status": task["status"],
                         "final": final,
-                    },
+                    }
+                )
+                await _sse(
+                    response,
+                    {"jsonrpc": "2.0", "id": rpc_id, "result": event} if rpc_id is not None else event,
                 )
                 last = state
             if final:
                 for artifact in task.get("artifacts") or []:
-                    await _sse(
-                        response,
+                    event = (
                         {
                             "taskId": run_id,
                             "contextId": task["contextId"],
                             "kind": "artifact-update",
                             "artifact": artifact,
                             "lastChunk": True,
-                        },
+                        }
+                    )
+                    await _sse(
+                        response,
+                        {"jsonrpc": "2.0", "id": rpc_id, "result": event} if rpc_id is not None else event,
                     )
                 break
             if timed_out:
@@ -874,6 +922,13 @@ async def handle_task_get(request: web.Request) -> web.Response:
     if refusal is not None:
         return refusal
     task_id = str(request.match_info.get("task_id") or "")
+    if not _owned_run(task_id, client_id):
+        return _refuse(
+            json_error("not_found", status=404, headers=_NO_STORE),
+            route=ROUTE_TASK,
+            refused="no such task for caller",
+            client_id=client_id,
+        )
     snapshot = task_snapshot(task_id, client_id=client_id, caps=caps)
     if snapshot is None:
         return _refuse(
@@ -885,6 +940,97 @@ async def handle_task_get(request: web.Request) -> web.Response:
     task, _final = snapshot
     audit(SURFACE, route=ROUTE_TASK, status=200, client_id=client_id)
     return web.json_response(task, headers=_NO_STORE)
+
+
+def _rpc_result(request_id: Any, result: Any) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+async def handle_rpc(request: web.Request) -> web.StreamResponse:
+    """A2A JSON-RPC binding over the existing published-workflow run seam."""
+    refusal, client_id, caps = _admit(request, ROUTE_RPC)
+    if refusal is not None:
+        return refusal
+    raw = await request.content.read(caps.body_bytes + 1)
+    if len(raw) > caps.body_bytes:
+        return _refuse(json_error("request_too_large", status=413, headers=_NO_STORE), route=ROUTE_RPC, refused="body over cap", client_id=client_id)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return web.json_response(_rpc_error(None, -32700, "invalid JSON"), headers=_NO_STORE)
+    if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0" or not isinstance(payload.get("method"), str) or not isinstance(payload.get("params", {}), dict):
+        return web.json_response(_rpc_error(payload.get("id") if isinstance(payload, dict) else None, -32600, "invalid JSON-RPC request"), headers=_NO_STORE)
+    request_id = payload.get("id")
+    if not isinstance(request_id, (str, int)) or isinstance(request_id, bool):
+        return web.json_response(_rpc_error(None, -32600, "request id must be a string or integer"), headers=_NO_STORE)
+    method = payload["method"]
+    params = payload.get("params") or {}
+    task_id = str(params.get("id") or params.get("taskId") or "")
+    result: Any
+    if method in ("agent/getAuthenticatedExtendedCard", "agent/getCard"):
+        skills, problem = await published_skills(limit=caps.max_items)
+        if problem:
+            result = _rpc_error(request_id, -32603, problem)
+        else:
+            result = _rpc_result(request_id, build_card(skills))
+    elif method in ("message/send", "message/stream"):
+        state = request.app.get("state")
+        started, error = await _start_task(params, client_id=client_id, supervisor=getattr(state, "workflows", None))
+        if error is not None:
+            result = _rpc_error(request_id, -32602, "task start refused: " + (error.text or "invalid request")[:300])
+        else:
+            assert started is not None
+            task_id = str(started.get("run_id") or "")
+            if method == "message/stream":
+                return await _stream_task(request, task_id, client_id=client_id, skill_id=_skill_id_of(params), caps=caps, rpc_id=request_id)
+            snapshot = task_snapshot(task_id, client_id=client_id, caps=caps)
+            result = _rpc_result(request_id, snapshot[0] if snapshot else _task_envelope(task_id, state=STATE_SUBMITTED, skill_id=_skill_id_of(params)))
+    elif method == "tasks/list":
+        from gideon.automation.workflows import store
+
+        try:
+            offset = max(0, min(int(params.get("offset") or 0), 100000))
+            limit = max(1, min(int(params.get("limit") or 50), caps.max_items))
+        except (TypeError, ValueError):
+            return web.json_response(_rpc_error(request_id, -32602, "limit and offset must be integers"), headers=_NO_STORE)
+        owned: list[str] = []
+        scan = 0
+        while len(owned) < offset + limit + 1:
+            rows, _total = store.list_runs(limit=200, offset=scan)
+            if not rows:
+                break
+            owned.extend(run.id for run in rows if _owned_run(run.id, client_id))
+            scan += len(rows)
+        task_ids = owned[offset:offset + limit]
+        tasks = [snapshot[0] for run_id in task_ids if (snapshot := task_snapshot(run_id, client_id=client_id, caps=caps))]
+        next_page = str(offset + limit) if len(owned) > offset + limit else ""
+        result = _rpc_result(request_id, {"tasks": tasks, "nextPageToken": next_page})
+    elif method in ("tasks/get", "tasks/cancel", "tasks/resubscribe"):
+        if not task_id or not _owned_run(task_id, client_id):
+            result = _rpc_error(request_id, -32001, "task not found")
+        elif method == "tasks/cancel":
+            from gideon.automation.workflows import service as wf
+
+            state = request.app.get("state")
+            canceled = wf.cancel_run(task_id, supervisor=getattr(state, "workflows", None))
+            if not canceled.get("ok") and canceled.get("code") != "WF_RUN_ALREADY_TERMINAL":
+                result = _rpc_error(request_id, -32603, str(canceled.get("message") or "cancel failed"))
+            else:
+                snapshot = task_snapshot(task_id, client_id=client_id, caps=caps)
+                result = _rpc_result(request_id, snapshot[0] if snapshot else {})
+        elif method == "tasks/resubscribe":
+            return await _stream_task(request, task_id, client_id=client_id, skill_id="", caps=caps, rpc_id=request_id)
+        else:
+            snapshot = task_snapshot(task_id, client_id=client_id, caps=caps)
+            result = _rpc_result(request_id, snapshot[0] if snapshot else {})
+    else:
+        result = _rpc_error(request_id, -32601, f"unknown method {method!r}")
+    audit(SURFACE, route=ROUTE_RPC, status=200, client_id=client_id, tool=method)
+    return web.json_response(result, headers=_NO_STORE)
 
 
 def register_routes(app: web.Application) -> None:
@@ -902,5 +1048,7 @@ def register_routes(app: web.Application) -> None:
     can shadow them.
     """
     app.router.add_get(ROUTE_CARD, handle_agent_card)
+    app.router.add_get(ROUTE_WELL_KNOWN_CARD, handle_agent_card)
     app.router.add_post(ROUTE_TASKS, handle_tasks)
     app.router.add_get(ROUTE_TASK, handle_task_get)
+    app.router.add_post(ROUTE_RPC, handle_rpc)

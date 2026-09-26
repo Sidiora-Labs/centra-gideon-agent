@@ -495,7 +495,9 @@ def _build_native_runtime(
         provider_name="gideon-filesystem",
         display="Filesystem & Shell Tools",
     )
-    tool_providers = [platform, *_list_tool_providers()]
+    from gideon.integrations.mcp_delegated import McpDelegatedToolProvider
+
+    tool_providers = [platform, *_list_tool_providers(), McpDelegatedToolProvider(session_key or "")]
 
     return NativeAgentRuntime(  # type: ignore[return-value]  # CI-2
         definition=definition,
