@@ -7,7 +7,7 @@ import {
   type ExternalThreadQueueAdapter,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
-import type { ChatTurn, Segment } from './chatTypes'
+import { guardrailNoticeForTool, type ChatTurn, type Segment } from './chatTypes'
 
 export interface GideonChatRuntimeProps {
   sessionId: string | null
@@ -72,7 +72,11 @@ export function convertGideonTurn(turn: ChatTurn, ordinal: number, sessionId: st
     id: gideonAuiId(sessionId, ordinal),
     role: turn.role,
     content: [
-      ...turn.segments.map(segmentPart),
+      ...turn.segments.flatMap((segment) => {
+        const part = segmentPart(segment)
+        const notice = segment.kind === 'tool' ? guardrailNoticeForTool(segment) : null
+        return notice ? [part, { type: 'data' as const, name: 'gideon-guardrail-notice', data: notice }] : [part]
+      }),
       ...(turn.fileChanges?.length ? [{ type: 'data' as const, name: 'gideon-file-changes', data: turn.fileChanges }] : []),
     ],
     ...(createdAt && !Number.isNaN(createdAt.getTime()) ? { createdAt } : {}),

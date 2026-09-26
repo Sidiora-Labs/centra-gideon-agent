@@ -79,6 +79,14 @@ describe("FileTree with persisted file-change snapshots", () => {
     expect(screen.getByText("+0")).toBeInTheDocument();
     expect(screen.getByText("−0")).toBeInTheDocument();
   });
+
+  it("uses an owner-supplied file count label without changing the persisted file row", () => {
+    render(<FileTree nodes={[file]} visibleCount={1} filesChangedLabel="1 Datei geändert" />);
+    expect(screen.getByText("1 Datei geändert")).toBeInTheDocument();
+    expect(screen.queryByText("1 files changed")).toBeNull();
+    expect(screen.getByText(changedPath)).toBeInTheDocument();
+    expect(screen.getByText("+1")).toBeInTheDocument();
+  });
 });
 
 describe("ReviewableDiff for already-applied persisted snapshots", () => {
@@ -109,6 +117,18 @@ describe("ReviewableDiff for already-applied persisted snapshots", () => {
     expect(screen.queryByText("discarded")).toBeNull();
     expect(container.querySelector(".opacity-40")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("uses an owner-supplied applied label only in read-only applied mode", () => {
+    const { rerender } = render(<ReviewableDiff filename={changedPath}
+      hunks={[appliedHunk]} mode="applied" appliedLabel="Angewendet" />);
+    expect(screen.getByText("Angewendet")).toBeInTheDocument();
+    expect(screen.queryByText("Applied")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    rerender(<ReviewableDiff filename={changedPath} hunks={[{ ...appliedHunk, decision: "pending" }]}
+      appliedLabel="Angewendet" />);
+    expect(screen.queryByText("Angewendet")).toBeNull();
+    expect(screen.getByText("0 of 1 kept")).toBeInTheDocument();
   });
 
   it("keeps the original donor review mode and real callbacks as the default", () => {

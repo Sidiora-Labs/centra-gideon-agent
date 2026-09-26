@@ -327,7 +327,11 @@ def call_tool_with_logging(
         return f"Error: {e}"
 
     result = inner_fn(name, args)
-    outcome = "failed" if result.startswith("Error:") else "completed"
+    outcome = (
+        "failed"
+        if result.startswith("Error:") or getattr(result, "agent_error", None) is not None
+        else "completed"
+    )
     sel().log_tool_invocation(
         session_key=session_key,
         source="mcp",

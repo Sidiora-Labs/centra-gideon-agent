@@ -24,11 +24,12 @@ export function ReviewableDiff({
   onDiscard,
   onApply,
   mode = "review",
+  appliedLabel,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "filename" | "hunks" | "onKeep" | "onDiscard" | "onApply" | "mode"
+  "children" | "filename" | "hunks" | "onKeep" | "onDiscard" | "onApply" | "mode" | "appliedLabel"
 > & {
   filename: string;
   hunks: readonly DiffHunk[];
@@ -36,6 +37,7 @@ export function ReviewableDiff({
   onDiscard?: (id: string) => void;
   onApply?: () => void;
   mode?: "review" | "applied";
+  appliedLabel?: string;
 }) {
   const kept = hunks.filter((hunk) => hunk.decision === "kept").length;
   const pending = hunks.filter((hunk) => hunk.decision === "pending").length;
@@ -54,7 +56,7 @@ export function ReviewableDiff({
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="font-mono text-xs">{filename}</span>
         <span className={cn(mono, "text-foreground/35 tabular-nums")}>
-          {mode === "applied" ? "Applied" : `${kept} of ${hunks.length} kept`}
+          {mode === "applied" ? (appliedLabel ?? "Applied") : `${kept} of ${hunks.length} kept`}
         </span>
       </div>
 

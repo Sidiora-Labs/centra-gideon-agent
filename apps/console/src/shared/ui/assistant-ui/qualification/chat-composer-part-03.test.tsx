@@ -130,4 +130,50 @@ describe('AUI trigger popover over the single Gideon editor', () => {
     expect(onMentionFile).toHaveBeenCalledExactlyOnceWith({ path: '/work/report.txt', name: 'report.txt' })
     expect(screen.getAllByLabelText('Message input')).toHaveLength(1)
   })
+
+  it('does not submit or execute a donor slash item during IME composition', async () => {
+    vi.spyOn(api, 'slashCommands').mockResolvedValue([{ name: '/help', description: 'Show help' }])
+    const onSend = vi.fn()
+    function Host() {
+      const [value, setValue] = useState('/')
+      return <Runtime><Composer value={value} onChange={setValue} onSend={onSend}
+        controls={{ slash: true }} auiModelSelector /></Runtime>
+    }
+    render(<Host />)
+    const editor = screen.getByLabelText('Message input')
+    const view = EditorView.findFromDOM(editor)!
+    act(() => view.dispatch({ selection: { anchor: 1 } }))
+    const option = await screen.findByRole('option', { name: /help.*Show help/ })
+    fireEvent.compositionStart(editor)
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(view.state.doc.toString()).toBe('/')
+    expect(onSend).not.toHaveBeenCalled()
+    expect(option).toBeInTheDocument()
+    fireEvent.compositionEnd(editor)
+    fireEvent.click(option)
+    await waitFor(() => expect(view.state.doc.toString()).toBe('/help '))
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('executes a knowledge mention at the real caret and forwards its stable ID once', async () => {
+    await mentionResults.load(mentionSearchKey('kn', undefined, false), async () => [
+      { kind: 'knowledge', id: 'knowledge-7', name: 'Notebook', sub: 'Team notes' },
+    ])
+    const onMentionKnowledge = vi.fn()
+    function Host() {
+      const [value, setValue] = useState('Ask @kn later')
+      return <Runtime><Composer value={value} onChange={setValue} onSend={vi.fn()}
+        onMentionKnowledge={onMentionKnowledge} controls={{}} auiModelSelector /></Runtime>
+    }
+    const host = render(<Host />)
+    const editor = screen.getByLabelText('Message input')
+    const view = EditorView.findFromDOM(editor)!
+    act(() => view.dispatch({ selection: { anchor: 7 } }))
+    const option = await screen.findByRole('option', { name: /Notebook.*Team notes/ })
+    expect(host.container.querySelectorAll('[data-slot="composer-trigger-popover"]')).toHaveLength(1)
+    fireEvent.click(option)
+    await waitFor(() => expect(view.state.doc.toString()).toBe('Ask @Notebook later'))
+    expect(view.state.selection.main.head).toBe('Ask @Notebook '.length)
+    expect(onMentionKnowledge).toHaveBeenCalledExactlyOnceWith({ id: 'knowledge-7', name: 'Notebook' })
+  })
 })

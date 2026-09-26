@@ -1,5 +1,4 @@
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
@@ -7,7 +6,6 @@ from aiohttp import web
 from gideon.engine.agents.native.runtime import NativeAgentRuntime
 from gideon.engine.agents.provider import AgentRuntimeDefinition
 from gideon.integrations.llm.anthropic import AnthropicProvider
-from gideon.integrations.llm.catalog import ModelInfo
 from gideon.integrations.llm.credentials import Credential
 from gideon.integrations.llm.openai import OpenAIProvider, _ChatDecoder
 
@@ -166,48 +164,18 @@ def test_openai_cached_tokens_still_use_declared_capacity():
 
 
 @pytest.mark.asyncio
-async def test_openai_served_windows_stay_bound_to_each_endpoint(monkeypatch):
-    catalog = AsyncMock(
-        side_effect=[
-            [
-                ModelInfo(
-                    id="other-embedding",
-                    name="other-embedding",
-                    capabilities=["embedding"],
-                    extra={"context_length": 4000},
-                ),
-                ModelInfo(
-                    id="same-model",
-                    name="same-model",
-                    capabilities=["chat"],
-                    extra={"context_window": 8192},
-                ),
-            ],
-            [
-                ModelInfo(
-                    id="same-model",
-                    name="same-model",
-                    capabilities=["chat"],
-                    extra={"context_length": 16384},
-                )
-            ],
-            [
-                ModelInfo(
-                    id="same-model",
-                    name="same-model",
-                    capabilities=["chat"],
-                    extra={"context_length": "unknown"},
-                )
-            ],
-        ]
-    )
-    monkeypatch.setattr(
-        "gideon.integrations.llm.catalog.openai_compatible_list_models", catalog
+async def test_openai_served_windows_stay_bound_to_each_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    (tmp_path / "config.json").write_text(
+        json.dumps({"security": {"egress": {"allow_hosts": ["127.0.0.1"]}}})
     )
     runners = []
     providers = []
 
-    async def serve():
+    async def serve(model_rows):
+        async def models(_request):
+            return web.json_response({"object": "list", "data": model_rows})
+
         async def inference(_request):
             frame = {
                 "id": "turn",
@@ -227,6 +195,7 @@ async def test_openai_served_windows_stay_bound_to_each_endpoint(monkeypatch):
             )
 
         app = web.Application()
+        app.router.add_get("/v1/models", models)
         app.router.add_post("/v1/chat/completions", inference)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -244,9 +213,12 @@ async def test_openai_served_windows_stay_bound_to_each_endpoint(monkeypatch):
         return provider
 
     try:
-        first = await serve()
-        second = await serve()
-        third = await serve()
+        first = await serve([
+            {"id": "other-embedding", "context_length": 4000},
+            {"id": "same-model", "context_window": 8192},
+        ])
+        second = await serve([{"id": "same-model", "context_length": 16384}])
+        third = await serve([{"id": "same-model", "context_length": "unknown"}])
         first_events = [event async for event in first.stream("hello")]
         second_events = [event async for event in second.stream("hello")]
         third_events = [event async for event in third.stream("hello")]
@@ -254,7 +226,6 @@ async def test_openai_served_windows_stay_bound_to_each_endpoint(monkeypatch):
         assert first_events[-1].context_usage.total_input_tokens == 100
         assert second_events[-1].context_usage.context_window_tokens == 16384
         assert third_events[-1].context_usage.context_window_tokens is None
-        assert catalog.await_count == 3
     finally:
         for provider in providers:
             await provider.shutdown()

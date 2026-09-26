@@ -1623,6 +1623,24 @@ def _context_usage_payload(
     return payload
 
 
+def _tool_result_payload(session_key: str, event: Any, output: str) -> dict[str, Any]:
+    meta = event.tool_meta or {}
+    ok = meta.get("ok")
+    agent_error = meta.get("agent_error")
+    return {
+        "session": session_key,
+        "tool_call_id": event.tool_call_id,
+        "output": output,
+        "content_type": str(meta.get("content_type", "") or ""),
+        "raw_ref": str(meta.get("raw_ref", "") or ""),
+        "truncated": bool(meta.get("truncated", False)),
+        "original_length": meta.get("original_length"),
+        "recovery_hints": [str(h) for h in (meta.get("recovery_hints") or [])][:6],
+        **({"agent_error": agent_error} if agent_error else {}),
+        **({"ok": bool(ok)} if ok is not None else {}),
+    }
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,
@@ -2744,29 +2762,16 @@ async def run_chat(
                 _out = (event.tool_output or "")[:8000]
                 _out, _ = redact_exfiltration_urls(_out)
                 _out, _ = redact_credentials(_out)
+                _payload = _tool_result_payload(session.key, event, _out)
+                _content_type = _payload["content_type"]
+                _raw_ref = _payload["raw_ref"]
+                _truncated = _payload["truncated"]
+                _orig_len = _payload["original_length"]
+                _recovery = _payload["recovery_hints"]
                 _tmeta = event.tool_meta or {}
-                _content_type = str(_tmeta.get("content_type", "") or "")
-                _raw_ref = str(_tmeta.get("raw_ref", "") or "")
-                _truncated = bool(_tmeta.get("truncated", False))
-                _orig_len = _tmeta.get("original_length")
-                _recovery = [str(h) for h in (_tmeta.get("recovery_hints") or [])][:6]
                 _tool_ok = _tmeta.get("ok")
-                _agent_error = _tmeta.get("agent_error")
-                state.broadcast_ws(
-                    "tool_result",
-                    {
-                        "session": session.key,
-                        "tool_call_id": event.tool_call_id,
-                        "output": _out,
-                        "content_type": _content_type,
-                        "raw_ref": _raw_ref,
-                        "truncated": _truncated,
-                        "original_length": _orig_len,
-                        "recovery_hints": _recovery,
-                        **({"agent_error": _agent_error} if _agent_error else {}),
-                        **({"ok": bool(_tool_ok)} if _tool_ok is not None else {}),
-                    },
-                )
+                _agent_error = _payload.get("agent_error")
+                state.broadcast_ws("tool_result", _payload)
                 if event.tool_call_id:
                     for m in reversed(session.messages):
                         if (

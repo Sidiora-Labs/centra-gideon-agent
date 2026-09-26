@@ -93,3 +93,38 @@ describe('actual tool call rendering', () => {
     }
   })
 })
+
+describe('connected tool output from real segments', () => {
+  const patch = ['diff --git a/src/account.ts b/src/account.ts', '--- a/src/account.ts', '+++ b/src/account.ts',
+    '@@ -1 +1 @@', '-old', '+new'].join('\n')
+
+  it('shows donor CodeDiff for a complete successful single-file patch', () => {
+    const view = render(<ToolCard seg={tool({ tool: 'custom_patch', output: patch, done: true, ok: true })} connected />)
+    fireEvent.click(view.container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLButtonElement)
+    const diff = view.container.querySelector('[data-slot="code-diff"]')
+    expect(diff?.textContent).toContain('src/account.ts')
+    expect(diff?.textContent).toContain('+1')
+    expect(diff?.textContent).toContain('−1')
+    expect(diff?.textContent).toContain('old')
+    expect(diff?.textContent).toContain('new')
+  })
+
+  it('shows donor TerminalBlock for an actual shell command and output without an exit code', () => {
+    const view = render(<ToolCard seg={tool({ tool: 'bash', inputObj: { command: 'pwd' }, output: '/repo\n', done: true, ok: true })} connected />)
+    fireEvent.click(view.container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLButtonElement)
+    const terminal = view.container.querySelector('[data-slot="terminal-block"]')
+    expect(terminal?.textContent).toContain('pwd')
+    expect(terminal?.textContent).toContain('/repo')
+    expect(terminal?.textContent).toContain('Finished')
+    expect(terminal?.textContent).not.toContain('exit 0')
+  })
+
+  it('retains the native bash diff renderer ahead of donor output adapters', () => {
+    const view = render(<ToolCard seg={tool({ tool: 'bash', inputObj: { command: 'git diff' }, output: patch, done: true, ok: true })} connected />)
+    fireEvent.click(view.container.querySelector('[data-slot="tool-fallback-trigger"]') as HTMLButtonElement)
+    expect(view.container.querySelector('[data-slot="code-diff"]')).toBeNull()
+    expect(view.container.querySelector('[data-slot="terminal-block"]')).toBeNull()
+    expect(view.container.textContent).toContain('old')
+    expect(view.container.textContent).toContain('new')
+  })
+})

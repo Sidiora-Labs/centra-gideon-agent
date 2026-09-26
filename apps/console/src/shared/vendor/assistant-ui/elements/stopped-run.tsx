@@ -8,16 +8,18 @@ import { field, mono } from "./surfaces";
 export function StoppedRun({
   words,
   reason,
+  showWords = true,
   onContinue,
   onDiscard,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "words" | "reason" | "onContinue" | "onDiscard"
+  "children" | "words" | "reason" | "showWords" | "onContinue" | "onDiscard"
 > & {
   words: readonly string[];
   reason: string;
+  showWords?: boolean;
   onContinue?: () => void;
   onDiscard?: () => void;
 }) {
@@ -28,13 +30,13 @@ export function StoppedRun({
 
       {...props}
     >
-      <p className="text-foreground/80 text-[13.5px] leading-relaxed">
+      {showWords && <p className="text-foreground/80 text-[13.5px] leading-relaxed">
         {words.join(" ")}
         <span
           aria-hidden
           className="bg-foreground/20 ms-1 inline-block h-[1em] w-[2px] translate-y-[0.15em] rounded-full"
         />
-      </p>
+      </p>}
 
       <div className="flex items-center gap-2">
         <span
