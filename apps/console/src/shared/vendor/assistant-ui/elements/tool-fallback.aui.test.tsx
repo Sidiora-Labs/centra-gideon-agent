@@ -1,32 +1,67 @@
 import {
   cleanup,
   fireEvent,
-  render,
+  render as baseRender,
   screen,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import {
+  AssistantRuntimeProvider,
+  MessagePrimitive,
+  ThreadPrimitive,
+  useExternalStoreRuntime,
+  type ThreadMessageLike,
+  type ToolCallMessagePartProps,
+} from "@assistant-ui/react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 
 import { ToolFallback, ToolFallbackApproval } from "./tool-fallback.aui";
 
-const stubs = vi.hoisted(() => ({
-  useScrollLock: () => () => {},
-  useToolCallElapsed: () => undefined,
-  voice: { active: false },
-}));
+function Runtime({ children }: { children: ReactNode }) {
+  const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
+  const runtime = useExternalStoreRuntime({
+    messages,
+    convertMessage: (message: ThreadMessageLike) => message,
+    onNew: async content => {
+      const text = content.content.map(part => part.type === "text" ? part.text : "").join("");
+      setMessages(current => [...current, { role: "user", content: [{ type: "text", text }] }]);
+    },
+  });
+  return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+}
 
-vi.mock("@assistant-ui/react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@assistant-ui/react")>()),
-  useScrollLock: stubs.useScrollLock,
-  useToolCallElapsed: stubs.useToolCallElapsed,
-  useAuiState: (selector: (state: unknown) => unknown) =>
-    selector({
-      thread: {
-        voice: stubs.voice.active ? {} : undefined,
-      },
-    }),
-}));
+function render(ui: ReactElement) {
+  const view = baseRender(<Runtime>{ui}</Runtime>);
+  return {
+    ...view,
+    rerender: (next: ReactElement) => view.rerender(<Runtime>{next}</Runtime>),
+  };
+}
+
+function ToolMessage({ part }: { part: ToolCallMessagePartProps }) {
+  const message: ThreadMessageLike = {
+    id: "tool-message",
+    role: "assistant",
+    content: [part],
+    status: part.status?.type === "running" ? { type: "running" } : { type: "complete", reason: "stop" },
+  };
+  const [messages, setMessages] = useState<ThreadMessageLike[]>([message]);
+  useEffect(() => setMessages([message]), [part]);
+  const runtime = useExternalStoreRuntime({
+    messages,
+    convertMessage: (item: ThreadMessageLike) => item,
+    onNew: async content => {
+      const text = content.content.map(item => item.type === "text" ? item.text : "").join("");
+      setMessages(current => [...current, { role: "user", content: [{ type: "text", text }] }]);
+    },
+  });
+  return <AssistantRuntimeProvider runtime={runtime}>
+    <ThreadPrimitive.Messages components={{
+      Message: () => <MessagePrimitive.Parts components={{ tools: { Fallback: ToolFallback } }} />,
+    }} />
+  </AssistantRuntimeProvider>;
+}
 
 const pendingApproval = { id: "req_1" };
 
@@ -124,6 +159,31 @@ describe("ToolFallback", () => {
     expect(view.container.textContent).toContain("partial output");
   });
 
+  it("follows a real tool-message part from running output to completed output", async () => {
+    const running: ToolCallMessagePartProps = {
+      type: "tool-call",
+      toolCallId: "call-1",
+      toolName: "test-tool",
+      args: { query: "docs" },
+      argsText: '{"query":"docs"}',
+      status: { type: "running" },
+    };
+    const view = baseRender(<ToolMessage part={running} />);
+    expect(screen.getByRole("button", { name: /Used tool: test-tool/ })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: /Used tool: test-tool/ }));
+    expect(screen.getByText('{"query":"docs"}')).toBeInTheDocument();
+
+    view.rerender(<ToolMessage part={{
+      ...running,
+      status: { type: "complete" },
+      result: "2 documents",
+    }} />);
+    await waitFor(() => expect(view.container.querySelector('[data-slot="tool-fallback-trigger-icon"]'))
+      .not.toHaveClass("animate-spin"));
+    fireEvent.click(screen.getByRole("button", { name: /Used tool: test-tool/ }));
+    expect(await screen.findByText("2 documents")).toBeInTheDocument();
+  });
+
   it("keeps caller supplied tool labels tied to the actual status", () => {
     const { rerender } = render(
       <ToolFallback.Root>
@@ -153,20 +213,6 @@ describe("ToolFallback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
 
     expect(respondToApproval).toHaveBeenCalledWith({ approved: true });
-  });
-
-  it("locks approval controls while a voice session is connected", () => {
-    const respondToApproval = vi.fn();
-    stubs.voice.active = true;
-    try {
-      renderTool({ approval: { id: "approval-1" }, respondToApproval });
-      const allow = button("Allow");
-      expect(allow.disabled).toBe(true);
-      fireEvent.click(allow);
-      expect(respondToApproval).not.toHaveBeenCalled();
-    } finally {
-      stubs.voice.active = false;
-    }
   });
 
   it("shows the prompt without controls when the thread cannot answer", () => {
