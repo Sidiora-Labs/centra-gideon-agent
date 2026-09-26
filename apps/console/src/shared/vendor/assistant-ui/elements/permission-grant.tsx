@@ -7,7 +7,13 @@ import { field, inkButton, mono, paper } from "./surfaces";
 
 export type GrantScope = "session" | "always" | "denied";
 
-export type PermissionChoice = { id: string; label: string };
+export type PermissionChoice = {
+  id: string;
+  label: string;
+  name?: string;
+  disabled?: boolean;
+  tone?: "danger" | "neutral";
+};
 
 export type PermissionGrantProps = Omit<
   ComponentProps<"div">,
@@ -91,13 +97,20 @@ export function PermissionGrant({
         {scope === "pending" ? (
           choices !== undefined ? (
             choices.length > 0 ? (
-              choices.map(({ id, label }) => (
+              choices.map(({ id, label, name, disabled, tone }) => (
                 <button
                   key={id}
                   type="button"
-                  disabled={!onChoice}
+                  aria-label={name}
+                  title={name}
+                  disabled={!onChoice || disabled}
                   onClick={onChoice ? () => onChoice(id) : undefined}
-                  className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                  className={cn(
+                    "h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50",
+                    tone === "danger"
+                      ? "text-red-600 hover:bg-red-500/10 hover:text-red-700"
+                      : "text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90",
+                  )}
                 >
                   {label}
                 </button>

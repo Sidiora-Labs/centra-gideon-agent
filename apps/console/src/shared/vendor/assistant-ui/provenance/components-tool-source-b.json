@@ -14,7 +14,7 @@
     "elicitation-form.tsx": "e41fb8c832f933e6eee19a12dbfea72ba854df2aca5e0fc11f524c7fba07330c",
     "mcp-server-panel.tsx": "14b82c682eec29a594cefbbbc992966d99c092e4f053552c5fe8612df11f15c1",
     "tool-error.tsx": "cb6b22cfa0e39019e3d63bbc6b9f9d621de5de95243a0da268e5c9fae345919a",
-    "permission-grant.tsx": "d670b15caace2fba5b2e9c049d8abdabdd00b2ab8e9efe31bbd5c8af3d6ef22c",
+    "permission-grant.tsx": "8f51713d73a08cf05daf37fbc7670af6e4f5cea8117460833ea21403f409d965",
     "computer-use.tsx": "e33f379eea3404acc883b10d5ed13b1ba9120e5d1fdbcc2ac5cd80228504fc7d",
     "code-runner.tsx": "9769774faf957b279ef886c85e6374acebafa0ca44e0185f8469b6d7fcf802ec"
   },
@@ -26,6 +26,7 @@
     "allow a caller to render live schema controls while retaining donor read-only field defaults",
     "expose an optional Cancel action and caller labels without changing the default donor actions",
     "accept exact caller-supplied approval choices, resolved labels and details without implying donor session or always policy",
-    "omit unknown requester and empty reach sections while retaining donor populated presentation"
+    "omit unknown requester and empty reach sections while retaining donor populated presentation",
+    "allow per-choice accessible names, disabled revision and neutral or danger presentation"
   ]
 }
