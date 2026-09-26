@@ -163,6 +163,9 @@ class TestChatMessageFeedback:
                 "target_kind": "chat_message", "target_id": "owner-a:chat-feedback:1", "verdict": "up",
             })
             assert bypass.status == 400
+            assert (await client.get(
+                "/api/feedback/target/chat_message/owner-a:chat-feedback:1"
+            )).status == 404
             assert (await (await client.get(path)).json())["verdict"] == "down"
 
     @pytest.mark.asyncio
@@ -176,6 +179,9 @@ class TestChatMessageFeedback:
                     f"/api/chat/sessions/chat-feedback/feedback/{index}", json={"verdict": "up"},
                 )
                 assert response.status == 404
+            assert (await client.get(
+                "/api/chat/sessions/chat-feedback/feedback/not-a-number"
+            )).status == 404
             invalid = await client.post(
                 "/api/chat/sessions/chat-feedback/feedback/1", json={"verdict": "maybe"},
             )
@@ -234,6 +240,40 @@ class TestChatMessageFeedback:
             assert (await client.post(path, json={"verdict": "up"})).status == 404
             assert (await client.get(path)).status == 404
             assert fb.current_verdict("chat_message", "owner-a:chat-feedback:1") is None
+
+    @pytest.mark.asyncio
+    async def test_missing_state_and_invalid_json_never_record_a_verdict(self, isolated):
+        path = "/api/chat/sessions/chat-feedback/feedback/1"
+        async with TestClient(TestServer(_make_app())) as client:
+            assert (await client.post(path, json={"verdict": "up"})).status == 404
+        state = _chat_state(isolated)
+        async with TestClient(TestServer(_make_app(state=state))) as client:
+            assert (await client.post(path, data="not json")).status == 400
+            assert (await (await client.get(path)).json())["verdict"] is None
+
+    @pytest.mark.asyncio
+    async def test_unreadable_paged_history_cannot_target_an_unverified_turn(self, isolated, monkeypatch):
+        state = _chat_state(isolated)
+        state._sessions["chat-feedback"]._disk_older_count = 1
+
+        def unreadable_history(_key):
+            raise OSError("conversation log is unavailable")
+
+        monkeypatch.setattr(state.conversation_log, "read_messages_chained", unreadable_history)
+        async with TestClient(TestServer(_make_app(state=state))) as client:
+            path = "/api/chat/sessions/chat-feedback/feedback/1"
+            assert (await client.post(path, json={"verdict": "up"})).status == 404
+            assert (await client.get(path)).status == 404
+        assert fb.current_verdict("chat_message", "owner-a:chat-feedback:1") is None
+
+    @pytest.mark.asyncio
+    async def test_feedback_store_failure_reports_failure_and_preserves_unrated_turn(self, isolated):
+        (isolated / "feedback.jsonl").mkdir()
+        state = _chat_state(isolated)
+        async with TestClient(TestServer(_make_app(state=state))) as client:
+            path = "/api/chat/sessions/chat-feedback/feedback/1"
+            assert (await client.post(path, json={"verdict": "up"})).status == 500
+            assert (await (await client.get(path)).json())["verdict"] is None
 
 
 class TestProducersRoute:
