@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { gatewayEvents, type GatewaySocket } from '../../shared/data/socketTransport'
+import { AgentOptionList } from '../../features/chat/auiAgentResults'
 
 type Field = { type?: string; title?: string; description?: string; enum?: string[]; minimum?: number; maximum?: number }
 type Request = { id: string; server: string; message: string; requestedSchema?: { properties?: Record<string, Field>; required?: string[] } }
@@ -35,13 +36,19 @@ function ElicitationCard({ request, onRespond }: {
   const [error, setError] = useState('')
   const fields = Object.entries(request.requestedSchema?.properties ?? {})
   const supported = Boolean(request.requestedSchema) && fields.every(([, field]) => ['string', 'number', 'integer', 'boolean'].includes(field.type ?? ''))
+  const singleEnum = supported && fields.length === 1 && fields[0][1].type === 'string' && fields[0][1].enum?.length ? fields[0] : null
   const respond = (action: string) => {
     if (!onRespond(action, action === 'accept' ? values : undefined)) setError('Connection unavailable. Please retry.')
   }
   return <form aria-label={`Request from ${request.server}`} className="rounded-lg border border-outline bg-surface p-4 text-on-surface shadow-lg" onSubmit={event => { event.preventDefault(); respond('accept') }}>
     <h2 className="font-semibold">{request.server} needs your input</h2>
     <p className="my-2">{request.message}</p>
-    {supported ? fields.map(([name, field]) => <label className="mb-3 block" key={name}>
+    {singleEnum ? <AgentOptionList title={singleEnum[1].title || singleEnum[0]}
+      options={singleEnum[1].enum!.map(value => ({ id: value, label: value, description: singleEnum[1].description }))}
+      onSelect={async value => {
+        if (!onRespond('accept', { [singleEnum[0]]: value })) throw new Error('Connection unavailable. Please retry.')
+        return { ok: true }
+      }} /> : supported ? fields.map(([name, field]) => <label className="mb-3 block" key={name}>
       <span>{field.title || name}</span>
       {field.description && <span className="block text-sm text-on-surface-low">{field.description}</span>}
       {field.type === 'boolean' ? <input type="checkbox" checked={values[name] === true} onChange={event => setValues(previous => ({ ...previous, [name]: event.target.checked }))} />
@@ -51,7 +58,7 @@ function ElicitationCard({ request, onRespond }: {
     </label>) : <p>This request cannot be completed in this form.</p>}
     {error && <p role="alert">{error}</p>}
     <div className="mt-3 flex gap-3">
-      {supported && <button type="submit" className="rounded border px-3 py-2">Submit</button>}
+      {supported && !singleEnum && <button type="submit" className="rounded border px-3 py-2">Submit</button>}
       <button type="button" className="rounded border px-3 py-2" onClick={() => respond('decline')}>Decline</button>
       <button type="button" className="rounded border px-3 py-2" onClick={() => respond('cancel')}>Cancel</button>
     </div>

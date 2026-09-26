@@ -61,8 +61,8 @@ export function ScheduledAgentRun({ job, history, onSaved }: {
     setError('')
     try {
       await api.enableSchedule(job.id, !job.enabled)
-      const { triggers } = await api.schedules()
-      const saved = triggers.find(trigger => trigger.raw_id === job.id || trigger.id === job.id)
+      const { jobs } = await api.schedules()
+      const saved = jobs.find(candidate => candidate.id === job.id)
       if (!saved || saved.enabled !== !job.enabled) throw new Error('Schedule change was not confirmed')
       onSaved()
     } catch (cause) {
