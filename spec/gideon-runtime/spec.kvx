@@ -1,6 +1,6 @@
 [meta]
 feature = "gideon-runtime"
-status = "in_progress"
+status = "done"
 version = "1.0.0"
 leader = "root"
 source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
