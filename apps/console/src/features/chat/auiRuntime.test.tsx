@@ -1,6 +1,7 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAui, type AppendMessage, type AssistantClient } from '@assistant-ui/react'
+import type { ChatHistoryMsg } from '../../shared/data/api'
 import { appendThinking, assistantTurn, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
 import {
   GideonChatRuntimeProvider, appendText, convertGideonTurn, gideonAuiId, makeGideonQueueAdapter, reloadLatestGideonAnswer,
@@ -155,6 +156,34 @@ describe('Gideon assistant-ui runtime', () => {
     })
     expect(ui.turnByAuiId().get(messageId)?.turn.segments[1]).toEqual({ kind: 'thinking', text: 'Looking for the report' })
     expect(ui.turnByAuiId().get(messageId)?.turn.segments[2]).toMatchObject({ id: 'call-7', agentError, done: true })
+  })
+
+  it('preserves gateway file-change snapshots without inventing review actions', () => {
+    const changes = [
+      { path: 'src/report.py', before: 'old value', after: 'new value\n… [truncated]' },
+      { path: 'README.md', before: '', after: 'Added readme' },
+    ]
+    const history: ChatHistoryMsg[] = [
+      { role: 'user', content: 'Update the files' },
+      { role: 'assistant', content: 'Editing' },
+      { role: 'assistant', content: 'Done', meta: { file_changes: changes } },
+    ]
+    const turns = hydrateTurns(history)
+    const ui = setup({ turns })
+    const messageId = gideonAuiId('session/a', 1)
+    expect(turns[1].fileChanges).toBe(changes)
+    expect(ui.turnByAuiId().get(messageId)?.turn.fileChanges).toBe(changes)
+    expect(ui.aui().thread.getState().messages[1].content).toEqual([
+      { type: 'text', text: 'Editing' },
+      { type: 'text', text: 'Done' },
+      { type: 'data', name: 'gideon-file-changes', data: changes },
+    ])
+
+    const withoutChanges = hydrateTurns(history.slice(0, 2))
+    expect(withoutChanges[1].fileChanges).toBeUndefined()
+    expect(convertGideonTurn(withoutChanges[1], 1, 'session/a', false).content).toEqual([
+      { type: 'text', text: 'Editing' },
+    ])
   })
 
   it('converts actual text, reasoning, tool, activity, approval and error segments without inventing results', () => {
