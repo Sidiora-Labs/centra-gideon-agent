@@ -70,7 +70,7 @@
     },
     "quota-banner.tsx": {
       "source_sha256": "a3a0eba1fb25d44d29e8cadc80ec2432350d8d4b2498a937d2db924d35e5160f",
-      "adaptation": "@/lib/utils -> ../lib/utils; absent reset date and handlerless upgrade action hidden; reset date label accepts exact cycle end"
+      "adaptation": "@/lib/utils -> ../lib/utils; absent reset date and handlerless upgrade action hidden; reset date label accepts exact cycle end; optional remaining label distinguishes observed usage from local reservations"
     }
   }
 }
