@@ -199,7 +199,11 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
             parameters["default_model"] = "\x00"
         request = getattr(self._conn._dialect, builders[axis])(**parameters)
         await self._send_dialect_request(request)
-        state_field = {"agent": "_agent_name", "model": "_model"}.get(axis)
+        state_field = {
+            "agent": "_agent_name",
+            "model": "_model",
+            "effort": "_reasoning_effort",
+        }.get(axis)
         if state_field is not None:
             setattr(self, state_field, value)
 
@@ -263,5 +267,5 @@ async def open_acp_session_provider(
         model=model,
         agent_name=agent_name,
         unattended=unattended,
-        session_snapshot=connection.last_session_new_snapshot,
+        session_snapshot=getattr(connection, "last_session_new_snapshot", {}),
     )

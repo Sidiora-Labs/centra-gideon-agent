@@ -157,6 +157,16 @@ async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_explicit_clear_removes_a_saved_credential(tmp_path):
+    async with _client(tmp_path) as client:
+        await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
+        response = await client.patch("/api/providers/fake-channel/config", json={"bot_token": None})
+        assert response.status == 200, await response.text()
+        assert _stored(tmp_path)["bot_token"] == ""
+        assert (await response.json())["_secret_set"] == []
+
+
+@pytest.mark.asyncio
 async def test_a_real_new_value_still_overwrites(tmp_path):
     """Masking must not make a token unchangeable."""
     async with _client(tmp_path) as client:

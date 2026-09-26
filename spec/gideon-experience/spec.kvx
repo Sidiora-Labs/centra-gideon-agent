@@ -198,12 +198,14 @@ ac_1 = "Implement the complete reachable feature: Functional settings and lossle
 
 [task.experience-onboarding]
 title = "experience-onboarding end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "experience-onboarding"
 requires = []
 reqs = ["005.1", "086.1", "087.1", "088.1", "089.1", "090.1", "091.1", "092.1", "093.1", "094.1", "095.1", "096.1", "097.1", "098.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/app/shell/App.tsx", "apps/console/src/app/shell/Onboarding.tsx", "apps/console/src/app/shell/identity.tsx", "apps/console/src/app/shell/onboardingProgress.test.tsx", "apps/console/src/app/shell/onboardingState.ts", "apps/console/src/features/onboarding/EssentialsStep.tsx", "apps/console/src/features/onboarding/essentialSetupState.ts", "apps/console/src/features/onboarding/essentialsStep.test.tsx", "apps/console/src/features/onboarding/exitTo.ts", "apps/console/src/features/onboarding/onboardingExit.test.ts", "apps/console/src/features/settings/AccountPanel.tsx", "apps/console/src/features/settings/LocalModelManager.tsx", "apps/console/src/features/settings/ModelBackends.tsx", "apps/console/src/features/settings/ProviderConfigForm.tsx", "apps/console/src/features/settings/useModelDownloads.ts", "apps/console/src/shared/data/api.ts", "checks/runtime/test_bot_name.py", "checks/runtime/test_provider_config_secrets.py", "runtime/gideon/core/config/loader.py", "runtime/gideon/extensions/apps/catalog.py", "runtime/gideon/extensions/apps/secret_fields.py", "runtime/gideon/interfaces/dashboard/handlers/providers.py", "runtime/gideon/interfaces/dashboard/handlers/search_registry.py", "runtime/gideon/interfaces/dashboard/handlers_system.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_bot_name.py checks/runtime/test_provider_config_secrets.py"
 
 [req.018]
 title = "Presentation intake outlines templates rendering and visual critique"

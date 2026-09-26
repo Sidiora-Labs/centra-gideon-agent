@@ -649,6 +649,7 @@ export interface AppCatalog {
   remoteApps?: AppCatalogEntry[]
   gitApps?: AppCatalogEntry[]
   networkSources?: string[]
+  sourceErrors?: string[]
 }
 export interface AppScanFinding { surface: string; severity: string; rule: string; path: string; evidence: string }
 export interface AppSignature { state: string; signer: string; reason: string }
@@ -2992,6 +2993,7 @@ export interface OnboardingEssentials {
 export type OnboardingStep = 'name' | 'essentials' | 'first_success' | 'done'
 export interface OnboardingState {
   needs_model: boolean; has_model_provider: boolean; has_chat_binding: boolean
+  active_chat_model?: string
   step?: OnboardingStep
   essentials?: OnboardingEssentials
   first_success?: { knowledge: boolean; trigger: boolean; loop: boolean }
@@ -3948,7 +3950,7 @@ export const api = {
   providerSchema: (name: string) => get<{ schema: ProviderSchema }>(`/api/providers/${encodeURIComponent(name)}/schema`).then((d) => d.schema),
   providerConfig: (name: string) => get<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
   saveProviderConfig: (name: string, config: Record<string, unknown>) =>
-    patch<{ config: Record<string, unknown> }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
+    patch<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
   enableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/enable`),
   disableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/disable`),
   agentRuntimes: (refresh = false) => get<{ agent_providers: AgentRuntime[] }>(`/api/agent-providers${refresh ? '?refresh=1' : ''}`).then((d) => d.agent_providers),

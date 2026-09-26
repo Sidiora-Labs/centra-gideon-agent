@@ -88,7 +88,12 @@ async def api_search_active(request: web.Request) -> web.Response:
     single-active per use-case.
     """
     active = load_active_search_providers()
-    normalized = {uc: active.get(uc, []) for uc in SEARCH_USE_CASES}
+    known = {p.name for p in list_providers()}
+    normalized = {uc: [name for name in active.get(uc, []) if name in known] for uc in SEARCH_USE_CASES}
+    if any(normalized[uc] != active.get(uc, []) for uc in SEARCH_USE_CASES):
+        from gideon.integrations.search_providers.use_cases import save_active_search_providers
+
+        save_active_search_providers(normalized)
     return web.json_response({"use_cases": normalized})
 
 

@@ -23,7 +23,8 @@ import { ImportStep } from '../../features/onboarding/ImportStep'
 import { TryOneStep } from '../../features/onboarding/TryOneStep'
 import { setOnboardingExit } from '../../features/onboarding/exitTo'
 import { requestProductTour } from '../../features/onboarding/tourLaunch'
-import { ORDER, TITLES, initialSetup, setupReducer, type StepId } from './onboardingState'
+import { ORDER, TITLES, clearSetup, isStepId, restoreSetup, saveSetup, setupReducer, type StepId } from './onboardingState'
+import type { RouteProps } from './useQueryState'
 
 const BOUNCINESS = TOKENS.find((token) => token.varName === '--bounciness') as ScalarToken | undefined
 const steps: Record<StepId, { icon: LucideIcon; subtitle: string }> = {
@@ -33,13 +34,26 @@ const steps: Record<StepId, { icon: LucideIcon; subtitle: string }> = {
   try: { icon: Rocket, subtitle: 'Watch it actually do something. Each one runs for real — and none of them is required.' },
   ready: { icon: Sparkles, subtitle: '' },
 }
-export function Onboarding() {
+export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'query' | 'setQuery'>>) {
   const { setName } = useIdentity()
-  const [state, dispatch] = useReducer(setupReducer, initialSetup)
+  const [state, dispatch] = useReducer(setupReducer, query.step, restoreSetup)
+  const [saveError, setSaveError] = useState('')
+  const [finishing, setFinishing] = useState(false)
   const [handleDraft, setHandleDraft] = useState<string | null>(null)
   const handle = handleDraft ?? suggestHandle(state.draft)
   const rows = useMemo(() => Object.fromEntries(ORDER.map((id) => [id, createRef<HTMLLIElement>()])) as Record<StepId, React.RefObject<HTMLLIElement | null>>, [])
   const progress = useCallback((patch: OnboardingStatePatch) => { void api.saveOnboardingState(patch).catch(() => {}) }, [])
+  useEffect(() => { saveSetup(state) }, [state])
+  useEffect(() => {
+    if (isStepId(query.step) && query.step !== state.step) dispatch({ type: 'visit', step: query.step })
+  }, [query.step])
+  useEffect(() => { if (!query.step) setQuery?.({ step: state.step }, { replace: true }) }, [])
+  useEffect(() => {
+    const row = rows[state.step].current
+    const frame = requestAnimationFrame(() => row?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+    return () => cancelAnimationFrame(frame)
+  }, [state.step, rows])
+  const move = (step: StepId) => { dispatch({ type: 'visit', step }); setQuery?.({ step }) }
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -54,19 +68,27 @@ export function Onboarding() {
   const commitName = () => {
     if (!state.draft.trim()) return
     dispatch({ type: 'name' })
+    setQuery?.({ step: state.resume ?? 'import' })
     if (state.resume === 'essentials') progress({ step: 'essentials' })
     if (state.resume === 'try') progress({ step: 'first_success' })
   }
   const advance = (type: 'import' | 'essentials' | 'try', summary: string) => {
     dispatch({ type, summary })
+    setQuery?.({ step: type === 'import' ? 'essentials' : type === 'essentials' ? 'try' : 'ready' })
     if (type === 'import') progress({ step: 'essentials' })
     if (type === 'essentials') progress({ step: 'first_success' })
   }
-  function finish() {
-    progress({ step: 'done' })
-    setNavMode(state.showEverything ? 'expert' : 'starter')
-    if (state.name) void setName(state.name, handleDraft ?? suggestHandle(state.name))
-    else void setName(DEFAULT_USER_NAME)
+  async function finish() {
+    if (finishing) return
+    setFinishing(true); setSaveError('')
+    try {
+      await api.saveOnboardingState({ step: 'done' })
+      await setName(state.name || DEFAULT_USER_NAME, state.name ? handleDraft ?? suggestHandle(state.name) : undefined)
+      clearSetup()
+      setNavMode(state.showEverything ? 'expert' : 'starter')
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save your setup. Please try again.')
+    } finally { setFinishing(false) }
   }
   function exitTo(path: string) {
     setOnboardingExit(path)
@@ -98,11 +120,13 @@ export function Onboarding() {
           const position: StepState = id === state.step ? 'active' : index < ORDER.indexOf(state.step) ? 'done' : 'upcoming'
           return <StepRow key={id} ref={rows[id]} index={index} icon={steps[id].icon} title={TITLES[id]}
             subtitle={id === 'ready' ? `You're ready, ${firstNameOf(state.name)}.` : steps[id].subtitle}
-            state={position} doneSummary={summaries[id] || undefined} onActivate={id === 'ready' ? undefined : () => dispatch({ type: 'visit', step: id })}>
+            state={position} doneSummary={summaries[id] || undefined} onActivate={id === 'ready' ? undefined : () => move(id)}>
             {content[id]}
           </StepRow>
         })}
       </ol>
+      {saveError && <p role="alert" className="text-danger">Could not finish setup: {saveError}</p>}
+      {finishing && <p role="status">Saving your setup…</p>}
       {state.step !== 'ready' && <div className="flex justify-center"><TextLink size="sm" ink="emphasis" onClick={finish}>
         {state.step === 'name' ? `Skip setup — start as ${DEFAULT_USER_NAME}, rename yourself in Settings` : 'Skip setup and go to the dashboard'}
       </TextLink></div>}

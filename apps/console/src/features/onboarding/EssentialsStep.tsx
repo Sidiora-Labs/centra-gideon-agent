@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Search, Mic, MessagesSquare, Download, Check, Loader2, ShieldCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -5,11 +6,14 @@ import { Button } from '../../shared/ui/Button'
 import { LoadError, LoadingStatus } from '../../shared/ui/ListScaffold'
 import { TextLink } from '../../shared/ui/TextLink'
 import { listItemEnter, stagger, spring } from '../../shared/theme/motion'
-import { essentialLane, essentialCandidates, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
+import { essentialLane, essentialCandidates, setupErrorText, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
 import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/installConsent'
 import { SchemaField } from '../settings/ModelBackends'
 import { SchemaFieldDisclosure } from '../tools/schema'
 import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
+import { useModelDownloads } from '../settings/useModelDownloads'
+import { useQuery } from '../../shared/data/data'
+import { api, type AvailableModel } from '../../shared/data/api'
 
 type LaneId = EssentialLane
 
@@ -49,8 +53,8 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
 
   onProgress: (patch: OnboardingStatePatch) => void
 }) {
-  const { catalog, catalogError, refresh, lanes, installed, open, expanded, modelApp, phase, boundLabel,
-    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound } = useEssentialSetup(readiness, onProgress)
+  const { catalog, catalogError, refresh, providerTypes, lanes, installed, open, expanded, modelApp, phase, boundLabel,
+    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound, selectInstalledProvider } = useEssentialSetup(readiness, onProgress)
 
   const modelReady = phase === 'done'
 
@@ -72,6 +76,10 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
 
   return (
     <div className="grid gap-l">
+      {!!catalog.sourceErrors?.length && <div role="alert" className="rounded-lg border border-warning/40 p-m text-on-surface">
+        Some app sources could not be loaded. Retry the catalog or continue with the apps shown here.
+        <div><Button variant="secondary" size="sm" onClick={refresh}>Retry catalog</Button></div>
+      </div>}
       {LANES.map((lane) => {
         const items = lanes[lane.id]
         const isModel = lane.id === 'model'
@@ -90,6 +98,12 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
               )}
             </div>
             <p className="text-on-surface-low text-[0.8125rem]">{lane.blurb}</p>
+
+            {isModel && phase === 'pick' && providerTypes?.filter((type) => type.capabilities?.includes('chat')).map((type) => (
+              <Button key={type.type} variant="secondary" size="sm" onClick={() => selectInstalledProvider(type.app)}>
+                Configure installed {type.label}
+              </Button>
+            ))}
 
             {isModel && phase !== 'pick' ? (
               <ModelSubFlow app={modelApp} phase={phase} boundLabel={boundLabel}
@@ -232,6 +246,7 @@ function BindModel({ onBound }: { onBound: (label: string) => void }) {
     return (
       <div className="flex flex-col gap-s">
         <p className="text-on-surface-low text-[0.8125rem]">No chat-capable models were discovered for this provider.</p>
+        <LocalFirstModel onReady={refresh} />
         <div><Button variant="secondary" size="sm" onClick={refresh}>Check again</Button></div>
       </div>
     )
@@ -249,7 +264,7 @@ function BindModel({ onBound }: { onBound: (label: string) => void }) {
               loading={binding === m.name} disabled={!!binding && binding !== m.name}
               disabledReason="Another model is being bound" onClick={() => bind(m)}>
               <Cpu size={15} aria-hidden="true" className="shrink-0 text-primary" />
-              <span className="min-w-0 truncate">{m.model_id}</span>
+              <span className="min-w-0 break-all text-left">{m.model_id}</span>
               <span className="shrink-0 text-on-surface-low text-[0.75rem]">{m.provider}</span>
             </Button>
           </motion.div>
@@ -257,4 +272,28 @@ function BindModel({ onBound }: { onBound: (label: string) => void }) {
       </motion.div>
     </div>
   )
+}
+
+function LocalFirstModel({ onReady }: { onReady: () => void }) {
+  const { data, error, refresh } = useQuery('onboarding:local-chat-catalog', () => api.modelsAvailable())
+  const choices = (data ?? []).flatMap((provider) => provider.local ? provider.models.filter((model) => model.capabilities.includes('chat') && !model.downloaded && !model.gated && model.fit !== 'red') : [])
+    .sort((a, b) => (a.size_mb ?? Infinity) - (b.size_mb ?? Infinity))
+  const model = choices[0]
+  if (error && !data) return <LoadError what="local model catalog" error={error} onRetry={refresh} />
+  if (!model) return null
+  return <StarterDownload model={model} onReady={() => { refresh(); onReady() }} />
+}
+
+function StarterDownload({ model, onReady }: { model: AvailableModel; onReady: () => void }) {
+  const { jobs, start } = useModelDownloads(model.provider, onReady)
+  const [error, setError] = useState('')
+  const job = jobs[model.name]
+  return <div className="grid gap-s rounded-lg border border-outline-variant p-m">
+    <p className="text-on-surface text-[0.8125rem]">Start locally with {model.name}</p>
+    <p className="text-on-surface-low text-[0.75rem]">{model.size_mb ? `${Math.round(model.size_mb)} MB · ` : ''}Downloads to this device. When it finishes, choose it for chat above.</p>
+    {job && ['queued', 'running'].includes(job.state)
+      ? <p role="status" className="text-on-surface-low">{job.state === 'queued' ? 'Download queued' : `Downloading ${Math.round(job.progress * 100)}%`}</p>
+      : <Button variant="secondary" size="sm" onClick={() => void start(model.name).catch((failure) => setError(setupErrorText(failure)))}>Download {model.name}</Button>}
+    {error && <p role="alert" className="text-danger">{error}</p>}
+  </div>
 }
