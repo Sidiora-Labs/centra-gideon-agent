@@ -13,6 +13,7 @@ import { FlowGraph, type FlowNodeState } from '../../shared/vendor/assistant-ui/
 import { ComparisonCard } from '../../shared/vendor/assistant-ui/elements/comparison-card'
 import { Timeline } from '../../shared/vendor/assistant-ui/elements/timeline'
 import { JobProgress } from '../../shared/vendor/assistant-ui/elements/job-progress'
+import { fmtElapsed } from '../workflows/workflowMeta'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -143,10 +144,22 @@ export function ArtifactComparison({ before, after }: { before: Artifact; after:
 }
 
 export function WorkflowTimeline({ rows }: { rows: readonly WorkflowTimelineRow[] }) {
-  return <Timeline aria-label="Workflow events" events={rows.map((row, index) => ({
-    id: `${row.node_id}:${row.ts}:${index}`, when: row.state === 'running' ? 'now' : 'past',
-    time: row.ts, title: `${row.node_id} · ${row.state}`, detail: row.detail || undefined,
-  }))} visibleCount={rows.length} className="max-w-none" />
+  return <Timeline aria-label="Workflow events" events={rows.map((row, index) => {
+    const facts = [
+      row.node_id ? row.kind : null,
+      typeof row.attempt === 'number' && row.attempt > 1 ? `attempt ${row.attempt}` : null,
+      row.model || null,
+      typeof row.tokens === 'number' && row.tokens ? `${row.tokens.toLocaleString()} tokens` : null,
+      typeof row.cost_usd === 'number' && row.cost_usd ? `~$${row.cost_usd.toFixed(4)}` : null,
+      typeof row.duration_secs === 'number' ? fmtElapsed(row.duration_secs) : null,
+      typeof row.approved === 'boolean' ? (row.approved ? 'approved' : 'rejected') : null,
+    ].filter(Boolean)
+    return {
+      id: `${row.node_id}:${row.ts}:${index}`, when: row.state === 'running' ? 'now' : 'past',
+      time: row.ts, title: [row.node_id || row.kind, row.state].filter(Boolean).join(' · '),
+      detail: [row.detail, ...facts].filter(Boolean).join(' · ') || undefined,
+    }
+  })} visibleCount={rows.length} className="max-w-none" />
 }
 
 export function WorkflowJobProgress({ workflow }: { workflow: WorkflowIntrospection }) {
