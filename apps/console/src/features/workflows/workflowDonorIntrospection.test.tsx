@@ -35,6 +35,8 @@ async def main():
   tokens=3,cost_usd=0.01,model='model-b',duration_secs=4,detail='Publish recorded')
  journal.write(J.GATE_RESOLVED,instance_path='main.review',node_id='review',approved=False,
   verifies=['draft'],detail='Reviewer rejected draft')
+ journal.write(J.GATE_RESOLVED,instance_path='main.release',node_id='release',approved=True,
+  verifies=[],detail='Reviewer approved release')
  app=web.Application(); app.router.add_get('/api/workflows/runs/{run_id}/introspect',api_run_introspect)
  runner=web.AppRunner(app); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',0); await site.start()
  print(site._server.sockets[0].getsockname()[1],measured.id,empty.id,flush=True); await asyncio.Event().wait()
@@ -67,6 +69,7 @@ afterAll(async () => {
 test('the live donor timeline retains real journal economics and proof progress', async () => {
   const recorded = await api.workflowRunIntrospect(measuredId)
   expect(recorded.timeline.some(row => row.node_id === 'draft' && row.tokens === 12 && row.cost_usd === 0.02)).toBe(true)
+  expect(recorded.timeline.some(row => row.node_id === 'release' && row.approved === true)).toBe(true)
   expect(recorded.proof.verified_steps).toBe(1)
   expect(recorded.proof.total_steps).toBe(2)
   const view = render(<IntrospectPanel runId={measuredId} onClose={cleanup} />)
@@ -74,7 +77,7 @@ test('the live donor timeline retains real journal economics and proof progress'
   const timeline = await screen.findByLabelText('Workflow events')
   expect(timeline).toHaveAttribute('data-slot', 'timeline')
   expect(timeline).toHaveTextContent('Draft recorded')
-  for (const fact of ['step_completed', 'attempt 2', 'model-a', '12 tokens', '~$0.0200', '8s', 'rejected']) {
+  for (const fact of ['step_completed', 'attempt 2', 'model-a', '12 tokens', '~$0.0200', '8s', 'rejected', 'approved']) {
     expect(timeline).toHaveTextContent(fact)
   }
   expect(within(timeline).getByText('draft · completed')).toBeInTheDocument()
@@ -88,7 +91,9 @@ test('the live donor timeline retains real journal economics and proof progress'
   view.unmount()
 })
 
-test('a journal-free run does not invent events or measured progress', async () => {
+test('a running journal-free run does not invent events or measured progress', async () => {
+  const recorded = await api.workflowRunIntrospect(emptyId)
+  expect(recorded.timeline).toEqual([])
   const view = render(<IntrospectPanel runId={emptyId} onClose={cleanup} />)
   fireEvent.click(await screen.findByRole('tab', { name: 'Timeline' }))
   expect(await screen.findByText('This run has written no journal events yet.')).toBeInTheDocument()

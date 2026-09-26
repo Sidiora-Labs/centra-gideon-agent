@@ -155,7 +155,7 @@ export function WorkflowTimeline({ rows }: { rows: readonly WorkflowTimelineRow[
       typeof row.approved === 'boolean' ? (row.approved ? 'approved' : 'rejected') : null,
     ].filter(Boolean)
     return {
-      id: `${row.node_id}:${row.ts}:${index}`, when: row.state === 'running' ? 'now' : 'past',
+      id: `${row.node_id}:${row.ts}:${index}`, when: 'past',
       time: row.ts, title: [row.node_id || row.kind, row.state].filter(Boolean).join(' · '),
       detail: [row.detail, ...facts].filter(Boolean).join(' · ') || undefined,
     }

@@ -3,6 +3,7 @@ import type { ToolSegment } from '../chatTypes'
 import { ToolOutput } from '../../tools/ToolOutput'
 import { RawBlock, KeyValueFields, ContentTypeOutput, inputOf } from './primitives'
 import { nativeRendererForTool } from './native'
+import { connectedUISpecContracts, renderAuiResult } from '../auiResultRegistry'
 import { CodeDiff, type DiffLine } from '../../../shared/vendor/assistant-ui/elements/code-diff'
 import { TerminalBlock } from '../../../shared/vendor/assistant-ui/elements/terminal-block'
 
@@ -44,6 +45,8 @@ export function renderToolOutput(seg: ToolSegment): ReactNode {
     const node = safe(() => native.output!(seg))
     if (node !== undefined) return node
   }
+  const structured = safe(() => renderAuiResult(seg, connectedUISpecContracts))
+  if (structured) return structured
   if (seg.done && seg.ok !== false && !seg.truncated) {
     const diff = singleFileDiff(seg.output)
     if (diff) return <CodeDiff {...diff} cycle={0} />
