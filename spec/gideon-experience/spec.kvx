@@ -318,7 +318,7 @@ ac_1 = "Implement the complete reachable feature: Consistent density-controlled 
 
 [task.experience-polish]
 title = "experience-polish end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "experience-polish"
 requires = []
