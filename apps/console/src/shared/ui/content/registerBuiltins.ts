@@ -5,6 +5,7 @@ import {
 import { registerContentType, type ContentType } from './contentTypes'
 import { HtmlWidgetEmbed, ReactWidgetEmbed } from './chatEmbeds'
 import { GenUiWidget } from '../genui/GenUiWidget'
+import { UISpecEmbed } from '../assistant-ui/generative/UISpecEmbed'
 import { exportDocumentHtml, copyDocumentHtml, exportInfographicSvg } from './exporters'
 
 
@@ -43,6 +44,11 @@ function builtinDefinitions(): ContentType[] { return [
   {
     id: 'genui', label: 'Generated UI', icon: LayoutDashboard, tone: PRIMARY,
     embed: { render: GenUiWidget, streaming: true },
+    commentable: false,
+  },
+  {
+    id: 'uispec', label: 'Structured result', icon: LayoutDashboard, tone: PRIMARY,
+    embed: { render: UISpecEmbed, streaming: false },
     commentable: false,
   },
   {
