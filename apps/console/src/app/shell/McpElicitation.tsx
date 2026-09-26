@@ -1,4 +1,3 @@
-import { uiText } from '../../shared/i18n/index';
 import { useEffect, useRef, useState } from 'react';
 import { gatewayEvents, type GatewaySocket } from '../../shared/data/socketTransport';
 import { AgentOptionList } from '../../features/chat/auiAgentResults';
@@ -88,7 +87,7 @@ function ElicitationCard({ request, onRespond }: {
             if (formRef.current?.reportValidity()) respond('accept');
         }}>
           <ElicitationForm server={request.server} message={request.message} fields={donorFields}
-            state="request" acceptLabel="Submit" cancelLabel={uiText('Cancel')}
+            state="request" acceptLabel="Submit" cancelLabel="Cancel"
             onAccept={() => { if (formRef.current?.reportValidity()) respond('accept'); }}
             onDecline={() => respond('decline')} onCancel={() => respond('cancel')}
             renderField={item => {
@@ -119,7 +118,7 @@ function ElicitationCard({ request, onRespond }: {
     {error && <p role="alert">{error}</p>}
     <div className="mt-3 flex gap-3">
       <button type="button" className="rounded border px-3 py-2" onClick={() => respond('decline')}>Decline</button>
-      <button type="button" className="rounded border px-3 py-2" onClick={() => respond('cancel')}>{uiText("Cancel")}</button>
+      <button type="button" className="rounded border px-3 py-2" onClick={() => respond('cancel')}>Cancel</button>
     </div>
   </form>;
 }

@@ -21,11 +21,11 @@
     },
     "reviewable-diff.tsx": {
       "source_sha256": "f8f0d725d37770bea2a968bfe985c7316e0b686ef9dd65ac3655fab09d103ebe",
-      "local_sha256": "77f074bde6adbaafb405d7365de3d020f83e85c90520a3cf34406c07a12dc21e"
+      "local_sha256": "f2c030df767737fb912a762f8b319cbd603548da16df9677328f193e57650539"
     },
     "file-tree.tsx": {
       "source_sha256": "ec536e12695228b321f10a74fa3d0403b5e7c1f17da2424890a67044146866b5",
-      "local_sha256": "670eee2139a8310e8745b6983d2abe150fcdb5b91ce579c8b75c7748d4599d8a"
+      "local_sha256": "d752347495b6032b11aa51ac2597c2f0e49f0616a4e6a011fb9c5d1db367edc9"
     },
     "ui/collapsible.tsx": {
       "source_sha256": "cf6333da05adc3d96abf7ce0928c0c9a3fe3c6df46f7771551220a9205c41975",
@@ -35,6 +35,8 @@
   "adaptations": [
     "local shared helper and collapsible imports",
     "terminal completion labels use explicit exit code; unknown exit is Finished",
-    "ToolCall request and result labels accept caller text while retaining donor English defaults"
+    "ToolCall request and result labels accept caller text while retaining donor English defaults",
+    "FileTree hides unknown or incomplete snapshot counts and opens a real file path only with an owner callback.",
+    "ReviewableDiff applied mode shows persisted diff lines without invented review decisions or actions."
   ]
 }
