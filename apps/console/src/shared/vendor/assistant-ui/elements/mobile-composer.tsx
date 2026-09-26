@@ -70,8 +70,8 @@ export function MobileComposer({
 
       {...props}
     >
-      {!keyboardOpen && (
-        <div className="fade-in animate-in -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 duration-200">
+      {!keyboardOpen && actions.length > 0 && (
+        <div data-slot="mobile-composer-actions" className="fade-in animate-in -mx-3 flex gap-1.5 overflow-x-auto px-3 pb-0.5 duration-200">
           {actions.map((action) => (
             <button
               key={action}
