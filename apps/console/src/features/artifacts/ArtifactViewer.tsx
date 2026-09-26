@@ -21,6 +21,7 @@ import { ArtifactDeploy } from './ArtifactDeploy'
 import type { CommentTarget } from '../../shared/ui/content/commentTarget'
 import { invalidateKeys } from '../../shared/data/data'
 import { ChipInput } from '../../shared/ui/forms'
+import { artifactPreviewType } from './artifactTablePreview'
 
 interface ViewerProps {
   slug: string
@@ -110,7 +111,7 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
   const frozen = !!art?.readonly
   const editable = isCurrent && !frozen
   const documentEditing = useDocumentEditing()
-  const ctype = useMemo(() => art ? resolveContentType({ kind: art.kind }) : null, [art, documentEditing])
+  const ctype = useMemo(() => art ? artifactPreviewType(art, resolveContentType({ kind: art.kind })) : null, [art, documentEditing])
 
   const onSave = async (draft: string) => {
     if (!art) return
