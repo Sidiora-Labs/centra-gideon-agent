@@ -224,7 +224,9 @@ class FileReader:
                 if not scanned:
                     return "\n".join(pages), metadata
                 if self.ocr_provider is None:
-                    metadata.update(ocr_required=True, ocr_available=False)
+                    metadata.update(ocr_required=True, ocr_available=False,
+                                    ocr_pages_skipped=len(scanned), extraction_partial=True,
+                                    extraction_warning=f"OCR unavailable for {len(scanned)} scanned pages")
                     if not any(text.strip() for text in pages):
                         message = "scanned PDF requires an available OCR provider"
                         metadata.update(
@@ -233,13 +235,10 @@ class FileReader:
                         return f"Error reading PDF: {message}", metadata
                     return "\n".join(pages), metadata
 
-                self._check_pdf_limit(
-                    "raster page count",
-                    len(scanned),
-                    self.pdf_limits.max_raster_pages,
-                )
+                eligible = scanned[: self.pdf_limits.max_raster_pages]
+                skipped_pages = len(scanned) - len(eligible)
                 ocr_read, ocr_skipped, ocr_pages = self._ocr_scanned_pages(
-                    document.pages, pages, scanned
+                    document.pages, pages, eligible
                 )
                 metadata.update(
                     ocr_required=True,
@@ -248,7 +247,13 @@ class FileReader:
                     ocr_page_count=ocr_pages,
                     ocr_bytes_read=ocr_read,
                     ocr_bytes_skipped=ocr_skipped,
+                    ocr_pages_skipped=skipped_pages,
+                    extraction_partial=bool(skipped_pages or ocr_skipped),
                 )
+                if skipped_pages:
+                    metadata["extraction_warning"] = f"OCR page limit skipped {skipped_pages} scanned pages"
+                elif ocr_skipped:
+                    metadata["extraction_warning"] = f"OCR byte limit skipped {ocr_skipped} bytes"
                 if ocr_skipped and not any(text.strip() for text in pages):
                     message = (
                         f"OCR byte limit skipped {ocr_skipped} bytes after reading "

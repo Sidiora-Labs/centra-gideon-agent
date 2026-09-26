@@ -225,6 +225,7 @@ from gideon.interfaces.dashboard.handlers.memory import (
     api_memory_entities,
     api_memory_entity_backlinks,
     api_memory_entity_create,
+    api_memory_entity_delete,
     api_memory_entity_graph,
     api_memory_entity_proposals,
     api_memory_entity_proposals_list,

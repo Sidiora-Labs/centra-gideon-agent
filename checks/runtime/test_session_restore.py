@@ -12,6 +12,11 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.cognition.history import ConversationLog
 from gideon.interfaces.dashboard.chat import restore_recent_sessions
+from gideon.interfaces.dashboard.chat_handlers import api_chat_session_detail
+from gideon.interfaces.dashboard.chat_persistence import (
+    _rehydrate_session_from_history,
+    save_session_to_history,
+)
 from gideon.interfaces.dashboard.state import ConsoleState
 
 
@@ -199,8 +204,8 @@ class TestRestoreRecentSessions:
         assert len(state._sessions["existing"].messages) == 1
         assert state._sessions["existing"].messages[0]["content"] == "already here"
 
-    def test_limits_to_500_messages(self, tmp_path, monkeypatch):
-        """Only the last 500 messages are loaded from a session."""
+    @pytest.mark.asyncio
+    async def test_restores_full_history_then_persists_new_turn(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )
@@ -208,6 +213,7 @@ class TestRestoreRecentSessions:
             {"role": "user", "content": f"msg {i}", "ts": f"2026-03-23T10:{i:04d}"}
             for i in range(600)
         ]
+        messages[0]["content"] = "first message " + "x" * 12_000
         _write_session(tmp_path, "dashboard_big", messages)
         path = tmp_path / "dashboard_big.jsonl"
         path.touch()
@@ -216,9 +222,29 @@ class TestRestoreRecentSessions:
         restored = restore_recent_sessions(state, window_minutes=60)
         assert restored == 1
         session = state._sessions["big"]
-        assert len(session.messages) == 500
-        assert session.messages[0]["content"] == "msg 100"
-        assert session._disk_older_count == 100
+        assert len(session.messages) == 600
+        assert session.messages[0]["content"] == messages[0]["content"]
+        session.append("user", "new question")
+        session.append("assistant", "new answer " + "y" * 12_000)
+        save_session_to_history(state, session)
+
+        restarted = _make_state(tmp_path)
+        restored = _rehydrate_session_from_history(restarted, "big")
+        assert restored is not None
+        assert len(restored.messages) == 602
+        assert restored.messages[0]["content"] == messages[0]["content"]
+        assert restored.messages[-1]["content"] == "new answer " + "y" * 12_000
+
+        app = web.Application()
+        app["state"] = restarted
+        app.router.add_get("/api/chat/sessions/{session}", api_chat_session_detail)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.get("/api/chat/sessions/big")
+            assert response.status == 200
+            detail = await response.json()
+            assert detail["total"] == 602
+            assert detail["messages"][0]["content"] == messages[0]["content"]
+            assert detail["messages"][-1]["content"] == "new answer " + "y" * 12_000
 
     def test_restores_multiple_sessions(self, tmp_path, monkeypatch):
         """Multiple recent dashboard sessions are all restored."""

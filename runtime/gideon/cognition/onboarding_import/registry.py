@@ -18,7 +18,7 @@ from gideon.cognition.onboarding_import.import_projection import (
     SourceDirectory,
 )
 from gideon.cognition.onboarding_import.model import ScanResult
-from gideon.cognition.onboarding_import.sources import claude_code, codex
+from gideon.cognition.onboarding_import.sources import claude_code, codex, hermes
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ def _source(module) -> ImportSource:
     return SourceDirectory.describe(ImportSource, module)
 
 
-SOURCES: tuple[ImportSource, ...] = (_source(claude_code), _source(codex))
+SOURCES: tuple[ImportSource, ...] = (_source(claude_code), _source(codex), _source(hermes))
 
 _BY_NAME: dict[str, ImportSource] = {src.name: src for src in SOURCES}
 

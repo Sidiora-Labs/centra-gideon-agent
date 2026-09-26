@@ -38,6 +38,7 @@ class ImportCategory(str, Enum):
     MCP_SERVERS = "mcp_servers"
     SKILLS = "skills"
     SETTINGS = "settings"
+    CONVERSATIONS = "conversations"
 
 
 class WriteOutcome(str, Enum):

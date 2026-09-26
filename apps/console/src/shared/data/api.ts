@@ -3036,6 +3036,7 @@ export interface SavedAgent {
   natural_voice?: boolean
   specialty?: string; route_hints?: string
   reserved?: boolean; editable?: boolean
+  active_sessions?: number; running_sessions?: number
 }
 
 
@@ -3843,6 +3844,7 @@ export const api = {
   memoryEntities: () => get<MemoryEntitiesResponse>('/api/memory/entities'),
   memoryEntityCreate: (body: { name: string; entity_type: MemoryEntityType; aliases?: string[] }) =>
     post<{ ok: boolean; id: string }>('/api/memory/entities', body),
+  memoryEntityDelete: (id: string) => del(`/api/memory/entities/${encodeURIComponent(id)}`),
   memoryEntityBacklinks: (id: string) =>
     get<{ links: MemoryLink[] }>(`/api/memory/entities/${encodeURIComponent(id)}/backlinks`),
   memoryEntityProposal: (body: { name: string; action: 'accept' | 'reject'; entity_type?: MemoryEntityType }) =>

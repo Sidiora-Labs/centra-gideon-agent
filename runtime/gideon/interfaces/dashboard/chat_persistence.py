@@ -447,8 +447,8 @@ def _rehydrate_session_from_history(
         from gideon.interfaces.dashboard.side_state import SideState
 
         session._side = SideState.from_dict(_side_meta)
-    messages = state.conversation_log.read_messages(history_key)
-    for m in messages[-200:]:
+    messages = state.conversation_log.read_messages_chained(history_key)
+    for m in messages:
         role = m.get("role", "assistant")
         cls = m.get("cls") or ("msg msg-u" if role == "user" else "msg msg-a")
         content = m.get("content", "")
@@ -641,8 +641,7 @@ def restore_recent_sessions(
             state.conversation_log.update_metadata(key, {"tab_id": tab_id})
         session._tab_id = tab_id
         messages = state.conversation_log.read_messages_chained(key)
-        session._disk_older_count = max(0, len(messages) - 500)
-        for m in messages[-500:]:
+        for m in messages:
             role = m.get("role", "assistant")
             cls = m.get("cls") or ("msg msg-u" if role == "user" else "msg msg-a")
             content = m.get("content", "")

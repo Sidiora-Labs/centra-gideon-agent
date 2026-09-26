@@ -796,6 +796,7 @@ async def start_dashboard(
     app.router.add_post("/api/memory/promote", handlers.api_memory_promote)
     app.router.add_get("/api/memory/entities", handlers.api_memory_entities)
     app.router.add_post("/api/memory/entities", handlers.api_memory_entity_create)
+    app.router.add_delete("/api/memory/entities/{entity_id}", handlers.api_memory_entity_delete)
     app.router.add_post(
         "/api/memory/entities/proposals", handlers.api_memory_entity_proposals
     )

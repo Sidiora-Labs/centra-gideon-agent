@@ -133,6 +133,9 @@ async def api_spawn_status(request: web.Request) -> web.Response:
                     except OSError:
                         pass
                 disk_data["result"] = _redact(result) if result else "_No result._"
+                from gideon.engine.subagent_memory import read_receipt
+
+                disk_data["memory_receipt"] = read_receipt(agent_id)
                 tombstone_path = _agent_dir(agent_id) / "tombstone.json"
                 if tombstone_path.exists() and not is_sensitive_path(
                     str(tombstone_path)
@@ -160,6 +163,10 @@ async def api_spawn_status(request: web.Request) -> web.Response:
     }  # type: dict[str, object]
     data["started"] = info.started
     if info.done:
+        from gideon.engine.subagent_memory import read_receipt
+
+        receipt = read_receipt(agent_id) if info.memory_receipt.get("status") == "pending" else info.memory_receipt
+        data["memory_receipt"] = info.memory_receipt if receipt.get("status") == "unavailable" and info.memory_receipt.get("status") == "pending" else receipt
         result = info.result
         if info.result_path and not is_sensitive_path(info.result_path):
             try:

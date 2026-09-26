@@ -13,6 +13,7 @@ import { providerMeta, isReservedAgent } from './agentMeta'
 import { NativeAgentDetail, DiscoveredAgentDetail } from './AgentDetail'
 import type { SavedAgent, DiscoveredAgent } from '../../shared/data/api'
 import { useConfigFsWatch } from '../../shared/data/useConfigFsWatch'
+import { useChatSocket } from '../../shared/data/useChatSocket'
 import { useQueryParam, useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { agentMatcher, decodeAgentAddress, encodeAgentAddress, useAgentLibraryActions, type AgentAddress } from './agentLibraryState'
@@ -32,6 +33,7 @@ export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => 
   const shownCount = runtimeGroups.reduce((count, { group, items }) => count + (group.ready ? items.length : 0), shownNative.length)
   const { syncing, syncAgents, setDefault } = useAgentLibraryActions(native?.defaultAgent, reload)
   useConfigFsWatch(open === null, path => { if (path.includes('/agents/') || path.endsWith('config.json')) reload() })
+  useChatSocket(message => { if (message.type === 'sessions') reload() }, reload)
   let panel: ReactNode = null
   if (open?.kind === 'native' && native) {
     const agent = native.agents.find(candidate => candidate.name === open.name)
@@ -71,6 +73,7 @@ function NativeRow({ agent, index, isDefault, onClick }: { agent: SavedAgent; in
       {(agent.skills?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.skills!.length} skill${agent.skills!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Sparkles size={11} /> {agent.skills!.length}</span>}
       {(agent.tools?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.tools!.length} tool${agent.tools!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Wrench size={11} /> {agent.tools!.length}</span>}
       {(agent.triggers?.length ?? 0) > 0 && <span role="img" aria-label={`${agent.triggers!.length} trigger${agent.triggers!.length === 1 ? '' : 's'}`} className="inline-flex items-center gap-1"><Zap size={11} /> {agent.triggers!.length}</span>}
+      {!!agent.active_sessions && <span className="tabular-nums">{agent.running_sessions ? `${agent.running_sessions} running · ` : ''}{agent.active_sessions} active</span>}
     </div>
   </ListRow></ContextMenu>
 }

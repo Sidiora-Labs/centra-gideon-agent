@@ -220,6 +220,7 @@ class SubagentInfo:
     queued: bool = False
     cancelled: bool = False
     _outcome_noted: bool = False
+    memory_receipt: dict = field(default_factory=lambda: {"status": "pending", "count": 0})
 
 
 @dataclass
@@ -290,6 +291,7 @@ class DelegationSupervisor:
         self._queue: list[SubagentInfo] = []
         self._pending_delivery: dict[str, list[SubagentInfo]] = {}
         self._delivery_tasks: dict[str, asyncio.Task] = {}
+        self._memory_tasks: set[asyncio.Task] = set()
         self._reaper_task: asyncio.Task | None = None
         self.hook_store: Any = None
         if hasattr(sessions, "register_child_stopper"):
@@ -1104,6 +1106,26 @@ class DelegationSupervisor:
         self._charge_child_and_check_budget(info)
         Stats().inc_subagent_completed()
 
+    def _schedule_memory_receipt(self, info: SubagentInfo) -> None:
+        if not info.done or info.error:
+            info.memory_receipt = {"status": "unavailable", "count": 0}
+            return
+        from gideon.engine.subagent_memory import capture
+
+        memory = getattr(self._ctx_builder, "memory", None)
+        task = asyncio.create_task(asyncio.to_thread(capture, info, memory), name=f"subagent-memory:{info.id}")
+        self._memory_tasks.add(task)
+
+        def settled(completed):
+            self._memory_tasks.discard(completed)
+            if not completed.cancelled():
+                try:
+                    info.memory_receipt = completed.result()
+                except Exception:
+                    info.memory_receipt = {"status": "unavailable", "count": 0}
+
+        task.add_done_callback(settled)
+
     @staticmethod
     def _record_subagent_usage(
         info: SubagentInfo, session_key: str, event: object
@@ -1134,6 +1156,7 @@ class DelegationSupervisor:
             task=_redact(info.task),
             agent=_redact(info.agent),
             result=_done_result(info.result),
+            memory_receipt=info.memory_receipt,
         )
         if usage:
             result.update(
@@ -1191,6 +1214,7 @@ class DelegationSupervisor:
         finally:
             if not info.reaped:
                 info.elapsed = time.time() - info.started
+                self._schedule_memory_receipt(info)
                 await self._fire_event(
                     "subagent_done", info, self._completion_payload(info, usage=True)
                 )
@@ -1642,3 +1666,7 @@ class DelegationSupervisor:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._tasks.clear()
+        if self._memory_tasks:
+            done, pending = await asyncio.wait(self._memory_tasks, timeout=2.0)
+            for task in pending:
+                task.cancel()
