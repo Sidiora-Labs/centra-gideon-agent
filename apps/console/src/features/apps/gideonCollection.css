@@ -1,4 +1,4 @@
-.gideon-collection{width:100%;max-width:1160px;margin:0 auto;padding:48px 32px 64px;color:var(--color-on-surface)}
+.gideon-collection{box-sizing:border-box;width:100%;max-width:1160px;min-width:0;margin:0 auto;padding:48px 32px 64px;color:var(--color-on-surface)}
 .gideon-collection-intro{margin-bottom:32px}
 .gideon-collection-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-on-surface-low)}
 .gideon-collection-intro h1{margin:10px 0 6px;font-size:clamp(30px,4vw,42px);font-weight:500;letter-spacing:-.035em}
@@ -8,14 +8,23 @@
 .gideon-collection-filters button:hover,.gideon-collection-filters button[aria-pressed=true]{background:var(--color-surface-high);color:var(--color-on-surface)}
 .gideon-collection-filters .gideon-collection-manage{margin-left:auto;color:var(--color-on-surface)}
 .gideon-collection-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.gideon-collection-card{display:flex;min-width:0;min-height:228px;flex-direction:column;text-align:left;border:1px solid var(--color-outline-variant);border-radius:12px;background:var(--color-surface-low);padding:20px;transition:background .15s,border-color .15s}
+.gideon-collection-card{--mark-accent:var(--color-primary);display:flex;min-width:0;min-height:324px;flex-direction:column;text-align:left;border:1px solid var(--color-outline-variant);border-radius:12px;background:var(--color-surface-low);padding:20px;transition:background .15s,border-color .15s}
+.gideon-collection-card[data-category="Create"]{--mark-accent:var(--color-secondary)}
+.gideon-collection-card[data-category="Think"]{--mark-accent:var(--color-info)}
+.gideon-collection-card[data-category="Everyday"]{--mark-accent:var(--color-primary)}
+.gideon-collection-card[data-category="Build"]{--mark-accent:var(--color-on-surface)}
 .gideon-collection-card:hover{background:var(--color-surface-high);border-color:var(--color-on-surface-low)}
 .gideon-collection-card:focus-visible,.gideon-collection-filters button:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px}
 .gideon-collection-card-top,.gideon-collection-card-foot{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--color-on-surface-low)}
-.gideon-collection-card-top{margin-bottom:22px}
+.gideon-collection-card-top{margin-bottom:9px;letter-spacing:.08em;text-transform:uppercase}
+.gideon-collection-art{display:flex;width:100%;height:100px;align-items:center;justify-content:flex-end;margin-bottom:13px}
+.gideon-collection-art svg{display:block;width:160px;max-width:100%;height:100px}
+.gideon-collection-art-mat{fill:color-mix(in srgb,var(--color-on-surface) 3%,transparent);stroke:color-mix(in srgb,var(--color-on-surface) 11%,transparent);stroke-width:1}
+.gideon-collection-art-outline{stroke:color-mix(in srgb,var(--color-on-surface) 62%,transparent);stroke-width:2.2}
+.gideon-collection-art-accent{stroke:var(--mark-accent);stroke-width:2.5}
 .gideon-collection-card strong{font-size:30px;font-weight:500;letter-spacing:-.04em;line-height:1.1}
 .gideon-collection-promise{margin-top:12px;font-size:13px}
 .gideon-collection-description{margin:5px 0 20px;font-size:12px;line-height:1.5;color:var(--color-on-surface-low)}
 .gideon-collection-card-foot{margin-top:auto;border-top:1px solid var(--color-outline-variant);padding-top:12px}
 @media(max-width:950px){.gideon-collection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.gideon-collection{padding:28px 16px 44px}.gideon-collection-grid{grid-template-columns:1fr}.gideon-collection-card{min-height:195px}.gideon-collection-filters .gideon-collection-manage{margin-left:0}}
+@media(max-width:600px){.gideon-collection{padding:76px 16px 44px}.gideon-collection-grid{grid-template-columns:1fr}.gideon-collection-card{min-height:300px}.gideon-collection-filters .gideon-collection-manage{margin-left:0}}
