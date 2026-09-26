@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from 'react'
+import { useId, type MouseEvent, type ReactNode } from 'react'
 import { motion, useMotionTemplate, useMotionValue } from 'framer-motion'
 import { physics, exprHeavy, useReducedMotion } from '../theme/motion'
 import { fvs } from '../theme/fontWeight'
@@ -31,13 +31,17 @@ export function Button({ children, variant = 'primary', size = 'md', shape = 'pi
   className, onClick, disabled = false, disabledReason, type = 'button', title, ariaLabel, ariaExpanded, ariaPressed }: ButtonProps) {
   const reduced = useReducedMotion()
   const state = controlAvailability(disabled, loading, disabledReason)
+  const reasonId = useId()
   const pointerX = useMotionValue(50)
   const pointerY = useMotionValue(50)
   const sheen = useMotionTemplate`radial-gradient(ellipse at ${pointerX}% ${pointerY}%, color-mix(in srgb, var(--color-on-primary) 22%, transparent), transparent 65%)`
   const highlight = !state.blocked && !reduced && exprHeavy(0.45) && ['primary', 'danger'].includes(variant)
   const density = sizes[size]
-  return <motion.button type={type} aria-label={ariaLabel} aria-expanded={ariaExpanded} aria-pressed={ariaPressed}
+  const description = loading && loadingLabel ? loadingLabel : disabled && disabledReason ? disabledReason : null
+  return <><motion.button type={type} aria-label={ariaLabel}
+    aria-describedby={description ? reasonId : undefined} aria-expanded={ariaExpanded} aria-pressed={ariaPressed}
     aria-busy={state.busy} aria-disabled={state.ariaDisabled} disabled={state.nativeDisabled}
+    data-visual-state={loading ? 'loading' : disabled ? 'disabled' : 'ready'}
     title={controlTitle(title, !!state.ariaDisabled, disabledReason)}
     onClick={(event) => activateControl(event, state.blocked, onClick)}
     onPointerMove={(event) => {
@@ -55,5 +59,5 @@ export function Button({ children, variant = 'primary', size = 'md', shape = 'pi
       'aria-disabled:cursor-not-allowed aria-disabled:opacity-40', className)}>
     {highlight && <motion.span aria-hidden className="pointer-events-none absolute inset-0" style={{ background: sheen }} />}
     <ControlContent busy={loading} label={loadingLabel}>{children}</ControlContent>
-  </motion.button>
+  </motion.button>{description && <span id={reasonId} className="sr-only">{description}</span>}</>
 }

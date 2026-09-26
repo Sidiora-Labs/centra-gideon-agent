@@ -1,4 +1,6 @@
 
+import type { SpawnMemoryReceipt } from '../../shared/data/api'
+
 export interface TextSegment { kind: 'text'; text: string }
 
 export interface ToolSegment {
@@ -136,6 +138,14 @@ export interface SubagentCard {
   result?: string
   costUsd?: number
   tokens?: number
+  memoryReceipt?: SpawnMemoryReceipt
+}
+
+export function memoryReceiptLabel(receipt: SpawnMemoryReceipt): string {
+  if (receipt.status === 'pending') return 'Memory capture pending'
+  if (receipt.status === 'recorded') return `${receipt.count} memory contribution${receipt.count === 1 ? '' : 's'} recorded`
+  if (receipt.status === 'no_contribution') return 'No memory contribution'
+  return 'Memory capture unavailable'
 }
 
 export interface FileEntry { path: string; name: string }

@@ -91,12 +91,14 @@ ac_1 = "Implement the complete reachable feature: Improve automatic chat titles"
 
 [task.experience-workspace]
 title = "experience-workspace end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "experience-workspace"
 requires = []
 reqs = ["006.1", "007.1", "008.1", "009.1", "041.1", "042.1", "043.1", "044.1", "045.1", "046.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/ChatPage.tsx", "apps/console/src/features/chat/SessionWorkspace.tsx", "apps/console/src/features/chat/SessionMarkerRail.tsx", "apps/console/src/features/chat/sessionMapSearch.ts", "apps/console/src/features/chat/sessionMapSearch.test.ts", "apps/console/src/features/chat/WorkflowProgressCard.tsx", "apps/console/src/features/chat/ChatActivityPanel.tsx", "apps/console/src/features/chat/chatTypes.ts", "apps/console/src/shared/data/api.ts", "runtime/gideon/interfaces/dashboard/chat_title.py"]
+verify_cmd = "cd apps/console && ./node_modules/.bin/vitest run src/features/chat/sessionMapSearch.test.ts"
 
 [req.005]
 title = "Downloadable default local model for first chat"
@@ -316,10 +318,11 @@ ac_1 = "Implement the complete reachable feature: Consistent density-controlled 
 
 [task.experience-polish]
 title = "experience-polish end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "experience-polish"
 requires = []
 reqs = ["099.1", "129.1", "130.1"]
+touches = ["apps/console/src/app/shell/shell.css", "apps/console/src/features/dashboard/DashboardPage.tsx", "apps/console/src/shared/ui/Button.tsx", "apps/console/src/shared/ui/ListScaffold.test.tsx", "apps/console/src/shared/ui/ListScaffold.tsx", "apps/console/src/shared/ui/Modal.tsx", "apps/console/src/shared/ui/dialog/DialogShell.tsx", "apps/console/src/shared/ui/experiencePolish.test.tsx"]
+verify_cmd = "cd apps/console && npm test -- src/shared/ui/experiencePolish.test.tsx src/shared/ui/ListScaffold.test.tsx"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
