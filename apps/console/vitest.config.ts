@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   test: {
+    coverage: { provider: 'v8', reporter: ['text-summary', 'json', 'json-summary'] },
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/shared/testing/setup.ts'],

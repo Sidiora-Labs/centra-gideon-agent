@@ -107,11 +107,11 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Incomplete executable'):self.evaluate()
 
     def test_python_missing_lines(self):
-        self.coverage({'summary':{'missing_lines':1}})
+        self.coverage({'summary':{'missing_lines':1,'missing_branches':0}})
         with self.assertRaisesRegex(ValueError,'lines/branches'):self.evaluate()
 
     def test_python_missing_branches(self):
-        self.coverage({'summary':{'missing_branches':1}})
+        self.coverage({'summary':{'missing_lines':0,'missing_branches':1}})
         with self.assertRaisesRegex(ValueError,'lines/branches'):self.evaluate()
 
     def test_istanbul_complete(self):
@@ -139,3 +139,121 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(self.evaluate()['coverage']['complete'])
 
 if __name__=='__main__':unittest.main()
+
+class ChangedCodeTests(unittest.TestCase):
+    setUp=EvidenceTests.setUp
+    tearDown=EvidenceTests.tearDown
+    coverage=EvidenceTests.coverage
+    save=EvidenceTests.save
+    evaluate=EvidenceTests.evaluate
+    def tree_after_edit(self, production, tests):
+        self.production.write_text(production)
+        self.tests.write_text(tests)
+        subprocess.run(['git','add','production.py','test_production.py'],cwd=self.root,check=True)
+        return subprocess.check_output(['git','write-tree'],cwd=self.root,text=True).strip()
+
+    def test_diff_counts_only_new_lines(self):
+        revised=self.tree_after_edit('value = 1\nother = 2\n','assert value == 1\nassert value != 2\nassert other == 2\n')
+        changed=gate.changed_lines(self.tree,revised,[self.production,self.tests])
+        self.assertEqual(changed[str(self.production)],{2})
+        self.assertEqual(changed[str(self.tests)],{3})
+        metrics=gate.compare_lines([self.production],[self.tests],changed)
+        self.assertEqual(metrics['production_lines'],1)
+        self.assertEqual(metrics['test_lines'],1)
+
+    def test_deleted_lines_do_not_count_as_new_code(self):
+        revised=self.tree_after_edit('','assert value == 1\n')
+        changed=gate.changed_lines(self.tree,revised,[self.production,self.tests])
+        self.assertEqual(changed[str(self.production)],set())
+        self.assertEqual(changed[str(self.tests)],set())
+        self.assertIsNone(gate.compare_lines([self.production],[self.tests],changed)['ratio'])
+
+    def test_entire_new_file_counts(self):
+        extra=self.root/'new.py';extra.write_text('first=1\nsecond=2\n')
+        subprocess.run(['git','add','new.py'],cwd=self.root,check=True)
+        revised=subprocess.check_output(['git','write-tree'],cwd=self.root,text=True).strip()
+        self.assertEqual(gate.changed_lines(self.tree,revised,[extra])[str(extra)],{1,2})
+
+    def test_unchanged_file_is_not_requalified(self):
+        self.report.write_text('{}')
+        result=gate.coverage_files(self.report,[self.production],{str(self.production):set()})
+        self.assertTrue(result['complete'])
+
+    def istanbul(self):
+        loc=lambda number:{'start':{'line':number,'column':0},'end':{'line':number,'column':10}}
+        return {'s':{'0':0,'1':1},'f':{'0':0,'1':1},'b':{'0':[0,0],'1':[1,1]},'statementMap':{'0':loc(1),'1':loc(2)},'fnMap':{'0':{'loc':loc(1)},'1':{'loc':loc(2)}},'branchMap':{'0':{'loc':loc(1)},'1':{'loc':loc(2)}}}
+
+    def test_changed_istanbul_ignores_untouched_gaps(self):
+        self.coverage(self.istanbul())
+        self.assertTrue(gate.coverage_files(self.report,[self.production],{str(self.production):{2}})['complete'])
+
+    def test_changed_istanbul_rejects_changed_gap(self):
+        self.coverage(self.istanbul())
+        with self.assertRaisesRegex(ValueError,'statements'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{1}})
+
+    def test_changed_function_decl_location_supported(self):
+        record=self.istanbul()
+        record['fnMap']['1']['decl']=record['fnMap']['1'].pop('loc')
+        record['f']['1']=0
+        self.coverage(record)
+        with self.assertRaisesRegex(ValueError,'functions'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{2}})
+
+    def test_changed_branch_requires_all_outcomes(self):
+        record=self.istanbul();record['b']['1']=[1,0];self.coverage(record)
+        with self.assertRaisesRegex(ValueError,'branches'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{2}})
+
+    def test_changed_coverage_requires_locations(self):
+        self.coverage({'s':{'0':1},'f':{},'b':{}})
+        with self.assertRaisesRegex(ValueError,'location map'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{1}})
+
+    def test_empty_coverage_cannot_cover_code(self):
+        self.coverage({'s':{},'f':{},'b':{}})
+        with self.assertRaisesRegex(ValueError,'Empty executable'):self.evaluate()
+
+    def test_incomplete_coverage_categories_rejected(self):
+        self.coverage({'s':{'0':1}})
+        with self.assertRaisesRegex(ValueError,'Incomplete Istanbul'):self.evaluate()
+
+    def test_python_requires_branch_summary(self):
+        self.coverage({'summary':{}})
+        with self.assertRaisesRegex(ValueError,'Incomplete Python'):self.evaluate()
+
+    def python_changed(self, lines, branches, enabled=True):
+        self.report.write_text(json.dumps({'meta':{'branch_coverage':enabled},'files':{'production.py':{'summary':{'missing_lines':len(lines),'missing_branches':len(branches)},'missing_lines':lines,'missing_branches':branches}}}))
+
+    def test_python_unchanged_missing_line_is_allowed(self):
+        self.python_changed([1],[[1,3]])
+        self.assertTrue(gate.coverage_files(self.report,[self.production],{str(self.production):{2}})['complete'])
+
+    def test_python_changed_missing_line_rejected(self):
+        self.python_changed([2],[])
+        with self.assertRaisesRegex(ValueError,'lines/branches'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{2}})
+
+    def test_python_changed_branch_destination_rejected(self):
+        self.python_changed([],[[1,2]])
+        with self.assertRaisesRegex(ValueError,'lines/branches'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{2}})
+
+    def test_python_requires_instrumentation(self):
+        self.python_changed([],[],False)
+        with self.assertRaisesRegex(ValueError,'branch instrumentation'):
+            gate.coverage_files(self.report,[self.production],{str(self.production):{2}})
+
+    def test_revision_must_describe_current_files(self):
+        self.evidence['baseline']=self.tree
+        self.production.write_text('changed = 1\n')
+        with self.assertRaisesRegex(ValueError,'differs from current file'):self.evaluate()
+
+    def test_baseline_evidence_uses_changed_lines(self):
+        revised=self.tree_after_edit('value = 1\nother = 2\n','assert value == 1\nassert value != 2\nassert other == 2\n')
+        self.evidence.update(baseline=self.tree,revision=revised)
+        self.python_changed([],[])
+        result=self.evaluate()
+        self.assertEqual(result['production_lines'],1)
+        self.assertEqual(result['test_lines'],1)
+        self.assertTrue(result['coverage']['complete'])
