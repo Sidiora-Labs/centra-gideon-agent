@@ -251,7 +251,7 @@
     },
     {
       "path": "elements/reasoning-effort.tsx",
-      "sha256": "11c71494e0d7aeffa9a138bfab6f20c46a9f7485553d0e1fa6b62dffca77f163",
+      "sha256": "44b2f00d1f1cbd8c1ae5717f1953f8ecbb818ab5a38173503cf7498081277254",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/reasoning-effort.tsx",
       "donorSha256": "100148236c6e236c6076f6ee191d328ff88134c822c63e0e63ae5019d4435e92",
       "status": "adapted"
