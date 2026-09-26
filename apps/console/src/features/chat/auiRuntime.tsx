@@ -78,6 +78,7 @@ export function convertGideonTurn(turn: ChatTurn, ordinal: number, sessionId: st
         return notice ? [part, { type: 'data' as const, name: 'gideon-guardrail-notice', data: notice }] : [part]
       }),
       ...(turn.fileChanges?.length ? [{ type: 'data' as const, name: 'gideon-file-changes', data: turn.fileChanges }] : []),
+      ...(turn.stopOutcome ? [{ type: 'data' as const, name: 'gideon-stop-outcome', data: turn.stopOutcome }] : []),
     ],
     ...(createdAt && !Number.isNaN(createdAt.getTime()) ? { createdAt } : {}),
     ...(turn.role === 'assistant' ? {

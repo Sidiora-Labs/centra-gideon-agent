@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAui, type AppendMessage, type AssistantClient } from '@assistant-ui/react'
 import type { ChatHistoryMsg } from '../../shared/data/api'
-import { appendThinking, assistantTurn, guardrailNoticeForTool, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
+import { appendThinking, assistantTurn, guardrailNoticeForTool, hydrateTurns, stopOutcomeForMessage, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
 import {
   GideonChatRuntimeProvider, appendText, convertGideonTurn, gideonAuiId, makeGideonQueueAdapter, reloadLatestGideonAnswer,
   useGideonTurnByAuiId, type GideonChatRuntimeProps, type GideonTurnRef,
@@ -184,6 +184,75 @@ describe('Gideon assistant-ui runtime', () => {
     expect(convertGideonTurn(withoutChanges[1], 1, 'session/a', false).content).toEqual([
       { type: 'text', text: 'Editing' },
     ])
+  })
+
+  it('binds final gateway stop records to the preceding assistant without changing turn identity', () => {
+    const stoppedMeta = { kind: 'stop_event', id: 'stop-1', state: 'stopped', outcome: 'soft' }
+    const failedResetMeta = { kind: 'stop_event', id: 'stop-2', state: 'stop_failed_reset', outcome: 'hard' }
+    const stopped: ChatHistoryMsg = { role: 'system', content: JSON.stringify(stoppedMeta), meta: stoppedMeta }
+    const failedReset: ChatHistoryMsg = { role: 'system', content: JSON.stringify(failedResetMeta), meta: failedResetMeta }
+    const history: ChatHistoryMsg[] = [
+      { role: 'user', content: 'First request' },
+      { role: 'assistant', content: 'Partial first answer' },
+      stopped,
+      { role: 'user', content: 'Second request' },
+      { role: 'assistant', content: 'Partial second answer' },
+      failedReset,
+    ]
+    const turns = hydrateTurns(history)
+    const ui = setup({ turns })
+    expect(turns).toHaveLength(4)
+    expect(turns[1].stopOutcome).toEqual({ state: 'stopped', outcome: 'soft' })
+    expect(turns[3].stopOutcome).toEqual({ state: 'stop_failed_reset', outcome: 'hard' })
+    expect(ui.aui().thread.getState().messages.map((message) => message.id)).toEqual(
+      turns.map((_, index) => gideonAuiId('session/a', index)),
+    )
+    expect(ui.aui().thread.getState().messages[1].content).toContainEqual({
+      type: 'data', name: 'gideon-stop-outcome', data: turns[1].stopOutcome,
+    })
+    expect(ui.aui().thread.getState().messages[3].content).toContainEqual({
+      type: 'data', name: 'gideon-stop-outcome', data: turns[3].stopOutcome,
+    })
+  })
+
+  it('rejects pending and unrelated system rows without creating assistant turns', () => {
+    const pendingMeta = { kind: 'stop_event', id: 'stop-3', state: 'stopping', outcome: null }
+    const wrongKindMeta = { kind: 'other_event', id: 'stop-4', state: 'stopped', outcome: 'soft' }
+    const wrongOutcomeMeta = { kind: 'stop_event', id: 'stop-5', state: 'stopped', outcome: 'unknown' }
+    const pending: HistMsg = { role: 'system', content: JSON.stringify(pendingMeta), meta: pendingMeta }
+    const wrongKind: HistMsg = { role: 'system', content: JSON.stringify(wrongKindMeta), meta: wrongKindMeta }
+    const wrongOutcome: HistMsg = { role: 'system', content: JSON.stringify(wrongOutcomeMeta), meta: wrongOutcomeMeta }
+    expect(stopOutcomeForMessage(pending)).toBeNull()
+    expect(stopOutcomeForMessage(wrongKind)).toBeNull()
+    expect(stopOutcomeForMessage(wrongOutcome)).toBeNull()
+    expect(stopOutcomeForMessage({ ...wrongOutcome, role: 'assistant' })).toBeNull()
+    expect(stopOutcomeForMessage({ ...wrongOutcome, meta: { ...wrongOutcome.meta, outcome: 'soft', id: '' } })).toBeNull()
+    expect(stopOutcomeForMessage({ ...wrongOutcome, content: '{' })).toBeNull()
+    expect(stopOutcomeForMessage({ ...wrongOutcome, content: '[]' })).toBeNull()
+    expect(stopOutcomeForMessage({ ...wrongOutcome, content: '{}' })).toBeNull()
+    const mismatch = { ...wrongOutcomeMeta, outcome: 'soft' }
+    expect(stopOutcomeForMessage({ ...wrongOutcome, meta: mismatch })).toBeNull()
+    const wrongPair = { ...wrongOutcomeMeta, outcome: 'hard' }
+    expect(stopOutcomeForMessage({ ...wrongOutcome, content: JSON.stringify(wrongPair), meta: wrongPair })).toBeNull()
+    const turns = hydrateTurns([{ role: 'user', content: 'No assistant yet' }, pending, wrongKind, wrongOutcome])
+    expect(turns).toHaveLength(1)
+    expect(turns[0].stopOutcome).toBeUndefined()
+    const trailing = hydrateTurns([{ role: 'user', content: 'Done' }, { role: 'assistant', content: 'Answer' }, pending])
+    expect(trailing[1].stopOutcome).toBeUndefined()
+
+    const olderMeta = { kind: 'stop_event', id: 'stop-old', state: 'stopped' }
+    const older: HistMsg = { role: 'system', content: JSON.stringify(olderMeta), meta: olderMeta }
+    const withAdjacentEvents = hydrateTurns([
+      { role: 'user', content: 'Check it' },
+      { role: 'assistant', content: 'Partial answer' },
+      { role: 'permission', content: 'Read file', meta: { approval_id: 'approval-1' } },
+      { role: 'error', content: 'Provider disconnected' },
+      older,
+      { role: 'notification', content: 'Unrelated marker' },
+    ])
+    expect(withAdjacentEvents).toHaveLength(2)
+    expect(withAdjacentEvents[1].segments.map((segment) => segment.kind)).toEqual(['text', 'approval', 'error'])
+    expect(withAdjacentEvents[1].stopOutcome).toEqual({ state: 'stopped' })
   })
 
   it('carries a computer-use denial through live and hydrated tool messages', async () => {
