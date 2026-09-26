@@ -1,0 +1,236 @@
+[meta]
+feature = "gideon-ui-shell"
+status = "in_progress"
+version = "1.0.0"
+manager = "gu26-fm01"
+model = "gpt-6-sol"
+source_of_truth = "spec/gideon-ui-rebuild/spec.kvx"
+phase = "implementation"
+
+[design.scope]
+contract = "Production redesign of full OSS and hosted UI from approved conceptual demo, actual use of all 150 requested assistant-ui surfaces, and hosted Windows Electron client. Demo is design reference only. No broad backend rewrite or new business-service integrations inferred from decorative template examples."
+reference = "design/gideon-redesign/mockup/app.js; design/gideon-redesign/mockup/styles.css; design/gideon-redesign/mockup/coverage.md"
+baseline_oss = "adbf3bae"
+baseline_hosted = "340f0e30"
+donor_revision = "72e404e9160a9dcc91fbec1515e910d1402f1de3"
+component_count = 150
+screen_map_count = 214
+
+[design.experience]
+contract = "Modern simple solid personal tool. Graphite surfaces, restrained accents, clear typography and branded labels. Familiar capabilities exposed where expected; advanced functionality presented as named miniapps. No icon wall, enterprise dashboard framing or wholesale donor stylesheet takeover. Actual donor component structure and behavior must be visible, not recreated as lookalikes."
+primary = ["New conversation", "Conversations", "Search", "Projects", "Files", "Calendar", "Notifications", "Account"]
+miniapps = ["Research", "Slides", "Studio", "Writer", "Music", "Worlds", "Knowledge", "Journal", "Health", "People", "Compass", "Automations", "Code", "Agents", "Lab", "Workspace", "Connections"]
+
+[design.hosted]
+contract = "Preserve current authentication, tenant boundaries, deep links, subscriptions and operator-managed model/provider/infrastructure policy. Models/context/usage remain visible where truthful; privileged provider credentials, local installs and runtime administration stay operator-owned. OSS retains configuration. Read-only/disabled hosted variants must explain actual availability, never silently remove the requested component from the traceability map."
+
+[design.architecture]
+vendor = "Selective source copies from packages/ui production modules under shared/vendor/assistant-ui, required runtime packages declared explicitly, retained MIT notices and hashes. No docs demos, workstation absolute paths or full monorepo imports. Export elements/* and typed runtime adapter contracts, using @assistant-ui/react@0.15.22. Preserve full donor Thread export and expose source-derived ThreadTranscript without composer/footer, with source-derived UserMessage and AssistantMessage override slots plus direct ThreadPrimitive/MessagePrimitive/ComposerPrimitive exports. Provide ThreadMessages composition when Gideon owns viewport. FM02 uses ThreadTranscript within ChatPage and keeps ComposerStage exactly once. Root serializes package.json/lock changes."
+state = "Gideon stores and transports stay authoritative. One useExternalStoreRuntime provider bridges ChatTurn[]/incremental segments and existing send/stop/edit/regenerate/queue/approval. Queue adapter must preserve existing steer/queue behavior. Branching uses actual messageRepository/setMessages or delegated Gideon variant/fork controls; flat history cannot claim working branches."
+results = "Typed registry dispatches actual tool/artifact/run payloads to donor components. Stable session/run/tool/message/artifact IDs required. Unknown confidence/cost/usage stays unknown; no invented values. Every interactive control maps to existing real action and resulting status."
+generative = "Twenty-two UISpec template structures need an explicit typed renderer/adapter; Gideon GenUiWidget uses a different parseGenUi DSL. Never assume interchangeable formats. Production payloads replace example records. Source producers and action routes must be traced and qualified per template."
+navigation = "Preserve legacy hash routes and all214 mapped surfaces. Shared navigationModel owns route IDs; App owns dispatch; NavRail gets onSearch from explicit palette state. apps collection and apps/manage installation remain distinct and reachable."
+
+[design.desktop]
+contract = "Hosted web experience inside Windows Electron, adapting existing desktop package. Windows hosted mode never requires or starts a POSIX local backend. Existing Mac/Linux local runtime behavior retained."
+config = "resources/hosted-config.json contains schemaVersion:1, mode:hosted, hostedUrl:<validated HTTPS origin>. Default hosted origin is https://gideon.workmates.app, explicitly confirmed by the user. Build may override using validated GIDEON_CLOUD_URL. Authentication stays existing hosted web flow with return route preserved."
+artifact = "Windows x64 NSIS executable, Gideon product identity/icon, checksum manifest, installation/start/uninstall evidence. Build cross-platform through Node script; use Windows runner for native qualification. No update server or signing claim without configured service/credentials."
+boundary = "Remote hosted content never gains Node integration or privileged local preload. Origin/navigation/media/download/external-link policies use existing Electron boundaries. This is required correct desktop behavior, not a new product administration flow."
+
+[design.fleet]
+leader = "gu26-leader"
+managers = 4
+workers = 16
+manager_model = "gpt-6-sol"
+worker_model = "gpt-6-sol"
+lifecycle = "Specs first. Root owns authoritative statuses/contracts and main integration. Managers integrate assigned isolated feature branches; sixteen workers own bounded task branches. One task per worker, no duplicate review agents. Start claims only after planning and governance prerequisites pass."
+git = "Each checkout stays isolated; preserve preexisting modifications. Qualified worker -> manager via cg fleet merge-up -> root main via cg fleet land. Leader alone pushes OSS origin/main as integrated commits land. Hosted commits remain local. Current phase has no production deploy or service replacement."
+dependencies = "Cross-feature prerequisites are explicit in master task graph; manager may not dispatch because a local mirror omits another feature task. Root unlocks consumers only once vendor/dependency/runtime contracts are committed."
+
+[design.commit_policy]
+leader_id = "gu26-leader"
+format = "gu26-leader\ngu26-fmNN\nYYYY-MM-DD\n<branch_name>\n<staged_git_tree_hash>\n\"<short actual changes>\"\n\nSigned By Gideon Agent | Powered by GPT Astra 6 and Codify©"
+hash_semantics = "A final commit cannot contain its own hash. Field is full git write-tree content hash of staged code, never a made-up commit ID. Resulting commit SHA is recorded separately in evidence."
+rotation = "Every committing agent uses independent persisted round-robin sequence 0,1,2,3,0... across both repositories and worktrees. Increment only after successful commit; serialize allocation. Author and committer use same assigned identity. Manager merges and leader landings rotate too."
+identities = ["jg-sidioralabs <203055447+jg-sidioralabs@users.noreply.github.com>", "dev-paxeer <220528561+dev-paxeer@users.noreply.github.com>", "gavin-sidiora <331247230+gavin-sidiora@users.noreply.github.com>", "paxlabs-inc <info@sidioralabs.com>"]
+enforcement = "Before first implementation commit install scoped commit helper, prepare-commit-msg/commit-msg validation and pre-integration/pre-push all-commit audit. Validate identity sequence, exact format, date, branch at creation, staged tree and footer; existing history exempt by recorded baselines. No --no-verify, skipped hooks, forced acceptance or rewriting prior history. No commits during spec preparation before this prerequisite."
+
+[design.quality]
+test_ratio = "At least 1.0 nonblank noncomment meaningful test LOC per newly added or materially changed executable production LOC, including adopted upstream source, measured per task and merged feature; fixtures, snapshots, repeated trivial assertions and generated boilerplate cannot inflate numerator. Exact baseline and file classifications recorded."
+coverage = "100 percent newly introduced or changed executable statements, branches and functions covered by passing behavior tests, including adopted source. Carry upstream tests and provenance where available; adoption grants no coverage exemption. Missing meaningful tests must be written. Report imported lines separately without excluding them from required totals. No task marked done with a failing required metric."
+runtime = "Use real library components, actual Gideon types and existing transport/store contracts. Tests exercise real code paths. No fake responses or stubs added to production to manufacture green gates."
+ui = "Merged-wave actual browser journeys at 320/390/768/1440, dark/light, keyboard/touch, real streaming/session/action behavior and hosted restrictions. Screenshots bind to exact commit and consumer, not a component catalog."
+windows = "Windows installer existence/hash is separate from native install/start/login/return/persistence/uninstall evidence. Signing requires actual credentials; record unsigned honestly. No Windows qualification claim from Linux checks."
+completion = "Source copied, component exported, showcase rendered, tests written, tests passed, integrated and live journey proven are distinct states. All requested consumers and metrics must pass before complete."
+
+[design.execution]
+task_limit = "One bounded task per worker; one target build plus focused verify; maximum two task-related repair cycles before reporting exact failed command/log and splitting required follow-up. Do not rerun unchanged passed gates. Aggregate/browser/Windows gates once on merged wave revision. Do not mark done for unrelated baseline failures or incomplete external proof."
+tests = "Each task writes tests alongside implementation; coverage enabled in declared packages and test instrumentation. Build/test commands below are target contracts to implement; their existence or success is NOT asserted at planning time."
+sources = "Six user-named items are not in inspected144-item registry. They remain explicit unresolved requirements; foundation task resolves source/composition before consumers can be complete. Never substitute fabricated donor provenance."
+
+[req.product]
+title = "Complete approved UI"
+ac_1 = "Production redesign of full OSS and hosted UI from approved conceptual demo, actual use of all 150 requested assistant-ui surfaces, and hosted Windows Electron client. Demo is design reference only. No broad backend rewrite or new business-service integrations inferred from decorative template examples."
+
+[req.windows]
+title = "Hosted Windows app"
+ac_1 = "Windows x64 NSIS executable, Gideon product identity/icon, checksum manifest, installation/start/uninstall evidence. Build cross-platform through Node script; use Windows runner for native qualification. No update server or signing claim without configured service/credentials."
+
+[req.aui-084]
+category = "Composer"
+title = "Command palette"
+source = "/root/private-neo-v1/component-lib/assistant-ui/packages/ui/src/components/react/assistant-ui/elements/command-palette.tsx"
+source_status = "mapped"
+consumer_oss = "features/chat/SessionWorkspace.tsx; features/chat/PromptPalette.tsx"
+consumer_hosted = "features/chat/SessionWorkspace.tsx; features/chat/PromptPalette.tsx"
+runtime_contract = "actual draft, attachment, model, slash and voice actions"
+owner_lane = "shell"
+owner_task = "shell-navigation"
+planned_product_component = ""
+action_types = []
+renderer_source = ""
+worker_id = "gu26-w01"
+manager_id = "gu26-fm01"
+implementation_status = "pending"
+oss_status = "pending"
+hosted_status = "pending"
+ac_1 = "Command palette uses actual assistant-ui source in features/chat/SessionWorkspace.tsx; features/chat/PromptPalette.tsx; populated from actual draft, attachment, model, slash and voice actions; interactive actions persist via existing callbacks and errors remain visible. Pass changed-code coverage, meaningful1:1 ratio, keyboard/mobile and actual consumer-path evidence in both editions."
+ac_2 = "Record donor export/hash, integration import, runtime payload type, producing API/tool, exact route/trigger, action handler and test/evidence in component-map.json. Source presence or a gallery example alone is not delivery."
+
+[req.aui-096]
+category = "Thread"
+title = "Settings"
+source = "/root/private-neo-v1/component-lib/assistant-ui/packages/ui/src/components/react/assistant-ui/elements/settings-panel.tsx"
+source_status = "mapped"
+consumer_oss = "features/ChatPage.tsx; features/chat/SessionWorkspace.tsx"
+consumer_hosted = "features/ChatPage.tsx; features/chat/SessionWorkspace.tsx"
+runtime_contract = "actual session list, selection, navigation and search"
+owner_lane = "shell"
+owner_task = "shell-settings"
+planned_product_component = ""
+action_types = []
+renderer_source = ""
+worker_id = "gu26-w04"
+manager_id = "gu26-fm01"
+implementation_status = "pending"
+oss_status = "pending"
+hosted_status = "pending"
+ac_1 = "Settings uses actual assistant-ui source in features/ChatPage.tsx; features/chat/SessionWorkspace.tsx; populated from actual session list, selection, navigation and search; interactive actions persist via existing callbacks and errors remain visible. Pass changed-code coverage, meaningful1:1 ratio, keyboard/mobile and actual consumer-path evidence in both editions."
+ac_2 = "Record donor export/hash, integration import, runtime payload type, producing API/tool, exact route/trigger, action handler and test/evidence in component-map.json. Source presence or a gallery example alone is not delivery."
+
+[req.aui-097]
+category = "Thread"
+title = "Onboarding"
+source = "/root/private-neo-v1/component-lib/assistant-ui/packages/ui/src/components/react/assistant-ui/elements/onboarding.tsx"
+source_status = "mapped"
+consumer_oss = "features/ChatPage.tsx; features/chat/SessionWorkspace.tsx"
+consumer_hosted = "features/ChatPage.tsx; features/chat/SessionWorkspace.tsx"
+runtime_contract = "actual session list, selection, navigation and search"
+owner_lane = "shell"
+owner_task = "shell-settings"
+planned_product_component = ""
+action_types = []
+renderer_source = ""
+worker_id = "gu26-w04"
+manager_id = "gu26-fm01"
+implementation_status = "pending"
+oss_status = "pending"
+hosted_status = "pending"
+ac_1 = "Onboarding uses actual assistant-ui source in features/ChatPage.tsx; features/chat/SessionWorkspace.tsx; populated from actual session list, selection, navigation and search; interactive actions persist via existing callbacks and errors remain visible. Pass changed-code coverage, meaningful1:1 ratio, keyboard/mobile and actual consumer-path evidence in both editions."
+ac_2 = "Record donor export/hash, integration import, runtime payload type, producing API/tool, exact route/trigger, action handler and test/evidence in component-map.json. Source presence or a gallery example alone is not delivery."
+
+[task.shell-navigation]
+title = "Authoritative navigation and preserved routes"
+component_ids = ["aui-084"]
+task_kind = "implementation"
+status = "pending"
+wave = 31
+owner_lane = "shell"
+agent_id = "gu26-w01"
+manager_id = "gu26-fm01"
+requires = []
+upstream_requires = ["components-foundation"]
+reqs = ["aui-084.1", "aui-084.2"]
+touches = ["apps/console/src/app/shell/App.tsx", "apps/console/src/app/shell/navigationModel.ts", "apps/console/src/app/shell/navigationModel.test.ts", "apps/console/src/app/shell/routeTransition.test.tsx", "apps/console/src/app/shell/navDisclosure.ts", "apps/console/src/shared/ui/CommandPalette.tsx", "apps/console/src/app/shell/paletteState.ts", "apps/console/src/app/shell/paletteState.test.ts"]
+build_cmd = "npm --prefix apps/console run build"
+verify_cmd = "cd apps/console && npx vitest run src/app/shell/navigationModel.test.ts src/app/shell/routeTransition.test.tsx src/app/shell/navDisclosure.test.tsx src/app/shell/paletteState.test.ts --coverage"
+quality_cmd = "python3 tooling/ui_quality_gate.py --task shell-navigation"
+acceptance = "Every existing hash/deep link still resolves. Familiar destinations are directly reachable. Search opens the real command/search launcher. apps is collection and apps/manage retains installation/configuration. Hosted CloudRuntimeBoundary and operator guards remain effective."
+gate_status = "planned_not_run"
+
+[task.shell-chrome]
+title = "Label-led desktop and mobile navigation"
+component_ids = []
+task_kind = "implementation"
+status = "pending"
+wave = 36
+owner_lane = "shell"
+agent_id = "gu26-w02"
+manager_id = "gu26-fm01"
+requires = ["shell-navigation"]
+upstream_requires = ["components-foundation", "shell-navigation"]
+reqs = ["product.1"]
+touches = ["apps/console/src/shared/ui/NavRail.tsx", "apps/console/src/shared/ui/NavRail.test.tsx", "apps/console/src/shared/ui/navRail.css", "apps/console/src/app/shell/shell.css", "apps/console/src/app/shell/HostedMobileNavigation.tsx", "apps/console/src/app/shell/hostedMobile.css", "apps/console/src/app/shell/hostedMobileNavigation.test.tsx"]
+build_cmd = "npm --prefix apps/console run build"
+verify_cmd = "cd apps/console && npx vitest run src/shared/ui/NavRail.test.tsx src/app/shell/hostedMobileNavigation.test.tsx --coverage"
+quality_cmd = "python3 tooling/ui_quality_gate.py --task shell-chrome"
+acceptance = "Graphite chrome, readable branded labels, Your space/Your apps/Recent/account, accurate badges and explicit Search. 320/390/768/1440px layouts preserve keyboard, focus, resize and mobile visualViewport behavior."
+gate_status = "planned_not_run"
+
+[task.shell-theme]
+title = "Coherent neutral Gideon design tokens"
+component_ids = []
+task_kind = "implementation"
+status = "pending"
+wave = 32
+owner_lane = "shell"
+agent_id = "gu26-w03"
+manager_id = "gu26-fm01"
+requires = []
+upstream_requires = ["components-foundation"]
+reqs = ["product.1"]
+touches = ["apps/console/src/shared/theme/tokens.css", "apps/console/src/shared/theme/schemes.ts", "apps/console/src/shared/theme/gideonNeutralTokens.test.ts"]
+build_cmd = "npm --prefix apps/console run build"
+verify_cmd = "cd apps/console && npx vitest run src/shared/theme/schemeContrast.test.ts src/shared/theme/colorScheme.test.ts src/shared/theme/gideonNeutralTokens.test.ts --coverage"
+quality_cmd = "python3 tooling/ui_quality_gate.py --task shell-theme"
+acceptance = "Default graphite and neutral light mode match approved demo composition; persisted dark/light/system and existing alternate schemes survive. Actual donor component typography, spacing and focus styling remain recognizable and consistent."
+gate_status = "planned_not_run"
+
+[task.shell-app-homes]
+title = "Branded miniapp collection and calm home"
+component_ids = []
+task_kind = "implementation"
+status = "pending"
+wave = 37
+owner_lane = "shell"
+agent_id = "gu26-w04"
+manager_id = "gu26-fm01"
+requires = ["shell-navigation"]
+upstream_requires = ["components-foundation", "shell-navigation"]
+reqs = ["product.1"]
+touches = ["apps/console/src/features/dashboard/DashboardPage.tsx", "apps/console/src/features/dashboard/gideonHome.test.tsx", "apps/console/src/features/apps/GideonCollection.tsx", "apps/console/src/features/apps/GideonCollection.test.tsx", "apps/console/src/features/apps/gideonCollection.css", "apps/console/src/features/apps/AppsSection.tsx"]
+build_cmd = "npm --prefix apps/console run build"
+verify_cmd = "cd apps/console && npx vitest run src/features/apps/GideonCollection.test.tsx src/features/dashboard/gideonHome.test.tsx --coverage"
+quality_cmd = "python3 tooling/ui_quality_gate.py --task shell-app-homes"
+acceptance = "All 17 approved named miniapps have real destinations and a useful first action. Collection retains installation/configuration access. No sample content, decorative fake metrics, missing routes or capability loss."
+gate_status = "planned_not_run"
+
+[task.shell-settings]
+title = "Grouped settings and first-use journey"
+component_ids = ["aui-096", "aui-097"]
+task_kind = "implementation"
+status = "pending"
+wave = 42
+owner_lane = "shell"
+agent_id = "gu26-w04"
+manager_id = "gu26-fm01"
+requires = ["shell-app-homes"]
+upstream_requires = ["components-foundation", "shell-app-homes"]
+reqs = ["aui-096.1", "aui-096.2", "aui-097.1", "aui-097.2"]
+touches = ["apps/console/src/features/settings/SettingsPage.tsx", "apps/console/src/features/settings/settingsUI.tsx", "apps/console/src/features/settings/gideonSettingsNavigation.test.tsx", "apps/console/src/app/shell/Onboarding.tsx", "apps/console/src/features/onboarding/gideonFirstJourney.test.tsx"]
+build_cmd = "npm --prefix apps/console run build"
+verify_cmd = "cd apps/console && npx vitest run src/features/settings/gideonSettingsNavigation.test.tsx src/features/onboarding/gideonFirstJourney.test.tsx --coverage"
+quality_cmd = "python3 tooling/ui_quality_gate.py --task shell-settings"
+acceptance = "Actual assistant-ui Settings/Onboarding components wrap existing persisted forms. All existing panels remain reachable; hosted provider controls remain managed. Mobile picker, URL/back/refresh and exit-to-first-chat work."
+gate_status = "planned_not_run"
+

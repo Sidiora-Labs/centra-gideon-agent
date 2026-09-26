@@ -1,0 +1,4742 @@
+[
+  {
+    "id": "chat",
+    "title": "New conversation",
+    "group": "Chat",
+    "kind": "chat",
+    "source": "features/ChatPage.tsx",
+    "description": "New conversation, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "chat/history",
+    "title": "Conversation history",
+    "group": "Chat",
+    "kind": "history",
+    "source": "features/ChatPage.tsx",
+    "description": "Conversation history, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "chat/session",
+    "title": "Conversation",
+    "group": "Chat",
+    "kind": "conversation",
+    "source": "features/ChatPage.tsx",
+    "description": "Conversation, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "chat/map",
+    "title": "Session map",
+    "group": "Chat",
+    "kind": "graph",
+    "source": "features/ChatPage.tsx",
+    "description": "Session map, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "chat/import",
+    "title": "Import conversations",
+    "group": "Chat",
+    "kind": "import",
+    "source": "features/ChatPage.tsx",
+    "description": "Import conversations, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "dashboard",
+    "title": "Today",
+    "group": "Work",
+    "kind": "dashboard",
+    "source": "features/dashboard/DashboardPage.tsx",
+    "description": "Today, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "mission-control",
+    "title": "Live activity",
+    "group": "Work",
+    "kind": "activity",
+    "source": "features/dashboard/MissionControl.tsx",
+    "description": "Live activity, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "projects",
+    "title": "Projects",
+    "group": "Work",
+    "kind": "projects",
+    "source": "features/projects/ProjectsSection.tsx",
+    "description": "Projects, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "projects/detail",
+    "title": "Project workspace",
+    "group": "Work",
+    "kind": "project",
+    "source": "features/projects/ProjectsSection.tsx",
+    "description": "Project workspace, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "agents",
+    "title": "Agents",
+    "group": "Work",
+    "kind": "agents",
+    "source": "features/agents/AgentsListPage.tsx",
+    "description": "Agents, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "agents/new",
+    "title": "Create an agent",
+    "group": "Work",
+    "kind": "form",
+    "source": "features/agents/AgentCreatePage.tsx",
+    "description": "Create an agent, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Purpose",
+      "Instructions",
+      "Skills",
+      "Tools",
+      "Knowledge"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "agents/inspect",
+    "title": "Agent controls",
+    "group": "Work",
+    "kind": "agent",
+    "source": "features/agents/AgentsListPage.tsx",
+    "description": "Agent controls, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "tasks",
+    "title": "Tasks",
+    "group": "Work",
+    "kind": "tasks",
+    "source": "features/tasks/TasksListPage.tsx",
+    "description": "Tasks, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "tasks/new",
+    "title": "Create a task",
+    "group": "Work",
+    "kind": "form",
+    "source": "features/tasks/TaskCreatePage.tsx",
+    "description": "Create a task, organized around what you want to do.",
+    "fields": [
+      "Task title",
+      "Project",
+      "Description",
+      "Assigned agent",
+      "Priority",
+      "Prerequisites"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "tasks/graph",
+    "title": "Dependencies",
+    "group": "Work",
+    "kind": "graph",
+    "source": "features/tasks/TasksListPage.tsx",
+    "description": "Dependencies, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "workflows",
+    "title": "Workflows",
+    "group": "Work",
+    "kind": "workflows",
+    "source": "features/workflows/WorkflowsListPage.tsx",
+    "description": "Workflows, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "workflows/definition",
+    "title": "Workflow builder",
+    "group": "Work",
+    "kind": "workflow",
+    "source": "features/workflows/WorkflowDefDetail.tsx",
+    "description": "Workflow builder, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "workflows/run",
+    "title": "Workflow run",
+    "group": "Work",
+    "kind": "run",
+    "source": "features/workflows/WorkflowRunDetail.tsx",
+    "description": "Workflow run, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "loops",
+    "title": "Ongoing work",
+    "group": "Work",
+    "kind": "loops",
+    "source": "features/loops/LoopsListPage.tsx",
+    "description": "Ongoing work, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "loops/new",
+    "title": "Start ongoing work",
+    "group": "Work",
+    "kind": "form",
+    "source": "features/loop/LoopSection.tsx",
+    "description": "Start ongoing work, organized around what you want to do.",
+    "fields": [
+      "What should Gideon achieve?",
+      "Project",
+      "Working method",
+      "Iteration limit",
+      "Stop condition"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "loops/run",
+    "title": "Loop controls",
+    "group": "Work",
+    "kind": "run",
+    "source": "features/loops/LoopCockpitPage.tsx",
+    "description": "Loop controls, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel"
+    ]
+  },
+  {
+    "id": "code",
+    "title": "Code projects",
+    "group": "Work",
+    "kind": "code",
+    "source": "features/code/CodeSection.tsx",
+    "description": "Code projects, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "code/workspace",
+    "title": "Code workspace",
+    "group": "Work",
+    "kind": "code-editor",
+    "source": "features/code/CodeCockpitPage.tsx",
+    "description": "Code workspace, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "design",
+    "title": "Design studio",
+    "group": "Create",
+    "kind": "design",
+    "source": "features/loops/DesignCockpitPage.tsx",
+    "description": "Design studio, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "triggers",
+    "title": "Schedules & triggers",
+    "group": "Work",
+    "kind": "triggers",
+    "source": "features/triggers/TriggersListPage.tsx",
+    "description": "Schedules & triggers, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "SidePanel",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "triggers/new",
+    "title": "Create an automation",
+    "group": "Work",
+    "kind": "form",
+    "source": "features/triggers/TriggerCreatePage.tsx",
+    "description": "Create an automation, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "When to run",
+      "Action",
+      "Instructions",
+      "Delivery channel",
+      "Daily spending limit"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "experiments",
+    "title": "Experiments",
+    "group": "Work",
+    "kind": "experiments",
+    "source": "features/experiments/ExperimentsPage.tsx",
+    "description": "Experiments, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "experiments/replay",
+    "title": "Run replay",
+    "group": "Work",
+    "kind": "replay",
+    "source": "features/experiments/ExperimentsPage.tsx",
+    "description": "Run replay, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "knowledge",
+    "title": "Knowledge",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/knowledge/KnowledgeListPage.tsx",
+    "description": "Knowledge, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "knowledge/item",
+    "title": "Knowledge reader",
+    "group": "Library",
+    "kind": "reader",
+    "source": "features/knowledge/KnowledgeReadingPage.tsx",
+    "description": "Knowledge reader, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "knowledge/new",
+    "title": "Add knowledge",
+    "group": "Library",
+    "kind": "form",
+    "source": "features/knowledge/KnowledgeCreatePage.tsx",
+    "description": "Add knowledge, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "knowledge/graph",
+    "title": "Knowledge graph",
+    "group": "Library",
+    "kind": "graph",
+    "source": "features/knowledge/KnowledgeListPage.tsx",
+    "description": "Knowledge graph, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "knowledge/sources",
+    "title": "Sources",
+    "group": "Library",
+    "kind": "sources",
+    "source": "features/knowledge/SourcesPage.tsx",
+    "description": "Sources, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "knowledge/sources/new",
+    "title": "Add a source",
+    "group": "Library",
+    "kind": "form",
+    "source": "features/knowledge/SourceCreatePage.tsx",
+    "description": "Add a source, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Source URL",
+      "Refresh schedule",
+      "Collection"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Checkbox",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "knowledge/reports",
+    "title": "Research reports",
+    "group": "Library",
+    "kind": "reports",
+    "source": "features/knowledge/ReportsPage.tsx",
+    "description": "Research reports, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "files",
+    "title": "Files",
+    "group": "Library",
+    "kind": "files",
+    "source": "features/files/FilesSection.tsx",
+    "description": "Files, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "artifacts",
+    "title": "Deliverables",
+    "group": "Library",
+    "kind": "artifacts",
+    "source": "features/artifacts/ArtifactsSection.tsx",
+    "description": "Deliverables, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "artifacts/editor",
+    "title": "Artifact editor",
+    "group": "Library",
+    "kind": "editor",
+    "source": "features/artifacts/ArtifactsSection.tsx",
+    "description": "Artifact editor, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "terminal",
+    "title": "Terminal",
+    "group": "Work",
+    "kind": "terminal",
+    "source": "features/terminal/TerminalPage.tsx",
+    "description": "Terminal, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "skills",
+    "title": "Skills",
+    "group": "Work",
+    "kind": "skills",
+    "source": "features/skills/SkillsPage.tsx",
+    "description": "Skills, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "tools",
+    "title": "Tools",
+    "group": "Work",
+    "kind": "tools",
+    "source": "features/tools/ToolsPage.tsx",
+    "description": "Tools, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "prompts",
+    "title": "Prompts",
+    "group": "Library",
+    "kind": "prompts",
+    "source": "features/prompts/PromptsListPage.tsx",
+    "description": "Prompts, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "prompts/new",
+    "title": "Write a prompt",
+    "group": "Library",
+    "kind": "editor",
+    "source": "features/prompts/PromptCreatePage.tsx",
+    "description": "Write a prompt, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "prompts/view",
+    "title": "Prompt editor",
+    "group": "Library",
+    "kind": "editor",
+    "source": "features/prompts/PromptViewPage.tsx",
+    "description": "Prompt editor, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "learning",
+    "title": "Learning",
+    "group": "Personal",
+    "kind": "learning",
+    "source": "features/learning/LearningPage.tsx",
+    "description": "Learning, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "rooms",
+    "title": "Rooms",
+    "group": "Chat",
+    "kind": "rooms",
+    "source": "features/rooms/RoomsSection.tsx",
+    "description": "Rooms, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "rooms/new",
+    "title": "Create a room",
+    "group": "Chat",
+    "kind": "form",
+    "source": "features/rooms/RoomsSection.tsx",
+    "description": "Create a room, organized around what you want to do.",
+    "fields": [
+      "Room name",
+      "Members",
+      "Instructions"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "rooms/conversation",
+    "title": "Room conversation",
+    "group": "Chat",
+    "kind": "room",
+    "source": "features/rooms/RoomsSection.tsx",
+    "description": "Room conversation, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "inbox",
+    "title": "Needs you",
+    "group": "Inbox",
+    "kind": "inbox",
+    "source": "features/inbox/InboxPage.tsx",
+    "description": "Needs you, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "notifications",
+    "title": "Notifications",
+    "group": "Inbox",
+    "kind": "notifications",
+    "source": "features/notifications/NotificationsPage.tsx",
+    "description": "Notifications, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "SidePanel",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "apps",
+    "title": "App library",
+    "group": "Apps",
+    "kind": "apps",
+    "source": "features/apps/AppsSection.tsx",
+    "description": "App library, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "apps/install",
+    "title": "Install an app",
+    "group": "Apps",
+    "kind": "install",
+    "source": "features/apps/AppsSection.tsx",
+    "description": "Install an app, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "Modal",
+      "SidePanel",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "app",
+    "title": "App workspace",
+    "group": "Apps",
+    "kind": "app",
+    "source": "features/apps/AppHostPage.tsx",
+    "description": "App workspace, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "discover",
+    "title": "Discover",
+    "group": "Apps",
+    "kind": "discover",
+    "source": "features/discover/DiscoverPage.tsx",
+    "description": "Discover, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "connections",
+    "title": "Connections",
+    "group": "Apps",
+    "kind": "connections",
+    "source": "features/../cloud/connections/ConnectionsPage.tsx",
+    "description": "Connections, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "companion",
+    "title": "Companion",
+    "group": "Personal",
+    "kind": "companion",
+    "source": "features/companion/CompanionPage.tsx",
+    "description": "Companion, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/context",
+    "title": "Saved context",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Saved context, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "context",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/processes",
+    "title": "Processes",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Processes, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "processes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/ports",
+    "title": "Ports",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Ports, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "ports",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/projects",
+    "title": "Projects",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Projects, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "projects",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/git",
+    "title": "Git",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Git, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "git",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/desktop",
+    "title": "Desktop",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Desktop, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "desktop",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/native",
+    "title": "Native terminals",
+    "group": "Work",
+    "kind": "terminal",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Native terminals, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "native",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/provider",
+    "title": "Provider CLI",
+    "group": "Work",
+    "kind": "terminal",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Provider CLI, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "provider",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/workspace/storage",
+    "title": "Storage",
+    "group": "Work",
+    "kind": "workspace",
+    "source": "features/capabilities/workspace/Page.tsx",
+    "description": "Storage, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Project",
+      "Folder",
+      "Branch",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "workspace",
+    "areaTitle": "Workspace tools",
+    "view": "storage",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Modal",
+      "Select",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/overview",
+    "title": "Overview",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Overview, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "overview",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/capture",
+    "title": "Capture inbox",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Capture inbox, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "capture",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/ideas",
+    "title": "Ideas",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Ideas, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "ideas",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/topics",
+    "title": "Topics",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Topics, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "topics",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/journals",
+    "title": "Journal",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Journal, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "journals",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/reviews",
+    "title": "Reviews",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Reviews, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "reviews",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/rsvp",
+    "title": "Reader",
+    "group": "Library",
+    "kind": "reader",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Reader, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "rsvp",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/videos",
+    "title": "Videos",
+    "group": "Library",
+    "kind": "reader",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Videos, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "videos",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/links",
+    "title": "Saved links",
+    "group": "Library",
+    "kind": "reader",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Saved links, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "links",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/archives",
+    "title": "Conversation imports",
+    "group": "Library",
+    "kind": "import",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Conversation imports, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "archives",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/vaults",
+    "title": "Connected folders",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Connected folders, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "vaults",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/knowledge/types",
+    "title": "Record types",
+    "group": "Library",
+    "kind": "knowledge",
+    "source": "features/capabilities/CapabilitiesSection.tsx",
+    "description": "Record types, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Content",
+      "Tags",
+      "Source URL"
+    ],
+    "oss": false,
+    "area": "knowledge",
+    "areaTitle": "Reading & capture",
+    "view": "types",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation"
+    ]
+  },
+  {
+    "id": "capabilities/identity/autobiography",
+    "title": "Autobiography",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Autobiography, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "autobiography",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/twin",
+    "title": "Human profile",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Human profile, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "twin",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/goals",
+    "title": "Life goals",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Life goals, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "goals",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/goal-plans",
+    "title": "Goal plans",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Goal plans, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "goal-plans",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/progress",
+    "title": "Progress",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Progress, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "progress",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/fidelity",
+    "title": "Profile checks",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Profile checks, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "fidelity",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/continuity",
+    "title": "Agent continuity",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Agent continuity, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "continuity",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/bundles",
+    "title": "Identity bundles",
+    "group": "Personal",
+    "kind": "export",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Identity bundles, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "bundles",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/recipes",
+    "title": "Tool recipes",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Tool recipes, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "recipes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/guarded-recipes",
+    "title": "Guarded recipes",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Guarded recipes, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "guarded-recipes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/identity/lifecycle",
+    "title": "Agent lifecycle",
+    "group": "Personal",
+    "kind": "identity",
+    "source": "features/capabilities/identity/Page.tsx",
+    "description": "Agent lifecycle, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Theme",
+      "Your story",
+      "Related goal"
+    ],
+    "oss": false,
+    "area": "identity",
+    "areaTitle": "Identity & goals",
+    "view": "lifecycle",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/overview",
+    "title": "Overview",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Overview, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "overview",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/measurements",
+    "title": "Readings",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Readings, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "measurements",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/labs",
+    "title": "Laboratory",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Laboratory, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "labs",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/body-composition",
+    "title": "Body",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Body, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "body-composition",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/eyes",
+    "title": "Vision",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Vision, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "eyes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/epigenetic",
+    "title": "Biological age",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Biological age, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "epigenetic",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/lifestyle",
+    "title": "Lifestyle",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Lifestyle, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "lifestyle",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/consumption",
+    "title": "Consumption",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Consumption, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "consumption",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/interventions",
+    "title": "Interventions",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Interventions, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "interventions",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/cognition",
+    "title": "Practice",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Practice, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "cognition",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/memory",
+    "title": "Memory",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Memory, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "memory",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/life",
+    "title": "Life calendar",
+    "group": "Personal",
+    "kind": "calendar",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Life calendar, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "life",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/genome",
+    "title": "Genome",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Genome, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "genome",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/import",
+    "title": "Import",
+    "group": "Personal",
+    "kind": "import",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Import, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "import",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/exports",
+    "title": "Exports",
+    "group": "Personal",
+    "kind": "export",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Exports, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "exports",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/shared",
+    "title": "Shared health",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Shared health, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "shared",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/privacy",
+    "title": "Privacy",
+    "group": "Personal",
+    "kind": "privacy",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Privacy, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "privacy",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/wellbeing/organizations",
+    "title": "Organizations",
+    "group": "Personal",
+    "kind": "wellbeing",
+    "source": "features/capabilities/wellbeing/Page.tsx",
+    "description": "Organizations, organized around what you want to do.",
+    "fields": [
+      "Record name",
+      "Date",
+      "Value",
+      "Unit",
+      "Source",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "wellbeing",
+    "areaTitle": "Health",
+    "view": "organizations",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/communications/people",
+    "title": "People",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "People, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "people",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/inbox",
+    "title": "Inbox",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Inbox, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "inbox",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/calendar",
+    "title": "Calendar",
+    "group": "Personal",
+    "kind": "calendar",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Calendar, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "calendar",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/beeper",
+    "title": "Beeper",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Beeper, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "beeper",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/outbound",
+    "title": "Outbound email",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Outbound email, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "outbound",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/desktop",
+    "title": "Desktop imports",
+    "group": "Personal",
+    "kind": "import",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Desktop imports, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "desktop",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/imports",
+    "title": "People imports",
+    "group": "Personal",
+    "kind": "import",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "People imports, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "imports",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/threads",
+    "title": "Threads",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Threads, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "threads",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/teams",
+    "title": "Teams",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Teams, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "teams",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/telegram",
+    "title": "Telegram",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Telegram, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "telegram",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/social",
+    "title": "Social accounts",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Social accounts, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "social",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/x",
+    "title": "X reading",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "X reading, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "x",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/stacker",
+    "title": "Stacker News",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Stacker News, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "stacker",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/signal",
+    "title": "Signal archive",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Signal archive, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "signal",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/lifecycle",
+    "title": "Lifecycle",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Lifecycle, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "lifecycle",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/communications/timeline",
+    "title": "Timeline",
+    "group": "Personal",
+    "kind": "communications",
+    "source": "features/capabilities/communications/Page.tsx",
+    "description": "Timeline, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Email",
+      "Relationship",
+      "Follow-up cadence",
+      "Notes"
+    ],
+    "oss": false,
+    "area": "communications",
+    "areaTitle": "People & calendar",
+    "view": "timeline",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput",
+      "WorkbenchLayout"
+    ]
+  },
+  {
+    "id": "capabilities/media/sketches",
+    "title": "Image sketches",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Image sketches, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "sketches",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/images",
+    "title": "Image generation",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Image generation, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "images",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/videos",
+    "title": "Video generation",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Video generation, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "videos",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/animations",
+    "title": "Code animation",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Code animation, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "animations",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/sprites",
+    "title": "Sprite production",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Sprite production, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "sprites",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/episodes",
+    "title": "Continuous episodes",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Continuous episodes, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "episodes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/timelines",
+    "title": "Video timeline",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Video timeline, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "timelines",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/cleanup",
+    "title": "Image cleanup",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Image cleanup, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "cleanup",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/datasets",
+    "title": "LoRA datasets",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "LoRA datasets, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "datasets",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/downloads",
+    "title": "Source downloader",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Source downloader, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "downloads",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/library",
+    "title": "Media library",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Media library, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "library",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/jobs",
+    "title": "Media jobs",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Media jobs, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "jobs",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/media/readiness",
+    "title": "Media readiness",
+    "group": "Create",
+    "kind": "media",
+    "source": "features/capabilities/media/Page.tsx",
+    "description": "Media readiness, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Prompt",
+      "Reference image",
+      "Aspect ratio",
+      "Duration"
+    ],
+    "oss": false,
+    "area": "media",
+    "areaTitle": "Images & video",
+    "view": "readiness",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/ingredients",
+    "title": "Ingredients",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Ingredients, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "ingredients",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/boards",
+    "title": "Moodboards",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Moodboards, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "boards",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/universes",
+    "title": "Universes",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Universes, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "universes",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/authors",
+    "title": "Authors",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Authors, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "authors",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/works",
+    "title": "Writing",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Writing, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "works",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/stories",
+    "title": "Stories",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Stories, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "stories",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/series",
+    "title": "Series",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Series, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "series",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/production",
+    "title": "Production",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Production, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "production",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/direction",
+    "title": "Direction",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Direction, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "direction",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/commissions",
+    "title": "Commissions",
+    "group": "Create",
+    "kind": "creative",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Commissions, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "commissions",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/creative/exports",
+    "title": "Exports",
+    "group": "Create",
+    "kind": "export",
+    "source": "features/capabilities/creative/Page.tsx",
+    "description": "Exports, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Type",
+      "Body",
+      "Tags",
+      "Related work"
+    ],
+    "oss": false,
+    "area": "creative",
+    "areaTitle": "Writing",
+    "view": "exports",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/music/repertoire",
+    "title": "Songbook",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Songbook, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "repertoire",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/catalog",
+    "title": "Music catalog",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Music catalog, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "catalog",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/listening",
+    "title": "Listening",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Listening, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "listening",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/decks",
+    "title": "Music cards",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Music cards, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "decks",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/rounds",
+    "title": "Music rounds",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Music rounds, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "rounds",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/midi",
+    "title": "MIDI studio",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "MIDI studio, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "midi",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/videos",
+    "title": "Music videos",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Music videos, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "videos",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/models3d",
+    "title": "3D models",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "3D models, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "models3d",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/music/assemblies",
+    "title": "Assemblies",
+    "group": "Create",
+    "kind": "music",
+    "source": "features/capabilities/music/Page.tsx",
+    "description": "Assemblies, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Artist",
+      "Instrument",
+      "Key",
+      "Notation",
+      "Tags"
+    ],
+    "oss": false,
+    "area": "music",
+    "areaTitle": "Music & 3D",
+    "view": "assemblies",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextArea",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/experience/stories",
+    "title": "Story loom",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Story loom, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "stories",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/games",
+    "title": "Game assets",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Game assets, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "games",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/world",
+    "title": "World canvas",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "World canvas, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "world",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/foundations",
+    "title": "Foundations",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Foundations, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "foundations",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/travel",
+    "title": "World travel",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "World travel, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "travel",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/voice",
+    "title": "Voice & avatar",
+    "group": "Create",
+    "kind": "voice",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Voice & avatar, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "voice",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/calls",
+    "title": "Calls",
+    "group": "Create",
+    "kind": "voice",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Calls, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "calls",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/moltworld",
+    "title": "Moltworld",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Moltworld, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "moltworld",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/experience/moltbook",
+    "title": "Moltbook",
+    "group": "Create",
+    "kind": "experience",
+    "source": "features/capabilities/experience/Page.tsx",
+    "description": "Moltbook, organized around what you want to do.",
+    "fields": [
+      "Title",
+      "Description",
+      "Scene",
+      "Choices"
+    ],
+    "oss": false,
+    "area": "experience",
+    "areaTitle": "Stories & worlds",
+    "view": "moltbook",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button"
+    ]
+  },
+  {
+    "id": "capabilities/platform/providers",
+    "title": "Providers",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Providers, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "providers",
+    "managed": true,
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/integrations",
+    "title": "Integrations",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Integrations, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "integrations",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/operations",
+    "title": "Operations",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Operations, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "operations",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/evidence",
+    "title": "Evidence",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Evidence, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "evidence",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/network",
+    "title": "Network",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Network, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "network",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/sharing",
+    "title": "Sharing",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Sharing, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "sharing",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/migration",
+    "title": "Archive migration",
+    "group": "Apps",
+    "kind": "import",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "Archive migration, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "migration",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "capabilities/platform/api",
+    "title": "API catalog",
+    "group": "Apps",
+    "kind": "platform",
+    "source": "features/capabilities/platform/Page.tsx",
+    "description": "API catalog, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Connection type",
+      "Endpoint",
+      "Description"
+    ],
+    "oss": false,
+    "area": "platform",
+    "areaTitle": "Services & exchange",
+    "view": "api",
+    "sourceExists": true,
+    "sourceControls": [
+      "AreaNavigation",
+      "Button",
+      "Select",
+      "TextInput"
+    ]
+  },
+  {
+    "id": "settings/account",
+    "title": "Account",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Account, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/design",
+    "title": "Design",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Design, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/chat",
+    "title": "Chat",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Chat, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/providers",
+    "title": "Providers",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Providers, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/models",
+    "title": "Models",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Models, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/search",
+    "title": "Search",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Search, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/prompts",
+    "title": "Prompts",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Prompts, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/memory",
+    "title": "Memory",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Memory, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/evals",
+    "title": "Evaluations",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Evaluations, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/agent",
+    "title": "Agent defaults",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Agent defaults, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/voice",
+    "title": "Speech & Transcription",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Speech & Transcription, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/apps",
+    "title": "Apps",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Apps, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/inbox",
+    "title": "Inbox",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Inbox, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/documents",
+    "title": "Documents",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Documents, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/notifications",
+    "title": "Notifications",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Notifications, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/security",
+    "title": "Security",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Security, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/secrets",
+    "title": "Secrets",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Secrets, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/devices",
+    "title": "Devices",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Devices, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/sender-trust",
+    "title": "Sender trust",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Sender trust, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/guardrails",
+    "title": "Guardrails",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Guardrails, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/external-access",
+    "title": "External access",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "External access, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/audit",
+    "title": "Audit log",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Audit log, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/doctor",
+    "title": "Doctor",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Doctor, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/diagnostics",
+    "title": "Diagnostics",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Diagnostics, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/tool-output",
+    "title": "Tool output",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Tool output, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/feedback",
+    "title": "AI feedback",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "AI feedback, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/usage",
+    "title": "Usage",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Usage, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/routing",
+    "title": "Routing & Efficiency",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Routing & Efficiency, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/legibility",
+    "title": "Legibility",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Legibility, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/ambient",
+    "title": "Ambient surfaces",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Ambient surfaces, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/companion",
+    "title": "Companion apps",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Companion apps, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/sources",
+    "title": "Watched sources",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Watched sources, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/packs",
+    "title": "Packs",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Packs, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/archive",
+    "title": "Archive",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Archive, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/portability",
+    "title": "Import / Export",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Import / Export, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/durability",
+    "title": "Backups",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Backups, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/updates",
+    "title": "Updates",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Updates, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "settings/runtime-config",
+    "title": "Runtime configuration",
+    "group": "Settings",
+    "kind": "setting",
+    "source": "features/settings/SettingsPage.tsx",
+    "description": "Runtime configuration, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": []
+  },
+  {
+    "id": "onboarding/welcome",
+    "title": "Welcome",
+    "group": "Getting started",
+    "kind": "onboarding",
+    "source": "app/shell/Onboarding.tsx",
+    "description": "Welcome, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "onboarding/connect",
+    "title": "Connect Gideon",
+    "group": "Getting started",
+    "kind": "onboarding",
+    "source": "app/shell/Onboarding.tsx",
+    "description": "Connect Gideon, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "onboarding/model",
+    "title": "Choose your first model",
+    "group": "Getting started",
+    "kind": "onboarding",
+    "source": "app/shell/Onboarding.tsx",
+    "description": "Choose your first model, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": true,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  },
+  {
+    "id": "onboarding/preferences",
+    "title": "Make it yours",
+    "group": "Getting started",
+    "kind": "onboarding",
+    "source": "app/shell/Onboarding.tsx",
+    "description": "Make it yours, organized around what you want to do.",
+    "fields": [
+      "Name",
+      "Description",
+      "Tags"
+    ],
+    "oss": false,
+    "sourceExists": true,
+    "sourceControls": [
+      "Button"
+    ]
+  }
+]
