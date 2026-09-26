@@ -1,6 +1,7 @@
 import { api, type AppSummary } from '../../shared/data/api'
 import { loadContributedModule, registerAppGenUiComponent, unregisterAppGenUiComponents, type AppContext } from './appSdk'
 import { LAYER_APP, maxSurfaceLayer } from '../../shared/ui/surfaces/layers'
+import { bindDonorUISpec, type LiveUISpec } from '../../shared/ui/assistant-ui/generative/uispec'
 
 export interface GenUiRegistrarSdk { registerComponent: typeof registerAppGenUiComponent }
 export function contributesComponents(app: Pick<AppSummary, 'enabled' | 'uiComponents' | 'uiCapabilities'>): boolean {
@@ -67,3 +68,11 @@ const catalog = new ComponentCatalog()
 export const loadAppComponents = (app: AppSummary) => catalog.load(app)
 export const syncAppGenUiComponents = (known?: AppSummary[]) => catalog.sync(known)
 export const resetAppGenUiLayer = () => catalog.clear()
+
+export function resolveAppUISpec(app: Pick<AppSummary, 'name' | 'enabled' | 'uiComponents' | 'uiCapabilities'>,
+  payload: unknown): LiveUISpec | null {
+  if (maxSurfaceLayer() < LAYER_APP || !contributesComponents(app) || !payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const data = payload as Record<string, unknown>
+  if (data.schemaVersion !== 1) return null
+  return bindDonorUISpec({ template: data.template, producer: `app:${app.name}`, recordId: data.recordId, bindings: data.bindings })
+}
