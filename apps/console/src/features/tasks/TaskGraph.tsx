@@ -1,15 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { GitFork, Route, TriangleAlert, Activity } from 'lucide-react'
-import { api, type TaskItem, type DependencyAnalysis } from '../../shared/data/api'
-import { statusMeta, signalPriority, TERMINAL } from './taskMeta'
+import { type TaskItem, type DependencyAnalysis } from '../../shared/data/api'
+import { statusMeta, signalPriority } from './taskMeta'
 import { DagView, type DagNode, type DagNodeState } from './DagView'
 import { EmptyState } from '../../shared/ui/ListScaffold'
 import { GRAPH_BOX, placeTaskGraph } from './taskGraphState'
+import { cyclicNodes, depMap } from './dag'
 
 function graphState(task: TaskItem, cyclic: boolean): DagNodeState {
   if (cyclic) return 'error'
   const running: Record<string, DagNodeState> = { blocked: 'blocked', in_progress: 'active' }
-  return running[task.status] ?? (TERMINAL.has(task.status) ? 'done' : 'todo')
+  return running[task.status] ?? (task.status === 'done' ? 'done' : 'todo')
 }
 
 export function scopedGraphMetrics(tasks: TaskItem[]) {
@@ -17,16 +18,43 @@ export function scopedGraphMetrics(tasks: TaskItem[]) {
   return { completion_pct: tasks.length ? completed / tasks.length * 100 : 0 }
 }
 
+export function scopedTaskAnalysis(tasks: TaskItem[]): DependencyAnalysis {
+  const dependencies = depMap(tasks)
+  const dependents = new Map(tasks.map(task => [task.id, [] as string[]]))
+  for (const [id, prerequisites] of dependencies) for (const prerequisite of prerequisites) dependents.get(prerequisite)?.push(id)
+  const degree = new Map([...dependencies].map(([id, prerequisites]) => [id, prerequisites.length]))
+  const queue = [...degree].filter(([, count]) => count === 0).map(([id]) => id)
+  const lengths = new Map<string, number>()
+  const previous = new Map<string, string | null>()
+  for (const id of queue) { lengths.set(id, 1); previous.set(id, null) }
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const id = queue[cursor]
+    for (const dependent of dependents.get(id) ?? []) {
+      const candidate = (lengths.get(id) ?? 0) + 1
+      if (candidate > (lengths.get(dependent) ?? 0)) { lengths.set(dependent, candidate); previous.set(dependent, id) }
+      const remaining = (degree.get(dependent) ?? 0) - 1
+      degree.set(dependent, remaining)
+      if (remaining === 0) queue.push(dependent)
+    }
+  }
+  const cyclic = cyclicNodes(dependencies)
+  const longest = cyclic.size || !tasks.length ? null : tasks.reduce((best, task) => (lengths.get(task.id) ?? 0) > (lengths.get(best.id) ?? 0) ? task : best)
+  const critical_path: string[] = []
+  for (let id: string | null = longest?.id ?? null; id; id = previous.get(id) ?? null) critical_path.unshift(id)
+  return {
+    ...scopedGraphMetrics(tasks),
+    critical_path,
+    cycles: cyclic.size ? [[...cyclic]] : [],
+    root_task_ids: tasks.filter(task => !dependencies.get(task.id)?.length).map(task => task.id),
+    leaf_task_ids: tasks.filter(task => !dependents.get(task.id)?.length).map(task => task.id),
+    bottleneck_tasks: [...dependents].filter(([, children]) => children.length >= 2).map(([id, children]) => ({ id, dependents: children.length })),
+  }
+}
+
 export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: string) => void }) {
   const viewport = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
-  const [analysis, setAnalysis] = useState<DependencyAnalysis | null>(null)
-  const revision = tasks.map(task => `${task.id}:${task.status}:${JSON.stringify(task.dependencies ?? [])}`).join('|')
-  useEffect(() => {
-    let current = true
-    api.taskGraph().then(snapshot => { if (current) setAnalysis(snapshot.analysis) }).catch(() => {})
-    return () => { current = false }
-  }, [revision])
+  const analysis = useMemo(() => scopedTaskAnalysis(tasks), [tasks])
   useLayoutEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -36,13 +64,13 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
     return () => observer.disconnect()
   }, [])
   const placement = useMemo(() => placeTaskGraph(tasks, width), [tasks, width])
-  const metrics = useMemo(() => scopedGraphMetrics(tasks), [tasks])
+  const metrics = analysis
   const critical = new Set(analysis?.critical_path ?? [])
   const names = new Map(tasks.map(task => [task.id, task.title]))
   const bottlenecks = analysis?.bottleneck_tasks ?? []
   const nodes: DagNode[] = placement.nodes.map(({ task: t, x, y }) => {
     const sm = statusMeta(t.status), pm = signalPriority(t.priority)
-    const done = TERMINAL.has(t.status)
+    const done = t.status === 'done'
     return { id: t.id, x, y, w: GRAPH_BOX.width, h: GRAPH_BOX.height, radius: GRAPH_BOX.radius, accent: sm.tone, ringed: critical.has(t.id), state: graphState(t, placement.cyclic.has(t.id)), label: `Open task: ${t.title}`, content: <div className="flex h-full w-full flex-col justify-center text-left">
       <div className={`truncate text-[0.8125rem] leading-tight font-medium text-on-surface ${done ? 'line-through opacity-60' : ''}`} title={t.title}>{t.title}</div>
       <div data-type="caption" className="mt-1 flex items-center gap-s text-on-surface-low"><span style={{ color: sm.tone }}>{sm.label}</span>{pm && <span style={{ color: pm.tone }}>{pm.label}</span>}</div>

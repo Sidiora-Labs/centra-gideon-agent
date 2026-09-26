@@ -10,8 +10,7 @@ This module adds the second axis. Each ``(source, kind)`` from
 
 * **mode** — ``never`` (drop), ``badge`` (persist, no toast), ``immediate`` (today's
   behavior), ``digest`` (batch for the scheduled summary).
-* **targets** — where an ``immediate`` goes: ``dashboard`` today, ``channel_dm`` when a
-  channel is configured, ``native`` as a real OS notification whenever the desktop shell is
+* **targets** — where an ``immediate`` goes: ``dashboard``, ``native`` as a real OS notification whenever the desktop shell is
   connected (DESKTOP-CAPABILITIES DC-5 — see :func:`native_delivery`), ``push`` for a
   content-free phone ping (:mod:`gideon.workspace.push`, live since MOBILE-COMPANION ``MC-5``).
 * **conditions** — keywords / name-mention that ESCALATE a quieter mode to ``immediate``.
@@ -61,7 +60,7 @@ def config_dir() -> Path:
 
 logger = logging.getLogger(__name__)
 
-TARGETS: tuple[str, ...] = ("dashboard", "channel_dm", "push", "native")
+TARGETS: tuple[str, ...] = ("dashboard", "push", "native")
 DEFAULT_TARGETS: tuple[str, ...] = ("dashboard",)
 
 SOUND_CUES: tuple[str, ...] = (
@@ -131,7 +130,7 @@ class Rule:
 
         Escalation is capped at ``immediate`` rather than promoting targets: a keyword hit
         means "show me now", not "also text me" — adding delivery channels the user never
-        selected for this kind would be a surprise, and channel_dm leaves the machine.
+        selected for this kind would be a surprise.
         """
         if self.mode == "immediate":
             return self

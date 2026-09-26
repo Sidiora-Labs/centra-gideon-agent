@@ -118,7 +118,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
 
 function RelatedTask({ task, fallback }: { task?: TaskItem; fallback: string }) {
   const status = statusMeta(task?.status)
-  const complete = task?.status === 'done' || task?.status === 'cancelled'
+  const complete = task?.status === 'done'
   return <><status.icon size={14} style={{ color: status.tone }} className="shrink-0" /><span data-type="body-s" className={`min-w-0 flex-1 truncate ${complete ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{task?.title ?? fallback}</span>{task && !complete && <span data-type="caption" className="text-on-surface-low">{status.label}</span>}</>
 }
 function DetailSection({ label, children }: { label: string; children: ReactNode }) {

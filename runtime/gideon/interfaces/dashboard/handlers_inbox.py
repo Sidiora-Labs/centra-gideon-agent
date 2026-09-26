@@ -468,6 +468,29 @@ async def api_inbox_dismiss_all(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "dismissed": count})
 
 
+async def api_inbox_proposals_clear(request: web.Request) -> web.Response:
+    state: "ConsoleState" = request.app["state"]
+    inbox_state, inbox = _get_inbox(state)
+    owner = owner_username()
+    reviewed = [
+        item.id
+        for item in inbox.items.values()
+        if item.item_kind == ItemKind.PROPOSAL.value
+        and item.belongs_to(owner)
+        and item.status_for(owner) in {
+            ItemStatus.HANDLED.value,
+            ItemStatus.DISMISSED.value,
+        }
+    ]
+    for item_id in reviewed:
+        del inbox.items[item_id]
+        inbox_state.dismissed.discard(item_id)
+    if reviewed:
+        inbox.save()
+        inbox_state.save()
+    return web.json_response({"ok": True, "cleared": len(reviewed)})
+
+
 async def api_inbox_draft(request: web.Request) -> web.Response:
     """POST /api/inbox/{id}/draft — generate draft reply on demand."""
     logger.info("Draft request received for %s", request.match_info.get("id", "?"))

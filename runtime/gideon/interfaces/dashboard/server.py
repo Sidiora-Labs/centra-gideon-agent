@@ -1338,6 +1338,9 @@ async def start_dashboard(
     app.router.add_post(
         "/api/inbox/proposals", handlers_inbox.api_inbox_proposal_create
     )
+    app.router.add_delete(
+        "/api/inbox/proposals/reviewed", handlers_inbox.api_inbox_proposals_clear
+    )
     app.router.add_post("/api/inbox/notes", handlers_inbox.api_inbox_note_create)
     app.router.add_post(
         "/api/inbox/{id}/apply", handlers_inbox.api_inbox_proposal_apply

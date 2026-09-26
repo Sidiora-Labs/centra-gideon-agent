@@ -17,9 +17,13 @@ The risks these tests cover:
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.integrations.inbox import InboxStore, ItemKind, ItemStatus
 
@@ -31,6 +35,7 @@ def home(tmp_path, monkeypatch):
     from gideon.workspace import notification_rules as nr
 
     (tmp_path / "entity_settings").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(
         pr, "_proposals_dir", lambda: _mkdir(tmp_path / "skill_proposals")
     )
@@ -68,6 +73,39 @@ def _items(home):
 
 def _proposal_items(home):
     return [i for i in _items(home) if i.item_kind == ItemKind.PROPOSAL.value]
+
+
+@pytest.mark.asyncio
+async def test_clear_reviewed_proposals_preserves_open_rows_and_does_not_refill(home):
+    from gideon.extensions.skills import proposals as pr
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.session import ConversationDirectory
+    from gideon.interfaces.dashboard.handlers_inbox import api_inbox_proposals_clear
+    from gideon.interfaces.dashboard.state import ConsoleState
+
+    proposal = _enqueue()
+    assert pr.reject(proposal.id)
+    inbox = InboxStore()
+    inbox.load()
+    reviewed = next(iter(inbox.items.values()))
+    inbox.add(replace(reviewed, id="still-open", status=ItemStatus.PENDING, owner_states={}, refs={}))
+    inbox.save()
+    app = web.Application()
+    app["state"] = ConsoleState(
+        sessions=ConversationDirectory(AppConfig.load()), start_time=time.time()
+    )
+    app.router.add_delete("/api/inbox/proposals/reviewed", api_inbox_proposals_clear)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.delete("/api/inbox/proposals/reviewed")
+        assert response.status == 200
+        assert await response.json() == {"ok": True, "cleared": 1}
+
+    persisted = InboxStore()
+    persisted.load()
+    assert list(persisted.items) == ["still-open"]
+    assert pr.backfill_inbox_items() == 0
+    persisted.load()
+    assert list(persisted.items) == ["still-open"]
 
 
 def test_enqueue_raises_a_proposal_item(home):

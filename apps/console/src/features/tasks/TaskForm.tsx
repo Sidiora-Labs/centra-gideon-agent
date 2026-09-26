@@ -23,8 +23,8 @@ export function TaskForm({ draft, onChange, compact, allTasks = [] }: { draft: T
       <Field label="Description"><TextArea value={draft.description ?? ''} onChange={value => set('description', value)} placeholder="Context, acceptance notes, links… (markdown)" rows={compact ? 4 : 6} /></Field>
     </EditorSection>
     <EditorSection title="Classification" compact={compact}>
-      <Field label="Status"><Segmented options={STATUSES.map(status => ({ key: status.key, label: status.label, tone: status.tone, icon: status.icon }))} value={draft.status ?? 'open'} onChange={value => set('status', value)} /></Field>
-      <Field label="Priority"><Segmented options={PRIORITIES.map(priority => ({ key: priority.key, label: priority.label, tone: priority.tone }))} value={draft.priority ?? 'medium'} onChange={value => set('priority', value)} /></Field>
+      <Field label="Status"><Segmented collapse="menu" options={STATUSES.map(status => ({ key: status.key, label: status.label, tone: status.tone, icon: status.icon }))} value={draft.status ?? 'open'} onChange={value => set('status', value)} /></Field>
+      <Field label="Priority"><Segmented collapse="menu" options={PRIORITIES.map(priority => ({ key: priority.key, label: priority.label, tone: priority.tone }))} value={draft.priority ?? 'medium'} onChange={value => set('priority', value)} /></Field>
       <div className="grid grid-cols-2 gap-m">
         <ProjectListPicker key={draft.id ?? 'new'} taskListId={draft.task_list_id ?? ''} onSelection={(projectId, taskListId) => patch({ task_list_id: taskListId, ...(!draft.id ? { project_id: projectId } : {}) })} />
         <Field label="Assignee"><TextInput value={draft.assignee ?? ''} onChange={value => set('assignee', value)} placeholder="Who owns it" /></Field>

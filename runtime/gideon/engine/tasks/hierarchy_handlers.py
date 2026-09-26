@@ -140,7 +140,7 @@ class RepeatableListReset:
 
     async def respond(self):
         from gideon.engine.tasks import registry
-        from gideon.engine.tasks.models import TERMINAL_STATUSES
+        from gideon.engine.tasks.models import TERMINAL_STATUSES, Task
         from gideon.engine.tasks.rules import ENGINE_OWNED_FIELDS, managed
 
         store = _store()
@@ -153,9 +153,14 @@ class RepeatableListReset:
                 {"error": "only task lists under the Repeatable project can be reset"},
                 status=400,
             )
-        tasks, _ = await registry.list_all_tasks(
-            task_list_id=self.list_id, limit=10_000
-        )
+        tasks = []
+        while True:
+            page, total = await registry.list_all_tasks(
+                task_list_id=self.list_id, limit=500, offset=len(tasks)
+            )
+            tasks.extend(page)
+            if not page or len(tasks) >= total:
+                break
         if any(task.status not in TERMINAL_STATUSES for task in tasks):
             return web.json_response(
                 {"error": "all tasks must be complete before the list can be reset"},
@@ -163,11 +168,12 @@ class RepeatableListReset:
             )
         reset_ids = []
         for task in tasks:
-            task.reset_for_repeat()
+            reset_task = Task.from_dict(task.to_dict())
+            reset_task.reset_for_repeat()
             fields = {
-                "status": task.status.value,
-                "exit_criteria": task.exit_criteria,
-                "action_plan": task.action_plan,
+                "status": reset_task.status.value,
+                "exit_criteria": reset_task.exit_criteria,
+                "action_plan": reset_task.action_plan,
                 "execution_notes": [],
                 "blocked_reason_kind": "",
                 "blocked_kind": "",
