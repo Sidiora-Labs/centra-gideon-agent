@@ -105,9 +105,9 @@ describe('nodeDepth', () => {
 })
 
 describe('fmtElapsed', () => {
-  it('renders nothing for a run that has not started', () => {
+  it('renders unknown duration as blank and measured zero as 0s', () => {
     expect(fmtElapsed(undefined)).toBe('')
-    expect(fmtElapsed(0)).toBe('')
+    expect(fmtElapsed(0)).toBe('0s')
   })
 
   it('scales its unit with the magnitude', () => {

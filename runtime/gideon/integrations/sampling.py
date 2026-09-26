@@ -221,6 +221,7 @@ def _record_outcome(
     candidates: list[dict[str, Any]],
     judgments: list[dict[str, Any]],
     prompt: str,
+    sample_attempts: list[dict[str, Any]] | None = None,
 ) -> None:
     """Append the bounded outcome record. Never raises — telemetry must not be able to
     fail a sampling call that already produced an answer."""
@@ -229,12 +230,15 @@ def _record_outcome(
 
         scores = [j["score"] for j in judgments]
         spread = round(max(scores) - min(scores), 4) if len(scores) >= 2 else 0.0
+        attempts = sample_attempts if sample_attempts is not None else candidates
         tokens_total = sum(
-            count_tokens(prompt) + count_tokens(c["text"]) for c in candidates
+            count_tokens(c.get("prompt", prompt)) + count_tokens(c["text"])
+            for c in attempts
         )
         record = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "n": n,
+            "sampling_calls": len(attempts),
             "criteria_digest": hashlib.sha256(
                 (criteria or "").encode("utf-8")
             ).hexdigest()[:16],
@@ -304,6 +308,45 @@ async def best_of_n(
         else:
             candidates.append(res)
 
+    initial_candidates = [dict(candidate) for candidate in candidates]
+
+    seen: set[str] = set()
+    duplicates: list[dict[str, Any]] = []
+    for candidate in candidates:
+        normalized = " ".join(candidate["text"].split()).casefold()
+        if not normalized:
+            continue
+        if normalized in seen:
+            duplicates.append(candidate)
+        else:
+            seen.add(normalized)
+
+    resamples: list[dict[str, Any]] = []
+    for candidate in duplicates:
+        prior = candidate["text"]
+        alternative_prompt = (
+            f"{prompt}\n\nGive an independent alternative answer to the same request. "
+            "The previous candidate was:\n"
+            f"{prior[:4000]}\n\nUse different wording and reasoning where possible."
+        )
+        replacement = await _sample_one(
+            alternative_prompt,
+            candidate["idx"],
+            candidate["temperature"],
+            use_case,
+        )
+        resamples.append({**replacement, "prompt": alternative_prompt})
+        normalized = " ".join(replacement["text"].split()).casefold()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            candidates[candidate["idx"]] = replacement
+        else:
+            candidates[candidate["idx"]] = {
+                **replacement,
+                "text": "",
+                "error": replacement["error"] or "duplicate candidate after resample",
+            }
+
     survivors = [c for c in candidates if c["text"].strip()]
     if not survivors:
         note = f"no candidate: all {n} sampling calls failed"
@@ -315,6 +358,7 @@ async def best_of_n(
             candidates=candidates,
             judgments=[],
             prompt=prompt,
+            sample_attempts=[*initial_candidates, *resamples],
         )
         return {
             "winner": None,
@@ -332,10 +376,15 @@ async def best_of_n(
     winner_idx = _select_winner(survivors, judgments)
     winner = next(c["text"] for c in survivors if c["idx"] == winner_idx)
     failed = len(candidates) - len(survivors)
+    repeated = sum(c["error"] == "duplicate candidate after resample" for c in candidates)
     if not judgments:
         note = "unjudged: the judge was unavailable — showing the lowest-temperature candidate"
+        if repeated:
+            note += f"; {repeated} repeated after a bounded resample"
     elif failed:
         note = f"{failed} of {n} candidates failed; judged the {len(survivors)} that returned"
+        if repeated:
+            note += f" ({repeated} repeated after a bounded resample)"
     else:
         note = ""
     _record_outcome(
@@ -345,6 +394,7 @@ async def best_of_n(
         candidates=candidates,
         judgments=judgments,
         prompt=prompt,
+        sample_attempts=[*initial_candidates, *resamples],
     )
     return {
         "winner": winner,

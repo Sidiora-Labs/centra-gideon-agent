@@ -747,7 +747,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                           <InvestigateButton kind="loop_cycle" id={`${c.id}:${f.cycle}`}
                             backLink={`#/loops/${c.id}`} size={28} />
                         </div>
-                        <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} />
+                        <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} taskTitle={tasks.find((task) => task.id === f.task_id)?.title} onOpenTask={onOpenTask} />
                       </>)
                     })()
               )}
@@ -1040,10 +1040,12 @@ function CycleNode({ f, verdict, dur, hasNudge, onClick, delay }: { f: LoopFindi
   )
 }
 
-function CycleDetail({ f, verdict, nudges, activity }: { f: LoopFinding; verdict?: LoopVerdict; nudges: LoopNudge[]; activity: { kind: string; label: string; detail?: string }[] }) {
+export function CycleDetail({ f, verdict, nudges, activity, taskTitle, onOpenTask }: { f: LoopFinding; verdict?: LoopVerdict; nudges: LoopNudge[]; activity: { kind: string; label: string; detail?: string }[]; taskTitle?: string; onOpenTask?: (taskId: string) => void }) {
+  const taskId = f.task_id
   return (
     <div className="flex flex-col gap-l">
       <div className="flex flex-wrap gap-s">
+        {taskId && onOpenTask && <QuietButton onClick={() => onOpenTask(taskId)} title={`Open task ${taskTitle || taskId}`}><ListChecks size={13} /> {taskTitle || taskId}</QuietButton>}
         {typeof verdict?.marginal_value === 'number' && typeof verdict?.quality_score === 'number' && <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={{ background: `color-mix(in srgb, ${verdict.done ? 'var(--color-ok)' : 'var(--color-primary)'} 18%, transparent)`, color: verdict.done ? 'var(--color-ok)' : 'var(--color-primary)' }}>{verdict.done ? <Check size={13} /> : null} judge ▲{verdict.marginal_value.toFixed(1)} · ★{verdict.quality_score.toFixed(1)}</span>}
         {verdict?.adversarial && <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7 bg-surface-high text-on-surface-var" title="A second, skeptical judge independently cross-checked this verdict (adversarial review)."><ShieldCheck size={13} className="text-on-surface-low" /> cross-checked</span>}
         {f.metric && typeof f.metric.value === 'number' && <span data-type="body-s" className="inline-flex items-center rounded-pill px-m h-7 bg-surface-high text-on-surface-var">{asText(f.metric.name) || 'metric'}: {f.metric.value}</span>}

@@ -126,12 +126,14 @@ ac_1 = "Implement the complete reachable feature: Show actual redacted workflow 
 
 [task.automation-workflows]
 title = "automation-workflows end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "automation-workflows"
 requires = []
 reqs = ["034.1", "060.1", "061.1", "062.1", "063.1", "064.1", "065.1", "066.1", "067.1", "068.1", "069.1", "070.1", "071.1", "072.1", "074.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/loops/LoopCockpitPage.tsx", "apps/console/src/features/loops/cycleFindingTaskLink.test.tsx", "apps/console/src/shared/data/api.ts", "apps/console/src/features/workflows/IntrospectPanel.tsx", "apps/console/src/features/workflows/WorkflowRunDetail.tsx", "apps/console/src/features/workflows/workflowMeta.test.ts", "apps/console/src/features/workflows/workflowMeta.ts", "checks/runtime/test_sampling_best_of_n.py", "checks/runtime/test_workflows_effects.py", "checks/runtime/test_workflows_input_types.py", "checks/runtime/test_workflows_node_inspect.py", "runtime/gideon/automation/workflows/controller.py", "runtime/gideon/automation/workflows/engine.py", "runtime/gideon/automation/workflows/models.py", "runtime/gideon/automation/workflows/service.py", "runtime/gideon/automation/workflows/workflow_codec.py", "runtime/gideon/integrations/sampling.py", "spec/gideon-automation/spec.kvx"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_workflows_input_types.py checks/runtime/test_workflows_node_inspect.py checks/runtime/test_workflows_effects.py checks/runtime/test_sampling_best_of_n.py"
 
 [req.015]
 title = "Contextual proactive planner for silence notifications contributions and background work"
