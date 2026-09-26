@@ -7,9 +7,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { WindowWorkspace, hostedOAuthStart } = require("../src/application/window-workspace");
+const { WindowWorkspace, hostedOAuthStart, navigationDecision, modalStyles } = require("../src/application/window-workspace");
+const { isLocalRow } = require("../src/application/endpoint-session");
 const { makeCapabilities } = require("../src/native/capabilities");
-const { makeTrayPresence, buildTrayMenuTemplate, shouldHideOnClose } = require("../src/native/tray-presence");
+const { makeTrayPresence, buildTrayMenuTemplate, shouldHideOnClose, shouldQuitOnAllWindowsClosed,
+  summarizePresence, composeTrayTitle, composeTrayTooltip, truncateLabel, DEEP_LINKS,
+  MAX_LISTED_LOOPS } = require("../src/native/tray-presence");
 const { openShellStore } = require("../src/storage/shell-store");
 
 const originalLoad = Module._load;
@@ -525,4 +528,129 @@ test("a second Linux desktop process yields the single-instance lock before boot
     assert.equal(app.listenerCount("second-instance"), 0);
     assert.equal(harness.windows.length, 0);
   });
+});
+
+test("real shell store indexes values and rejects non-object files without losing its path", (context) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "gideon-store-index-"));
+  context.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const store = openShellStore({ home, platform: "linux" });
+  assert.equal(store.length, 0);
+  assert.equal(store.key(0), null);
+  store.setItem("endpoint", "http://localhost:10000");
+  store.setItem("selection", "local");
+  assert.equal(store.length, 2);
+  assert.deepEqual([store.key(0), store.key(1), store.key(2)], ["endpoint", "selection", null]);
+  store.removeItem("endpoint");
+  assert.equal(store.length, 1);
+  assert.equal(store.key(0), "selection");
+  assert.equal(openShellStore({ home, platform: "linux" }).getItem("selection"), "local");
+  for (const invalid of [null, [], 17]) {
+    fs.writeFileSync(store.file, JSON.stringify(invalid));
+    const reopened = openShellStore({ home, platform: "linux" });
+    assert.equal(reopened.status, "unparseable");
+    assert.equal(reopened.storeReason, "not_an_object");
+    assert.equal(reopened.length, 0);
+    assert.equal(reopened.file, store.file);
+  }
+});
+
+test("tray presence summarizes real payload shapes and composes local status", () => {
+  const payload = summarizePresence([{ id: "approval-1" }, { id: "approval-2" }], [
+    { id: "run/1", status: "running", name: "  Review   launch  " },
+    { id: "paused", status: "paused", name: "Not running" },
+    { id: "", status: "running", name: "Missing id" },
+    null,
+  ]);
+  assert.deepEqual(payload, { approvals: 2, running: [{ id: "run/1", label: "Review launch" }], connected: true });
+  assert.deepEqual(summarizePresence({ pending: 3 }, { loops: [{ id: 4, status: "RUNNING", task: "Ship" }] }),
+    { approvals: 3, running: [{ id: "4", label: "Ship" }], connected: true });
+  assert.deepEqual(summarizePresence({ items: [{ id: "request" }] }, { loops: [
+    { id: "goal", status: "running", goal: "Review" },
+    { id: "id-only", status: "running" },
+    { status: "running", name: "No id" },
+  ] }), { approvals: 1, running: [{ id: "goal", label: "Review" },
+    { id: "id-only", label: "id-only" }], connected: true });
+  assert.deepEqual(summarizePresence(null, {}), { approvals: 0, running: [], connected: false });
+  assert.equal(truncateLabel("  first   second "), "first second");
+  assert.equal(truncateLabel("abcdefgh", 6), "abcde…");
+  assert.equal(composeTrayTitle({ capturing: true, approvals: 3 }), "● Listening");
+  assert.equal(composeTrayTitle({ approvals: 2 }), "2");
+  assert.equal(composeTrayTitle(), "");
+  assert.match(composeTrayTooltip({ capturing: true }), /listening/);
+  assert.equal(composeTrayTooltip({ mode: "hosted" }), "Gideon — hosted workspace");
+  assert.equal(composeTrayTooltip({ connected: false }), "Gideon — not connected to the gateway");
+  assert.equal(composeTrayTooltip({ ...payload, approvals: 1 }), "Gideon — 1 approval waiting, 1 loop running");
+  assert.equal(composeTrayTooltip(payload), "Gideon — 2 approvals waiting, 1 loop running");
+  assert.equal(composeTrayTooltip({ connected: true }), "Gideon — 0 approvals waiting, 0 loops running");
+  assert.equal(shouldQuitOnAllWindowsClosed({ platform: "darwin", trayAvailable: true }), false);
+  assert.equal(shouldQuitOnAllWindowsClosed({ platform: "darwin", trayAvailable: false }), true);
+  assert.equal(shouldQuitOnAllWindowsClosed({ platform: "linux", trayAvailable: true }), true);
+});
+
+test("local tray menu routes supplied actions and caps visible loop entries", () => {
+  const routed = [];
+  const running = Array.from({ length: MAX_LISTED_LOOPS + 2 }, (_, index) =>
+    ({ id: `run/${index}`, label: `Loop ${index}` }));
+  const menu = buildTrayMenuTemplate({ presence: { connected: true, approvals: 1, running },
+    loginItem: { supported: true, enabled: false },
+    tiles: [null, { title: "Missing label" }, { label: "Recent item", click: () => routed.push("tile") }],
+    actions: { deepLink: (route) => routed.push(route), quickCapture: () => routed.push("capture"),
+      open: () => routed.push("open"), quit: () => routed.push("quit"),
+      toggleLoginItem: (enabled) => routed.push(`login:${enabled}`) } });
+  const item = (label) => menu.find((entry) => entry.label === label);
+  assert.equal(item("1 approval waiting").enabled, undefined);
+  assert.equal(item("10 loops running").submenu.length, MAX_LISTED_LOOPS);
+  assert.equal(item("Recent item").label, "Recent item");
+  item("1 approval waiting").click();
+  item("10 loops running").submenu[0].click();
+  item("Quick Capture Note…").click();
+  item("Open Dashboard").click();
+  item("Recent item").click();
+  item("Open at Login").click({ checked: true });
+  item("Quit Gideon").click();
+  assert.deepEqual(routed, [DEEP_LINKS.approvals, DEEP_LINKS.loop("run/0"), "capture", "open", "tile", "login:true", "quit"]);
+  assert.equal(DEEP_LINKS.loop("run/0"), "#/loops/run%2F0");
+});
+
+test("hosted navigation keeps its exact origin and routes external web links", () => {
+  const origin = "https://gideon.centra.ag";
+  assert.deepEqual(navigationDecision(`${origin}/projects`, origin),
+    { allowed: true, external: "", origin });
+  assert.deepEqual(navigationDecision("https://gideon.centra.ag.attacker.example/projects", origin),
+    { allowed: false, external: "https://gideon.centra.ag.attacker.example/projects",
+      origin: "https://gideon.centra.ag.attacker.example" });
+  assert.deepEqual(navigationDecision("file:///tmp/local.html", origin, true),
+    { allowed: true, external: "", origin: "null" });
+  assert.deepEqual(navigationDecision("about:blank", origin, false),
+    { allowed: false, external: "", origin: "null" });
+  assert.deepEqual(navigationDecision("not a URL", origin),
+    { allowed: false, external: "", origin: "" });
+});
+
+test("OAuth start accepts only a hosted HTTPS return and a supported provider", () => {
+  const hosted = "https://gideon.centra.ag";
+  const start = (provider, returnTo, base = "https://auth.example") =>
+    `${base}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(returnTo)}`;
+  assert.equal(hostedOAuthStart(start("github", `${hosted}/projects`), hosted), true);
+  assert.equal(hostedOAuthStart(start("google", `${hosted}/chat`), hosted), true);
+  assert.equal(hostedOAuthStart(start("other", `${hosted}/chat`), hosted), false);
+  assert.equal(hostedOAuthStart(start("google", "https://foreign.example/chat"), hosted), false);
+  assert.equal(hostedOAuthStart(start("google", `${hosted}/chat`, "http://auth.example"), hosted), false);
+  assert.equal(hostedOAuthStart(start("google", `${hosted}/chat`).replace("/auth/v1/authorize", "/auth/other"), hosted), false);
+  assert.equal(hostedOAuthStart(start("google", `${hosted}/chat`).replace("auth.example", "user:pass@auth.example"), hosted), false);
+  assert.equal(hostedOAuthStart(start("google", "not a URL"), hosted), false);
+});
+
+test("local endpoint classification and title styling keep Mac/Linux behavior", () => {
+  assert.equal(isLocalRow(null), false);
+  assert.equal(isLocalRow({ id: "ep_local", kind: "remote" }), true);
+  assert.equal(isLocalRow({ id: "another", kind: "local" }), true);
+  assert.equal(isLocalRow({ id: "another", kind: "remote" }), false);
+  const light = modalStyles(null, false);
+  const dark = modalStyles(null, true);
+  const override = modalStyles({ bg: "#123456", text: "#ffffff" }, false);
+  assert.match(light, /background:#f5f9ff/);
+  assert.match(dark, /background:#112235/);
+  assert.match(override, /background:#123456;color:#ffffff/);
+  assert.match(override, /\.ok:hover\{background:#4b91ec/);
 });
