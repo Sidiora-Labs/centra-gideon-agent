@@ -17,8 +17,15 @@ export interface ReportSection {
 
 export function ResearchReport({
   title,
+  prompt,
+  details,
+  lastStatus,
+  statusError = false,
+  lastRun,
+  lastError,
   sections,
   sourcesRead,
+  compact = false,
   className,
   ...props
 }: Omit<
@@ -26,17 +33,26 @@ export function ResearchReport({
   "children" | "title" | "sections" | "sourcesRead"
 > & {
   title: string;
-  sections: readonly ReportSection[];
-  sourcesRead: number;
+  prompt?: string;
+  details?: readonly string[];
+  lastStatus?: string;
+  statusError?: boolean;
+  lastRun?: string;
+  lastError?: string;
+  sections?: readonly ReportSection[];
+  sourcesRead?: number;
+  compact?: boolean;
 }) {
-  const done = sections.filter((section) => section.state === "done").length;
+  const progress = sections ? `${sections.filter((section) => section.state === "done").length}/${sections.length} sections` : null;
+  const sourceCount = Number.isFinite(sourcesRead) ? `${sourcesRead} sources read` : null;
+  const metrics = [progress, sourceCount].filter(Boolean).join(" · ");
 
   return (
     <div
       data-slot="research-report"
       className={cn(
-        paper,
-        "flex w-full max-w-sm flex-col gap-3 rounded-2xl p-4",
+        !compact && paper,
+        compact ? "flex min-w-0 flex-1 flex-col gap-1" : "flex w-full max-w-sm flex-col gap-3 rounded-2xl p-4",
         className,
       )}
 
@@ -44,12 +60,18 @@ export function ResearchReport({
     >
       <div className="flex flex-col gap-1">
         <span className="text-[13.5px] font-medium">{title}</span>
-        <span className={cn(mono, "text-foreground/30 tabular-nums")}>
-          {done}/{sections.length} sections · {sourcesRead} sources read
-        </span>
+        {prompt && <p className="text-foreground/65 text-xs leading-relaxed">{prompt}</p>}
+        {details && details.length > 0 && <p className="text-foreground/45 text-xs">{details.join(" · ")}</p>}
+        {(lastStatus || lastRun) && <div className={cn(mono, "text-foreground/40 flex flex-wrap gap-x-2")}>
+          {lastStatus && <span role={statusError ? "alert" : undefined}>
+            {lastStatus}{lastError && ` · ${lastError}`}
+          </span>}
+          {lastRun && <span>{lastRun}</span>}
+        </div>}
+        {metrics && <span className={cn(mono, "text-foreground/30 tabular-nums")}>{metrics}</span>}
       </div>
 
-      <div className="flex flex-col">
+      {sections && <div className="flex flex-col">
         {sections.map((section) => (
           <div
             key={section.id}
@@ -91,7 +113,7 @@ export function ResearchReport({
             )}
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

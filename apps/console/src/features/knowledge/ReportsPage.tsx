@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Plus, FileClock, Play, Trash2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Plus, FileClock, Play, Trash2 } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
 import { IconButton } from '../../shared/ui/IconButton'
@@ -12,8 +12,8 @@ import { api, type ResearchReport, type ResearchReportInput } from '../../shared
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { notify } from '../../app/shell/appSdk'
 import { relPast } from '../schedule/scheduleMeta'
-import { fvs } from '../../shared/theme/fontWeight'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { ResearchReport as ResearchReportCard } from '../../shared/vendor/assistant-ui/elements/research-report'
 
 const CACHE_KEY = 'knowledge:reports'
 
@@ -31,7 +31,7 @@ function blank(): ResearchReportInput {
   }
 }
 
-function meta(r: ResearchReport): string {
+function reportDetails(r: ResearchReport): string[] {
   const when = r.schedule.cron_expr
     ? `cron ${r.schedule.cron_expr}`
     : r.schedule.every_secs
@@ -40,8 +40,8 @@ function meta(r: ResearchReport): string {
         ? 'once'
         : 'no schedule'
   const watches = r.source.tags.length ? `tagged ${r.source.tags.join(', ')}` : 'anything new'
-  const ran = r.last_run_ts ? `ran ${relPast(r.last_run_ts)}` : 'never run'
-  return `${when} · ${watches} · ${ran}`
+  const citation = r.citation_policy === 'cite-source-only' ? 'cites new material only' : 'may cite context'
+  return [when, watches, citation]
 }
 
 export function ReportRow({ report, index, onChanged }: {
@@ -68,22 +68,12 @@ export function ReportRow({ report, index, onChanged }: {
         <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-high">
           <FileClock size={16} className="text-on-surface-var" aria-hidden />
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span data-type="title-m" className="min-w-0 truncate text-on-surface" style={fvs(500)}>{report.name}</span>
-            {report.last_status === 'error' && (
-              <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-2 h-6 text-on-surface-var"
-                title={report.last_error || 'The last run failed'}>
-                <AlertTriangle size={12} style={{ color: 'var(--color-warning)' }} aria-hidden />
-                last run failed
-              </span>
-            )}
-            <span data-type="caption" className="rounded-pill bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var">
-              {report.citation_policy === 'cite-source-only' ? 'cites new material only' : 'may cite context'}
-            </span>
-          </div>
-          <p data-type="body-s" className="mt-0.5 truncate text-on-surface-low">{meta(report)}</p>
-        </div>
+        <ResearchReportCard compact title={report.name} prompt={report.prompt}
+          details={reportDetails(report)}
+          lastStatus={report.last_status === 'error' ? 'last run failed' : report.last_status ? `status ${report.last_status}` : undefined}
+          statusError={report.last_status === 'error'}
+          lastRun={report.last_run_ts ? `ran ${relPast(report.last_run_ts)}` : 'never run'}
+          lastError={report.last_error || undefined} />
         <div className="flex shrink-0 items-center gap-s">
           <Toggle on={report.enabled} disabled={busy}
             label={`${report.name} enabled`}
