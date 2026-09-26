@@ -323,4 +323,6 @@ wave = 4
 owner_lane = "experience-polish"
 requires = []
 reqs = ["099.1", "129.1", "130.1"]
+touches = ["apps/console/src/app/shell/shell.css", "apps/console/src/features/dashboard/DashboardPage.tsx", "apps/console/src/shared/ui/Button.tsx", "apps/console/src/shared/ui/ListScaffold.test.tsx", "apps/console/src/shared/ui/ListScaffold.tsx", "apps/console/src/shared/ui/Modal.tsx", "apps/console/src/shared/ui/dialog/DialogShell.tsx", "apps/console/src/shared/ui/experiencePolish.test.tsx"]
+verify_cmd = "cd apps/console && npm test -- src/shared/ui/experiencePolish.test.tsx src/shared/ui/ListScaffold.test.tsx"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
