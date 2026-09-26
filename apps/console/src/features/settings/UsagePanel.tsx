@@ -208,7 +208,7 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
   )
 }
 
-function UsageTable({ rows, keyField, empty }: {
+export function UsageTable({ rows, keyField, empty }: {
   rows: Array<UsageAgg & Record<string, string>>
   keyField: 'model' | 'source'
   empty: string
@@ -236,7 +236,7 @@ function UsageTable({ rows, keyField, empty }: {
           const share = total > 0 && r.priced ? Math.round((r.cost_usd / total) * 100) : 0
           return (
             <tr key={label} className="text-on-surface-var">
-              <Td pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 font-mono">{label}</Td>
+              <Td pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 font-mono max-w-64 break-all">{label}</Td>
               <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums">{fmtTokens((r.input_tokens || 0) + (r.output_tokens || 0))}</Td>
               <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums">{r.priced ? fmtUsd(r.cost_usd) : 'unpriced'}</Td>
               <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums text-on-surface-low">{r.priced ? `${share}%` : '—'}</Td>
