@@ -153,7 +153,7 @@
     },
     {
       "path": "elements/guardrail-notice.tsx",
-      "sha256": "ea164c09dc9b371281e485faa94547cbc27c8876bddddaaf35f7f19a1082ac87",
+      "sha256": "271c86faf3608cc9f1ea2eef82014c41feae1bd245d9dad66c5f12ada4ed9734",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/guardrail-notice.tsx",
       "donorSha256": "66d0e80718f9ee1ee05066070f8bb6d70f48459d464471498f9440d1a4cc0893",
       "status": "adapted"

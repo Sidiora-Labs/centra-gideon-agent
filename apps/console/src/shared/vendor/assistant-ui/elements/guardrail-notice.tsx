@@ -19,10 +19,12 @@ export function GuardrailNotice({
 > & {
   title: string;
   explanation: string;
-  policy: string;
-  alternatives: readonly string[];
+  policy?: string;
+  alternatives?: readonly string[];
   onPick?: (alternative: string) => void;
 }) {
+  const recordedAlternatives = alternatives ?? [];
+  const hasPolicy = Boolean(policy?.trim());
   return (
     <div
       data-slot="guardrail-notice"
@@ -41,19 +43,19 @@ export function GuardrailNotice({
         <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">
           {title}
         </span>
-        <span className={cn(mono, "text-foreground/30 shrink-0")}>
+        {hasPolicy && <span className={cn(mono, "text-foreground/30 shrink-0")}>
           {policy}
-        </span>
+        </span>}
       </div>
 
       <p className="text-foreground/60 text-xs leading-relaxed">
         {explanation}
       </p>
 
-      {alternatives.length > 0 && (
+      {recordedAlternatives.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <span className={cn(mono, "text-foreground/30")}>try instead</span>
-          {alternatives.map((alternative) =>
+          {recordedAlternatives.map((alternative) =>
             onPick ? (
               <button
                 key={alternative}
