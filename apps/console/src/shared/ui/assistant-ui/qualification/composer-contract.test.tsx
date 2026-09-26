@@ -62,6 +62,29 @@ describe('static composer primitive contract', () => {
     expect(within(root).getByText('100%')).toHaveClass('text-red-500')
   })
 
+  it('shows a measured zero percent without inventing a breakdown', () => {
+    render(<ComposerContext measured={{ percent: 0, usedTokens: 0, windowTokens: 128000 }} />)
+    expect(screen.getByRole('button', { name: 'Context: 0% used' })).toBeInTheDocument()
+    expect(screen.getByText('0 / 128,000 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Breakdown unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/System/)).toBeNull()
+  })
+
+  it('keeps unknown measured usage unknown', () => {
+    render(<ComposerContext measured={{ percent: null, usedTokens: null, windowTokens: null, breakdown: null }} />)
+    expect(screen.getByRole('button', { name: 'Context: unknown' })).toBeInTheDocument()
+    expect(screen.getByText('Breakdown unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/tokens/)).toBeNull()
+  })
+
+  it('renders only supplied measured breakdown and sources', () => {
+    render(<ComposerContext measured={{ percent: 37.8, breakdown: [{ label: 'Messages', tokens: 4200, tint: '#123456' }], sources: ['runtime meter'] }} />)
+    expect(screen.getByRole('button', { name: 'Context: 38% used' })).toBeInTheDocument()
+    expect(screen.getByText('4,200 tokens')).toBeInTheDocument()
+    expect(screen.getByText('Sources: runtime meter')).toBeInTheDocument()
+    expect(screen.queryByText('Breakdown unavailable')).toBeNull()
+  })
+
   it('handles a zero total without invalid segment widths', () => {
     const { container } = render(<ComposerContext usage={{ system: 0, tools: 0, messages: 0, total: 0 }} />)
     expect(screen.getByText('0%')).toBeInTheDocument()
