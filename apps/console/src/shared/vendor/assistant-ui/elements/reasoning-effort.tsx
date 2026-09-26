@@ -16,16 +16,18 @@ export interface EffortLevel {
 export function ReasoningEffort({
   levels,
   selectedKey,
+  heading = "Thinking",
   spent,
   onSelect,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "levels" | "selectedKey" | "spent" | "onSelect"
+  "children" | "levels" | "selectedKey" | "heading" | "spent" | "onSelect"
 > & {
   levels: readonly EffortLevel[];
   selectedKey: string;
+  heading?: string;
   spent?: number | null;
   onSelect?: (key: string) => void;
 }) {
@@ -45,7 +47,7 @@ export function ReasoningEffort({
       {...props}
     >
       <div className="flex items-baseline justify-between">
-        <span className="text-[13.5px] font-medium">Thinking</span>
+        <span className="text-[13.5px] font-medium">{heading}</span>
         {usage && <span className={cn(mono, "text-foreground/35 tabular-nums")}>
           {fmt(usage.spent)} / {fmt(usage.budget)}
         </span>}

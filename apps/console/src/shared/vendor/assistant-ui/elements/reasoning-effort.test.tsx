@@ -6,6 +6,14 @@ const selected = (levels: readonly EffortLevel[], spent?: number | null, onSelec
   render(<ReasoningEffort levels={levels} selectedKey="high" spent={spent} onSelect={onSelect} />)
 
 describe('ReasoningEffort measured budget contract', () => {
+  it('accepts a localized heading without changing the selected effort', () => {
+    const levels = [{ key: 'low', label: 'Low' }, { key: 'high', label: 'High' }]
+    render(<ReasoningEffort levels={levels} selectedKey="high" heading="Pensando" />)
+    expect(screen.getByText('Pensando')).toBeInTheDocument()
+    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getByText('High')).toHaveAttribute('aria-current', 'true')
+  })
+
   it('retains donor ratio, progress, selected state and action when measurements are known', () => {
     const onSelect = vi.fn()
     const levels = [{ key: 'low', label: 'Low', budget: 100 }, { key: 'high', label: 'High', budget: 200 }]
