@@ -2114,6 +2114,22 @@ class WorkflowsConfig:
             "working node survives while a wedged one does not.",
         ),
     )
+    max_concurrent_llm_nodes: int = field(
+        default=4,
+        metadata=_meta(
+            "Lane Cap — Model Calls",
+            "How many model-backed nodes (stage/infer) may run at once in one workflow.",
+        ),
+    )
+    max_concurrent_io_nodes: int = field(
+        default=2,
+        metadata=_meta(
+            "Lane Cap — Actions",
+            "How many action nodes may run at once. Kept low on purpose: a fan-out over "
+            "minutes-long local-model actions would otherwise starve the run's model "
+            "calls behind it.",
+        ),
+    )
     model_tier_reasoning: str = field(
         default="reasoning",
         metadata=_meta(
@@ -2240,6 +2256,8 @@ class WorkflowsConfig:
 
     def __post_init__(self) -> None:
         floors = {
+            "max_concurrent_llm_nodes": 1,
+            "max_concurrent_io_nodes": 1,
             "default_node_timeout_total_secs": 0,
             "default_node_timeout_stall_secs": 0,
         }
