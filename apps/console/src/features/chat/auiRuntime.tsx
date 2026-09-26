@@ -71,7 +71,10 @@ export function convertGideonTurn(turn: ChatTurn, ordinal: number, sessionId: st
   return {
     id: gideonAuiId(sessionId, ordinal),
     role: turn.role,
-    content: turn.segments.map(segmentPart),
+    content: [
+      ...turn.segments.map(segmentPart),
+      ...(turn.fileChanges?.length ? [{ type: 'data' as const, name: 'gideon-file-changes', data: turn.fileChanges }] : []),
+    ],
     ...(createdAt && !Number.isNaN(createdAt.getTime()) ? { createdAt } : {}),
     ...(turn.role === 'assistant' ? {
       status: isCurrent ? { type: 'running' as const }
