@@ -257,7 +257,9 @@ describe('ApprovalCard — connected PermissionGrant decisions', () => {
   it('shows the actual resolved backend outcome without pending decision controls', () => {
     const onAct = vi.fn()
     render(<ApprovalCard seg={seg({ resolved: 'trust' })} onAct={onAct} />)
-    expect(grant().textContent).toContain('trusted for this chat')
+    const resolvedGrant = screen.getByRole('group', { name: 'bash — auto-approved (trusted for this chat)' })
+    expect(resolvedGrant.getAttribute('data-slot')).toBe('permission-grant')
+    expect(resolvedGrant.textContent).toContain('trusted for this chat')
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('button', { name: /^Allow bash/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Deny bash/ })).toBeNull()

@@ -67,7 +67,7 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
   return (
     <PermissionGrant
       role="group"
-      aria-label={`Permission needed to run ${seg.tool}`}
+      aria-label={resolved ? `${seg.tool} — ${resolved.label}` : `Permission needed to run ${seg.tool}`}
       capability={seg.tool}
       reach={reach}
       scope={seg.resolved ?? 'pending'}
