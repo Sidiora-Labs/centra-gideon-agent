@@ -1,10 +1,23 @@
+// @vitest-environment node
+
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
+import { describe, expect, it, vi } from 'vitest'
 import { GatewaySocket } from '../../shared/data/socketTransport'
-import { McpElicitationCards } from './McpElicitation'
+
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
+vi.stubGlobal('window', dom.window)
+vi.stubGlobal('document', dom.window.document)
+vi.stubGlobal('navigator', dom.window.navigator)
+vi.stubGlobal('HTMLElement', dom.window.HTMLElement)
+vi.stubGlobal('MutationObserver', dom.window.MutationObserver)
+vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+vi.resetModules()
+const { fireEvent, render, within, waitFor } = await import('@testing-library/react')
+const { McpElicitationCards } = await import('./McpElicitation')
+const screen = within(dom.window.document.body)
 
 const serverCode = `
 import asyncio, json, sys
