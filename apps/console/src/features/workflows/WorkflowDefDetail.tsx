@@ -20,6 +20,8 @@ import {
   type WorkflowLedgerRow,
 } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
+import { confirm } from '../../shared/ui/dialog'
+import { roundPlan, roundPlanText, roundPlanWithInputs } from './roundPlan'
 
 interface FlatNode { depth: number; kind: string; id: string; label: string; summary: string }
 
@@ -114,6 +116,7 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
   }, [tab, ledger, name])
 
   const rows = useMemo(() => (def ? flatten(def.root) : []), [def])
+  const plan = useMemo(() => (def ? roundPlan(def) : null), [def])
   const declared = useMemo(() => Object.entries(def?.inputs ?? {}), [def])
   const inputFields = useMemo(() => declared.map(([key, input]) => [key, {
     type: input.type,
@@ -128,6 +131,14 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
   )
 
   const start = useCallback(async () => {
+    if (plan) {
+      const approved = await confirm({
+        title: `Review ${name} round plan`,
+        body: roundPlanText(roundPlanWithInputs(plan, inputs)),
+        confirmLabel: 'Approve and run',
+      })
+      if (!approved) return
+    }
     setStarting(true)
     try {
       const payload: Record<string, unknown> = {}
@@ -139,7 +150,7 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
     } finally {
       setStarting(false)
     }
-  }, [inputs, name, onStarted])
+  }, [inputs, name, onStarted, plan])
 
   const refine = useCallback(async () => {
     if (refining) return
@@ -227,6 +238,12 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
 
             {tab === 'steps' && (
               <>
+                {plan && (
+                  <div className="flex flex-col gap-xs rounded-m border border-outline p-m">
+                    <span data-type="title-m" className="text-on-surface">Round plan to review</span>
+                    <p data-type="caption" className="whitespace-pre-wrap text-on-surface-low">{roundPlanText(plan)}</p>
+                  </div>
+                )}
                 {declared.length > 0 && (
                   <div className="flex flex-col gap-s">
                     <span data-type="title-m" className="text-on-surface">Inputs</span>

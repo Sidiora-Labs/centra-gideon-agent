@@ -94,12 +94,13 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
   }
   async function dryRun() {
     setBusy(true); setErr(''); setNote('')
-    runStartRef.current = job.last_run_ts ?? null
     try {
-      await api.runSchedule(job.id, true)
-      setTriggered(true)
-      setNote('Dry-run replay started — write tools are previewed (no side effects). See history for the result.')
-      onChanged()
+      const result = await api.runSchedule(job.id, true)
+      if (!result.ok) { setErr(result.refused || 'Could not preview this schedule'); return }
+      const plan = (result.result as { plan?: { enforced?: string[]; bypassed?: string[] } } | undefined)?.plan
+      setNote(plan
+        ? `Dry run: no action executed. Enforced gates: ${(plan.enforced ?? []).join(', ') || 'none'}. Manual bypasses: ${(plan.bypassed ?? []).join(', ') || 'none'}.`
+        : 'Dry run: no action executed.')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Dry run failed'
       setErr(/already running/i.test(msg) ? 'This schedule is already running.' : msg)

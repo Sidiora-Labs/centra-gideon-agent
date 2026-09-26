@@ -37,8 +37,11 @@ export function ScheduleWidget({ navigate }: RouteProps) {
   const row = (r: typeof schedule[number], i: number) => {
     const o = statusMeta(r.outcome ?? r.status)
     const when = r.finished_at ?? r.started_at
+    const origin = r.job_id && r.job_id !== 'day-budget'
+      ? `triggers?open=${encodeURIComponent(`schedule:${r.job_id}`)}`
+      : 'triggers'
     return (
-      <WidgetRow key={r.id ?? r.run_id ?? `${r.job_id}-${i}`} onClick={() => navigate('triggers')}
+      <WidgetRow key={r.id ?? r.run_id ?? `${r.job_id}-${i}`} onClick={() => navigate(origin)}
         label={rowSubject([r.job_name || r.job_id || 'Schedule', statusMeta(r.outcome ?? r.status).label])}>
         <div className="flex items-center gap-s">
           <StatusDot color={o.tone} />

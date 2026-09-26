@@ -80,11 +80,11 @@ def _serialize_event(t) -> dict[str, Any]:
         "max_fires": t.max_fires,
         "fire_count": t.fire_count,
         "last_run_ts": last_run_ts,
-        "last_run_status": "ran" if last_run_ts is not None else None,
+        "last_run_status": t.last_status or None,
         "action": {"provider": t.action_provider, "config": t.action_config},
         "state": t.state,
         "health": _event_health(t),
-        "last_error": _redact(t.park_reason),
+        "last_error": _redact(t.park_reason or t.last_error),
     }
 
 
@@ -101,7 +101,32 @@ def _event_health(t) -> str:
 
     if t.state == TriggerState.PARKED.value:
         return TriggerHealth.PARKED.value
+    if t.last_status == "failure":
+        return TriggerHealth.FAILING.value
     return TriggerHealth.OK.value
+
+
+async def api_trigger_budget(request: web.Request) -> web.Response:
+    from datetime import datetime, timedelta
+
+    from gideon.security.guardrails.budgets import budget_from_config, get_meter
+
+    meter = get_meter()
+    limit = budget_from_config()
+    totals = meter.day_totals()
+    verdict, reason = meter.check_day(limit)
+    now = datetime.now().astimezone()
+    reset_at = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return web.json_response({
+        "tokens": totals.tokens,
+        "dollars": totals.dollars,
+        "max_tokens": limit.max_tokens,
+        "max_dollars": limit.max_dollars,
+        "status": verdict.value,
+        "reason": reason,
+        "paused": verdict.value == "exceeded",
+        "resumes_at": reset_at.isoformat(),
+    })
 
 
 def _sel():
@@ -757,8 +782,6 @@ async def api_trigger_create(request: web.Request) -> web.Response:
 
 def _create_event(body: dict) -> web.Response:
     """Create a data-event trigger (#38)."""
-    import uuid
-
     from gideon.automation.event_triggers import (
         EVENT_PATTERNS,
         INBOX_SENDER,
@@ -781,11 +804,24 @@ def _create_event(body: dict) -> web.Response:
             status=400,
         )
     action = body.get("action") or {}
+    if not isinstance(action, dict) or not isinstance(action.get("config") or {}, dict):
+        return web.json_response({"error": "action must contain an object config"}, status=400)
     refusal = _provider_refusal({"provider": action.get("provider") or "notify"})
     if refusal is not None:
         return refusal
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return web.json_response({"error": "name required"}, status=400)
+    if any(t.id == name for t in _event_store().load()):
+        return web.json_response({"error": "an event trigger with this name already exists"}, status=409)
+    try:
+        max_fires = int(body.get("max_fires", 0) or 0)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "max_fires must be an integer"}, status=400)
+    if max_fires < 0:
+        return web.json_response({"error": "max_fires must be nonnegative"}, status=400)
     t = EventTrigger(
-        id=str(body.get("name") or uuid.uuid4().hex[:8]).strip(),
+        id=name,
         pattern=pattern,
         source=PATTERN_SOURCE[pattern],
         action_provider=str(action.get("provider") or "notify"),
@@ -795,7 +831,7 @@ def _create_event(body: dict) -> web.Response:
         sender_glob=sender_glob,
         address_glob=str(body.get("address_glob") or ""),
         event_glob=str(body.get("event_glob") or ""),
-        max_fires=int(body.get("max_fires", 0) or 0),
+        max_fires=max_fires,
     )
     _event_store().upsert(t)
     payload = _serialize_event(t)
@@ -1076,6 +1112,11 @@ def _update_event(raw: str, body: dict) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
 
     raw_action = body.get("action")
+    if raw_action is not None and (
+        not isinstance(raw_action, dict)
+        or not isinstance(raw_action.get("config") or {}, dict)
+    ):
+        return web.json_response({"error": "action must contain an object config"}, status=400)
     action = raw_action if isinstance(raw_action, dict) else {}
     refusal = _provider_refusal(
         {"provider": action.get("provider") or trigger.action_provider}
@@ -1106,14 +1147,18 @@ def _update_event(raw: str, body: dict) -> web.Response:
             status=400,
         )
     if "enabled" in body:
-        trigger.enabled = bool(body["enabled"])
+        if not isinstance(body["enabled"], bool):
+            return web.json_response({"error": "enabled must be a boolean"}, status=400)
+        trigger.enabled = body["enabled"]
     if "key_glob" in body:
         trigger.key_glob = str(body.get("key_glob") or "")
     if "content_re" in body:
         trigger.content_re = str(body.get("content_re") or "")
     if "max_fires" in body:
         try:
-            trigger.max_fires = max(0, int(body.get("max_fires") or 0))
+            trigger.max_fires = int(body.get("max_fires") or 0)
+            if trigger.max_fires < 0:
+                return web.json_response({"error": "max_fires must be nonnegative"}, status=400)
         except (TypeError, ValueError):
             return web.json_response(
                 {"error": "max_fires must be an integer"}, status=400
@@ -1963,22 +2008,57 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
     if isinstance(raw_meta, dict):
         meta = {str(k): sanitize_string(str(v))[:500] for k, v in raw_meta.items()}
 
-    outcome = await execute_event_action(
-        trigger,
-        source=trigger.source,
-        event_type=str(body.get("event_type", "") or "MemoryUpdate"),
-        key=key,
-        value=value,
-        meta=meta,
-        test=bool(body.get("test")),
-    )
+    if body.get("dry_run") is True:
+        from gideon.automation.event_triggers import EventOccurrence
+
+        occurrence = EventOccurrence(
+            trigger.source,
+            str(body.get("event_type", "") or "MemoryUpdate"),
+            key,
+            value,
+            meta,
+        )
+        matches = occurrence.accepts(trigger)
+        return web.json_response({
+            "ok": True,
+            "result": {
+                "dry_run": True,
+                "would_fire": matches,
+                "reason": "matches this trigger" if matches else "event does not match or trigger is paused",
+                "action": trigger.action_provider,
+                "trigger_id": f"event:{trigger.id}",
+            },
+        })
+
+    try:
+        outcome = await execute_event_action(
+            trigger,
+            source=trigger.source,
+            event_type=str(body.get("event_type", "") or "MemoryUpdate"),
+            key=key,
+            value=value,
+            meta=meta,
+            test=bool(body.get("test")),
+        )
+    except Exception as failure:
+        from gideon.integrations.action_providers import provider_failure
+
+        detail = _redact(provider_failure(trigger.action_provider, failure).render())
+        store.record_outcome(trigger.id, status="failure", error=detail)
+        return web.json_response({"ok": False, "result": {"ran": False, "reason": detail}})
     payload = outcome.to_dict()
+    succeeded = outcome.ran and payload.get("success", True)
+    store.record_outcome(
+        trigger.id,
+        status="success" if succeeded else "failure",
+        error="" if succeeded else str(payload.get("error") or payload.get("reason") or "action failed"),
+    )
     for field_name in ("stdout", "stderr", "error"):
         if payload.get(field_name):
             payload[field_name] = _redact(str(payload[field_name]))
     if payload.get("reason"):
         payload["reason"] = _redact(str(payload["reason"]))
-    return web.json_response({"ok": outcome.ran, "result": payload})
+    return web.json_response({"ok": succeeded, "result": payload})
 
 
 async def api_trigger_test(request: web.Request) -> web.Response:
@@ -2365,6 +2445,7 @@ def register_trigger_routes(app: web.Application) -> None:
     app.router.add_get("/api/triggers", api_triggers)
     app.router.add_post("/api/triggers", api_trigger_create)
     app.router.add_get("/api/triggers/variables", api_trigger_variables)
+    app.router.add_get("/api/triggers/budget", api_trigger_budget)
     app.router.add_get("/api/triggers/history", api_trigger_history_all)
     app.router.add_get("/api/triggers/week", api_triggers_week)
     app.router.add_get("/api/triggers/doctor", api_triggers_doctor)
