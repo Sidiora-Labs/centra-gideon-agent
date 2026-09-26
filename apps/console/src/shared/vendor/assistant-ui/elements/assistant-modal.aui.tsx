@@ -24,12 +24,12 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
   };
   const content = (
     <>
-      <div className="flex gap-2 border-b p-2">
+      <div data-slot="aui_assistant-modal-header" className="flex shrink-0 gap-2 border-b p-2">
         <button type="button" onClick={() => setView("thread")} aria-pressed={view === "thread"}>Conversation</button>
         <button type="button" onClick={() => setView("list")} aria-pressed={view === "list"}>History</button>
         <button type="button" className="ml-auto" onClick={() => changeOpen(false)} aria-label="Close assistant">Close</button>
       </div>
-      <div className="h-full overflow-auto">
+      <div data-slot="aui_assistant-modal-body" className="min-h-0 flex-1 overflow-auto">
         {view === "thread" ? (thread === undefined ? <ThreadTranscript /> : thread)
           : (history === undefined ? <ThreadList /> : history)}
       </div>
@@ -40,7 +40,7 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
     if (!currentOpen || typeof document === "undefined") return null;
     return createPortal(
       <div role="dialog" aria-label="Assistant" data-slot="aui_assistant-modal"
-        className="bg-background border-border fixed inset-x-3 bottom-3 z-50 h-[min(80vh,40rem)] overflow-hidden rounded-xl border shadow-xl">
+        className="bg-background border-border fixed inset-x-3 bottom-3 z-50 flex h-[min(80vh,40rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
         {content}
       </div>, document.body,
     );
@@ -51,7 +51,7 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
       <PopoverPrimitive.Trigger aria-label="Open assistant">{trigger ?? "Assistant"}</PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Positioner side="top" align="end" sideOffset={16}>
-          <PopoverPrimitive.Popup data-slot="aui_assistant-modal" className="bg-background border-border h-[min(80vh,40rem)] w-[min(90vw,36rem)] overflow-hidden rounded-xl border shadow-xl">
+          <PopoverPrimitive.Popup data-slot="aui_assistant-modal" className="bg-background border-border flex h-[min(80vh,40rem)] w-[min(90vw,36rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
             {content}
           </PopoverPrimitive.Popup>
         </PopoverPrimitive.Positioner>
