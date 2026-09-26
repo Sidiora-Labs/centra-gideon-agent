@@ -449,6 +449,20 @@ def test_a_manual_fire_does_not_spend_the_budget(state, event_store, monkeypatch
     ), "a manual fire must not retire the trigger"
 
 
+def test_event_dry_run_reports_match_without_running_or_charging(state, event_store):
+    _ev(event_store, pattern="MemoryKeyPattern", key_glob="project.*", action_provider="ghost")
+    req = _req(
+        "POST", "/api/triggers/event:ev1/run", state,
+        body={"dry_run": True, "key": "project.ship"},
+        match_info={"id": "event:ev1"},
+    )
+    body = _body(_run(T.api_trigger_run(req)))
+    assert body["result"]["would_fire"] is True
+    assert body["result"]["trigger_id"] == "event:ev1"
+    persisted = event_store.load()[0]
+    assert persisted.fire_count == 0 and persisted.last_status == ""
+
+
 def test_event_test_and_run_agree(state, event_store, monkeypatch):
     """Measured: /test said "use /run" and /run said 404 — a circular dead end."""
     from gideon.integrations.action_providers import ActionResult

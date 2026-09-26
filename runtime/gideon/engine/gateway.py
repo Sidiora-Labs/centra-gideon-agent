@@ -559,7 +559,7 @@ class RuntimeCoordinator:
                     status="needs_input",
                     error=(
                         f"{context} paused: daily automation budget reached; "
-                        "raise the budget in Settings → Guardrails to resume."
+                        "unattended runs resume after the daily reset, or the operator can raise the budget."
                     ),
                 )
             )

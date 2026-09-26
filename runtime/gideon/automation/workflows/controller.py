@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import calendar
 import contextlib
+import json
 import logging
 import os
 import re
@@ -487,6 +488,17 @@ class RunController:
         totals = journal_mod.run_totals(self.run.id)
         self._restore_recorded_tokens(totals)
         self._rehydrate_context()
+        if resumed and self._round_configs():
+            from gideon.automation.workflows.round_protocol import completed_iterations
+
+            for path, _config in self._round_configs():
+                self._iterations[path] = completed_iterations(self.run.id, path)
+            interrupted = [inst for inst in self.instances.values() if inst.state == InstanceState.RUNNING]
+            for inst in interrupted:
+                inst.state = InstanceState.PENDING
+                inst.started_at = None
+            if interrupted:
+                store.write_state(self.run.id, self.instances)
         async with self._lock:
             if not self.run.started_at:
                 self.run.started_at = _now()
@@ -503,9 +515,39 @@ class RunController:
         )
         self._enforce_inherited_mode()
         provisioned = await self._provision_workspace()
+        if provisioned:
+            from gideon.automation.workflows.round_protocol import admit_round
+
+            round_workspace = ""
+            for path, config in self._round_configs():
+                decision = admit_round(self.run.id, config, self._round_inputs())
+                if not decision.allow_next:
+                    await self._finish(RunStatus.ESCALATED, error=decision.reason[:500])
+                    return False
+                worktree = str(decision.handoff["worktree"])
+                if round_workspace and worktree != round_workspace:
+                    await self._finish(RunStatus.ESCALATED, error="round loops require one reviewed worktree")
+                    return False
+                round_workspace = worktree
+                saved = (self.run.extra.get("round_handoff") or {}).get(path)
+                self._steering_inject[path] = json.dumps(saved if isinstance(saved, dict) else decision.handoff, default=str)
+            if round_workspace:
+                self.services.cwd = round_workspace
         self._bind_project_memory_cwd()
         self._publish("workflow_run_update", {"status": self.run.status.value})
         return provisioned
+
+    def _round_configs(self) -> list[tuple[str, dict]]:
+        return [
+            (path, node.config["round_protocol"])
+            for path, node in _walk(self.root)
+            if node.kind == NodeKind.LOOP
+            and isinstance(node.config, dict)
+            and isinstance(node.config.get("round_protocol"), dict)
+        ]
+
+    def _round_inputs(self) -> dict:
+        return {"worktree": self.services.cwd, **self.run.inputs}
 
     async def _provision_workspace(self) -> bool:
         """Stand up the run's declared workspace before the first node (WORK-CONTAINERS §4.1).
@@ -2399,6 +2441,7 @@ class RunController:
             project_id=self.run.project_id,
             instance_path=item.path,
             cwd=self.services.cwd,
+            action_cwd=self.services.cwd if self._round_configs() and node.kind == NodeKind.ACTION else "",
             tiers=self.services.model_tiers,
             completion=self.services.completion,
             get_provider=self.services.get_provider,
@@ -3320,6 +3363,33 @@ class RunController:
         if not self._iteration_complete(node, parent_path, iteration):
             return
         output = self._outputs.get(item.node.id)
+        round_config = (node.config or {}).get("round_protocol")
+        if isinstance(round_config, dict):
+            from gideon.automation.workflows.round_protocol import complete_round
+
+            decision = complete_round(
+                run_id=self.run.id,
+                iteration=iteration,
+                config=round_config,
+                inputs=self._round_inputs(),
+                output=output,
+                loop_path=parent_path,
+            )
+            if not decision.allow_next:
+                self._surface_loop(parent_path, node, reason="round_verification", detail=decision.reason)
+                return
+            handoffs = dict(self.run.extra.get("round_handoff") or {})
+            handoffs[parent_path] = decision.handoff
+            self.run.extra["round_handoff"] = handoffs
+            self._save_run()
+            self.journal.handoff(parent_path, node.id, epoch=self._instance(item.path).epoch, iteration=iteration, handoff=decision.handoff)
+            self._steering_inject[parent_path] = json.dumps(decision.handoff, default=str)
+            if decision.handoff.get("stop"):
+                loop_inst = self._instance(parent_path)
+                loop_inst.state = InstanceState.DONE
+                loop_inst.completed_at = _now()
+                self.journal.iteration(parent_path, node.id, iteration=iteration, outcome=decision.reason, error_signature="", tokens=0)
+                return
         if self._iteration_is_dry(node, parent_path, iteration, output):
             self._dry_streaks[parent_path] = self._dry_streaks.get(parent_path, 0) + 1
         else:
@@ -4053,6 +4123,10 @@ class RunController:
         if status == RunStatus.CANCELLED:
             store.clear_cancel(self.run.id)
         if status in TERMINAL_RUN_STATUSES:
+            from gideon.automation.workflows.round_protocol import release_round
+
+            for _path, config in self._round_configs():
+                release_round(self.run.id, config, self._round_inputs())
             self._release_held_leases()
             attention.resolve_run_items(self.services.attention_state, self.run.id)
             if status == RunStatus.COMPLETE:

@@ -8,15 +8,16 @@ import { HeaderActions, HeaderControl, HeaderSegmented } from '../../shared/ui/H
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { Button } from '../../shared/ui/Button'
 import { PresetEmptyState } from '../../shared/ui/PresetEmptyState'
-import { api, ApiError, type WorkflowDef, type WorkflowSurfacingFinding, type WorkflowSurfacingRow } from '../../shared/data/api'
+import { api, ApiError, type WorkflowDef, type WorkflowDefSummary, type WorkflowSurfacingFinding, type WorkflowSurfacingRow } from '../../shared/data/api'
 import { useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { confirmDelete, promptForm, promptInput } from '../../shared/ui/dialog'
+import { confirm, confirmDelete, promptForm, promptInput } from '../../shared/ui/dialog'
 import { notify } from '../../app/shell/appSdk'
 import { fmtElapsed, isTerminal, runLook } from './workflowMeta'
 import { coerceInputs, inputFields, startsWithoutInput } from './templateStart'
 import { preflightRemediations } from './preflightRemediation'
-import { suggestTemplate } from './templateSuggest'
+import { rankWorkflowDefinitions } from './templateSuggest'
+import { roundPlan, roundPlanText, roundPlanWithInputs } from './roundPlan'
 import { workflowPresets } from './workflowPresets'
 import { cadenceLabel, findingsByDef, freshnessLook, modeLook, needsAttention, packChips } from './surfacingMeta'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -29,6 +30,7 @@ const TABS = [
 export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: RouteProps) {
   const [tab, setTab] = useQueryParam(routeQuery, setQuery, 'tab', 'runs', { replace: true })
   const [q, setQ] = useQueryParam(routeQuery, setQuery, 'q', '', { replace: true })
+  const [discovery, setDiscovery] = useState<{ intent: string; choices: WorkflowDefSummary[]; details: Record<string, WorkflowDef> } | null>(null)
 
   const { data: defsData, error: defsErr, loading: defsLoading, stale: defsStale } =
     useQuery('workflows:defs', () => api.workflowDefs().then((d) => d.defs))
@@ -81,18 +83,29 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
     } catch {
     }
 
+    const plan = def ? roundPlan(def) : null
     let inputs: Record<string, unknown> | undefined
     if (def && !startsWithoutInput(def.inputs)) {
       const fields = inputFields(def.inputs)
       const example = def.metadata?.steering_examples?.find((e) => e.event === 'kickoff')
       const answers = await promptForm({
         title: `Run ${name}`,
-        body: example?.description ? `For example: ${example.description}` : def.description,
+        body: [example?.description ? `For example: ${example.description}` : def.description,
+          plan ? `Round plan to review:\n${roundPlanText(plan)}` : ''].filter(Boolean).join('\n\n'),
         fields,
         confirmLabel: 'Run',
       })
       if (answers === null) return
       inputs = coerceInputs(answers, def.inputs)
+      if (plan && !(await confirm({ title: `Approve ${name} round plan?`, body: roundPlanText(roundPlanWithInputs(plan, inputs)), confirmLabel: 'Approve and run' }))) return
+    } else {
+      const approved = await confirm({
+        title: `Run ${name}?`,
+        body: [def?.description || 'Start this workflow with its saved definition and defaults.',
+          plan ? `Round plan:\n${roundPlanText(plan)}` : ''].filter(Boolean).join('\n\n'),
+        confirmLabel: 'Start run',
+      })
+      if (!approved) return
     }
 
     try {
@@ -114,15 +127,15 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
       confirmLabel: 'Continue',
     })
     if (!intent) return
-    const template = suggestTemplate(intent, defs.map((d) => d.name))
-    if (!template) {
-      setTab('defs')
-      setQ(intent)
-      notify('No single template matched — showing the closest ones to pick from.')
-      return
-    }
-    await start(template)
-  }, [defs, setTab, setQ, start])
+    const choices = rankWorkflowDefinitions(intent, defs, surfacing).slice(0, 4).map((match) => match.definition)
+    const details = Object.fromEntries((await Promise.all(choices.map(async (choice) => {
+      try { return [choice.name, (await api.workflowDef(choice.name)).definition] as const }
+      catch { return null }
+    }))).filter((entry): entry is readonly [string, WorkflowDef] => entry !== null))
+    setDiscovery({ intent, choices, details })
+    setTab('defs')
+    setQ('')
+  }, [defs, surfacing, setTab, setQ])
 
   const remove = useCallback(async (name: string) => {
     const ok = await confirmDelete('workflow definition', name, {
@@ -177,6 +190,35 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
         results={{ count: tab === 'defs' ? filteredDefs.length : filteredRuns.length, noun: tab === 'defs' ? 'definitions' : 'runs', active: !!q.trim() }}
         stale={stale} />
       <div className="min-h-0 flex-1 overflow-y-auto p-l">
+        {tab === 'defs' && discovery && (
+          <section aria-label="Workflow matches" className="mb-l rounded-lg border border-outline-variant/50 bg-surface-container p-m">
+            <div className="flex items-start justify-between gap-m">
+              <div>
+                <div data-type="body-m" className="text-on-surface">Matches for “{discovery.intent}”</div>
+                <div data-type="caption" className="text-on-surface-low">Choose a saved workflow to review its inputs and start it.</div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setDiscovery(null)}>Clear</Button>
+            </div>
+            {discovery.choices.length === 0 ? (
+              <p data-type="body-s" className="mt-m text-on-surface-low">No matching workflow found. Browse the definitions below or try a different description.</p>
+            ) : (
+              <div className="mt-m flex flex-col gap-s">
+                {discovery.choices.map((choice) => {
+                  const detail = discovery.details[choice.name]
+                  const required = Object.entries(detail?.inputs ?? {}).filter(([, param]) => param.required).map(([name]) => name)
+                  return <div key={choice.name} className="flex flex-wrap items-center gap-m rounded-md bg-surface px-m py-s">
+                    <div className="min-w-0 flex-1">
+                      <div data-type="body-s" className="text-on-surface">{choice.name} · v{choice.version}</div>
+                      <div data-type="caption" className="text-on-surface-low">{detail?.description || choice.description || 'Saved workflow'}</div>
+                      <div data-type="caption" className="text-on-surface-low">{required.length ? `Needs: ${required.join(', ')}` : 'No required inputs'}</div>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => { void start(choice.name) }}>Review and start</Button>
+                  </div>
+                })}
+              </div>
+            )}
+          </section>
+        )}
         {loading ? <Loading what="workflows" /> : tab === 'defs' ? (
           defsErr ? (
             <LoadError what="workflow definitions" error={defsErr} onRetry={load} />

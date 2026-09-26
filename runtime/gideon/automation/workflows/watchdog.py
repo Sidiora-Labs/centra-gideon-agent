@@ -210,6 +210,8 @@ class _ReconciliationPass:
             return
         controller = owner._controllers.get(run.id)
         if controller is None:
+            if (run.extra or {}).get("round_interrupted"):
+                return
             await owner._adopt(run)
         elif controller.run.is_terminal:
             owner._controllers.pop(run.id, None)
@@ -344,7 +346,15 @@ class WorkflowWatchdog:
         )
 
     def _is_crash_survivor(self, run: WorkflowRun) -> bool:
-        return run.status == RunStatus.RUNNING and self._controllers.get(run.id) is None
+        if run.status != RunStatus.RUNNING or self._controllers.get(run.id) is not None:
+            return False
+        from gideon.automation.workflows.round_protocol import has_round_protocol
+
+        if has_round_protocol(store.read_spec(run.id)):
+            run.extra["round_interrupted"] = True
+            store.save(run)
+            return False
+        return True
 
     async def _sweep_one(self, run: WorkflowRun) -> bool:
         substrate = self._substrate_for(run)

@@ -197,6 +197,9 @@ async def api_proactive_digest(request: web.Request) -> web.Response:
         view["schedule"] = state["schedule"]
         view["schedule_drift"] = state["drift"]
         view["quiet_hours"] = _quiet_hours()
+        from gideon.engine.proactive_decisions import recent
+
+        view["commitment_decisions"] = recent()
         return view
 
     try:
@@ -516,6 +519,8 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
             status=403,
         )
     body = await _body(request)
+    if body.get("commitment_key"):
+        return await _commitment_reply(request, body)
     run_id = str(body.get("run_id", "") or "").strip()
     text = str(body.get("text", "") or "")
     if not run_id:
@@ -633,6 +638,54 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
         resources=f"run:{run_id}:{_verb(parsed)}:{','.join(targets)}",
     )
     return web.json_response({"ok": True, "outcome": "acted", "results": results})
+
+
+async def _commitment_reply(request: web.Request, body: dict) -> web.Response:
+    """An explicit dismissal or reviewed background workflow from a persisted decision."""
+    from gideon.engine import proactive_decisions
+
+    topic = str(body.get("commitment_key") or "").strip()
+    decision = await asyncio.to_thread(proactive_decisions.get, topic)
+    if decision is None:
+        return json_error("commitment_not_found", message="that commitment decision is no longer available", status=404)
+    action = body.get("action")
+    if action == "dismiss":
+        updated = await asyncio.to_thread(proactive_decisions.dismiss, topic)
+        return web.json_response({"ok": True, "outcome": "dismissed", "decision": updated})
+    if action != "approve_background":
+        return json_error("invalid_request", message="action must be dismiss or approve_background", status=400)
+    if proactive_decisions.suppressed(decision):
+        return json_error("commitment_suppressed", message="that topic is in its dismissal cooldown", status=409)
+    if decision.get("run_id"):
+        return web.json_response({"ok": True, "outcome": "already", "run_id": decision["run_id"]})
+    name = str(body.get("workflow_name") or "").strip()
+    inputs = body.get("inputs") or {}
+    if not name or not isinstance(inputs, dict):
+        return json_error("invalid_request", message="a saved workflow and input object are required", status=400)
+    from gideon.automation.workflows import service as workflow_service
+    from gideon.automation.workflows.handlers import _guard, _supervisor
+    from gideon.automation.workflows.models import OriginKind
+
+    denied = _guard(request, "workflow_run_start")
+    if denied is not None:
+        return denied
+    supervisor = _supervisor(request)
+    if supervisor is None:
+        return json_error("engine_unavailable", message="workflow supervisor is unavailable", status=503)
+    result = await workflow_service.start_run(
+        name=name, inputs=inputs, supervisor=supervisor,
+        origin_kind=OriginKind.MANUAL,
+        session_key=str(request.headers.get("X-Session-Key") or ""),
+        idempotency_key=f"proactive:{topic}",
+    )
+    if not result.get("ok"):
+        return json_error("background_launch_failed", message=str(result.get("message") or "workflow did not start"), status=409)
+    updated = await asyncio.to_thread(proactive_decisions.approved_run, topic, result["run_id"])
+    _sel().log_api_access(
+        caller=request.headers.get("X-Session-Key", ""), operation="commitment_background_launch",
+        outcome="approved", source="dashboard", resources=f"run:{result['run_id']}",
+    )
+    return web.json_response({"ok": True, "outcome": "launched", "run_id": result["run_id"], "decision": updated})
 
 
 def _verb(parsed: Any) -> str:

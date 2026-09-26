@@ -23,6 +23,7 @@ export function GuardrailsPanel() {
     api.gideonConfig().then((c) => (c.guardrails ?? {}) as GuardrailsCfg),
     { persist: true },
   )
+  const { data: dailySpend, refresh: refreshDailySpend } = useQuery('triggers:budget', () => api.triggerBudget())
   useEffect(() => { if (data) setCfg(data) }, [data])
 
   if (!data && loadErr) return <LoadError what="settings" error={loadErr} onRetry={refresh} />
@@ -41,6 +42,12 @@ export function GuardrailsPanel() {
       <IncidentSection />
 
       <Section title="Daily budget" hint="Cap what your automations spend in a day. At the ceiling, further unattended runs are skipped (a cron fire is paused, a subagent spawn refused) and resume automatically the next day. 0 = unlimited.">
+        {dailySpend && <div role="status" data-type="body-s" className="mb-m rounded-lg bg-surface-container px-m py-3 text-on-surface-var">
+          {dailySpend.paused ? 'Paused by daily budget' : dailySpend.status === 'warn' ? 'Approaching daily budget' : 'Daily automation budget available'}
+          {' · '}{dailySpend.tokens.toLocaleString()} tokens and ${dailySpend.dollars.toFixed(4)} recorded today.
+          {dailySpend.paused && <> Resumes automatically {new Date(dailySpend.resumes_at).toLocaleString()}.</>}
+          <Button variant="ghost" size="xs" onClick={refreshDailySpend}>Refresh spend</Button>
+        </div>}
         <RowGroup>
           <NumberRow label="Max tokens / day" hint="Across every trigger. 0 = unlimited."
             value={cfg.budgets?.max_tokens_per_day ?? 0} min={0} step={1000}

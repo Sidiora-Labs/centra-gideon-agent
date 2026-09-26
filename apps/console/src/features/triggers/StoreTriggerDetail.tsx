@@ -83,7 +83,10 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
         setErr(r.refused || (typeof r.result === 'string' && r.result) || 'This automation did not run.')
         return
       }
-      setRunFlash(dry ? 'Dry run — nothing executed' : 'Ran')
+      const plan = (r.result as { plan?: { enforced?: string[]; bypassed?: string[] } } | undefined)?.plan
+      setRunFlash(dry
+        ? plan ? `Dry run: no action executed. Enforced: ${(plan.enforced ?? []).join(', ') || 'none'}. Bypassed: ${(plan.bypassed ?? []).join(', ') || 'none'}.` : 'Dry run: no action executed.'
+        : 'Ran')
       if (!dry) setHistKey((k) => k + 1)
       onChanged()
     } catch (e) {

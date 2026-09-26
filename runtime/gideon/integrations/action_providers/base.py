@@ -21,6 +21,7 @@ class ActionContext:
     event: str
     context: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
+    execution_cwd: str = ""
 
 
 @dataclass

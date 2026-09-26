@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availableSuggestions, intentKind, suggestTemplate } from './templateSuggest'
+import { availableSuggestions, intentKind, rankWorkflowDefinitions, suggestTemplate } from './templateSuggest'
 
 
 const SHIPPED = new Set([
@@ -73,5 +73,18 @@ describe('availableSuggestions', () => {
   it('omits a kind whose template is not installed', () => {
     const pairs = availableSuggestions(new Set(['deep-research']))
     expect(pairs).toEqual([{ kind: 'research', template: 'deep-research' }])
+  })
+})
+
+describe('rankWorkflowDefinitions', () => {
+  it('ranks matching saved definitions and leaves unrelated ones out', () => {
+    const defs = [
+      { name: 'code-project', description: 'Build software', tags: ['code'] },
+      { name: 'incident-review', description: 'Investigate production incidents', tags: ['incident'] },
+      { name: 'travel-planner', description: 'Plan trips', tags: ['travel'] },
+    ] as Parameters<typeof rankWorkflowDefinitions>[1]
+    const ranked = rankWorkflowDefinitions('investigate production incidents', defs)
+    expect(ranked[0].definition.name).toBe('incident-review')
+    expect(ranked.map((item) => item.definition.name)).not.toContain('travel-planner')
   })
 })
