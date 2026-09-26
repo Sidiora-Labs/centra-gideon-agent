@@ -11,6 +11,7 @@ import { TextLink } from '../../shared/ui/TextLink'
 import { Meter } from '../../shared/ui/Meter'
 import { InvestigateButton } from '../../shared/ui/InvestigateButton'
 import { Markdown } from '../../shared/ui/Markdown'
+import { TodoList, type TodoItem } from '../../shared/vendor/assistant-ui/elements/todo-list'
 import { confirm, confirmDelete } from '../../shared/ui/dialog'
 import { accentChip } from '../../shared/theme/accent'
 import { statusMeta, priorityMeta, dueMeta, relTime, isExitComplete, exitDoneCount, blockKindMeta } from './taskMeta'
@@ -95,12 +96,10 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
         </li>
       })}</ul>
     </DetailSection>}
-    {steps.length > 0 && <DetailSection label="Action plan"><ol className="grid gap-xs">{steps.map((step, index) => <li key={index} data-type="body-s" className="flex items-start gap-s">
-      <button type="button" disabled={readOnly || busy} onClick={() => toggle('step', index)} aria-label={step.completed ? 'Mark step incomplete' : 'Mark step done'} className="group -mx-0.5 shrink-0 inline-flex size-6 items-center justify-center disabled:cursor-default">
-        <span className="inline-flex size-5 items-center justify-center rounded-pill tabular-nums transition-shadow group-hover:ring-2 group-hover:ring-primary group-disabled:ring-0" data-type="caption" style={{ background: step.completed ? 'var(--color-ok)' : 'color-mix(in srgb, var(--color-primary) 18%, transparent)' }}>{step.completed ? <Check size={11} className="text-white" /> : index + 1}</span>
-      </button>
-      <span className={step.completed ? 'text-on-surface-low line-through' : 'text-on-surface'}>{step.content ?? step.description}</span>
-    </li>)}</ol></DetailSection>}
+    {steps.length > 0 && <DetailSection label="Action plan"><TodoList heading="" className="max-w-none"
+      items={steps.map((step, index): TodoItem => ({ id: `${task.id}:${index}`, text: step.content ?? step.description ?? '', status: step.completed ? 'done' : 'pending' }))}
+      onToggle={!readOnly && !busy ? (_item, index) => toggle('step', index) : undefined} />
+    </DetailSection>}
     {prerequisites.length > 0 && <DetailSection label={`Depends on · ${prerequisites.length}`}><div className="grid gap-1.5">
       {prerequisites.map(id => {
         const related = taskIndex.get(id)

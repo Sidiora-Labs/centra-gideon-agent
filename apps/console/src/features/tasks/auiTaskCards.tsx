@@ -12,7 +12,7 @@ export function taskCardState(status: string): TaskCardState {
 }
 
 export function TaskTodoResult({ task }: { task: TaskItem }) {
-  const items: TodoItem[] = (task.action_plan ?? []).map((step, index) => ({
+  const items: TodoItem[] = (task.action_plan ?? []).map((step, index): TodoItem => ({
     id: `${task.id}:${step.sequence ?? index}`, text: step.content ?? step.description ?? '',
     status: step.completed ? 'done' : 'pending',
   })).filter(item => item.text)

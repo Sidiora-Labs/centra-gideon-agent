@@ -13,7 +13,7 @@
   "adapted_modules": {
     "elicitation-form.tsx": "0a712c5630a2e4693b66724d2c18ac58f86575d5ce4d3874ccaeef210bd11baa",
     "mcp-server-panel.tsx": "14b82c682eec29a594cefbbbc992966d99c092e4f053552c5fe8612df11f15c1",
-    "tool-error.tsx": "781892b5f9f553936e028235b64dc523c81e6cf93dcf31e3e3b58e48998ecf6e",
+    "tool-error.tsx": "cb6b22cfa0e39019e3d63bbc6b9f9d621de5de95243a0da268e5c9fae345919a",
     "permission-grant.tsx": "a91e15d004d3ba9316f3773c4d40eaa8f0b07c152dc5f786c2281841e9e8b343",
     "computer-use.tsx": "e33f379eea3404acc883b10d5ed13b1ba9120e5d1fdbcc2ac5cd80228504fc7d",
     "code-runner.tsx": "9769774faf957b279ef886c85e6374acebafa0ca44e0185f8469b6d7fcf802ec"
@@ -21,6 +21,7 @@
   "adaptations": [
     "replace donor @/lib/utils import with shared vendor ../lib/utils",
     "retain donor typed props, caller actions and presentation behavior",
-    "disable action buttons when the caller has not supplied an action"
+    "disable action buttons when the caller has not supplied an action",
+    "allow unknown retry telemetry and show attempt fraction only when both counts are supplied"
   ]
 }

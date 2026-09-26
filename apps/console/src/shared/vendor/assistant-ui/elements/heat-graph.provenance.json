@@ -1,0 +1,14 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "heat-graph.tsx": {
+      "source_sha256": "d3937b4c6c1f6aee55fe6ecbe1e8aa878b8455ed1613f49e856060507a6cbcd3",
+      "local_sha256": "181b5b0bc3295c33abf98f570bbba432155e376ebf7107baa515c04042726fa6"
+    }
+  },
+  "adaptations": [
+    "import real vendored heat-graph dependency from ../dependencies/heat-graph"
+  ]
+}

@@ -66,6 +66,7 @@ export interface ComposerMeasuredContext {
   usedTokens?: number | null;
   windowTokens?: number | null;
   breakdown?: readonly { label: string; tokens: number; tint: string }[] | null;
+  breakdownComplete?: boolean;
   sources?: readonly string[];
 }
 
@@ -518,16 +519,23 @@ export function ComposerContext({
           <p className="text-[13.5px] font-medium">
             {displayPercent !== undefined ? `Context: ${displayPercent}% used` : "Context: unknown"}
           </p>
-          {measured?.usedTokens != null && measured.windowTokens != null && (
+          {measured?.usedTokens != null && measured.windowTokens != null ? (
             <p className={mono}>{formatTokens(measured.usedTokens)} / {formatTokens(measured.windowTokens)} tokens</p>
-          )}
-          {breakdown && breakdown.length > 0 ? breakdown.map((part) => (
-            <div key={part.label} className="flex items-center gap-2 text-xs">
-              <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: part.tint }} />
-              <span className="flex-1">{part.label}</span>
-              <span>{formatTokens(part.tokens)} tokens</span>
-            </div>
-          )) : <p className="text-foreground/45 text-xs">Breakdown unavailable</p>}
+          ) : measured?.windowTokens != null ? (
+            <p className={mono}>Window: {formatTokens(measured.windowTokens)} tokens</p>
+          ) : measured?.usedTokens != null ? (
+            <p className={mono}>Used: {formatTokens(measured.usedTokens)} tokens</p>
+          ) : null}
+          {breakdown && breakdown.length > 0 ? <>
+            {breakdown.map((part) => (
+              <div key={part.label} className="flex items-center gap-2 text-xs">
+                <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: part.tint }} />
+                <span className="flex-1">{part.label}</span>
+                <span>{formatTokens(part.tokens)} tokens</span>
+              </div>
+            ))}
+            {measured?.breakdownComplete === false && <p className="text-foreground/45 text-xs">Breakdown incomplete</p>}
+          </> : <p className="text-foreground/45 text-xs">Breakdown unavailable</p>}
           {measured?.sources && measured.sources.length > 0 && (
             <p className="text-foreground/45 max-h-24 overflow-y-auto break-words text-xs">Sources: {measured.sources.join(", ")}</p>
           )}

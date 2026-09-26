@@ -1,0 +1,38 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "elements/markdown-text.tsx": "4621787f69160d9f34a170da8fb76005a811a7cfa704280e463518a67eb7fc8d",
+    "elements/syntax-highlighter.tsx": "5a744f84764857325a67b82d04499fed98e046dc2d621122b8b3202bd17f886d",
+    "elements/shiki-highlighter.aui.tsx": "f3b0c83d58234376a60fe3296c42da4fc7cad64260789a91a13f4997cc7dbceb",
+    "elements/mermaid-diagram.aui.tsx": "5a67938ae2045c68d04feb5c8e327c06f2ab80b5bdadd0410fdc28bc62b03724",
+    "elements/shiki-highlighter.tsx": "a666781609f2c946363ff5f87e225f34c810131f9dac34f3c27720c33d0c71bd",
+    "elements/mermaid-diagram.tsx": "89d291f29899452fc4dced6319ea6309ef4099930fa815752cf848b9d0ede740",
+    "hooks/use-copy-to-clipboard.ts": "1f3b8a1bab79cef961f62eb25d6b58a0d16c957d63ba1faf086ad09c99712c0a"
+  },
+  "adapted_modules": {
+    "elements/markdown-text.tsx": "5767b517fe86916e2f913b4edb033cd9a60406449cb70f9070f0bfbeeae8e9a4",
+    "elements/syntax-highlighter.tsx": "5a744f84764857325a67b82d04499fed98e046dc2d621122b8b3202bd17f886d",
+    "elements/shiki-highlighter.aui.tsx": "f3b0c83d58234376a60fe3296c42da4fc7cad64260789a91a13f4997cc7dbceb",
+    "elements/mermaid-diagram.aui.tsx": "5a67938ae2045c68d04feb5c8e327c06f2ab80b5bdadd0410fdc28bc62b03724",
+    "elements/shiki-highlighter.tsx": "3a75851baba855bcd3e12a4efdc7d64feb8433b614210f5ff883543982716e58",
+    "elements/mermaid-diagram.tsx": "565a085eb80124599dad3d5280fbcd5f2cd96f582a09e4fb3deb3a29f8ca80bc",
+    "hooks/use-copy-to-clipboard.ts": "1f3b8a1bab79cef961f62eb25d6b58a0d16c957d63ba1faf086ad09c99712c0a"
+  },
+  "adaptations": [
+    "replace donor absolute imports with relative shared vendor imports",
+    "use W09-owned tooltip button and compatibility layer without duplicating them",
+    "use the same pinned beautiful-mermaid and Shiki runtime dependencies as the donor",
+    "simplify unreachable viewport and parser error branches in Mermaid zoom, retaining native pointer capture when supported"
+  ],
+  "donor_paths": {
+    "elements/markdown-text.tsx": "packages/ui/src/components/react/assistant-ui/elements/markdown-text.tsx",
+    "elements/syntax-highlighter.tsx": "packages/ui/src/components/react/assistant-ui/elements/syntax-highlighter.tsx",
+    "elements/shiki-highlighter.aui.tsx": "packages/ui/src/components/react/assistant-ui/elements/shiki-highlighter.aui.tsx",
+    "elements/mermaid-diagram.aui.tsx": "packages/ui/src/components/react/assistant-ui/elements/mermaid-diagram.aui.tsx",
+    "elements/shiki-highlighter.tsx": "packages/ui/src/components/react/assistant-ui/elements/shiki-highlighter.tsx",
+    "elements/mermaid-diagram.tsx": "packages/ui/src/components/react/assistant-ui/elements/mermaid-diagram.tsx",
+    "hooks/use-copy-to-clipboard.ts": "packages/ui/src/hooks/use-copy-to-clipboard.ts"
+  }
+}

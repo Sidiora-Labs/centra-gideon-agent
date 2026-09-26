@@ -31,9 +31,9 @@ export function ToolError({
   name: string;
   target: string;
   message: string;
-  attempt: number;
-  maxAttempts: number;
-  retrying: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  retrying?: boolean;
   onRetry?: () => void;
   onSkip?: () => void;
 }) {
@@ -54,9 +54,11 @@ export function ToolError({
         <span className="text-foreground/80 min-w-0 flex-1 truncate text-[13px]">
           {target}
         </span>
-        <span className={cn(mono, "text-foreground/30 shrink-0 tabular-nums")}>
-          {attempt}/{maxAttempts}
-        </span>
+        {attempt !== undefined && maxAttempts !== undefined && (
+          <span className={cn(mono, "text-foreground/30 shrink-0 tabular-nums")}>
+            {attempt}/{maxAttempts}
+          </span>
+        )}
       </div>
 
       <div
