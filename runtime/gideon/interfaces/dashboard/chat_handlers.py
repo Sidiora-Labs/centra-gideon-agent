@@ -25,6 +25,7 @@ from gideon.core.config.loader import (
 from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import (
+    _attach_rewound,
     _attach_variants,
     _redact_meta,
     _rehydrate_session_from_history,
@@ -2200,18 +2201,22 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
             )
     all_messages = state.conversation_log.read_messages_chained(resolved_key)
     disk_total = len(all_messages)
-    max_resume = 500
-    messages = all_messages[-max_resume:] if disk_total > max_resume else all_messages
-    session._disk_older_count = max(0, disk_total - len(messages))
-    for m in messages:
+    for m in all_messages:
         role = m.get("role", "assistant")
         cls = "msg msg-u" if role == "user" else "msg msg-a"
         content = m.get("content", "")
         if role != "user":
             content, _ = redact_exfiltration_urls(content)
             content, _ = redact_credentials(content)
-        session.append(role, content, cls, ts=m.get("ts", ""))
+        session.append(
+            role,
+            content,
+            cls,
+            ts=m.get("ts", ""),
+            meta=m.get("meta") if isinstance(m.get("meta"), dict) else None,
+        )
         _attach_variants(session, m)
+        _attach_rewound(session, m)
     session.drain()
     session._resumed_count = len(session.messages)
     total = disk_total

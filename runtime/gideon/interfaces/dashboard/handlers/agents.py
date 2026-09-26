@@ -743,10 +743,23 @@ async def api_gideon_agents(request: web.Request) -> web.Response:
     from gideon.engine.agents.defaults import is_reserved_agent
 
     cfg = AppConfig.load()
+    state: ConsoleState | None = request.app.get("state")
+    live: dict[str, dict[str, int]] = {}
+    if state is not None:
+        for session in state._sessions.values():
+            if session.lifecycle != "active":
+                continue
+            name = session.agent or cfg.default_agent
+            if not name:
+                continue
+            counts = live.setdefault(name, {"active_sessions": 0, "running_sessions": 0})
+            counts["active_sessions"] += 1
+            counts["running_sessions"] += int(session.running)
     agents = [
         {
             "name": name,
             **dataclasses.asdict(agent_cfg),
+            **live.get(name, {"active_sessions": 0, "running_sessions": 0}),
             "reserved": is_reserved_agent(name),
             "editable": not is_reserved_agent(name),
         }
@@ -782,9 +795,12 @@ async def api_gideon_agents_sync(request: web.Request) -> web.Response:
 
 async def _do_agents_sync(request: web.Request) -> web.Response:
     from gideon.engine.agents.marketplace import get_default_agent_registry
+    from gideon.engine.agents.defaults import is_reserved_agent
 
     cfg = AppConfig.load()
-    synced = []
+    synced: list[str] = []
+    updated: list[str] = []
+    seen: set[str] = set()
     for file_name, body in get_default_agent_registry().documents():
         name = body.get("name", file_name)
         if not isinstance(name, str) or not re.fullmatch(
@@ -792,18 +808,57 @@ async def _do_agents_sync(request: web.Request) -> web.Response:
         ):
             logger.warning("Skipping malformed agent %s: invalid name", file_name)
             continue
-        if _resolve_agent_name(name, cfg):
+        seen.add(name)
+        existing_name = _resolve_agent_name(name, cfg)
+        if existing_name and cfg.agents[existing_name].source not in ("local", "marketplace"):
             continue
         try:
             staged = _staged_agent_fields(body)
         except ConfigValueError as exc:
             logger.warning("Skipping malformed agent %s: %s", name, exc)
             continue
-        cfg.agents[name] = AgentProfile(**staged)
-        synced.append(name)
-    if synced:
+        staged["source"] = "marketplace"
+        profile = AgentProfile(**staged)
+        if existing_name:
+            if dataclasses.asdict(cfg.agents[existing_name]) != dataclasses.asdict(profile):
+                cfg.agents[existing_name] = profile
+                updated.append(existing_name)
+        elif not is_reserved_agent(name):
+            cfg.agents[name] = profile
+            synced.append(name)
+    state: ConsoleState | None = request.app.get("state")
+    active_names = (
+        {
+            session.agent or cfg.default_agent
+            for session in state._sessions.values()
+            if session.lifecycle == "active" and (session.agent or cfg.default_agent)
+        }
+        if state is not None else set()
+    )
+    removed = [
+        name for name, profile in cfg.agents.items()
+        if profile.source in ("local", "marketplace")
+        and name not in seen and name not in active_names and not is_reserved_agent(name)
+    ]
+    for name in removed:
+        del cfg.agents[name]
+    if cfg.default_agent in removed:
+        from gideon.engine.agents.defaults import (
+            DEFAULT_NATIVE_AGENT_NAME,
+            make_default_native_profile,
+        )
+
+        cfg.default_agent = DEFAULT_NATIVE_AGENT_NAME
+        cfg.agents.setdefault(
+            DEFAULT_NATIVE_AGENT_NAME, make_default_native_profile(AgentProfile)
+        )
+    if synced or updated or removed:
         cfg.save()
-    return web.json_response({"ok": True, "synced": synced})
+        if state is not None:
+            state.push_refresh("agents")
+    return web.json_response(
+        {"ok": True, "synced": synced, "updated": updated, "removed": removed}
+    )
 
 
 async def api_gideon_agents_create(request: web.Request) -> web.Response:

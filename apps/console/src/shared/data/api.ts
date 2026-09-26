@@ -2993,6 +2993,7 @@ export interface SavedAgent {
   natural_voice?: boolean
   specialty?: string; route_hints?: string
   reserved?: boolean; editable?: boolean
+  active_sessions?: number; running_sessions?: number
 }
 
 

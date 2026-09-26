@@ -593,7 +593,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         setSideMsgs(pairs)
         sideOpenedRef.current = true
       }
-      if (d.running) { markStreaming(true); breakText.current = true }
+      markStreaming(!!d.running)
+      if (d.running) breakText.current = true
       setLoadingHistory(false)
     }).catch(() => { if (alive) setLoadingHistory(false) })
     return () => { alive = false }
@@ -739,39 +740,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (sk) api.chatSessionDetail(sk).then((d) => {
           writeCachedDetail(sk, d)
           if (sk !== sessionRef.current) return
-          const byTs = new Map<string, MemoryCitation[]>()
-          let lastCites: MemoryCitation[] | null = null
-          const skillsByTs = new Map<string, SkillUsed[]>()
-          let lastSkills: SkillUsed[] | null = null
-          for (const m of d.messages || []) {
-            if (m.role !== 'assistant') continue
-            const c = m.meta?.memory_citations
-            if (Array.isArray(c) && c.length) {
-              lastCites = c
-              if (m.ts) byTs.set(m.ts, c)
-            }
-            const sk2 = m.meta?.skills_used
-            if (Array.isArray(sk2) && sk2.length) {
-              lastSkills = sk2
-              if (m.ts) skillsByTs.set(m.ts, sk2)
-            }
-          }
-          if (byTs.size || lastCites || skillsByTs.size || lastSkills) setTurns((prev) => {
-            const lastIdx = prev.map((t) => t.role).lastIndexOf('assistant')
-            return prev.map((t, i) => {
-              if (t.role !== 'assistant') return t
-              const patch: Partial<ChatTurn> = {}
-              if (!t.citations) {
-                if (t.ts && byTs.has(t.ts)) patch.citations = byTs.get(t.ts)
-                else if (i === lastIdx && !t.ts && lastCites) patch.citations = lastCites
-              }
-              if (!t.skillsUsed) {
-                if (t.ts && skillsByTs.has(t.ts)) patch.skillsUsed = skillsByTs.get(t.ts)
-                else if (i === lastIdx && !t.ts && lastSkills) patch.skillsUsed = lastSkills
-              }
-              return Object.keys(patch).length ? { ...t, ...patch } : t
-            })
-          })
+          coalescer.reset(); coalescing.current = false; breakText.current = true
+          setTurns(hydrateTurns(d.messages || [], d.running))
+          markStreaming(!!d.running)
         }).catch(() => {})
         break
       }
@@ -886,6 +857,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (!s) return
     api.chatSessionDetail(s).then((d) => {
       if (sessionRef.current !== s) return
+      coalescer.reset(); coalescing.current = false; breakText.current = true
       setTurns(hydrateTurns(d.messages || [], d.running))
       markStreaming(!!d.running)
       if (!d.running) setStatusText('')
@@ -903,9 +875,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (showingApproval) return
       api.chatSessionDetail(s).then((d) => {
         if (sessionRef.current !== s) return
-        if (!d.pending_approval) return
-
+        coalescer.flushNow()
+        coalescer.reset(); coalescing.current = false; breakText.current = true
         setTurns(hydrateTurns(d.messages || [], d.running))
+        if (!d.running) { markStreaming(false); setStatusText(''); setLatestActivity(null) }
         lastWsActivityRef.current = Date.now()
       }).catch(() => {})
     }, 2000)
@@ -1016,7 +989,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     return () => { alive = false }
   }, [resultRef])
 
-  async function ensureSession(seedMessages?: HistMsg[]): Promise<string> {
+  async function ensureSession(seedMessages?: HistMsg[], navigateNow = true): Promise<string> {
     if (sessionRef.current) return sessionRef.current
     if (ensureInFlightRef.current) return ensureInFlightRef.current
     const p = (async () => {
@@ -1031,7 +1004,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (seedMessages?.length) {
         writeCachedDetail(created.key, { key: created.key, title: '', messages: seedMessages, running: false } as unknown as ChatDetail)
       }
-      navigate(`chat/${created.key}`, { replace: true })
+      if (navigateNow) navigate(`chat/${created.key}`, { replace: true })
       if (acp) await persistSelection('this agent', api.setSessionAcpAgent(created.key, { provider: acp.providerId, provider_agent: acp.agent.provider_agent, model: selection.model && selection.model !== 'Auto' ? selection.model : undefined }))
       if (selection.approval !== 'normal') {
         const result = await persistSelection('this approval mode', api.setApprovalMode(selection.approval, created.key))
@@ -1140,6 +1113,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const artifactSlugs = mentionedArtifacts.map((a) => a.slug)
     setInput(''); setPreOptimize(null); markStreaming(true); breakText.current = true
     setPasteBlocks([]); setMentionedFiles([]); setAttachedPaths([]); setMentionedKnowledge([]); setMentionedArtifacts([])
+    let acceptedSession: string | null = null
     try {
       const meta: Record<string, unknown> = { client_ts: clientTs }
       if (files.length) meta.files = files
@@ -1149,11 +1123,32 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (original) meta.original = original
       if (uiLabel) meta.ui_label = uiLabel
       const seed: HistMsg[] = [{ role: 'user', content: llmText, ts: clientTs, meta: meta as HistMsg['meta'] }]
-      const sid = await ensureSession(seed)
+      const sid = await ensureSession(seed, false)
+      acceptedSession = sid
       if (screenShare.sharing) await screenShare.captureAndStage(sid)
       await api.sendChat(llmText, sid, meta, undefined, opts?.inputOrigin)
+      if (!sessionId) navigate(`chat/${sid}`, { replace: true })
     }
-    catch (e) { markStreaming(false); patchLastAssistant((segs) => [...segs, { kind: 'text', text: `⚠️ ${(e as Error).message}` }]) }
+    catch (e) {
+      const sid = acceptedSession
+      const detail = sid ? await api.chatSessionDetail(sid).catch(() => null) : null
+      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === clientTs)
+      if (accepted && detail) {
+        setTurns(hydrateTurns(detail.messages || [], detail.running))
+        markStreaming(!!detail.running)
+        if (sid && !sessionId) navigate(`chat/${sid}`, { replace: true })
+      } else {
+        markStreaming(false)
+        setTurns((prev) => prev.filter((turn) => turn.ts !== clientTs))
+        setInput((cur) => cur || t)
+        setPasteBlocks(blocks)
+        setMentionedFiles(mentionedFiles)
+        setAttachedPaths(attachedPaths)
+        setMentionedKnowledge(mentionedKnowledge)
+        setMentionedArtifacts(mentionedArtifacts)
+        setMicError(`Couldn’t send: ${(e as Error).message}`)
+      }
+    }
   }
 
   async function pinScreenFrame() {
@@ -1358,12 +1353,25 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const t = content.trim()
     if (!s || !t || streaming) return
     const turn = turns[turnIndex]
+    const previousTurns = turns
     setEditingTurn(null)
     const newTs = new Date().toISOString()
     setTurns((prev) => [...prev.slice(0, turnIndex), userTurn(t, newTs)])
     markStreaming(true); breakText.current = true
     try { await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind) }
-    catch (e) { markStreaming(false); patchLastAssistant((segs) => [...segs, { kind: 'text', text: `⚠️ ${(e as Error).message}` }]) }
+    catch (e) {
+      const detail = await api.chatSessionDetail(s).catch(() => null)
+      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === newTs)
+      if (accepted && detail) {
+        setTurns(hydrateTurns(detail.messages || [], detail.running))
+        markStreaming(!!detail.running)
+      } else {
+        markStreaming(false)
+        setTurns(previousTurns)
+        setInput(t)
+        setMicError(`Couldn’t resend: ${(e as Error).message}`)
+      }
+    }
   }
 
   async function rewindTo(turnIndex: number) {

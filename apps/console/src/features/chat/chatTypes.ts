@@ -198,6 +198,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
   const turns: ChatTurn[] = []
   const toolIndex = new Map<string, ToolSegment>()
   let lastUserText = ''
+  let lastUserTs: string | undefined
   let assistantTextSinceUser = false
 
   let visible = -1
@@ -212,7 +213,8 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
     if (m.role === 'user') {
       visible += 1
       const text = m.content.trim()
-      if (text === lastUserText && !assistantTextSinceUser) continue
+      if (text === lastUserText && !assistantTextSinceUser
+        && ((!m.ts && !lastUserTs) || (m.ts && m.ts === lastUserTs))) continue
 
       const pastes = m.meta?.pastes
       const original = m.meta?.original
@@ -224,8 +226,8 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       if (Array.isArray(m.rewound) && m.rewound.length) ut.rewound = m.rewound
       ut.visibleIndex = visible
       turns.push(ut)
-      lastUserText = text; assistantTextSinceUser = false
-    } else if (m.role === 'assistant') {
+      lastUserText = text; lastUserTs = m.ts; assistantTextSinceUser = false
+    } else if (m.role === 'assistant' || m.role === 'streaming') {
       visible += 1
       const at = lastAssistant()
       at.visibleIndex = visible
