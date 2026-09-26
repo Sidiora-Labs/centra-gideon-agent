@@ -342,9 +342,17 @@ async def ready_tasks(
     *,
     mine_only: bool = True,
 ) -> list[Task]:
-    records, _ = await list_all_tasks(
-        project=project, task_list_id=task_list_id, limit=MAX_TASK_PAGE_LIMIT
-    )
+    records: list[Task] = []
+    while True:
+        page, total = await list_all_tasks(
+            project=project,
+            task_list_id=task_list_id,
+            limit=MAX_TASK_PAGE_LIMIT,
+            offset=len(records),
+        )
+        records.extend(page)
+        if not page or len(records) >= total:
+            break
     graph = {row.id: row for row in records}
     ready_ids = set(reconcile.ready_task_ids(graph))
     selected = [row for row in records if row.id in ready_ids]
@@ -425,9 +433,17 @@ async def search_tasks(
     offset: int = 0,
 ) -> tuple[list[Task], int]:
     limit, offset = task_page_window(limit, offset)
-    rows, _ = await list_all_tasks(
-        project=project, task_list_id=task_list_id, limit=MAX_TASK_PAGE_LIMIT
+    rows = await _directory().collect(
+        None,
+        {
+            "status": None,
+            "assignee": None,
+            "project": project,
+            "task_list_id": task_list_id,
+        },
     )
+    if task_list_id:
+        rows = [row for row in rows if row.task_list_id == task_list_id]
     search = TaskSearch(
         (query or "").strip().lower(),
         set(filter(None, statuses or [])),

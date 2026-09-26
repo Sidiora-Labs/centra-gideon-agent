@@ -1356,7 +1356,7 @@ class ConsoleState(WebSocketState):
         try:
             from gideon.core.config.loader import AppConfig
 
-            return (AppConfig.load().agent.bot_name or "").strip()
+            return (AppConfig.load().dashboard.user_name or "").strip()
         except Exception:
             logger.debug("operator name lookup failed", exc_info=True)
             return ""

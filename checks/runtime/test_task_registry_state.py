@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from gideon.automation.workflows import pool
 from gideon.engine.tasks import registry
 from gideon.engine.tasks.native import NativeTaskProvider
+from gideon.engine.tasks.models import Task
 
 
 @pytest.fixture
@@ -87,3 +89,17 @@ async def test_real_provider_aggregation_retains_per_source_rows(source):
     )
     assert [item.id for item in selected] == [row.id]
     assert (await directory.find(row.id))[0] is source
+
+
+@pytest.mark.asyncio
+async def test_search_pages_past_the_provider_window(source):
+    directory = source._ensure_dir()
+    for index in range(501):
+        task = Task(id=f"page-{index:03}", title=f"Page {index:03}")
+        (directory / f"{task.id}.json").write_text(json.dumps(task.to_dict()))
+    found, total = await registry.search_tasks("page", limit=500, offset=500)
+    assert total == 501
+    assert len(found) == 1
+    ready = await registry.ready_tasks(mine_only=False)
+    assert len(ready) == 501
+    assert {row.id for row in ready} == {f"page-{index:03}" for index in range(501)}

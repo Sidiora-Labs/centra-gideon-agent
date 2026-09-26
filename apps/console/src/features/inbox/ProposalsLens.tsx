@@ -5,17 +5,31 @@ import { Button } from '../../shared/ui/Button'
 import { Checkbox, FieldError, TextArea } from '../../shared/ui/forms'
 import { EmptyState } from '../../shared/ui/ListScaffold'
 import { type InboxItem } from '../../shared/data/api'
+import { api } from '../../shared/data/api'
+import { useState } from 'react'
+import { isOpen } from './inboxMeta'
 import {
   APPLY_CASE_LABEL,
   applyCase,
+  applyTarget,
   groupLabel,
   proposalOf,
 } from './proposalLens'
 
-export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChanged: () => void }) {
-  const { selected, outcomes, editing, draft, draftError, busy, selectedItems, batchOk, groups, toggle, approve, approveSelected, startEdit, saveEdit, setDraft, setEditing } = useInboxProposals(items, onChanged)
+export function ProposalsLens({ items, reviewedCount, onChanged }: { items: InboxItem[]; reviewedCount?: number; onChanged: () => void }) {
+  const pending = items.filter(item => isOpen(item.status))
+  const { selected, outcomes, editing, draft, draftError, busy, selectedItems, batchOk, groups, toggle, approve, approveSelected, startEdit, saveEdit, setDraft, setEditing } = useInboxProposals(pending, onChanged)
+  const [clearError, setClearError] = useState('')
+  const [clearing, setClearing] = useState(false)
+  const clearReviewed = async () => {
+    if (clearing) return
+    setClearing(true); setClearError('')
+    try { await api.clearReviewedInboxProposals(); onChanged() }
+    catch (error) { setClearError(error instanceof Error ? error.message : 'Could not clear reviewed proposals.') }
+    finally { setClearing(false) }
+  }
 
-  if (items.length === 0) {
+  if (items.length === 0 && !reviewedCount) {
     return (
       <EmptyState
         icon={Lightbulb}
@@ -27,7 +41,8 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
 
   return (
     <div className="grid gap-l">
-      <div className="flex flex-wrap items-center gap-m rounded-xl border border-outline/25 bg-surface-high/40 p-m">
+      {(reviewedCount ?? 0) > 0 && <div className="flex flex-wrap items-center gap-s"><Button size="sm" variant="ghost" onClick={clearReviewed} loading={clearing}>Clear {reviewedCount} reviewed proposal{reviewedCount === 1 ? '' : 's'}</Button>{clearError && <span role="alert" className="text-danger">{clearError}</span>}</div>}
+      {pending.length > 0 && <div className="flex flex-wrap items-center gap-m rounded-xl border border-outline/25 bg-surface-high/40 p-m">
         <Button
           size="sm"
           variant="primary"
@@ -52,10 +67,11 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
             ? `${selectedItems.length} selected`
             : 'Batch approve works within one source and kind.'}
         </span>
-      </div>
+      </div>}
 
       <div className="flex flex-col gap-s">
         {items.map((it) => {
+          const reviewed = !isOpen(it.status)
           const p = proposalOf(it)
           const kase = p ? applyCase(p) : ''
           const outcome = outcomes[it.id]
@@ -66,11 +82,11 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
               style={{ background: 'var(--color-surface-container)' }}
             >
               <div className="flex items-start gap-s">
-                <Checkbox
+                {!reviewed && <Checkbox
                   checked={selected.has(it.id)}
                   onChange={() => toggle(it.id)}
                   ariaLabel={`Select proposal: ${p?.title || it.message}`}
-                />
+                />}
                 <div className="min-w-0 flex-1">
                   <div data-type="label-m" className="truncate text-on-surface" style={fvs(500)}>
                     {p?.title || it.message}
@@ -78,7 +94,7 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
                   <div data-type="caption" className="mt-0.5 flex flex-wrap items-center gap-s text-on-surface-low">
                     <span>{groupLabel(it)}</span>
                     {kase ? (
-                      <span>· {APPLY_CASE_LABEL[kase]}</span>
+                      <span>· {APPLY_CASE_LABEL[kase]}{p && applyTarget(p) ? `: ${applyTarget(p)}` : ''}</span>
                     ) : (
                       <span className="inline-flex items-center gap-xs text-warn">
                         <AlertTriangle size={11} /> no runnable action
@@ -102,7 +118,7 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
                       ? `mt-s ${outcome.ok ? 'text-ok' : 'text-danger'}`
                       : 'sr-only'}
                   >
-                    {outcome ? (outcome.ok ? 'Applied.' : `Not applied — ${outcome.error}. Still pending.`) : ''}
+                    {outcome ? (outcome.ok ? outcome.text : `Not applied — ${outcome.error}. Still pending.`) : reviewed ? 'Reviewed' : ''}
                   </div>
                   {editing === it.id && p && (
                     <div className="mt-s flex flex-col gap-s">
@@ -127,7 +143,7 @@ export function ProposalsLens({ items, onChanged }: { items: InboxItem[]; onChan
                     </div>
                   )}
                 </div>
-                {editing !== it.id && (
+                {!reviewed && editing !== it.id && (
                   <div className="flex shrink-0 items-center gap-s">
                     {p?.editable && (
                       <Button size="sm" variant="secondary" onClick={() => startEdit(it, p)}>

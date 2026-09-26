@@ -30,11 +30,9 @@ const SOUND_OPTIONS: { value: string; label: string }[] = [
 
 const TARGET_LABELS: Record<NotificationTarget, string> = {
   dashboard: 'Dashboard',
-  channel_dm: 'Channel DM',
   push: 'Push (mobile app required)',
   native: 'Desktop notification (when the desktop app is running)',
 }
-const INERT_TARGETS: NotificationTarget[] = ['channel_dm', 'push']
 
 export function NotificationRulesMatrix({ doc, onSaved }: { doc: NotificationRulesDoc; onSaved: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -107,7 +105,7 @@ export function NotificationRulesMatrix({ doc, onSaved }: { doc: NotificationRul
                                       : r.targets.filter((x) => x !== t)
                                     save(r.key, { targets: next.length ? next : ['dashboard'] })
                                   }} />
-                                <span className={INERT_TARGETS.includes(t) ? 'text-on-surface-low' : undefined}>{TARGET_LABELS[t]}</span>
+                                <span>{TARGET_LABELS[t]}</span>
                               </label>
                             ))}
                           </div>

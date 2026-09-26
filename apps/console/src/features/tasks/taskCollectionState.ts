@@ -49,7 +49,7 @@ export function filterTaskCollection(input: { tasks: TaskItem[] | null; ready: T
   const due = (task: TaskItem) => { const value = task.due ? parseDueDate(task.due) : NaN; return Number.isNaN(value) ? Infinity : value }
   const updated = (task: TaskItem) => Date.parse(task.updated_at || task.created_at || '') || 0
   return source.filter(task => {
-    if (!query && status !== 'all' && status !== 'ready' && !(status === 'done' ? TERMINAL.has(task.status) : task.status === status)) return false
+    if (!query && status !== 'all' && status !== 'ready' && task.status !== status) return false
     return scopeContains(task, scope, coding) && (!list || task.task_list_id === list) && (assigned !== ASSIGNED_MINE || belongsToOwner(task, owner))
   }).sort((left, right) => {
     const terminal = Number(TERMINAL.has(left.status)) - Number(TERMINAL.has(right.status))
@@ -112,7 +112,7 @@ export function useTaskCollection(query: string, filter: string) {
     let current = true
     setSearchError(null)
     const timer = setTimeout(() => {
-      api.searchTasks({ query, limit: 100 }).then(data => { if (current) setResults(data.tasks) }).catch(error => { if (current) { setResults(null); setSearchError(error) } })
+      api.allSearchTasks({ query }).then(data => { if (current) setResults(data.tasks) }).catch(error => { if (current) { setResults(null); setSearchError(error) } })
     }, 250)
     return () => { current = false; clearTimeout(timer) }
   }, [query, tasks, retry.search])

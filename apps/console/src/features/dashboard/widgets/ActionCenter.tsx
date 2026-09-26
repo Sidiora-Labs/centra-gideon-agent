@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { Check, X, ShieldCheck, Inbox, Sparkles, CheckCheck, Send } from 'lucide-react'
+import { Check, X, ShieldCheck, Inbox, Sparkles, CheckCheck } from 'lucide-react'
 import { api } from '../../../shared/data/api'
 import { reportingWrite } from '../../../app/shell/reportingWrite'
 import { rowSubject } from '../../../shared/data/rowSubject'
@@ -12,7 +12,12 @@ import type { RouteProps } from '../../../app/shell/useQueryState'
 import { invalidateKeys } from '../../../shared/data/data'
 
 type Kind = 'approval' | 'inbox' | 'proposal'
-interface Entry { key: string; kind: Kind; title: string; sub: string; id: string; session?: string }
+interface Entry { key: string; kind: Kind; title: string; sub: string; id: string; session?: string; inboxItemId?: string }
+
+function needsAction(item: { item_kind?: string; classification?: string }): boolean {
+  return ['needs_input', 'agent_request', 'proposal', 'user_note'].includes(item.item_kind ?? '')
+    || (['message', 'mention', 'email'].includes(item.item_kind ?? 'message') && item.classification === 'needs_reply')
+}
 
 export function ActionCenter({ navigate }: RouteProps) {
   const bustProposals = () => invalidateKeys('skill-proposals', true)
@@ -32,13 +37,17 @@ export function ActionCenter({ navigate }: RouteProps) {
   }
 
   const proposalIds = new Set(proposals.map((p) => p.id))
+  const approvalIds = new Set(approvals.map(approval => approval.id))
+  const proposalInbox = new Map(inbox.flatMap(item => item.refs?.skill_proposal ? [[String(item.refs.skill_proposal), item.id] as const] : []))
   const liveInbox = inbox.filter(
-    (i) => !(i.refs?.skill_proposal && proposalIds.has(String(i.refs.skill_proposal))),
+    (i) => needsAction(i)
+      && !(i.refs?.skill_proposal && proposalIds.has(String(i.refs.skill_proposal)))
+      && !(i.refs?.approval && approvalIds.has(String(i.refs.approval))),
   )
   const allEntries: Entry[] = [
     ...approvals.map((a) => ({ key: `a:${a.id}`, kind: 'approval' as const, id: a.id, title: `Run ${a.tool}`, sub: a.tool_purpose || a.source || 'Tool approval', session: a.session })),
     ...liveInbox.map((i) => ({ key: `i:${i.id}`, kind: 'inbox' as const, id: i.id, title: i.sender_name || i.channel_name || 'Message', sub: i.message?.slice(0, 90) || '' })),
-    ...proposals.map((p) => ({ key: `p:${p.id}`, kind: 'proposal' as const, id: p.id, title: `Skill: ${p.slug}`, sub: p.description?.slice(0, 90) || '' })),
+    ...proposals.map((p) => ({ key: `p:${p.id}`, kind: 'proposal' as const, id: p.id, title: `Skill: ${p.slug}`, sub: p.description?.slice(0, 90) || '', inboxItemId: proposalInbox.get(p.id) })),
   ].filter((e) => !done.has(e.key))
 
   const failures: { key: string; what: string; retry: () => void }[] = [
@@ -61,14 +70,15 @@ export function ActionCenter({ navigate }: RouteProps) {
   const routeFor = (e: Entry) => {
     if (e.kind === 'approval' && e.session) return `chat/${encodeURIComponent(e.session)}`
     if (e.kind === 'approval') return 'chat'
-    if (e.kind === 'inbox') return 'inbox'
+    if (e.kind === 'inbox') return `inbox?open=${encodeURIComponent(e.id)}`
+    if (e.inboxItemId) return `inbox?kind=proposal&open=${encodeURIComponent(e.inboxItemId)}`
     return 'skills?mode=proposals'
   }
 
   const primary = (e: Entry) => {
     if (e.kind === 'approval') withBusy(e.key, `approve “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'approve'))
     else if (e.kind === 'proposal') withBusy(e.key, `accept “${rowSubject([e.title, e.sub])}”`, () => api.acceptSkillProposal(e.id).then(bustProposals))
-    else navigate('inbox')
+    else navigate(routeFor(e))
   }
   const secondary = (e: Entry) => {
     if (e.kind === 'approval') withBusy(e.key, `reject “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'reject'))
@@ -78,6 +88,7 @@ export function ActionCenter({ navigate }: RouteProps) {
 
   return (
     <div className="flex flex-col gap-xs pt-xs">
+      <span data-type="caption" className="text-on-surface-low">{allEntries.length} item{allEntries.length === 1 ? '' : 's'} need your decision</span>
       {failures.map((f) => (
         <InlineError key={f.key} icon onRetry={f.retry}>
           Couldn&rsquo;t load {f.what}.
@@ -97,8 +108,8 @@ export function ActionCenter({ navigate }: RouteProps) {
                 isBusy ? <span data-type="label-m" className="px-m text-on-surface-low">…</span> : (
                   e.kind === 'inbox' ? (
                     <>
-                      <RowAction tone="primary" onClick={() => primary(e)} title="Open to reply"
-                        ariaLabel={`Reply: ${subject}`}><Send size={14} /> Reply</RowAction>
+                      <RowAction tone="primary" onClick={() => primary(e)} title="Open inbox item"
+                        ariaLabel={`Open: ${subject}`}><Inbox size={14} /> Open</RowAction>
                       <RowAction tone="danger" onClick={() => secondary(e)} title="Dismiss"
                         ariaLabel={`Dismiss: ${subject}`}><X size={14} /></RowAction>
                     </>
