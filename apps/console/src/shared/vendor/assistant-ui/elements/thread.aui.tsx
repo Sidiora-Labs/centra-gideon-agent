@@ -3,15 +3,9 @@
 import { MessagePrimitive, ThreadPrimitive, useAuiState, type AssistantState } from "@assistant-ui/react";
 import type { ComponentType, ReactNode, Ref } from "react";
 
-export type ThreadComponents = {
-  UserMessage?: ComponentType;
-  AssistantMessage?: ComponentType;
-  Welcome?: ComponentType;
-  ToolFallback?: ComponentType;
-  ToolGroup?: ComponentType;
-  ReasoningGroup?: ComponentType;
-  TaskGroup?: ComponentType;
-};
+export { Thread } from "./thread-full.aui";
+export type { ThreadComponents, ThreadProps, ThreadGroupPart } from "./thread-full.aui";
+import type { ThreadComponents } from "./thread-full.aui";
 
 export type ThreadTranscriptProps = {
   components?: ThreadComponents;
