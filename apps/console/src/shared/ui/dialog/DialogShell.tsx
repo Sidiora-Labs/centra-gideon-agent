@@ -43,9 +43,10 @@ export function DialogShell({ request, onClose, active = true }: {
   }
   useDismissKey('Escape', cancel, ownsInteraction ? 120 : -1)
   useEffect(() => {
-    if (!ownsInteraction || danger) return
+    if (!ownsInteraction || danger || !isPrompt) return
     const keyboard = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.key !== 'Enter' || (event.target instanceof HTMLElement && event.target.tagName === 'TEXTAREA')) return
+      if (event.defaultPrevented || event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)
+        || !trapRef.current?.contains(event.target)) return
       event.preventDefault()
       event.stopImmediatePropagation()
       submit()
@@ -57,7 +58,7 @@ export function DialogShell({ request, onClose, active = true }: {
   const resting = { opacity: 1, scale: 1, y: 0 }
   const hidden = { opacity: 0, scale: reduced ? 1 : 0.98, y: reduced ? 0 : expr(12, 0.3) }
   return createPortal(
-    <motion.div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
+    <motion.div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-l sm:p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={spring.effects}>
       <div className="absolute inset-0 bg-canvas/70 backdrop-blur-sm" onClick={cancel} aria-hidden="true" />
       <motion.div ref={trapRef} role={isAlert || danger ? 'alertdialog' : 'dialog'} aria-modal="true"
@@ -65,7 +66,8 @@ export function DialogShell({ request, onClose, active = true }: {
         aria-describedby={body ? `${identity}-body` : undefined}
         className="relative flex max-h-full w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface shadow-sheet"
         initial={hidden} animate={resting} exit={hidden} transition={reduced ? spring.effects : physics.fluid}>
-        <header className="flex shrink-0 items-start gap-3 border-b border-outline-variant/30 bg-surface-high/40 px-l py-l">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <header className="flex items-start gap-m border-b border-outline-variant/30 bg-surface-high/40 px-l py-l">
           {(danger || Icon) && <span className={`mt-0.5 shrink-0 ${danger ? 'text-danger' : 'text-primary'}`}>
             {Icon ? <Icon size={18} /> : <AlertTriangle size={18} />}
           </span>}
@@ -74,12 +76,13 @@ export function DialogShell({ request, onClose, active = true }: {
             {body && <div id={`${identity}-body`} data-type="body-s" className="mt-2 whitespace-pre-line text-on-surface-var">{body}</div>}
           </div>
         </header>
-        {isPrompt && fields.length > 0 && <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-l py-l">
+        {isPrompt && fields.length > 0 && <div className="flex flex-col gap-m px-l py-l">
           {fields.map((field, index) => <PromptField key={field.name} field={field} value={state.values[field.name] ?? ''}
             error={state.errors[field.name]} autoFocus={index === 0} id={`${identity}-field-${index}`}
             onChange={(value) => dispatch({ type: 'edit', name: field.name, value })} />)}
         </div>}
-        <footer className="flex shrink-0 justify-end gap-2 px-l py-l">
+        </div>
+        <footer className="flex shrink-0 flex-wrap justify-end gap-s border-t border-outline-variant/30 px-l py-l">
           {!isAlert && <button type="button" onClick={cancel} autoFocus={danger && !isPrompt} data-type="body-s"
             className="h-9 rounded-lg border border-outline-variant/50 bg-surface-high px-4 text-on-surface-var hover:bg-surface-highest">{cancelLabel ?? 'Cancel'}</button>}
           <button type="button" onClick={submit} autoFocus={!danger && !isPrompt}

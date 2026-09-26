@@ -238,10 +238,11 @@ hosted = "customer"
 
 [task.experience-polish]
 title = "experience-polish end-to-end implementation"
-status = "pending"
+status = "in_progress"
 wave = 4
 owner_lane = "experience-polish"
 requires = []
 reqs = ["099", "129", "130"]
+touches = ["apps/console/src/app/shell/shell.css", "apps/console/src/shared/ui/Button.tsx", "apps/console/src/shared/ui/ListScaffold.tsx", "apps/console/src/shared/ui/Modal.tsx", "apps/console/src/shared/ui/dialog/DialogShell.tsx", "apps/console/src/shared/ui/experiencePolish.test.tsx"]
+verify_cmd = "cd apps/console && npm test -- src/shared/ui/experiencePolish.test.tsx"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
