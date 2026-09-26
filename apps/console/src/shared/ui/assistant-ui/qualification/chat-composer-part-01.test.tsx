@@ -97,6 +97,26 @@ describe('donor composer on Gideon callbacks', () => {
     expect(host.onSend).not.toHaveBeenCalled()
   })
 
+  it('keeps Enter as a newline when send-on-enter is disabled and retains Ctrl-Enter optimization', () => {
+    writeQuery('chat:send-on-enter', false, true)
+    const onOptimize = vi.fn()
+    const host = mount({ value: 'Draft', onOptimize, controls: { optimize: true } })
+    const editor = screen.getByRole('textbox', { name: 'Message input' })
+    const view = EditorView.findFromDOM(editor)!
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }))
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(view.state.doc.toString()).toBe('Draft\n')
+    expect(host.onSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+    expect(onOptimize).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(editor, { key: 'Enter', shiftKey: true })
+    expect(view.state.doc.toString()).toBe('Draft\n\n')
+    act(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }))
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+    expect(onOptimize).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByRole('textbox', { name: 'Message input' })).toHaveLength(1)
+  })
+
   it('renders a donor command item from the live command API and inserts its actual command', async () => {
     vi.spyOn(api, 'slashCommands').mockResolvedValue([{ name: '/help', description: 'Show help' }])
     const host = mount({ value: '/' })
