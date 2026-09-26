@@ -1,0 +1,39 @@
+{
+  "source_repository": "AgentbaseAI/assistant-ui",
+  "source_commit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "license": "MIT",
+  "modules": {
+    "tool-call.tsx": {
+      "source_sha256": "4f41b05a3f64c5bc37f8f67d9b5931cfde1b69140cfbe0a3c2507e9d7cf3a174",
+      "local_sha256": "071dfcceaa40a7c0240410b231457a601b85454b8aecd1540b04f86ae7d4232e"
+    },
+    "tool-timeline.tsx": {
+      "source_sha256": "acdbde86542f4e87fd52fb6e250156a30cb09277e8e0236b23819076bc2fda3d",
+      "local_sha256": "5ebe91f240018311af4e26d51ad29d51e09abb4d180e32759196a64653290582"
+    },
+    "terminal-block.tsx": {
+      "source_sha256": "971b7341a8c113c57c54174fee0004425acc4b63cbd68416ff19b1b9bfbd7866",
+      "local_sha256": "cff4b6f52206b30f9da0eddb8a661369203b6a9c5805c03af412c8e5738cbcfa"
+    },
+    "code-diff.tsx": {
+      "source_sha256": "4aac7d976a391479aacd0b4a8a0539a3691d0b6556b94845a856bf463349d3ef",
+      "local_sha256": "dd942692c9f06e21e358bdf6fc9540b095852adb2f6a19d3b1f24bffe24cc23a"
+    },
+    "reviewable-diff.tsx": {
+      "source_sha256": "f8f0d725d37770bea2a968bfe985c7316e0b686ef9dd65ac3655fab09d103ebe",
+      "local_sha256": "77f074bde6adbaafb405d7365de3d020f83e85c90520a3cf34406c07a12dc21e"
+    },
+    "file-tree.tsx": {
+      "source_sha256": "ec536e12695228b321f10a74fa3d0403b5e7c1f17da2424890a67044146866b5",
+      "local_sha256": "670eee2139a8310e8745b6983d2abe150fcdb5b91ce579c8b75c7748d4599d8a"
+    },
+    "ui/collapsible.tsx": {
+      "source_sha256": "cf6333da05adc3d96abf7ce0928c0c9a3fe3c6df46f7771551220a9205c41975",
+      "local_sha256": "cf6333da05adc3d96abf7ce0928c0c9a3fe3c6df46f7771551220a9205c41975"
+    }
+  },
+  "adaptations": [
+    "local shared helper and collapsible imports",
+    "terminal completion labels use explicit exit code; unknown exit is Finished"
+  ]
+}
