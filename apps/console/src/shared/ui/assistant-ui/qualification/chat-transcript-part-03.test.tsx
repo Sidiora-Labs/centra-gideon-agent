@@ -173,6 +173,17 @@ describe('persisted assistant file changes', () => {
     expect(view.container.querySelector('[data-slot="file-tree"]')?.textContent).toContain('+1')
   })
 
+  it('does not claim line counts for an end-of-file newline change', () => {
+    const view = render(<MessageAssistant fileChanges={[{
+      path: 'src/eof.txt', before: 'same', after: 'same\n',
+    }]}>Updated file</MessageAssistant>)
+    const tree = view.container.querySelector('[data-slot="file-tree"]')
+    expect(tree?.textContent).toContain('src/eof.txt')
+    expect(tree?.textContent).not.toContain('+0')
+    expect(tree?.textContent).not.toContain('−0')
+    expect(view.container.querySelector('[data-slot="reviewable-diff"]')).toBeNull()
+  })
+
   it('adds and removes the donor file surface as persisted history changes', () => {
     const view = render(<MessageAssistant>Streaming answer</MessageAssistant>)
     expect(view.container.querySelector('[data-slot="file-tree"]')).toBeNull()

@@ -106,6 +106,7 @@ function snapshotLines(text: string): string[] {
 
 function diffForChange(change: ChatFileChange): { lines: DiffLine[]; additions: number; deletions: number; range: string } | null {
   if (isTruncated(change)) return null
+  if (change.before && change.after && change.before.endsWith('\n') !== change.after.endsWith('\n')) return null
   const before = snapshotLines(change.before)
   const after = snapshotLines(change.after)
   if (before.length + after.length > 2_000 || before.length * after.length > 250_000) return null
