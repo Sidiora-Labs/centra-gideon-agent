@@ -1,4 +1,4 @@
-import { useCallback, useId, useReducer, useState, type ReactNode } from 'react'
+import { useCallback, useId, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { X, Maximize2, Minimize2 } from 'lucide-react'
@@ -13,7 +13,7 @@ import { MobileSheet } from './MobileSheet'
 
 const DOCK_MIN = 320
 const DOCK_MAX = 720
-const dockMaxWidth = () => Math.min(DOCK_MAX, Math.max(DOCK_MIN, Math.floor(window.innerWidth / 2)))
+const MIN_DOCK_WORKSPACE = 720
 
 export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-w', fillHeight = false, onExpand, children }: {
   title: ReactNode
@@ -31,13 +31,32 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
     if (node && bodyHost.parentNode !== node) node.appendChild(bodyHost)
   }, [bodyHost])
   const titleId = useId()
-  const mobile = useIsMobile()
+  const isMobile = useIsMobile()
+  const workspaceProbe = useRef<HTMLSpanElement>(null)
+  const [workspaceWidth, setWorkspaceWidth] = useState(() => window.innerWidth)
+  useLayoutEffect(() => {
+    const workspace = workspaceProbe.current?.parentElement
+    if (!workspace) return
+    const measure = () => setWorkspaceWidth(workspace.clientWidth || window.innerWidth)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(workspace)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+  const mobile = isMobile || workspaceWidth < MIN_DOCK_WORKSPACE
+  const dockMaxWidth = () => Math.min(DOCK_MAX, Math.max(DOCK_MIN, Math.floor(workspaceWidth / 2)))
+  const workspaceAnchor = <span ref={workspaceProbe} hidden aria-hidden="true" />
   const reduced = useReducedMotion()
   const focusReturnRef = useFocusReturn<HTMLDivElement>()
   const [mode, setMode] = useReducer((_current: 'dock' | 'full', next: 'dock' | 'full') => next, 'dock')
   const expanded = mode === 'full'
-  const { fitWidth: dockW, onHandleDown, onHandleKey, min, max } = useResizablePanel(
+  const { fitWidth, onHandleDown, onHandleKey, min, max } = useResizablePanel(
     storeKey.replace(/-w$/, ''), { def: Math.min(420, dockMaxWidth()), min: DOCK_MIN, max: dockMaxWidth, side: rtl ? 'left' : 'right', edgePeek: Math.ceil(window.innerWidth / 2), storageKey: storeKey })
+  const dockW = Math.min(fitWidth, dockMaxWidth())
   const close = () => {
     urlKey?.setQuery({ [urlKey.key]: null })
     onClose()
@@ -50,7 +69,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
   useDockReservation(!expanded && !mobile)
   useDismissKey('Escape', () => expanded ? setMode('dock') : close(), expanded ? 20 : 10)
 
-  if (mobile) return <><MobileSheet title={title} icon={icon} fullHeight onClose={close}
+  if (mobile) return <>{workspaceAnchor}<MobileSheet title={title} icon={icon} fullHeight onClose={close}
     actions={onExpand && <IconButton icon={Maximize2} label="Open full page" size={44} onClick={onExpand} />}>
     <div ref={attachBody} />
   </MobileSheet>{createPortal(children, bodyHost)}</>
@@ -70,7 +89,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
   const body = <div ref={attachBody} className="min-h-0 flex-1 overflow-y-auto px-l py-l" />
   if (expanded) {
     const edge = rtl ? `inset(0px calc(100dvw - ${dockW}px) 0px 0px)` : `inset(0px 0px 0px calc(100dvw - ${dockW}px))`
-    return <>{createPortal(
+    return <>{workspaceAnchor}{createPortal(
       <motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
         className="fixed inset-0 z-[var(--z-content)] flex flex-col bg-surface"
         initial={reduced ? { opacity: 0 } : { clipPath: edge }}
@@ -84,7 +103,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
   const top = fillHeight ? '0px' : 'var(--shell-corner-rh, 56px)'
   const bottom = 'var(--spacing-m, 12px)'
   return (
-    <><motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
+    <>{workspaceAnchor}<motion.div ref={focusReturnRef} role="region" aria-labelledby={titleId}
       className="relative shrink-0 overflow-hidden rounded-s-2xl border-s border-outline-variant/50 bg-surface shadow-sm"
       style={{ marginTop: top, marginBottom: bottom, height: `calc(100% - ${top} - ${bottom})` }}
       initial={{ width: reduced ? dockW : 0, opacity: 0 }} animate={{ width: dockW, opacity: 1 }}
