@@ -59,6 +59,8 @@ def deck_from_dict(payload: Any) -> DeckModel:
         ],
         width_in=_number(data.get("width_in"), "model.width_in"),
         height_in=_number(data.get("height_in"), "model.height_in"),
+        template_slug=_text(data.get("template_slug"), "model.template_slug"),
+        template_version=_whole(data.get("template_version"), "model.template_version", default=0),
     )
 
 

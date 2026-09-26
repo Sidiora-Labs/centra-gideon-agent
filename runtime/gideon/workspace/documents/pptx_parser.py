@@ -21,6 +21,7 @@ never dropped silently, and located in the terms the EDITOR shows ("slide 3 · b
 from __future__ import annotations
 
 import io
+import re
 from typing import Any
 
 from gideon.workspace.documents.docx_parser import LossReport
@@ -46,6 +47,7 @@ def parse_pptx(data: bytes) -> tuple[DeckModel, LossReport]:
     prs = Presentation(io.BytesIO(data))
     slides = list(prs.slides)
     title = ""
+    template_slug, template_version = _template_ref(prs.core_properties.keywords)
     if slides and _is_cover(slides[0]):
         title = _title_text(slides[0])
         _slide(slides.pop(0), "cover slide", report)
@@ -58,6 +60,8 @@ def parse_pptx(data: bytes) -> tuple[DeckModel, LossReport]:
             ],
             width_in=_inches(prs.slide_width),
             height_in=_inches(prs.slide_height),
+            template_slug=template_slug,
+            template_version=template_version,
         ),
         report,
     )
@@ -90,12 +94,18 @@ def _slide(slide: Any, where: str, report: LossReport) -> Slide:
         )
         layout = ""
     bullets = _bullets(slide, where, report)
-    _report_shapes(slide, where, report)
+    notes = _notes_text(slide)
+    image = re.search(r"(?:^|\n)\[image: ([^\]\n]+)\]\s*$", notes)
+    artifact_slug = image.group(1).strip() if image else ""
+    if image:
+        notes = notes[:image.start()].rstrip()
+    _report_shapes(slide, where, report, artifact_slug)
     _report_background(slide, where, report)
     return Slide(
         title=_title_text(slide),
         bullets=bullets,
-        notes=_notes_text(slide),
+        notes=notes,
+        artifact_slug=artifact_slug,
         layout=layout,
         title_box=_box(slide, slide.shapes.title),
         body_box=_box(slide, body_placeholder(slide)),
@@ -178,18 +188,23 @@ def _run_styles(para: Any) -> list[str]:
     return found
 
 
-def _report_shapes(slide: Any, where: str, report: LossReport) -> None:
+def _report_shapes(slide: Any, where: str, report: LossReport, artifact_slug: str = "") -> None:
     """Everything on the slide that is not the title, the body, or empty.
 
     An EMPTY placeholder is skipped: a layout ships them (a Title Slide has a subtitle
     box), and a report that named every unused box would be noise a user learns to
     ignore — which is how the item that matters gets missed.
     """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
     carried = {title_index(slide)}
     body = body_placeholder(slide)
     if body is not None:
         carried.add(int(body.placeholder_format.idx))
     for shape in slide.shapes:
+        if (artifact_slug and shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+                and shape.name == f"Gideon image artifact {artifact_slug}"):
+            continue
         text = str(shape.text_frame.text or "").strip() if shape.has_text_frame else ""
         if shape.is_placeholder:
             if int(shape.placeholder_format.idx) in carried or not text:
@@ -205,6 +220,16 @@ def _report_shapes(slide: Any, where: str, report: LossReport) -> None:
         if text:
             detail = f"{detail}; its text: {_snip(text)}"
         report.add("slide_shape", detail, location=where)
+
+
+def _template_ref(keywords: str | None) -> tuple[str, int]:
+    for part in (keywords or "").split(";"):
+        part = part.strip()
+        if part.startswith("gideon-template="):
+            slug, sep, version = part.removeprefix("gideon-template=").rpartition("@")
+            if sep and slug and version.isdigit():
+                return slug, int(version)
+    return "", 0
 
 
 def _report_background(slide: Any, where: str, report: LossReport) -> None:

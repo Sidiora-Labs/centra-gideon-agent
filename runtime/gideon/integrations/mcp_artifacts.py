@@ -432,6 +432,10 @@ def _list_tools() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Existing knowledge item id or text artifact slug to turn into an outline; cite this source in speaker notes",
                     },
+                    "template": {
+                        "type": "string",
+                        "description": "Existing PPTX artifact slug whose slide masters and layouts style the new deck",
+                    },
                     "slides": {
                         "type": "array",
                         "description": "Alternative to markdown: [{title, body:[str | {text, level}], notes, sources:[url], layout}] — sources are written into speaker notes",  # noqa: E501
@@ -1199,6 +1203,7 @@ def _document_create(
         if source and model.slides:
             first = model.slides[0]
             first.notes = (first.notes + "\n" if first.notes else "") + f"Source: {source}"
+        model.template_slug = str(args.get("template") or "").strip()
     elif name == "sheet_create":
         sheets = args.get("sheets")
         rows = args.get("rows")

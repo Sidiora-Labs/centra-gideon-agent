@@ -7,8 +7,8 @@ import { buildReactSrcdoc, readThemeVars } from './widgetSrcdoc'
 import { useWidgetWire } from './useWidgetActionBridge'
 import { exportWidget, useWidgetDocument, useWidgetExpansion } from './widgetFrameState'
 
-interface ReactWidgetFrameProps { jsx: string; title?: string }
-export function ReactWidgetFrame({ jsx, title = 'React widget' }: ReactWidgetFrameProps) {
+interface ReactWidgetFrameProps { jsx: string; title?: string; onReady?: () => void; onError?: (message: string) => void }
+export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError }: ReactWidgetFrameProps) {
   const { mode } = useMode()
   const frame = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(240)
@@ -18,7 +18,7 @@ export function ReactWidgetFrame({ jsx, title = 'React widget' }: ReactWidgetFra
   const source = useMemo(() => buildReactSrcdoc({ jsx, themeVars: vars, mode }), [jsx, vars, mode])
   const url = useWidgetDocument(source)
   useEffect(() => setError(null), [source])
-  useWidgetWire(frame, { onHeight: value => setHeight(Math.max(80, Math.min(640, value))), onError: setError })
+  useWidgetWire(frame, { onHeight: value => setHeight(Math.max(80, Math.min(640, value))), onReady, onError: message => { setError(message); onError?.(message) } })
   return <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
     className={expansion.expanded ? 'fixed inset-4 z-[var(--z-content)] flex flex-col rounded-2xl border border-outline-variant bg-surface shadow-2xl' : 'relative my-3 overflow-hidden rounded-xl border border-outline-variant bg-surface'}>
     <div className="flex min-h-11 items-center justify-between gap-3 border-b border-outline-variant bg-surface-high/40 px-3 py-1.5">

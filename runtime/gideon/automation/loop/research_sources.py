@@ -62,3 +62,20 @@ def record(session_key: str, url: str, readable_chars: int) -> None:
 def coverage(loop_id: str) -> dict[str, int]:
     sources = _read(loop_id)
     return {"pages": len(sources), "domains": len({s.get("domain") for s in sources})}
+
+
+def unmet_reason(loop_id: str, kind_config: dict | None) -> str | None:
+    cfg = kind_config or {}
+    try:
+        min_pages = max(0, int(cfg.get("evidence_min_pages") or 0))
+        min_domains = max(0, int(cfg.get("evidence_min_domains") or 0))
+    except (TypeError, ValueError):
+        return None
+    if not min_pages and not min_domains:
+        return None
+    have = coverage(loop_id)
+    if have["pages"] >= min_pages and have["domains"] >= min_domains:
+        return None
+    return ("Research readable-source coverage unmet: "
+            f"{have['pages']}/{min_pages} distinct pages and "
+            f"{have['domains']}/{min_domains} sites.")

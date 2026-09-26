@@ -669,6 +669,79 @@ async def api_artifact_model(request: web.Request) -> web.Response:
     )
 
 
+async def api_artifact_deck_preview(request: web.Request) -> web.Response:
+    """Render a saved PPTX's editable slide model in Chromium for visual review."""
+    from hashlib import sha256
+
+    from gideon.workspace.documents.deck_preview import render_deck_preview
+    from gideon.workspace.documents.pptx_parser import parse_pptx
+
+    if _is_restricted_session(request.app["state"], request):
+        return json_error("forbidden", message="restricted session", status=403)
+    prov, refusal = _writable_provider(request)
+    if refusal is not None:
+        return refusal
+    slug = request.match_info["slug"]
+    art, refusal = _model_target(request, prov, slug)
+    if refusal is not None or art is None:
+        return refusal or json_error("not_found", status=404)
+    if art.kind != "pptx":
+        return json_error("model_unavailable", message="preview requires a PPTX artifact", status=415)
+    _, refusal = _if_match(request, art)
+    if refusal is not None:
+        return refusal
+    raw = prov.raw_bytes(slug, version=art.version)
+    if raw is None:
+        return json_error("not_found", message="PPTX body unavailable", status=404)
+    try:
+        model, loss = await asyncio.to_thread(parse_pptx, raw[0])
+        rendered = await render_deck_preview(model, prov)
+    except (ValueError, ImportError) as exc:
+        return json_error("preview_unavailable", message=str(exc), status=400)
+    except Exception:
+        logger.exception("deck preview render failed for %s", slug)
+        return json_error("preview_unavailable", message="Chromium could not render the deck preview", status=503)
+    current = prov.get(slug)
+    if current is None or current.version != art.version:
+        return json_error("version_conflict", message="deck changed during preview; reload it", status=409)
+    slides = []
+    for index, (png, critique) in enumerate(rendered, 1):
+        identity = sha256(f"{slug}:{art.version}:{index}".encode() + png).hexdigest()[:20]
+        preview_slug = f"deck-preview-{identity}"
+        existing = prov.get(preview_slug)
+        if existing is not None and (existing.kind != "image" or f"preview:{identity}" not in existing.tags):
+            return json_error("preview_conflict", message="preview artifact name is occupied", status=409)
+        if existing is None:
+            existing = prov.create_binary(
+                slug=preview_slug,
+                name=f"{art.name} · slide {index} preview",
+                data=png,
+                mime="image/png",
+                kind="image",
+                source="manual",
+                tags=[f"preview:{identity}", f"slide:{index}"],
+                description="Chromium raster of the editable deck model; not an Office binary render.",
+                actor="user",
+                session_id=_session_key(request),
+                project_id=art.project_id,
+            )
+        slides.append({
+            "index": index,
+            "slug": existing.slug,
+            "version": existing.version,
+            "raw_url": f"/api/artifacts/{existing.slug}/raw?version={existing.version}",
+            "critique": critique,
+        })
+    _audit(request, "artifact.deck_preview", "ok", f"slug={slug} version={art.version} slides={len(slides)}")
+    return web.json_response({
+        "slug": slug,
+        "version": art.version,
+        "fidelity": "Chromium raster of editable slide content with heuristic layout critique; PowerPoint master and layout fidelity is not represented.",
+        "loss": loss.to_dict(),
+        "slides": slides,
+    })
+
+
 async def api_artifact_model_write(request: web.Request) -> web.Response:
     """PUT /api/artifacts/{slug}/model — re-render a posted model into the artifact (§C3).
 
@@ -1411,6 +1484,7 @@ def register_artifact_routes(app: web.Application) -> None:
     app.router.add_get("/api/artifacts/{slug}/extract", api_artifact_extract)
     app.router.add_get("/api/artifacts/{slug}/model", api_artifact_model)
     app.router.add_put("/api/artifacts/{slug}/model", api_artifact_model_write)
+    app.router.add_post("/api/artifacts/{slug}/deck-preview", api_artifact_deck_preview)
     app.router.add_post("/api/artifacts/{slug}/regenerate", api_artifact_regenerate)
     app.router.add_get("/api/artifacts/{slug}/versions", api_artifact_versions)
     app.router.add_get(

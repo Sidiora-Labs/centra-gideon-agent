@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Plus, Presentation, Trash2 } from 'lucide-react'
-import { api, type DeckModelJson, type DeckSlideJson } from '../../data/api'
+import { api, type DeckModelJson, type DeckSlideJson, type DeckPreviewResponse } from '../../data/api'
 import { Button } from '../Button'
 import { Centered } from '../Centered'
 import { InlineError } from '../InlineError'
@@ -14,12 +14,13 @@ import type { DocumentEditorProps } from './contentTypes'
 
 const transport = { load: api.artifactDeckModel, save: api.saveArtifactDeckModel }
 type DeckEdit = (transform: (model: DeckModelJson) => DeckModelJson) => void
-export function SlideOutline({ slide, index, editable, reason, onEdit }: { slide: DeckSlideJson; index: number; editable: boolean; reason: string; onEdit: DeckEdit }) {
+export function SlideOutline({ slide, index, editable, reason, onEdit, preview }: { slide: DeckSlideJson; index: number; editable: boolean; reason: string; onEdit: DeckEdit; preview?: DeckPreviewResponse["slides"][number] }) {
   const number = index + 1
   const controls = { disabled: !editable, disabledReason: reason || undefined }
   const patch = (value: Partial<DeckSlideJson>) => onEdit(model => withSlide(model, index, { ...model.slides[index], ...value }))
   const placements = ([['Title', slide.title_box], ['Body', slide.body_box]] as const).filter(([, box]) => isPlaced(box))
   const critique = [
+    ...(preview?.critique ?? []),
     ...(!slide.title.trim() ? ['Add a slide title so the main claim is clear.'] : []),
     ...(slide.bullets.length > 6 ? ['This slide has more than six bullets. Split it or cut detail.'] : []),
     ...(slide.bullets.some(bullet => bullet.text.length > 120) ? ['A bullet is over 120 characters and may wrap too far.'] : []),
@@ -27,11 +28,14 @@ export function SlideOutline({ slide, index, editable, reason, onEdit }: { slide
   ]
   return <div className="mx-auto grid w-full max-w-[52rem] gap-4">
     <section aria-label={`Slide ${number} outline preview`} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]">
-      <div className="aspect-video min-h-0 overflow-hidden rounded-xl border border-outline/40 bg-surface-container p-[6%] shadow-sm">
+      <div className="relative aspect-video min-h-0 overflow-hidden rounded-xl border border-outline/40 bg-surface-container p-[6%] shadow-sm">
+        {preview && <img src={preview.raw_url} alt={`Chromium raster preview of slide ${number}`} className="absolute inset-0 z-10 h-full w-full bg-white object-contain" />}
         <p data-type="caption" className="mb-3 uppercase tracking-wide text-primary">Slide {number} · outline preview</p>
         <h3 className="line-clamp-2 text-xl font-semibold leading-tight text-on-surface">{slide.title || 'Untitled slide'}</h3>
         <ul className="mt-4 grid gap-1.5 text-sm text-on-surface-var">{slide.bullets.slice(0, 7).map((bullet, i) =>
           <li key={i} className="truncate" style={{ paddingLeft: `${Math.min(3, bullet.level) * .75}rem` }}>• {bullet.text || 'Empty bullet'}</li>)}</ul>
+        {slide.artifact_slug && <img src={`/api/artifacts/${encodeURIComponent(slide.artifact_slug)}/raw`} alt={`Visual asset for slide ${number}`}
+          className="absolute bottom-[8%] right-[6%] h-[56%] w-[40%] rounded-md object-contain" />}
       </div>
       <div className="rounded-xl border border-outline/30 bg-surface-container/20 p-3">
         <p data-type="label-s" className="text-on-surface">Review this slide</p>
@@ -57,6 +61,9 @@ export function SlideOutline({ slide, index, editable, reason, onEdit }: { slide
       })}</ul>
       <Button size="xs" variant="tonal" className="mt-3" {...controls} onClick={() => onEdit(model => withAppendedBullet(model, index))}><Plus size={14} aria-hidden="true" /> Add bullet</Button>
     </section>
+    <Field label="Image artifact slug" hint="A saved image artifact is embedded into the PPTX and remains linked to this slide.">
+      <TextInput size="sm" value={slide.artifact_slug} ariaLabel={`Image artifact for slide ${number}`} placeholder="image-artifact-slug" {...controls} onChange={artifact_slug => patch({ artifact_slug })} />
+    </Field>
     <Field label="Speaker notes" hint="Not shown on the slide; saved in the deck’s notes pane."><TextArea size="sm" rows={3} value={slide.notes} ariaLabel={`Speaker notes for slide ${number}`} {...controls} onChange={notes => patch({ notes })} /></Field>
     <section data-type="caption" className="rounded-xl border border-dashed border-outline/40 bg-surface-container/20 p-3 text-on-surface-var">
       {placements.length ? <>
@@ -66,17 +73,28 @@ export function SlideOutline({ slide, index, editable, reason, onEdit }: { slide
         <Button size="xs" variant="ghost" className="mt-2" {...controls} onClick={() => onEdit(model => withInheritedBoxes(model, index))}>Use the layout’s positions</Button>
       </> : <p>This slide’s title and body sit where its layout puts them.</p>}
     </section>
-    <p data-type="caption" className="text-on-surface-low">Pictures, tables, charts and per-character formatting are listed above if this deck has any; they are not carried through a save.</p>
+    <p data-type="caption" className="text-on-surface-low">Pictures other than a linked image artifact, tables, charts and per-character formatting are listed above if present; they are not carried through a save.</p>
   </div>
 }
 
 export function SlideDeck({ slug, title, readOnly, onDirty }: DocumentEditorProps) {
   const editor = useStructuredEditor(slug, 'deck', transport, readOnly, onDirty)
   const [selected, setSelected] = useState(0)
-  useEffect(() => setSelected(0), [slug])
+  const [preview, setPreview] = useState<DeckPreviewResponse | null>(null)
+  const [rendering, setRendering] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  useEffect(() => { setSelected(0); setPreview(null); setPreviewError('') }, [slug])
   if (editor.slug === slug && editor.loadError) return <div className="p-l"><InlineError icon multiline>Couldn’t read {title}: {editor.loadError}</InlineError></div>
   if (!editor.ready || !editor.model || !editor.baseline) return <Centered><Loader2 size={18} className="animate-spin text-on-surface-low" /></Centered>
   const { model } = editor
+  const currentPreview = preview?.slug === slug && preview.version === editor.baseline.version && !editor.dirty ? preview : null
+  const renderPreview = async () => {
+    if (!editor.baseline || editor.dirty) return
+    setRendering(true); setPreviewError('')
+    try { setPreview(await api.renderArtifactDeckPreview(slug, editor.baseline.version)) }
+    catch (error) { setPreviewError(error instanceof Error ? error.message : String(error)) }
+    finally { setRendering(false) }
+  }
   const slide = model.slides[selected]
   const controls = { disabled: !editor.editable, disabledReason: editor.reason || undefined }
   const addSlide = () => {
@@ -91,16 +109,20 @@ export function SlideDeck({ slug, title, readOnly, onDirty }: DocumentEditorProp
     {!editor.baseline.loss.lossless && !editor.acknowledged && <StructuredLossGate noun="deck" loss={editor.baseline.loss} onAcknowledge={editor.acknowledge} />}
     <div className="flex flex-wrap items-end gap-3 border-b border-outline/30 bg-surface-container/30 px-m py-3">
       <div className="min-w-[14rem] flex-1"><Field label="Deck title" hint="Saved as the deck’s cover slide."><TextInput size="sm" value={model.title} ariaLabel="Deck title" placeholder="No cover slide" {...controls} onChange={title => editor.edit(current => ({ ...current, title }))} /></Field></div>
+      <div className="min-w-[14rem] flex-1"><Field label="PPTX template artifact" hint="Saved masters and layouts; template version stays pinned."><TextInput size="sm" value={model.template_slug ?? ''} ariaLabel="PPTX template artifact slug" placeholder="Optional template slug" {...controls} onChange={template_slug => editor.edit(current => ({ ...current, template_slug, template_version: 0 }))} /></Field></div>
       <div className="min-w-[13rem]"><Field label="Slide size"><Select value={slideSizeKey(model)} options={slideSizeOptions(model)} ariaLabel="Slide size" {...controls} onChange={key => editor.edit(current => withSlideSize(current, key))} /></Field></div>
+      <Button size="xs" variant="tonal" disabled={editor.dirty || rendering || editor.saving} onClick={() => void renderPreview()}>{rendering ? 'Rendering slides…' : 'Render slide previews'}</Button>
       <StructuredSaveControl {...editor} onSave={() => void editor.save(baseline => confirmStructuredSave(title, 'deck', baseline))} />
     </div>
+    {previewError && <InlineError icon multiline className="mx-m mt-2" onDismiss={() => setPreviewError('')}>{previewError}</InlineError>}
+    {currentPreview && <p data-type="caption" className="px-m py-2 text-on-surface-low">{currentPreview.fidelity}</p>}
     {editor.saveError && <InlineError icon multiline className="mx-m mt-2" onDismiss={editor.clearError}>{editor.saveError}</InlineError>}
     {model.slides.length > 0 && <nav aria-label="Deck navigation" className="flex flex-wrap items-center gap-2 border-b border-outline/30 px-m py-2">
       <Segmented size="sm" collapse="scroll" ariaLabel="Slides" value={String(selected)} options={model.slides.map((slide, index) => ({ key: String(index), label: `${index + 1}. ${slideLabel(slide, index)}` }))} onChange={key => setSelected(Number(key))} />
       <Button size="xs" variant="ghost" shape="squircle" ariaLabel="Add slide after this one" title="Add a slide after this one" {...controls} onClick={addSlide}><Plus size={14} aria-hidden="true" /></Button>
       <Button size="xs" variant="ghost" shape="squircle" ariaLabel="Delete slide" title="Delete this slide" disabled={!editor.editable || !slide} disabledReason={editor.reason || 'There is no slide to delete.'} onClick={deleteSlide}><Trash2 size={14} aria-hidden="true" /></Button>
     </nav>}
-    {slide ? <div className="min-h-0 flex-1 overflow-auto p-l"><SlideOutline slide={slide} index={selected} editable={editor.editable} reason={editor.reason} onEdit={editor.edit} /></div>
+    {slide ? <div className="min-h-0 flex-1 overflow-auto p-l"><SlideOutline slide={slide} index={selected} editable={editor.editable} reason={editor.reason} onEdit={editor.edit} preview={currentPreview?.slides[selected]} /></div>
       : <EmptyState icon={Presentation} title="This deck has no slides" hint="Add one to start building the deck, or ask the agent to generate an outline." action={editor.editable ? { label: 'Add slide', onClick: addSlide } : undefined} />}
   </div>
 }

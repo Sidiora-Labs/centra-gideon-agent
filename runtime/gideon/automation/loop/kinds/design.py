@@ -155,12 +155,21 @@ class DesignKind(LoopKindStrategy):
             has_doc = bool(
                 store.read_deliverable(cid).strip()
             ) or self._has_design_artifact(cid)
-            if has_doc:
+            visual_focus = (loop.kind_config or {}).get("design_focus") in ("interface", "visualization")
+            preview_ok = not visual_focus or self._has_reviewed_previews(cid)
+            if has_doc and preview_ok:
                 for k in keys:
                     if k:
                         store.set_phase_status(cid, k, "done")
                 await ctx.complete(cid, "design system delivered")
                 return True
+            if has_doc and visual_focus and not preview_ok:
+                loop_files.write_guidance(
+                    cid,
+                    "Open the Design canvas, inspect each rendered component, and approve "
+                    "its current version. Fix render errors or request refinement before "
+                    "the visual design can complete.",
+                )
         refreshed = store.get(cid)
         if refreshed is not None:
             write_brief(refreshed)
@@ -200,6 +209,19 @@ class DesignKind(LoopKindStrategy):
         except Exception:
             logger.debug("design artifact check failed for %s", loop_id, exc_info=True)
         return False
+
+    def _has_reviewed_previews(self, loop_id: str) -> bool:
+        try:
+            from gideon.automation.loop.design_preview import all_current_reviewed
+            from gideon.workspace.artifacts import registry as artifact_registry
+
+            prov = artifact_registry.get_provider()
+            if prov is None:
+                return False
+            return all_current_reviewed(loop_id, prov.list(tag=f"loop:{loop_id}"))
+        except Exception:
+            logger.debug("design preview review failed for %s", loop_id, exc_info=True)
+            return False
 
     def _ingest_worker_overrides(self, loop: Loop, store) -> None:
         """Read the worker's token_overrides.json from the loop dir (if any) and merge it
