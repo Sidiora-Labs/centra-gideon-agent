@@ -34,8 +34,10 @@ update path and the file-backed PATCH path cannot disagree about what a field is
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
+from contextlib import suppress
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -172,10 +174,81 @@ def _agents_on_disk(home) -> dict:
     return json.loads(p.read_text(encoding="utf-8")).get("agents", {})
 
 
-async def _sync() -> Any:
+async def _sync(state=None) -> Any:
     from gideon.interfaces.dashboard.handlers.agents import api_gideon_agents_sync
 
-    return await api_gideon_agents_sync(_request({}))
+    request = _request({})
+    if state is not None:
+        request.app["state"] = state
+    return await api_gideon_agents_sync(request)
+
+
+@pytest.mark.asyncio
+async def test_sync_reconciles_file_agent_changes_and_removal(home, monkeypatch):
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.agents import marketplace
+    from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+
+    agent_file = home / "agents" / "file-helper" / "agent.json"
+    registry = marketplace.AgentMarketplaceRegistry()
+    registry.register("local", marketplace.LocalAgentMarketplace(home / "agents"))
+    monkeypatch.setattr(marketplace, "_DEFAULT_REGISTRY", registry)
+    agent_file.parent.mkdir(parents=True)
+    agent_file.write_text(json.dumps({"name": "file-helper", "description": "first"}))
+
+    added = _body(await _sync())
+    assert added["synced"] == ["file-helper"]
+    assert AppConfig.load().agents["file-helper"].description == "first"
+
+    agent_file.write_text(json.dumps({"name": "file-helper", "description": "revised"}))
+    changed = _body(await _sync())
+    assert changed["updated"] == ["file-helper"]
+    assert AppConfig.load().agents["file-helper"].description == "revised"
+
+    state = ConsoleState(None, 0)
+    active = _ChatSession("active", agent="file-helper")
+    state._sessions[active.key] = active
+    agent_file.unlink()
+    retained = _body(await _sync(state))
+    assert retained["removed"] == []
+    assert "file-helper" in AppConfig.load().agents
+
+    active.lifecycle = "archived"
+    removed = _body(await _sync(state))
+    assert removed["removed"] == ["file-helper"]
+    assert "file-helper" not in AppConfig.load().agents
+
+
+@pytest.mark.asyncio
+async def test_agents_directory_reports_active_and_running_sessions(home):
+    from gideon.core.config.loader import AppConfig
+    from gideon.interfaces.dashboard.handlers.agents import api_gideon_agents
+    from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+
+    cfg = AppConfig.load()
+    cfg.agents["file-helper"] = AgentProfile(description="directory test")
+    cfg.default_agent = "file-helper"
+    cfg.save()
+
+    state = ConsoleState(None, 0)
+    active = _ChatSession("active", agent="file-helper")
+    running = _ChatSession("running", agent="file-helper")
+    archived = _ChatSession("archived", agent="file-helper")
+    archived.lifecycle = "archived"
+    pending = asyncio.create_task(asyncio.Event().wait())
+    running.task = pending
+    state._sessions = {session.key: session for session in (active, running, archived)}
+    app = web.Application()
+    app["state"] = state
+    try:
+        response = await api_gideon_agents(make_mocked_request("GET", "/api/agents", app=app))
+        profile = next(agent for agent in _body(response)["agents"] if agent["name"] == "file-helper")
+        assert profile["active_sessions"] == 2
+        assert profile["running_sessions"] == 1
+    finally:
+        pending.cancel()
+        with suppress(asyncio.CancelledError):
+            await pending
 
 
 async def _create(body) -> Any:
