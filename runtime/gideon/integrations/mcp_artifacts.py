@@ -428,9 +428,17 @@ def _list_tools() -> list[dict[str, Any]]:
                         "type": "string",
                         "description": "Outline: `##` per slide, bullets beneath (indent two spaces per sub-level), `<!-- notes: -->` for notes",  # noqa: E501
                     },
+                    "source": {
+                        "type": "string",
+                        "description": "Existing knowledge item id or text artifact slug to turn into an outline; cite this source in speaker notes",
+                    },
+                    "template": {
+                        "type": "string",
+                        "description": "Existing PPTX artifact slug whose slide masters and layouts style the new deck",
+                    },
                     "slides": {
                         "type": "array",
-                        "description": "Alternative to markdown: [{title, body:[str | {text, level}], notes}] — `level` is the bullet's indent depth (0 = top)",  # noqa: E501
+                        "description": "Alternative to markdown: [{title, body:[str | {text, level}], notes, sources:[url], layout}] — sources are written into speaker notes",  # noqa: E501
                     },
                     "title": {"type": "string", "description": "Deck title slide"},
                     "format": {
@@ -1104,6 +1112,15 @@ def _bullet(entry: Any) -> Any:
     return Bullet(text=str(entry))
 
 
+def _deck_source_notes(slide: dict[str, Any]) -> str:
+    sources = slide.get("sources")
+    if not isinstance(sources, list):
+        return ""
+    urls = [url for url in sources if isinstance(url, str)
+            and url.startswith(("https://", "http://"))]
+    return "Sources:\n" + "\n".join(f"- {url}" for url in urls) if urls else ""
+
+
 def _document_create(
     prov: Any, name: str, args: dict[str, Any], sk: str | None, _audit: Any
 ) -> str:
@@ -1147,6 +1164,14 @@ def _document_create(
         from gideon.workspace.documents.model import DeckModel, Slide
 
         markdown = str(args.get("markdown") or "")
+        source = str(args.get("source") or "").strip()
+        if source:
+            resolved, _ = _resolve_document_source(prov, source)
+            if resolved is None:
+                _audit("denied", error=f"source not found: {source}")
+                return f"Error: no knowledge item or text artifact matches {source!r}."
+            if not markdown.strip() and not args.get("slides"):
+                markdown = resolved
         slides_in = args.get("slides")
         if markdown.strip():
             model: Any = deck_from_markdown(
@@ -1159,8 +1184,14 @@ def _document_create(
                     Slide(
                         title=str(sl.get("title") or ""),
                         bullets=[_bullet(b) for b in (sl.get("body") or [])],
-                        notes=str(sl.get("notes") or ""),
+                        notes="\n".join(
+                            part for part in (
+                                str(sl.get("notes") or ""),
+                                _deck_source_notes(sl),
+                            ) if part
+                        ),
                         artifact_slug=str(sl.get("artifact_slug") or ""),
+                        layout=str(sl.get("layout") or ""),
                     )
                     for sl in slides_in
                     if isinstance(sl, dict)
@@ -1169,6 +1200,10 @@ def _document_create(
         else:
             _audit("denied", error="no deck input")
             return "Error: provide markdown or slides."
+        if source and model.slides:
+            first = model.slides[0]
+            first.notes = (first.notes + "\n" if first.notes else "") + f"Source: {source}"
+        model.template_slug = str(args.get("template") or "").strip()
     elif name == "sheet_create":
         sheets = args.get("sheets")
         rows = args.get("rows")

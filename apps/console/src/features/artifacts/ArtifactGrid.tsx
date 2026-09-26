@@ -18,7 +18,8 @@ export const ArtifactGrid = memo(function ArtifactGrid({ artifacts, onOpen, onBr
     return narrowed
       ? <EmptyState icon={Box} title="No matching artifacts" hint="Try a different search, kind, or collection." />
       : BINARY_ARTIFACT_KINDS.has(kind ?? 'text')
-        ? <EmptyState icon={Box} title="No artifacts" hint="Artifacts are named, versioned snapshots — widgets, docs, images, and files agents produce. Ask the agent to create one." />
+        ? <EmptyState icon={Box} title="No artifacts" hint="Ask Gideon to create a document, image, or deck, then return here to review its versions."
+            action={{ label: 'Browse files', onClick: onBrowseFiles, icon: FolderOpen }} />
         : <EmptyState icon={Box} title="No artifacts" hint="Artifacts are named, versioned snapshots — widgets, docs, images, and files agents produce. Ask the agent to save one, or save a file as an artifact from the Files page."
             action={{ label: 'Browse files', onClick: onBrowseFiles, icon: FolderOpen }} />
   }

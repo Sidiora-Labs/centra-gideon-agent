@@ -190,9 +190,10 @@ export function buildSrcdoc({ html, themeVars, mode, includeHost = true, transpa
 
 const reactHarness = String.raw`(function () {
   function message(error) { return String(error && error.message || error); }
-  function report(error) { parent.postMessage({type:'widget-error', message:message(error)}, '*'); }
+  var renderFailed = false;
+  function report(error) { renderFailed = true; parent.postMessage({type:'widget-error', message:message(error)}, '*'); }
   function errorView(error) {
-    return React.createElement('pre', {style:{color:'var(--danger)',whiteSpace:'pre-wrap',fontFamily:'monospace',fontSize:'13px'}}, message(error));
+    return React.createElement('pre', {'data-widget-error':true, style:{color:'var(--danger)',whiteSpace:'pre-wrap',fontFamily:'monospace',fontSize:'13px'}}, message(error));
   }
   window.addEventListener('error', function (event) { report(event.error || event.message); });
   try {
@@ -205,8 +206,14 @@ const reactHarness = String.raw`(function () {
       render() { return this.state.failure ? errorView(this.state.failure) : this.props.children; }
     }
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(RenderGuard, null, React.createElement(component)));
+    var readySent = false;
     function measure() {
       parent.postMessage({type:'widget-height', height:Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)}, '*');
+      var root = document.getElementById('root');
+      if (!readySent && !renderFailed && root && root.childElementCount && !root.querySelector('[data-widget-error]')) {
+        readySent = true;
+        parent.postMessage({type:'widget-ready'}, '*');
+      }
     }
     new ResizeObserver(measure).observe(document.body);
     setTimeout(measure, 100);

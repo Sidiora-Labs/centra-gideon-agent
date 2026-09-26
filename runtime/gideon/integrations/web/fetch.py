@@ -212,6 +212,13 @@ async def web_fetch(
     record_seen_urls(session_key, [final_url])
 
     total = len(full_text)
+    if session_key.startswith("loop-") and total >= 200:
+        try:
+            from gideon.automation.loop.research_sources import record
+
+            record(session_key, final_url, total)
+        except Exception:
+            logger.warning("research source accounting failed", exc_info=True)
     budget = max(1, max_tokens) * NOMINAL_CHARS_PER_TOKEN
     start = max(0, start_index)
     window = full_text[start : start + budget]

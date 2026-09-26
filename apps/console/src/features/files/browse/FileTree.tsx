@@ -38,7 +38,7 @@ export function FileTree({ dirs, rootPath, activePath, gitStatuses, onOpenFile, 
   let shown = hideNames?.size ? entries.filter((e) => !hideNames.has(e.name)) : entries
   if (hidePrefixes?.size) shown = shown.filter((e) => ![...hidePrefixes].some((p) => e.name.startsWith(p)))
   if (hideNamesDeep?.size) shown = shown.filter((e) => !hideNamesDeep.has(e.name))
-  if (shown.length === 0) return <div className="px-m py-s text-on-surface-low text-[0.8125rem]">{emptyLabel}</div>
+  if (shown.length === 0) return <div className="px-m py-s text-on-surface-low text-[0.8125rem]">{emptyLabel}. Use New file or Upload files above to add something here.</div>
   return (
     <div>
       {shown.map((e) => (
@@ -224,7 +224,11 @@ function TreeNode({ entry, depth, dirs, activePath, gitStatuses, onOpenFile, art
             </div>
           )}
           {kids.length === 0 && !creating
-            ? <div className="py-1 text-on-surface-low text-[0.8125rem]" style={{ paddingLeft: 10 + (depth + 1) * 16 + 15 }}>empty</div>
+            ? <div className="flex flex-wrap items-center gap-2 py-1 text-on-surface-low text-[0.8125rem]" style={{ paddingLeft: 10 + (depth + 1) * 16 + 15 }}>
+                <span>Empty folder.</span>
+                {onCreate && <button type="button" onClick={() => { void startCreate('file') }} className="rounded px-1.5 py-1 text-primary hover:bg-surface-high">New file</button>}
+                <button type="button" onClick={() => uploadInput.current?.click()} className="rounded px-1.5 py-1 text-primary hover:bg-surface-high">Upload files</button>
+              </div>
             : kids.map((c) => (
               <TreeNode key={c.path} entry={c} depth={depth + 1} dirs={dirs} activePath={activePath}
                 gitStatuses={gitStatuses} onOpenFile={onOpenFile} artifactPaths={artifactPaths}

@@ -380,3 +380,5 @@ class DeckModel:
     slides: list[Slide] = field(default_factory=list)
     width_in: float = 0.0
     height_in: float = 0.0
+    template_slug: str = ""
+    template_version: int = 0

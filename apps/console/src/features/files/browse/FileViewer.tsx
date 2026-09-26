@@ -37,7 +37,7 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
   const resolved = resolveContentType({ name: entry.name })
   const isCodeFile = (resolved.id === 'text') && lang !== 'plaintext'
   const type = isCodeFile ? (getContentType('code') ?? resolved) : resolved
-  const isBinaryType = type.id === 'image' || type.id === 'pdf'
+  const isBinaryType = !!type.binary
 
   const onMissingRef = useRef(onMissing)
   onMissingRef.current = onMissing
@@ -167,7 +167,7 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
       content={isBinaryType ? '' : (content ?? '')}
       title={entry.name}
       docId={entry.path}
-      path={entry.path}
+      path={['docx', 'xlsx', 'pptx', 'video'].includes(type.id) ? api.fileRawUrl(entry.path, true) : entry.path}
       language={lang}
       readOnly={noText}
       truncated={truncated && !noText}

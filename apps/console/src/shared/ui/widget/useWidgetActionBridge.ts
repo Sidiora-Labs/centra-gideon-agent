@@ -11,6 +11,7 @@ export type WidgetWireMessage =
   | { type: 'widget-height'; height: number; width?: number }
   | { type: 'widget-action'; action: string; payload: unknown }
   | { type: 'widget-error'; message: string }
+  | { type: 'widget-ready' }
   | { type: 'widget-edit-values'; values: Record<string, string> }
   | { type: 'widget-edit-ready' }
   | { type: 'widget-annotation'; annotation: WidgetAnnotation }
@@ -28,6 +29,7 @@ export function readWidgetMessage(event: MessageEvent, frame: HTMLIFrameElement 
     }
     case 'widget-action':
       return typeof value.action === 'string' && value.action ? { type: value.type, action: value.action, payload: value.payload } : null
+    case 'widget-ready': return { type: value.type }
     case 'widget-error':
       return { type: value.type, message: String(value.message || 'Render error') }
     case 'widget-edit-ready':
@@ -49,6 +51,7 @@ export interface WidgetWireHandlers {
   forwardActions?: boolean
   onHeight?: (height: number, width?: number) => void
   onError?: (message: string) => void
+  onReady?: () => void
   liveArtifact?: () => { saved: boolean; slug: string }
   onEditValues?: (values: Record<string, string>) => void
   onEditReady?: () => void
@@ -59,6 +62,7 @@ function deliver(message: WidgetWireMessage, handlers: WidgetWireHandlers) {
   switch (message.type) {
     case 'widget-height': return handlers.onHeight?.(message.height, message.width)
     case 'widget-error': return handlers.onError?.(message.message)
+    case 'widget-ready': return handlers.onReady?.()
     case 'widget-edit-ready': return handlers.onEditReady?.()
     case 'widget-edit-values': return handlers.onEditValues?.(message.values)
     case 'widget-annotation': return handlers.onAnnotation?.(message.annotation)

@@ -40,6 +40,8 @@ class ResearchKind(GoalKind):
                 "output_template": "",
                 "output_manner": "",
                 "source_budget": 0,
+                "evidence_min_pages": 0,
+                "evidence_min_domains": 0,
                 "breadth": 3,
                 "depth": 2,
                 "max_uses_per_cycle": 12,
@@ -108,6 +110,8 @@ class ResearchKind(GoalKind):
                 return default
 
         budget = _int("source_budget", 0)
+        min_pages = max(0, _int("evidence_min_pages", 0))
+        min_domains = max(0, _int("evidence_min_domains", 0))
         breadth = _int("breadth", 3)
         depth = _int("depth", 2)
         max_uses = _int("max_uses_per_cycle", 12)
@@ -170,6 +174,14 @@ class ResearchKind(GoalKind):
                 f"**Source budget:** aim to consult up to ~{budget} sources before "
                 "converging; if returns flatten earlier, start synthesizing.",
             ]
+        if min_pages or min_domains:
+            extra += [
+                "",
+                f"**Readable-source requirement:** fetch and read at least {min_pages} "
+                f"distinct pages across {min_domains} distinct sites before the report can "
+                "complete. Search listings and repeated URLs do not count. If coverage "
+                "cannot be met within the cycle budget, state the gap explicitly in the report.",
+            ]
         extra += [
             "",
             "**Convergence:** a separate judge scores marginal value each cycle; when "
@@ -192,6 +204,16 @@ class ResearchKind(GoalKind):
             "drive the judge's returns assessment. Then revise the subtopic list (add "
             "discovered gaps, mark covered, prune dead ends)."
         )
+        cfg = loop.kind_config or {}
+        if cfg.get("evidence_min_pages") or cfg.get("evidence_min_domains"):
+            from gideon.automation.loop.research_sources import coverage
+
+            have = coverage(loop.id)
+            addendum += (
+                f" Readable-source coverage so far: {have['pages']} distinct pages across "
+                f"{have['domains']} sites; required: {cfg.get('evidence_min_pages', 0)} "
+                f"pages across {cfg.get('evidence_min_domains', 0)} sites."
+            )
         return base + "\n" + addendum
 
     def walkthrough(self):

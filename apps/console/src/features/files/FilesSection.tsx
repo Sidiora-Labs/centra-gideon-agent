@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Box, Search, FilePlus2, FolderPlus, RefreshCw, GitBranch, Files as FilesIcon, X, Loader2, CornerDownRight, PanelRight,
+  Box, Search, FilePlus2, FolderPlus, RefreshCw, GitBranch, Files as FilesIcon, X, Loader2, CornerDownRight, PanelRight, Upload,
 } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
@@ -30,7 +30,7 @@ import { tabListKeys } from '../../shared/data/tabListKeys'
 const TAB_KEY = 'files-tab'
 
 export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: RouteProps) {
-  const { roots, loading: rootsLoading } = useFileRoots()
+  const { roots, loading: rootsLoading, error: rootsError } = useFileRoots()
   const deepSlug = (sub || '').split('/')[0] || ''
   useEffect(() => {
     if (deepSlug) navigate(`artifacts/${deepSlug}`, { replace: true })
@@ -70,6 +70,8 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
   const [uploadRows, setUploadRows] = useState<{ name: string; pct: number }[]>([])
   const uploadAbortRef = useRef<AbortController | null>(null)
   const [rootDrop, setRootDrop] = useState(false)
+  const rootUploadInput = useRef<HTMLInputElement>(null)
+  const previewedRoot = useRef(new Set<string>())
   const [artModal, setArtModal] = useState<{ entry: FsEntry; content: string; name: string } | null>(null)
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
@@ -103,6 +105,19 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
   useEffect(() => {
     if (requestedFile) openByPath(requestedFile)
   }, [requestedFile, openByPath])
+
+  useEffect(() => {
+    if (!activeRoot || requestedFile || fileTabs.tabs.length || previewedRoot.current.has(activeRoot)) return
+    previewedRoot.current.add(activeRoot)
+    let alive = true
+    dirs.load(activeRoot).then((entries) => {
+      if (alive) {
+        const first = entries.find((entry) => !entry.is_dir)
+        if (first) fileTabs.open(first)
+      }
+    })
+    return () => { alive = false }
+  }, [activeRoot, requestedFile, fileTabs.tabs.length, fileTabs.open, dirs.load])
 
   useEffect(() => {
     if (!activeRoot || grep.trim().length < 2) { setResults([]); setSearchEngine(''); setSearchErr(null); return }
@@ -146,6 +161,14 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
       setCreating(null); setNewName(''); refresh()
       if (creating === 'file') fileTabs.open({ name, path: r.path, is_dir: false })
     } catch (e) { notify(`Could not create: ${(e as Error).message}`, 'error') }
+  }
+
+  const createInside = async (entry: FsEntry, name: string, kind: 'file' | 'dir') => {
+    try {
+      const made = await api.fileCreate(entry.path, name, kind)
+      dirs.invalidate(entry.path)
+      if (kind === 'file') fileTabs.open({ name, path: made.path, is_dir: false })
+    } catch (error) { setFileErr(`Could not create: ${(error as Error).message}`) }
   }
 
   const onRename = useCallback(async (entry: FsEntry, nextName: string) => {
@@ -270,7 +293,8 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
               )}
               <div className="relative min-h-0 flex-1">
                 {!activeFile ? (
-                  <EmptyState icon={FilesIcon} title="No file open" hint="Pick a file from the explorer to view or edit it. Type in the search box to grep contents (⌘F)." />
+                  <EmptyState icon={FilesIcon} title="No file open" hint="Choose a file in the explorer, or create your first file here."
+                    action={{ label: 'New file', icon: FilePlus2, onClick: () => { setExplorerOpen(true); setCreating('file'); setNewName('') } }} />
                 ) : (
                   <div className="absolute inset-0">
                       <FileViewer key={activeFile.path}
@@ -307,7 +331,10 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                     <div className="flex items-center gap-0.5">
                       <RailBtn icon={FilePlus2} label="New file" onClick={() => { setCreating('file'); setNewName('') }} />
                       <RailBtn icon={FolderPlus} label="New folder" onClick={() => { setCreating('dir'); setNewName('') }} />
+                      <RailBtn icon={Upload} label="Upload files" onClick={() => rootUploadInput.current?.click()} />
                       <RailBtn icon={RefreshCw} label="Refresh" onClick={refresh} />
+                      <input ref={rootUploadInput} type="file" multiple hidden aria-label="Upload files to current folder"
+                        onChange={(event) => { if (activeRoot) void onUpload(activeRoot, Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = '' }} />
                     </div>
                   </>
                 )}
@@ -366,8 +393,11 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                   : activeRoot
                     ? <FileTree key={`${activeRoot}:${nonce}`} dirs={dirs} rootPath={activeRoot} activePath={fileTabs.activePath || null}
                         gitStatuses={statuses} onOpenFile={fileTabs.open} artifactPaths={artifactPaths}
-                        onRename={onRename} onDelete={onDelete} onUpload={(entry, files) => onUpload(entry.path, files)} />
-                    : <Loading what="the file" />}
+                        onRename={onRename} onDelete={onDelete} onUpload={(entry, files) => onUpload(entry.path, files)} onCreate={createInside} />
+                    : rootsLoading ? <Loading what="the file" />
+                    : <div role={rootsError ? 'alert' : undefined} className="px-m py-s text-on-surface-low text-sm">
+                        {rootsError ? `Could not load file locations: ${rootsError}` : 'No workspace folder is available. Open a project with a valid folder, then return to Files.'}
+                      </div>}
               </div>
             </div>
             </SidePanel>
@@ -425,6 +455,7 @@ function guessKind(name: string): string {
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'svg') return 'svg'
   if (ext === 'json') return 'json'
+  if (ext === 'csv' || ext === 'tsv') return 'csv'
   if (['md', 'markdown', 'mdx', 'txt'].includes(ext)) return 'markdown'
   return 'text'
 }
