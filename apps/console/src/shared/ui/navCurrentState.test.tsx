@@ -17,16 +17,23 @@ const ITEMS = [
 describe('NavRail announces which item is current', () => {
   it('exactly the active item carries aria-current="page"', () => {
     const { container } = render(
-      <NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} collapsed={false} />,
+      <NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} onSearch={() => {}} collapsed={false} />,
     )
     const current = [...container.querySelectorAll('[aria-current="page"]')]
     expect(current).toHaveLength(1)
     expect(current[0].getAttribute('aria-label')).toBe('Inbox')
   })
 
+  it('keeps a destination current while its nested page is open', () => {
+    const { container } = render(
+      <NavRail items={ITEMS} activeId="inbox/alerts" onSelect={() => {}} onSearch={() => {}} collapsed={false} />,
+    )
+    expect(container.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Inbox')
+  })
+
   it('the inactive item carries NO aria-current at all', () => {
     const { container } = render(
-      <NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} collapsed={false} />,
+      <NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} onSearch={() => {}} collapsed={false} />,
     )
     const home = container.querySelector('[aria-label="Home"]')!
     expect(home.hasAttribute('aria-current')).toBe(false)
@@ -34,10 +41,10 @@ describe('NavRail announces which item is current', () => {
 
   it('it FOLLOWS activeId rather than being pinned to one item', () => {
     const { container, rerender } = render(
-      <NavRail items={ITEMS} activeId="home" onSelect={() => {}} collapsed={false} />,
+      <NavRail items={ITEMS} activeId="home" onSelect={() => {}} onSearch={() => {}} collapsed={false} />,
     )
     expect(container.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Home')
-    rerender(<NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} collapsed={false} />)
+    rerender(<NavRail items={ITEMS} activeId="inbox" onSelect={() => {}} onSearch={() => {}} collapsed={false} />)
     expect(container.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('Inbox')
     expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(1)
   })
