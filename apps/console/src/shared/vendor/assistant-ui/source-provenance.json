@@ -55,7 +55,7 @@
     },
     {
       "path": "elements/composer.tsx",
-      "sha256": "5956737d88e48db835a62c31d7622ef47f12302797e6a57ee05260f4de10d34a",
+      "sha256": "ce56e696404c548cf37ce36bfdceae100adfb7409026fbf0f17f06d89d5d6bdf",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/composer.tsx",
       "donorSha256": "361a15d0f2f07a251c20d61b8a260c043e23440222e9bc5bc78954be37d38dec",
       "status": "adapted"
@@ -265,7 +265,7 @@
     },
     {
       "path": "elements/reasoning.tsx",
-      "sha256": "3baf11483647c6fb78afad4028394fe661249db508edd45f0b4ed12a1fee0071",
+      "sha256": "7a0aae3d77c04d59eea9d78dda485178c9adf57c763e14d295f08275d1038c32",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/reasoning.tsx",
       "donorSha256": "e59cdb4c4ccd6da31fb170603fbec624e2b7988a7ef2711e5a24ee455615ea20",
       "status": "adapted"
@@ -349,7 +349,7 @@
     },
     {
       "path": "elements/thread.aui.tsx",
-      "sha256": "077a282cc1129f8347a345aab91656f2e9693593b8f93bca69ff301061bb90d6",
+      "sha256": "f7cccb306f468da2c24ae061ba5f39bcf2e40af6b438b11c9e72edf5fc938e1f",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/thread.aui.tsx",
       "donorSha256": "64cb85b4076644dd319325b319264ec8e998e619a97c19e0f001d3fa5a03a016",
       "status": "adapted"
@@ -363,7 +363,7 @@
     },
     {
       "path": "elements/tool-fallback.aui.tsx",
-      "sha256": "e32b60dcc436bb77e8c219b9ceebdc5c27155bc9bd0c10b5ee4cbf23c155cb2c",
+      "sha256": "050ea8a4742b1af72b6947343f0c629e7b5a7d909c8e7bf3f4179dda0abec450",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/tool-fallback.aui.tsx",
       "donorSha256": "f5675f389a6fa28a2363f666e0f42fbff17c8df229bf291f83002e18521689c9",
       "status": "adapted"
@@ -388,6 +388,13 @@
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/typing-indicator.tsx",
       "donorSha256": "3fbafcfae07583a14e38cf4bfce4d0187b0a04a1a3fb51291f6fb8aea98aa516",
       "status": "adapted"
+    },
+    {
+      "path": "elements/voice-conversation.aui.tsx",
+      "sha256": "c166c681c414c539d1d11de3fd926f8a568c6b57d3fd30c5d3ef6467e556c8f6",
+      "donorPath": "packages/ui/src/components/react/assistant-ui/elements/voice-conversation.aui.tsx",
+      "donorSha256": "c166c681c414c539d1d11de3fd926f8a568c6b57d3fd30c5d3ef6467e556c8f6",
+      "status": "adopted"
     },
     {
       "path": "elements/voice-conversation.tsx",
@@ -418,15 +425,15 @@
       "status": "adapted"
     },
     {
-      "path": "ui-compat.tsx",
-      "sha256": "a8f65942760281831e75d0b5b944a22a49695ace83ab2382d6fc29bce9ba722a",
+      "path": "lib/utils.ts",
+      "sha256": "55bbdc94cef3e0c8a8bba386e94f97228dd2c967fe61466fc565378890550c08",
       "donorPath": null,
       "donorSha256": null,
       "status": "local production bridge"
     },
     {
-      "path": "lib/utils.ts",
-      "sha256": "55bbdc94cef3e0c8a8bba386e94f97228dd2c967fe61466fc565378890550c08",
+      "path": "ui-compat.tsx",
+      "sha256": "69be8e0d7e1b12a6a246ec990bcad7fa5c669be892c914cdbcf3accda31e5ba5",
       "donorPath": null,
       "donorSha256": null,
       "status": "local production bridge"

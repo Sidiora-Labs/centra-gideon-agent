@@ -47,8 +47,8 @@ describe('donor timing and logo contracts', () => {
 
   it('shows measured AUI message timing inside the message scope', () => {
     render(<Runtime timed><ThreadTranscript components={{ AssistantMessage: MessageTiming }} /></Runtime>)
-    expect(screen.getByText('1.25s')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('1.25s'))
+    expect(screen.getByText('1.25s', { selector: 'summary' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('1.25s', { selector: 'summary' }))
     expect(screen.getByText('120ms')).toBeInTheDocument()
     expect(screen.getByText('42.3 tok/s')).toBeInTheDocument()
     expect(screen.getByText('4')).toBeInTheDocument()

@@ -13,7 +13,7 @@ import {
   useAui,
   useLocalRuntime,
 } from "@assistant-ui/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Thread } from "./thread.aui";
 
@@ -76,6 +76,13 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
   globalThis.URL.createObjectURL ??= () => "blob:attachment";
   globalThis.URL.revokeObjectURL ??= () => {};
+});
+
+beforeEach(() => {
+  // The app's Node Blob URL test shim cannot consume jsdom's File. A browser
+  // object URL is opaque to the attachment UI, so use a stable URL here.
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:attachment");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 });
 
 afterEach(() => {

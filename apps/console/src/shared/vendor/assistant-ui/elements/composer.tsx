@@ -518,9 +518,13 @@ export function ComposerContext({
           <p className="text-[13.5px] font-medium">
             {displayPercent !== undefined ? `Context: ${displayPercent}% used` : "Context: unknown"}
           </p>
-          {measured?.usedTokens != null && measured.windowTokens != null && (
+          {measured?.usedTokens != null && measured.windowTokens != null ? (
             <p className={mono}>{formatTokens(measured.usedTokens)} / {formatTokens(measured.windowTokens)} tokens</p>
-          )}
+          ) : measured?.windowTokens != null ? (
+            <p className={mono}>Window: {formatTokens(measured.windowTokens)} tokens</p>
+          ) : measured?.usedTokens != null ? (
+            <p className={mono}>Used: {formatTokens(measured.usedTokens)} tokens</p>
+          ) : null}
           {breakdown && breakdown.length > 0 ? breakdown.map((part) => (
             <div key={part.label} className="flex items-center gap-2 text-xs">
               <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: part.tint }} />

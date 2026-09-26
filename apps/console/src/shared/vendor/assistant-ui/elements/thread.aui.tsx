@@ -1,7 +1,7 @@
 "use client";
 
 import { MessagePrimitive, ThreadPrimitive, useAuiState, type AssistantState } from "@assistant-ui/react";
-import type { ComponentType, ReactNode, Ref } from "react";
+import type { ReactNode, Ref } from "react";
 
 export { Thread } from "./thread-full.aui";
 export type { ThreadComponents, ThreadProps, ThreadGroupPart } from "./thread-full.aui";

@@ -19,6 +19,7 @@ import { useEffect } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Thread, type ThreadProps } from "./thread.aui";
+import { VoiceConversation as AuiVoiceConversation } from "./voice-conversation.aui";
 
 const adapter: ChatModelAdapter = {
   async *run() {},
@@ -47,10 +48,12 @@ const createVoiceAdapter = () => {
 
   return {
     adapter: { connect: () => session },
+    session,
     emitTranscript: (transcript: RealtimeVoiceAdapter.TranscriptItem) =>
       transcriptCallback?.(transcript),
   } satisfies {
     adapter: RealtimeVoiceAdapter;
+    session: RealtimeVoiceAdapter.Session;
     emitTranscript: (transcript: RealtimeVoiceAdapter.TranscriptItem) => void;
   };
 };
@@ -117,21 +120,24 @@ function VoiceRuntimeAccess({
 function VoiceTestThread({
   voice,
   onReady,
+  showPanel = false,
 }: {
   voice: RealtimeVoiceAdapter;
   onReady: (aui: ReturnType<typeof useAui>) => void;
+  showPanel?: boolean;
 }) {
   const runtime = useLocalRuntime(adapter, { adapters: { voice } });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <VoiceRuntimeAccess onReady={onReady} />
+      {showPanel && <AuiVoiceConversation />}
       <Thread />
     </AssistantRuntimeProvider>
   );
 }
 
-const renderVoiceThread = () => {
+const renderVoiceThread = (showPanel = false) => {
   const voice = createVoiceAdapter();
   let aui: ReturnType<typeof useAui> | undefined;
 
@@ -141,6 +147,7 @@ const renderVoiceThread = () => {
       onReady={(nextAui) => {
         aui = nextAui;
       }}
+      showPanel={showPanel}
     />,
   );
 
@@ -165,6 +172,28 @@ afterEach(async () => {
 });
 
 describe("Thread", () => {
+  it("wires the connected voice panel to a real AUI voice session", async () => {
+    const { aui, voice } = renderVoiceThread(true);
+    expect(document.querySelector('[data-slot="voice-conversation"]')).toBeNull();
+
+    await act(async () => {
+      aui.thread.connectVoice();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      voice.emitTranscript({ role: "user", text: "Voice question", isFinal: true });
+      await Promise.resolve();
+    });
+
+    const panel = document.querySelector<HTMLElement>('[data-slot="voice-conversation"]');
+    expect(panel).toBeTruthy();
+    expect(within(panel!).getByText("Voice question")).toBeTruthy();
+    fireEvent.click(within(panel!).getByRole("button", { name: "Turn the microphone off" }));
+    expect(voice.session.mute).toHaveBeenCalledOnce();
+    fireEvent.click(within(panel!).getByRole("button", { name: "End the call" }));
+    expect(voice.session.disconnect).toHaveBeenCalledOnce();
+  });
+
   it("focuses the composer by default", async () => {
     render(<TestThread />);
 
