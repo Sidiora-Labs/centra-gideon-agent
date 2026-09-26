@@ -211,6 +211,30 @@ describe('Gideon assistant-ui runtime', () => {
     )
   })
 
+  it('exposes only real safe user file paths in the per-message attachment scope', () => {
+    const paths = [
+      '/workspace/screenshots/shot.png', 'docs/brief with spaces.md',
+      '/workspace/screenshots/shot.png', '', '../secrets.txt',
+      'docs/../secrets.txt', 'https://example.test/file', 'docs/bad\nname.txt',
+      'docs\\windows.txt', 'docs//duplicate.txt', 'docs/folder/',
+    ]
+    const history: ChatHistoryMsg[] = [
+      { role: 'user', content: 'Review these files', meta: { files: paths } },
+      { role: 'assistant', content: 'I can review them' },
+    ]
+    const turns = hydrateTurns(history)
+    expect(turns[0].files).toBe(paths)
+    const ui = setup({ turns })
+    const attachments = ui.aui().thread.getState().messages[0].attachments
+    expect(attachments).toEqual([
+      { id: '/workspace/screenshots/shot.png', type: 'file', name: 'shot.png', status: { type: 'complete' }, content: [{ type: 'text', text: '/workspace/screenshots/shot.png' }] },
+      { id: 'docs/brief with spaces.md', type: 'file', name: 'brief with spaces.md', status: { type: 'complete' }, content: [{ type: 'text', text: 'docs/brief with spaces.md' }] },
+    ])
+    expect(ui.turnByAuiId().get(gideonAuiId('session/a', 0))?.turn.files).toBe(paths)
+    expect(ui.aui().thread.getState().messages[1].attachments).toBeUndefined()
+    expect(convertGideonTurn(userTurn('No safe files', undefined, undefined, ['..', '\u0000']), 0, 'session/a', false).attachments).toEqual([])
+  })
+
   it('binds final gateway stop records to the preceding assistant without changing turn identity', () => {
     const stoppedMeta = { kind: 'stop_event', id: 'stop-1', state: 'stopped', outcome: 'soft' }
     const failedResetMeta = { kind: 'stop_event', id: 'stop-2', state: 'stop_failed_reset', outcome: 'hard' }
