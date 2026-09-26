@@ -42,6 +42,8 @@ envelope (``{"error": {"code", "message"}}``) so a caller branches on a stable c
 from __future__ import annotations
 
 import logging
+import json
+from pathlib import Path
 
 from aiohttp import web
 
@@ -53,9 +55,39 @@ logger = logging.getLogger(__name__)
 
 async def api_packs_installed(request: web.Request) -> web.Response:
     """List installed packs with connector-resolution, roster + setup-binding state."""
+    from gideon.automation.triggers.store import LoadedTrigger, TriggerStore
+    from gideon.core.config.loader import AppConfig, config_dir
     from gideon.extensions.packs.installed import load_installed
 
-    packs = [p.to_view() for p in load_installed()]
+    agents = AppConfig.load().agents
+    trigger_ids = {trigger.id for trigger in TriggerStore().list_triggers()}
+    packs = []
+    for pack in load_installed():
+        view = pack.to_view()
+        view["roster_active"] = [
+            target
+            for row in pack.roster
+            if str(row.get("activation", "")) == "always"
+            if (target := str(row.get("target", "")))
+            and target in agents
+            and getattr(agents[target], "source", "") == f"pack:{pack.name}"
+        ]
+        staged_dir = config_dir() / "packs" / "staged" / pack.name / "triggers"
+        added = []
+        for staged_id in pack.staged_triggers:
+            if Path(staged_id).name != staged_id:
+                continue
+            try:
+                raw = json.loads((staged_dir / f"{staged_id}.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            trigger = LoadedTrigger.parse(raw)
+            if not trigger.errors and trigger.trigger.id in trigger_ids:
+                added.append(staged_id)
+        view["triggers_added"] = added
+        packs.append(view)
     return web.json_response({"packs": packs})
 
 

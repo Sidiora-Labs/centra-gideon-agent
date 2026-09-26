@@ -786,6 +786,8 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
     record = next(p for p in body["packs"] if p["name"] == "personal-cfo")
     assert record["unbound"] == ["finance_folder"]
     assert {r["activation"] for r in record["roster"]} == {"always", "phase-2"}
+    assert record["roster_active"] == []
+    assert record["triggers_added"] == []
 
     folder = home / "statements"
     folder.mkdir()
@@ -808,6 +810,19 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
     )
     assert status == 200
     assert body["deployed"] == ["cfo"] and body["dormant"] == ["cfo-tax-analyst"]
+    status, body = _call(
+        handlers.api_pack_triggers_deploy,
+        _json_request("POST", "/api/packs/personal-cfo/triggers/deploy", {}, name="personal-cfo"),
+    )
+    assert status == 200
+    assert body["deployed"] == ["pack-personal-cfo-spending-digest"]
+    status, body = _call(
+        handlers.api_packs_installed, _json_request("GET", "/api/packs/installed")
+    )
+    assert status == 200
+    record = next(p for p in body["packs"] if p["name"] == "personal-cfo")
+    assert record["roster_active"] == ["cfo"]
+    assert record["triggers_added"] == ["cfo-spending-digest"]
 
 
 def test_routes_use_the_shared_error_envelope(fresh_home):

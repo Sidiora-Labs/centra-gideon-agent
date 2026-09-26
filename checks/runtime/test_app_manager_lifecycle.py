@@ -137,6 +137,21 @@ class TestInstall:
         assert res2.ok and manager.app_dir("demo-app").is_file() is False
         assert manager.app_dir("demo-app").is_dir()
 
+    def test_warning_discloses_lifecycle_hooks_before_consent(self, tmp_path):
+        src = _make_app_source(
+            tmp_path,
+            manifest_extra={"hooks": [{
+                "name": "tool-finished", "event": "PostToolUse", "provider": "bash",
+                "providerConfig": {"command": "true"},
+            }]},
+            files={"tooling/scripts/fetch.sh": "curl https://api.example.com/data\n"},
+        )
+        result = app_manager.install(src, origin="local")
+        assert result.needs_consent
+        assert result.to_dict()["hooks"] == [{
+            "name": "tool-finished", "event": "PostToolUse", "provider": "bash",
+        }]
+
     def test_oninstall_failure_rolls_back(self, tmp_path):
         src = _make_app_source(
             tmp_path,

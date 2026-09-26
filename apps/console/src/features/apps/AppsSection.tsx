@@ -47,7 +47,7 @@ import { artGradient } from './appArt'
 import { AppConfigFields, useAppConfig } from './appConfigForm'
 import { isInNav, setInNav } from './navApps'
 import { PageTitle } from '../../shared/ui/PageTitle'
-import { ScanReport, ConsentModal, PermissionList, PermissionConsent, CronConsentList } from './installConsent'
+import { ScanReport, ConsentModal, PermissionList, PermissionConsent, CronConsentList, type AppHookSummary } from './installConsent'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 interface PendingInstall {
@@ -633,6 +633,7 @@ export function StoreView({ catalog, indexing = false, catalogError, result, tot
           busy={guarded.busy}
           permissions={pending.entry?.permissions}
           crons={pending.entry?.crons}
+          hooks={(pending.entry as (AppCatalogEntry & { hooks?: AppHookSummary[] }) | undefined)?.hooks}
           appUI={pending.entry}
           onConfirm={confirmPending}
           onClose={() => { setPending(null); guarded.reset() }}
@@ -766,6 +767,7 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
           busy={guarded.busy}
           permissions={pending.entry?.permissions}
           crons={pending.entry?.crons}
+          hooks={(pending.entry as (AppCatalogEntry & { hooks?: AppHookSummary[] }) | undefined)?.hooks}
           appUI={pending.entry}
           onConfirm={confirmPending}
           onClose={() => { setPending(null); guarded.reset() }}
@@ -1290,6 +1292,12 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
       {
 }
       <PermissionConsent permissions={item.permissions} appUI={item} />
+      {!!(item as StoreItem & { hooks?: AppHookSummary[] }).hooks?.length && (
+        <div data-type="body-s" className="text-on-surface-low">
+          <div data-type="label-m" className="text-on-surface">Lifecycle hooks</div>
+          {(item as StoreItem & { hooks: AppHookSummary[] }).hooks.map((hook) => <div key={hook.name}>{hook.name} · {hook.event} via {hook.provider}</div>)}
+        </div>
+      )}
       {(item.crons ?? []).length > 0 && <CronConsentList crons={item.crons!} />}
 
       <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
@@ -1308,6 +1316,7 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
       {consent && guarded.blocked && (
         <ConsentModal label={item.displayName} result={guarded.blocked} busy={guarded.busy}
           permissions={item.permissions} crons={item.crons}
+          hooks={(item as StoreItem & { hooks?: AppHookSummary[] }).hooks}
           appUI={item}
           onConfirm={async () => { const r = await guarded.confirmInstall(); if (r?.ok) { setConsent(null); onInstalled() } }}
           onClose={() => { setConsent(null); guarded.reset() }} />
