@@ -376,6 +376,7 @@ export function ChatPage({ sub, navigate, navEpoch = 0, query, setQuery }: { sub
 
 function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialProjectId = '', seed = '', agent: initialAgent = '' }: { sessionId: string | null; navigate: (p: string, opts?: { replace?: boolean }) => void; query: Record<string, string>; setQuery: RouteProps['setQuery']; projectId?: string; seed?: string; agent?: string }) {
   const data = useComposerData()
+  const isMobile = useIsMobile()
   const { name } = useIdentity()
   const [projectId, setProjectId] = useState(initialProjectId)
   useEffect(() => { setProjectId(initialProjectId) }, [initialProjectId])
