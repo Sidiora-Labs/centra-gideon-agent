@@ -60,6 +60,7 @@ from gideon.integrations.llm.events import (
     EVENT_TOOL_CALL,
     EVENT_TOOL_RESULT,
     AgentEvent,
+    ContextUsage,
 )
 from gideon.integrations.llm.prompt_cache import (
     PromptCache,
@@ -306,10 +307,14 @@ class _TurnTotals:
     measured_calls: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
+    last_context_usage: ContextUsage | None = None
 
     def account(self, response: "_ModelExchange") -> None:
         self.calls += len(response.calls)
         self.model_calls += response.attempts
+        self.last_context_usage = (
+            response.usage.context_usage if response.usage is not None else None
+        )
         for usage in response.usages:
             self.measured_calls += 1
             self.input_tokens += usage.input_tokens or 0
@@ -329,6 +334,7 @@ class _TurnTotals:
             cost_usd=self.cost,
             num_turns=self.cycles,
             context_usage_pct=context_pct,
+            context_usage=self.last_context_usage,
             event_count=self.events,
             tool_call_count=self.calls,
             cache_creation_tokens=self.cache_creation_tokens,

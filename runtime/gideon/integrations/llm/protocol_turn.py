@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.integrations.llm.events import ContextUsage
+
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_TOOL_CALL,
@@ -55,8 +57,32 @@ class TurnUsage:
     output_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
+    measured_input_tokens: int | None = None
+    measured_total_input_tokens: int | None = None
+    measured_cache_creation_tokens: int | None = None
+    measured_cache_read_tokens: int | None = None
 
-    def terminal(self, context: float | None) -> LLMEvent:
+    def terminal(
+        self, context: float | None, *, context_window_tokens: int | None = None
+    ) -> LLMEvent:
+        usage = None
+        if any(
+            value is not None
+            for value in (
+                self.measured_input_tokens,
+                self.measured_total_input_tokens,
+                self.measured_cache_creation_tokens,
+                self.measured_cache_read_tokens,
+                context_window_tokens,
+            )
+        ):
+            usage = ContextUsage(
+                input_tokens=self.measured_input_tokens,
+                total_input_tokens=self.measured_total_input_tokens,
+                cache_creation_tokens=self.measured_cache_creation_tokens,
+                cache_read_tokens=self.measured_cache_read_tokens,
+                context_window_tokens=context_window_tokens,
+            )
         return LLMEvent(
             kind=EVENT_COMPLETE,
             input_tokens=self.input_tokens,
@@ -64,6 +90,7 @@ class TurnUsage:
             cache_creation_tokens=self.cache_creation_tokens,
             cache_read_tokens=self.cache_read_tokens,
             context_usage_pct=context,
+            context_usage=usage,
             cost_usd=0.0,
         )
 

@@ -206,10 +206,28 @@ class _MessagesDecoder:
             value = wire_value(usage, name)
             if value is not None:
                 setattr(self.usage, name, value)
+            if name == "input_tokens" and type(value) is int and value >= 0:
+                self.usage.measured_input_tokens = value
         if usage is not None:
             self.usage.cache_creation_tokens, self.usage.cache_read_tokens = (
                 _read_cache_usage(usage)
             )
+            for field, name in (
+                ("cache_creation_input_tokens", "measured_cache_creation_tokens"),
+                ("cache_read_input_tokens", "measured_cache_read_tokens"),
+            ):
+                value = wire_value(usage, field)
+                if type(value) is int and value >= 0:
+                    setattr(self.usage, name, value)
+            buckets = (
+                self.usage.measured_input_tokens,
+                self.usage.measured_cache_creation_tokens,
+                self.usage.measured_cache_read_tokens,
+            )
+            if all(value is not None for value in buckets):
+                self.usage.measured_total_input_tokens = sum(
+                    value for value in buckets if value is not None
+                )
         return []
 
     def _block_start(self, event: Any) -> list[LLMEvent]:
@@ -377,7 +395,10 @@ class AnthropicProvider(ConversationProtocol):
                 )
             ) * 100
         context = self._record_completion(decoder.answer, context, remember=remember)
-        yield decoder.usage.terminal(context)
+        yield decoder.usage.terminal(
+            context,
+            context_window_tokens=self.context_window,
+        )
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)
