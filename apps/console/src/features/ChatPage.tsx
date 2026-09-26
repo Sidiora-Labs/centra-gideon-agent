@@ -2180,7 +2180,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           )
         )}
         right={
-          <HeaderActions className="max-w-[70vw]" preferLabeledOverflow={!isMobile}>
+          <HeaderActions className="max-w-full" preferLabeledOverflow={!isMobile}>
             <HeaderModePill ariaLabel="Task mode" value={selection.taskMode ?? 'agent'}
               options={TASK_MODE_SLIDER} onChange={(v) => applySelection({ taskMode: v as TaskMode })} />
             <HeaderModePill ariaLabel="Permission mode" value={selection.approval ?? 'normal'}
