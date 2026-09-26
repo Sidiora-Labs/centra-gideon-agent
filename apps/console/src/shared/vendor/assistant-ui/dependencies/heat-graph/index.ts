@@ -1,0 +1,6 @@
+export { Root } from "./components/Root"
+export { DayLabels } from "./components/DayLabels"
+export { Grid } from "./components/Grid"
+export { Cell } from "./components/Cell"
+export { DAY_SHORT } from "./utils/date-utils"
+export type { DataPoint } from "./types"
