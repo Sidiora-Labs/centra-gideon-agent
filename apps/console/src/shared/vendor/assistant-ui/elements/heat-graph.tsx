@@ -4,7 +4,10 @@ import * as HeatGraphPrimitive from "../dependencies/heat-graph";
 
 const COLORS = ["#ebedf0", "#c6d7f9", "#8fb0f3", "#5888e8", "#2563eb"];
 
-export function HeatGraph({ data }: { data: HeatGraphPrimitive.DataPoint[] }) {
+export function HeatGraph({ data, unitLabel = "contributions" }: {
+  data: HeatGraphPrimitive.DataPoint[];
+  unitLabel?: string;
+}) {
   return (
     <HeatGraphPrimitive.Root
       data={data}
@@ -18,7 +21,7 @@ export function HeatGraph({ data }: { data: HeatGraphPrimitive.DataPoint[] }) {
         <CellGrid />
       </div>
       <GraphLegend />
-      <CellTooltip />
+      <CellTooltip unitLabel={unitLabel} />
     </HeatGraphPrimitive.Root>
   );
 }
@@ -66,12 +69,12 @@ function CellGrid() {
   );
 }
 
-function CellTooltip() {
+function CellTooltip({ unitLabel }: { unitLabel: string }) {
   return (
     <HeatGraphPrimitive.Tooltip className="pointer-events-none rounded-md bg-gray-900 px-3 py-1.5 text-xs whitespace-nowrap text-white">
       {({ cell }) => (
         <>
-          <strong>{cell.count} contributions</strong> on{" "}
+          <strong>{cell.count} {unitLabel}</strong> on{" "}
           {cell.date.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",

@@ -65,6 +65,26 @@ describe("donor HeatGraph with real calendar data", () => {
     expect(screen.queryByText("4 contributions")).not.toBeInTheDocument();
   });
 
+  it("uses the caller unit for real activity without changing date or count", async () => {
+    const today = calendarDate();
+    const { container } = render(
+      <HeatGraph data={[{ date: today, count: 3 }]} unitLabel="findings" />,
+    );
+    const cell = graphCells(container).at(-1)!;
+    fireEvent.mouseEnter(cell);
+    const count = await screen.findByText("3 findings");
+    expect(count).toBeInTheDocument();
+    expect(count.parentElement).toHaveTextContent(`on ${today.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`);
+    expect(screen.queryByText("3 contributions")).not.toBeInTheDocument();
+  });
+
+  it("labels a real zero-count day with the caller unit", async () => {
+    const { container } = render(<HeatGraph data={[]} unitLabel="findings" />);
+    fireEvent.mouseEnter(graphCells(container).at(-1)!);
+    expect(await screen.findByText("0 findings")).toBeInTheDocument();
+    expect(screen.queryByText("0 contributions")).not.toBeInTheDocument();
+  });
+
   it("aggregates same-day records through the real grid dependency", async () => {
     const today = calendarDate();
     const yesterday = calendarDate(1);
