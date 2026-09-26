@@ -23,6 +23,7 @@ const RawHtml = renderer('RawHtmlPreview')
 const ReactR = renderer('ReactPreview')
 const Svg = renderer('SvgPreview')
 const Text = renderer('TextPreview')
+const Code = renderer('CodePreview')
 const JsonTree = renderer('JsonTreePreview')
 const CsvTable = renderer('CsvTablePreview')
 const ImageFile = renderer('ImageFilePreview')
@@ -171,6 +172,8 @@ function builtinDefinitions(): ContentType[] { return [
   },
   {
     id: 'code', label: 'Code', icon: FileCode, tone: 'var(--color-on-surface-low)',
+    exts: ['js', 'mjs', 'cjs', 'ts', 'py'],
+    preview: { render: Code },
     edit: { language: 'plaintext' },
   },
   {

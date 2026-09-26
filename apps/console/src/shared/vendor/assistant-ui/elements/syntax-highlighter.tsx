@@ -34,9 +34,26 @@ const DarkSyntaxHighlighter = makePrismAsyncLightSyntaxHighlighter({
   className: "hidden dark:block",
 });
 
-export const SyntaxHighlighter = (props: SyntaxHighlighterProps) => (
-  <>
-    <LightSyntaxHighlighter {...props} />
-    <DarkSyntaxHighlighter {...props} />
-  </>
-);
+const ExplicitLightSyntaxHighlighter = makePrismAsyncLightSyntaxHighlighter({
+  style: coldarkCold,
+  customStyle: syntaxHighlighterCustomStyle,
+});
+
+const ExplicitDarkSyntaxHighlighter = makePrismAsyncLightSyntaxHighlighter({
+  style: coldarkDark,
+  customStyle: syntaxHighlighterCustomStyle,
+});
+
+export const SyntaxHighlighter = ({
+  mode,
+  ...props
+}: SyntaxHighlighterProps & { mode?: "light" | "dark" }) => {
+  if (mode === "light") return <ExplicitLightSyntaxHighlighter {...props} />;
+  if (mode === "dark") return <ExplicitDarkSyntaxHighlighter {...props} />;
+  return (
+    <>
+      <LightSyntaxHighlighter {...props} />
+      <DarkSyntaxHighlighter {...props} />
+    </>
+  );
+};
