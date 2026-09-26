@@ -117,6 +117,12 @@ def package_root(proj: str) -> str:
 
 
 def container_instructions() -> list[str]:
+    if os.environ.get("GIDEON_DOCKER_MODE") == "single":
+        return [
+            "docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .",
+            "docker stop gideon && docker rm gideon",
+            "docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local",
+        ]
     return [
         f"docker compose -f infrastructure/compose/compose.yaml {action}"
         for action in ("pull", "up -d")

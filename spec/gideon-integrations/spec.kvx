@@ -130,9 +130,11 @@ ac_1 = "Implement the complete reachable feature: Repair nonexistent installatio
 
 [task.integrations-distribution]
 title = "integrations-distribution end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "integrations-distribution"
 requires = []
 reqs = ["131.1", "133.1", "134.1", "135.1"]
+touches = ["README.md", "apps/console/src/features/settings/DurabilityPanel.tsx", "checks/runtime/test_durability_service.py", "checks/runtime/test_single_container_distribution.py", "checks/runtime/test_website_installer.py", "docs/guides/CONTAINERS.md", "docs/guides/GETTING_STARTED.md", "infrastructure/docker/Dockerfile.backend", "infrastructure/website/install.sh", "infrastructure/website/install.sh.sha256", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/operations/self_update.py"]
+verify_cmd = "PYTHONPATH=runtime GIDEON_SINGLE_CONTAINER_IMAGE=gideon-distribution-check /tmp/gideon-runtime-venv/bin/python -m pytest -q checks/runtime/test_single_container_distribution.py checks/runtime/test_website_installer.py checks/runtime/test_durability_service.py::TestEndpoints::test_cli_snapshot_updates_manual_status checks/runtime/test_durability_service.py::TestEndpoints::test_status checks/runtime/test_cli_update_kinds.py::test_container_kind_prints_the_two_commands_and_exits_zero checks/runtime/test_cli_update_kinds.py::test_container_env_beats_a_git_tree"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."

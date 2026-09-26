@@ -618,6 +618,16 @@ class TestEndpoints:
             body = await (await client.get("/api/durability/status")).json()
         assert "snapshot" in body and "export" in body
 
+    def test_cli_snapshot_updates_manual_status(self, tmp_path, monkeypatch):
+        from gideon.interfaces.cli.main import main
+
+        archive_dir = tmp_path / "manual-snapshots"
+        monkeypatch.setattr("sys.argv", ["gideon", "snapshot", str(archive_dir)])
+        main()
+
+        assert list(archive_dir.glob("gideon-snapshot-*.tar.gz"))
+        assert service.status()["snapshot"]["last_run"] > 0
+
     @pytest.mark.asyncio
     async def test_archive_shows_the_retention_plan(self, tmp_path):
         from aiohttp.test_utils import TestClient, TestServer

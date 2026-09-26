@@ -55,7 +55,7 @@ export function DurabilityPanel() {
       <PanelHeader
         title="Backups"
         hint="What gets backed up automatically, how long copies are kept, and whether a restore is ever actually rehearsed." />
-      <ScheduleSection cfg={cfg} setCfg={setCfg} status={data.status} />
+      <ScheduleSection cfg={cfg} setCfg={setCfg} status={data.status} onChanged={refresh} />
       <RetentionSection cfg={cfg} setCfg={setCfg} snaps={data.snaps} />
       <ArchiveSection snaps={data.snaps} onChanged={refresh} />
       <TimeTravelSection cfg={cfg} setCfg={setCfg} />
@@ -401,10 +401,11 @@ function PreviewCard({ preview, op, busy, files, paths, selected, root, error, o
 }
 
 
-function ScheduleSection({ cfg, setCfg, status }: {
+function ScheduleSection({ cfg, setCfg, status, onChanged }: {
   cfg: Record<string, unknown>
   setCfg: (c: Record<string, unknown>) => void
   status: DurabilityStatus | null
+  onChanged: () => void
 }) {
   const [saved, flash] = useSavedFlash()
   const [running, setRunning] = useState('')
@@ -422,6 +423,7 @@ function ScheduleSection({ cfg, setCfg, status }: {
     } catch (e) {
       notify(`${label} failed: ${String((e as Error)?.message || e)}`, 'error')
     } finally {
+      onChanged()
       setRunning('')
     }
   }
@@ -446,7 +448,7 @@ function ScheduleSection({ cfg, setCfg, status }: {
             <div data-type="caption" className="mb-2 text-on-surface-low">
               {status.enabled
                 ? 'Last run of each job:'
-                : 'Automatic backups are off — these are the last runs from when they were on.'}
+                : 'Automatic backups are off — manual runs still appear here.'}
             </div>
             <div className="flex flex-col gap-1.5">
               <JobLine label="Incremental export" when={status.export.last_run} due={status.export.due} />
@@ -467,7 +469,7 @@ function ScheduleSection({ cfg, setCfg, status }: {
         </div>
         <p data-type="caption" className="pb-3 text-on-surface-low">
           To restore, use the archive list below. A full <em>replace</em> restore stays a
-          command-line action — <code>gideon restore --replace</code> — because it has to
+          command-line action — <code>gideon restore &lt;snapshot.tar.gz&gt; --mode replace</code> — because it has to
           overwrite live state while the gateway is stopped.
         </p>
       </RowGroup>
@@ -599,7 +601,7 @@ function ArchiveSection({ snaps, onChanged }: {
         )}
         <p data-type="caption" className="mt-3 text-on-surface-low">
           Stored in <code>{snaps.directory}</code>. A full <em>replace</em> restore is a
-          command-line action — <code>gideon restore --replace</code> — because it has
+          command-line action — <code>gideon restore &lt;snapshot.tar.gz&gt; --mode replace</code> — because it has
           to overwrite live state while the gateway is stopped.
         </p>
       </div>

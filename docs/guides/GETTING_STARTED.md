@@ -159,20 +159,20 @@ Tool calls the agent wants to make appear as approval prompts (the default is
 [configuration reference](../reference/CONFIGURATION.md) to tune approval,
 sandboxing, and security policy.
 
-## Docker Compose
+## One-container Docker install
 
-Run a published release without installing anything but Docker. From a checkout, or after
-downloading `infrastructure/compose/compose.yaml`:
+From a source checkout, build an image that includes the gateway and console, then run it
+with a persistent volume:
 
 ```bash
-cp .env.example .env         # set provider keys / options
-docker compose -f infrastructure/compose/compose.yaml up -d
+docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .
+docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local
 ```
 
-The gateway comes up on `http://127.0.0.1:10000` with a persistent
-`gideon_home` volume and a healthcheck. Pin a release with
-`GIDEON_IMAGE_TAG` in `.env`. See the
-[container guide](CONTAINERS.md) for ports, volumes, backups, and updates.
+Open the access URL printed by `docker logs gideon`. Both state and the default workspace
+live on `gideon_home`. If you need environment variables, create `.env` and add
+`--env-file .env` before the image name in the run command. See the
+[container guide](CONTAINERS.md) for backups, updates, and the Compose alternative.
 
 ## Where to go next
 
