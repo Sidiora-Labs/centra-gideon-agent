@@ -222,11 +222,21 @@ Examples:
     chat_parser.add_argument("-m", "--message", help="Single message (non-interactive)")
     chat_parser.add_argument("--model", help="Model to use (default: from config)")
 
-    sub.add_parser("acp", help="Serve Gideon to an ACP editor over stdio")
+    tui_parser = sub.add_parser(
+        "tui", help="Interactive gateway-backed terminal chat with tools and approvals"
+    )
+    tui_parser.add_argument("--url", default="", help="Gateway origin (required for remote use)")
+    tui_parser.add_argument("--token", default="", help="Gateway token (or GIDEON_TOKEN)")
+    tui_parser.add_argument("--cookie", default="", help="Authenticated cookie (or GIDEON_COOKIE)")
+    tui_parser.add_argument("--session", default="", help="Resume an existing session key")
+    tui_parser.add_argument("--port", type=int, default=None, help="Local gateway port")
 
+    sub.add_parser("acp", help="Serve Gideon to an ACP editor over stdio")
     mcp_auth_parser = sub.add_parser("mcp-auth", help="Authorize a configured MCP server")
     mcp_auth_parser.add_argument("name", help="Configured MCP server name")
-    mcp_auth_parser.add_argument("--manual", action="store_true", help="Paste OAuth callback URL for a remote server")
+    mcp_auth_parser.add_argument(
+        "--manual", action="store_true", help="Paste OAuth callback URL for a remote server"
+    )
 
     run_parser = sub.add_parser(
         "run",
@@ -1414,6 +1424,10 @@ Examples:
         except (_BridgeResolveErr, _LLMResolveErr) as exc:
             print(str(exc), file=sys.stderr)
             raise SystemExit(1) from None
+    elif args.command == "tui":
+        from gideon.interfaces.cli.terminal import run_terminal
+
+        run_terminal(args)
     elif args.command == "acp":
         from gideon.integrations.acp.server import run_stdio
 

@@ -90,12 +90,15 @@ ac_1 = "Implement the complete reachable feature: Guided terminal setup for prov
 
 [task.integrations-terminal]
 title = "integrations-terminal end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "integrations-terminal"
 requires = []
 reqs = ["003.1", "004.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/terminal.py", "runtime/gideon/core/config/loader.py", "checks/runtime/test_cli_terminal.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_cli_terminal.py"
+implementation_status = "implemented_authenticated_gateway_http_ws_session_journey_pass_provider_credentials_unqualified"
 
 [req.131]
 title = "Persistent container workspaces"
