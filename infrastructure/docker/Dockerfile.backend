@@ -1,10 +1,12 @@
 ARG PYTHON_IMAGE=mirror.gcr.io/library/python:3.13-slim
 FROM ${PYTHON_IMAGE} AS base
+FROM node:22-bookworm-slim AS node-tools
 FROM base AS deps
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
+    libolm-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip wheel
@@ -14,7 +16,7 @@ RUN mkdir -p runtime/gideon && \
     echo '__version__ = "0.1.0"' > runtime/gideon/__init__.py && \
     /opt/venv/bin/pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cpu \
-    ".[slack,eval,httpx,anthropic,openai,embeddings,stt,tts,mcp]" && \
+    ".[slack,eval,httpx,anthropic,openai,embeddings,stt,tts,mcp,channels]" && \
     /opt/venv/bin/pip uninstall -y gideon-agent-harness && \
     rm -rf runtime/ build/ *.egg-info
 
@@ -40,9 +42,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     git \
-    nodejs \
-    npm \
+    libolm3 \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 RUN npm install -g --no-fund --no-audit \
     @agentclientprotocol/claude-agent-acp \
     @agentclientprotocol/codex-acp \
@@ -52,6 +57,8 @@ RUN npm install -g --no-fund --no-audit \
 RUN groupadd --gid 10001 gideon && \
     useradd --uid 10001 --gid 10001 --create-home --shell /bin/false gideon
 COPY --from=builder /opt/venv /opt/venv
+RUN BRIDGE_DIR="$(/opt/venv/bin/python -c 'from pathlib import Path; import gideon.integrations.messaging_channels as m; print(Path(m.__file__).parent / "bridge")')" && \
+    npm ci --prefix "$BRIDGE_DIR" --omit=dev --no-audit --no-fund
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     GIDEON_HOME=/data \

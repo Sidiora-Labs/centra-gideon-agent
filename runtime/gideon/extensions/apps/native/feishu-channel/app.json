@@ -1,0 +1,25 @@
+{
+  "name": "feishu-channel",
+  "version": "1.0.0",
+  "displayName": "Feishu / Lark",
+  "description": "Connect a Feishu or Lark bot through its authenticated long connection.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.feishu:create_provider",
+    "capabilities": ["messaging"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "app_id": {"type": "string", "default": "", "x-meta": {"label": "App ID"}},
+        "app_secret": {"type": "string", "default": "", "x-meta": {"label": "App secret", "sensitive": true}},
+        "encrypt_key": {"type": "string", "default": "", "x-meta": {"label": "Event encryption key", "sensitive": true}},
+        "verification_token": {"type": "string", "default": "", "x-meta": {"label": "Verification token", "sensitive": true}},
+        "group_policy": {"type": "string", "default": "mention", "enum": ["mention", "open"], "x-meta": {"label": "Group activation"}}
+      }
+    }
+  }
+}

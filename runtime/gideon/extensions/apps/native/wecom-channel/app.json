@@ -1,0 +1,22 @@
+{
+  "name": "wecom-channel",
+  "version": "1.0.0",
+  "displayName": "WeCom",
+  "description": "Connect a WeCom AI bot over its authenticated long connection.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.wecom:create_provider",
+    "capabilities": ["messaging"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "bot_id": {"type": "string", "default": "", "x-meta": {"label": "AI bot ID"}},
+        "secret": {"type": "string", "default": "", "x-meta": {"label": "AI bot secret", "sensitive": true}}
+      }
+    }
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "name": "gideonai-mail-desk",
+  "version": "0.1.0",
+  "displayName": "Mail Desk",
+  "description": "Two-way mail desk over stdlib IMAP and SMTP. Converse with your agent by mail, replies thread back, and results arrive in the same conversation. No streaming; approvals answer by reply token.",
+  "icon": "Mails",
+  "author": "Gideon",
+  "license": "MIT",
+  "tags": [
+    "channel",
+    "email",
+    "bundled"
+  ],
+  "cli": {
+    "setup": "mail_desk_setup:run",
+    "doctor": "mail_desk_doctor:probe"
+  },
+  "loggerRoots": [
+    "mail_desk_runtime"
+  ],
+  "permissions": {
+    "storage": true,
+    "network": true
+  },
+  "provider": {
+    "type": "channel",
+    "implementation": "mail_desk_runtime.transport:create_provider",
+    "capabilities": [
+      "messaging",
+      "threads",
+      "attachments"
+    ],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "imap_host": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "IMAP Host",
+            "help": "IMAP server hostname for inbound mail (e.g. imap.gmail.com)."
+          }
+        },
+        "imap_port": {
+          "type": "integer",
+          "default": 993,
+          "x-meta": {
+            "label": "IMAP Port",
+            "help": "993 for implicit SSL (the default), 143 for plaintext."
+          }
+        },
+        "imap_user": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "IMAP Username",
+            "help": "IMAP login, usually the full email address."
+          }
+        },
+        "imap_use_ssl": {
+          "type": "boolean",
+          "default": true,
+          "x-meta": {
+            "label": "IMAP SSL",
+            "help": "Connect with implicit TLS (IMAP4_SSL). Leave on for port 993."
+          }
+        },
+        "folder": {
+          "type": "string",
+          "default": "INBOX",
+          "x-meta": {
+            "label": "Folder",
+            "help": "IMAP folder to poll. Polled read-only — your mail is never marked read."
+          }
+        },
+        "smtp_host": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "SMTP Host",
+            "help": "SMTP server hostname for outbound mail (e.g. smtp.gmail.com)."
+          }
+        },
+        "smtp_port": {
+          "type": "integer",
+          "default": 587,
+          "x-meta": {
+            "label": "SMTP Port",
+            "help": "587 for STARTTLS (the default), 465 for implicit SSL."
+          }
+        },
+        "smtp_user": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "SMTP Username",
+            "help": "SMTP login, usually the full email address."
+          }
+        },
+        "smtp_security": {
+          "type": "string",
+          "default": "starttls",
+          "enum": [
+            "starttls",
+            "ssl",
+            "plain"
+          ],
+          "x-meta": {
+            "label": "SMTP Security",
+            "help": "starttls (587), ssl (465), or plain. A failed STARTTLS aborts the send — it never falls back to plaintext."
+          }
+        },
+        "address": {
+          "type": "string",
+          "default": "",
+          "x-meta": {
+            "label": "Mailbox Address",
+            "help": "The address this channel sends as and receives at. Defaults to the IMAP username. Also the self-message filter's anchor."
+          }
+        },
+        "poll_secs": {
+          "type": "integer",
+          "default": 60,
+          "x-meta": {
+            "label": "Poll Interval (s)",
+            "help": "How often to check for new mail. Clamped to 10-3600s."
+          }
+        },
+        "dm_activation": {
+          "type": "string",
+          "default": "always",
+          "enum": [
+            "always",
+            "off"
+          ],
+          "x-meta": {
+            "label": "Inbound Activation",
+            "help": "always answers every paired sender; off disables inbound while keeping outbound delivery."
+          }
+        }
+      }
+    }
+  },
+  "providers": [
+    {
+      "type": "trigger_source",
+      "implementation": "mail_desk_runtime.trigger_source:create_provider",
+      "capabilities": [
+        "mail_received"
+      ]
+    }
+  ],
+  "native": true
+}

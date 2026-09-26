@@ -1,0 +1,26 @@
+{
+  "name": "matrix-channel",
+  "version": "1.0.0",
+  "displayName": "Matrix",
+  "description": "Connect Matrix rooms with encrypted client sessions and trusted Gideon conversations.",
+  "icon": "MessagesSquare",
+  "author": "Gideon",
+  "tags": ["channel", "bundled"],
+  "native": true,
+  "provider": {
+    "type": "channel",
+    "implementation": "gideon.integrations.messaging_channels.matrix:create_provider",
+    "capabilities": ["messaging", "threads"],
+    "settingsSchema": {
+      "type": "object",
+      "properties": {
+        "homeserver": {"type": "string", "default": "https://matrix.org", "x-meta": {"label": "Homeserver URL"}},
+        "user_id": {"type": "string", "default": "", "x-meta": {"label": "Bot user ID"}},
+        "access_token": {"type": "string", "default": "", "x-meta": {"label": "Access token", "sensitive": true}},
+        "device_id": {"type": "string", "default": "", "x-meta": {"label": "Device ID"}},
+        "e2ee_enabled": {"type": "boolean", "default": true, "x-meta": {"label": "Encrypted rooms"}},
+        "group_policy": {"type": "string", "default": "mention", "enum": ["mention", "open", "off"], "x-meta": {"label": "Group activation"}}
+      }
+    }
+  }
+}

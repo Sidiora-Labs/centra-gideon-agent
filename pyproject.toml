@@ -18,6 +18,7 @@ bedrock = ["boto3>=1.34"]
 httpx = ["httpx>=0.27"]
 oauth2 = ["cryptography>=42"]
 slack = ["slack-sdk>=3.27,<4"]
+channels = ["matrix-nio[e2e]>=0.25.2", "wecom-aibot-sdk-python>=0.1.5", "dingtalk-stream>=0.24,<1", "qq-botpy>=1.2,<2", "lark-channel-sdk>=1.4,<2", "qrcode>=8,<9"]
 stt = ["faster-whisper>=1.0"]
 tts = ["huggingface-hub>=0.23", "piper-tts>=1.2"]
 eval = ["jinja2>=3.0"]
@@ -42,8 +43,8 @@ include = ["gideon*"]
 
 [tool.setuptools.package-data]
 "gideon.workspace.capabilities.experience.assets" = ["*.applescript", "*.swift", "world-engine/*.js", "world-engine/*.json"]
-"gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
-"*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.svg", "**/*.png", "**/*.woff2"]
+"gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
+"*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.mjs", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.mjs", "**/*.svg", "**/*.png", "**/*.woff2"]
 
 [tool.black]
 line-length = 88
