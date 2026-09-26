@@ -35,6 +35,7 @@ class DesignKind(LoopKindStrategy):
             "token_overrides": {},
             "targets": "",
             "exports": [],
+            "design_focus": "system",
         }
 
     def phase_key(self, phase: dict) -> str:
@@ -154,12 +155,21 @@ class DesignKind(LoopKindStrategy):
             has_doc = bool(
                 store.read_deliverable(cid).strip()
             ) or self._has_design_artifact(cid)
-            if has_doc:
+            visual_focus = (loop.kind_config or {}).get("design_focus") in ("interface", "visualization")
+            preview_ok = not visual_focus or self._has_reviewed_previews(cid)
+            if has_doc and preview_ok:
                 for k in keys:
                     if k:
                         store.set_phase_status(cid, k, "done")
                 await ctx.complete(cid, "design system delivered")
                 return True
+            if has_doc and visual_focus and not preview_ok:
+                loop_files.write_guidance(
+                    cid,
+                    "Open the Design canvas, inspect each rendered component, and approve "
+                    "its current version. Fix render errors or request refinement before "
+                    "the visual design can complete.",
+                )
         refreshed = store.get(cid)
         if refreshed is not None:
             write_brief(refreshed)
@@ -199,6 +209,19 @@ class DesignKind(LoopKindStrategy):
         except Exception:
             logger.debug("design artifact check failed for %s", loop_id, exc_info=True)
         return False
+
+    def _has_reviewed_previews(self, loop_id: str) -> bool:
+        try:
+            from gideon.automation.loop.design_preview import all_current_reviewed
+            from gideon.workspace.artifacts import registry as artifact_registry
+
+            prov = artifact_registry.get_provider()
+            if prov is None:
+                return False
+            return all_current_reviewed(loop_id, prov.list(tag=f"loop:{loop_id}"))
+        except Exception:
+            logger.debug("design preview review failed for %s", loop_id, exc_info=True)
+            return False
 
     def _ingest_worker_overrides(self, loop: Loop, store) -> None:
         """Read the worker's token_overrides.json from the loop dir (if any) and merge it
@@ -289,6 +312,7 @@ class DesignKind(LoopKindStrategy):
                 "token_overrides": {},
                 "targets": "",
                 "exports": [],
+                "design_focus": "system",
                 "design_steps": [p["title"] for p in plan],
             },
         }
@@ -328,7 +352,15 @@ class DesignKind(LoopKindStrategy):
     def build_brief(self, loop: Loop, context_dir: str = "") -> str:
         cfg = loop.kind_config or {}
         targets = str(cfg.get("targets", "")).strip()
+        focus = str(cfg.get("design_focus") or "system")
         lines = ["# Design Loop Brief", "", f"**Design task:** {loop.task}", ""]
+        if focus in ("interface", "visualization"):
+            lines += [
+                f"**Specialist focus:** {'product interface' if focus == 'interface' else 'data visualization'}.",
+                "Use the bundled visual-output skill. Save an editable React artifact, inspect its live canvas preview, revise the artifact where spacing, labels, contrast, or responsive behavior fail, and record what you inspected in the cycle finding.",
+                "Do not report a visual review if the canvas could not render.",
+                "",
+            ]
         if targets:
             lines += [f"**Designing for:** {targets}", ""]
         lines += [
@@ -414,7 +446,7 @@ class DesignKind(LoopKindStrategy):
         screenshot extraction, exports) layer on in the Design slice; the loop spine
         — read status/brief/guidance, advance the current design step, MUST write a
         finding — holds now so the kind runs on the unified engine."""
-        return "\n".join(
+        nudge = "\n".join(
             [
                 f"Run the next autonomous cycle for design loop {loop.id} "
                 f"(working dir for loop files: {loop_dir}). Steps: (1) check status.json — "
@@ -438,6 +470,13 @@ class DesignKind(LoopKindStrategy):
                 "Then end the turn.",
             ]
         )
+        if (loop.kind_config or {}).get("design_focus") in ("interface", "visualization"):
+            nudge += (
+                "\nFor this specialist focus, open the actual saved React artifact in the "
+                "design Canvas and refine it from the rendered preview. Record the artifact "
+                "slug, what was visible, and any unverified behavior in the finding."
+            )
+        return nudge
 
 
 class _DesignWalkthrough:

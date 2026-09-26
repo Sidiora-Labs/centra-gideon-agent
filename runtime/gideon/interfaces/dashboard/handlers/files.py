@@ -2068,7 +2068,13 @@ def _content_search_python(
         for fn in filenames:
             check_deadline()
             fpath = os.path.join(dirpath, fn)
-            if globs and not any(fnmatch.fnmatch(fpath, g) for g in globs):
+            relative = os.path.relpath(fpath, root).replace(os.sep, "/")
+            if globs and not any(
+                fnmatch.fnmatchcase(relative, g)
+                or fnmatch.fnmatchcase(fpath, g)
+                or ("/" not in g and fnmatch.fnmatchcase(fn, g))
+                for g in globs
+            ):
                 continue
             if _validate_dashboard_path(fpath) is None:
                 continue

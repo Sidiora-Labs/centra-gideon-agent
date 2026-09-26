@@ -3397,7 +3397,8 @@ export interface DeckSlideJson {
   title_box: DeckShapeBoxJson
   body_box: DeckShapeBoxJson
 }
-export interface DeckModelJson { title: string; slides: DeckSlideJson[]; width_in: number; height_in: number }
+export interface DeckModelJson { title: string; slides: DeckSlideJson[]; width_in: number; height_in: number; template_slug?: string; template_version?: number }
+export interface DeckPreviewResponse { slug: string; version: number; fidelity: string; slides: { index: number; slug: string; version: number; raw_url: string; critique: string[] }[] }
 export interface DeckModelResponse {
   slug: string; kind: string; version: number; mime: string
   model: DeckModelJson; loss: DocumentLossReport
@@ -4238,6 +4239,9 @@ export const api = {
 
   designDefaultTokens: (scheme: 'light' | 'dark' = 'light') =>
     get<{ tokens: Record<string, unknown>; schema: Record<string, unknown>; resolved: Record<string, unknown>; css: string; overrides: Record<string, unknown>; scheme: string }>(`/api/design/tokens/default?scheme=${scheme}`),
+  uLoopDesignPreview: (id: string) => get<{ receipts: Record<string, { version: number; reviewed_at: number }> }>(`/api/loops/${encodeURIComponent(id)}/design/preview`),
+  reviewULoopDesignPreview: (id: string, slug: string, version: number, approved: boolean) =>
+    post<{ ok: boolean; receipts: Record<string, { version: number; reviewed_at: number }> }>(`/api/loops/${encodeURIComponent(id)}/design/preview`, { slug, version, approved }),
   uLoopDesignTokens: (id: string, scheme: 'light' | 'dark' = 'light') =>
     get<{ resolved: Record<string, unknown>; css: string; overrides: Record<string, unknown>; scheme: string }>(`/api/loops/${encodeURIComponent(id)}/design/tokens?scheme=${scheme}`),
 
@@ -5141,6 +5145,9 @@ export const api = {
       body: JSON.stringify({ model }),
     }).then(j<{ slug: string; version: number; mime: string }>).then((result) => publishArtifactModelSaved(slug, version, result)),
   artifactDeckModel: (slug: string) => get<DeckModelResponse>(`/api/artifacts/${encodeURIComponent(slug)}/model`),
+  renderArtifactDeckPreview: (slug: string, version: number) => fetch(`/api/artifacts/${encodeURIComponent(slug)}/deck-preview`, {
+    method: 'POST', headers: { 'If-Match': String(version), ...SK },
+  }).then(j<DeckPreviewResponse>),
   saveArtifactDeckModel: (slug: string, version: number, model: DeckModelJson) =>
     fetch(`/api/artifacts/${encodeURIComponent(slug)}/model`, {
       method: 'PUT',
