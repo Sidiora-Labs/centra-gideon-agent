@@ -27,6 +27,9 @@ def _isolated_home(tmp_path, monkeypatch) -> None:
         ("string", {"wrong": "shape"}, "object"),
         ("object", "wrong shape", "string"),
         ("number", True, "boolean"),
+        ("integer", 1.5, "number"),
+        ("boolean", 1, "number"),
+        ("array", "not an array", "string"),
     ],
 )
 async def test_declared_input_type_fails_before_stage_invocation(
@@ -53,3 +56,33 @@ async def test_declared_input_type_fails_before_stage_invocation(
         f"but received '{actual_type}'"
     )
     assert failure.remediation == f"provide 'subject' as a {declared_type}"
+
+
+async def test_declared_values_are_typed_before_a_run_is_persisted() -> None:
+    from gideon.automation.workflows.service import _coerce_declared_inputs
+
+    spec = {"inputs": {
+        "count": {"type": "integer"},
+        "ratio": {"type": "number"},
+        "enabled": {"type": "boolean"},
+        "items": {"type": "array"},
+        "options": {"type": "object"},
+    }}
+    values, invalid = _coerce_declared_inputs(spec, {
+        "count": "3", "ratio": "1.5", "enabled": "false",
+        "items": '["one"]', "options": '{"mode":"safe"}',
+    })
+    assert invalid == []
+    assert values == {
+        "count": 3, "ratio": 1.5, "enabled": False,
+        "items": ["one"], "options": {"mode": "safe"},
+    }
+
+    _, invalid = _coerce_declared_inputs(spec, {"count": "3.5", "items": "{}"})
+    assert len(invalid) == 2
+    assert "count" in invalid[0]
+    assert "items" in invalid[1]
+
+    exact, invalid = _coerce_declared_inputs(spec, {"count": "9007199254740993"})
+    assert invalid == []
+    assert exact["count"] == 9007199254740993

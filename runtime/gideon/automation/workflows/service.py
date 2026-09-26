@@ -24,9 +24,12 @@ run. A read that lazily started something would make polling a side-effecting ac
 from __future__ import annotations
 
 import logging
+import json
+import math
 import re
 import shutil
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from gideon.automation.workflows import (
@@ -575,6 +578,13 @@ async def start_run(
             missing=missing,
         )
     inputs = _with_declared_defaults(spec, inputs or {})
+    inputs, invalid = _coerce_declared_inputs(spec, inputs)
+    if invalid:
+        return _service_failure(
+            "WF_RUN_INVALID_INPUT",
+            "; ".join(invalid),
+            invalid_inputs=invalid,
+        )
 
     if not skip_preflight:
         from gideon.automation.workflows.preflight import preflight as run_preflight
@@ -894,10 +904,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
     stored_prompt = store.read_output(run_id, f"{target}::prompt")
     resolved_prompt: Any
     if isinstance(stored_prompt, str) and stored_prompt:
-        if len(stored_prompt.encode("utf-8")) > journal_mod.MAX_INLINE_OUTPUT_BYTES:
-            resolved_prompt = {"ref": prompt_ref or f"{target}::prompt"}
-        else:
-            resolved_prompt = stored_prompt
+        resolved_prompt = stored_prompt
     elif prompt_ref:
         resolved_prompt = {"ref": prompt_ref}
     else:
@@ -2159,9 +2166,8 @@ def _with_declared_defaults(
     whose inputs were completed lazily at each binding would leave a record that does not explain
     its own behaviour.
 
-    A declared input with NO default still gets a key, valued "": the alternative is a binding
-    error on an input the template said was optional, which is the bug this function exists to
-    fix. An optional input's whole meaning is "the workflow works without it".
+    A declared input with NO default still gets a value in its declared type so a binding
+    can resolve it without creating an invalid run.
 
     The caller's value always wins, including an explicit empty string — a user who deliberately
     cleared a field is not asking for the default back.
@@ -2174,8 +2180,70 @@ def _with_declared_defaults(
         if key in out:
             continue
         default = meta.get("default") if isinstance(meta, dict) else None
-        out[str(key)] = "" if default is None else default
+        if default is None and isinstance(meta, dict):
+            default = {
+                "number": 0,
+                "integer": 0,
+                "boolean": False,
+                "array": [],
+                "object": {},
+            }.get(str(meta.get("type", "") or "").lower(), "")
+        out[str(key)] = default
     return out
+
+
+def _coerce_declared_inputs(
+    spec: dict[str, Any], provided: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    declared = spec.get("inputs")
+    if not isinstance(declared, dict):
+        return dict(provided), []
+    result = dict(provided)
+    invalid: list[str] = []
+    for name, meta in declared.items():
+        if not isinstance(meta, dict) or name not in result:
+            continue
+        kind = str(meta.get("type", "") or "").lower()
+        value = result[name]
+        if kind not in {"string", "number", "integer", "boolean", "array", "object"}:
+            continue
+        try:
+            if kind == "string":
+                if not isinstance(value, str):
+                    raise ValueError("expected text")
+            elif kind in {"number", "integer"}:
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise ValueError("expected a numeric value")
+                parsed = Decimal(value.strip()) if isinstance(value, str) else value
+                if isinstance(parsed, Decimal) and not parsed.is_finite():
+                    raise ValueError("expected a finite number")
+                if isinstance(parsed, float) and not math.isfinite(parsed):
+                    raise ValueError("expected a finite number")
+                if kind == "integer":
+                    if int(parsed) != parsed:
+                        raise ValueError("expected a whole number")
+                    value = int(parsed)
+                else:
+                    value = float(parsed) if isinstance(parsed, Decimal) else parsed
+                    if isinstance(value, float) and not math.isfinite(value):
+                        raise ValueError("expected a finite number")
+            elif kind == "boolean":
+                if isinstance(value, str):
+                    if value.strip().lower() not in {"true", "false"}:
+                        raise ValueError("expected true or false")
+                    value = value.strip().lower() == "true"
+                elif not isinstance(value, bool):
+                    raise ValueError("expected true or false")
+            else:
+                if isinstance(value, str):
+                    value = json.loads(value)
+                if not isinstance(value, list if kind == "array" else dict):
+                    raise ValueError(f"expected a JSON {kind}")
+        except (ValueError, TypeError, OverflowError, InvalidOperation) as exc:
+            invalid.append(f"input {name!r} declares {kind}: {exc}")
+            continue
+        result[name] = value
+    return result, invalid
 
 
 def _nodes_of(run_id: str) -> list[dict[str, Any]]:

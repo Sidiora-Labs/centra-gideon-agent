@@ -313,7 +313,7 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
                       {
 }
                       {typeof row.cost_usd === 'number' && row.cost_usd ? <span>~${row.cost_usd.toFixed(4)}</span> : null}
-                      {typeof row.duration_secs === 'number' && row.duration_secs ? <span>{fmtElapsed(row.duration_secs)}</span> : null}
+                      {typeof row.duration_secs === 'number' ? <span>{fmtElapsed(row.duration_secs)}</span> : null}
                       {typeof row.approved === 'boolean' ? <span>{row.approved ? 'approved' : 'rejected'}</span> : null}
                     </span>
                     {row.detail ? <span className="text-on-surface-low">{String(row.detail)}</span> : null}

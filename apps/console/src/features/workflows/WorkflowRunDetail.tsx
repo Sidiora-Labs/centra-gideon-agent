@@ -440,7 +440,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               <span>run <span className="font-mono">{run.run_id}</span></span>
               <span>spec v{run.spec_version}</span>
               {run.tokens ? <span className="tabular-nums">{run.tokens.toLocaleString()} tokens</span> : null}
-              {run.elapsed_secs ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)} {isTerminal(run.status) ? 'duration' : 'elapsed'}</span> : null}
+              {typeof run.elapsed_secs === 'number' ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)} {isTerminal(run.status) ? 'duration' : 'elapsed'}</span> : null}
             </div>
 
             {

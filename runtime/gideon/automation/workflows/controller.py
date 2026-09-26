@@ -85,10 +85,17 @@ from gideon.automation.workflows.effects import (
     redo_blocked,
     run_teardown,
 )
-from gideon.automation.workflows.engine import dispatch, dispatcher_commits_effects
+from gideon.automation.workflows.engine import (
+    check_declared_schema,
+    dispatch,
+    dispatcher_commits_effects,
+)
+from gideon.automation.workflows.failure_taxonomy import classify_exception
 from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
     NodeResult,
+    _release_claim,
+    claim_key,
     resolve_axis_model,
 )
 from gideon.automation.workflows.human_input import drop_continuations
@@ -166,6 +173,9 @@ ESCALATION_ANSWER_HORIZON_SECS = 24 * 3600.0
 _DECLARED_INPUT_TYPES = {
     "string": lambda value: isinstance(value, str),
     "object": lambda value: isinstance(value, dict),
+    "array": lambda value: isinstance(value, list),
+    "boolean": lambda value: isinstance(value, bool),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
     "number": lambda value: isinstance(value, (int, float))
     and not isinstance(value, bool),
 }
@@ -1481,22 +1491,59 @@ class RunController:
                 continue
             node = dict(_walk(self.root)).get(spec_path(path))
             node_id = node.id if node else ""
+            if inst.subagent_claim_holder:
+                _release_claim(claim_key(self.run.id, node_id), inst.subagent_claim_holder)
+                inst.subagent_claim_holder = ""
             error = str(getattr(info, "error", "") or "")
             reaped = bool(getattr(info, "reaped", False))
             if error:
+                classified = classify_exception(RuntimeError(error))
                 failure = Failure(
                     failure_class=(
-                        FailureClass.TIMEOUT if reaped else FailureClass.INTERNAL
+                        FailureClass.TIMEOUT
+                        if reaped
+                        else classified.failure_class
                     ),
                     cause_plain=error,
                     remediation=(
                         "the subagent was force-killed after exceeding its deadline; raise the "
                         "subagent timeout, or split this stage into smaller steps"
                         if reaped
-                        else "check the subagent's transcript for the failing turn"
+                        else classified.remediation
                     ),
                     recoverable=True,
                 )
+                if node is not None and self._retry_allowed(node, inst.attempt, failure):
+                    record = attempt_from_failure(inst.attempt, failure)
+                    self._attempts.setdefault(path, []).append(record)
+                    self.journal.write(
+                        journal_mod.STEP_ATTEMPT,
+                        instance_path=path,
+                        node_id=node_id,
+                        epoch=inst.epoch,
+                        **record.to_dict(),
+                    )
+                    self.journal.step_failed(
+                        path,
+                        node_id,
+                        epoch=inst.epoch,
+                        failure=failure,
+                        attempt=inst.attempt,
+                        retries_exhausted=False,
+                    )
+                    inst.state = InstanceState.PENDING
+                    inst.subagent_id = ""
+                    self._publish(
+                        "workflow_node_done",
+                        {
+                            "node_id": node_id,
+                            "instance_path": path,
+                            "status": InstanceState.PENDING.value,
+                            "node_epoch": inst.epoch,
+                        },
+                    )
+                    settled = True
+                    continue
                 inst.state = InstanceState.FAILED
                 inst.failure = failure
                 inst.completed_at = _now()
@@ -1509,10 +1556,18 @@ class RunController:
                     retries_exhausted=True,
                 )
             else:
-                inst.state = InstanceState.DONE
+                raw_result = str(getattr(info, "result", "") or "")
+                schema = (node.config or {}).get("schema") if node else None
+                mismatch = (
+                    check_declared_schema(raw_result, schema)
+                    if isinstance(schema, dict)
+                    else ""
+                )
+                inst.state = InstanceState.DEGRADED if mismatch else InstanceState.DONE
+                inst.degraded_reason = f"Output schema mismatch: {mismatch}" if mismatch else ""
                 inst.completed_at = _now()
                 ref, preview = self.journal.store_output(
-                    path, {"result": str(getattr(info, "result", "") or "")}
+                    path, {"result": raw_result}
                 )
                 inst.output_ref = ref
                 if node_id:
@@ -1522,8 +1577,9 @@ class RunController:
                     node_id,
                     epoch=inst.epoch,
                     cache_key="",
-                    state=InstanceState.DONE,
+                    state=inst.state,
                     retries=max(0, inst.attempt - 1),
+                    degraded_reason=inst.degraded_reason,
                     output_ref=ref,
                 )
             self._publish(
@@ -1533,6 +1589,7 @@ class RunController:
                     "instance_path": path,
                     "status": inst.state.value,
                     "node_epoch": inst.epoch,
+                    "degraded_reason": inst.degraded_reason,
                 },
             )
             settled = True
@@ -2232,7 +2289,46 @@ class RunController:
         """
         if not dispatcher_commits_effects(item.node):
             return True
-        committed = committed_effect(self._effects.get(item.path, []))
+        history = self._effects.get(item.path, [])
+        latest = next((record for record in reversed(history) if record.epoch == inst.epoch), None)
+        if latest is not None and latest.effect_status in (
+            EffectStatus.ATTEMPTED,
+            EffectStatus.COMMITTED,
+        ):
+            inst.state = InstanceState.BLOCKED
+            inst.completed_at = _now()
+            inst.failure = Failure(
+                failure_class=FailureClass.USER,
+                cause_plain=(
+                    f"node {item.node.id or item.path} has an external effect with no "
+                    "replayable completed step; its outcome may already have happened"
+                ),
+                remediation=(
+                    "reconcile the external result before continuing; explicitly skip or "
+                    "redo the node only after confirming the effect is safe"
+                ),
+                terminal_reason="effect_outcome_unknown",
+            )
+            self.journal.step_failed(
+                item.path,
+                item.node.id,
+                epoch=inst.epoch,
+                failure=inst.failure,
+                attempt=inst.attempt,
+                retries_exhausted=True,
+            )
+            self._persist_state()
+            self._publish(
+                "workflow_node_done",
+                {
+                    "node_id": item.node.id,
+                    "instance_path": item.path,
+                    "status": InstanceState.BLOCKED.value,
+                    "degraded_reason": "effect_outcome_unknown",
+                },
+            )
+            return False
+        committed = committed_effect(history)
         if committed is None or committed.epoch == inst.epoch:
             return True
         if redo_blocked(item.node.config or {}, committed, inst.epoch):
@@ -2379,9 +2475,16 @@ class RunController:
         cautionary case is an engine that shipped a no-op node timeout nobody noticed,
         because timeouts only ever execute under failure.
         """
-        total = self.services.node_timeout_total
         node = self._with_retry_hint(item)
         node = self._with_carried_context(node, item)
+        declared_total = (node.config or {}).get("timeout_total_secs")
+        total = (
+            float(declared_total)
+            if isinstance(declared_total, (int, float))
+            and not isinstance(declared_total, bool)
+            and declared_total > 0
+            else self.services.node_timeout_total
+        )
         if node.kind in (NodeKind.STAGE, NodeKind.INFER):
             failure = self._declared_input_failure()
             if failure is not None:
@@ -2453,21 +2556,18 @@ class RunController:
             value = self.run.inputs[name]
             if accepts(value):
                 continue
-            actual_type = (
-                "object"
-                if isinstance(value, dict)
-                else (
-                    "boolean"
-                    if isinstance(value, bool)
-                    else (
-                        "number"
-                        if isinstance(value, (int, float))
-                        else (
-                            "string" if isinstance(value, str) else type(value).__name__
-                        )
-                    )
-                )
-            )
+            if isinstance(value, dict):
+                actual_type = "object"
+            elif isinstance(value, list):
+                actual_type = "array"
+            elif isinstance(value, bool):
+                actual_type = "boolean"
+            elif isinstance(value, (int, float)):
+                actual_type = "number"
+            elif isinstance(value, str):
+                actual_type = "string"
+            else:
+                actual_type = type(value).__name__
             return Failure(
                 failure_class=FailureClass.USER,
                 cause_plain=(
@@ -2718,8 +2818,10 @@ class RunController:
 
         if result.state == InstanceState.RUNNING:
             inst.state = InstanceState.RUNNING
+            self._store_prompt(item.path, result.resolved_prompt)
             if isinstance(result.output, dict):
                 inst.subagent_id = str(result.output.get("subagent_id", "") or "")
+                inst.subagent_claim_holder = str(result.output.get("claim_holder", "") or "")
             return
 
         if result.state == InstanceState.WAITING:
@@ -2897,6 +2999,7 @@ class RunController:
             )
             self._project_task(item, inst, result)
         else:
+            self._store_prompt(item.path, result.resolved_prompt)
             if result.output is not None:
                 ref, _unused = self.journal.store_output(item.path, result.output)
                 inst.output_ref = ref
@@ -2946,9 +3049,13 @@ class RunController:
         failure.
         """
         failure = result.failure
+        return self._retry_allowed(item.node, inst.attempt, failure)
+
+    @staticmethod
+    def _retry_allowed(node: Node, attempt: int, failure: Failure | None) -> bool:
         if failure is None or not failure.retryable:
             return False
-        retry_cfg = (item.node.config or {}).get("retry") or {}
+        retry_cfg = (node.config or {}).get("retry") or {}
         max_attempts = retry_cfg.get("max_attempts", 1)
         if not isinstance(max_attempts, int) or max_attempts < 1:
             max_attempts = 1
@@ -2957,7 +3064,7 @@ class RunController:
             str(m) for m in no_retry
         ]:
             return False
-        return inst.attempt < max_attempts
+        return attempt < max_attempts
 
     def _escalate(
         self, path: str, node_id: str, *, reason: str, detail: str = ""
@@ -4027,6 +4134,16 @@ class RunController:
 
     async def _finish(self, status: RunStatus, *, error: str = "") -> None:
         """Write the run's terminal status. The single terminal writer (WF2-R10)."""
+        if status in (RunStatus.FAILED, RunStatus.ESCALATED) and not error:
+            failed = [
+                (path, inst) for path, inst in self.instances.items()
+                if inst.failure and inst.failure.cause_plain
+            ]
+            if failed:
+                path, inst = max(failed, key=lambda row: (row[0].count("."), row[1].completed_at or ""))
+                node = dict(_walk(self.root)).get(spec_path(path))
+                label = node.id if node and node.id else path
+                error = f"{label}: {inst.failure.cause_plain}"[:500]
         self.run.status = status
         self.run.error_message = error
         if status in (

@@ -3000,6 +3000,7 @@ export type GoalType = 'verifiable' | 'open_ended' | 'monitor'
 export type Granularity = 'quick' | 'balanced' | 'exhaustive' | 'forever'
 export interface LoopFinding {
   cycle: number; summary?: string; key_insight?: string
+  task_id?: string
   sources_checked?: string[]; sources_empty?: string[]
   files_touched?: string[]
   new_findings_count?: number; evidence?: string; metric?: { name?: string; value?: number }; ts?: number

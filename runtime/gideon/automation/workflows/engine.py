@@ -209,11 +209,18 @@ async def dispatch_infer(
                 resolved_prompt=sent_prompt,
             )
         output = parsed
+    declared_schema = cfg.get("schema")
+    mismatch = (
+        check_declared_schema(output, declared_schema)
+        if isinstance(declared_schema, dict)
+        else ""
+    )
     return NodeResult(
-        state=InstanceState.DONE,
+        state=InstanceState.DEGRADED if mismatch else InstanceState.DONE,
         output=output,
         resolved_prompt=sent_prompt,
         tokens=_estimate_tokens(prompt, text),
+        degraded_reason=f"Output schema mismatch: {mismatch}" if mismatch else "",
     )
 
 
@@ -395,7 +402,7 @@ async def dispatch_stage(
         )
     return NodeResult(
         state=InstanceState.RUNNING,
-        output={"subagent_id": info.id},
+        output={"subagent_id": info.id, "claim_holder": holder},
         resolved_prompt=prompt,
     )
 
@@ -1752,6 +1759,57 @@ def check_output_contract(value: Any, contract: dict[str, Any]) -> str:
             if hit:
                 return f"output contains forbidden phrase: {hit[0]}"
     return ""
+
+
+def check_declared_schema(value: Any, schema: dict[str, Any]) -> str:
+    if isinstance(value, str) and schema.get("type") != "string":
+        parsed = _parse_json_loose(value)
+        if parsed is None and value.strip().lower() != "null":
+            return "expected JSON matching the declared schema"
+        value = parsed
+
+    def check(actual: Any, declared: Any, path: str) -> str:
+        if isinstance(declared, str):
+            expected = declared.lower()
+        elif isinstance(declared, dict) and isinstance(declared.get("type"), str):
+            expected = str(declared["type"]).lower()
+        elif isinstance(declared, dict):
+            expected = "object"
+        else:
+            return ""
+        matches = {
+            "string": lambda v: isinstance(v, str),
+            "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+            "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+            "boolean": lambda v: isinstance(v, bool),
+            "array": lambda v: isinstance(v, list),
+            "object": lambda v: isinstance(v, dict),
+            "null": lambda v: v is None,
+        }
+        accepts = matches.get(expected)
+        if accepts is not None and not accepts(actual):
+            return f"{path} should be {expected}, got {type(actual).__name__}"
+        if isinstance(actual, dict) and isinstance(declared, dict):
+            props = declared.get("properties") if "type" in declared else declared
+            if not isinstance(props, dict):
+                props = {}
+            required = declared.get("required", []) if "type" in declared else props.keys()
+            for key in required if isinstance(required, (list, tuple)) else props:
+                if key not in actual:
+                    return f"{path}.{key} is missing"
+            for key, child in props.items():
+                if key in actual:
+                    problem = check(actual[key], child, f"{path}.{key}")
+                    if problem:
+                        return problem
+        if isinstance(actual, list) and isinstance(declared, dict) and "items" in declared:
+            for index, child in enumerate(actual):
+                problem = check(child, declared["items"], f"{path}[{index}]")
+                if problem:
+                    return problem
+        return ""
+
+    return check(value, schema, "output")
 
 
 def _parse_json_loose(text: Any) -> Any:
