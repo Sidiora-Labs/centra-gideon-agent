@@ -2089,13 +2089,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       onQueueRemove={(id) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => { setQueued((previous) => previous.filter((item) => item.id !== id)) }).catch(reportActionFailure('cancel that queued message')); }}
       onQueueEdit={(id, text) => { const key = sessionRef.current; if (!key) return; return api.cancelQueued(key, id).then(() => { setQueued((previous) => previous.filter((item) => item.id !== id)); setInput(text); }).catch(reportActionFailure('edit that queued message')); }}
       onQueueInterrupt={(id) => { const key = sessionRef.current; if (!key) return; return api.interruptChat(key, id).then(() => {}).catch(reportActionFailure('interrupt this turn')); }}>
-      <div className="relative flex h-full flex-col overflow-hidden">
+      <div className="relative flex h-full flex-col overflow-hidden" data-gideon-chat-page>
       <DotGlow intensity={composerFocused ? 1.6 : 1} composerRef={composerRef} focusRef={glowTargetRef} />
 
       {
 }
       <TopBar
         keepCornerPadding
+        contentWidth={1120}
         left={!started ? (
           undefined
         ) : (
@@ -2204,7 +2205,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       {
 }
       <div className="relative flex min-h-0 flex-1">
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-w-0 flex-1 flex-col" data-gideon-chat-content>
           {loadingHistory ? (
             <>
               <div className="relative flex-1 overflow-y-auto">
