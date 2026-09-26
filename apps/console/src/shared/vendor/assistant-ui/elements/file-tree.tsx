@@ -21,17 +21,19 @@ export function FileTree({
   visibleCount,
   totalAdditions,
   totalDeletions,
+  filesChangedLabel,
   onFileClick,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "nodes" | "visibleCount" | "totalAdditions" | "totalDeletions" | "onFileClick"
+  "children" | "nodes" | "visibleCount" | "totalAdditions" | "totalDeletions" | "filesChangedLabel" | "onFileClick"
 > & {
   nodes: readonly FileTreeNode[];
   visibleCount: number;
   totalAdditions?: number;
   totalDeletions?: number;
+  filesChangedLabel?: string;
   onFileClick?: (path: string) => void;
 }) {
   const files = nodes.filter((node) => node.kind === "file").length;
@@ -49,7 +51,7 @@ export function FileTree({
       {...props}
     >
       <div className="flex items-baseline justify-between px-1">
-        <span className="text-[13.5px] font-medium">{files} files changed</span>
+        <span className="text-[13.5px] font-medium">{filesChangedLabel ?? `${files} files changed`}</span>
         {totalsComplete && (totalAdditions !== undefined || totalDeletions !== undefined) &&
           <span className={cn(mono, "tabular-nums")}>
             {totalAdditions !== undefined && <span className="text-emerald-600 dark:text-emerald-400">
