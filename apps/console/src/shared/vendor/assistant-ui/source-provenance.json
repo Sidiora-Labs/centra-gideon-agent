@@ -55,7 +55,7 @@
     },
     {
       "path": "elements/composer.tsx",
-      "sha256": "ce56e696404c548cf37ce36bfdceae100adfb7409026fbf0f17f06d89d5d6bdf",
+      "sha256": "b531a8bba30724182d3258f2ceb104aa8221cfcb44f4bed6c71a802c84fc62fa",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/composer.tsx",
       "donorSha256": "361a15d0f2f07a251c20d61b8a260c043e23440222e9bc5bc78954be37d38dec",
       "status": "adapted"
@@ -286,7 +286,7 @@
     },
     {
       "path": "elements/shared-conversation.tsx",
-      "sha256": "9335c5a74a0934183f12733426e62bd03b787dfe0af89abec8553cd32cd2b1ee",
+      "sha256": "1e9e59f3a3985b1ae6c6f2bfc82c0a96a2f2c7730febb5848a7eaa1d837543dc",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/shared-conversation.tsx",
       "donorSha256": "2fee5047294f5a3d715860892d3936982f0f0458ab60362fc315815a1d8c65ff",
       "status": "adapted"
@@ -363,7 +363,7 @@
     },
     {
       "path": "elements/tool-fallback.aui.tsx",
-      "sha256": "050ea8a4742b1af72b6947343f0c629e7b5a7d909c8e7bf3f4179dda0abec450",
+      "sha256": "977ad16869245347b73d5e2afa668a6a532f54518b469d7c94ddaa4e2a5878df",
       "donorPath": "packages/ui/src/components/react/assistant-ui/elements/tool-fallback.aui.tsx",
       "donorSha256": "f5675f389a6fa28a2363f666e0f42fbff17c8df229bf291f83002e18521689c9",
       "status": "adapted"
