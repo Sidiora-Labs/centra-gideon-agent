@@ -155,6 +155,21 @@ describe('Gideon assistant-ui runtime', () => {
     await waitFor(() => expect(ui.callbacks.onStop).toHaveBeenCalledTimes(1))
   })
 
+  it('rejects an assistant turn as an edit target through the external-store runtime', async () => {
+    const ui = setup()
+    const runtime = ui.aui().thread.__internal_getRuntime?.() as unknown as {
+      __internal_threadBinding: { getState(): { append(message: AppendMessage): Promise<void> } }
+    }
+    const edit: AppendMessage = {
+      role: 'user', content: [{ type: 'text', text: 'Wrong target' }], attachments: [],
+      metadata: { custom: {} }, createdAt: new Date(0),
+      parentId: gideonAuiId('session/a', 0), sourceId: gideonAuiId('session/a', 1), runConfig: undefined,
+    }
+    await expect(runtime.__internal_threadBinding.getState().append(edit))
+      .rejects.toThrow('Cannot edit a turn outside this Gideon session')
+    expect(ui.callbacks.onEdit).not.toHaveBeenCalled()
+  })
+
   it('routes an active send into the existing steer lane and carries the real queued IDs', async () => {
     const ui = setup({ streaming: true, queued: [{ id: 'queue-1', content: 'Next prompt' }] })
     await act(async () => ui.aui().thread.append('Steer this answer'))
@@ -179,6 +194,15 @@ describe('Gideon assistant-ui runtime', () => {
     expect(ui.aui().threads.getState().archivedThreadIds).toContain('session/c')
     await act(async () => ui.aui().threads.item({ index: 1 }).switchTo())
     expect(ui.callbacks.onSwitchSession).toHaveBeenCalledExactlyOnceWith('session/b')
+  })
+
+  it('does not advertise session-list navigation without both Gideon navigation callbacks', () => {
+    const ui = setup({ onNewSession: undefined })
+    expect(ui.aui().threads.getState().threadIds).not.toContain('session/b')
+    expect(ui.aui().thread.getState().messages.map((message) => message.id)).toEqual([
+      gideonAuiId('session/a', 0), gideonAuiId('session/a', 1),
+    ])
+    expect(ui.callbacks.onSwitchSession).not.toHaveBeenCalled()
   })
 
   it('keeps new chats and optional queue capabilities explicit', () => {
