@@ -5,9 +5,10 @@ import { MessagePrimitive } from '../../shared/vendor/assistant-ui'
 import { ThreadTranscript, useMessage } from '../../shared/vendor/assistant-ui/elements/thread.aui'
 import { MessageAssistant } from '../../shared/ui/chat/MessageAssistant'
 import { MessageUser } from '../../shared/ui/chat/MessageUser'
-import { ThreadAssistantTurnActions, ThreadErrorSegment } from '../ChatPage'
+import { AssistantSegments, ThreadAssistantTurnActions, ThreadErrorSegment } from '../ChatPage'
 import { GideonChatRuntimeProvider, useGideonTurnByAuiId } from './auiRuntime'
-import { assistantTurn, hydrateTurns, turnText, userTurn, type ChatTurn } from './chatTypes'
+import { ThreadPeekViews } from './auiThreadSurfaces'
+import { assistantTurn, hydrateTurns, turnText, userTurn, type ChatTurn, type Segment } from './chatTypes'
 
 afterEach(cleanup)
 
@@ -23,7 +24,7 @@ function AssistantSlot() {
   const id = useMessage((message) => message.id)
   const record = useGideonTurnByAuiId().get(id)
   return <MessagePrimitive.Root data-turn-id={id}>
-    {record && <MessageAssistant>{turnText(record.turn)}</MessageAssistant>}
+    {record && <MessageAssistant stopOutcome={record.turn.stopOutcome}>{turnText(record.turn)}</MessageAssistant>}
   </MessagePrimitive.Root>
 }
 
@@ -41,6 +42,60 @@ function ConnectedThread() {
 }
 
 describe('connected Gideon thread', () => {
+  it('shows one selected-history view and returns to the live preview while a reply streams', () => {
+    const history = hydrateTurns([
+      { role: 'user', content: 'What changed?', ts: '2026-09-26T12:00:00Z' },
+      { role: 'assistant', content: 'The report changed.', ts: '2026-09-26T12:00:05Z' },
+    ])
+    const view = render(<ThreadPeekViews turns={history}/> )
+    expect(view.container.querySelectorAll('[data-slot="chat-panel"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-slot="day-separator"]')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }))
+    expect(view.container.querySelectorAll('[data-slot="chat-panel"]')).toHaveLength(0)
+    expect(view.container.querySelectorAll('[data-slot="day-separator"]')).toHaveLength(1)
+    expect(screen.getByText('The report changed.')).toBeTruthy()
+    view.rerender(<ThreadPeekViews turns={history} streamingText="New answer underway" busy/> )
+    expect(view.container.querySelectorAll('[data-slot="chat-panel"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-slot="day-separator"]')).toHaveLength(0)
+    expect(screen.getByText('New answer underway')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Timeline' }).hasAttribute('disabled')).toBe(true)
+    view.rerender(<ThreadPeekViews turns={history}/> )
+    expect(view.container.querySelectorAll('[data-slot="day-separator"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-slot="chat-panel"]')).toHaveLength(0)
+  })
+
+  it('groups adjacent real tool calls once while preserving interleaved process order and rich results', () => {
+    const segments: Segment[] = [
+      { kind: 'thinking', text: 'Planning the checks' },
+      { kind: 'tool', id: 'read-a', tool: 'Read', input: 'a.txt', output: 'FIRST_RESULT', purpose: 'Inspect a.txt', done: true },
+      { kind: 'tool', id: 'read-b', tool: 'Read', input: 'b.txt', output: 'SECOND_RESULT', purpose: 'Inspect b.txt', done: true },
+      { kind: 'activity', activityKind: 'progress', text: 'Checkpoint reached' },
+      { kind: 'tool', id: 'read-c', tool: 'Read', input: 'c.txt', output: 'THIRD_RESULT', purpose: 'Inspect c.txt', done: true },
+      { kind: 'text', text: 'The checks are complete.' },
+    ]
+    const view = render(<AssistantSegments segments={segments} isLast messageTs="2026-09-26T12:00:05Z"
+      onApprove={() => {}} onSwitchToAgent={() => {}} onOpenFile={() => {}} onSetupModel={() => {}}/>)
+    const groups = view.container.querySelectorAll('[data-slot="aui-tool-progress"]')
+    expect(groups).toHaveLength(2)
+    expect(view.container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-slot="tool-timeline"]')).toHaveLength(1)
+    expect(view.container.querySelectorAll('[data-slot="tool-fallback-root"]')).toHaveLength(1)
+    const checkpoint = screen.getByText('Checkpoint reached')
+    expect(Boolean(groups[0].compareDocumentPosition(checkpoint) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(Boolean(checkpoint.compareDocumentPosition(groups[1]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    fireEvent.click(view.container.querySelector('[data-slot="tool-group-trigger"]') as HTMLButtonElement)
+    expect(view.container.querySelectorAll('[data-slot="tool-fallback-root"]')).toHaveLength(3)
+    const triggers = view.container.querySelectorAll('[data-slot="tool-fallback-trigger"]')
+    fireEvent.click(triggers[0] as HTMLElement)
+    expect(view.container.textContent?.match(/FIRST_RESULT/g)).toHaveLength(1)
+    expect(screen.getByText('The checks are complete.')).toBeTruthy()
+    view.rerender(<AssistantSegments segments={segments} isLast streaming messageTs="2026-09-26T12:00:05Z"
+      onApprove={() => {}} onSwitchToAgent={() => {}} onOpenFile={() => {}} onSetupModel={() => {}}/>)
+    expect(view.container.querySelectorAll('[data-slot="tool-group-root"]')).toHaveLength(0)
+    expect(view.container.querySelectorAll('[data-slot="tool-timeline"]')).toHaveLength(2)
+    expect(view.container.querySelectorAll('[data-slot="aui-tool-progress"]')).toHaveLength(2)
+  })
+
   it('renders one transcript from the real turn map and updates an answer without duplicating it', () => {
     const { container } = render(<ConnectedThread/>)
     expect(screen.getByText('Explain the result')).toBeTruthy()
@@ -52,6 +107,24 @@ describe('connected Gideon thread', () => {
     expect(screen.queryByText('First')).toBeNull()
     expect(screen.getByText('Final answer')).toBeTruthy()
     expect(Array.from(container.querySelectorAll('[data-turn-id]'), (node) => node.getAttribute('data-turn-id'))).toEqual(ids)
+  })
+
+  it('shows only a recorded stop outcome beside the partial answer', () => {
+    const event = { kind: 'stop_event', id: 'stop-1', state: 'stopped', outcome: 'soft' }
+    const turns = hydrateTurns([
+      { role: 'user', content: 'Continue the analysis' },
+      { role: 'assistant', content: 'Partial answer' },
+      { role: 'system', content: JSON.stringify(event), meta: event },
+    ])
+    const view = render(<GideonChatRuntimeProvider sessionId="stopped-history" turns={turns} streaming={false}
+      onSend={() => {}} onStop={() => {}} onEdit={() => {}} onReload={() => {}}>
+      <ThreadTranscript components={{ UserMessage: UserSlot, AssistantMessage: AssistantSlot }}/>
+    </GideonChatRuntimeProvider>)
+    expect(view.container.querySelectorAll('[data-slot="stopped-run"]')).toHaveLength(1)
+    expect(view.container.textContent?.match(/Partial answer/g)).toHaveLength(1)
+    expect(screen.getByText('Stopped')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull()
   })
 
   it('uses one donor action row for persisted votes and real answer navigation', () => {

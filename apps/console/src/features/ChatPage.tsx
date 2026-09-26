@@ -87,6 +87,7 @@ import { followupAnnouncement } from './chat/FollowupChips'
 import { CheckWorkChip } from './chat/CheckWorkChip'
 import { SessionMarkerRail } from './chat/SessionMarkerRail'
 import { GideonChatRuntimeProvider, useGideonTurnByAuiId } from './chat/auiRuntime'
+import { AuiToolProgress } from './chat/auiToolTimeline'
 import { ThreadTranscript, useMessage } from '../shared/vendor/assistant-ui/elements/thread.aui'
 import { ThreadList, ThreadListSidebar } from '../shared/vendor/assistant-ui/elements/thread-list.aui'
 import { ThreadFollowupSuggestions } from '../shared/vendor/assistant-ui/elements/follow-up-suggestions.aui'
@@ -97,7 +98,7 @@ import { AssistantModal } from '../shared/vendor/assistant-ui/elements/assistant
 import { AssistantSidebar } from '../shared/vendor/assistant-ui/elements/assistant-sidebar.aui'
 import { ContextDisplay } from '../shared/vendor/assistant-ui/elements/context-display.aui'
 import { MessagePrimitive } from '../shared/vendor/assistant-ui'
-import { ThreadConversationSearch, ThreadSessionSearch, ThreadChatPreview, ThreadEmptyWelcome, ThreadConnectionNotice, ThreadSharedSnapshots, appendSelectionQuote, readActualContextUsage, measuredContextDisplay, type ActualContextUsage } from './chat/auiThreadSurfaces'
+import { ThreadConversationSearch, ThreadSessionSearch, ThreadPeekViews, ThreadEmptyWelcome, ThreadConnectionNotice, ThreadSharedSnapshots, appendSelectionQuote, readActualContextUsage, measuredContextDisplay, type ActualContextUsage } from './chat/auiThreadSurfaces'
 import { applyCoalescedFlush, insertActivity } from './chat/coalesceReducers'
 import { useQuery, invalidateKeys, peekQuery, writeQuery } from '../shared/data/data'
 import { sessionRecencyMs } from '../shared/data/epoch'
@@ -301,7 +302,7 @@ function SessionPeekBody({ sessionKey, onOpen }: { sessionKey: string; onOpen: (
     <div className="flex h-full min-h-0 flex-col gap-m">
       <div className="min-h-0 flex-1 overflow-y-auto">
         {shown.length === 0 && !streamText && <p className="px-2 py-6 text-center text-on-surface-low text-[0.8125rem]">No messages yet — say hi below.</p>}
-        <ThreadChatPreview turns={hydrateTurns(shown, false)} streamingText={streamText} busy={busy}
+        <ThreadPeekViews key={sessionKey} turns={hydrateTurns(shown, false)} streamingText={streamText} busy={busy}
           renderAssistant={(text) => <Markdown className="[&_p]:text-[0.8125rem]">{parseSwitchToAgent(parseOptions(text.slice(0, 2000)).body).body}</Markdown>}
           endRef={endRef}/>
       </div>
@@ -2078,7 +2079,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             const isLast = index === turns.length - 1;
             return <>
               {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
-              <MessageAssistant timestamp={stampOf(turn)} model={sessionBindingRef.current?.model || undefined}
+              <MessageAssistant timestamp={stampOf(turn)} model={sessionBindingRef.current?.model || undefined} stopOutcome={turn.stopOutcome}
                 fileChanges={turn.fileChanges} onOpenFile={setOpenFile}
                 feedback={feedbackTarget === turn.visibleIndex ? { verdict: 'down' as const, busy: feedbackBusy, error: feedbackError, onSubmit: (_verdict: 'down', reason?: string) => { void saveFeedback(turn.visibleIndex!, 'down', reason); }, onClose: () => { if (!feedbackBusy) { setFeedbackTarget(null); setFeedbackError(null); } } } : undefined}
                 actions={!(isLast && streaming) && <ThreadAssistantTurnActions text={turnText(turn)} canFork={memoryMode === 'persistent'} variantCount={turn.variantCount} variantIdx={turn.variantIdx}
@@ -2757,7 +2758,7 @@ export function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
   )
 }
 
-function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, onSwitchToAgent, onOpenFile, onSetupModel, chatSessionKey, citations, skillsUsed }: {
+export function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, onSwitchToAgent, onOpenFile, onSetupModel, chatSessionKey, citations, skillsUsed }: {
   segments: Segment[]; isLast: boolean
   messageTs?: string
   streaming?: boolean
@@ -2826,7 +2827,24 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
     && !!(s as ToolSegment).done && !!workflowRefFromTool((s as ToolSegment).tool, (s as ToolSegment).output)
   const isLiveCard = (s: Segment) => isSdlc(s) || isWorkflow(s)
   const sdlcNodes = segments.filter(isLiveCard).map(renderItem).filter(Boolean)
-  const workNodes = workSegs.filter((s) => !isLiveCard(s)).map(renderItem).filter(Boolean)
+  const workNodes: ReactNode[] = []
+  let hasToolProgress = false
+  for (let i = 0; i < workSegs.length;) {
+    const ordinaryTool = (s: Segment) => s.kind === 'tool' && !isLiveCard(s)
+    if (ordinaryTool(workSegs[i])) {
+      let end = i + 1
+      while (end < workSegs.length && ordinaryTool(workSegs[end])) end++
+      const tools = workSegs.slice(i, end) as ToolSegment[]
+      hasToolProgress = true
+      workNodes.push(<AuiToolProgress key={`tool-run-${i}`} tools={tools} streaming={!!streaming}>
+        {tools.map((tool, offset) => renderItem(tool, i + offset))}
+      </AuiToolProgress>)
+      i = end
+    } else {
+      if (!isLiveCard(workSegs[i])) workNodes.push(renderItem(workSegs[i], i))
+      i++
+    }
+  }
   const finalNodes = finalSegs.map(renderItem).filter(Boolean)
   const hasFinal = finalNodes.length > 0
   const collapseWork = !streaming && hasFinal && stepCount > 0
@@ -2834,7 +2852,7 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
   return (
     <>
       {workNodes.length > 0 && (
-        collapseWork
+        collapseWork && !hasToolProgress
           ? <AgentWork stepCount={stepCount} toolNames={toolNames}>{workNodes}</AgentWork>
           : <div className="flex flex-col gap-1">{workNodes}</div>
       )}
