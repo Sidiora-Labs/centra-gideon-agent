@@ -1,0 +1,8 @@
+{
+  "sourceRepository": "assistant-ui",
+  "sourceCommit": "72e404e9160a9dcc91fbec1515e910d1402f1de3",
+  "sourcePath": "packages/ui/src/components/react/assistant-ui/elements/generative-ui.tsx",
+  "sha256": "0bfa3926464e20323076b9097477796c4756fb162e8ddb58d421e6f8073c793f",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2025 AgentbaseAI Inc."
+}
