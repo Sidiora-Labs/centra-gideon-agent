@@ -148,6 +148,7 @@ export function MapAnswer({
             <button
               key={pin.id}
               type="button"
+              aria-label={`${pin.label}: ${pin.detail}`}
               aria-current={pin.id === activeId || undefined}
               onClick={() => onSelect(pin.id)}
               className={className}

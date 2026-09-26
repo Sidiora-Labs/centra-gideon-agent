@@ -49,7 +49,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/map-answer.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/map-answer.tsx",
       "donor_sha256": "98f4f90c0617da95bbc6aa1b53b7fce119dacd462b294414c8d5fdc82a805291",
-      "local_sha256": "51ef72b94a1a611e0f7879762069a473d0fe79c39c8e75eda5aeb296b583f911"
+      "local_sha256": "1c94e8dbfed344f73b3a711598a168859755ba4884f0a5d53563fed5c962498e"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/data-table.tsx",
