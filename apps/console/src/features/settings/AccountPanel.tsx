@@ -13,7 +13,12 @@ export function AccountPanel() {
   const [draft, setDraft] = useState(name)
   const [saved, setSaved] = useState(false)
 
-  const save = () => { setName(draft.trim() || DEFAULT_USER_NAME); setSaved(true); setTimeout(() => setSaved(false), 1800) }
+  const save = async () => {
+    try {
+      await setName(draft.trim() || DEFAULT_USER_NAME)
+      setSaved(true); setTimeout(() => setSaved(false), 1800)
+    } catch (error) { notify(`Couldn't save your name: ${String((error as Error)?.message || error)}`, 'error') }
+  }
   const dirty = draft.trim() !== name
 
   const [handle, setHandle] = useState('')
@@ -51,8 +56,9 @@ export function AccountPanel() {
   const botDirty = botDraft.trim() !== botName
   const saveBot = () => {
     const v = botDraft.trim()
-    api.patchConfig('agent.bot_name', v).then(() => {
-      setBotName(v); setBotSaved(true); setTimeout(() => setBotSaved(false), 1800)
+    api.patchConfig('agent.bot_name', v).then(() => api.gideonConfig()).then((config) => {
+      const stored = String(config?.agent?.bot_name ?? '')
+      setBotName(stored); setBotDraft(stored); setBotSaved(true); setTimeout(() => setBotSaved(false), 1800)
     }).catch((e) => {
       notify(`Couldn't save the assistant name: ${String((e as Error)?.message || e)}`, 'error')
     })

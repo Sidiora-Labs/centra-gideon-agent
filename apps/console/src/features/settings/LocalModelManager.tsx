@@ -136,7 +136,7 @@ export function LocalModelManager({
 
   const renderRow = (m: AvailableModel) => {
     const job = jobs[m.name]
-    const downloading = job?.state === 'running'
+    const downloading = job?.state === 'running' || job?.state === 'queued'
     const err = errors[m.name] || (job?.state === 'error' ? job.error : '')
     const frac = job && job.total_bytes > 0 ? job.progress : undefined
     const sizeMb = m.size_mb ?? (m.size ? Math.round(m.size / 1024 / 1024) : 0)
@@ -162,7 +162,7 @@ export function LocalModelManager({
             </div>
             <div data-type="caption" className="truncate text-on-surface-low">
               {downloading
-                ? `downloading${job.downloaded_bytes ? ` · ${MB(job.downloaded_bytes)}${sizeMb ? ` / ${sizeMb}` : ''} MB` : ''}`
+                ? `${job?.state === 'queued' ? 'queued' : 'downloading'}${job?.downloaded_bytes ? ` · ${MB(job.downloaded_bytes)}${sizeMb ? ` / ${sizeMb}` : ''} MB` : ''}`
                 : <>{m.description || (m.capabilities?.length ? m.capabilities.join(', ') : '')}{stated.mb ? ` · ${stated.mb} MB` : ''}{stated.familyMedianMb ? ` · family median ~${stated.familyMedianMb} MB` : ''}</>}
             </div>
             {stepDown && !downloading && (
