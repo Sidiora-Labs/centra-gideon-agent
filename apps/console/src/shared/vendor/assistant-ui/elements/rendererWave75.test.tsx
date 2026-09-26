@@ -39,6 +39,7 @@ function Parts({ components }: { components?: Record<string, unknown> }) {
     <ThreadPrimitive.Messages components={{
       AssistantMessage: () => <MessagePrimitive.Root><MessagePrimitive.Parts
         components={components as never} /></MessagePrimitive.Root>,
+      UserMessage: () => <MessagePrimitive.Root><MessagePrimitive.Parts /></MessagePrimitive.Root>,
     }} />
   </ThreadPrimitive.Viewport></ThreadPrimitive.Root>
 }
@@ -258,7 +259,7 @@ describe('Mermaid diagram source and zoom behavior', () => {
     expect(document.activeElement).toBe(trigger)
   })
   it('renders the AUI wrapper in an actual assistant runtime', async () => {
-    const { container } = render(<Runtime><AuiMermaid code={validMermaid} language="mermaid" /></Runtime>)
+    const { container } = render(<Runtime><AuiMermaid components={prismComponents} code={validMermaid} language="mermaid" /></Runtime>)
     await waitFor(() => expect(container.querySelector('[data-slot="mermaid-diagram"] svg')).toBeTruthy())
     expect(AuiMermaid.Zoom).toBe(MermaidZoom)
   })
@@ -644,7 +645,7 @@ describe('Renderer data updates from a live caller', () => {
     expect(surface?.textContent).toContain(invalidMermaid)
   })
   it('passes Mermaid wrapper class to the real base component', () => {
-    const view = render(<Runtime><AuiMermaid code={validMermaid} language="mermaid"
+    const view = render(<Runtime><AuiMermaid components={prismComponents} code={validMermaid} language="mermaid"
       className="consumer-wrapper" /></Runtime>)
     expect(view.container.querySelector('[data-slot="mermaid-diagram"]')?.className).toContain('consumer-wrapper')
   })
@@ -810,7 +811,7 @@ function LiveMarkdown(props: ComponentProps<typeof MarkdownText>) {
 function LiveAssistantMessage() {
   return <MessagePrimitive.Root><MessagePrimitive.Parts components={{ Text: LiveMarkdown }} /></MessagePrimitive.Root>
 }
-const stableLiveParts = { AssistantMessage: LiveAssistantMessage }
+const stableLiveParts = { AssistantMessage: LiveAssistantMessage, UserMessage: () => <MessagePrimitive.Root><MessagePrimitive.Parts /></MessagePrimitive.Root> }
 function StableParts() {
   return <ThreadPrimitive.Root><ThreadPrimitive.Viewport autoScroll={false} scrollToBottomOnInitialize={false}
     scrollToBottomOnRunStart={false} scrollToBottomOnThreadSwitch={false}>
