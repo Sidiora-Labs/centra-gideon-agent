@@ -19,7 +19,26 @@ export function SlideOutline({ slide, index, editable, reason, onEdit }: { slide
   const controls = { disabled: !editable, disabledReason: reason || undefined }
   const patch = (value: Partial<DeckSlideJson>) => onEdit(model => withSlide(model, index, { ...model.slides[index], ...value }))
   const placements = ([['Title', slide.title_box], ['Body', slide.body_box]] as const).filter(([, box]) => isPlaced(box))
+  const critique = [
+    ...(!slide.title.trim() ? ['Add a slide title so the main claim is clear.'] : []),
+    ...(slide.bullets.length > 6 ? ['This slide has more than six bullets. Split it or cut detail.'] : []),
+    ...(slide.bullets.some(bullet => bullet.text.length > 120) ? ['A bullet is over 120 characters and may wrap too far.'] : []),
+    ...(!slide.notes.trim() ? ['Add notes for context and source attribution.'] : []),
+  ]
   return <div className="mx-auto grid w-full max-w-[52rem] gap-4">
+    <section aria-label={`Slide ${number} outline preview`} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_14rem]">
+      <div className="aspect-video min-h-0 overflow-hidden rounded-xl border border-outline/40 bg-surface-container p-[6%] shadow-sm">
+        <p data-type="caption" className="mb-3 uppercase tracking-wide text-primary">Slide {number} · outline preview</p>
+        <h3 className="line-clamp-2 text-xl font-semibold leading-tight text-on-surface">{slide.title || 'Untitled slide'}</h3>
+        <ul className="mt-4 grid gap-1.5 text-sm text-on-surface-var">{slide.bullets.slice(0, 7).map((bullet, i) =>
+          <li key={i} className="truncate" style={{ paddingLeft: `${Math.min(3, bullet.level) * .75}rem` }}>• {bullet.text || 'Empty bullet'}</li>)}</ul>
+      </div>
+      <div className="rounded-xl border border-outline/30 bg-surface-container/20 p-3">
+        <p data-type="label-s" className="text-on-surface">Review this slide</p>
+        {critique.length ? <ul className="mt-2 grid gap-2 text-xs text-on-surface-low">{critique.map(item => <li key={item}>• {item}</li>)}</ul>
+          : <p className="mt-2 text-xs text-on-surface-low">The outline has a title, readable bullet count, and notes. Open the saved PPTX to inspect exact layout and visual assets.</p>}
+      </div>
+    </section>
     <section className="grid gap-3 rounded-xl border border-outline/30 p-3 sm:grid-cols-[1fr_15rem]">
       <Field label={`Slide ${number} title`}><TextInput size="sm" value={slide.title} ariaLabel={`Title of slide ${number}`} placeholder="Untitled slide" {...controls} onChange={title => patch({ title })} /></Field>
       <Field label="Layout"><Select value={slide.layout} options={layoutOptions(slide.layout)} ariaLabel={`Layout of slide ${number}`} {...controls} onChange={layout => patch({ layout })} /></Field>

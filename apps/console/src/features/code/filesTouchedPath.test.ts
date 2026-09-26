@@ -11,5 +11,7 @@ describe('resolveTouchedPath', () => {
       abs: '/repo/runtime/gideon/main.py',
       rel: 'runtime/gideon/main.py',
     })
+    expect(resolveTouchedPath('src/App.tsx:27:4', '/repo')).toEqual({ abs: '/repo/src/App.tsx', rel: 'src/App.tsx' })
+    expect(resolveTouchedPath('src/../../private.txt', '/repo')).toBeNull()
   })
 })

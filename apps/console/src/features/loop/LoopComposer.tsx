@@ -30,6 +30,16 @@ const KINDS: { id: LoopKind; label: string; blurb: string }[] = [
 
 const COMPOSER_CONTROLS: ComposerControls = { agent: false, model: false, reasoning: false, attach: false, mic: true, optimize: true }
 const GRANULARITIES: Granularity[] = ['quick', 'balanced', 'exhaustive', 'forever']
+const RESEARCH_COVERAGE = {
+  lookup: { pages: 0, domains: 0 },
+  survey: { pages: 3, domains: 2 },
+  investigation: { pages: 8, domains: 4 },
+} as const
+const DESIGN_FOCUS = [
+  { key: 'system', label: 'Design system' },
+  { key: 'interface', label: 'Product UI' },
+  { key: 'visualization', label: 'Data visual' },
+] as const
 const PLACEHOLDER: Record<LoopKind, string> = {
   general: 'Describe the iterative task…',
   goal: 'Describe the goal — a report, a green build, an investigation…',
@@ -72,6 +82,8 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
   const [focused, setFocused] = useState(false)
   const [busy, setBusy] = useState(false)
   const [granularity, setGranularity] = useState<Granularity>('balanced')
+  const [researchDepth, setResearchDepth] = useState<keyof typeof RESEARCH_COVERAGE>('survey')
+  const [designFocus, setDesignFocus] = useState<'system' | 'interface' | 'visualization'>('system')
   const [attended, setAttended] = useState(false)
   const [scratch, setScratch] = useState(false)
   const [projectKind, setProjectKind] = useState<'greenfield' | 'brownfield'>('greenfield')
@@ -125,8 +137,13 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
       if (!cls) { setError('Could not analyze the task — is a model configured?'); setBusy(false); return }
       const kc: Record<string, unknown> = { ...(cls.kind_config ?? {}) }
       if (kind === 'goal') kc.granularity = granularity
+      if (kind === 'research') {
+        kc.evidence_min_pages = RESEARCH_COVERAGE[researchDepth].pages
+        kc.evidence_min_domains = RESEARCH_COVERAGE[researchDepth].domains
+      }
       if (kind === 'code') kc.project_kind = projectKind
       if (kind === 'design') {
+        kc.design_focus = designFocus
         const inputs: { type: string; ref: string }[] = []
         if (designUrl.trim()) inputs.push({ type: 'url', ref: designUrl.trim() })
         for (const f of designFiles) inputs.push({ type: designInputType(f.name), ref: f.name })
@@ -149,7 +166,9 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
         ...(kind === 'code' && (inheritedWs || (projectKind === 'brownfield' && brownfieldWs.trim()))
           ? { workspace_dir: (inheritedWs || brownfieldWs.trim()) } : {}),
         success_criteria: cls.success_criteria || null,
-        skill_ids: cls.suggested_skill_ids ?? [],
+        skill_ids: kind === 'design' && designFocus !== 'system'
+          ? [...new Set([...(cls.suggested_skill_ids ?? []), 'visual-output'])]
+          : cls.suggested_skill_ids ?? [],
         workflow_ids: cls.suggested_workflow_ids ?? [],
         kind_config: kc,
       }
@@ -178,6 +197,11 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
         <Segmented ariaLabel="Granularity" disabled={busy} collapse="menu" value={granularity} onChange={(v) => setGranularity(v as Granularity)}
           options={GRANULARITIES.map((g) => ({ key: g, label: g.charAt(0).toUpperCase() + g.slice(1) }))} />
       )}
+      {kind === 'research' && <Segmented ariaLabel="Research coverage" disabled={busy} collapse="menu" value={researchDepth}
+        onChange={(value) => setResearchDepth(value as keyof typeof RESEARCH_COVERAGE)}
+        options={[{ key: 'lookup', label: 'Lookup' }, { key: 'survey', label: 'Survey' }, { key: 'investigation', label: 'Investigation' }]} />}
+      {kind === 'design' && <Segmented ariaLabel="Design focus" disabled={busy} collapse="menu" value={designFocus}
+        onChange={(value) => setDesignFocus(value as typeof designFocus)} options={[...DESIGN_FOCUS]} />}
       {
 }
       {kind === 'code' && (

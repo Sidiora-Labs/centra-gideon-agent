@@ -74,6 +74,8 @@ export function resolveTouchedPath(raw: string, root: string): { abs: string; re
   let p = raw.trim()
     .replace(/\s+[-–—→:]\s+.*$/, '')
     .replace(/\s+\([^)]*\)\s*$/, '')
+    .replace(/:\d+(?::\d+)?$/, '')
+  if (/[\u0000-\u001f]/.test(p) || p.split('/').includes('..')) return null
   const mk = '/.gideon-worktrees/'
   const i = p.indexOf(mk)
   if (i >= 0) {
@@ -89,7 +91,8 @@ export function resolveTouchedPath(raw: string, root: string): { abs: string; re
     if (mi >= 0) { const rel = p.slice(mi + marker.length); return { abs: `${root}/${rel}`, rel } }
     return null
   }
-  return { abs: `${root}/${p.replace(/^\.?\//, '')}`, rel: p }
+  const rel = p.replace(/^\.?\//, '')
+  return rel ? { abs: `${root}/${rel}`, rel } : null
 }
 
 const stageKey = (s: CodeStage): string => (s.stage || s.title || '')

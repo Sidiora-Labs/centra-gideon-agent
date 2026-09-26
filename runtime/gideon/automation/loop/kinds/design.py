@@ -35,6 +35,7 @@ class DesignKind(LoopKindStrategy):
             "token_overrides": {},
             "targets": "",
             "exports": [],
+            "design_focus": "system",
         }
 
     def phase_key(self, phase: dict) -> str:
@@ -289,6 +290,7 @@ class DesignKind(LoopKindStrategy):
                 "token_overrides": {},
                 "targets": "",
                 "exports": [],
+                "design_focus": "system",
                 "design_steps": [p["title"] for p in plan],
             },
         }
@@ -328,7 +330,15 @@ class DesignKind(LoopKindStrategy):
     def build_brief(self, loop: Loop, context_dir: str = "") -> str:
         cfg = loop.kind_config or {}
         targets = str(cfg.get("targets", "")).strip()
+        focus = str(cfg.get("design_focus") or "system")
         lines = ["# Design Loop Brief", "", f"**Design task:** {loop.task}", ""]
+        if focus in ("interface", "visualization"):
+            lines += [
+                f"**Specialist focus:** {'product interface' if focus == 'interface' else 'data visualization'}.",
+                "Use the bundled visual-output skill. Save an editable React artifact, inspect its live canvas preview, revise the artifact where spacing, labels, contrast, or responsive behavior fail, and record what you inspected in the cycle finding.",
+                "Do not report a visual review if the canvas could not render.",
+                "",
+            ]
         if targets:
             lines += [f"**Designing for:** {targets}", ""]
         lines += [
@@ -414,7 +424,7 @@ class DesignKind(LoopKindStrategy):
         screenshot extraction, exports) layer on in the Design slice; the loop spine
         — read status/brief/guidance, advance the current design step, MUST write a
         finding — holds now so the kind runs on the unified engine."""
-        return "\n".join(
+        nudge = "\n".join(
             [
                 f"Run the next autonomous cycle for design loop {loop.id} "
                 f"(working dir for loop files: {loop_dir}). Steps: (1) check status.json — "
@@ -438,6 +448,13 @@ class DesignKind(LoopKindStrategy):
                 "Then end the turn.",
             ]
         )
+        if (loop.kind_config or {}).get("design_focus") in ("interface", "visualization"):
+            nudge += (
+                "\nFor this specialist focus, open the actual saved React artifact in the "
+                "design Canvas and refine it from the rendered preview. Record the artifact "
+                "slug, what was visible, and any unverified behavior in the finding."
+            )
+        return nudge
 
 
 class _DesignWalkthrough:
