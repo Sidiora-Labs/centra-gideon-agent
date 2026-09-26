@@ -1265,9 +1265,26 @@ async def api_memory_entity_create(request: web.Request) -> web.Response:
             {"error": "aliases must be a list of strings"}, status=400
         )
     loop = asyncio.get_event_loop()
-    entity_id = await loop.run_in_executor(
-        None, lambda: svc.graph_add_entity(name, entity_type, aliases=aliases)
-    )
+    try:
+        entity_id = await loop.run_in_executor(
+            None, lambda: svc.graph_add_entity(name, entity_type, aliases=aliases)
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    return web.json_response({"ok": True, "id": entity_id})
+
+
+async def api_memory_entity_delete(request: web.Request) -> web.Response:
+    """DELETE /api/memory/entities/{entity_id} — retain a deletion tombstone."""
+    svc = _get_service(request.app["state"])
+    if not svc.has_graph:
+        return web.json_response({"error": "the memory entity graph is disabled"}, status=409)
+    entity_id = request.match_info.get("entity_id", "")
+    if not entity_id:
+        return web.json_response({"error": "entity id is required"}, status=400)
+    deleted = await asyncio.to_thread(svc.graph_delete_entity, entity_id)
+    if not deleted:
+        return web.json_response({"error": "entity not found"}, status=404)
     return web.json_response({"ok": True, "id": entity_id})
 
 
@@ -1321,9 +1338,12 @@ async def api_memory_entity_proposals(request: web.Request) -> web.Response:
             {"error": f"entity_type must be one of: {', '.join(ENTITY_TYPES)}"},
             status=400,
         )
-    entity_id = await loop.run_in_executor(
-        None, lambda: svc.graph_accept_proposal(name, entity_type)
-    )
+    try:
+        entity_id = await loop.run_in_executor(
+            None, lambda: svc.graph_accept_proposal(name, entity_type)
+        )
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
     return web.json_response({"ok": True, "id": entity_id})
 
 

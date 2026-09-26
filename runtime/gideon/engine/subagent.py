@@ -220,6 +220,7 @@ class SubagentInfo:
     queued: bool = False
     cancelled: bool = False
     _outcome_noted: bool = False
+    memory_receipt: dict = field(default_factory=lambda: {"status": "pending", "count": 0})
 
 
 @dataclass
@@ -290,6 +291,7 @@ class DelegationSupervisor:
         self._queue: list[SubagentInfo] = []
         self._pending_delivery: dict[str, list[SubagentInfo]] = {}
         self._delivery_tasks: dict[str, asyncio.Task] = {}
+        self._memory_tasks: set[asyncio.Task] = set()
         self._reaper_task: asyncio.Task | None = None
         self.hook_store: Any = None
         if hasattr(sessions, "register_child_stopper"):
@@ -741,6 +743,51 @@ class DelegationSupervisor:
     def get(self, agent_id: str) -> SubagentInfo | None:
         return self._agents.get(agent_id)
 
+    def live_controls(self, agent_id: str) -> dict[str, Any] | None:
+        info = self.get(agent_id)
+        if info is None:
+            return None
+        empty = {"model": info.model, "effort": "", "models": [], "efforts": []}
+        if info.done or info.queued:
+            return empty
+        provider = self._sessions.get_provider(f"subagent:{agent_id}")
+        controls = getattr(provider, "live_controls", None)
+        if not callable(controls):
+            return empty
+        offered = controls()
+        if os.environ.get("GIDEON_HOSTED", "").strip() == "1":
+            offered["models"] = []
+        return offered
+
+    async def set_live_control(
+        self, agent_id: str, axis: str, value: str
+    ) -> dict[str, Any]:
+        from gideon.integrations.acp.live_controls import LiveControlUnavailable
+
+        offered = self.live_controls(agent_id)
+        if offered is None:
+            raise KeyError(agent_id)
+        choices = (
+            offered["models"]
+            if axis == "model"
+            else [row["value"] for row in offered["efforts"]]
+            if axis == "effort"
+            else []
+        )
+        if value not in choices:
+            raise LiveControlUnavailable(
+                f"This agent does not offer live {axis} selection"
+            )
+        provider = self._sessions.get_provider(f"subagent:{agent_id}")
+        change = getattr(provider, "set_live_control", None)
+        if change is None:
+            raise LiveControlUnavailable("This agent has no live control contract")
+        await change(axis, value)
+        if axis == "model":
+            info = self._agents[agent_id]
+            info.model = value
+        return self.live_controls(agent_id) or offered
+
     @property
     def count(self) -> int:
         return sum(not info.done for info in self._agents.values())
@@ -1059,6 +1106,26 @@ class DelegationSupervisor:
         self._charge_child_and_check_budget(info)
         Stats().inc_subagent_completed()
 
+    def _schedule_memory_receipt(self, info: SubagentInfo) -> None:
+        if not info.done or info.error:
+            info.memory_receipt = {"status": "unavailable", "count": 0}
+            return
+        from gideon.engine.subagent_memory import capture
+
+        memory = getattr(self._ctx_builder, "memory", None)
+        task = asyncio.create_task(asyncio.to_thread(capture, info, memory), name=f"subagent-memory:{info.id}")
+        self._memory_tasks.add(task)
+
+        def settled(completed):
+            self._memory_tasks.discard(completed)
+            if not completed.cancelled():
+                try:
+                    info.memory_receipt = completed.result()
+                except Exception:
+                    info.memory_receipt = {"status": "unavailable", "count": 0}
+
+        task.add_done_callback(settled)
+
     @staticmethod
     def _record_subagent_usage(
         info: SubagentInfo, session_key: str, event: object
@@ -1089,6 +1156,7 @@ class DelegationSupervisor:
             task=_redact(info.task),
             agent=_redact(info.agent),
             result=_done_result(info.result),
+            memory_receipt=info.memory_receipt,
         )
         if usage:
             result.update(
@@ -1146,6 +1214,7 @@ class DelegationSupervisor:
         finally:
             if not info.reaped:
                 info.elapsed = time.time() - info.started
+                self._schedule_memory_receipt(info)
                 await self._fire_event(
                     "subagent_done", info, self._completion_payload(info, usage=True)
                 )
@@ -1597,3 +1666,7 @@ class DelegationSupervisor:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._tasks.clear()
+        if self._memory_tasks:
+            done, pending = await asyncio.wait(self._memory_tasks, timeout=2.0)
+            for task in pending:
+                task.cancel()

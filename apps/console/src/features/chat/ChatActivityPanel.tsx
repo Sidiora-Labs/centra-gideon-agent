@@ -7,7 +7,7 @@ import { Markdown } from '../../shared/ui/Markdown'
 import { Button } from '../../shared/ui/Button'
 import { spring } from '../../shared/theme/motion'
 import { SlotEmptyState } from '../dashboard/widgets/kit'
-import type { ChatActivity, SubagentCard } from './chatTypes'
+import { memoryReceiptLabel, type ChatActivity, type SubagentCard } from './chatTypes'
 import { tabListKeys } from '../../shared/data/tabListKeys'
 
 type Tab = 'files' | 'links' | 'subagents' | 'side'
@@ -160,6 +160,7 @@ function SubagentRow({ sub, index = 0 }: { sub: SubagentCard; index?: number }) 
         </span>
       </div>
       {failed && <div data-type="caption" className="mt-1.5 text-danger">{sub.error}</div>}
+      {sub.memoryReceipt && <p data-type="caption" className="mt-1.5 text-on-surface-low">{memoryReceiptLabel(sub.memoryReceipt)}</p>}
       {sub.done && !failed && sub.result && (
         <div className="mt-1.5">
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}

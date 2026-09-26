@@ -1379,6 +1379,34 @@ class AppManifest:
         if not self.description:
             errors.append("missing required field: description")
 
+        hooks = self.extra.get("hooks", [])
+        if not isinstance(hooks, list):
+            errors.append("hooks must be an array")
+        else:
+            from gideon.engine.hooks import HOOK_EVENTS
+
+            seen_hooks: set[str] = set()
+            for hook in hooks:
+                if not isinstance(hook, dict):
+                    errors.append("hooks entries must be objects")
+                    continue
+                hook_name = hook.get("name")
+                if not isinstance(hook_name, str) or not KEBAB_RE.fullmatch(hook_name):
+                    errors.append(f"hook name must be kebab-case: {hook_name!r}")
+                elif hook_name in seen_hooks:
+                    errors.append(f"duplicate hook name: {hook_name!r}")
+                else:
+                    seen_hooks.add(hook_name)
+                if hook.get("event") not in HOOK_EVENTS:
+                    errors.append(f"hook {hook_name!r} has an unsupported event")
+                if not isinstance(hook.get("provider"), str) or not hook.get("provider"):
+                    errors.append(f"hook {hook_name!r} needs a provider")
+                if not isinstance(hook.get("providerConfig", {}), dict):
+                    errors.append(f"hook {hook_name!r} providerConfig must be an object")
+                timeout = hook.get("timeout", 30)
+                if type(timeout) is not int or not 1 <= timeout <= 300:
+                    errors.append(f"hook {hook_name!r} timeout must be 1–300 seconds")
+
         if self.icon and not ICON_RE.fullmatch(self.icon):
             errors.append(f"icon must be a bare identifier, got: {self.icon!r}")
 

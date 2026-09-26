@@ -65,7 +65,7 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <EntranceRegion className="min-h-9 lg:hidden"><HeroPulse {...route} /></EntranceRegion>
+            <EntranceRegion className="lg:hidden" style={{ minHeight: 'calc(36px * var(--space-scale))' }}><HeroPulse {...route} /></EntranceRegion>
 
             {
 }
@@ -257,6 +257,7 @@ function Launcher({ navigate }: RouteProps) {
               type="button"
               onClick={() => navigate(`chat/${encodeURIComponent(s.key)}`)}
               className="inline-flex min-h-6 -my-0.5 items-center gap-xs text-on-surface-var transition-colors hover:text-on-surface"
+              style={{ marginBlock: 'calc(-2px * var(--space-scale))' }}
               data-type="body-m"
             >
               <MessageSquare size={12} className="shrink-0 text-on-surface-low" /> <span className="max-w-[16rem] truncate">{sessionTitle(s)}</span>

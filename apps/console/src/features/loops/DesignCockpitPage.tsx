@@ -650,7 +650,7 @@ function CanvasView({ artifacts, loopId }: { artifacts: Artifact[]; loopId: stri
           onDragOver={(e) => { if (dragSlug) { e.preventDefault(); if (overSlug !== a.slug) setOverSlug(a.slug) } }}
           onDrop={(e) => { e.preventDefault(); onDrop(a.slug) }}
           className={`rounded-lg transition-shadow ${overSlug === a.slug && dragSlug !== a.slug ? 'ring-2 ring-primary' : ''} ${dragSlug === a.slug ? 'opacity-50' : ''}`}>
-          <CanvasComponent a={a} draggable={ordered.length > 1}
+          <CanvasComponent a={a} loopId={loopId} draggable={ordered.length > 1}
             onDragStart={() => setDragSlug(a.slug)} onDragEnd={() => { setDragSlug(null); setOverSlug(null) }} />
         </div>
       ))}
@@ -658,42 +658,78 @@ function CanvasView({ artifacts, loopId }: { artifacts: Artifact[]; loopId: stri
   )
 }
 
-function CanvasComponent({ a, draggable, onDragStart, onDragEnd }: {
-  a: Artifact; draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void
+function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
+  a: Artifact; loopId: string; draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void
 }) {
   const [jsx, setJsx] = useState<string | null>(a.content ?? null)
+  const [rendered, setRendered] = useState(false)
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const [reviewed, setReviewed] = useState(false)
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [feedback, setFeedback] = useState('')
+  const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    setJsx(a.content ?? null)
-    if (a.content == null) {
-      api.artifact(a.slug).then((full) => { if (alive) setJsx(full.content ?? '') }).catch(() => { if (alive) setJsx('') })
-    }
+    setJsx(a.content ?? null); setRendered(false); setRenderError(null); setReviewed(false)
+    if (a.content == null) api.artifact(a.slug).then(full => { if (alive) setJsx(full.content ?? '') })
+      .catch(() => { if (alive) setJsx('') })
+    api.uLoopDesignPreview(loopId).then(result => { if (alive) setReviewed(result.receipts[a.slug]?.version === a.version) })
+      .catch(() => { if (alive) setActionError('Could not read saved preview reviews.') })
     return () => { alive = false }
-  }, [a.slug, a.version, a.content])
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        {
-}
-        {draggable && (
-          <span draggable role="button" aria-label="Drag to reorder"
-            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', a.slug); onDragStart?.() }}
-            onDragEnd={() => onDragEnd?.()}
-            className="cursor-grab active:cursor-grabbing text-on-surface-low hover:text-on-surface">
-            <GripVertical size={14} />
-          </span>
-        )}
-        <span data-type="label-s" className="text-on-surface" style={fvs(600)}>{a.name}</span>
-        <span data-type="caption" className="text-on-surface-low">v{a.version}</span>
-      </div>
-      {a.description && <p data-type="caption" className="text-on-surface-low">{a.description}</p>}
-      {jsx === null ? <div data-type="caption" className="text-on-surface-low">Loading…</div>
-        : jsx ? <ReactWidgetFrame jsx={jsx} title={a.name} />
-        : <div data-type="caption" className="text-on-surface-low">(no content)</div>}
+  }, [loopId, a.slug, a.version, a.content])
+  const renderFailed = (message: string) => {
+    setRendered(false); setRenderError(message); setReviewed(false)
+    void api.reviewULoopDesignPreview(loopId, a.slug, a.version, false).catch(() => {})
+  }
+  const approve = async () => {
+    if (!rendered || renderError || reviewBusy) return
+    setReviewBusy(true); setActionError(null)
+    try {
+      await api.reviewULoopDesignPreview(loopId, a.slug, a.version, true)
+      setReviewed(true)
+    } catch (cause) { setActionError((cause as Error).message || 'Could not save preview review.') }
+    finally { setReviewBusy(false) }
+  }
+  const requestRefinement = async () => {
+    if (!feedback.trim() || feedbackBusy) return
+    setFeedbackBusy(true); setActionError(null)
+    try {
+      await api.uLoopNudge(loopId, `Refine canvas artifact ${a.name} (${a.slug}, version ${a.version}): ${feedback.trim()}`)
+      setFeedback('')
+    } catch (cause) { setActionError((cause as Error).message || 'Could not request refinement.') }
+    finally { setFeedbackBusy(false) }
+  }
+  return <div className="flex flex-col gap-s">
+    <div className="flex items-center gap-s">
+      {draggable && <span draggable role="button" aria-label="Drag to reorder"
+        onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', a.slug); onDragStart?.() }}
+        onDragEnd={() => onDragEnd?.()} className="cursor-grab active:cursor-grabbing text-on-surface-low hover:text-on-surface"><GripVertical size={14}/></span>}
+      <span data-type="label-s" className="text-on-surface" style={fvs(600)}>{a.name}</span>
+      <span data-type="caption" className="text-on-surface-low">v{a.version}</span>
     </div>
-  )
+    {a.description && <p data-type="caption" className="text-on-surface-low">{a.description}</p>}
+    {jsx === null ? <div data-type="caption" className="text-on-surface-low">Loading…</div>
+      : jsx ? <ReactWidgetFrame jsx={jsx} title={a.name} onReady={() => { setRendered(true); setRenderError(null) }} onError={renderFailed}/>
+      : <div data-type="caption" className="text-on-surface-low">No component source is available.</div>}
+    <div className="flex flex-wrap items-center gap-s">
+      <span role="status" data-type="caption" className={renderError ? 'text-danger' : 'text-on-surface-low'}>
+        {renderError ? `Render error: ${renderError}` : rendered ? reviewed ? 'Current version reviewed' : 'Rendered in browser — inspect before approving' : 'Waiting for browser render'}
+      </span>
+      <button type="button" disabled={!rendered || !!renderError || reviewed || reviewBusy}
+        onClick={() => { void approve() }} className="rounded-md bg-primary px-m py-xs text-on-primary disabled:opacity-40">
+        {reviewBusy ? 'Saving…' : reviewed ? 'Reviewed' : 'Approve preview'}
+      </button>
+    </div>
+    <div className="flex flex-wrap items-center gap-s">
+      <input aria-label={`Refinement for ${a.name}`} value={feedback} onChange={event => setFeedback(event.target.value)}
+        placeholder="Describe what to change after previewing…" className="min-w-0 flex-1 rounded-md border border-outline/40 bg-surface px-s py-xs text-on-surface" />
+      <button type="button" disabled={!feedback.trim() || feedbackBusy} onClick={() => { void requestRefinement() }}
+        className="rounded-md border border-outline/40 px-m py-xs text-on-surface disabled:opacity-40">{feedbackBusy ? 'Sending…' : 'Request refinement'}</button>
+    </div>
+    {actionError && <p role="alert" data-type="caption" className="text-danger">{actionError}</p>}
+  </div>
 }
-
 
 const CONTRAST_PAIRS: [string, string, string][] = [
   ['Body text', 'fg.default', 'bg.base'],

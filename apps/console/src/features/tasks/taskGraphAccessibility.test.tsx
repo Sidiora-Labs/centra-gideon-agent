@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { TaskItem } from '../../shared/data/api'
-import { scopedGraphMetrics, TaskGraph } from './TaskGraph'
+import { scopedGraphMetrics, scopedTaskAnalysis, TaskGraph } from './TaskGraph'
 import { DagView } from './DagView'
 import { filterTasksByTag, taskNoMatchCause, taskTagOptions } from './taskGraphState'
 import { useTaskPreference } from './taskCollectionState'
@@ -26,6 +26,16 @@ describe('task graph accessibility and filters', () => {
       { id: 'completed', title: 'Completed scoped task', status: 'done' },
       { id: 'open', title: 'Open scoped task', status: 'open' },
     ] as TaskItem[])).toEqual({ completion_pct: 50 })
+  })
+
+  it('keeps critical paths and cancelled progress inside the visible scope', () => {
+    const rows = [
+      { id: 'plan', title: 'Plan', status: 'done' },
+      { id: 'ship', title: 'Ship', status: 'cancelled', dependencies: [{ depends_on_task_id: 'plan', dependency_type: 'BLOCKS' }] },
+      { id: 'other', title: 'Other project', status: 'done', dependencies: [{ depends_on_task_id: 'ship', dependency_type: 'BLOCKS' }] },
+    ] as TaskItem[]
+    expect(scopedTaskAnalysis(rows.slice(0, 2))).toMatchObject({ completion_pct: 50, critical_path: ['plan', 'ship'] })
+    expect(scopedTaskAnalysis(rows.slice(2))).toMatchObject({ completion_pct: 100, critical_path: ['other'] })
   })
 
   it('uses named native buttons for graph nodes and activates them from the keyboard', async () => {

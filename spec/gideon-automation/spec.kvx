@@ -11,7 +11,7 @@ agent_model = "gpt-6-sol"
 
 [design.integration]
 contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
-branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+branch_policy = "Local task commits, feature merges and main integration are authorized. Leader pushes OSS origin/main as integrated commits land. Hosted commits remain local. No PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
 
 [design.hosted]
 contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
@@ -23,275 +23,378 @@ contract = "Every numbered requirement has an observable product result, a worke
 title = "Render zero elapsed duration as 0s"
 acceptance = "Implement the complete reachable feature: Render zero elapsed duration as 0s"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Render zero elapsed duration as 0s"
+
 
 [req.060]
 title = "General-loop pause resume and workflow lifecycle"
 acceptance = "Implement the complete reachable feature: General-loop pause resume and workflow lifecycle"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: General-loop pause resume and workflow lifecycle"
+
 
 [req.061]
 title = "Correct workflow failure attribution and actual cause"
 acceptance = "Implement the complete reachable feature: Correct workflow failure attribution and actual cause"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Correct workflow failure attribution and actual cause"
+
 
 [req.062]
 title = "Reliable failed-stage retry"
 acceptance = "Implement the complete reachable feature: Reliable failed-stage retry"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Reliable failed-stage retry"
+
 
 [req.063]
 title = "Previous-iteration bindings including first-cycle defaults"
 acceptance = "Implement the complete reachable feature: Previous-iteration bindings including first-cycle defaults"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Previous-iteration bindings including first-cycle defaults"
+
 
 [req.064]
 title = "Consistent fan-out totals"
 acceptance = "Implement the complete reachable feature: Consistent fan-out totals"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Consistent fan-out totals"
+
 
 [req.065]
 title = "Distinct best-of-N candidate answers"
 acceptance = "Implement the complete reachable feature: Distinct best-of-N candidate answers"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Distinct best-of-N candidate answers"
+
 
 [req.066]
 title = "Output schema mismatch notices"
 acceptance = "Implement the complete reachable feature: Output schema mismatch notices"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Output schema mismatch notices"
+
 
 [req.067]
 title = "Enforced declared workflow input types"
 acceptance = "Implement the complete reachable feature: Enforced declared workflow input types"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Enforced declared workflow input types"
+
 
 [req.068]
 title = "Interrupted workflow resume without repeated effects"
 acceptance = "Implement the complete reachable feature: Interrupted workflow resume without repeated effects"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Interrupted workflow resume without repeated effects"
+
 
 [req.069]
 title = "Escalation details in progress and run views"
 acceptance = "Implement the complete reachable feature: Escalation details in progress and run views"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Escalation details in progress and run views"
+
 
 [req.070]
 title = "Remove terminal-run continuation controls"
 acceptance = "Implement the complete reachable feature: Remove terminal-run continuation controls"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Remove terminal-run continuation controls"
+
 
 [req.071]
 title = "Loop draft start timeout task title and approval response repairs"
 acceptance = "Implement the complete reachable feature: Loop draft start timeout task title and approval response repairs"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Loop draft start timeout task title and approval response repairs"
+
 
 [req.072]
 title = "Associate findings with canonical tasks"
 acceptance = "Implement the complete reachable feature: Associate findings with canonical tasks"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Associate findings with canonical tasks"
+
 
 [req.074]
 title = "Show actual redacted workflow node prompt"
 acceptance = "Implement the complete reachable feature: Show actual redacted workflow node prompt"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Show actual redacted workflow node prompt"
+
 
 [task.automation-workflows]
 title = "automation-workflows end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "automation-workflows"
 requires = []
-reqs = ["034", "060", "061", "062", "063", "064", "065", "066", "067", "068", "069", "070", "071", "072", "074"]
+reqs = ["034.1", "060.1", "061.1", "062.1", "063.1", "064.1", "065.1", "066.1", "067.1", "068.1", "069.1", "070.1", "071.1", "072.1", "074.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/loops/LoopCockpitPage.tsx", "apps/console/src/features/loops/cycleFindingTaskLink.test.tsx", "apps/console/src/shared/data/api.ts", "apps/console/src/features/workflows/IntrospectPanel.tsx", "apps/console/src/features/workflows/WorkflowRunDetail.tsx", "apps/console/src/features/workflows/workflowMeta.test.ts", "apps/console/src/features/workflows/workflowMeta.ts", "checks/runtime/test_sampling_best_of_n.py", "checks/runtime/test_workflows_effects.py", "checks/runtime/test_workflows_input_types.py", "checks/runtime/test_workflows_node_inspect.py", "runtime/gideon/automation/workflows/controller.py", "runtime/gideon/automation/workflows/engine.py", "runtime/gideon/automation/workflows/models.py", "runtime/gideon/automation/workflows/service.py", "runtime/gideon/automation/workflows/workflow_codec.py", "runtime/gideon/integrations/sampling.py", "spec/gideon-automation/spec.kvx"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_workflows_input_types.py checks/runtime/test_workflows_node_inspect.py checks/runtime/test_workflows_effects.py checks/runtime/test_sampling_best_of_n.py"
 
 [req.015]
 title = "Contextual proactive planner for silence notifications contributions and background work"
 acceptance = "Implement the complete reachable feature: Contextual proactive planner for silence notifications contributions and background work"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Contextual proactive planner for silence notifications contributions and background work"
+
 
 [req.016]
 title = "Persistent multi-agent rounds roles handoffs and interruption recovery"
 acceptance = "Implement the complete reachable feature: Persistent multi-agent rounds roles handoffs and interruption recovery"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Persistent multi-agent rounds roles handoffs and interruption recovery"
+
 
 [req.017]
 title = "Intent-based workflow discovery and natural-language launch"
 acceptance = "Implement the complete reachable feature: Intent-based workflow discovery and natural-language launch"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Intent-based workflow discovery and natural-language launch"
+
 
 [req.085]
 title = "Scheduled daily spending limits visible pause and reset resume"
 acceptance = "Implement the complete reachable feature: Scheduled daily spending limits visible pause and reset resume"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Scheduled daily spending limits visible pause and reset resume"
+
 
 [req.109]
 title = "Trigger dry-run outcomes and originating-trigger links"
 acceptance = "Implement the complete reachable feature: Trigger dry-run outcomes and originating-trigger links"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Trigger dry-run outcomes and originating-trigger links"
+
 
 [req.110]
 title = "Model requirement only for model-using triggers"
 acceptance = "Implement the complete reachable feature: Model requirement only for model-using triggers"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Model requirement only for model-using triggers"
+
 
 [req.111]
 title = "Consistent trigger create and update semantics"
 acceptance = "Implement the complete reachable feature: Consistent trigger create and update semantics"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Consistent trigger create and update semantics"
+
 
 [req.112]
 title = "Consistent trigger status and latest error"
 acceptance = "Implement the complete reachable feature: Consistent trigger status and latest error"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Consistent trigger status and latest error"
+
 
 [task.automation-proactivity]
 title = "automation-proactivity end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "automation-proactivity"
 requires = []
-reqs = ["015", "016", "017", "085", "109", "110", "111", "112"]
+reqs = ["015.1", "016.1", "017.1", "085.1", "109.1", "110.1", "111.1", "112.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/dashboard/widgets/ScheduleWidget.tsx", "apps/console/src/features/inbox/CommitmentDecisionsCard.tsx", "apps/console/src/features/inbox/TriageDigestCard.tsx", "apps/console/src/features/schedule/ScheduleDetail.tsx", "apps/console/src/features/settings/GuardrailsPanel.tsx", "apps/console/src/features/triggers/StoreTriggerDetail.tsx", "apps/console/src/features/triggers/TriggersListPage.tsx", "apps/console/src/features/workflows/WorkflowDefDetail.tsx", "apps/console/src/features/workflows/WorkflowRunDetail.tsx", "apps/console/src/features/workflows/WorkflowsListPage.tsx", "apps/console/src/features/workflows/roundPlan.test.ts", "apps/console/src/features/workflows/roundPlan.ts", "apps/console/src/features/workflows/templateSuggest.test.ts", "apps/console/src/features/workflows/templateSuggest.ts", "apps/console/src/shared/data/api.ts", "checks/runtime/test_event_triggers.py", "checks/runtime/test_proactive_plan.py", "checks/runtime/test_triggers_facade.py", "checks/runtime/test_workflows_round_protocol.py", "runtime/gideon/automation/event_triggers.py", "runtime/gideon/automation/workflows/controller.py", "runtime/gideon/automation/workflows/engine.py", "runtime/gideon/automation/workflows/handlers.py", "runtime/gideon/automation/workflows/round_protocol.py", "runtime/gideon/automation/workflows/service.py", "runtime/gideon/automation/workflows/watchdog.py", "runtime/gideon/engine/gateway.py", "runtime/gideon/integrations/action_providers/base.py", "runtime/gideon/integrations/action_providers/bash_provider.py", "runtime/gideon/engine/heartbeat_jobs.py", "runtime/gideon/engine/proactive_decisions.py", "runtime/gideon/engine/proactive_plan.py", "runtime/gideon/interfaces/dashboard/handlers/proactive.py", "runtime/gideon/interfaces/dashboard/handlers/triggers.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m compileall -q runtime/gideon/automation/event_triggers.py runtime/gideon/automation/workflows/controller.py runtime/gideon/automation/workflows/engine.py runtime/gideon/automation/workflows/round_protocol.py runtime/gideon/automation/workflows/service.py runtime/gideon/engine/gateway.py runtime/gideon/integrations/action_providers/base.py runtime/gideon/integrations/action_providers/bash_provider.py runtime/gideon/engine/heartbeat_jobs.py runtime/gideon/engine/proactive_plan.py runtime/gideon/interfaces/dashboard/handlers/triggers.py runtime/gideon/automation/workflows/handlers.py runtime/gideon/automation/workflows/watchdog.py runtime/gideon/engine/proactive_decisions.py runtime/gideon/interfaces/dashboard/handlers/proactive.py && git diff --check && git diff --cached --check && PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_workflows_round_protocol.py::test_declared_round_loop_stops_and_projects_visible_handoffs"
 
 [req.079]
 title = "Complete task pagination across lists DAGs and prerequisite pickers"
 acceptance = "Implement the complete reachable feature: Complete task pagination across lists DAGs and prerequisite pickers"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Complete task pagination across lists DAGs and prerequisite pickers"
+
 
 [req.080]
 title = "Scoped task progress and critical paths"
 acceptance = "Implement the complete reachable feature: Scoped task progress and critical paths"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Scoped task progress and critical paths"
+
 
 [req.081]
 title = "Cancelled tasks distinct from completed"
 acceptance = "Implement the complete reachable feature: Cancelled tasks distinct from completed"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Cancelled tasks distinct from completed"
+
 
 [req.082]
 title = "Refused task save feedback and fitting controls"
 acceptance = "Implement the complete reachable feature: Refused task save feedback and fitting controls"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Refused task save feedback and fitting controls"
+
 
 [req.083]
 title = "Preserve execution-owned fields on task reset"
 acceptance = "Implement the complete reachable feature: Preserve execution-owned fields on task reset"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Preserve execution-owned fields on task reset"
+
 
 [req.084]
 title = "Consistent task-list names and counts"
 acceptance = "Implement the complete reachable feature: Consistent task-list names and counts"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Consistent task-list names and counts"
+
 
 [req.100]
 title = "Consistent Needs you count and contents"
 acceptance = "Implement the complete reachable feature: Consistent Needs you count and contents"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Consistent Needs you count and contents"
+
 
 [req.101]
 title = "Attention links to exact inbox items"
 acceptance = "Implement the complete reachable feature: Attention links to exact inbox items"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Attention links to exact inbox items"
+
 
 [req.102]
 title = "Accurate active native inbox empty state"
 acceptance = "Implement the complete reachable feature: Accurate active native inbox empty state"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Accurate active native inbox empty state"
+
 
 [req.103]
 title = "Room-member read failure rather than endless spinner"
 acceptance = "Implement the complete reachable feature: Room-member read failure rather than endless spinner"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Room-member read failure rather than endless spinner"
+
 
 [req.104]
 title = "Proposal decision outcomes and target names"
 acceptance = "Implement the complete reachable feature: Proposal decision outcomes and target names"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Proposal decision outcomes and target names"
+
 
 [req.105]
 title = "No proposal refill and clear reviewed proposals"
 acceptance = "Implement the complete reachable feature: No proposal refill and clear reviewed proposals"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: No proposal refill and clear reviewed proposals"
+
 
 [req.106]
 title = "Notification rules control promised delivery"
 acceptance = "Implement the complete reachable feature: Notification rules control promised delivery"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Notification rules control promised delivery"
+
 
 [req.107]
 title = "Mention escalation matches user name"
 acceptance = "Implement the complete reachable feature: Mention escalation matches user name"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Mention escalation matches user name"
+
 
 [req.108]
 title = "Notification filter reset action"
 acceptance = "Implement the complete reachable feature: Notification filter reset action"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Notification filter reset action"
+
 
 [req.113]
 title = "Learning inactivity begins at first pass"
 acceptance = "Implement the complete reachable feature: Learning inactivity begins at first pass"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Learning inactivity begins at first pass"
+
 
 [task.automation-tasks]
 title = "automation-tasks end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "automation-tasks"
 requires = []
-reqs = ["079", "080", "081", "082", "083", "084", "100", "101", "102", "103", "104", "105", "106", "107", "108", "113"]
+reqs = ["079.1", "080.1", "081.1", "082.1", "083.1", "084.1", "100.1", "101.1", "102.1", "103.1", "104.1", "105.1", "106.1", "107.1", "108.1", "113.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+touches = ["apps/console/src/features/dashboard/actionCenterFeedError.test.tsx", "apps/console/src/features/dashboard/missionControl.test.tsx", "apps/console/src/features/dashboard/MissionControl.tsx", "apps/console/src/features/dashboard/widgets/ActionCenter.tsx", "apps/console/src/features/inbox/InboxPage.tsx", "apps/console/src/features/inbox/ProposalsLens.tsx", "apps/console/src/features/inbox/inboxProposalState.ts", "apps/console/src/features/inbox/proposalLens.ts", "apps/console/src/features/notifications/NotificationsPage.tsx", "apps/console/src/features/settings/NotificationRulesMatrix.tsx", "apps/console/src/features/tasks/TaskForm.tsx", "apps/console/src/features/tasks/TaskDetail.tsx", "apps/console/src/features/tasks/TaskGraph.tsx", "apps/console/src/features/tasks/TasksListPage.tsx", "apps/console/src/features/tasks/taskCollectionState.ts", "apps/console/src/features/tasks/taskGraphAccessibility.test.tsx", "apps/console/src/shared/data/api.ts", "checks/runtime/test_inbox_proposals.py", "checks/runtime/test_notification_rules.py", "checks/runtime/test_task_registry_state.py", "runtime/gideon/engine/tasks/hierarchy_handlers.py", "runtime/gideon/engine/tasks/registry.py", "runtime/gideon/interfaces/dashboard/handlers_inbox.py", "runtime/gideon/interfaces/dashboard/server.py", "runtime/gideon/interfaces/dashboard/state.py", "runtime/gideon/workspace/notification_rules.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_task_registry_state.py checks/runtime/test_inbox_proposals.py checks/runtime/test_notification_rules.py checks/runtime/test_tasks_api.py::test_reset_repeatable_list checks/runtime/test_tasks_api.py::test_reset_repeatable_list_defers_managed_task_fields"
 
 [req.014]
 title = "Plugin hooks observers background services and richer installation"
 acceptance = "Implement the complete reachable feature: Plugin hooks observers background services and richer installation"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Plugin hooks observers background services and richer installation"
+
 
 [req.114]
 title = "Close terminally failed app installation dialogs"
 acceptance = "Implement the complete reachable feature: Close terminally failed app installation dialogs"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Close terminally failed app installation dialogs"
+
 
 [req.115]
 title = "Custom app configuration widgets"
 acceptance = "Implement the complete reachable feature: Custom app configuration widgets"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Custom app configuration widgets"
+
 
 [req.116]
 title = "Advanced configuration disclosure and required fields"
 acceptance = "Implement the complete reachable feature: Advanced configuration disclosure and required fields"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Advanced configuration disclosure and required fields"
+
 
 [req.117]
 title = "New skills work on first creation"
 acceptance = "Implement the complete reachable feature: New skills work on first creation"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: New skills work on first creation"
+
 
 [req.118]
 title = "Hide internal prompts from user-facing skill lists"
 acceptance = "Implement the complete reachable feature: Hide internal prompts from user-facing skill lists"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Hide internal prompts from user-facing skill lists"
+
 
 [req.119]
 title = "One-click staged agent-pack activation and active-state reporting"
 acceptance = "Implement the complete reachable feature: One-click staged agent-pack activation and active-state reporting"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: One-click staged agent-pack activation and active-state reporting"
+
 
 [req.120]
 title = "Markdown app and tool descriptions"
 acceptance = "Implement the complete reachable feature: Markdown app and tool descriptions"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Markdown app and tool descriptions"
+
 
 [req.121]
 title = "Widget form submission and failure feedback"
 acceptance = "Implement the complete reachable feature: Widget form submission and failure feedback"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Widget form submission and failure feedback"
+
 
 [task.automation-apps]
 title = "automation-apps end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "automation-apps"
 requires = []
-reqs = ["014", "114", "115", "116", "117", "118", "119", "120", "121"]
+reqs = ["014.1", "114.1", "115.1", "116.1", "117.1", "118.1", "119.1", "120.1", "121.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-
+touches = ["apps/console/src/features/apps/AppsSection.tsx", "apps/console/src/features/apps/appConfigForm.tsx", "apps/console/src/features/apps/installConsent.tsx", "apps/console/src/features/settings/PacksPanel.tsx", "apps/console/src/features/settings/packLedgerDetail.test.tsx", "apps/console/src/shared/data/useGuardedInstall.ts", "apps/console/src/shared/ui/widget/WidgetFrame.tsx", "apps/console/src/shared/ui/widget/useWidgetActionBridge.ts", "apps/console/src/shared/ui/widget/widgetHostScript.test.ts", "apps/console/src/shared/ui/widget/widgetSrcdoc.ts", "checks/runtime/test_app_hook_contributions.py", "checks/runtime/test_app_manager_lifecycle.py", "checks/runtime/test_packs_kinds.py", "checks/runtime/test_prompt_api.py", "runtime/gideon/engine/automation_boot.py", "runtime/gideon/extensions/apps/app_hooks.py", "runtime/gideon/extensions/apps/app_manager.py", "runtime/gideon/extensions/apps/catalog.py", "runtime/gideon/extensions/apps/manifest.py", "runtime/gideon/extensions/skills/loader.py", "runtime/gideon/interfaces/dashboard/handlers/apps.py", "runtime/gideon/interfaces/dashboard/handlers/packs.py", "runtime/gideon/interfaces/dashboard/handlers/prompts.py"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/pytest -q checks/runtime/test_app_hook_contributions.py checks/runtime/test_app_manager_lifecycle.py::TestInstall::test_warning_discloses_lifecycle_hooks_before_consent checks/runtime/test_prompt_api.py::test_create_skill_uses_requested_name_on_first_creation checks/runtime/test_packs_kinds.py::test_bundled_install_route_drives_the_whole_flow"

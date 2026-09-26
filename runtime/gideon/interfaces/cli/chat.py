@@ -96,6 +96,19 @@ async def _interactive(provider: ModelProvider, cfg: AppConfig) -> None:
             print("Bye!")
             break
 
+        if message == "/compact" and provider.compacts_in_process:
+            await provider.compact()
+            result = await provider.wait_for_compaction()
+            status = result.get("type", "failed")
+            if status == "completed":
+                print(f"Conversation compacted: {result.get('summary', '')}")
+            elif status == "noop":
+                print("Conversation is too short to compact; nothing changed.")
+            else:
+                print("Compaction failed.", file=sys.stderr)
+            print()
+            continue
+
         await _send_and_print(provider, message)
 
         pct = provider.context_usage_pct()

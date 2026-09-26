@@ -7,16 +7,16 @@ import { MotionConfig, motion } from 'framer-motion'
 import { ease, duration, useReducedMotion } from '../../shared/theme/motion'
 import { armCueAudio } from '../../shared/theme/soundCues'
 import { installPushCuePlayback } from './pushCuePlayback'
-import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
+import { Bell, Blocks, BookOpen, Brain, Compass, FileCode, FileText, Files, FlaskConical, FolderKanban, Inbox, LayoutDashboard, ListChecks, Loader2, MessageSquare, Radar, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
 import { NavRail, type NavItem } from '../../shared/ui/NavRail'
 import { ShellCornerLeft, ShellCornerRight } from '../../shared/ui/ShellCorners'
 import { IncidentBanner } from './IncidentBanner'
 import { ChatPage } from '../../features/ChatPage'
 import { useIdentity } from './identity'
 import { Onboarding } from './Onboarding'
-import { peekOnboardingExit, clearOnboardingExit } from '../../features/onboarding/exitTo'
+import { peekOnboardingExit, clearOnboardingExit, setOnboardingExit } from '../../features/onboarding/exitTo'
 import { ProductTour } from '../../features/onboarding/ProductTour'
-import { useHashRoute } from './useHashRoute'
+import { parseRouteHash, useHashRoute } from './useHashRoute'
 import { installRoutePreload, lazyRoute } from './routePreload'
 import { useIsMobile } from './useIsMobile'
 import type { RouteProps } from './useQueryState'
@@ -57,6 +57,7 @@ const TasksSection = lazyRoute('tasks', () => import('../../features/tasks/Tasks
 const ProjectsSection = lazyRoute('projects', () => import('../../features/projects/ProjectsSection').then((m) => ({ default: m.ProjectsSection })))
 const PromptsSection = lazyRoute('prompts', () => import('../../features/prompts/PromptsSection').then((m) => ({ default: m.PromptsSection })))
 const WorkflowsSection = lazyRoute('workflows', () => import('../../features/workflows/WorkflowsSection').then((m) => ({ default: m.WorkflowsSection })))
+const ExperimentsPage = lazyRoute('experiments', () => import('../../features/experiments/ExperimentsPage').then((m) => ({ default: m.ExperimentsPage })))
 const SkillsPage = lazyRoute('skills', () => import('../../features/skills/SkillsPage').then((m) => ({ default: m.SkillsPage })))
 const ToolsPage = lazyRoute('tools', () => import('../../features/tools/ToolsPage').then((m) => ({ default: m.ToolsPage })))
 const KnowledgeSection = lazyRoute('knowledge', () => import('../../features/knowledge/KnowledgeSection').then((m) => ({ default: m.KnowledgeSection })))
@@ -94,6 +95,7 @@ const NAV: NavItem[] = [
   { id: 'learning', label: 'Learning', icon: Brain, section: 'Capabilities' },
   { id: 'prompts', label: 'Prompts', icon: FileText, section: 'Capabilities' },
   { id: 'workflows', label: 'Workflows', icon: Workflow, section: 'Capabilities' },
+  { id: 'experiments', label: 'Experiments', icon: FlaskConical, section: 'Capabilities' },
   { id: 'apps', label: 'Apps', icon: Blocks, section: 'Apps' },
   { id: 'settings', label: 'Settings', icon: Settings, pinBottom: true },
 ]
@@ -129,6 +131,7 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   terminal: TerminalPage,
   prompts: PromptsSection,
   workflows: WorkflowsSection,
+  experiments: ExperimentsPage,
   skills: SkillsPage,
   learning: LearningPage,
   tools: ToolsPage,
@@ -221,8 +224,14 @@ function AppInner() {
 
   useEffect(() => {
     if (!loaded) return
-    if (!onboarded && route !== 'onboarding') navigate('onboarding')
-    else if (onboarded && route === 'onboarding') navigate(peekOnboardingExit() || 'dashboard')
+    if (!onboarded && route !== 'onboarding') {
+      if (ROUTABLE.has(route)) setOnboardingExit(location.hash)
+      navigate('onboarding?step=name', { replace: true })
+    }
+    else if (onboarded && route === 'onboarding') {
+      const destination = peekOnboardingExit()
+      navigate(ROUTABLE.has(parseRouteHash(destination, 'dashboard').route) ? destination : 'dashboard', { replace: true })
+    }
     else if (onboarded && route !== 'companion' && !ROUTABLE.has(route)) navigate('dashboard', { replace: true })
     else if (onboarded) clearOnboardingExit()
   }, [loaded, onboarded, route, navigate])
@@ -244,7 +253,7 @@ function AppInner() {
   if (query.embed === '1') embedRef.current = true
 
   if (!loaded) return <div data-visual-state="waiting" className="grid h-full place-items-center" style={{ background: 'var(--color-canvas)' }}><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
-  if (route === 'onboarding' || !onboarded) return <Onboarding />
+  if (route === 'onboarding' || !onboarded) return <Onboarding query={query} setQuery={setQuery} />
 
   if (route === 'companion') {
     return (

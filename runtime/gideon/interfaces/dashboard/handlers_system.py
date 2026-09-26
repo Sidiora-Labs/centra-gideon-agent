@@ -555,6 +555,7 @@ async def api_onboarding(request: web.Request) -> web.Response:
     """
     has_provider = False
     has_binding = False
+    active_chat_model = ""
     try:
         from gideon.integrations.llm.capabilities import Capability
         from gideon.integrations.llm.registry import get_default_registry
@@ -577,7 +578,9 @@ async def api_onboarding(request: web.Request) -> web.Response:
     try:
         from gideon.extensions.providers.use_cases import active_model_refs
 
-        has_binding = bool(active_model_refs("chat"))
+        refs = active_model_refs("chat")
+        has_binding = bool(refs)
+        active_chat_model = str(refs[0]) if refs else ""
     except Exception:
         logger.debug("onboarding: active-model probe failed", exc_info=True)
 
@@ -596,6 +599,7 @@ async def api_onboarding(request: web.Request) -> web.Response:
             "needs_model": needs_model,
             "has_model_provider": has_provider,
             "has_chat_binding": has_binding,
+            "active_chat_model": active_chat_model,
             **load_onboarding_state(),
         }
     )

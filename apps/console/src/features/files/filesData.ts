@@ -4,12 +4,14 @@ import { api, type FsEntry, type FsRoot } from '../../shared/data/api'
 export function useFileRoots() {
   const [roots, setRoots] = useState<FsRoot[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    api.fileRoots().then((r) => { if (alive) { setRoots(r.roots); setLoading(false) } }).catch(() => { if (alive) setLoading(false) })
+    api.fileRoots().then((r) => { if (alive) { setRoots(r.roots); setError(null); setLoading(false) } })
+      .catch((failure) => { if (alive) { setError((failure as Error).message || 'Could not read file locations.'); setLoading(false) } })
     return () => { alive = false }
   }, [])
-  return { roots, loading }
+  return { roots, loading, error }
 }
 
 const DIR_CACHE_KEY = 'files-dir-cache'

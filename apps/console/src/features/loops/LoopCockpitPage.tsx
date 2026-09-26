@@ -61,6 +61,65 @@ const DIAL_THRESHOLD: Record<string, number | null> = {
 }
 
 
+type ResearchSource = { url: string; domain: string };
+
+function ResearchCoverage({ loop }: { loop: GoalLoop }) {
+  const research = loop as GoalLoop & { kind?: string; files_dir?: string; kind_config?: Record<string, unknown> };
+  const [sources, setSources] = useState<ResearchSource[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const directory = research.files_dir || '';
+  useEffect(() => {
+    if (research.kind !== 'research' || !directory) return;
+    let alive = true;
+    const refresh = () => {
+      api.fileRead(`${directory.replace(/\/$/, '')}/research_sources.json`, true)
+        .then((result) => {
+          if (!alive) return;
+          if (result.truncated) throw new Error('The source list was truncated.');
+          const value: unknown = JSON.parse(result.content);
+          if (!Array.isArray(value)) throw new Error('The source list is unreadable.');
+          setSources(value.filter((entry): entry is ResearchSource =>
+            !!entry && typeof entry === 'object' && typeof entry.url === 'string' &&
+            /^https?:\/\//.test(entry.url) && typeof entry.domain === 'string'));
+          setError(null);
+        })
+        .catch((cause) => {
+          if (!alive) return;
+          if (cause instanceof ApiError && cause.status === 404) { setSources([]); setError(null); }
+          else setError((cause as Error)?.message || 'Could not read the source list.');
+        });
+    };
+    refresh();
+    const timer = research.status === 'running' ? window.setInterval(refresh, 10_000) : 0;
+    return () => { alive = false; if (timer) window.clearInterval(timer); };
+  }, [research.id, research.kind, research.status, research.total_cycles, directory]);
+  if (research.kind !== 'research') return null;
+  const cfg = research.kind_config || {};
+  const minPages = Math.max(0, Number(cfg.evidence_min_pages) || 0);
+  const minDomains = Math.max(0, Number(cfg.evidence_min_domains) || 0);
+  const domains = sources ? new Set(sources.map((source) => source.domain)).size : 0;
+  const unmet = sources !== null && (sources.length < minPages || domains < minDomains);
+  const ended = ['complete', 'stopped', 'failed'].includes(research.status);
+  return <section aria-label="Research source coverage" className="mx-m rounded-lg border border-outline/40 bg-surface-container/30 p-m">
+    <div className="flex flex-wrap items-center gap-s">
+      <strong data-type="label-s">Readable sources</strong>
+      {sources !== null && <span data-type="body-s" className="tabular-nums text-on-surface-var">
+        {sources.length}/{minPages} distinct pages · {domains}/{minDomains} sites
+      </span>}
+      {unmet && <span data-type="caption" className={ended ? 'text-danger' : 'text-on-surface-low'}>
+        {ended ? 'Coverage target unmet' : 'Gathering more sources'}</span>}
+      {!unmet && sources !== null && (minPages || minDomains) > 0 && <span data-type="caption" className="text-primary">Coverage target met</span>}
+    </div>
+    {sources === null && !error && <p data-type="caption" className="text-on-surface-low">Reading fetched sources…</p>}
+    {error && <p role="alert" data-type="caption" className="text-danger">{error}</p>}
+    {sources && sources.length > 0 && <details className="mt-s">
+      <summary data-type="caption" className="cursor-pointer text-primary">View fetched pages</summary>
+      <ul className="mt-s grid gap-xs text-sm">{sources.map((source) =>
+        <li key={source.url} className="min-w-0 truncate"><a href={source.url} target="_blank" rel="noreferrer" className="text-primary underline" title={source.url}>{source.url}</a></li>)}</ul>
+    </details>}
+  </section>;
+}
+
 interface RoiPoint { cycle: number; score: number }
 
 function RoiRail({ points, granularity }: { points: RoiPoint[]; granularity: string }) {
@@ -498,6 +557,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
 
       { }
       {statusBar}
+      <ResearchCoverage loop={c}/>
 
       <div className="flex-1 min-h-0 flex">
         { }
@@ -747,7 +807,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                           <InvestigateButton kind="loop_cycle" id={`${c.id}:${f.cycle}`}
                             backLink={`#/loops/${c.id}`} size={28} />
                         </div>
-                        <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} />
+                        <CycleDetail f={f} verdict={verdictByCycle.get(f.cycle)} nudges={byCycle.get(f.cycle) ?? []} activity={running && c.total_cycles === f.cycle ? activity : []} taskTitle={tasks.find((task) => task.id === f.task_id)?.title} onOpenTask={onOpenTask} />
                       </>)
                     })()
               )}
@@ -1040,10 +1100,12 @@ function CycleNode({ f, verdict, dur, hasNudge, onClick, delay }: { f: LoopFindi
   )
 }
 
-function CycleDetail({ f, verdict, nudges, activity }: { f: LoopFinding; verdict?: LoopVerdict; nudges: LoopNudge[]; activity: { kind: string; label: string; detail?: string }[] }) {
+export function CycleDetail({ f, verdict, nudges, activity, taskTitle, onOpenTask }: { f: LoopFinding; verdict?: LoopVerdict; nudges: LoopNudge[]; activity: { kind: string; label: string; detail?: string }[]; taskTitle?: string; onOpenTask?: (taskId: string) => void }) {
+  const taskId = f.task_id
   return (
     <div className="flex flex-col gap-l">
       <div className="flex flex-wrap gap-s">
+        {taskId && onOpenTask && <QuietButton onClick={() => onOpenTask(taskId)} title={`Open task ${taskTitle || taskId}`}><ListChecks size={13} /> {taskTitle || taskId}</QuietButton>}
         {typeof verdict?.marginal_value === 'number' && typeof verdict?.quality_score === 'number' && <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={{ background: `color-mix(in srgb, ${verdict.done ? 'var(--color-ok)' : 'var(--color-primary)'} 18%, transparent)`, color: verdict.done ? 'var(--color-ok)' : 'var(--color-primary)' }}>{verdict.done ? <Check size={13} /> : null} judge ▲{verdict.marginal_value.toFixed(1)} · ★{verdict.quality_score.toFixed(1)}</span>}
         {verdict?.adversarial && <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7 bg-surface-high text-on-surface-var" title="A second, skeptical judge independently cross-checked this verdict (adversarial review)."><ShieldCheck size={13} className="text-on-surface-low" /> cross-checked</span>}
         {f.metric && typeof f.metric.value === 'number' && <span data-type="body-s" className="inline-flex items-center rounded-pill px-m h-7 bg-surface-high text-on-surface-var">{asText(f.metric.name) || 'metric'}: {f.metric.value}</span>}

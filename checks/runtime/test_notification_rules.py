@@ -152,9 +152,9 @@ def test_unregistered_kind_resolves_through_the_generic_fallback(home):
 
 def test_known_targets_are_preserved_in_order(home):
     _write_rules(
-        home, {"rules": {"cron/result": {"targets": ["channel_dm", "dashboard"]}}}
+        home, {"rules": {"cron/result": {"targets": ["native", "dashboard", "push"]}}}
     )
-    assert nr.resolve_rule("cron", "result").targets == ("channel_dm", "dashboard")
+    assert nr.resolve_rule("cron", "result").targets == ("native", "dashboard", "push")
 
 
 def test_unknown_target_is_dropped_but_known_ones_survive(home):
@@ -163,11 +163,11 @@ def test_unknown_target_is_dropped_but_known_ones_survive(home):
         home,
         {
             "rules": {
-                "cron/result": {"targets": ["dashboard", "hologram", "channel_dm"]}
+                "cron/result": {"targets": ["dashboard", "hologram", "channel_dm", "push"]}
             }
         },
     )
-    assert nr.resolve_rule("cron", "result").targets == ("dashboard", "channel_dm")
+    assert nr.resolve_rule("cron", "result").targets == ("dashboard", "push")
 
 
 def test_all_unknown_targets_fall_back_to_dashboard(home):
@@ -285,7 +285,7 @@ def test_escalation_is_idempotent_on_immediate():
 
 
 def test_escalation_does_not_add_delivery_targets():
-    """A keyword hit means "show me now", not "also text me"; channel_dm leaves the box."""
+    """A keyword hit does not add a delivery target the user did not choose."""
     rule = nr.Rule("cron", "result", "badge", ("dashboard",))
     assert rule.escalated().targets == ("dashboard",)
 

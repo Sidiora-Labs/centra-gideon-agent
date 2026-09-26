@@ -56,7 +56,7 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
           ) : undefined}
         />
       }
-      controls={(items === undefined || items.length > 0)
+      controls={(items === undefined || items.length > 0 || filter !== 'all')
         ? <ListControls results={{ count: (filtered ?? []).length, noun: 'notifications', active: filter !== 'all' }}>
             <FilterMenu sections={[filterSection]} />
           </ListControls>
@@ -96,7 +96,7 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
         {items === undefined && loadErr ? (
 
           <LoadError what="notifications" error={loadErr} onRetry={load} />
-        ) : filtered === null ? <ListSkeleton rows={6} what="notifications" /> : items && items.length === 0 ? (
+        ) : filtered === null ? <ListSkeleton rows={6} what="notifications" /> : items && items.length === 0 && filter === 'all' ? (
           <EmptyState icon={Bell} title="You're all caught up" hint="Schedule runs, trigger fires, agent updates, and task results surface here for you to review." />
         ) : (
           <>

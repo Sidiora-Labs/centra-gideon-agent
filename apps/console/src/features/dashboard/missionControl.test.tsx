@@ -87,7 +87,7 @@ describe('the four lanes', () => {
 
   it('an EMPTY lane says it is empty rather than vanishing', async () => {
     approvals.mockResolvedValue([approval()])
-    toLanes.mockReturnValue(lanes({ 'needs-approval': [{ id: 'c1', title: 'shell.run', approval: approval() }] }))
+    toLanes.mockReturnValue(lanes({ 'needs-approval': [{ id: 'appr-1', origin: 'approval', title: 'shell.run' }] }))
     render(<MissionControl />)
 
     expect(await screen.findByText('Nothing is waiting on an answer from you.')).toBeTruthy()
@@ -98,7 +98,7 @@ describe('the four lanes', () => {
 })
 
 describe('approving from a lane', () => {
-  const card = { id: 'c1', title: 'shell.run', detail: 'rm -rf ./build', approval: approval() }
+  const card = { id: 'appr-1', origin: 'approval', title: 'shell.run', subtitle: 'rm -rf ./build' }
 
   beforeEach(() => {
     approvals.mockResolvedValue([approval()])
@@ -106,6 +106,8 @@ describe('approving from a lane', () => {
   })
 
   it('names WHICH item the approve button acts on', async () => {
+    const actual = await vi.importActual<typeof import('../../shared/data/attentionLanes')>('../../shared/data/attentionLanes')
+    toLanes.mockImplementation(actual.toLanes)
     render(<MissionControl />)
     const btn = await screen.findByRole('button', { name: /^Approve .*shell\.run/ })
     expect(btn).toBeTruthy()
@@ -143,7 +145,7 @@ describe('approving from a lane', () => {
 })
 
 describe('answering a pending question', () => {
-  const card = { id: 'q1', title: 'loop-worker', item: questionItem() }
+  const card = { id: 'inbox-1', origin: 'inbox', title: 'loop-worker' }
 
   beforeEach(() => {
     inboxOpen.mockResolvedValue([questionItem()])
@@ -155,6 +157,18 @@ describe('answering a pending question', () => {
     expect(await screen.findByRole('button', { name: /^Answer .*Ship it$/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Answer .*Hold$/ })).toBeTruthy()
     expect(screen.getByText('Which branch should I push?')).toBeTruthy()
+  })
+
+  it('opens the exact inbox item from an attention card', async () => {
+    const actual = await vi.importActual<typeof import('../../shared/data/attentionLanes')>('../../shared/data/attentionLanes')
+    toLanes.mockImplementation(actual.toLanes)
+    const item = { ...questionItem(), id: 'inbox /?' }
+    inboxOpen.mockResolvedValue([item])
+    render(<MissionControl />)
+
+    const link = await screen.findByRole('link', { name: /^Open inbox item:/ })
+    expect(link.getAttribute('href')).toBe('#/inbox?open=inbox%20%2F%3F')
+    expect(screen.getByRole('button', { name: /^Answer .*Ship it$/ })).toBeTruthy()
   })
 
   it('answering resumes the run with the CHOSEN option and its resume token', async () => {
@@ -177,7 +191,8 @@ describe('answering a pending question', () => {
   })
 
   it('a question with NO options says where to answer it instead of faking a text box', async () => {
-    const bare = { id: 'q2', title: 'loop-worker', item: questionItem([]) }
+    const bare = { id: 'inbox-1', origin: 'inbox', title: 'loop-worker' }
+    inboxOpen.mockResolvedValue([questionItem([])])
     toLanes.mockReturnValue(lanes({ 'your-turn': [bare] }))
     render(<MissionControl />)
 
@@ -293,17 +308,17 @@ describe('the route is mounted in the shell', () => {
   })
 
   it('lazy-imports the page', () => {
-    expect(app).toMatch(/const MissionControl = lazy\(/)
+    expect(app).toMatch(/const MissionControl = lazyRoute\('mission-control', \(\) => import\('\.\.\/\.\.\/features\/dashboard\/MissionControl'\)/)
   })
 
   it(`dispatches '${MISSION_CONTROL_VIEW_ID}' to it, not to the coming-soon fallback`, () => {
-    expect(app).toMatch(new RegExp(`case '${MISSION_CONTROL_VIEW_ID}': return <MissionControl`))
+    expect(app).toMatch(new RegExp(`'${MISSION_CONTROL_VIEW_ID}': MissionControl`))
   })
 
   it('is in ROUTABLE, so the hash route is not rejected before it renders', () => {
-    const routable = app.match(/const ROUTABLE = new Set\(\[(.*?)\]\)/s)
+    const routable = app.match(/^const ROUTABLE = [^\n]+/m)
     expect(routable, 'the ROUTABLE literal moved — re-point this rail').toBeTruthy()
-    expect(routable![1]).toContain(`'${MISSION_CONTROL_VIEW_ID}'`)
+    expect(routable![0]).toContain(`'${MISSION_CONTROL_VIEW_ID}'`)
   })
 
   it('is reachable by a user, via the command palette', () => {

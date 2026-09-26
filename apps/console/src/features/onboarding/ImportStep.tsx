@@ -19,6 +19,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   mcp_servers: 'MCP servers',
   skills: 'Skills',
   settings: 'Settings',
+  conversations: 'Conversations',
 }
 
 const CATEGORY_BLURB: Record<string, string> = {
@@ -27,6 +28,7 @@ const CATEGORY_BLURB: Record<string, string> = {
   mcp_servers: 'MCP server definitions, added to your MCP config.',
   skills: 'Skills, copied in and re-scanned like a Store install.',
   settings: 'Staged for you to review — never merged into live config.',
+  conversations: 'Earlier chats, including tool exchanges, kept in separate searchable sessions.',
 }
 
 export function labelOfCategory(category: string): string {

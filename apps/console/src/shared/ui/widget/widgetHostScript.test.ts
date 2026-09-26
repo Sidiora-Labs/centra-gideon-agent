@@ -3,11 +3,12 @@ import { HOST_SCRIPT_SOURCE } from './widgetSrcdoc'
 
 const posted = vi.fn()
 let onClick: (e: { isTrusted: boolean; target: Element; preventDefault: () => void }) => void
+let onSubmit: (e: { isTrusted: boolean; target: Element; submitter?: Element; preventDefault: () => void }) => void
 
 beforeAll(() => {
   vi.spyOn(window, 'postMessage').mockImplementation(((...args: unknown[]) => { posted(...args) }) as never)
   document.body.innerHTML = `
-    <form>
+    <form id="widget-form">
       <input name="range" value="30d">
       <input name="live" type="checkbox" checked>
       <input name="mode" type="radio" value="a">
@@ -18,6 +19,7 @@ beforeAll(() => {
   const realAdd = document.addEventListener.bind(document)
   vi.spyOn(document, 'addEventListener').mockImplementation(((type: string, fn: never, ...rest: never[]) => {
     if (type === 'click') onClick = fn as unknown as typeof onClick
+    if (type === 'submit') onSubmit = fn as unknown as typeof onSubmit
     realAdd(type, fn, ...rest)
   }) as never)
   new Function(HOST_SCRIPT_SOURCE)()
@@ -56,5 +58,21 @@ describe('HOST_SCRIPT — the human-gesture gate', () => {
   it('ignores a human click that is not on a [data-action] element', () => {
     deliver('plain', true)
     expect(posted).not.toHaveBeenCalled()
+  })
+
+  it('forwards a trusted form submission with its fields', () => {
+    const preventDefault = vi.fn()
+    onSubmit({ isTrusted: true, target: el('widget-form'), submitter: el('act'), preventDefault })
+    expect(preventDefault).toHaveBeenCalled()
+    expect(posted).toHaveBeenCalledWith({
+      type: 'widget-action', action: 'submit',
+      payload: { from: 'widget', formData: { range: '30d', live: true, mode: 'b' } },
+    }, '*')
+  })
+
+  it('reports a form with no action and sends no widget action', () => {
+    onSubmit({ isTrusted: true, target: el('widget-form'), preventDefault: vi.fn() })
+    expect(posted).toHaveBeenCalledWith({ type: 'widget-error', message: expect.stringContaining('no action') }, '*')
+    expect(posted.mock.calls.some(([message]) => message.type === 'widget-action')).toBe(false)
   })
 })

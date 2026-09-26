@@ -25,6 +25,7 @@ from gideon.core.config.loader import (
 from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import (
+    _attach_rewound,
     _attach_variants,
     _redact_meta,
     _rehydrate_session_from_history,
@@ -2200,18 +2201,22 @@ async def api_chat_session_resume(request: web.Request) -> web.Response:
             )
     all_messages = state.conversation_log.read_messages_chained(resolved_key)
     disk_total = len(all_messages)
-    max_resume = 500
-    messages = all_messages[-max_resume:] if disk_total > max_resume else all_messages
-    session._disk_older_count = max(0, disk_total - len(messages))
-    for m in messages:
+    for m in all_messages:
         role = m.get("role", "assistant")
         cls = "msg msg-u" if role == "user" else "msg msg-a"
         content = m.get("content", "")
         if role != "user":
             content, _ = redact_exfiltration_urls(content)
             content, _ = redact_credentials(content)
-        session.append(role, content, cls, ts=m.get("ts", ""))
+        session.append(
+            role,
+            content,
+            cls,
+            ts=m.get("ts", ""),
+            meta=m.get("meta") if isinstance(m.get("meta"), dict) else None,
+        )
         _attach_variants(session, m)
+        _attach_rewound(session, m)
     session.drain()
     session._resumed_count = len(session.messages)
     total = disk_total
@@ -2495,8 +2500,22 @@ async def api_chat_task_mode(request: web.Request) -> web.Response:
 
 
 _APPROVE_ACTIONS = frozenset(
-    {"approved", "rejected", "trust", "trust_agent", "trust_reads", "yolo"}
+    {"approved", "rejected", "revised", "trust", "trust_agent", "trust_reads", "yolo"}
 )
+
+
+def _permission_request_id(message: dict) -> str:
+    try:
+        return str(json.loads(message.get("cls", "{}") or "{}").get("request_id") or "")
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return ""
+
+
+def _permission_can_revise(message: dict) -> bool:
+    try:
+        return json.loads(message.get("cls", "{}") or "{}").get("can_revise") is True
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return False
 
 
 def persistable_grant_target(
@@ -2550,6 +2569,16 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
     original_action = action
     reported_decision = original_action
     request_id = body.get("request_id", "")
+    revision = ""
+    if original_action == "revised":
+        revision = body.get("revision", "")
+        if not isinstance(revision, str) or not revision.strip() or len(revision) > 4000:
+            return web.json_response({"error": "revision must contain 1 to 4000 characters"}, status=400)
+        matching = next((message for message in reversed(session.messages)
+            if message.get("role") == "permission"
+            and _permission_request_id(message) == request_id), None)
+        if matching is None or not _permission_can_revise(matching):
+            return web.json_response({"error": "revision is unavailable for this approval"}, status=400)
     screening = None
     requested_mode = {
         "trust": "trust",
@@ -2624,8 +2653,8 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
                     status=400,
                 )
         return web.json_response({"error": "no pending approval"}, status=404)
-    resolved = action if action in ("approved", "approved_trust_reads") else "rejected"
-    fut.set_result(resolved)
+    resolved = action if action in ("approved", "approved_trust_reads") else "revised" if action == "revised" else "rejected"
+    fut.set_result("revision:" + json.dumps(revision.strip()) if resolved == "revised" else resolved)
     if request_id:
         _mark_permission_resolved(
             session.messages,
@@ -2642,7 +2671,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             "approval_resolved",
             {
                 "id": request_id,
-                "approved": resolved != "rejected",
+                "approved": resolved in ("approved", "approved_trust_reads"),
                 "decision": reported_decision if grant_allowed else resolved,
             },
         )

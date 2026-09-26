@@ -85,10 +85,13 @@ export function ScanReport({ scan }: { scan: NonNullable<AppInstallResult['scan'
 }
 
 // Exported so the onboarding essential-apps step consents through THIS surface rather
-export function ConsentModal({ label, result, busy, permissions, crons, appUI, onConfirm, onClose }: {
+export type AppHookSummary = { name: string; event: string; provider: string }
+
+export function ConsentModal({ label, result, busy, permissions, crons, hooks, appUI, onConfirm, onClose }: {
   label: string; result: GuardedResult; busy: boolean
   permissions: AppSummary['permissions'] | undefined
   crons: AppCronSummary[] | undefined
+  hooks?: AppHookSummary[]
   appUI?: { hasUI?: boolean; uiComponents?: string }
   onConfirm: () => void; onClose: () => void
 }) {
@@ -125,6 +128,10 @@ export function ConsentModal({ label, result, busy, permissions, crons, appUI, o
         {
 }
         <PermissionConsent permissions={permissions} appUI={appUI} />
+        {!!(hooks ?? result.hooks)?.length && <div data-type="body-s" className="text-on-surface-low">
+          <div data-type="label-m" className="text-on-surface">Lifecycle hooks</div>
+          {(hooks ?? result.hooks ?? []).map((hook) => <div key={hook.name}>{hook.name} · {hook.event} via {hook.provider}</div>)}
+        </div>}
         {(crons ?? []).length > 0 && <CronConsentList crons={crons!} />}
         <div className="flex justify-end gap-2 pt-s">
           {

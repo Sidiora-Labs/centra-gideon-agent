@@ -471,6 +471,19 @@ class LoopWatchdog:
         call site changing."""
         if stop_reason is None:
             stop_reason = default_stop_reason(genuine=genuine)
+        if stop_reason in (
+            LoopStopReason.CYCLE_BUDGET,
+            LoopStopReason.COST_BUDGET,
+            LoopStopReason.DEADLINE,
+        ):
+            current = store.get(loop_id)
+            if current is not None and current.kind == "research":
+                from gideon.automation.loop.research_sources import unmet_reason
+
+                unmet = unmet_reason(loop_id, current.kind_config)
+                if unmet:
+                    genuine = False
+                    reason = f"{reason}; {unmet}" if reason else unmet
         fields = (
             {"error_message": None}
             if genuine

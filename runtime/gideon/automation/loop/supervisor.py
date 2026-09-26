@@ -73,6 +73,26 @@ async def done_signal(
     :data:`~gideon.automation.workflows.supervisor_policy.DONE_SIGNALS` set exists to make impossible.
     """
     spec = policy.convergence
+    if loop.kind == "research":
+        cfg = _cfg(loop)
+        try:
+            min_pages = max(0, int(cfg.get("evidence_min_pages") or 0))
+            min_domains = max(0, int(cfg.get("evidence_min_domains") or 0))
+        except (TypeError, ValueError):
+            min_pages = min_domains = 0
+        if min_pages or min_domains:
+            from gideon.automation.loop.research_sources import coverage
+
+            have = coverage(loop.id)
+            if have["pages"] < min_pages or have["domains"] < min_domains:
+                loop_files.write_guidance(
+                    loop.id,
+                    f"Research needs readable-source coverage: {have['pages']}/{min_pages} "
+                    f"distinct fetched pages and {have['domains']}/{min_domains} sites. "
+                    "Fetch and read further primary sources, or state the unmet coverage "
+                    "in the report if the run must stop.",
+                )
+                return False
     if spec.signal not in DONE_SIGNALS:
         raise ValueError(
             f"unknown done signal {spec.signal!r}; known: {sorted(DONE_SIGNALS)}"

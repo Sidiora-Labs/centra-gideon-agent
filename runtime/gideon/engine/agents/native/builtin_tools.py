@@ -124,6 +124,8 @@ _CATEGORY_OF: dict[str, str] = {
     "repo_map": "filesystem",
     "bash": "shell",
     "tool_result_get": "core",
+    "conversation_archive_search": "core",
+    "conversation_archive_read": "core",
     "knowledge_search": "knowledge",
     "knowledge_structural": "knowledge",
     "knowledge_create": "knowledge",
@@ -537,6 +539,22 @@ class NativeBuiltinToolProvider(ToolProvider):
                     "required": ["result_id"],
                 },
             ),
+            ToolDefinition(
+                name="conversation_archive_search",
+                provider=self.name,
+                requires_approval=False,
+                risk_level=RiskLevel.SAFE,
+                description="Find exact older messages removed from this conversation during compaction. Args: query, optional limit.",
+                parameters={**s, "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]},
+            ),
+            ToolDefinition(
+                name="conversation_archive_read",
+                provider=self.name,
+                requires_approval=False,
+                risk_level=RiskLevel.SAFE,
+                description="Read exact archived conversation messages from a search hit. Args: archive, index, optional max_chars.",
+                parameters={**s, "properties": {"archive": {"type": "string"}, "index": {"type": "integer"}, "max_chars": {"type": "integer"}}, "required": ["archive", "index"]},
+            ),
         ]
 
     def _read_gate_refusal(
@@ -625,6 +643,31 @@ class NativeBuiltinToolProvider(ToolProvider):
                 ]
             return ToolResult(success=False, error=message, recovery_hints=hints)
         return completed
+
+    async def _t_conversation_archive_search(self, a: dict) -> ToolResult:
+        import json
+
+        from gideon.cognition.archive_recall import search
+
+        query = str(a.get("query") or "").strip()
+        if not query:
+            return ToolResult(success=False, error="query is required")
+        limit = max(1, min(int(a.get("limit") or 5), 20))
+        hits = await asyncio.to_thread(search, self._session_key, query, limit=limit)
+        return _ok_capped(json.dumps(hits, ensure_ascii=False), session_key=self._session_key)
+
+    async def _t_conversation_archive_read(self, a: dict) -> ToolResult:
+        import json
+
+        from gideon.cognition.archive_recall import read
+
+        archive = str(a.get("archive") or "")
+        index = int(a.get("index", -1))
+        max_chars = max(500, min(int(a.get("max_chars") or 12000), 20000))
+        result = await asyncio.to_thread(read, self._session_key, archive, index, max_chars=max_chars)
+        if result is None:
+            return ToolResult(success=False, error="archive entry unavailable or access restricted")
+        return _ok_capped(json.dumps(result, ensure_ascii=False), session_key=self._session_key)
 
     async def _t_tool_result_get(self, a: dict) -> ToolResult:
         reference = str(a.get("result_id", "")).strip()

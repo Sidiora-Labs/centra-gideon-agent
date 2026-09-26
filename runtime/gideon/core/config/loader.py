@@ -6,7 +6,6 @@ Wire policies live in decoding; document I/O preserves application-owned section
 import json
 import logging
 import os
-import re as _re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -226,12 +225,14 @@ def _vault_mode(memory_data: dict) -> str:
 
 
 _BOT_NAME_MAX = 50
-_BOT_NAME_RE = _re.compile(r"[^a-zA-Z0-9 _\-.]")
-
-
 def _sanitize_bot_name(raw: str) -> str:
-    prepared = raw.strip()[:_BOT_NAME_MAX] if isinstance(raw, str) else ""
-    return _BOT_NAME_RE.sub("", prepared)
+    import unicodedata
+
+    prepared = unicodedata.normalize("NFC", raw.strip()) if isinstance(raw, str) else ""
+    return "".join(
+        char for char in prepared
+        if char in " _-." or unicodedata.category(char)[0] in "LMN"
+    )[:_BOT_NAME_MAX]
 
 
 @dataclass

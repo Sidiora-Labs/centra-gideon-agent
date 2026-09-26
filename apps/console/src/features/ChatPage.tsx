@@ -59,7 +59,7 @@ import { WorkflowProgressCard, workflowRefFromTool } from './chat/WorkflowProgre
 import { ApprovalCard } from './chat/ApprovalCard'
 import { ChatFilePanel } from './chat/ChatFilePanel'
 import { sameSessionTarget, type CommentTarget } from '../shared/ui/content/commentTarget'
-import { ChatActivityPanel } from './chat/ChatActivityPanel'
+import { SessionWorkspace } from './chat/SessionWorkspace'
 import { createScrollToTurnHandler } from './chat/scrollToTurn'
 import { AssistantActions, UserActions } from './chat/MessageActions'
 import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
@@ -103,7 +103,7 @@ function writeCachedDetail(key: string, d: ChatDetail): void {
   writeQuery(detailKey(key), d, true)
 }
 
-type ApproveAction = 'approved' | 'rejected' | 'trust' | 'trust_agent' | 'trust_reads' | 'yolo'
+type ApproveAction = 'approved' | 'rejected' | 'revised' | 'trust' | 'trust_agent' | 'trust_reads' | 'yolo'
 
 const MEMORY_MODES: { id: MemoryMode; label: string; hint: string }[] = [
   { id: 'persistent', label: 'Persistent', hint: 'Remember across sessions' },
@@ -432,6 +432,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const glowTargetRef = useRef<HTMLDivElement | null>(null)
   const glowAnchorRef = useRef<HTMLDivElement | null>(null)
   const [activityOpen, setActivityOpen] = useQueryFlag(query, setQuery, 'activity')
+  const [workspacePane, setWorkspacePane] = useQueryParam(query, setQuery, 'workspace', '')
   const [historyOpen, setHistoryOpen] = useQueryFlag(query, setQuery, 'history')
   const turnNodes = useRef<Map<number, HTMLDivElement>>(new Map())
   const [findOpen, setFindOpen] = useState(false)
@@ -593,7 +594,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         setSideMsgs(pairs)
         sideOpenedRef.current = true
       }
-      if (d.running) { markStreaming(true); breakText.current = true }
+      markStreaming(!!d.running)
+      if (d.running) breakText.current = true
       setLoadingHistory(false)
     }).catch(() => { if (alive) setLoadingHistory(false) })
     return () => { alive = false }
@@ -694,7 +696,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         patchLastAssistant((segs) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
-          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
+          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
           return segs
         })
         breakText.current = true
@@ -739,39 +741,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (sk) api.chatSessionDetail(sk).then((d) => {
           writeCachedDetail(sk, d)
           if (sk !== sessionRef.current) return
-          const byTs = new Map<string, MemoryCitation[]>()
-          let lastCites: MemoryCitation[] | null = null
-          const skillsByTs = new Map<string, SkillUsed[]>()
-          let lastSkills: SkillUsed[] | null = null
-          for (const m of d.messages || []) {
-            if (m.role !== 'assistant') continue
-            const c = m.meta?.memory_citations
-            if (Array.isArray(c) && c.length) {
-              lastCites = c
-              if (m.ts) byTs.set(m.ts, c)
-            }
-            const sk2 = m.meta?.skills_used
-            if (Array.isArray(sk2) && sk2.length) {
-              lastSkills = sk2
-              if (m.ts) skillsByTs.set(m.ts, sk2)
-            }
-          }
-          if (byTs.size || lastCites || skillsByTs.size || lastSkills) setTurns((prev) => {
-            const lastIdx = prev.map((t) => t.role).lastIndexOf('assistant')
-            return prev.map((t, i) => {
-              if (t.role !== 'assistant') return t
-              const patch: Partial<ChatTurn> = {}
-              if (!t.citations) {
-                if (t.ts && byTs.has(t.ts)) patch.citations = byTs.get(t.ts)
-                else if (i === lastIdx && !t.ts && lastCites) patch.citations = lastCites
-              }
-              if (!t.skillsUsed) {
-                if (t.ts && skillsByTs.has(t.ts)) patch.skillsUsed = skillsByTs.get(t.ts)
-                else if (i === lastIdx && !t.ts && lastSkills) patch.skillsUsed = lastSkills
-              }
-              return Object.keys(patch).length ? { ...t, ...patch } : t
-            })
-          })
+          coalescer.reset(); coalescing.current = false; breakText.current = true
+          setTurns(hydrateTurns(d.messages || [], d.running))
+          markStreaming(!!d.running)
         }).catch(() => {})
         break
       }
@@ -859,7 +831,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         const id = String(d.id ?? '')
         if (id) setSubagents((prev) => prev.map((s) => s.id === id
           ? { ...s, done: true, error: (d.error as string | null) ?? null, elapsed: typeof d.elapsed === 'number' ? d.elapsed : undefined, result: String(d.result ?? ''),
-              costUsd: typeof d.cost_usd === 'number' ? d.cost_usd : undefined, tokens: typeof d.tokens === 'number' ? d.tokens : undefined }
+              costUsd: typeof d.cost_usd === 'number' ? d.cost_usd : undefined, tokens: typeof d.tokens === 'number' ? d.tokens : undefined,
+              memoryReceipt: d.memory_receipt && typeof d.memory_receipt === 'object' ? d.memory_receipt as SubagentCard['memoryReceipt'] : undefined }
           : s))
         break
       }
@@ -886,6 +859,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (!s) return
     api.chatSessionDetail(s).then((d) => {
       if (sessionRef.current !== s) return
+      coalescer.reset(); coalescing.current = false; breakText.current = true
       setTurns(hydrateTurns(d.messages || [], d.running))
       markStreaming(!!d.running)
       if (!d.running) setStatusText('')
@@ -903,9 +877,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (showingApproval) return
       api.chatSessionDetail(s).then((d) => {
         if (sessionRef.current !== s) return
-        if (!d.pending_approval) return
-
+        coalescer.flushNow()
+        coalescer.reset(); coalescing.current = false; breakText.current = true
         setTurns(hydrateTurns(d.messages || [], d.running))
+        if (!d.running) { markStreaming(false); setStatusText(''); setLatestActivity(null) }
         lastWsActivityRef.current = Date.now()
       }).catch(() => {})
     }, 2000)
@@ -949,7 +924,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const approve = useCallback((id: string, action: ApproveAction) => {
+  const approve = useCallback((id: string, action: ApproveAction, revision?: string) => {
     const s = sessionRef.current
     if (!s) return
     const raised: ApprovalMode | null =
@@ -957,7 +932,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       : action === 'trust_reads' ? 'trust_reads'
       : action === 'yolo' ? 'yolo'
       : null
-    api.approve(s, action, id)
+    api.approve(s, action, id, revision)
       .then((result) => {
         const screening = result.approval_screening
         if (screening?.verdict === 'denied') {
@@ -1016,7 +991,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     return () => { alive = false }
   }, [resultRef])
 
-  async function ensureSession(seedMessages?: HistMsg[]): Promise<string> {
+  async function ensureSession(seedMessages?: HistMsg[], navigateNow = true): Promise<string> {
     if (sessionRef.current) return sessionRef.current
     if (ensureInFlightRef.current) return ensureInFlightRef.current
     const p = (async () => {
@@ -1031,7 +1006,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (seedMessages?.length) {
         writeCachedDetail(created.key, { key: created.key, title: '', messages: seedMessages, running: false } as unknown as ChatDetail)
       }
-      navigate(`chat/${created.key}`, { replace: true })
+      if (navigateNow) navigate(`chat/${created.key}`, { replace: true })
       if (acp) await persistSelection('this agent', api.setSessionAcpAgent(created.key, { provider: acp.providerId, provider_agent: acp.agent.provider_agent, model: selection.model && selection.model !== 'Auto' ? selection.model : undefined }))
       if (selection.approval !== 'normal') {
         const result = await persistSelection('this approval mode', api.setApprovalMode(selection.approval, created.key))
@@ -1140,6 +1115,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const artifactSlugs = mentionedArtifacts.map((a) => a.slug)
     setInput(''); setPreOptimize(null); markStreaming(true); breakText.current = true
     setPasteBlocks([]); setMentionedFiles([]); setAttachedPaths([]); setMentionedKnowledge([]); setMentionedArtifacts([])
+    let acceptedSession: string | null = null
     try {
       const meta: Record<string, unknown> = { client_ts: clientTs }
       if (files.length) meta.files = files
@@ -1149,11 +1125,32 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (original) meta.original = original
       if (uiLabel) meta.ui_label = uiLabel
       const seed: HistMsg[] = [{ role: 'user', content: llmText, ts: clientTs, meta: meta as HistMsg['meta'] }]
-      const sid = await ensureSession(seed)
+      const sid = await ensureSession(seed, false)
+      acceptedSession = sid
       if (screenShare.sharing) await screenShare.captureAndStage(sid)
       await api.sendChat(llmText, sid, meta, undefined, opts?.inputOrigin)
+      if (!sessionId) navigate(`chat/${sid}`, { replace: true })
     }
-    catch (e) { markStreaming(false); patchLastAssistant((segs) => [...segs, { kind: 'text', text: `⚠️ ${(e as Error).message}` }]) }
+    catch (e) {
+      const sid = acceptedSession
+      const detail = sid ? await api.chatSessionDetail(sid).catch(() => null) : null
+      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === clientTs)
+      if (accepted && detail) {
+        setTurns(hydrateTurns(detail.messages || [], detail.running))
+        markStreaming(!!detail.running)
+        if (sid && !sessionId) navigate(`chat/${sid}`, { replace: true })
+      } else {
+        markStreaming(false)
+        setTurns((prev) => prev.filter((turn) => turn.ts !== clientTs))
+        setInput((cur) => cur || t)
+        setPasteBlocks(blocks)
+        setMentionedFiles(mentionedFiles)
+        setAttachedPaths(attachedPaths)
+        setMentionedKnowledge(mentionedKnowledge)
+        setMentionedArtifacts(mentionedArtifacts)
+        setMicError(`Couldn’t send: ${(e as Error).message}`)
+      }
+    }
   }
 
   async function pinScreenFrame() {
@@ -1358,12 +1355,25 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const t = content.trim()
     if (!s || !t || streaming) return
     const turn = turns[turnIndex]
+    const previousTurns = turns
     setEditingTurn(null)
     const newTs = new Date().toISOString()
     setTurns((prev) => [...prev.slice(0, turnIndex), userTurn(t, newTs)])
     markStreaming(true); breakText.current = true
     try { await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind) }
-    catch (e) { markStreaming(false); patchLastAssistant((segs) => [...segs, { kind: 'text', text: `⚠️ ${(e as Error).message}` }]) }
+    catch (e) {
+      const detail = await api.chatSessionDetail(s).catch(() => null)
+      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === newTs)
+      if (accepted && detail) {
+        setTurns(hydrateTurns(detail.messages || [], detail.running))
+        markStreaming(!!detail.running)
+      } else {
+        markStreaming(false)
+        setTurns(previousTurns)
+        setInput(t)
+        setMicError(`Couldn’t resend: ${(e as Error).message}`)
+      }
+    }
   }
 
   async function rewindTo(turnIndex: number) {
@@ -2044,7 +2054,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             )}
             <HeaderControl icon={Edit3} label="New chat" variant="primary" priority="primary" onClick={() => navigate('chat/new')} />
             {started && (
-              <HeaderControl icon={PanelRight} label="Activity" active={activityOpen} onClick={() => setActivityOpen(!activityOpen)} />
+              <HeaderControl icon={PanelRight} label="Workspace" active={activityOpen || !!workspacePane} onClick={() => { if (activityOpen || workspacePane) { setActivityOpen(false); setWorkspacePane('') } else setWorkspacePane('activity') }} />
             )}
             {!started && (
               <HeaderControl icon={History} label="Chat history" active={historyOpen} onClick={() => setHistoryOpen(!historyOpen)} />
@@ -2195,11 +2205,13 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         {
 }
         <AnimatePresence>
-          {activityOpen && started && (
-            <SidePanel title="Activity" icon={<Activity size={18} className="text-primary" />} storeKey="chat-activity-w"
-              fillHeight urlKey={{ key: 'activity', setQuery }} onClose={() => setActivityOpen(false)}>
-              <ChatActivityPanel activity={activity} onOpenFile={setOpenFile} subagents={subagents}
-                onKillFanout={killFanout}
+          {(activityOpen || !!workspacePane) && started && sessionRef.current && (
+            <SidePanel title="Workspace" icon={<Activity size={18} className="text-primary" />} storeKey="chat-workspace-w"
+              fillHeight onClose={() => { setActivityOpen(false); setWorkspacePane('') }}>
+              <SessionWorkspace sessionKey={sessionRef.current} pane={workspacePane} onPane={setWorkspacePane}
+                turns={turns} activity={activity} onOpenFile={setOpenFile}
+                onOpenArtifact={(slug) => navigate(`artifacts/${encodeURIComponent(slug)}`)}
+                subagents={subagents} onKillFanout={killFanout}
                 side={{ msgs: sideMsgs, busy: sideBusy, onAsk: askSide, onOpen: openSide }} />
             </SidePanel>
           )}
@@ -2723,7 +2735,7 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
   segments: Segment[]; isLast: boolean
   messageTs?: string
   streaming?: boolean
-  onApprove: (id: string, action: ApproveAction) => void
+  onApprove: (id: string, action: ApproveAction, revision?: string) => void
   onSwitchToAgent: (continuation: string) => void
   onOpenFile: (path: string) => void
   onSetupModel: () => void

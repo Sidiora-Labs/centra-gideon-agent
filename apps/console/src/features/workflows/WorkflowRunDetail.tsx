@@ -185,6 +185,23 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
     }))
   }, [act, runId])
 
+  const extendRoundBudget = useCallback(async () => {
+    if (!run?.budget) return
+    const answers = await promptForm({
+      title: 'Extend round budget',
+      body: 'Raise a paused run limit to continue. Enter 0 to remove a finite limit.',
+      fields: [
+        { name: 'max_tokens', label: 'Maximum tokens', initial: String(run.budget.max_tokens), required: true },
+        { name: 'max_cost', label: 'Maximum cost', initial: String(run.budget.max_cost), required: true },
+      ],
+      confirmLabel: 'Extend and resume',
+    })
+    if (!answers) return
+    await act('Extend round budget', () => api.resumeWorkflowRun(runId, {
+      round_budget: { max_tokens: Number(answers.max_tokens), max_cost: Number(answers.max_cost) },
+    }))
+  }, [act, run, runId])
+
   const requestCascade = useCallback(async <T,>(title: string, confirmLabel: string, request: (confirmCascade: boolean) => Promise<T>): Promise<T | null> => {
     try {
       return await request(false)
@@ -387,11 +404,19 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               <QuietButton onClick={() => act('Start', () => api.startWorkflowDraft(runId))} title="Start this draft workflow">
                 <Play size={13} /> Start
               </QuietButton>
+            ) : run.round_interrupted ? (
+              <>
+                <QuietButton onClick={() => act('Resume round', () => api.resumeWorkflowRun(runId, { round_resume: true }))} title="Resume at the unfinished role from the saved round journal">
+                  <Play size={13} /> Resume round
+                </QuietButton>
+                <QuietButton onClick={cancel} title="Cancel this run"><X size={13} /> Cancel</QuietButton>
+              </>
             ) : run.status === 'paused' ? (
               <>
                 <QuietButton onClick={() => act('Resume', () => api.resumeWorkflowRun(runId, {}))} title="Resume this paused workflow">
                   <Play size={13} /> Resume
                 </QuietButton>
+                {(run.rounds?.length ?? 0) > 0 && <QuietButton onClick={() => void extendRoundBudget()} title="Raise this round run's budget and resume">Extend budget</QuietButton>}
                 <QuietButton onClick={cancel} title="Cancel this run"><X size={13} /> Cancel</QuietButton>
               </>
             ) : !isTerminal(run.status) ? (
@@ -432,6 +457,38 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               <p data-type="body-s" className="text-danger">{run.error}</p>
             )}
 
+            {(run.round_interrupted || (run.rounds?.length ?? 0) > 0 || Object.keys(run.round_handoff ?? {}).length > 0) && (
+              <section aria-label="Workflow rounds" className="rounded-lg border border-outline-variant/50 bg-surface-container p-m">
+                <div data-type="title-s" className="text-on-surface">Persistent rounds</div>
+                {run.round_interrupted && <p data-type="body-s" className="mt-s text-warning">Interrupted after host restart. Resume explicitly to continue at the unfinished role.</p>}
+                {run.status === 'paused' && <p data-type="body-s" className="mt-s text-on-surface-var">Paused. Resume continues from the saved handoff in the same worktree.</p>}
+                {Object.entries(run.round_handoff ?? {}).map(([path, handoff]) => (
+                  <p key={path} data-type="body-s" className="mt-s text-on-surface-var">
+                    {path}: next role {handoff.next_role || 'pending'}
+                    {handoff.next_allowed_paths?.length ? ` · allowed: ${handoff.next_allowed_paths.join(', ')}` : ''}
+                    {handoff.stop ? ' · stopped' : ''}
+                  </p>
+                ))}
+                <div className="mt-m flex flex-col gap-s">
+                  {(run.rounds ?? []).map((round) => (
+                    <div key={round.iteration} data-type="body-s" className="rounded-md bg-surface px-m py-s text-on-surface-var">
+                      <span className="text-on-surface">Round {round.iteration + 1} · {round.completed_role || 'role unknown'} · {round.verification.exit_code === 0 ? 'check passed' : round.verification.exit_code == null ? 'check unavailable' : `check failed (exit ${round.verification.exit_code})`}</span>
+                      {round.reason && <span> · {round.reason}</span>}
+                      {round.handback && <div>Handed back to {round.next_role || 'the prior role'} for repair.</div>}
+                      <div>Changed: {round.changed_paths.length ? round.changed_paths.join(', ') : 'none'}</div>
+                      {round.quarantined_paths.length > 0 && <div className="text-danger">Quarantined: {round.quarantined_paths.join(', ')}</div>}
+                      {round.quarantine_evidence?.map((evidence) => (
+                        <details key={evidence.path} className="mt-s">
+                          <summary className="cursor-pointer">Review saved {evidence.path}</summary>
+                          <pre className="mt-xs max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-container p-s">{evidence.content}{evidence.truncated ? '\n… preview truncated' : ''}</pre>
+                        </details>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {isEscalationRecord(run.attention) && (
               <EscalationPanel escalation={run.attention} error={run.error} />
             )}
@@ -440,7 +497,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               <span>run <span className="font-mono">{run.run_id}</span></span>
               <span>spec v{run.spec_version}</span>
               {run.tokens ? <span className="tabular-nums">{run.tokens.toLocaleString()} tokens</span> : null}
-              {run.elapsed_secs ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)} {isTerminal(run.status) ? 'duration' : 'elapsed'}</span> : null}
+              {typeof run.elapsed_secs === 'number' ? <span className="tabular-nums">{fmtElapsed(run.elapsed_secs)} {isTerminal(run.status) ? 'duration' : 'elapsed'}</span> : null}
             </div>
 
             {

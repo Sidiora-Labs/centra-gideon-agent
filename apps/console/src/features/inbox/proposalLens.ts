@@ -24,6 +24,14 @@ export function applyCase(proposal: InboxProposal): ApplyCase | '' {
   if (entries.length !== 1) return ''
   return APPLY_CASES.find(candidate => candidate === entries[0][0]) ?? ''
 }
+export function applyTarget(proposal: InboxProposal): string {
+  const kase = applyCase(proposal)
+  const payload = kase ? proposal.apply[kase] : null
+  if (!payload) return ''
+  if (kase === 'skill_promotion') return proposal.title
+  const key = kase === 'workflow' ? 'ref' : kase === 'action' ? 'provider' : 'app'
+  return typeof payload[key] === 'string' ? payload[key].trim() : ''
+}
 export function groupKey(item: ProposalItem): string {
   return [proposalOf(item)?.provenance ?? '', item.item_kind ?? ''].join('|')
 }

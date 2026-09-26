@@ -228,6 +228,11 @@ async def ingest_item(
 
     status = result.status
     proc_error = None
+    document_read = result.outputs.get("document_read")
+    document_meta = getattr(document_read, "metadata", None) or {}
+    if document_meta.get("extraction_partial") and status == "done":
+        status = "partial"
+        proc_error = str(document_meta.get("extraction_warning") or "Document extraction was incomplete")[:500]
     if status in ("failed", "partial") and result.failed:
         msgs = []
         for nt in result.failed:

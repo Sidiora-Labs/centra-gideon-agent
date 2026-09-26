@@ -202,11 +202,13 @@ async def resolve_window(model_ref: str) -> Window:
     ref = (model_ref or "").strip()
     try:
         from gideon.integrations.local_models.budgets import model_budget
-        from gideon.integrations.model_windows import model_context_window
+        from gideon.integrations.model_windows import model_context_window, served_context_window
 
         budget = await model_budget(ref)
         authority = None
-        if budget.source == "catalog":
+        if served_context_window(ref) is not None:
+            authority = "provider"
+        elif budget.source == "catalog":
             authority = "catalog"
         elif ref and model_context_window(ref, default=0) > 0:
             authority = "window-table"

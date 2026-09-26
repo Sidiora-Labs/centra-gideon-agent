@@ -130,6 +130,7 @@ class CatalogEntry:
     pointer: str = ""
     permissions: dict[str, Any] = field(default_factory=dict)
     crons: list[dict[str, Any]] = field(default_factory=list)
+    hooks: list[dict[str, str]] = field(default_factory=list)
     hasUI: bool = False  # noqa: N815
     uiComponents: str = ""  # noqa: N815
     quality: dict[str, Any] = field(default_factory=dict)
@@ -225,6 +226,7 @@ _registry_retry: dict[str, tuple[float, float]] = {}
 
 _GIT_SCAN_TTL_SECS = 300.0
 _git_scan_cache: dict[str, tuple[float, list["CatalogEntry"]]] = {}
+_git_scan_failed: set[str] = set()
 _catalog_build_lock = threading.Lock()
 
 
@@ -440,7 +442,7 @@ def _scan_registries(*, now: float) -> list[CatalogEntry]:
     return out
 
 
-def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
+def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -> list[CatalogEntry]:
     """Shallow-clone a git source, scan immediate subdirs for ``app.json``,
     and return installable CatalogEntry objects (with ``pointer=url#subdir``).
 
@@ -459,6 +461,8 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
 
     cached = _git_scan_cache.get(url)
     if cached is not None and (now - cached[0]) < _GIT_SCAN_TTL_SECS:
+        if errors is not None and url in _git_scan_failed:
+            errors.append("A configured app source could not be loaded")
         return cached[1]
 
     entries: list[CatalogEntry] = []
@@ -471,6 +475,9 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
             timeout=90,
         )
         if proc.returncode != 0:
+            _git_scan_failed.add(url)
+            if errors is not None:
+                errors.append("A configured app source could not be loaded")
             logger.debug(
                 "git scan: clone failed for %s: %s",
                 url,
@@ -478,6 +485,8 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
             )
             _git_scan_cache[url] = (now, [])
             return []
+
+        _git_scan_failed.discard(url)
 
         root = Path(tmp)
 
@@ -527,12 +536,16 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
                     pointer=f"{url}#{entry.name}",
                     permissions=_perms,
                     crons=_crons,
+                    hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
                     hasUI=bool(m.ui.pages),
                     uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
                 )
             )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        _git_scan_failed.add(url)
+        if errors is not None:
+            errors.append("A configured app source could not be loaded")
         logger.debug(
             "git scan: error scanning %s",
             url,
@@ -546,7 +559,7 @@ def _scan_git_source(url: str, *, now: float) -> list[CatalogEntry]:
     return entries
 
 
-def _scan_git_sources(*, now: float) -> list[CatalogEntry]:
+def _scan_git_sources(*, now: float, errors: list[str] | None = None) -> list[CatalogEntry]:
     """Scan all configured git sources that lack a registry index, returning
     discovered multi-app subdirectory entries. Sources WITH a registry index
     are skipped (already handled by ``_scan_registries``).
@@ -555,7 +568,7 @@ def _scan_git_sources(*, now: float) -> list[CatalogEntry]:
     name-collision filtering."""
     out: list[CatalogEntry] = []
     for url in list_git_sources():
-        out.extend(_scan_git_source(url, now=now))
+        out.extend(_scan_git_source(url, now=now, errors=errors))
     return out
 
 
@@ -1001,6 +1014,7 @@ def _scan_local_sources() -> list[CatalogEntry]:
                     quality=(m.quality.to_dict() if m.quality else {}),
                     permissions=_perms,
                     crons=_crons,
+                    hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
                     hasUI=bool(m.ui.pages),
                     uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
@@ -1100,6 +1114,7 @@ def available_bundled() -> list[CatalogEntry]:
                 quality=(m.quality.to_dict() if m.quality else {}),
                 permissions=_perms,
                 crons=_crons,
+                hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
                 hasUI=bool(m.ui.pages),
                 uiComponents=m.ui.components,
                 coreCompatibility=m.core_compatibility().to_dict(),
@@ -1293,7 +1308,8 @@ def _build_available_catalog() -> dict[str, Any]:
     bundled_entries = available_bundled()
     local_entries = _scan_local_sources()
     registry_entries = _scan_registries(now=now)
-    git_entries = _scan_git_sources(now=now)
+    source_errors: list[str] = []
+    git_entries = _scan_git_sources(now=now, errors=source_errors)
     winners = resolve_catalog_entries(
         [*bundled_entries, *local_entries, *registry_entries, *git_entries]
     )
@@ -1313,4 +1329,5 @@ def _build_available_catalog() -> dict[str, Any]:
         "remoteApps": _kept(registry_entries),
         "gitApps": _kept(git_entries),
         "networkSources": network_source_hosts(),
+        "sourceErrors": source_errors,
     }

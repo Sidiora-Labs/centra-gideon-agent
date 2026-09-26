@@ -151,6 +151,10 @@ async def retire(runtime: RuntimeCoordinator) -> None:
         save_all_sessions_to_history(surface)
         surface.file_indexes.stop_all()
 
+    if runtime.consolidator is not None:
+        outcome = await runtime.consolidator.drain(timeout=3.0)
+        log.info("Memory extraction shutdown: %s", outcome)
+
     await cancel_tasks(runtime._handler_tasks)
     for watcher in (runtime.loop_watchdog, runtime.workflow_watchdog):
         if watcher is not None:

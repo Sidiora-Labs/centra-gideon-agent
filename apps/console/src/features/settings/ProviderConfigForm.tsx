@@ -23,6 +23,7 @@ export function ProviderConfigForm({ name }: { name: string }) {
   const [schema, setSchema] = useState<ProviderSchema | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [secretSet, setSecretSet] = useState<string[]>([])
+  const [clearedSecrets, setClearedSecrets] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -40,6 +41,7 @@ export function ProviderConfigForm({ name }: { name: string }) {
         const next = { ...(c.config ?? {}) }
         for (const k of set) next[k] = ''
         setSecretSet(set)
+        setClearedSecrets([])
         setValues(next)
       })
       .catch((error) => { if (live) setLoadErr(error) })
@@ -54,7 +56,13 @@ export function ProviderConfigForm({ name }: { name: string }) {
   const set = (k: string, v: unknown) => { setValues((p) => ({ ...p, [k]: v })); setDirty(true); setSaved(false); setErr('') }
   const save = async () => {
     setSaving(true); setErr('')
-    try { await api.saveProviderConfig(name, values); setDirty(false); setSaved(true); setTimeout(() => setSaved(false), 2000) }
+    try {
+      const savedConfig = await api.saveProviderConfig(name, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, clearedSecrets.includes(key) ? null : value])))
+      setSecretSet(savedConfig._secret_set ?? [])
+      setClearedSecrets([])
+      setValues(Object.fromEntries(Object.entries(savedConfig.config ?? {}).map(([key, value]) => [key, savedConfig._secret_set?.includes(key) ? '' : value])))
+      setDirty(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+    }
     catch (e) {
       let msg = e instanceof Error ? e.message : 'Save failed'
       try { const p = JSON.parse(msg); msg = p.error + (p.details ? `: ${p.details.join('; ')}` : '') } catch {   }
@@ -67,7 +75,9 @@ export function ProviderConfigForm({ name }: { name: string }) {
     <div className="mt-3 flex flex-col gap-3 border-t border-outline-variant/30 pt-3">
       {props.map(([key, prop]) => (
         <SchemaField key={key} fieldKey={key} prop={prop} value={values[key]}
-          secretAlreadySet={secretSet.includes(key)} onChange={(v) => set(key, v)} />
+          secretAlreadySet={secretSet.includes(key) && !clearedSecrets.includes(key)}
+          onClear={secretSet.includes(key) ? () => { setClearedSecrets((keys) => [...keys, key]); set(key, '') } : undefined}
+          onChange={(v) => { setClearedSecrets((keys) => keys.filter((item) => item !== key)); set(key, v) }} />
       ))}
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={save} loading={saving} disabled={!dirty || saving} disabledReason={!dirty && !saving ? 'No changes to save' : undefined}>Save</Button>
@@ -79,9 +89,9 @@ export function ProviderConfigForm({ name }: { name: string }) {
   )
 }
 
-export function SchemaField({ fieldKey, prop, value, onChange, secretAlreadySet = false }: {
+export function SchemaField({ fieldKey, prop, value, onChange, secretAlreadySet = false, onClear }: {
   fieldKey: string; prop: ProviderSchemaProp; value: unknown; onChange: (v: unknown) => void
-  secretAlreadySet?: boolean
+  secretAlreadySet?: boolean; onClear?: () => void
 }) {
   const meta = prop['x-meta'] ?? {}
   const label = meta.label ?? fieldKey
@@ -154,6 +164,7 @@ export function SchemaField({ fieldKey, prop, value, onChange, secretAlreadySet 
       <label htmlFor={id} data-type="body-s" className="mb-1 block text-on-surface">{label}</label>
       {hint && <div data-type="caption" className="mb-1.5 text-on-surface-low">{hint}</div>}
       {control}
+      {meta.sensitive && secretAlreadySet && onClear && <Button variant="ghost" size="sm" onClick={onClear}>Clear saved {label.toLowerCase()}</Button>}
     </div>
   )
 }

@@ -24,9 +24,12 @@ run. A read that lazily started something would make polling a side-effecting ac
 from __future__ import annotations
 
 import logging
+import json
+import math
 import re
 import shutil
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from gideon.automation.workflows import (
@@ -575,6 +578,13 @@ async def start_run(
             missing=missing,
         )
     inputs = _with_declared_defaults(spec, inputs or {})
+    inputs, invalid = _coerce_declared_inputs(spec, inputs)
+    if invalid:
+        return _service_failure(
+            "WF_RUN_INVALID_INPUT",
+            "; ".join(invalid),
+            invalid_inputs=invalid,
+        )
 
     if not skip_preflight:
         from gideon.automation.workflows.preflight import preflight as run_preflight
@@ -715,6 +725,8 @@ def status(run_id: str) -> dict[str, Any]:
     run = store.get(run_id)
     if run is None:
         return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    from gideon.automation.workflows.round_protocol import read_rounds
+
     return _ok(
         run_id=run.id,
         workflow=run.workflow_name,
@@ -726,8 +738,72 @@ def status(run_id: str) -> dict[str, Any]:
         elapsed_secs=run.elapsed_seconds,
         project_id=run.project_id,
         policy_overrides=run.policy_overrides,
+        budget=run.budget.to_dict(),
+        round_handoff=(run.extra or {}).get("round_handoff") or {},
+        round_interrupted=bool((run.extra or {}).get("round_interrupted")),
+        rounds=read_rounds(run_id),
         nodes=_nodes_of(run_id),
     )
+
+
+async def resume_interrupted_round(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    """Explicitly re-adopt one interrupted round run at its persisted frontier."""
+    from gideon.automation.workflows.round_protocol import has_round_protocol
+
+    run = store.get(run_id)
+    if run is None:
+        return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    spec = store.read_spec(run_id)
+    if not has_round_protocol(spec) or run.status != RunStatus.RUNNING or not (run.extra or {}).get("round_interrupted"):
+        return _service_failure("WF_RUN_NOT_INTERRUPTED", "this round run is not awaiting explicit resume")
+    if supervisor is None:
+        return _service_failure("WF_NO_SUPERVISOR", "the workflow supervisor is unavailable")
+    if supervisor.controller(run_id) is not None:
+        return _service_failure("WF_RUN_ALREADY_LIVE", "this round run already has a live controller")
+    run.extra.pop("round_interrupted", None)
+    store.save(run)
+    try:
+        await supervisor.launch(run, spec)
+    except Exception as exc:
+        run.extra["round_interrupted"] = True
+        store.save(run)
+        return _service_failure("WF_RUN_LAUNCH_FAILED", f"could not resume the round run: {exc}")
+    return _ok(run_id=run_id, resumed=True, status=RunStatus.RUNNING.value)
+
+
+def extend_round_budget(run_id: str, limits: dict, *, supervisor: Any = None) -> dict[str, Any]:
+    """Raise a paused round run's own persisted soft cap before ordinary resume."""
+    import math
+    from gideon.automation.workflows.round_protocol import has_round_protocol
+
+    run = store.get(run_id)
+    if run is None:
+        return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    if run.status != RunStatus.PAUSED or not has_round_protocol(store.read_spec(run_id)):
+        return _service_failure("WF_RUN_NOT_PAUSED_ROUND", "only a paused round run can extend its budget")
+    try:
+        tokens = int(limits.get("max_tokens", run.budget.max_tokens))
+        cost = float(limits.get("max_cost", run.budget.max_cost))
+    except (TypeError, ValueError):
+        return _service_failure("WF_BUDGET_INVALID", "budget limits must be numeric")
+    def raised(old: float, new: float) -> bool:
+        return old > 0 and (new == 0 or new > old)
+
+    def lowered(old: float, new: float) -> bool:
+        return (old == 0 and new > 0) or (old > 0 and 0 < new < old)
+
+    if (not math.isfinite(cost) or tokens < 0 or cost < 0
+            or lowered(run.budget.max_tokens, tokens) or lowered(run.budget.max_cost, cost)
+            or not (raised(run.budget.max_tokens, tokens) or raised(run.budget.max_cost, cost))):
+        return _service_failure("WF_BUDGET_INVALID", "raise at least one budget limit without lowering another")
+    run.budget.max_tokens = tokens
+    run.budget.max_cost = cost
+    controller = supervisor.controller(run_id) if supervisor is not None else None
+    if controller is not None:
+        controller.run.budget.max_tokens = tokens
+        controller.run.budget.max_cost = cost
+    store.save(run)
+    return resume_run(run_id, supervisor=supervisor)
 
 
 def set_policy_overrides(run_id: str, overrides: dict[str, Any]) -> dict[str, Any]:
@@ -894,10 +970,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
     stored_prompt = store.read_output(run_id, f"{target}::prompt")
     resolved_prompt: Any
     if isinstance(stored_prompt, str) and stored_prompt:
-        if len(stored_prompt.encode("utf-8")) > journal_mod.MAX_INLINE_OUTPUT_BYTES:
-            resolved_prompt = {"ref": prompt_ref or f"{target}::prompt"}
-        else:
-            resolved_prompt = stored_prompt
+        resolved_prompt = stored_prompt
     elif prompt_ref:
         resolved_prompt = {"ref": prompt_ref}
     else:
@@ -2159,9 +2232,8 @@ def _with_declared_defaults(
     whose inputs were completed lazily at each binding would leave a record that does not explain
     its own behaviour.
 
-    A declared input with NO default still gets a key, valued "": the alternative is a binding
-    error on an input the template said was optional, which is the bug this function exists to
-    fix. An optional input's whole meaning is "the workflow works without it".
+    A declared input with NO default still gets a value in its declared type so a binding
+    can resolve it without creating an invalid run.
 
     The caller's value always wins, including an explicit empty string — a user who deliberately
     cleared a field is not asking for the default back.
@@ -2174,8 +2246,70 @@ def _with_declared_defaults(
         if key in out:
             continue
         default = meta.get("default") if isinstance(meta, dict) else None
-        out[str(key)] = "" if default is None else default
+        if default is None and isinstance(meta, dict):
+            default = {
+                "number": 0,
+                "integer": 0,
+                "boolean": False,
+                "array": [],
+                "object": {},
+            }.get(str(meta.get("type", "") or "").lower(), "")
+        out[str(key)] = default
     return out
+
+
+def _coerce_declared_inputs(
+    spec: dict[str, Any], provided: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    declared = spec.get("inputs")
+    if not isinstance(declared, dict):
+        return dict(provided), []
+    result = dict(provided)
+    invalid: list[str] = []
+    for name, meta in declared.items():
+        if not isinstance(meta, dict) or name not in result:
+            continue
+        kind = str(meta.get("type", "") or "").lower()
+        value = result[name]
+        if kind not in {"string", "number", "integer", "boolean", "array", "object"}:
+            continue
+        try:
+            if kind == "string":
+                if not isinstance(value, str):
+                    raise ValueError("expected text")
+            elif kind in {"number", "integer"}:
+                if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                    raise ValueError("expected a numeric value")
+                parsed = Decimal(value.strip()) if isinstance(value, str) else value
+                if isinstance(parsed, Decimal) and not parsed.is_finite():
+                    raise ValueError("expected a finite number")
+                if isinstance(parsed, float) and not math.isfinite(parsed):
+                    raise ValueError("expected a finite number")
+                if kind == "integer":
+                    if int(parsed) != parsed:
+                        raise ValueError("expected a whole number")
+                    value = int(parsed)
+                else:
+                    value = float(parsed) if isinstance(parsed, Decimal) else parsed
+                    if isinstance(value, float) and not math.isfinite(value):
+                        raise ValueError("expected a finite number")
+            elif kind == "boolean":
+                if isinstance(value, str):
+                    if value.strip().lower() not in {"true", "false"}:
+                        raise ValueError("expected true or false")
+                    value = value.strip().lower() == "true"
+                elif not isinstance(value, bool):
+                    raise ValueError("expected true or false")
+            else:
+                if isinstance(value, str):
+                    value = json.loads(value)
+                if not isinstance(value, list if kind == "array" else dict):
+                    raise ValueError(f"expected a JSON {kind}")
+        except (ValueError, TypeError, OverflowError, InvalidOperation) as exc:
+            invalid.append(f"input {name!r} declares {kind}: {exc}")
+            continue
+        result[name] = value
+    return result, invalid
 
 
 def _nodes_of(run_id: str) -> list[dict[str, Any]]:

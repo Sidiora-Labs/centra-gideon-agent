@@ -21,6 +21,7 @@ firing is an injected callable so the package stays free of any
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import re
 import time
@@ -39,7 +40,7 @@ from gideon.core.cancellation import (
 )
 from gideon.core.token_estimate import CONSERVATIVE_CHARS_PER_TOKEN
 from gideon.engine.agents.native import dispatch_plan
-from gideon.engine.agents.native.approval import REJECT, ApprovalGate
+from gideon.engine.agents.native.approval import REJECT, REVISE, ApprovalGate
 from gideon.engine.agents.native.tools import (
     ARGUMENTS_UNREADABLE,
     format_tool_result,
@@ -301,17 +302,23 @@ class _TurnTotals:
     calls: int = 0
     recoveries: int = 0
     context_recovered: bool = False
+    model_calls: int = 0
+    measured_calls: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
 
     def account(self, response: "_ModelExchange") -> None:
         self.calls += len(response.calls)
-        usage = response.usage
-        if usage is None:
-            return
-        self.input_tokens += usage.input_tokens or 0
-        self.output_tokens += usage.output_tokens or 0
-        self.cost += usage.cost_usd or 0.0
-        if usage.context_usage_pct is not None:
-            response.runtime._last_context_pct = usage.context_usage_pct
+        self.model_calls += response.attempts
+        for usage in response.usages:
+            self.measured_calls += 1
+            self.input_tokens += usage.input_tokens or 0
+            self.output_tokens += usage.output_tokens or 0
+            self.cache_creation_tokens += usage.cache_creation_tokens or 0
+            self.cache_read_tokens += usage.cache_read_tokens or 0
+            self.cost += usage.cost_usd or 0.0
+            if usage.context_usage_pct is not None:
+                response.runtime._last_context_pct = usage.context_usage_pct
 
     def finish(self, reason: str, context_pct: float | None) -> AgentEvent:
         return AgentEvent(
@@ -324,6 +331,17 @@ class _TurnTotals:
             context_usage_pct=context_pct,
             event_count=self.events,
             tool_call_count=self.calls,
+            cache_creation_tokens=self.cache_creation_tokens,
+            cache_read_tokens=self.cache_read_tokens,
+            tool_meta={
+                "model_calls": self.model_calls,
+                "usage_status": (
+                    "no_model_calls" if not self.model_calls else
+                    "measured" if self.measured_calls == self.model_calls else
+                    "partial" if self.measured_calls else "absent"
+                ),
+                "measured_calls": self.measured_calls,
+            },
         )
 
 
@@ -334,8 +352,11 @@ class _ModelExchange:
         self.fragments: list[str] = []
         self.calls: list[AgentEvent] = []
         self.usage: AgentEvent | None = None
+        self.usages: list[AgentEvent] = []
+        self.attempts = 0
         self.visible = False
         self.retried = False
+        self.thinking: list[str] = []
 
     def accept(self, event: AgentEvent) -> bool:
         self.totals.events += 1
@@ -343,10 +364,13 @@ class _ModelExchange:
             self.calls.append(event)
         elif event.kind == EVENT_COMPLETE:
             self.usage = event
+            self.usages.append(event)
         elif event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK):
             self.visible = True
             if event.kind == EVENT_TEXT_CHUNK:
                 self.fragments.append(event.text)
+            else:
+                self.thinking.append(event.text)
             return True
         return False
 
@@ -380,6 +404,7 @@ class _ModelExchange:
                 self.runtime._messages,
                 cache_mode,
                 generation=self.runtime._cache_generation,
+                max_markers=3,
             )
         else:
             instruction = correction_note(failure)
@@ -399,18 +424,20 @@ class _ModelExchange:
             enabled=runtime._prompt_cache_enabled(),
         )
         messages = mark_cacheable_prefix(
-            runtime._messages, cache_mode, generation=runtime._cache_generation
+            runtime._messages, cache_mode, generation=runtime._cache_generation,
+            max_markers=3,
         )
         while True:
             if runtime._cancelled:
                 return
             self.visible = False
             started = now_ms()
+            self.attempts += 1
             try:
                 async for event in runtime._model.complete(
                     messages,
                     tools=tools,
-                    model=runtime._definition.model or None,
+                    model=(runtime._definition.model or None) if runtime._active_fallback is None else None,
                     reasoning_effort=runtime._reasoning_effort,
                 ):
                     if runtime._cancelled:
@@ -427,7 +454,29 @@ class _ModelExchange:
                     started_ms=started,
                     passed=False,
                 )
-                messages = await self._retry_messages(error, messages, cache_mode)
+                try:
+                    messages = await self._retry_messages(error, messages, cache_mode)
+                except Exception as retry_error:
+                    if retry_error is not error:
+                        raise
+                    if (
+                        not self.visible and not self.calls
+                        and self.totals.recoveries < _MAX_INFERENCE_RECOVERIES_PER_TURN
+                        and await runtime._advance_model_fallback(failure)
+                    ):
+                        self.retried = True
+                        self.totals.recoveries += 1
+                        self.usage = None
+                        cache_mode = effective_cache_mode(
+                            getattr(runtime._model, "prompt_cache", PromptCache.NONE),
+                            enabled=runtime._prompt_cache_enabled(),
+                        )
+                        messages = mark_cacheable_prefix(
+                            runtime._messages, cache_mode,
+                            generation=runtime._cache_generation, max_markers=3,
+                        )
+                        continue
+                    raise
                 logger.warning(
                     "native inference failed (%s); retrying exchange %d "
                     "(turn recovery %d/%d): %s",
@@ -441,6 +490,20 @@ class _ModelExchange:
                 self.fragments.clear()
                 self.usage = None
             else:
+                if not runtime._cancelled and not self.calls and not "".join(self.fragments).strip():
+                    if self.totals.recoveries >= _MAX_INFERENCE_RECOVERIES_PER_TURN:
+                        raise RuntimeError("Model returned no answer after bounded recovery")
+                    self.totals.recoveries += 1
+                    if self.thinking:
+                        note = "Your previous response contained reasoning but no answer. Provide the answer now."
+                    elif any(message.get("role") == "tool" for message in messages):
+                        note = "The tool results are available. Provide a substantive answer to the user."
+                    else:
+                        note = "Your response was empty. Provide a substantive answer to the user."
+                    messages = [*messages, {"role": "user", "content": note, "_volatile": True}]
+                    self.thinking.clear()
+                    self.usage = None
+                    continue
                 if self.retried:
                     runtime._audit_inference_attempt(
                         FailureMode.NONE, attempt=2, started_ms=started, passed=True
@@ -471,11 +534,13 @@ class NativeAgentRuntime(AgentProvider):
         max_tool_concurrency: int = dispatch_plan.MAX_CONCURRENT_CALLS,
     ) -> None:
         self._definition, self._model = definition, model_provider
+        self._active_fallback: str | None = None
         self._agent_id = getattr(definition, "name", "") or ""
         self._project_id, self._reasoning_effort = (
             project_id or "",
             reasoning_effort or "",
         )
+        self._next_reasoning_effort: str | None = None
         self._cwd = Path(cwd) if cwd else None
         self._session_key = session_key
         self._max_turns = max_turns
@@ -486,6 +551,8 @@ class NativeAgentRuntime(AgentProvider):
         self._dry_run = bool(dry_run)
         self._unattended = bool(unattended) or self._dry_run
         self._approval = ApprovalGate()
+        self._revisions: dict[str, str] = {}
+        self._pending_revisions: list[tuple[str, str]] = []
         self._approval_policy, self._task_mode = "", "agent"
         self._cancel, self._breaker = CancelScope(), LoopBreaker()
         self._messages: list[dict] = []
@@ -694,6 +761,47 @@ class NativeAgentRuntime(AgentProvider):
         except Exception:
             logger.debug("Could not record native inference attempt", exc_info=True)
 
+    async def _advance_model_fallback(self, failure: FailureMode) -> bool:
+        if self._cancelled or not is_retryable(failure):
+            return False
+        try:
+            from gideon.extensions.providers.provider_bridge import resolve_provider_for_use_case
+            from gideon.extensions.providers.use_cases import resolution_chain
+
+            chain = resolution_chain("chat")
+            current = self._active_fallback or (self._definition.model or getattr(self._model, "_model", ""))
+            current_id = str(current).split(":", 1)[-1]
+            position = next(
+                (index for index, ref in enumerate(chain)
+                 if ref == current or ref.split(":", 1)[-1] == current_id),
+                None,
+            )
+            if position is None or position + 1 >= len(chain):
+                return False
+            for ref in chain[position + 1:]:
+                try:
+                    candidate = resolve_provider_for_use_case("chat", model_override=ref, _force_model_axis=True)
+                    await candidate.start()
+                except Exception:
+                    logger.warning("Native fallback candidate %s unavailable", ref, exc_info=True)
+                    continue
+                previous = self._model
+                self._model = candidate
+                self._active_fallback = ref
+                await self._close_replaced_model(previous)
+                logger.warning("Native inference switched to configured fallback %s", ref)
+                return True
+        except Exception:
+            logger.warning("Native provider fallback failed", exc_info=True)
+        return False
+
+    @staticmethod
+    async def _close_replaced_model(provider: "ModelProvider") -> None:
+        try:
+            await provider.shutdown()
+        except Exception:
+            logger.debug("Replaced model shutdown failed", exc_info=True)
+
     def last_stop_report(self) -> dict:
         report = self._cancel.report
         return report.to_dict()
@@ -722,6 +830,9 @@ class NativeAgentRuntime(AgentProvider):
 
     async def stream(self, message: str) -> AsyncIterator[AgentEvent]:
         self._cancel.begin_turn()
+        if self._next_reasoning_effort is not None:
+            self._reasoning_effort = self._next_reasoning_effort
+            self._next_reasoning_effort = None
         self._breaker.reset()
         self._steers_injected = 0
         self._steer_pending.clear()
@@ -767,6 +878,18 @@ class NativeAgentRuntime(AgentProvider):
                 async for event in self._execute_tool_batch(tool_calls):
                     totals.events += 1
                     yield event
+                if self._pending_revisions:
+                    corrections = self._pending_revisions[:]
+                    self._pending_revisions.clear()
+                    self._messages.append({
+                        "role": "user",
+                        "content": "\n".join(
+                            f"Revise the proposed {name} action: {instruction}. "
+                            "Propose the updated action and wait for normal approval before execution."
+                            for name, instruction in corrections
+                        ),
+                        "_volatile": True,
+                    })
                 if self._drain_steers_into_history():
                     yield AgentEvent(kind=EVENT_TEXT_CHUNK, text="")
             yield totals.finish("max_turns", self._last_context_pct)
@@ -1007,6 +1130,7 @@ class NativeAgentRuntime(AgentProvider):
         observation, metadata = (
             await self._prefetch(prep) if prefetched is None else prefetched
         )
+        revision_instruction = ""
         if observation is _NEEDS_APPROVAL:
             if self._unattended:
                 observation = self._denial(
@@ -1030,6 +1154,9 @@ class NativeAgentRuntime(AgentProvider):
                 decision = await self._approval.wait(request, future)
                 if self._cancelled:
                     observation = "Error: cancelled"
+                elif decision == REVISE:
+                    revision_instruction = self._revisions.pop(str(request), "")
+                    observation = "Error: the user requested a revision; this action was not run."
                 elif decision == REJECT:
                     observation = self._denial(
                         security.DENY_KIND_USER,
@@ -1043,6 +1170,8 @@ class NativeAgentRuntime(AgentProvider):
         observation = self._observe_tool_result(prep, observation)
         yield prep.result_event(observation, metadata)
         self._messages.append(self._tool_result_msg(prep.call, observation))
+        if revision_instruction:
+            self._pending_revisions.append((prep.tool_name, revision_instruction))
         if self._breaker.circuit_tripped():
             logger.warning("native: %s", circuit_message(self._breaker.total_failures))
             self._cancel.request(reason=CANCEL_INTERNAL)
@@ -1349,6 +1478,16 @@ class NativeAgentRuntime(AgentProvider):
         gate = self._approval
         gate.reject(str(request_id))
 
+    async def revise_tool(self, request_id: str | int, instruction: str) -> bool:
+        key = str(request_id)
+        if not instruction.strip() or len(instruction) > 4000:
+            return False
+        self._revisions[key] = instruction.strip()
+        if self._approval.revise(key):
+            return True
+        self._revisions.pop(key, None)
+        return False
+
     def context_usage_pct(self) -> float | None:
         return self._last_context_pct
 
@@ -1417,6 +1556,27 @@ class NativeAgentRuntime(AgentProvider):
 
     def set_session_key(self, session_key: str, channel_id: str | None = None) -> None:
         self._session_key = session_key
+
+    def export_turn_state(self) -> dict:
+        if self._cancel.active:
+            raise RuntimeError("Cannot export native state during an active turn")
+        return {
+            "messages": copy.deepcopy(self._messages),
+            "cache_generation": self._cache_generation,
+            "last_context_pct": self._last_context_pct,
+        }
+
+    def restore_turn_state(self, state: dict) -> None:
+        if self._cancel.active or self._messages:
+            raise RuntimeError("Native state can only be restored before its first turn")
+        self._messages = copy.deepcopy(state["messages"])
+        self._cache_generation = int(state.get("cache_generation", 0)) + 1
+        self._last_context_pct = state.get("last_context_pct")
+
+    async def set_reasoning_effort(self, effort: str) -> None:
+        if effort not in {"", "low", "medium", "high", "max"}:
+            raise ValueError("unsupported reasoning effort")
+        self._next_reasoning_effort = effort
 
     def set_steer_source(self, pull: "Callable[[], list[str]] | None") -> bool:
         self._pull_steer = pull

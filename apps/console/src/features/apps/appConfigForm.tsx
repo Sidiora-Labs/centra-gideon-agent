@@ -5,6 +5,7 @@ import type { SchemaProp } from '../../shared/data/api'
 export type { SchemaProp } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { missingRequired, SchemaFieldDisclosure } from '../tools/schema'
+import { usePromptWidgets } from '../tools/usePromptWidgets'
 
 export function serializeJsonField(value: unknown, expected: 'array' | 'object'): string {
   if (value === undefined || value === null) return expected === 'array' ? '[]' : '{}'
@@ -66,6 +67,7 @@ export function AppConfigFields({ appName, props, cur, set, secretSet = [], requ
   secretSet?: string[]
 }) {
   const fields = Object.entries(props)
+  const { widgets } = usePromptWidgets(fields.map(([, schema]) => schema))
 
   function renderField([key, p]: [string, SchemaProp]) {
     const meta = p['x-meta'] ?? {}
@@ -74,6 +76,16 @@ export function AppConfigFields({ appName, props, cur, set, secretSet = [], requ
     const v = cur[key]
     const fieldId = `app-cfg-${appName}-${key}`
     const secretAlreadySet = !!meta.sensitive && secretSet.includes(key)
+    const widget = meta.widget ? widgets[meta.widget] : undefined
+    if (widget && !meta.sensitive) {
+      return (
+        <Field key={key} label={label} hint={meta.help}>
+          <div id={fieldId} role="group" aria-label={label} aria-required={isRequired || undefined}>
+            {widget({ value: v, onChange: (value) => set(key, value), schema: p, placeholder: meta.help })}
+          </div>
+        </Field>
+      )
+    }
     if (Array.isArray(p.enum) && p.enum.length) {
       return (
         <Field key={key} label={label} hint={meta.help}>

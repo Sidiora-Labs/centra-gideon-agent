@@ -160,7 +160,7 @@ class OpenAIProvider(ConversationProtocol):
         self._initialize_conversation()
 
     async def start(self) -> None:
-        if self._model:
+        if self._model and not self._base_url:
             return
         try:
             from gideon.integrations.llm.catalog import (
@@ -171,6 +171,14 @@ class OpenAIProvider(ConversationProtocol):
             models = await openai_compatible_list_models(
                 self._base_url or "", getattr(self._client, "api_key", "") or ""
             )
+            from gideon.integrations.model_windows import register_served_context_window
+
+            for item in models:
+                if item.id != self._model:
+                    continue
+                for field in ("context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"):
+                    if register_served_context_window(item.id, item.extra.get(field)):
+                        break
             suitable = [
                 item.id
                 for item in models

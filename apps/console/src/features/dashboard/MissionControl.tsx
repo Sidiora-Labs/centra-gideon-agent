@@ -115,6 +115,22 @@ export function MissionControl() {
   const approvals = data?.approvals ?? []
   const activity = data?.activity ?? []
   const lanes = useMemo(() => toLanes(items, approvals, activity), [items, approvals, activity])
+  const cards = useMemo(() => {
+    const inboxById = new Map(items.map(item => [item.id, item]))
+    const approvalsById = new Map(approvals.map(approval => [approval.id, approval]))
+    const hydrate = (lane: Lane): ConsumedCard[] => (lanes[lane] ?? []).map(card => ({
+        ...card,
+        detail: card.subtitle,
+        item: card.origin === 'inbox' ? inboxById.get(card.id) : null,
+        approval: card.origin === 'approval' ? approvalsById.get(card.id) : null,
+    }))
+    return {
+      'needs-approval': hydrate('needs-approval'),
+      'your-turn': hydrate('your-turn'),
+      working: hydrate('working'),
+      idle: hydrate('idle'),
+    }
+  }, [lanes, items, approvals])
 
   const mark = useCallback((id: string, o: Outcome) => {
     setOutcomes((prev) => ({ ...prev, [id]: o }))
@@ -183,7 +199,7 @@ export function MissionControl() {
         <AttentionLaneSection
           key={lane}
           lane={lane}
-          cards={lanes[lane] ?? []}
+          cards={cards[lane] ?? []}
           loading={loading}
           outcomes={outcomes}
           onResolve={resolve}
@@ -287,6 +303,11 @@ function AttentionCard({
         <p data-type="body-s" className="min-w-0 text-on-surface-low">
           {card.detail}
         </p>
+      ) : null}
+      {card.item ? (
+        <TextLink href={`#/inbox?open=${encodeURIComponent(card.item.id)}`} size="xs" aria-label={`Open inbox item: ${subject}`}>
+          Open inbox item
+        </TextLink>
       ) : null}
       {question?.prompt ? (
         <p data-type="body-s" className="min-w-0 text-on-surface">

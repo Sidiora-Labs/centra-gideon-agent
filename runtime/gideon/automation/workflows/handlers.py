@@ -61,6 +61,10 @@ _STATUS_MAP: dict[str, tuple[int, str]] = {
     "WF_NO_SUPERVISOR": (503, "engine_unavailable"),
     "WF_RUN_LAUNCH_FAILED": (500, "launch_failed"),
     "WF_RUN_NOT_LIVE": (409, "run_not_live"),
+    "WF_RUN_NOT_INTERRUPTED": (409, "round_not_interrupted"),
+    "WF_RUN_ALREADY_LIVE": (409, "run_already_live"),
+    "WF_RUN_NOT_PAUSED_ROUND": (409, "round_not_paused"),
+    "WF_BUDGET_INVALID": (400, "budget_invalid"),
     "WF_RUN_ALREADY_TERMINAL": (409, "already_terminal"),
     "WF_RUN_NO_SPEC": (500, "spec_unreadable"),
     "WF_RUN_BAD_SPEC": (500, "spec_unreadable"),
@@ -1219,13 +1223,21 @@ async def api_run_resume(request: web.Request) -> web.Response:
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
-    result = service.resume_run(
-        run_id,
-        supervisor=_supervisor(request),
-        token=str(body.get("resume_token", "") or ""),
-        answer=body.get("answer"),
-        always_allow=strict_bool(body.get("always_allow"), field="always_allow"),
-    )
+    if strict_bool(body.get("round_resume"), field="round_resume", default=False):
+        result = await service.resume_interrupted_round(run_id, supervisor=_supervisor(request))
+    elif "round_budget" in body:
+        limits = body["round_budget"]
+        if not isinstance(limits, dict):
+            return json_error("budget_invalid", message="round_budget must be an object", status=400)
+        result = service.extend_round_budget(run_id, limits, supervisor=_supervisor(request))
+    else:
+        result = service.resume_run(
+            run_id,
+            supervisor=_supervisor(request),
+            token=str(body.get("resume_token", "") or ""),
+            answer=body.get("answer"),
+            always_allow=strict_bool(body.get("always_allow"), field="always_allow"),
+        )
     _audit(
         request,
         "workflow_run_resume",

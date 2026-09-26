@@ -41,6 +41,244 @@ model = "gpt-6-sol"
 task_driven = "Implement the current numbered requirements, extending existing end-to-end Gideon paths."
 source_of_truth = "Root alone owns authoritative requirement state; workers report per-item completion and managers integrate their branches."
 [hard_rules]
-local_integration = "User authorizes local task commits and cg fleet main merges. No remote pushes or deployment. Do not stage dependencies or unrelated preexisting changes."
+local_integration = "User authorizes local task commits and cg fleet main merges. Leader alone pushes OSS origin/main after integration; hosted commits stay local and deployment is excluded. Do not stage dependencies or unrelated preexisting changes."
 identity = "Use Gideon identity only in source, comments, specs and commit messages."
 hosted = "Preserve operator-managed provider/model/infrastructure policy and all existing hosted changes."
+
+[fleet.members]
+leader = "gf26-leader"
+feature_managers = ["gf26-fm01", "gf26-fm02", "gf26-fm03", "gf26-fm04"]
+manager_model = "gpt-6-sol"
+worker_model = "gpt-6-sol"
+subagent_count = 20
+
+[fleet.assignment.runtime-memory]
+worker_id = "gf26-w01"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 1
+items = [1, 2, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 132]
+
+[fleet.assignment.runtime-models]
+worker_id = "gf26-w02"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 2
+items = [25, 26, 27, 28, 29, 30, 31, 32, 33, 73, 75]
+
+[fleet.assignment.runtime-sessions]
+worker_id = "gf26-w03"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 3
+items = [35, 36, 37, 38, 39, 40, 76, 77, 78]
+
+[fleet.assignment.runtime-experiments]
+worker_id = "gf26-w04"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 4
+items = [21, 22, 23, 24]
+
+[fleet.assignment.experience-workspace]
+worker_id = "gf26-w05"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 1
+items = [6, 7, 8, 9, 41, 42, 43, 44, 45, 46]
+
+[fleet.assignment.experience-onboarding]
+worker_id = "gf26-w06"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 2
+items = [5, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98]
+
+[fleet.assignment.experience-creative]
+worker_id = "gf26-w07"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 3
+items = [18, 19, 20, 58, 59, 122, 123, 124, 125, 126, 127]
+
+[fleet.assignment.experience-polish]
+worker_id = "gf26-w08"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 4
+items = [99, 129, 130]
+
+[fleet.assignment.automation-workflows]
+worker_id = "gf26-w09"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 1
+items = [34, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 74]
+
+[fleet.assignment.automation-proactivity]
+worker_id = "gf26-w10"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 2
+items = [15, 16, 17, 85, 109, 110, 111, 112]
+
+[fleet.assignment.automation-tasks]
+worker_id = "gf26-w11"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 3
+items = [79, 80, 81, 82, 83, 84, 100, 101, 102, 103, 104, 105, 106, 107, 108, 113]
+
+[fleet.assignment.automation-apps]
+worker_id = "gf26-w12"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 4
+items = [14, 114, 115, 116, 117, 118, 119, 120, 121]
+
+[fleet.assignment.integrations-protocols]
+worker_id = "gf26-w13"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 1
+items = [10, 11, 12]
+
+[fleet.assignment.integrations-channels]
+worker_id = "gf26-w14"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 2
+items = [13, 128]
+
+[fleet.assignment.integrations-terminal]
+worker_id = "gf26-w15"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 3
+items = [3, 4]
+
+[fleet.assignment.integrations-distribution]
+worker_id = "gf26-w16"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 4
+items = [131, 133, 134, 135]
+
+[fleet.members]
+leader = "gf26-leader"
+feature_managers = ["gf26-fm01", "gf26-fm02", "gf26-fm03", "gf26-fm04"]
+manager_model = "gpt-6-sol"
+worker_model = "gpt-6-sol"
+subagent_count = 20
+
+[fleet.assignment.runtime-memory]
+worker_id = "gf26-w01"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 1
+items = [1, 2, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 132]
+
+[fleet.assignment.runtime-models]
+worker_id = "gf26-w02"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 2
+items = [25, 26, 27, 28, 29, 30, 31, 32, 33, 73, 75]
+
+[fleet.assignment.runtime-sessions]
+worker_id = "gf26-w03"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 3
+items = [35, 36, 37, 38, 39, 40, 76, 77, 78]
+
+[fleet.assignment.runtime-experiments]
+worker_id = "gf26-w04"
+manager_id = "gf26-fm01"
+feature = "gideon-runtime"
+wave = 4
+items = [21, 22, 23, 24]
+
+[fleet.assignment.experience-workspace]
+worker_id = "gf26-w05"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 1
+items = [6, 7, 8, 9, 41, 42, 43, 44, 45, 46]
+
+[fleet.assignment.experience-onboarding]
+worker_id = "gf26-w06"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 2
+items = [5, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98]
+
+[fleet.assignment.experience-creative]
+worker_id = "gf26-w07"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 3
+items = [18, 19, 20, 58, 59, 122, 123, 124, 125, 126, 127]
+
+[fleet.assignment.experience-polish]
+worker_id = "gf26-w08"
+manager_id = "gf26-fm02"
+feature = "gideon-experience"
+wave = 4
+items = [99, 129, 130]
+
+[fleet.assignment.automation-workflows]
+worker_id = "gf26-w09"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 1
+items = [34, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 74]
+
+[fleet.assignment.automation-proactivity]
+worker_id = "gf26-w10"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 2
+items = [15, 16, 17, 85, 109, 110, 111, 112]
+
+[fleet.assignment.automation-tasks]
+worker_id = "gf26-w11"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 3
+items = [79, 80, 81, 82, 83, 84, 100, 101, 102, 103, 104, 105, 106, 107, 108, 113]
+
+[fleet.assignment.automation-apps]
+worker_id = "gf26-w12"
+manager_id = "gf26-fm03"
+feature = "gideon-automation"
+wave = 4
+items = [14, 114, 115, 116, 117, 118, 119, 120, 121]
+
+[fleet.assignment.integrations-protocols]
+worker_id = "gf26-w13"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 1
+items = [10, 11, 12]
+
+[fleet.assignment.integrations-channels]
+worker_id = "gf26-w14"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 2
+items = [13, 128]
+
+[fleet.assignment.integrations-terminal]
+worker_id = "gf26-w15"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 3
+items = [3, 4]
+
+[fleet.assignment.integrations-distribution]
+worker_id = "gf26-w16"
+manager_id = "gf26-fm04"
+feature = "gideon-integrations"
+wave = 4
+items = [131, 133, 134, 135]

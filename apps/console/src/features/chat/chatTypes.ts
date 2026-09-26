@@ -1,4 +1,6 @@
 
+import type { SpawnMemoryReceipt } from '../../shared/data/api'
+
 export interface TextSegment { kind: 'text'; text: string }
 
 export interface ToolSegment {
@@ -38,6 +40,7 @@ export interface ApprovalSegment {
   purpose?: string
   risk?: 'safe' | 'caution' | 'destructive'
   toolKind?: string
+  canRevise?: boolean
 
   resolved?: string
 }
@@ -135,6 +138,14 @@ export interface SubagentCard {
   result?: string
   costUsd?: number
   tokens?: number
+  memoryReceipt?: SpawnMemoryReceipt
+}
+
+export function memoryReceiptLabel(receipt: SpawnMemoryReceipt): string {
+  if (receipt.status === 'pending') return 'Memory capture pending'
+  if (receipt.status === 'recorded') return `${receipt.count} memory contribution${receipt.count === 1 ? '' : 's'} recorded`
+  if (receipt.status === 'no_contribution') return 'No memory contribution'
+  return 'Memory capture unavailable'
 }
 
 export interface FileEntry { path: string; name: string }
@@ -179,7 +190,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; tool_call_id?: string; approval_id?: string; tool_kind?: string; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[] } }
 
 function recollapsePastes(content: string, pastes: { seq: number; lines: number; content: string }[]): string {
   let out = content
@@ -198,6 +209,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
   const turns: ChatTurn[] = []
   const toolIndex = new Map<string, ToolSegment>()
   let lastUserText = ''
+  let lastUserTs: string | undefined
   let assistantTextSinceUser = false
 
   let visible = -1
@@ -212,7 +224,8 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
     if (m.role === 'user') {
       visible += 1
       const text = m.content.trim()
-      if (text === lastUserText && !assistantTextSinceUser) continue
+      if (text === lastUserText && !assistantTextSinceUser
+        && ((!m.ts && !lastUserTs) || (m.ts && m.ts === lastUserTs))) continue
 
       const pastes = m.meta?.pastes
       const original = m.meta?.original
@@ -224,8 +237,8 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       if (Array.isArray(m.rewound) && m.rewound.length) ut.rewound = m.rewound
       ut.visibleIndex = visible
       turns.push(ut)
-      lastUserText = text; assistantTextSinceUser = false
-    } else if (m.role === 'assistant') {
+      lastUserText = text; lastUserTs = m.ts; assistantTextSinceUser = false
+    } else if (m.role === 'assistant' || m.role === 'streaming') {
       visible += 1
       const at = lastAssistant()
       at.visibleIndex = visible
@@ -264,7 +277,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
     } else if (m.role === 'permission') {
       const resolved = m.meta?.resolved || undefined
-      lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
+      lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
     } else if (m.role === 'error') {
       lastAssistant().segments.push({ kind: 'error', text: m.content })
     }

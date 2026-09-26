@@ -273,6 +273,7 @@ class RecordCodecs:
             "item_label",
             "item_total",
             "subagent_id",
+            "subagent_claim_holder",
         ),
     }
 
@@ -489,6 +490,7 @@ class RecordCodecs:
             item_label=row.scalar("item_label"),
             item_total=row.scalar("item_total", int, 0),
             subagent_id=row.scalar("subagent_id"),
+            subagent_claim_holder=row.scalar("subagent_claim_holder"),
         )
         return factory(**values)
 

@@ -174,6 +174,8 @@ def _register_mcp_routes(app: web.Application) -> None:
     app.router.add_post("/api/spawn/cancel-fanout", handlers.api_spawn_cancel_fanout)
     app.router.add_get("/api/spawn", handlers.api_spawn_list)
     app.router.add_get("/api/spawn/{agent_id}", handlers.api_spawn_status)
+    app.router.add_get("/api/spawn/{agent_id}/control", handlers.api_spawn_control)
+    app.router.add_patch("/api/spawn/{agent_id}/control", handlers.api_spawn_control)
     app.router.add_delete("/api/spawn/{agent_id}", handlers.api_spawn_delete)
     app.router.add_delete("/api/spawn", handlers.api_spawn_clear)
     app.router.add_get("/api/lessons", handlers.api_lessons)
@@ -794,6 +796,7 @@ async def start_dashboard(
     app.router.add_post("/api/memory/promote", handlers.api_memory_promote)
     app.router.add_get("/api/memory/entities", handlers.api_memory_entities)
     app.router.add_post("/api/memory/entities", handlers.api_memory_entity_create)
+    app.router.add_delete("/api/memory/entities/{entity_id}", handlers.api_memory_entity_delete)
     app.router.add_post(
         "/api/memory/entities/proposals", handlers.api_memory_entity_proposals
     )
@@ -1326,6 +1329,10 @@ async def start_dashboard(
 
     register_workflow_routes(app)
 
+    from gideon.interfaces.dashboard.handlers.experiments import register_experiment_routes
+
+    register_experiment_routes(app)
+
     from gideon.interfaces.dashboard.handlers.loop_routes import (
         register_unified_loop_routes,
     )
@@ -1345,6 +1352,9 @@ async def start_dashboard(
     app.router.add_post("/api/inbox/dismiss-all", handlers_inbox.api_inbox_dismiss_all)
     app.router.add_post(
         "/api/inbox/proposals", handlers_inbox.api_inbox_proposal_create
+    )
+    app.router.add_delete(
+        "/api/inbox/proposals/reviewed", handlers_inbox.api_inbox_proposals_clear
     )
     app.router.add_post("/api/inbox/notes", handlers_inbox.api_inbox_note_create)
     app.router.add_post(

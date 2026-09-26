@@ -29,6 +29,17 @@ _READINESS_TTL_SECS = 300.0
 _readiness_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
+def _provider_document(path) -> dict[str, Any]:
+    import json
+
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("providers", []), list):
+        raise ValueError("provider configuration must be an object with a providers list")
+    return data
+
+
 async def api_providers_list(request: web.Request) -> web.Response:
     """GET /api/model-providers — list configured model-provider entries.
 
@@ -754,12 +765,14 @@ async def api_provider_create(request: web.Request) -> web.Response:
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
     name = string_field(body, "name")
-    ptype = body.get("type", "").strip()
+    ptype = string_field(body, "type")
     model = body.get("model", "")
     options = body.get("options", {})
 
     if not name or not ptype:
         return web.json_response({"error": "name and type are required"}, status=400)
+    if not isinstance(model, str) or not isinstance(options, dict):
+        return web.json_response({"error": "model must be a string and options must be an object"}, status=400)
 
     from gideon.integrations.llm.registry import canonical_provider_type
     from gideon.integrations.llm.registry import get_default_registry as _gdr
@@ -784,11 +797,9 @@ async def api_provider_create(request: web.Request) -> web.Response:
     async with _get_config_lock():
         path = config_path()
         try:
-            data = (
-                _json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            )
-        except Exception:
-            data = {}
+            data = _provider_document(path)
+        except (OSError, ValueError) as exc:
+            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
 
         providers = data.setdefault("providers", [])
         if any(p.get("name") == name for p in providers):
@@ -874,15 +885,17 @@ async def api_provider_update(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
+    if "model" in body and not isinstance(body["model"], str):
+        return web.json_response({"error": "model must be a string"}, status=400)
+    if "options" in body and not isinstance(body["options"], dict):
+        return web.json_response({"error": "options must be an object"}, status=400)
 
     async with _get_config_lock():
         path = config_path()
         try:
-            data = (
-                _json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            )
-        except Exception:
-            data = {}
+            data = _provider_document(path)
+        except (OSError, ValueError) as exc:
+            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
 
         providers = data.get("providers", [])
         target = None
@@ -933,11 +946,9 @@ async def api_provider_delete(request: web.Request) -> web.Response:
     async with _get_config_lock():
         path = config_path()
         try:
-            data = (
-                _json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            )
-        except Exception:
-            data = {}
+            data = _provider_document(path)
+        except (OSError, ValueError) as exc:
+            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
 
         providers = data.get("providers", [])
         before = len(providers)

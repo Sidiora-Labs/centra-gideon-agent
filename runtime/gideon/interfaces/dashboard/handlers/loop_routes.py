@@ -1117,6 +1117,37 @@ async def api_loop_design_tokens(request: web.Request) -> web.Response:
     )
 
 
+async def api_loop_design_preview(request: web.Request) -> web.Response:
+    """Version-bound review of a React artifact actually rendered on the Design canvas."""
+    cid = request.match_info["id"]
+    if not loop_files.valid_loop_id(cid):
+        return web.json_response({"error": "Invalid loop id"}, status=400)
+    loop = store.get(cid)
+    if loop is None:
+        return web.json_response({"error": "Not found"}, status=404)
+    if loop.kind != "design":
+        return web.json_response({"error": "Not a design loop"}, status=400)
+    from gideon.automation.loop.design_preview import receipts, record
+
+    if request.method == "GET":
+        return web.json_response({"receipts": receipts(cid)})
+    body = await _json_body(request)
+    if isinstance(body, web.Response):
+        return body
+    slug, version, approved = body.get("slug"), body.get("version"), body.get("approved")
+    if not isinstance(slug, str) or not slug or type(version) is not int or version < 1 or type(approved) is not bool:
+        return web.json_response({"error": "Expected artifact slug, version, and approved flag"}, status=400)
+    from gideon.workspace.artifacts import registry as artifact_registry
+
+    provider = artifact_registry.get_provider()
+    art = provider.get(slug) if provider is not None else None
+    if (art is None or art.kind != "react" or art.version != version
+            or f"loop:{cid}" not in art.tags or not (art.content or "").strip()):
+        return web.json_response({"error": "No matching current Design canvas artifact"}, status=409)
+    record(cid, slug, version, approved)
+    return web.json_response({"ok": True, "receipts": receipts(cid)})
+
+
 def register_unified_loop_routes(app: web.Application) -> None:
     """Register the unified ``/api/loops`` routes (CRUD + lifecycle core). The
     plan-walkthrough + queue/autopilot routes register in the next sub-step. Called
@@ -1143,3 +1174,5 @@ def register_unified_loop_routes(app: web.Application) -> None:
     app.router.add_get("/api/loops/{id}/stream", api_loop_stream)
     app.router.add_get("/api/design/tokens/default", api_design_default_tokens)
     app.router.add_get("/api/loops/{id}/design/tokens", api_loop_design_tokens)
+    app.router.add_get("/api/loops/{id}/design/preview", api_loop_design_preview)
+    app.router.add_post("/api/loops/{id}/design/preview", api_loop_design_preview)

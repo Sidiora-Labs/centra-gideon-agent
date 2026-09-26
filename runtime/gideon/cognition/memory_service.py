@@ -385,6 +385,15 @@ class MemoryService:
         archive.invalidate_alias_index()
         return identity
 
+    def graph_delete_entity(self, entity_id: str) -> bool:
+        archive = self._graph_store()
+        if archive is None:
+            return False
+        deleted = archive.graph.delete_entity(entity_id)
+        if deleted:
+            archive.invalidate_alias_index()
+        return deleted
+
     def graph_accept_proposal(self, name: str, entity_type: str) -> str:
         archive = self._graph_store()
         if archive is None:

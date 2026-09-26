@@ -225,9 +225,11 @@ class _EntityRows(_GraphTable):
             raise ValueError("entity name must not be empty")
         timestamp = _now()
         existing = self.db.execute(
-            "SELECT id, aliases FROM mem_entities WHERE LOWER(name) = LOWER(?) AND is_deleted = 0",
+            "SELECT id, aliases, is_deleted FROM mem_entities WHERE LOWER(name) = LOWER(?) ORDER BY is_deleted ASC LIMIT 1",
             (title,),
         ).fetchone()
+        if existing is not None and existing["is_deleted"]:
+            raise ValueError("entity was deleted and cannot be recreated automatically")
         if existing is None:
             identity = entity_id or new_entity_id()
             values = (

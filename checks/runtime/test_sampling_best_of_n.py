@@ -166,6 +166,24 @@ async def test_temperatures_are_varied_and_ladder_ordered(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_identical_answers_get_one_bounded_resample_and_report_exhaustion(monkeypatch, tmp_path):
+    sampler = _Sampler(
+        delay=0,
+        texts={temperature: "same answer" for temperature in _TEMPERATURE_LADDER[:3]},
+    )
+    _stub_samples(monkeypatch, sampler)
+    result = await best_of_n("prompt", 3, judge_provider_factory=_judge_factory({}))
+
+    assert len(sampler.temperatures) == 5
+    assert [candidate["text"] for candidate in result["candidates"]] == [
+        "same answer", "", "",
+    ]
+    assert "2 repeated after a bounded resample" in result["note"]
+    record = json.loads((tmp_path / "sampling_outcomes.jsonl").read_text().strip())
+    assert record["sampling_calls"] == 5
+
+
+@pytest.mark.asyncio
 async def test_n_is_clamped_to_max(monkeypatch):
     sampler = _Sampler(delay=0)
     _stub_samples(monkeypatch, sampler)
@@ -304,12 +322,13 @@ async def test_outcome_record_is_bounded_and_content_free(monkeypatch, tmp_path)
     assert set(rec) == {
         "ts",
         "n",
+        "sampling_calls",
         "criteria_digest",
         "winner_idx",
         "score_spread",
         "tokens_total",
     }
-    assert rec["n"] == 3 and rec["winner_idx"] == 1
+    assert rec["n"] == 3 and rec["sampling_calls"] == 3 and rec["winner_idx"] == 1
     assert rec["score_spread"] == 3.0
     assert rec["tokens_total"] > 0
     assert len(rec["criteria_digest"]) == 16

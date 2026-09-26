@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { api, type AppCatalogEntry, type ChatModelOption, type ModelProviderType, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { guardedFromApp, useGuardedInstall } from '../../shared/data/useGuardedInstall'
@@ -30,13 +30,20 @@ export function essentialCandidates(catalog: Awaited<ReturnType<typeof api.appCa
 type SetupState = { installed: Record<string, true>; open: string; expanded: Record<string, true>; modelApp: string; phase: ModelPhase; boundLabel: string }
 export function useEssentialSetup(readiness: OnboardingState | null, onProgress: (patch: OnboardingStatePatch) => void) {
   const { data: catalog, error: catalogError, refresh } = useQuery('onboarding:essentials-catalog', () => api.appCatalog())
+  const { data: providerTypes } = useQuery('onboarding:provider-types', () => api.modelProviderTypes())
   const [state, change] = useReducer((state: SetupState, patch: Partial<SetupState>) => ({ ...state, ...patch }), {
-    installed: {}, open: '', expanded: {}, modelApp: '', boundLabel: '',
+    installed: {}, open: '', expanded: {}, modelApp: '', boundLabel: readiness?.active_chat_model ?? '',
     phase: readiness && !readiness.needs_model ? 'done' : readiness?.has_model_provider ? 'bind' : 'pick',
   } as SetupState)
   const pendingRef = useRef<AppCatalogEntry | null>(null)
   const active = useRef(false)
   const guarded = useGuardedInstall(confirm => api.installApp(pendingRef.current?.pointer || pendingRef.current?.source || '', confirm).then(guardedFromApp))
+  useEffect(() => {
+    if (state.phase !== 'pick' || readiness?.has_model_provider || !providerTypes?.length || !catalog) return
+    const listed = new Set(catalogApps(catalog).map((entry) => entry.name))
+    const installedChat = providerTypes.filter((type) => type.capabilities?.includes('chat') && !listed.has(type.app))
+    if (installedChat.length === 1) change({ phase: 'configure', modelApp: installedChat[0].app })
+  }, [catalog, providerTypes, readiness?.has_model_provider, state.phase])
   const record = (entry: AppCatalogEntry, lane: EssentialLane) => {
     change({ installed: { ...state.installed, [entry.name]: true }, open: '', ...(lane === 'model' ? { modelApp: entry.name, phase: 'configure' as const } : {}) })
     const progress = { model: { model: entry.name }, search: { search: true }, speech: { speech: true }, channel: { channel: entry.name } }
@@ -53,7 +60,8 @@ export function useEssentialSetup(readiness: OnboardingState | null, onProgress:
       if (result?.ok && lane) record(entry, lane)
     } finally { active.current = false }
   }
-  return { ...state, catalog, catalogError, refresh, lanes: useMemo(() => essentialCandidates(catalog), [catalog]), guarded, pendingRef,
+  return { ...state, catalog, catalogError, refresh, providerTypes, lanes: useMemo(() => essentialCandidates(catalog), [catalog]), guarded, pendingRef,
+    selectInstalledProvider: (app: string) => change({ phase: 'configure', modelApp: app }),
     install: (entry: AppCatalogEntry) => attempt(entry, false),
     confirmInstall: () => { if (pendingRef.current) return attempt(pendingRef.current, true) },
     toggle: (name: string) => { change({ open: state.open === name ? '' : name }); guarded.reset() },
@@ -110,7 +118,7 @@ export function useChatModelBinding(onBound: (label: string) => void) {
     active.current = true; setBinding(model.name); setFailed('')
     try {
       const reference = model.provider ? `${model.provider}:${model.model_id}` : model.model_id
-      await api.setActiveModel('chat', [reference]); onBound(model.model_id)
+      await api.setActiveModel('chat', [reference]); onBound(reference)
     } catch (failure) { setBinding(''); setFailed(setupErrorText(failure) || 'Could not bind that model.') }
     finally { active.current = false }
   }

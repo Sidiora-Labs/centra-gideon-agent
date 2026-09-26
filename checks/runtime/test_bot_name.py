@@ -25,6 +25,9 @@ class TestSanitizeBotName:
     def test_whitespace_stripped(self):
         assert _sanitize_bot_name("  Alita  ") == "Alita"
 
+    def test_unicode_name_is_preserved_without_control_characters(self):
+        assert _sanitize_bot_name("  智慧 Élodie 🤖\u202e  ") == "智慧 Élodie "
+
 
 class TestBotNameSubstitution:
     """Runtime substitution on the unified ``{{bot_name}}`` format. A non-dashboard

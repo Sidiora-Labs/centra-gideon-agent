@@ -23,6 +23,47 @@ export function requireWriteAccepted<T>(result: T): T {
   throw new Error(detail || receipt.message || receipt.reason || 'The server refused this change.')
 }
 
+export interface ExperimentAttempt {
+  ordinal: number
+  inputs: Record<string, unknown>
+  state: string
+  run_id: string
+  score: number | null
+  valid: boolean | null
+  observation: string
+  tokens?: number | null
+  cost_usd?: number | null
+  run_error?: string
+}
+export interface ExperimentCampaign {
+  id: string
+  title: string
+  objective: string
+  workflow_name: string
+  metric: string
+  direction: 'maximize' | 'minimize'
+  max_parallel: number
+  max_tokens: number
+  total_tokens: number | null
+  status: string
+  best_attempt: number | null
+  attempts: ExperimentAttempt[]
+  created_at: string
+}
+export interface ExperimentReplay {
+  replay_id: string
+  recorded_run_id: string
+  candidate_run_id: string
+  recorded_events: number
+  candidate_events: number
+  recorded_steps: Array<{ instance_path: string; node_id: string; epoch: number; state: string; attempts: number; events: Array<Record<string, unknown>> }>
+  candidate_steps: Array<{ instance_path: string; node_id: string; epoch: number; state: string; attempts: number; events: Array<Record<string, unknown>> }>
+  matches: boolean
+  divergence: Array<{ path: string; recorded: unknown; candidate: unknown }>
+  truncated: boolean
+  side_effects_executed: false
+}
+
 async function _installReq(path: string, body: unknown): Promise<AppInstallResult> {
   const failure = (error: string): AppInstallResult => ({ ok: false, name: '', error, needs_consent: false, scan: null })
   try {
@@ -442,7 +483,9 @@ export interface ChannelTrust {
   default_dm_policy: string
   default_group_policy: string
 }
-export interface SpawnedAgent { id: string; task: string; done: boolean; parent?: string; agent?: string; started?: number; result?: string; error?: string }
+export interface SpawnMemoryReceipt { status: 'pending' | 'recorded' | 'no_contribution' | 'unavailable'; count: number; run_id?: string; conversation_id?: string; parent_session?: string; agent?: string; source?: 'delegated_result' }
+export interface SpawnedAgent { id: string; task: string; done: boolean; parent?: string; agent?: string; started?: number; result?: string; error?: string; turns?: number; last_tool?: string; elapsed?: number; memory_receipt?: SpawnMemoryReceipt }
+export interface SpawnControl { model: string; effort: string; models: string[]; efforts: Array<{ value: string; label: string }> }
 export interface KnowledgeContextCard {
   id: string; title: string; provider?: string; match_type?: string; tokens: number; summary?: string
   content?: string
@@ -547,6 +590,7 @@ export interface AppQualityWire {
   designSystem?: 'v2' | 'legacy' | 'n/a'
   a11y?: boolean
 }
+export interface AppHookSummary { name: string; event: string; provider: string }
 export interface AppSummary {
   name: string; displayName: string; version: string; description: string
   enabled: boolean; origin: string; source?: string; icon: string
@@ -565,6 +609,7 @@ export interface AppSummary {
   updateAvailable?: boolean
   latestVersion?: string
   quality?: AppQualityWire
+  hooks?: AppHookSummary[]
 }
 export interface AppDetail {
   name: string
@@ -596,6 +641,7 @@ export interface AppCatalogEntry {
   hasUI?: boolean
   uiComponents?: string
   quality?: AppQualityWire
+  hooks?: AppHookSummary[]
 }
 export interface AppCatalog {
   bundled: AppCatalogEntry[]
@@ -608,6 +654,7 @@ export interface AppCatalog {
   remoteApps?: AppCatalogEntry[]
   gitApps?: AppCatalogEntry[]
   networkSources?: string[]
+  sourceErrors?: string[]
 }
 export interface AppScanFinding { surface: string; severity: string; rule: string; path: string; evidence: string }
 export interface AppSignature { state: string; signer: string; reason: string }
@@ -623,6 +670,7 @@ export interface AppInstallResult {
   restart_required?: boolean
   log_excerpt?: string
   fix_prompt?: string
+  hooks?: AppHookSummary[]
 }
 export interface SkillInstallResult {
   ok?: boolean; path?: string; error?: string
@@ -1001,6 +1049,10 @@ export interface WorkflowRunDetailData {
   tokens?: number; elapsed_secs?: number
   project_id?: string
   policy_overrides?: Record<string, unknown>
+  budget?: { max_tokens: number; max_cost: number; max_retries: number }
+  round_handoff?: Record<string, { completed_role?: string; next_role?: string; next_allowed_paths?: string[]; stop?: boolean; quarantined_paths?: string[] }>
+  round_interrupted?: boolean
+  rounds?: Array<{ iteration: number; at: string; allow_next: boolean; reason: string; completed_role?: string; next_role?: string; changed_paths: string[]; quarantined_paths: string[]; quarantine_evidence?: Array<{ path: string; content: string; truncated: boolean }>; handback?: boolean; verification: { exit_code?: number | null } }>
   nodes: WorkflowNodeState[]
 }
 export interface WorkflowContinuation {
@@ -2011,7 +2063,7 @@ export interface WeekProjection {
 
 export interface EventFireResult {
   ok: boolean
-  result: { ran: boolean; reason: string; success?: boolean; exit_code?: number; stdout?: string; stderr?: string; error?: string; duration_ms?: number }
+  result: { ran?: boolean; reason: string; dry_run?: boolean; would_fire?: boolean; action?: string; trigger_id?: string; success?: boolean; exit_code?: number; stdout?: string; stderr?: string; error?: string; duration_ms?: number }
 }
 export type KnowledgeType =
   | 'note' | 'fleeting' | 'journal' | 'gist' | 'bookmark'
@@ -2316,7 +2368,7 @@ export interface NotificationSettings {
   min_severity: string
 }
 export type NotificationMode = 'never' | 'badge' | 'immediate' | 'digest'
-export type NotificationTarget = 'dashboard' | 'channel_dm' | 'push' | 'native'
+export type NotificationTarget = 'dashboard' | 'push' | 'native'
 export type NotificationSound = 'turn_complete' | 'approval_needed' | 'error' | 'coin_blip' | 'terminal_bell'
 export interface NotificationRuleRow {
   key: string; source: string; kind: string; label: string; severity: number
@@ -2420,6 +2472,14 @@ export interface TriageDigestView {
   machine_did?: TriageLedgerRow[]
   ledger_complete?: boolean
   ledger_rows?: number
+  commitment_decisions?: CommitmentDecision[]
+}
+
+export interface CommitmentDecision {
+  topic: string; agent: string; text: string; action: string; reason: string
+  policy: string; destination: string; decided_at: string; delivered_at: string
+  dismissed_until: string; approved_at: string; run_id: string; error: string
+  context: { recent_sessions?: Array<{ id?: string; created_at?: string }>; learned_routines?: Array<{ key?: string }> }
 }
 
 export interface TriageReplyResult {
@@ -2951,6 +3011,7 @@ export interface OnboardingEssentials {
 export type OnboardingStep = 'name' | 'essentials' | 'first_success' | 'done'
 export interface OnboardingState {
   needs_model: boolean; has_model_provider: boolean; has_chat_binding: boolean
+  active_chat_model?: string
   step?: OnboardingStep
   essentials?: OnboardingEssentials
   first_success?: { knowledge: boolean; trigger: boolean; loop: boolean }
@@ -2993,6 +3054,7 @@ export interface SavedAgent {
   natural_voice?: boolean
   specialty?: string; route_hints?: string
   reserved?: boolean; editable?: boolean
+  active_sessions?: number; running_sessions?: number
 }
 
 
@@ -3000,6 +3062,7 @@ export type GoalType = 'verifiable' | 'open_ended' | 'monitor'
 export type Granularity = 'quick' | 'balanced' | 'exhaustive' | 'forever'
 export interface LoopFinding {
   cycle: number; summary?: string; key_insight?: string
+  task_id?: string
   sources_checked?: string[]; sources_empty?: string[]
   files_touched?: string[]
   new_findings_count?: number; evidence?: string; metric?: { name?: string; value?: number }; ts?: number
@@ -3393,7 +3456,8 @@ export interface DeckSlideJson {
   title_box: DeckShapeBoxJson
   body_box: DeckShapeBoxJson
 }
-export interface DeckModelJson { title: string; slides: DeckSlideJson[]; width_in: number; height_in: number }
+export interface DeckModelJson { title: string; slides: DeckSlideJson[]; width_in: number; height_in: number; template_slug?: string; template_version?: number }
+export interface DeckPreviewResponse { slug: string; version: number; fidelity: string; slides: { index: number; slug: string; version: number; raw_url: string; critique: string[] }[] }
 export interface DeckModelResponse {
   slug: string; kind: string; version: number; mime: string
   model: DeckModelJson; loss: DocumentLossReport
@@ -3507,7 +3571,9 @@ export interface InstalledPackRec {
   installed_at: string
   pack_owned?: string[]
   component_locks?: Record<string, { source: string; computedHash: string; path: string }>
-  roster?: Array<{ slug?: string; target?: string; tier?: string }>
+  roster?: Array<{ slug?: string; target?: string; tier?: string; activation?: string }>
+  roster_active?: string[]
+  triggers_added?: string[]
   staged_triggers: string[]
 }
 
@@ -3585,6 +3651,14 @@ export interface RewindApplyWire {
 }
 
 export const api = {
+  experimentCampaigns: () => get<{ campaigns: ExperimentCampaign[] }>('/api/experiments/campaigns'),
+  experimentCampaign: (id: string) => get<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}`),
+  createExperimentCampaign: (body: { title: string; objective: string; workflow_name: string; metric: string; direction: 'maximize' | 'minimize'; variants: Record<string, unknown>[]; max_parallel: number; max_tokens: number }) => post<ExperimentCampaign>('/api/experiments/campaigns', body),
+  advanceExperimentCampaign: (id: string) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/advance`, {}),
+  stopExperimentCampaign: (id: string) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/stop`, {}),
+  observeExperimentAttempt: (id: string, ordinal: number, body: { score: number; valid: boolean; observation: string }) => post<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}/attempts/${ordinal}/observation`, body),
+  recordExperimentRun: (runId: string) => post<{ id: string; run_id: string; event_count: number }>(`/api/experiments/runs/${encodeURIComponent(runId)}/record`, {}),
+  compareExperimentReplay: (id: string, candidateRun?: string) => get<ExperimentReplay>(`/api/experiments/replays/${encodeURIComponent(id)}${candidateRun ? `?candidate_run=${encodeURIComponent(candidateRun)}` : ''}`),
   agentsInstalled: () => get<AgentDef[]>('/api/agents/installed'),
   savedAgents: () => get<{ agents: Array<{ name: string; description?: string; model?: string }> }>('/api/agents').then((d) => d.agents),
   agents: () => get<{ agents: SavedAgent[]; default_agent: string }>('/api/agents'),
@@ -3792,6 +3866,7 @@ export const api = {
   memoryEntities: () => get<MemoryEntitiesResponse>('/api/memory/entities'),
   memoryEntityCreate: (body: { name: string; entity_type: MemoryEntityType; aliases?: string[] }) =>
     post<{ ok: boolean; id: string }>('/api/memory/entities', body),
+  memoryEntityDelete: (id: string) => del(`/api/memory/entities/${encodeURIComponent(id)}`),
   memoryEntityBacklinks: (id: string) =>
     get<{ links: MemoryLink[] }>(`/api/memory/entities/${encodeURIComponent(id)}/backlinks`),
   memoryEntityProposal: (body: { name: string; action: 'accept' | 'reject'; entity_type?: MemoryEntityType }) =>
@@ -3832,6 +3907,10 @@ export const api = {
   sessionsSearch: (q: string) => get<{ sessions: Array<{ key: string; title?: string; messages?: number; snippet?: string }>; source?: string }>(`/api/sessions/search?q=${encodeURIComponent(q)}`).then((d) => d.sessions),
 
   spawnedAgents: () => get<{ agents: SpawnedAgent[] }>('/api/spawn').then((d) => d.agents),
+  spawnedAgent: (id: string) => get<SpawnedAgent>(`/api/spawn/${encodeURIComponent(id)}`),
+  spawnedAgentControl: (id: string) => get<SpawnControl>(`/api/spawn/${encodeURIComponent(id)}/control`),
+  setSpawnedAgentControl: (id: string, axis: 'model' | 'effort', value: string) =>
+    patch<SpawnControl>(`/api/spawn/${encodeURIComponent(id)}/control`, { axis, value }),
   cancelSpawnedAgent: (id: string) => del(`/api/spawn/${encodeURIComponent(id)}`),
   clearSpawnedAgents: () => del('/api/spawn'),
   cancelFanout: (parentSession: string) =>
@@ -3899,7 +3978,7 @@ export const api = {
   providerSchema: (name: string) => get<{ schema: ProviderSchema }>(`/api/providers/${encodeURIComponent(name)}/schema`).then((d) => d.schema),
   providerConfig: (name: string) => get<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
   saveProviderConfig: (name: string, config: Record<string, unknown>) =>
-    patch<{ config: Record<string, unknown> }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
+    patch<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
   enableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/enable`),
   disableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/disable`),
   agentRuntimes: (refresh = false) => get<{ agent_providers: AgentRuntime[] }>(`/api/agent-providers${refresh ? '?refresh=1' : ''}`).then((d) => d.agent_providers),
@@ -4135,9 +4214,9 @@ export const api = {
     post<{ ok: boolean; session?: string; queued?: boolean; steered?: boolean }>('/api/chat?ws=1', { message, session, meta, ...(queue_mode ? { queue_mode } : {}), ...(input_origin ? { input_origin } : {}) }),
   cancelQueued: (session: string, queueId: string) => del(`/api/chat/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(queueId)}`),
   stopChat: (session: string, force = false) => post(`/api/chat/sessions/${session}/stop${force ? '?force=true' : ''}`),
-  approve: (session: string, action: string, request_id?: string) =>
+  approve: (session: string, action: string, request_id?: string, revision?: string) =>
     post<{ ok: boolean; mode?: ApprovalMode; approval_screening?: ApprovalScreeningVerdict }>(
-      `/api/chat/sessions/${session}/approve`, { action, request_id }),
+      `/api/chat/sessions/${session}/approve`, { action, request_id, revision }),
 
   sideOpen: (session: string) => post<{ ok: boolean }>(`/api/chat/sessions/${session}/side/open`, {}),
   sideTurn: (session: string, question: string) => post<{ ok: boolean; run_id: string }>(`/api/chat/sessions/${session}/side/turn`, { question }),
@@ -4230,6 +4309,9 @@ export const api = {
 
   designDefaultTokens: (scheme: 'light' | 'dark' = 'light') =>
     get<{ tokens: Record<string, unknown>; schema: Record<string, unknown>; resolved: Record<string, unknown>; css: string; overrides: Record<string, unknown>; scheme: string }>(`/api/design/tokens/default?scheme=${scheme}`),
+  uLoopDesignPreview: (id: string) => get<{ receipts: Record<string, { version: number; reviewed_at: number }> }>(`/api/loops/${encodeURIComponent(id)}/design/preview`),
+  reviewULoopDesignPreview: (id: string, slug: string, version: number, approved: boolean) =>
+    post<{ ok: boolean; receipts: Record<string, { version: number; reviewed_at: number }> }>(`/api/loops/${encodeURIComponent(id)}/design/preview`, { slug, version, approved }),
   uLoopDesignTokens: (id: string, scheme: 'light' | 'dark' = 'light') =>
     get<{ resolved: Record<string, unknown>; css: string; overrides: Record<string, unknown>; scheme: string }>(`/api/loops/${encodeURIComponent(id)}/design/tokens?scheme=${scheme}`),
 
@@ -4287,8 +4369,10 @@ export const api = {
   deleteEventTrigger: (id: string) => del(`/api/triggers/event:${encodeURIComponent(id)}`),
   toggleEventTrigger: (id: string, enabled?: boolean) =>
     post<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}/toggle`, enabled === undefined ? {} : { enabled }),
-  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string }) =>
+  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, body ?? {}),
+  dryRunEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
+    post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, { ...(body ?? {}), dry_run: true }),
   testEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/test`, { ...(body ?? {}), test: true }),
   eventTriggerHistory: (id: string) =>
@@ -4313,6 +4397,7 @@ export const api = {
   scheduleHistory: (id: string, limit = 10, offset = 0) => get<{ runs: ScheduleRun[]; total: number }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history?limit=${limit}&offset=${offset}`),
   scheduleRunDetail: (id: string, runId: string) => get<{ run: ScheduleRun }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`).then((d) => d.run),
   triggerVariables: () => get<TriggerVariables>('/api/triggers/variables'),
+  triggerBudget: () => get<{ tokens: number; dollars: number; max_tokens: number; max_dollars: number; status: string; reason: string; paused: boolean; resumes_at: string }>('/api/triggers/budget'),
 
   tasks: (opts: { project?: string; task_list?: string; status?: string; limit?: number; offset?: number; mine?: boolean } = {}) => {
     const qs = new URLSearchParams()
@@ -4354,6 +4439,17 @@ export const api = {
     return get<{ tasks: TaskItem[] }>(`/api/tasks/ready${s ? `?${s}` : ''}`).then((d) => d.tasks)
   },
   searchTasks: (body: Record<string, unknown>) => post<{ tasks: TaskItem[]; total: number }>('/api/tasks/search', body),
+  allSearchTasks: async (body: Record<string, unknown>) => {
+    const tasks: TaskItem[] = []
+    let total = 0
+    do {
+      const page = await api.searchTasks({ ...body, limit: 500, offset: tasks.length })
+      tasks.push(...page.tasks)
+      total = page.total
+      if (!page.tasks.length) break
+    } while (tasks.length < total)
+    return { tasks, total }
+  },
 
   projects: () => get<{ projects: ProjectItem[] }>('/api/projects').then((d) => d.projects),
   project: (id: string) => get<ProjectItem>(`/api/projects/${encodeURIComponent(id)}`),
@@ -4768,6 +4864,7 @@ export const api = {
   favoriteInboxItem: (id: string, favorited: boolean) =>
     post<{ ok: boolean; favorited: boolean }>(`/api/inbox/${encodeURIComponent(id)}/favorite`, { favorited }),
   dismissAllInbox: () => post<{ ok: boolean; dismissed: number }>('/api/inbox/dismiss-all'),
+  clearReviewedInboxProposals: () => del('/api/inbox/proposals/reviewed'),
   restartInbox: () => post<{ ok: boolean; error?: string }>('/api/inbox/restart'),
   inboxSettings: () => get<{ settings: InboxSettings }>('/api/inbox/settings').then((d) => d.settings),
   saveInboxSettings: (s: Partial<InboxSettings>) => put<{ settings: InboxSettings }>('/api/inbox/settings', s),
@@ -4809,6 +4906,9 @@ export const api = {
   proactiveDigest: () => get<TriageDigestView>('/api/proactive/digest'),
   proactiveReply: (runId: string, text: string) =>
     post<TriageReplyResult>('/api/proactive/digest/reply', { run_id: runId, text }),
+  proactiveCommitmentReply: (topic: string, action: 'dismiss' | 'approve_background', workflowName?: string, inputs?: Record<string, unknown>) =>
+    post<{ ok: boolean; outcome: string; run_id?: string; decision?: CommitmentDecision }>(
+      '/api/proactive/digest/reply', { commitment_key: topic, action, workflow_name: workflowName, inputs }),
   proactiveInstall: (cron?: string) =>
     post<{ ok: boolean; created: boolean; schedule: TriageSchedule }>(
       '/api/proactive/install', cron ? { cron } : {}),
@@ -5079,7 +5179,7 @@ export const api = {
     body: { decisions: Array<{ key: string; outcome: 'accept' | 'reject'; reason?: string }>; dry_run?: boolean },
   ) =>
     post<WorkflowTriageResult>(`/api/workflows/runs/${encodeURIComponent(id)}/review/triage`, body),
-  resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean }) =>
+  resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean; round_resume?: boolean; round_budget?: { max_tokens: number; max_cost: number } }) =>
     post<{ ok?: boolean; approved?: boolean; node_id?: string; resumed?: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/resume`, body),
   rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean; confirm_cascade?: boolean }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/rewind`, body),
@@ -5133,6 +5233,9 @@ export const api = {
       body: JSON.stringify({ model }),
     }).then(j<{ slug: string; version: number; mime: string }>).then((result) => publishArtifactModelSaved(slug, version, result)),
   artifactDeckModel: (slug: string) => get<DeckModelResponse>(`/api/artifacts/${encodeURIComponent(slug)}/model`),
+  renderArtifactDeckPreview: (slug: string, version: number) => fetch(`/api/artifacts/${encodeURIComponent(slug)}/deck-preview`, {
+    method: 'POST', headers: { 'If-Match': String(version), ...SK },
+  }).then(j<DeckPreviewResponse>),
   saveArtifactDeckModel: (slug: string, version: number, model: DeckModelJson) =>
     fetch(`/api/artifacts/${encodeURIComponent(slug)}/model`, {
       method: 'PUT',

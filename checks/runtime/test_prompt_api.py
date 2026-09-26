@@ -530,6 +530,20 @@ def test_create_skill_rejects_invalid_skill_content(tmp_path):
     assert loader.load_skill("invalid") is None
 
 
+def test_create_skill_uses_requested_name_on_first_creation(tmp_path):
+    from gideon.extensions.skills import ProcedureLibrary
+
+    loader = ProcedureLibrary(skills_path=tmp_path, install_builtins=False)
+    state = SimpleNamespace(context_builder=SimpleNamespace(skills=loader))
+    template = "---\nname: my-skill\ndescription: First creation\n---\n# Skill\n"
+    resp = _run(api_skills_create(_req(body={"name": "first-skill", "content": template}, method="POST", state=state)))
+    assert resp.status == 200
+    created = loader.load_skill("first-skill")
+    assert created is not None
+    assert "name: first-skill" in created
+    assert "source: dashboard" in created
+
+
 def _seed_greet():
     prov = _provider()
     from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable

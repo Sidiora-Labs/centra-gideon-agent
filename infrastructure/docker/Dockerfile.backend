@@ -57,6 +57,11 @@ RUN npm install -g --no-fund --no-audit \
 RUN groupadd --gid 10001 gideon && \
     useradd --uid 10001 --gid 10001 --create-home --shell /bin/false gideon
 COPY --from=builder /opt/venv /opt/venv
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN /opt/venv/bin/pip install --no-cache-dir 'playwright>=1.40' && \
+    /opt/venv/bin/python -m playwright install --with-deps chromium && \
+    chmod -R a+rX /opt/playwright && \
+    rm -rf /var/lib/apt/lists/*
 RUN BRIDGE_DIR="$(/opt/venv/bin/python -c 'from pathlib import Path; import gideon.integrations.messaging_channels as m; print(Path(m.__file__).parent / "bridge")')" && \
     npm ci --prefix "$BRIDGE_DIR" --omit=dev --no-audit --no-fund
 ENV PATH="/opt/venv/bin:$PATH" \

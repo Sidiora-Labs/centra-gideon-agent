@@ -1,8 +1,17 @@
 import { useMemo, useReducer, useRef } from 'react'
 import { api, type InboxItem, type InboxProposal } from '../../shared/data/api'
+import { notify } from '../../app/shell/appSdk'
 import { canBatchApprove, groupCount } from './proposalLens'
 
-type Outcome = { ok: boolean; error?: string }
+type Outcome = { ok: boolean; error?: string; text?: string }
+export function proposalDecisionText(result: { case?: string; result?: Record<string, unknown> }): string {
+  const details = result.result ?? {}
+  if (result.case === 'workflow') return `Started workflow “${String(details.workflow || 'workflow')}”.`
+  if (result.case === 'action') return `Ran ${String(details.provider || 'the action')}.`
+  if (result.case === 'skill_promotion') return `Installed skill proposal ${String(details.pid || '')}.`
+  if (result.case === 'app_callback') return `Sent to ${String(details.app || 'the app')}.`
+  return 'Proposal applied.'
+}
 type ProposalState = { selected: Set<string>; outcomes: Record<string, Outcome>; editing: string | null; draft: string; draftError: string; busy: boolean }
 type Change = Partial<ProposalState> | ((state: ProposalState) => Partial<ProposalState>)
 const initial = (): ProposalState => ({ selected: new Set(), outcomes: {}, editing: null, draft: '', draftError: '', busy: false })
@@ -13,7 +22,11 @@ export function useInboxProposals(items: InboxItem[], onChanged: () => void) {
   const batchOk = canBatchApprove(selectedItems)
   const apply = async (item: InboxItem, edited?: InboxProposal) => {
     let outcome: Outcome
-    try { const response = await api.applyInboxProposal(item.id, edited); outcome = { ok: Boolean(response.ok), error: response.error } }
+    try {
+      const response = await api.applyInboxProposal(item.id, edited)
+      outcome = { ok: Boolean(response.ok), error: response.error, text: response.ok ? proposalDecisionText(response) : undefined }
+      if (response.ok) notify(outcome.text || 'Proposal applied.', 'success')
+    }
     catch (error) { outcome = { ok: false, error: error instanceof Error ? error.message : 'apply failed' } }
     update(previous => ({ outcomes: { ...previous.outcomes, [item.id]: outcome } }))
   }

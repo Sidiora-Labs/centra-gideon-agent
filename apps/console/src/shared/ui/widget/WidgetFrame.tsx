@@ -26,8 +26,9 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
   const source = useMemo(() => buildSrcdoc({ html, themeVars, mode, includeHost: !streaming, transparentBody: true, editMode: !streaming }), [html, themeVars, mode, streaming])
   const url = useWidgetDocument(source)
   const [railOpen, setRailOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const iteration = useArtifactIteration(frame, { source: html, target: { slug: identity, persistVersion: artifact.persistVersion } })
-  useWidgetWire(frame, { forwardActions: true, onHeight: measure.receive, liveArtifact: artifact.liveArtifact, ...iteration.wire })
+  useWidgetWire(frame, { forwardActions: true, onHeight: measure.receive, onError: setError, liveArtifact: artifact.liveArtifact, ...iteration.wire })
   const exportSource = () => buildSrcdoc({ html, themeVars, mode, includeHost: false })
   const actions = <div className="flex items-center gap-1" role="group" aria-label={`${title} actions`}>
     <SquareIconButton label={railOpen ? 'Close the iteration rail' : 'Iterate — tweak parameters or mark elements'} icon={SlidersHorizontal} on={railOpen} ariaExpanded={railOpen} onClick={() => setRailOpen(open => !open)} />
@@ -48,6 +49,7 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
         className="w-full border-none bg-transparent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={spring.effects}
         style={{ height: expansion.expanded ? 'calc(100% - 44px)' : measure.height }} />}
     </AnimatePresence>
+    {error && <div role="alert" className="border-t border-outline-variant bg-surface-high px-m py-s text-danger">{error}</div>}
     {railOpen && !streaming && <ArtifactIterationRail it={iteration} onClose={() => setRailOpen(false)} className="border-t border-outline-variant bg-surface" />}
     {!expansion.expanded && !streaming && <div className="absolute right-2 top-2 rounded-lg border border-outline-variant bg-surface/95 p-1 shadow-sm opacity-0 transition-opacity group-hover/widget:opacity-100 focus-within:opacity-100">{actions}</div>}
     {expansion.expanded && <div className="fixed inset-0 -z-10 bg-black/55 backdrop-blur-sm" onClick={expansion.close} />}

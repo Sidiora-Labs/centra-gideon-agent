@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import calendar
 import contextlib
+import json
 import logging
 import os
 import re
@@ -85,10 +86,17 @@ from gideon.automation.workflows.effects import (
     redo_blocked,
     run_teardown,
 )
-from gideon.automation.workflows.engine import dispatch, dispatcher_commits_effects
+from gideon.automation.workflows.engine import (
+    check_declared_schema,
+    dispatch,
+    dispatcher_commits_effects,
+)
+from gideon.automation.workflows.failure_taxonomy import classify_exception
 from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
     NodeResult,
+    _release_claim,
+    claim_key,
     resolve_axis_model,
 )
 from gideon.automation.workflows.human_input import drop_continuations
@@ -166,6 +174,9 @@ ESCALATION_ANSWER_HORIZON_SECS = 24 * 3600.0
 _DECLARED_INPUT_TYPES = {
     "string": lambda value: isinstance(value, str),
     "object": lambda value: isinstance(value, dict),
+    "array": lambda value: isinstance(value, list),
+    "boolean": lambda value: isinstance(value, bool),
+    "integer": lambda value: isinstance(value, int) and not isinstance(value, bool),
     "number": lambda value: isinstance(value, (int, float))
     and not isinstance(value, bool),
 }
@@ -487,6 +498,17 @@ class RunController:
         totals = journal_mod.run_totals(self.run.id)
         self._restore_recorded_tokens(totals)
         self._rehydrate_context()
+        if resumed and self._round_configs():
+            from gideon.automation.workflows.round_protocol import completed_iterations
+
+            for path, _config in self._round_configs():
+                self._iterations[path] = completed_iterations(self.run.id, path)
+            interrupted = [inst for inst in self.instances.values() if inst.state == InstanceState.RUNNING]
+            for inst in interrupted:
+                inst.state = InstanceState.PENDING
+                inst.started_at = None
+            if interrupted:
+                store.write_state(self.run.id, self.instances)
         async with self._lock:
             if not self.run.started_at:
                 self.run.started_at = _now()
@@ -503,9 +525,39 @@ class RunController:
         )
         self._enforce_inherited_mode()
         provisioned = await self._provision_workspace()
+        if provisioned:
+            from gideon.automation.workflows.round_protocol import admit_round
+
+            round_workspace = ""
+            for path, config in self._round_configs():
+                decision = admit_round(self.run.id, config, self._round_inputs())
+                if not decision.allow_next:
+                    await self._finish(RunStatus.ESCALATED, error=decision.reason[:500])
+                    return False
+                worktree = str(decision.handoff["worktree"])
+                if round_workspace and worktree != round_workspace:
+                    await self._finish(RunStatus.ESCALATED, error="round loops require one reviewed worktree")
+                    return False
+                round_workspace = worktree
+                saved = (self.run.extra.get("round_handoff") or {}).get(path)
+                self._steering_inject[path] = json.dumps(saved if isinstance(saved, dict) else decision.handoff, default=str)
+            if round_workspace:
+                self.services.cwd = round_workspace
         self._bind_project_memory_cwd()
         self._publish("workflow_run_update", {"status": self.run.status.value})
         return provisioned
+
+    def _round_configs(self) -> list[tuple[str, dict]]:
+        return [
+            (path, node.config["round_protocol"])
+            for path, node in _walk(self.root)
+            if node.kind == NodeKind.LOOP
+            and isinstance(node.config, dict)
+            and isinstance(node.config.get("round_protocol"), dict)
+        ]
+
+    def _round_inputs(self) -> dict:
+        return {"worktree": self.services.cwd, **self.run.inputs}
 
     async def _provision_workspace(self) -> bool:
         """Stand up the run's declared workspace before the first node (WORK-CONTAINERS §4.1).
@@ -1481,22 +1533,59 @@ class RunController:
                 continue
             node = dict(_walk(self.root)).get(spec_path(path))
             node_id = node.id if node else ""
+            if inst.subagent_claim_holder:
+                _release_claim(claim_key(self.run.id, node_id), inst.subagent_claim_holder)
+                inst.subagent_claim_holder = ""
             error = str(getattr(info, "error", "") or "")
             reaped = bool(getattr(info, "reaped", False))
             if error:
+                classified = classify_exception(RuntimeError(error))
                 failure = Failure(
                     failure_class=(
-                        FailureClass.TIMEOUT if reaped else FailureClass.INTERNAL
+                        FailureClass.TIMEOUT
+                        if reaped
+                        else classified.failure_class
                     ),
                     cause_plain=error,
                     remediation=(
                         "the subagent was force-killed after exceeding its deadline; raise the "
                         "subagent timeout, or split this stage into smaller steps"
                         if reaped
-                        else "check the subagent's transcript for the failing turn"
+                        else classified.remediation
                     ),
                     recoverable=True,
                 )
+                if node is not None and self._retry_allowed(node, inst.attempt, failure):
+                    record = attempt_from_failure(inst.attempt, failure)
+                    self._attempts.setdefault(path, []).append(record)
+                    self.journal.write(
+                        journal_mod.STEP_ATTEMPT,
+                        instance_path=path,
+                        node_id=node_id,
+                        epoch=inst.epoch,
+                        **record.to_dict(),
+                    )
+                    self.journal.step_failed(
+                        path,
+                        node_id,
+                        epoch=inst.epoch,
+                        failure=failure,
+                        attempt=inst.attempt,
+                        retries_exhausted=False,
+                    )
+                    inst.state = InstanceState.PENDING
+                    inst.subagent_id = ""
+                    self._publish(
+                        "workflow_node_done",
+                        {
+                            "node_id": node_id,
+                            "instance_path": path,
+                            "status": InstanceState.PENDING.value,
+                            "node_epoch": inst.epoch,
+                        },
+                    )
+                    settled = True
+                    continue
                 inst.state = InstanceState.FAILED
                 inst.failure = failure
                 inst.completed_at = _now()
@@ -1509,10 +1598,18 @@ class RunController:
                     retries_exhausted=True,
                 )
             else:
-                inst.state = InstanceState.DONE
+                raw_result = str(getattr(info, "result", "") or "")
+                schema = (node.config or {}).get("schema") if node else None
+                mismatch = (
+                    check_declared_schema(raw_result, schema)
+                    if isinstance(schema, dict)
+                    else ""
+                )
+                inst.state = InstanceState.DEGRADED if mismatch else InstanceState.DONE
+                inst.degraded_reason = f"Output schema mismatch: {mismatch}" if mismatch else ""
                 inst.completed_at = _now()
                 ref, preview = self.journal.store_output(
-                    path, {"result": str(getattr(info, "result", "") or "")}
+                    path, {"result": raw_result}
                 )
                 inst.output_ref = ref
                 if node_id:
@@ -1522,8 +1619,9 @@ class RunController:
                     node_id,
                     epoch=inst.epoch,
                     cache_key="",
-                    state=InstanceState.DONE,
+                    state=inst.state,
                     retries=max(0, inst.attempt - 1),
+                    degraded_reason=inst.degraded_reason,
                     output_ref=ref,
                 )
             self._publish(
@@ -1533,6 +1631,7 @@ class RunController:
                     "instance_path": path,
                     "status": inst.state.value,
                     "node_epoch": inst.epoch,
+                    "degraded_reason": inst.degraded_reason,
                 },
             )
             settled = True
@@ -2232,7 +2331,46 @@ class RunController:
         """
         if not dispatcher_commits_effects(item.node):
             return True
-        committed = committed_effect(self._effects.get(item.path, []))
+        history = self._effects.get(item.path, [])
+        latest = next((record for record in reversed(history) if record.epoch == inst.epoch), None)
+        if latest is not None and latest.effect_status in (
+            EffectStatus.ATTEMPTED,
+            EffectStatus.COMMITTED,
+        ):
+            inst.state = InstanceState.BLOCKED
+            inst.completed_at = _now()
+            inst.failure = Failure(
+                failure_class=FailureClass.USER,
+                cause_plain=(
+                    f"node {item.node.id or item.path} has an external effect with no "
+                    "replayable completed step; its outcome may already have happened"
+                ),
+                remediation=(
+                    "reconcile the external result before continuing; explicitly skip or "
+                    "redo the node only after confirming the effect is safe"
+                ),
+                terminal_reason="effect_outcome_unknown",
+            )
+            self.journal.step_failed(
+                item.path,
+                item.node.id,
+                epoch=inst.epoch,
+                failure=inst.failure,
+                attempt=inst.attempt,
+                retries_exhausted=True,
+            )
+            self._persist_state()
+            self._publish(
+                "workflow_node_done",
+                {
+                    "node_id": item.node.id,
+                    "instance_path": item.path,
+                    "status": InstanceState.BLOCKED.value,
+                    "degraded_reason": "effect_outcome_unknown",
+                },
+            )
+            return False
+        committed = committed_effect(history)
         if committed is None or committed.epoch == inst.epoch:
             return True
         if redo_blocked(item.node.config or {}, committed, inst.epoch):
@@ -2379,9 +2517,16 @@ class RunController:
         cautionary case is an engine that shipped a no-op node timeout nobody noticed,
         because timeouts only ever execute under failure.
         """
-        total = self.services.node_timeout_total
         node = self._with_retry_hint(item)
         node = self._with_carried_context(node, item)
+        declared_total = (node.config or {}).get("timeout_total_secs")
+        total = (
+            float(declared_total)
+            if isinstance(declared_total, (int, float))
+            and not isinstance(declared_total, bool)
+            and declared_total > 0
+            else self.services.node_timeout_total
+        )
         if node.kind in (NodeKind.STAGE, NodeKind.INFER):
             failure = self._declared_input_failure()
             if failure is not None:
@@ -2399,6 +2544,7 @@ class RunController:
             project_id=self.run.project_id,
             instance_path=item.path,
             cwd=self.services.cwd,
+            action_cwd=self.services.cwd if self._round_configs() and node.kind == NodeKind.ACTION else "",
             tiers=self.services.model_tiers,
             completion=self.services.completion,
             get_provider=self.services.get_provider,
@@ -2453,21 +2599,18 @@ class RunController:
             value = self.run.inputs[name]
             if accepts(value):
                 continue
-            actual_type = (
-                "object"
-                if isinstance(value, dict)
-                else (
-                    "boolean"
-                    if isinstance(value, bool)
-                    else (
-                        "number"
-                        if isinstance(value, (int, float))
-                        else (
-                            "string" if isinstance(value, str) else type(value).__name__
-                        )
-                    )
-                )
-            )
+            if isinstance(value, dict):
+                actual_type = "object"
+            elif isinstance(value, list):
+                actual_type = "array"
+            elif isinstance(value, bool):
+                actual_type = "boolean"
+            elif isinstance(value, (int, float)):
+                actual_type = "number"
+            elif isinstance(value, str):
+                actual_type = "string"
+            else:
+                actual_type = type(value).__name__
             return Failure(
                 failure_class=FailureClass.USER,
                 cause_plain=(
@@ -2718,8 +2861,10 @@ class RunController:
 
         if result.state == InstanceState.RUNNING:
             inst.state = InstanceState.RUNNING
+            self._store_prompt(item.path, result.resolved_prompt)
             if isinstance(result.output, dict):
                 inst.subagent_id = str(result.output.get("subagent_id", "") or "")
+                inst.subagent_claim_holder = str(result.output.get("claim_holder", "") or "")
             return
 
         if result.state == InstanceState.WAITING:
@@ -2897,6 +3042,7 @@ class RunController:
             )
             self._project_task(item, inst, result)
         else:
+            self._store_prompt(item.path, result.resolved_prompt)
             if result.output is not None:
                 ref, _unused = self.journal.store_output(item.path, result.output)
                 inst.output_ref = ref
@@ -2946,9 +3092,13 @@ class RunController:
         failure.
         """
         failure = result.failure
+        return self._retry_allowed(item.node, inst.attempt, failure)
+
+    @staticmethod
+    def _retry_allowed(node: Node, attempt: int, failure: Failure | None) -> bool:
         if failure is None or not failure.retryable:
             return False
-        retry_cfg = (item.node.config or {}).get("retry") or {}
+        retry_cfg = (node.config or {}).get("retry") or {}
         max_attempts = retry_cfg.get("max_attempts", 1)
         if not isinstance(max_attempts, int) or max_attempts < 1:
             max_attempts = 1
@@ -2957,7 +3107,7 @@ class RunController:
             str(m) for m in no_retry
         ]:
             return False
-        return inst.attempt < max_attempts
+        return attempt < max_attempts
 
     def _escalate(
         self, path: str, node_id: str, *, reason: str, detail: str = ""
@@ -3320,6 +3470,33 @@ class RunController:
         if not self._iteration_complete(node, parent_path, iteration):
             return
         output = self._outputs.get(item.node.id)
+        round_config = (node.config or {}).get("round_protocol")
+        if isinstance(round_config, dict):
+            from gideon.automation.workflows.round_protocol import complete_round
+
+            decision = complete_round(
+                run_id=self.run.id,
+                iteration=iteration,
+                config=round_config,
+                inputs=self._round_inputs(),
+                output=output,
+                loop_path=parent_path,
+            )
+            if not decision.allow_next:
+                self._surface_loop(parent_path, node, reason="round_verification", detail=decision.reason)
+                return
+            handoffs = dict(self.run.extra.get("round_handoff") or {})
+            handoffs[parent_path] = decision.handoff
+            self.run.extra["round_handoff"] = handoffs
+            self._save_run()
+            self.journal.handoff(parent_path, node.id, epoch=self._instance(item.path).epoch, iteration=iteration, handoff=decision.handoff)
+            self._steering_inject[parent_path] = json.dumps(decision.handoff, default=str)
+            if decision.handoff.get("stop"):
+                loop_inst = self._instance(parent_path)
+                loop_inst.state = InstanceState.DONE
+                loop_inst.completed_at = _now()
+                self.journal.iteration(parent_path, node.id, iteration=iteration, outcome=decision.reason, error_signature="", tokens=0)
+                return
         if self._iteration_is_dry(node, parent_path, iteration, output):
             self._dry_streaks[parent_path] = self._dry_streaks.get(parent_path, 0) + 1
         else:
@@ -4027,6 +4204,16 @@ class RunController:
 
     async def _finish(self, status: RunStatus, *, error: str = "") -> None:
         """Write the run's terminal status. The single terminal writer (WF2-R10)."""
+        if status in (RunStatus.FAILED, RunStatus.ESCALATED) and not error:
+            failed = [
+                (path, inst) for path, inst in self.instances.items()
+                if inst.failure and inst.failure.cause_plain
+            ]
+            if failed:
+                path, inst = max(failed, key=lambda row: (row[0].count("."), row[1].completed_at or ""))
+                node = dict(_walk(self.root)).get(spec_path(path))
+                label = node.id if node and node.id else path
+                error = f"{label}: {inst.failure.cause_plain}"[:500]
         self.run.status = status
         self.run.error_message = error
         if status in (
@@ -4053,6 +4240,10 @@ class RunController:
         if status == RunStatus.CANCELLED:
             store.clear_cancel(self.run.id)
         if status in TERMINAL_RUN_STATUSES:
+            from gideon.automation.workflows.round_protocol import release_round
+
+            for _path, config in self._round_configs():
+                release_round(self.run.id, config, self._round_inputs())
             self._release_held_leases()
             attention.resolve_run_items(self.services.attention_state, self.run.id)
             if status == RunStatus.COMPLETE:
