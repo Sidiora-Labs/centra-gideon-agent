@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Gideon web app — the dashboard UI",
+  "description": "Gideon web app \u2014 the dashboard UI",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
@@ -45,7 +45,20 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "unified": "^11.0.5",
-    "three": "0.186.1"
+    "three": "0.186.1",
+    "@assistant-ui/ai-sdk": "0.0.8",
+    "@assistant-ui/react": "0.15.22",
+    "@assistant-ui/react-generative-ui": "0.0.21",
+    "@assistant-ui/react-markdown": "0.14.17",
+    "@assistant-ui/react-mcp": "0.1.20",
+    "@assistant-ui/react-syntax-highlighter": "0.14.6",
+    "@assistant-ui/store": "0.3.15",
+    "@base-ui/react": "1.8.0",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cn": "0.3.0",
+    "react-shiki": "0.11.1",
+    "react-syntax-highlighter": "16.1.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -63,7 +76,8 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.0",
-    "vitest": "^5.0.0",
-    "@types/three": "0.186.0"
+    "vitest": "5.0.0",
+    "@types/three": "0.186.0",
+    "@vitest/coverage-v8": "5.0.0"
   }
 }
