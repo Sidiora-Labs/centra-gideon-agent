@@ -406,10 +406,10 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
 
       {artModal && (
         <Modal title="Save as artifact" icon={<Box size={18} className="text-primary" />} onClose={() => setArtModal(null)}>
-          <div className="flex flex-col gap-m p-l" style={{ minWidth: 360 }}>
-            <p className="text-on-surface-low text-[0.8125rem]">Creates a versioned artifact that live-points at <span className="font-mono">{baseName(artModal.entry.path)}</span>. Re-saving bumps it instead of duplicating.</p>
+          <div className="flex min-w-0 flex-col gap-m p-l">
+            <p className="break-words text-on-surface-low text-[0.8125rem]">Creates a versioned artifact that live-points at <span className="break-all font-mono">{baseName(artModal.entry.path)}</span>. Re-saving bumps it instead of duplicating.</p>
             <TextInput value={artModal.name} onChange={(v) => setArtModal((m) => m && { ...m, name: v })} placeholder="Artifact name" autoFocus />
-            <div className="flex justify-end gap-s">
+            <div className="flex flex-wrap justify-end gap-s">
               <Button variant="ghost" size="sm" onClick={() => setArtModal(null)}>Cancel</Button>
               <Button size="sm" onClick={confirmArtifact}>Save artifact</Button>
             </div>
