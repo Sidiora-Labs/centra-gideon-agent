@@ -18,11 +18,11 @@ function SelectableMap() {
 }
 
 function point(label: string) {
-  return screen.getByRole('button', { name: label, exact: true })
+  return screen.getByRole('button', { name: label })
 }
 
 function row(label: string, detail: string) {
-  return screen.getByRole('button', { name: `${label}: ${detail}`, exact: true })
+  return screen.getByRole('button', { name: `${label}: ${detail}` })
 }
 
 describe('MapAnswer recorded locations', () => {
