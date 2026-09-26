@@ -2,7 +2,7 @@ import { render, screen, act } from '@testing-library/react'
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime, type ThreadMessageLike } from '@assistant-ui/react'
 import { useState, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
-import { ThreadMessages, ThreadTranscript, useMessage } from '../../../vendor/assistant-ui/elements/thread.aui'
+import { Thread, ThreadMessages, ThreadTranscript, useMessage } from '../../../vendor/assistant-ui/elements/thread.aui'
 
 type StoredMessage = { id: string; role: 'user' | 'assistant'; text: string }
 const initial: StoredMessage[] = [
@@ -59,6 +59,13 @@ describe('source-derived connected transcript', () => {
     expect(screen.getByTestId('conversation-map').previousElementSibling).toBe(viewport)
     act(() => addMessage({ id: 'a2', role: 'assistant', text: 'Live answer' }))
     expect(screen.getByTestId('assistant-a2')).toHaveTextContent('Live answer')
+  })
+
+  it('preserves full donor Thread with message override slots', () => {
+    const { container } = render(<Runtime><Thread components={components} autoFocus={false} /></Runtime>)
+    expect(screen.getByTestId('user-u1')).toHaveTextContent('First request')
+    expect(screen.getByTestId('assistant-a1')).toHaveTextContent('First answer')
+    expect(container.querySelectorAll('[data-slot="aui_thread-viewport"]')).toHaveLength(1)
   })
 
   it('allows Gideon to own root and viewport while rendering one message collection', () => {
