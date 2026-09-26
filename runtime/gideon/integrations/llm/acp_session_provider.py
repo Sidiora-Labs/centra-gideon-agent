@@ -35,10 +35,13 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
         model: str = "",
         agent_name: str = "",
         unattended: bool = False,
+        session_snapshot: dict | None = None,
     ) -> None:
         self._conn, self._session = connection, session
         self._runtime_id = runtime_id
         self._model, self._agent_name = model, agent_name
+        self._reasoning_effort = ""
+        self._session_snapshot = dict(session_snapshot or {})
         self.set_unattended(unattended)
 
     @property
@@ -52,6 +55,34 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
     @property
     def agent_model(self) -> str:
         return self._model
+
+    def live_controls(self) -> dict:
+        from gideon.integrations.acp.live_controls import offered_controls
+
+        return offered_controls(
+            self._session_snapshot,
+            self._conn._dialect,
+            model=self._model,
+            effort=self._reasoning_effort,
+        )
+
+    async def set_live_control(self, axis: str, value: str) -> None:
+        from gideon.integrations.acp.live_controls import apply_live_control
+
+        await apply_live_control(
+            self._conn,
+            self._conn._dialect,
+            self.session_id,
+            self._session_snapshot,
+            axis=axis,
+            value=value,
+            model=self._model,
+            effort=self._reasoning_effort,
+        )
+        if axis == "model":
+            self._model = value
+        else:
+            self._reasoning_effort = value
 
     @property
     def agent_name(self) -> str:
@@ -232,4 +263,5 @@ async def open_acp_session_provider(
         model=model,
         agent_name=agent_name,
         unattended=unattended,
+        session_snapshot=connection.last_session_new_snapshot,
     )

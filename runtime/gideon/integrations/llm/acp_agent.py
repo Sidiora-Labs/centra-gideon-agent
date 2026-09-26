@@ -204,6 +204,16 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
     def session_snapshot(self) -> dict:
         return self._client.session_snapshot
 
+    def live_controls(self) -> dict:
+        return self._client.live_controls()
+
+    async def set_live_control(self, axis: str, value: str) -> None:
+        await self._client.set_live_control(axis, value)
+        if axis == "model":
+            self._model = value
+        else:
+            self._reasoning_effort = value
+
     @staticmethod
     def _to_llm_event(event: Any) -> LLMEvent:
         from gideon.integrations.acp.adapter import acp_event_to_agent_event

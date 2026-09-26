@@ -174,6 +174,8 @@ def _register_mcp_routes(app: web.Application) -> None:
     app.router.add_post("/api/spawn/cancel-fanout", handlers.api_spawn_cancel_fanout)
     app.router.add_get("/api/spawn", handlers.api_spawn_list)
     app.router.add_get("/api/spawn/{agent_id}", handlers.api_spawn_status)
+    app.router.add_get("/api/spawn/{agent_id}/control", handlers.api_spawn_control)
+    app.router.add_patch("/api/spawn/{agent_id}/control", handlers.api_spawn_control)
     app.router.add_delete("/api/spawn/{agent_id}", handlers.api_spawn_delete)
     app.router.add_delete("/api/spawn", handlers.api_spawn_clear)
     app.router.add_get("/api/lessons", handlers.api_lessons)

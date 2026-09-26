@@ -155,6 +155,37 @@ class AcpClient:
     def session_snapshot(self) -> dict[str, object]:
         return self._session_new_snapshot
 
+    def live_controls(self) -> dict[str, Any]:
+        from gideon.integrations.acp.live_controls import offered_controls
+
+        return offered_controls(
+            self._session_new_snapshot,
+            self._dialect,
+            model=self._model,
+            effort=self._reasoning_effort,
+        )
+
+    async def set_live_control(self, axis: str, value: str) -> None:
+        from gideon.integrations.acp.live_controls import apply_live_control
+
+        sid = self._require_session_id("change a live control")
+        if self._connection is None:
+            raise AcpError("ACP connection is not open")
+        await apply_live_control(
+            self._connection,
+            self._dialect,
+            sid,
+            self._session_new_snapshot,
+            axis=axis,
+            value=value,
+            model=self._model,
+            effort=self._reasoning_effort,
+        )
+        if axis == "model":
+            self._model = value
+        else:
+            self._reasoning_effort = value
+
     @property
     def exit_code(self) -> int | None:
         return self._transport.exit_code
@@ -358,6 +389,7 @@ class AcpClient:
         if session is None:
             return False
         self._session, self._session_id, self._resumed = session, session_id, True
+        self._session_new_snapshot = dict(connection.last_session_new_snapshot or {})
         return True
 
     async def _new_session(self) -> None:
