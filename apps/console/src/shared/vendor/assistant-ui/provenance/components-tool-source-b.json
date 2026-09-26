@@ -15,7 +15,7 @@
     "mcp-server-panel.tsx": "14b82c682eec29a594cefbbbc992966d99c092e4f053552c5fe8612df11f15c1",
     "tool-error.tsx": "cb6b22cfa0e39019e3d63bbc6b9f9d621de5de95243a0da268e5c9fae345919a",
     "permission-grant.tsx": "8f51713d73a08cf05daf37fbc7670af6e4f5cea8117460833ea21403f409d965",
-    "computer-use.tsx": "e33f379eea3404acc883b10d5ed13b1ba9120e5d1fdbcc2ac5cd80228504fc7d",
+    "computer-use.tsx": "e459f58e845e933a37030fd8b2171d40f38638e99d563c83774409a43f080ad4",
     "code-runner.tsx": "9769774faf957b279ef886c85e6374acebafa0ca44e0185f8469b6d7fcf802ec"
   },
   "adaptations": [
@@ -27,6 +27,7 @@
     "expose an optional Cancel action and caller labels without changing the default donor actions",
     "accept exact caller-supplied approval choices, resolved labels and details without implying donor session or always policy",
     "omit unknown requester and empty reach sections while retaining donor populated presentation",
-    "allow per-choice accessible names, disabled revision and neutral or danger presentation"
+    "allow per-choice accessible names, disabled revision and neutral or danger presentation",
+    "allow missing computer URL and coordinate pairs; omit unknown address and pointer marks while retaining step details"
   ]
 }

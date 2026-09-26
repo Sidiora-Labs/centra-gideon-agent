@@ -10,8 +10,8 @@ export interface ComputerStep {
   id: string;
   action: string;
   target: string;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
 }
 
 export function ComputerUse({
@@ -22,7 +22,7 @@ export function ComputerUse({
   className,
   ...props
 }: Omit<ComponentProps<"div">, "url" | "steps" | "activeIndex" | "children"> & {
-  url: string;
+  url?: string;
   steps: readonly ComputerStep[];
   activeIndex: number;
   children: React.ReactNode;
@@ -42,7 +42,7 @@ export function ComputerUse({
 
       {...props}
     >
-      <div className="flex items-center gap-2 px-3 py-2">
+      {url && <div className="flex items-center gap-2 px-3 py-2">
         <span className="flex shrink-0 gap-1">
           {["bg-red-500/50", "bg-amber-500/50", "bg-emerald-500/50"].map(
             (tint) => (
@@ -63,12 +63,12 @@ export function ComputerUse({
         >
           {url}
         </span>
-      </div>
+      </div>}
 
       <div className="border-foreground/[0.07] relative min-h-[8.5rem] overflow-hidden border-t">
         {children}
 
-        {trail.map((step, i) => (
+        {trail.filter((step) => step.x !== undefined && step.y !== undefined).map((step, i) => (
           <span
             key={step.id}
             aria-hidden
@@ -81,7 +81,7 @@ export function ComputerUse({
           />
         ))}
 
-        {active && (
+        {active && active.x !== undefined && active.y !== undefined && (
           <MousePointer2Icon
             aria-hidden
             className="pointer-events-none absolute size-4 fill-blue-500 text-blue-500 transition-[left,top] duration-500 ease-out motion-reduce:transition-none dark:fill-blue-400 dark:text-blue-400"
