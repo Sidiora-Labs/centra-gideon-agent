@@ -9,6 +9,7 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 APPROVE = "approve"
 REJECT = "reject"
+REVISE = "revise"
 
 
 @dataclass(slots=True)
@@ -40,6 +41,9 @@ class ApprovalGate:
 
     def reject(self, request_id: str) -> bool:
         return self.resolve(request_id, REJECT)
+
+    def revise(self, request_id: str) -> bool:
+        return self.resolve(request_id, REVISE)
 
     def cancel_all(self) -> None:
         for slot in tuple(self._requests.values()):

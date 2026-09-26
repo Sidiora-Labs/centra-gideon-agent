@@ -205,11 +205,13 @@ ac_1 = "Implement the complete reachable feature: Relevant skill routing and con
 
 [task.runtime-models]
 title = "runtime-models end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "runtime-models"
 requires = []
 reqs = ["025.1", "026.1", "027.1", "028.1", "029.1", "030.1", "031.1", "032.1", "033.1", "073.1", "075.1"]
+touches = ["runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/engine/agents/native/approval.py", "runtime/gideon/engine/session.py", "runtime/gideon/engine/routing/learned.py", "runtime/gideon/integrations/llm/anthropic.py", "runtime/gideon/integrations/llm/openai.py", "runtime/gideon/integrations/llm/catalog.py", "runtime/gideon/integrations/llm/prompt_cache.py", "runtime/gideon/integrations/model_windows.py", "runtime/gideon/integrations/prompt_providers/engine.py", "runtime/gideon/integrations/prompt_providers/runtime.py", "runtime/gideon/cognition/context_headroom.py", "runtime/gideon/operations/usage_ledger.py", "runtime/gideon/interfaces/dashboard/chat_runner.py", "runtime/gideon/interfaces/dashboard/chat_handlers.py", "apps/console/src/features/ChatPage.tsx", "apps/console/src/features/chat/ApprovalCard.tsx", "apps/console/src/features/chat/chatTypes.ts", "apps/console/src/shared/data/api.ts"]
+verify_cmd = "PYTHONPATH=runtime /tmp/gideon-runtime-venv/bin/python -m pytest -q checks/runtime/test_prompt_engine.py checks/runtime/test_usage_ledger.py checks/runtime/test_routing_learned_order.py"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.035]

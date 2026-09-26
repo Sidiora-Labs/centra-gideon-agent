@@ -3289,6 +3289,7 @@ async def run_chat(
                     "request_id": str(event.request_id),
                     "tool_call_id": event.tool_call_id or "",
                     "tool_kind": event.tool_kind or "",
+                    "can_revise": callable(getattr(client, "revise_tool", None)),
                 }
                 if event.tool_input:
                     input_text = tool_input_to_str(event.tool_input)
@@ -3313,6 +3314,7 @@ async def run_chat(
                         "tool_purpose": event.tool_purpose or "",
                         "tool_kind": event.tool_kind or "",
                         "risk": effective_risk,
+                        "can_revise": perm_meta["can_revise"],
                     },
                 )
                 loop = asyncio.get_running_loop()
@@ -3337,6 +3339,17 @@ async def run_chat(
                     session._approval_futures.pop(str(event.request_id), None)
                     if mirrored_item:
                         _resolve_mirrored_approval(mirrored_item, outcome)
+                if outcome.startswith("revision:"):
+                    try:
+                        instruction = json.loads(outcome.removeprefix("revision:"))
+                        reviser = getattr(client, "revise_tool", None)
+                        accepted = (
+                            await reviser(event.request_id, instruction)
+                            if callable(reviser) and isinstance(instruction, str) else False
+                        )
+                    except Exception:
+                        accepted = False
+                    outcome = "revised" if accepted else "rejected"
                 if outcome == "approved_trust_reads":
                     session._trust_reads = True
                     outcome = "approved"
@@ -3448,6 +3461,18 @@ async def run_chat(
                             request_id=event.request_id,
                             metadata={"reason": "interactive", "risk": effective_risk},
                         )
+                elif outcome == "revised":
+                    session.append("tool", f"{event.title} (revision requested)", "msg msg-tool")
+                    sel().log_tool_invocation(
+                        session_key=session_key,
+                        agent=_agent_label(session),
+                        source="dashboard",
+                        tool_name=event.title,
+                        tool_kind=event.tool_kind,
+                        outcome="revised",
+                        request_id=event.request_id,
+                        metadata={"reason": "interactive", "risk": effective_risk},
+                    )
                 else:
                     await client.reject_tool(event.request_id)
                     session.append("tool", f"{event.title} (rejected)", "msg msg-tool")

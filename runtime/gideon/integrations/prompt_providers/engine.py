@@ -718,7 +718,10 @@ def _build_value_ctx(
     ctx: dict[str, Any] = dict(values)
     for var in variables:
         if var.name in values and values[var.name] is not None:
-            ctx[var.name] = _coerce(var, values[var.name])
+            supplied = _coerce(var, values[var.name])
+            if var.required and isinstance(supplied, str) and not supplied.strip():
+                raise PromptRenderError(f"missing required variable: {var.name}")
+            ctx[var.name] = supplied
         elif var.default is not None:
             ctx[var.name] = _coerce(var, var.default)
         elif var.required:
@@ -749,13 +752,20 @@ def render(
 
 
 def render_template(
-    template: PromptTemplate,
+    template: PromptTemplate | PromptSnippet,
     values: dict[str, Any] | None = None,
     *,
     resolver: SnippetResolver | None = None,
 ) -> str:
     """Render a ``PromptTemplate`` with the supplied variable values."""
-    return render(template.content, template.variables, values, resolver=resolver)
+    declarations = merged_variables(template, resolver)
+    expanded = _resolve_includes(template.content, resolver, 0, ())
+    known = {variable.name for variable in declarations}
+    declarations.extend(
+        variable for variable in extract_inline_variables(expanded)
+        if variable.name not in known
+    )
+    return render(expanded, declarations, values)
 
 
 def render_snippet(
@@ -765,7 +775,7 @@ def render_snippet(
     resolver: SnippetResolver | None = None,
 ) -> str:
     """Render a ``PromptSnippet`` standalone (for preview)."""
-    return render(snippet.content, snippet.variables, values, resolver=resolver)
+    return render_template(snippet, values, resolver=resolver)
 
 
 def included_snippet_names(content: str) -> list[str]:

@@ -2495,8 +2495,22 @@ async def api_chat_task_mode(request: web.Request) -> web.Response:
 
 
 _APPROVE_ACTIONS = frozenset(
-    {"approved", "rejected", "trust", "trust_agent", "trust_reads", "yolo"}
+    {"approved", "rejected", "revised", "trust", "trust_agent", "trust_reads", "yolo"}
 )
+
+
+def _permission_request_id(message: dict) -> str:
+    try:
+        return str(json.loads(message.get("cls", "{}") or "{}").get("request_id") or "")
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return ""
+
+
+def _permission_can_revise(message: dict) -> bool:
+    try:
+        return json.loads(message.get("cls", "{}") or "{}").get("can_revise") is True
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return False
 
 
 def persistable_grant_target(
@@ -2550,6 +2564,16 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
     original_action = action
     reported_decision = original_action
     request_id = body.get("request_id", "")
+    revision = ""
+    if original_action == "revised":
+        revision = body.get("revision", "")
+        if not isinstance(revision, str) or not revision.strip() or len(revision) > 4000:
+            return web.json_response({"error": "revision must contain 1 to 4000 characters"}, status=400)
+        matching = next((message for message in reversed(session.messages)
+            if message.get("role") == "permission"
+            and _permission_request_id(message) == request_id), None)
+        if matching is None or not _permission_can_revise(matching):
+            return web.json_response({"error": "revision is unavailable for this approval"}, status=400)
     screening = None
     requested_mode = {
         "trust": "trust",
@@ -2624,8 +2648,8 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
                     status=400,
                 )
         return web.json_response({"error": "no pending approval"}, status=404)
-    resolved = action if action in ("approved", "approved_trust_reads") else "rejected"
-    fut.set_result(resolved)
+    resolved = action if action in ("approved", "approved_trust_reads") else "revised" if action == "revised" else "rejected"
+    fut.set_result("revision:" + json.dumps(revision.strip()) if resolved == "revised" else resolved)
     if request_id:
         _mark_permission_resolved(
             session.messages,
@@ -2642,7 +2666,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             "approval_resolved",
             {
                 "id": request_id,
-                "approved": resolved != "rejected",
+                "approved": resolved in ("approved", "approved_trust_reads"),
                 "decision": reported_decision if grant_allowed else resolved,
             },
         )

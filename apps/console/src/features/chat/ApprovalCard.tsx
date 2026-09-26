@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { withWeight } from '../../shared/theme/fontWeight'
-import { Check, Ban, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
+import { Check, Ban, Pencil, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 import { ApprovalPrompt } from '../../shared/ui/ApprovalPrompt'
 import { RungChip } from '../../shared/ui/RungChip'
 import { Segmented } from '../../shared/ui/Segmented'
@@ -44,7 +44,7 @@ function BlastRadiusChips({ tool, risk }: { tool: string; risk?: ApprovalSegment
   )
 }
 
-type Action = 'approved' | 'rejected' | 'trust' | 'trust_agent'
+type Action = 'approved' | 'rejected' | 'revised' | 'trust' | 'trust_agent'
 
 const REMEMBER_SCOPES = [
   {
@@ -69,8 +69,9 @@ const REMEMBER_SCOPES = [
 
 type RememberScope = (typeof REMEMBER_SCOPES)[number]['key']
 
-export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id: string, action: Action) => void }) {
+export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id: string, action: Action, revision?: string) => void }) {
   const [scope, setScope] = useState<RememberScope>('once')
+  const [revision, setRevision] = useState('')
   const { ladder } = useAutonomyLadder()
   const rungType = useMemo(() => providerRungIndex(ladder).get(seg.tool), [ladder, seg.tool])
   if (seg.resolved) {
@@ -111,6 +112,13 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
           {
 }
           <p aria-live="polite" data-type="caption" className="text-on-surface-low">{chosen.promise}</p>
+          {seg.canRevise && <label className="mt-2 flex flex-col gap-1 text-on-surface-var" data-type="caption">
+            Request a change before this action runs
+            <textarea aria-label="How should this action change?" value={revision} maxLength={4000}
+              onChange={event => setRevision(event.target.value)} rows={2}
+              className="w-full resize-y rounded-md border border-outline bg-surface px-2 py-1 text-on-surface"
+              placeholder="Describe what to change" />
+          </label>}
         </div>
       }
       choices={[
@@ -124,6 +132,12 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
           name: `Deny ${seg.tool} — nothing is remembered`,
           onClick: () => onAct(seg.id, 'rejected'),
         },
+        ...(seg.canRevise ? [{
+          key: 'revised', icon: Pencil, label: 'Request change',
+          name: `Request a revised ${seg.tool} action without running this one`,
+          busy: !revision.trim(),
+          onClick: () => onAct(seg.id, 'revised', revision.trim()),
+        }] : []),
       ]}
     />
   )
