@@ -10,6 +10,8 @@ import logging
 from functools import partial
 from typing import Any
 
+from gideon.core.errors import AgentError
+
 from gideon.integrations.tool_providers.base import (
     ToolDefinition,
     ToolProvider,
@@ -109,6 +111,10 @@ class InProcessMcpToolProvider(ToolProvider):
         except Exception as exc:
             logger.debug("in-process tool %s failed: %s", tool_name, exc, exc_info=True)
             return ToolResult(success=False, error=str(exc))
+        if self._module == "gideon.integrations.computer_use.tools":
+            agent_error = getattr(response, "agent_error", None)
+            if isinstance(agent_error, AgentError):
+                return ToolResult(success=False, agent_error=agent_error)
         return ToolResult(success=True, output=response or "")
 
 

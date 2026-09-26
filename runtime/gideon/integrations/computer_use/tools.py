@@ -48,6 +48,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.core.errors import AgentError
+
 logger = logging.getLogger(__name__)
 
 DISPATCH_PATH = "/api/computer-use/dispatch"
@@ -207,6 +209,33 @@ TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SURFACE}
 TOOL_NAMES: frozenset[str] = frozenset(TOOLS_BY_NAME)
 
 
+class _ToolResponse(str):
+    def __new__(cls, text: str, agent_error: AgentError):
+        value = str.__new__(cls, text)
+        value.agent_error = agent_error
+        return value
+
+
+def _agent_error_from_wire(error: Any) -> AgentError | None:
+    if not isinstance(error, dict):
+        return None
+    code = error.get("agent_code")
+    if not isinstance(code, str) or not code.startswith("ERR_COMPUTER_USE_"):
+        return None
+    if not all(isinstance(error.get(field), str) for field in ("what", "why", "fix")):
+        return None
+    suggestions = error.get("suggestions", [])
+    if not isinstance(suggestions, list) or not all(isinstance(item, str) for item in suggestions):
+        return None
+    return AgentError(
+        code=code,
+        what=error["what"],
+        why=error["why"],
+        fix=error["fix"],
+        suggestions=tuple(suggestions),
+    )
+
+
 def _list_tools() -> list[dict[str, Any]]:
     """The MCP tool definitions — the same shape every ``mcp_*`` category module returns.
 
@@ -253,7 +282,10 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
     if not isinstance(response, dict):
         return f"Error: computer use returned {type(response).__name__}, not an object."
     if response.get("error"):
-        return _render_error(response["error"])
+        error = response["error"]
+        rendered = _render_error(error)
+        agent_error = _agent_error_from_wire(error)
+        return _ToolResponse(rendered, agent_error) if agent_error else rendered
     result = response.get("result")
     if isinstance(result, str):
         return result

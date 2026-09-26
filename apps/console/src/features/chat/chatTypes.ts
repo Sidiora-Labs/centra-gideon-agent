@@ -32,6 +32,20 @@ export interface AgentError {
   suggestions?: string[]
 }
 
+const GUARDRAIL_ERROR_CODES = new Set([
+  'ERR_COMPUTER_USE_APP_NOT_ALLOWED',
+  'ERR_COMPUTER_USE_SECURE_FIELD',
+  'ERR_COMPUTER_USE_UNATTENDED_NOT_GRANTED',
+  'ERR_COMPUTER_USE_DISABLED',
+])
+
+export function guardrailNoticeForTool(segment: ToolSegment): { code: string; reason: string } | null {
+  const error = segment.agentError
+  return error && GUARDRAIL_ERROR_CODES.has(error.code)
+    ? { code: error.code, reason: error.what }
+    : null
+}
+
 export interface ApprovalSegment {
   kind: 'approval'
   id: string

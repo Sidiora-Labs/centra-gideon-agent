@@ -33,6 +33,7 @@ import platform
 import subprocess
 import tempfile
 import urllib.parse
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -800,6 +801,15 @@ def _post(path: str, body: dict | None = None) -> dict:
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if path == "/api/computer-use/dispatch":
+            try:
+                payload = json.loads(e.read())
+                if isinstance(payload, dict):
+                    return payload
+            except (OSError, ValueError):
+                pass
+        return {"error": str(e)}
     except Exception as e:
         return {"error": str(e)}
 

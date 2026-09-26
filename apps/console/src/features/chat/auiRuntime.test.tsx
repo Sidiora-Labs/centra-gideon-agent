@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAui, type AppendMessage, type AssistantClient } from '@assistant-ui/react'
 import type { ChatHistoryMsg } from '../../shared/data/api'
-import { appendThinking, assistantTurn, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
+import { appendThinking, assistantTurn, guardrailNoticeForTool, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
 import {
   GideonChatRuntimeProvider, appendText, convertGideonTurn, gideonAuiId, makeGideonQueueAdapter, reloadLatestGideonAnswer,
   useGideonTurnByAuiId, type GideonChatRuntimeProps, type GideonTurnRef,
@@ -184,6 +184,38 @@ describe('Gideon assistant-ui runtime', () => {
     expect(convertGideonTurn(withoutChanges[1], 1, 'session/a', false).content).toEqual([
       { type: 'text', text: 'Editing' },
     ])
+  })
+
+  it('carries a computer-use denial through live and hydrated tool messages', async () => {
+    const error = {
+      code: 'ERR_COMPUTER_USE_DISABLED',
+      what: 'computer_click refused: desktop computer use is OFF on this machine — no enable file.',
+      why: 'Desktop input requires operator arming.',
+      fix: 'A human must write the out-of-band enable file.',
+    }
+    const live: ChatTurn[] = [userTurn('Click'), {
+      role: 'assistant', segments: [{ kind: 'tool', id: 'computer-1', tool: 'computer_click',
+        output: error.what, done: true, agentError: error, ok: false }],
+    }]
+    const ui = setup({ turns: live })
+    expect(guardrailNoticeForTool(live[1].segments[0] as Extract<ChatTurn['segments'][number], { kind: 'tool' }>))
+      .toEqual({ code: error.code, reason: error.what })
+    expect(ui.aui().thread.getState().messages[1].content[1]).toEqual({
+      type: 'data', name: 'gideon-guardrail-notice', data: { code: error.code, reason: error.what },
+    })
+
+    const history = hydrateTurns([
+      { role: 'user', content: 'Click' },
+      { role: 'tool', content: 'computer_click', meta: {
+        tool_call_id: 'computer-1', done: true, output: error.what, agent_error: error, ok: false,
+      } },
+    ])
+    await act(async () => ui.rerender({ turns: history }))
+    expect(ui.aui().thread.getState().messages[1].content[1]).toMatchObject({
+      type: 'data', name: 'gideon-guardrail-notice', data: { code: error.code, reason: error.what },
+    })
+    const unrelated = { ...error, code: 'ERR_COMPUTER_USE_DRIVER_FAILED' }
+    expect(guardrailNoticeForTool({ kind: 'tool', id: 'driver-1', tool: 'computer_click', done: true, agentError: unrelated })).toBeNull()
   })
 
   it('converts actual text, reasoning, tool, activity, approval and error segments without inventing results', () => {
