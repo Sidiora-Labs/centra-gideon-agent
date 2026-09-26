@@ -122,6 +122,14 @@ describe('artifact records rendered through source DataTable', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
+  it('can keep an open action while the host owns the heading', () => {
+    let opened = ''
+    render(<StructuredArtifactTable artifact={artifact} showTitle={false} onOpen={slug => { opened = slug }} />)
+    expect(screen.queryByText(artifact.name)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open artifact' }))
+    expect(opened).toBe(artifact.slug)
+  })
+
   it('unions heterogeneous columns in their recorded order', () => {
     render(<StructuredArtifactTable artifact={{ ...artifact, content: '[{"name":"First"},{"total":2,"name":"Second"}]' }} />)
     expect(screen.getAllByRole('columnheader').map(node => node.textContent)).toEqual(['name', 'total'])
@@ -152,6 +160,12 @@ describe('artifact records rendered through source DataTable', () => {
 })
 
 describe('artifact viewer preview selection', () => {
+  it('reserves reading space without repeating the viewer title', () => {
+    const { container } = render(preview(artifact))
+    expect(container.firstElementChild?.className).toBe('p-4')
+    expect(screen.queryByText(artifact.name)).toBeNull()
+    expect(screen.getByRole('region', { name: `Data table from ${artifact.name}` })).toBeTruthy()
+  })
   it('preserves editing, split mode and all existing content-type capabilities', () => {
     const resolved = artifactPreviewType(artifact, type)
     expect(resolved.id).toBe(type.id)
