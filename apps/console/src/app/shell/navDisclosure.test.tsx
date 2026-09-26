@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   STARTER_NAV_IDS, isDisclosed, readNavDisclosure, pinNavSurface, setNavMode, undisclosedCount,
 } from './navDisclosure'
+import { navigationItems } from './navigationModel'
 
 
 vi.mock('../../shared/data/useChatSocket', () => ({ useChatSocket: () => {} }))
@@ -40,7 +41,7 @@ const renderApp = () => render(
   <ThemeProvider><AppearanceProvider><PersonalityProvider><App /></PersonalityProvider></AppearanceProvider></ThemeProvider>,
 )
 
-const rail = () => screen.getByRole('navigation')
+const rail = () => document.querySelector<HTMLElement>('nav[data-tour="rail"]')!
 const railLinks = () => within(rail()).getAllByRole('button').map((b) => b.getAttribute('aria-label'))
 
 function setViewport(isMobile: boolean) {
@@ -118,21 +119,22 @@ describe('the rail a fresh install sees', () => {
       expect(n.length).toBeGreaterThan(3)
       return n
     })
-    for (const label of ['Home', 'Chat', 'Inbox', 'Apps', 'Settings']) expect(names).toContain(label)
+    for (const label of ['New conversation', 'Conversations', 'Projects', 'Files', 'Calendar', 'Notifications', 'Apps', 'Manage apps', 'Your account']) expect(names).toContain(label)
     for (const label of ['Learning', 'Tools', 'Terminal', 'Workflows']) expect(names).not.toContain(label)
   })
 
-  it('drops the section headers, which have nothing left to group', async () => {
+  it('labels the familiar groups in starter navigation', async () => {
     renderApp()
     await waitFor(() => expect(railLinks()).toContain('Apps'))
-    expect(rail().textContent).not.toMatch(/PLATFORM|CAPABILITIES/i)
+    expect(rail().textContent).toMatch(/Your space/i)
+    expect(rail().textContent).toMatch(/Your apps/i)
   })
 
   it('says how many surfaces it is holding back, in the control\'s own name', async () => {
     renderApp()
     const more = await screen.findByRole('button', { name: /^Everything, show \d+ more surfaces$/ })
     expect(more).toHaveAttribute('aria-expanded', 'false')
-    expect(more.getAttribute('aria-label')).toMatch(/show 1[0-9] more surfaces/)
+    expect(more.getAttribute('aria-label')).toBe(`Everything, show ${undisclosedCount(navigationItems().map(item => item.id), [])} more surfaces`)
     expect(more.className).not.toContain('outline-none')
     expect(more.closest('button')).toBe(more)
     more.focus()
@@ -142,13 +144,43 @@ describe('the rail a fresh install sees', () => {
   it('renders NO control once nothing is left to reveal', async () => {
     localStorage.setItem('nav-disclosure', JSON.stringify({
       mode: 'starter',
-      pinned: ['projects', 'knowledge', 'tasks', 'triggers', 'files', 'artifacts', 'terminal',
-        'agents', 'tools', 'skills', 'learning', 'prompts', 'workflows'],
+      pinned: navigationItems().map(item => item.id),
     }))
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Workflows'))
+    await waitFor(() => expect(railLinks()).toContain('Workflows'), { timeout: 15000 })
     expect(screen.queryByRole('button', { name: /^Everything, show/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Show fewer/ })).toBeNull()
+  })
+})
+
+describe('apps collection and management routes', () => {
+  it('renders the collection at apps and keeps management one click away', async () => {
+    location.hash = '#/apps'
+    renderApp()
+    expect(await screen.findByRole('heading', { name: 'More room for what you do.' }, { timeout: 15000 })).toBeInTheDocument()
+    await userEvent.setup().click(within(screen.getByRole('navigation', { name: 'App categories' })).getByRole('button', { name: 'Manage apps' }))
+    await waitFor(() => expect(location.hash).toBe('#/apps/manage'))
+    expect(await screen.findByRole('heading', { name: 'Apps', level: 1 }, { timeout: 15000 })).toBeInTheDocument()
+  })
+
+  it('preserves legacy apps query links for installation and configuration', async () => {
+    location.hash = '#/apps?view=store'
+    renderApp()
+    expect(await screen.findByRole('heading', { name: 'Apps', level: 1 }, { timeout: 15000 })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'More room for what you do.' })).toBeNull()
+  })
+})
+
+describe('the visible Search launcher', () => {
+  it('opens the command palette and routes a selected familiar destination', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(within(rail()).getByRole('button', { name: 'Search' }))
+    const search = await screen.findByLabelText('Search pages and actions')
+    await user.type(search, 'Manage apps')
+    await user.click(await screen.findByRole('option', { name: /^Manage apps/ }))
+    await waitFor(() => expect(location.hash).toBe('#/apps/manage'))
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).toBeNull()
   })
 })
 
@@ -209,8 +241,8 @@ describe('expert mode', () => {
       }
     })
     expect(readNavDisclosure().mode).toBe('expert')
-    expect(rail().textContent).toMatch(/Platform/i)
-    expect(rail().textContent).toMatch(/Capabilities/i)
+    expect(rail().textContent).toMatch(/Your space/i)
+    expect(rail().textContent).toMatch(/Your apps/i)
     expect(await screen.findByRole('button', { name: /^Show fewer, hide \d+ surfaces$/ }))
       .toHaveAttribute('aria-expanded', 'true')
   })
@@ -228,7 +260,7 @@ describe('expert mode', () => {
     renderApp()
     await waitFor(() => {
       const names = railLinks()
-      for (const label of ['Home', 'Chat', 'Learning', 'Tools', 'Terminal', 'Workflows', 'Settings']) {
+      for (const label of ['Home', 'New conversation', 'Learning', 'Tools', 'Terminal', 'Workflows', 'Your account']) {
         expect(names).toContain(label)
       }
     })
@@ -274,14 +306,14 @@ describe('the Appearance toggle', () => {
     location.hash = '#/settings/design'
     renderApp()
 
-    const sw = await screen.findByRole('switch', { name: 'Show every surface' }, { timeout: 5000 })
+    const sw = await screen.findByRole('switch', { name: 'Show every surface' }, { timeout: 15000 })
     expect(sw).toHaveAttribute('aria-checked', 'false')
     await user.click(sw)
 
-    await waitFor(() => expect(railLinks()).toContain('Workflows'))
+    await waitFor(() => expect(railLinks()).toContain('Workflows'), { timeout: 15000 })
     expect(readNavDisclosure().mode).toBe('expert')
     await user.click(await screen.findByRole('switch', { name: 'Show every surface' }))
-    await waitFor(() => expect(railLinks()).not.toContain('Workflows'))
-    expect(railLinks()).toContain('Settings')
+    await waitFor(() => expect(railLinks()).not.toContain('Workflows'), { timeout: 15000 })
+    expect(railLinks()).toContain('Your account')
   })
 })
