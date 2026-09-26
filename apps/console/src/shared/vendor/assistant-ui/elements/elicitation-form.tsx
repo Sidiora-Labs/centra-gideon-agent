@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { CheckIcon, PlugIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { field, inkButton, mono, paper } from "./surfaces";
@@ -21,8 +21,12 @@ export function ElicitationForm({
   message,
   fields,
   state,
+  renderField,
   onAccept,
   onDecline,
+  onCancel,
+  acceptLabel = "Send",
+  cancelLabel = "Cancel",
   className,
   ...props
 }: Omit<
@@ -32,15 +36,23 @@ export function ElicitationForm({
   | "message"
   | "fields"
   | "state"
+  | "renderField"
   | "onAccept"
   | "onDecline"
+  | "onCancel"
+  | "acceptLabel"
+  | "cancelLabel"
 > & {
   server: string;
   message: string;
   fields: readonly ElicitationField[];
   state: ElicitationState;
+  renderField?: (field: ElicitationField) => ReactNode;
   onAccept?: () => void;
   onDecline?: () => void;
+  onCancel?: () => void;
+  acceptLabel?: string;
+  cancelLabel?: string;
 }) {
   return (
     <div
@@ -74,7 +86,7 @@ export function ElicitationForm({
               {item.label}
               {item.required && <span className="text-foreground/25"> *</span>}
             </span>
-            {item.kind === "choice" ? (
+            {renderField ? renderField(item) : item.kind === "choice" ? (
               <div className="flex flex-wrap gap-1.5">
                 {item.options?.map((option) => (
                   <span
@@ -146,8 +158,17 @@ export function ElicitationForm({
                 "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
               )}
             >
-              Send
+              {acceptLabel}
             </button>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
+              >
+                {cancelLabel}
+              </button>
+            )}
           </>
         ) : (
           <span
