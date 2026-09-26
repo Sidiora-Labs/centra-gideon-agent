@@ -9,7 +9,7 @@ export function artifactPreviewType(artifact: Artifact, type: ContentType): Cont
   return { ...type, preview: { ...type.preview, render: (props) => {
     const shown = { ...artifact, content: props.content }
     return artifactTableRows(shown) !== null
-      ? <StructuredArtifactTable artifact={shown} />
+      ? <div className="p-4"><StructuredArtifactTable artifact={shown} showTitle={false} /></div>
       : createElement(fallback, props)
   } } }
 }
