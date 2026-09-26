@@ -17,11 +17,15 @@ export interface TodoItem {
 export function TodoList({
   items,
   revision,
+  heading = "Todos",
+  onToggle,
   className,
   ...props
-}: Omit<ComponentProps<"div">, "children" | "items" | "revision"> & {
+}: Omit<ComponentProps<"div">, "children" | "items" | "revision" | "onToggle"> & {
   items: readonly TodoItem[];
   revision?: number;
+  heading?: string;
+  onToggle?: (item: TodoItem, index: number) => void;
 }) {
   const done = items.filter((item) => item.status === "done").length;
 
@@ -32,7 +36,7 @@ export function TodoList({
       {...props}
     >
       <div className="flex items-baseline justify-between">
-        <span className="text-[13.5px] font-medium">Todos</span>
+        {heading && <span className="text-[13.5px] font-medium">{heading}</span>}
         <span className={cn(mono, "text-foreground/35 tabular-nums")}>
           {revision === undefined
             ? `${done}/${items.length}`
@@ -40,29 +44,34 @@ export function TodoList({
         </span>
       </div>
       <ul className="flex flex-col gap-1">
-        {items.map((item) => (
+        {items.map((item, index) => {
+          const marker = item.status === "done" ? (
+            <span className="border-foreground/20 bg-foreground/[0.06] flex size-3.5 items-center justify-center rounded-[5px] border">
+              <CheckIcon className="text-foreground/45 size-2.5" />
+            </span>
+          ) : item.status === "failed" ? (
+            <span className="flex size-3.5 items-center justify-center rounded-[5px] border border-red-600/25 bg-red-600/[0.08] dark:border-red-400/25 dark:bg-red-400/[0.08]">
+              <XIcon className="size-2.5 text-red-600 dark:text-red-400" />
+            </span>
+          ) : item.status === "active" ? (
+            <Loader2Icon className="size-3.5 animate-spin text-blue-500 motion-reduce:animate-none dark:text-blue-400" />
+          ) : (
+            <span className="border-foreground/15 size-3.5 rounded-[5px] border" />
+          );
+          return (
           <li
             key={item.id}
             className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both flex items-start gap-2.5 py-0.5 text-[13.5px] duration-300"
           >
-            <span
-              aria-hidden
-              className="flex size-4 h-5 shrink-0 items-center justify-center"
-            >
-              {item.status === "done" ? (
-                <span className="border-foreground/20 bg-foreground/[0.06] flex size-3.5 items-center justify-center rounded-[5px] border">
-                  <CheckIcon className="text-foreground/45 size-2.5" />
-                </span>
-              ) : item.status === "failed" ? (
-                <span className="flex size-3.5 items-center justify-center rounded-[5px] border border-red-600/25 bg-red-600/[0.08] dark:border-red-400/25 dark:bg-red-400/[0.08]">
-                  <XIcon className="size-2.5 text-red-600 dark:text-red-400" />
-                </span>
-              ) : item.status === "active" ? (
-                <Loader2Icon className="size-3.5 animate-spin text-blue-500 motion-reduce:animate-none dark:text-blue-400" />
-              ) : (
-                <span className="border-foreground/15 size-3.5 rounded-[5px] border" />
-              )}
-            </span>
+            {onToggle ? (
+              <button type="button" aria-label={item.status === "done" ? "Mark step incomplete" : "Mark step done"}
+                onClick={() => onToggle(item, index)}
+                className="group -mx-0.5 flex size-6 shrink-0 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:ring-primary">
+                <span aria-hidden className="flex size-4 h-5 items-center justify-center">{marker}</span>
+              </button>
+            ) : (
+              <span aria-hidden className="flex size-4 h-5 shrink-0 items-center justify-center">{marker}</span>
+            )}
             <span className="sr-only">{item.status}</span>
             <div className="min-w-0 flex-1 leading-5 break-words">
               <span
@@ -83,7 +92,8 @@ export function TodoList({
               ) : null}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );
