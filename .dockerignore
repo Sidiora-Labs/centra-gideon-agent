@@ -1,4 +1,5 @@
 .git
+.codegraph
 .gitignore
 
 .env
