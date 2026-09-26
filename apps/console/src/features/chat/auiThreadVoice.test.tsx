@@ -5,7 +5,7 @@ import { MessagePrimitive } from '../../shared/vendor/assistant-ui'
 import { ThreadTranscript, useMessage } from '../../shared/vendor/assistant-ui/elements/thread.aui'
 import { MessageAssistant } from '../../shared/ui/chat/MessageAssistant'
 import { MessageUser } from '../../shared/ui/chat/MessageUser'
-import { AssistantSegments, ThreadAssistantTurnActions, ThreadErrorSegment } from '../ChatPage'
+import { applyLiveToolResult, AssistantSegments, ThreadAssistantTurnActions, ThreadErrorSegment } from '../ChatPage'
 import { GideonChatRuntimeProvider, useGideonTurnByAuiId } from './auiRuntime'
 import { ThreadPeekViews } from './auiThreadSurfaces'
 import { assistantTurn, hydrateTurns, turnText, userTurn, type ChatTurn, type Segment } from './chatTypes'
@@ -157,6 +157,33 @@ describe('connected Gideon thread', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Speak' }))
     expect(events.slice(-3)).toEqual(['regenerate', 'fork', 'speak'])
     expect(screen.queryByRole('button', { name: 'More response actions' })).toBeNull()
+  })
+
+  it('keeps explicit live tool success and failure without inferring a missing status', () => {
+    const segments: Segment[] = [
+      { kind: 'tool', id: 'one', tool: 'Read', done: false },
+      { kind: 'tool', id: 'two', tool: 'Read', done: false, ok: false },
+    ]
+    const succeeded = applyLiveToolResult(segments, { tool_call_id: 'one', output: 'File opened', ok: true })
+    expect(succeeded[0]).toMatchObject({ done: true, output: 'File opened', ok: true })
+    expect(succeeded[1]).toBe(segments[1])
+    const failed = applyLiveToolResult(succeeded, { tool_call_id: 'one', output: 'Denied', ok: false })
+    expect(failed[0]).toMatchObject({ done: true, output: 'Denied', ok: false })
+    const unknown = applyLiveToolResult(segments, { tool_call_id: 'one', output: 'Old event' })
+    expect((unknown[0] as Extract<Segment, {kind: 'tool'}>).ok).toBeUndefined()
+    const retained = applyLiveToolResult(segments, { tool_call_id: 'two', output: 'Legacy event' })
+    expect((retained[1] as Extract<Segment, {kind: 'tool'}>).ok).toBe(false)
+    const rich = applyLiveToolResult([...segments, { kind: 'text', text: 'Still answering' }], {
+      tool_call_id: 'one', output: 'A result', content_type: 'text/plain', raw_ref: 'result-1',
+      truncated: false, original_length: 0, recovery_hints: ['Open result'],
+      agent_error: { code: 'DENIED', what: 'Denied', why: 'Policy', fix: 'Ask owner' }, ok: true,
+    })
+    expect(rich[0]).toMatchObject({ contentType: 'text/plain', rawRef: 'result-1', truncated: false,
+      originalLength: 0, recoveryHints: ['Open result'], ok: true })
+    expect(rich[2]).toMatchObject({ kind: 'text', text: 'Still answering' })
+    const emptyHints = applyLiveToolResult(rich, { tool_call_id: 'one', recovery_hints: [] })
+    expect(emptyHints[0]).toMatchObject({ recoveryHints: ['Open result'], ok: true })
+    expect(applyLiveToolResult(segments, { output: 'Unmatched' })).toEqual(segments)
   })
 
   it('shows a real assistant error without advertising an unavailable retry action', () => {

@@ -714,18 +714,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         break
       }
       case 'tool_result':
-        patchLastAssistant((segs) => segs.map((sg) =>
-          sg.kind === 'tool' && sg.id === String(d.tool_call_id ?? '')
-            ? { ...sg, output: String(d.output ?? ''), done: true,
-                contentType: d.content_type ? String(d.content_type) : sg.contentType,
-                rawRef: d.raw_ref ? String(d.raw_ref) : sg.rawRef,
-                truncated: d.truncated != null ? !!d.truncated : sg.truncated,
-                originalLength: d.original_length != null ? Number(d.original_length) : sg.originalLength,
-                recoveryHints: Array.isArray(d.recovery_hints) && d.recovery_hints.length
-                  ? (d.recovery_hints as string[]) : sg.recoveryHints,
-                agentError: d.agent_error ? (d.agent_error as ToolSegment['agentError']) : sg.agentError,
-                ok: d.ok === false ? false : sg.ok }
-            : sg))
+        patchLastAssistant((segs) => applyLiveToolResult(segs, d))
         break
       case 'approval':
         coalescer.flushNow()
@@ -2756,6 +2745,21 @@ export function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
       </div>
     </div>
   )
+}
+
+export function applyLiveToolResult(segments: Segment[], result: Record<string, unknown>): Segment[] {
+  return segments.map((segment) =>
+    segment.kind === 'tool' && segment.id === String(result.tool_call_id ?? '')
+      ? { ...segment, output: String(result.output ?? ''), done: true,
+          contentType: result.content_type ? String(result.content_type) : segment.contentType,
+          rawRef: result.raw_ref ? String(result.raw_ref) : segment.rawRef,
+          truncated: result.truncated != null ? !!result.truncated : segment.truncated,
+          originalLength: result.original_length != null ? Number(result.original_length) : segment.originalLength,
+          recoveryHints: Array.isArray(result.recovery_hints) && result.recovery_hints.length
+            ? result.recovery_hints as string[] : segment.recoveryHints,
+          agentError: result.agent_error ? result.agent_error as ToolSegment['agentError'] : segment.agentError,
+          ok: typeof result.ok === 'boolean' ? result.ok : segment.ok }
+      : segment)
 }
 
 export function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, onSwitchToAgent, onOpenFile, onSetupModel, chatSessionKey, citations, skillsUsed }: {
