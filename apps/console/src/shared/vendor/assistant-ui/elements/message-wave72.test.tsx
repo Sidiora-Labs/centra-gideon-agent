@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { useState, type FormEvent } from 'react'
 import { FeedbackDialog } from './feedback-dialog'
 import { StoppedRun } from './stopped-run'
 import { DaySeparator, type DatedMessage } from './day-separator'
@@ -302,5 +303,337 @@ describe('ConfidenceMarker', () => {
     expect(view.container.querySelectorAll('[aria-describedby]')).toHaveLength(0)
     view.rerender(<ConfidenceMarker claims={[]} hoveredId="missing" />)
     expect(view.container.querySelector('[data-slot="confidence-marker"] p')?.textContent).toBe('')
+  })
+})
+
+describe('message components in controlled consumer flows', () => {
+  it('round-trips multiple feedback reasons and a note before reporting submission', () => {
+    const submissions: Array<{ reasons: string[]; note: string }> = []
+    function FeedbackFlow() {
+      const [selected, setSelected] = useState<string[]>([])
+      const [note, setNote] = useState('')
+      const [sent, setSent] = useState(false)
+      const toggle = (reason: string) => setSelected((current) => current.includes(reason)
+        ? current.filter((item) => item !== reason) : [...current, reason])
+      return <FeedbackDialog reasons={['Wrong detail', 'Missing context', 'Wrong tone']}
+        selected={selected} note={note} sent={sent} onToggleReason={toggle}
+        onNoteChange={setNote} onSubmit={() => {
+          submissions.push({ reasons: selected, note })
+          setSent(true)
+        }} />
+    }
+    render(<FeedbackFlow />)
+    const wrong = screen.getByRole('button', { name: 'Wrong detail' })
+    const context = screen.getByRole('button', { name: 'Missing context' })
+    fireEvent.click(wrong)
+    fireEvent.click(context)
+    expect(wrong.getAttribute('aria-pressed')).toBe('true')
+    expect(context.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(wrong)
+    expect(wrong.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Anything else?' }),
+      { target: { value: 'The second paragraph omits the customer constraint.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
+    expect(submissions).toEqual([{ reasons: ['Missing context'],
+      note: 'The second paragraph omits the customer constraint.' }])
+    expect(screen.getByRole('status').textContent).toContain('Feedback sent.')
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('lets a consumer cancel and reopen feedback without submitting a stale note', () => {
+    const submit = vi.fn()
+    function DismissibleFeedback() {
+      const [open, setOpen] = useState(true)
+      const [note, setNote] = useState('')
+      const toggle = () => {
+        if (open) setNote('')
+        setOpen(!open)
+      }
+      return <>
+        <button type="button" onClick={toggle}>{open ? 'Cancel feedback' : 'Reopen feedback'}</button>
+        {open && <FeedbackDialog reasons={[]} selected={[]} note={note} sent={false}
+          onNoteChange={setNote} onSubmit={submit} />}
+      </>
+    }
+    render(<DismissibleFeedback />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Anything else?' }),
+      { target: { value: 'A draft I changed my mind about' } })
+    expect((screen.getByRole('textbox', { name: 'Anything else?' }) as HTMLTextAreaElement).value)
+      .toBe('A draft I changed my mind about')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel feedback' }))
+    expect(screen.queryByRole('textbox', { name: 'Anything else?' })).toBeNull()
+    expect(submit).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen feedback' }))
+    expect((screen.getByRole('textbox', { name: 'Anything else?' }) as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getByRole('button', { name: 'Send feedback' })).not.toBeNull()
+  })
+
+  it('keeps feedback controls from submitting a surrounding form by accident', () => {
+    const formSubmit = vi.fn((event: FormEvent<HTMLFormElement>) => event.preventDefault())
+    const feedbackSubmit = vi.fn()
+    const toggleReason = vi.fn()
+    render(<form onSubmit={formSubmit}>
+      <FeedbackDialog reasons={['Needs correction']} selected={[]} note="" sent={false}
+        onToggleReason={toggleReason} onSubmit={feedbackSubmit} />
+    </form>)
+    const reason = screen.getByRole('button', { name: 'Needs correction' }) as HTMLButtonElement
+    const send = screen.getByRole('button', { name: 'Send feedback' }) as HTMLButtonElement
+    expect(reason.type).toBe('button')
+    expect(send.type).toBe('button')
+    fireEvent.click(reason)
+    fireEvent.click(send)
+    expect(toggleReason).toHaveBeenCalledWith('Needs correction')
+    expect(feedbackSubmit).toHaveBeenCalledTimes(1)
+    expect(formSubmit).not.toHaveBeenCalled()
+  })
+
+  it('isolates feedback callbacks when two independent messages are visible', () => {
+    const firstSubmit = vi.fn()
+    const secondSubmit = vi.fn()
+    const firstNote = vi.fn()
+    const secondNote = vi.fn()
+    render(<>
+      <FeedbackDialog data-testid="first-feedback" reasons={[]} selected={[]}
+        note="first" sent={false} onNoteChange={firstNote} onSubmit={firstSubmit} />
+      <FeedbackDialog data-testid="second-feedback" reasons={[]} selected={[]}
+        note="second" sent={false} onNoteChange={secondNote} onSubmit={secondSubmit} />
+    </>)
+    const second = screen.getByTestId('second-feedback')
+    fireEvent.change(within(second).getByRole('textbox', { name: 'Anything else?' }),
+      { target: { value: 'Only the second message needs correction' } })
+    fireEvent.click(within(second).getByRole('button', { name: 'Send feedback' }))
+    expect(secondNote).toHaveBeenCalledWith('Only the second message needs correction')
+    expect(secondSubmit).toHaveBeenCalledTimes(1)
+    expect(firstNote).not.toHaveBeenCalled()
+    expect(firstSubmit).not.toHaveBeenCalled()
+    expect((within(screen.getByTestId('first-feedback')).getByRole('textbox') as HTMLTextAreaElement).value)
+      .toBe('first')
+  })
+
+  it('reveals stopped-run actions only when the matching operation becomes available', () => {
+    const continueRun = vi.fn()
+    const discardRun = vi.fn()
+    const view = render(<StoppedRun words={['The', 'answer', 'started']} reason="Paused" />)
+    expect(screen.queryByRole('button')).toBeNull()
+    view.rerender(<StoppedRun words={['The', 'answer', 'started']} reason="Paused"
+      onContinue={continueRun} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(continueRun).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull()
+    view.rerender(<StoppedRun words={['The', 'answer', 'started']} reason="Stopped"
+      onDiscard={discardRun} />)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(discardRun).toHaveBeenCalledTimes(1)
+    expect(continueRun).toHaveBeenCalledTimes(1)
+    expect(view.container.textContent).toContain('Stopped')
+  })
+
+  it('routes controls to the correct stopped run when two are visible', () => {
+    const continueFirst = vi.fn()
+    const discardSecond = vi.fn()
+    render(<>
+      <StoppedRun data-testid="stopped-first" words={['First', 'partial']}
+        reason="User paused" onContinue={continueFirst} />
+      <StoppedRun data-testid="stopped-second" words={['Second', 'partial']}
+        reason="Request cancelled" onDiscard={discardSecond} />
+    </>)
+    const first = screen.getByTestId('stopped-first')
+    const second = screen.getByTestId('stopped-second')
+    expect(within(first).getByText(/First partial/)).not.toBeNull()
+    expect(within(second).getByText(/Second partial/)).not.toBeNull()
+    expect(within(first).queryByRole('button', { name: 'Discard' })).toBeNull()
+    expect(within(second).queryByRole('button', { name: 'Continue' })).toBeNull()
+    fireEvent.click(within(second).getByRole('button', { name: 'Discard' }))
+    expect(discardSecond).toHaveBeenCalledTimes(1)
+    expect(continueFirst).not.toHaveBeenCalled()
+    fireEvent.click(within(first).getByRole('button', { name: 'Continue' }))
+    expect(continueFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('inserts new day dividers only when appended message data crosses a day', () => {
+    const first: DatedMessage = { id: 'turn-1', day: 'Monday', time: '23:58', role: 'user', text: 'Late note' }
+    const second: DatedMessage = { id: 'turn-2', day: 'Monday', time: '23:59', role: 'assistant', text: 'Response' }
+    const third: DatedMessage = { id: 'turn-3', day: 'Tuesday', time: '00:02', role: 'assistant', text: 'Follow-up' }
+    const view = render(<DaySeparator messages={[first]} />)
+    expect(screen.getAllByText('Monday')).toHaveLength(1)
+    view.rerender(<DaySeparator messages={[first, second]} />)
+    expect(screen.getAllByText('Monday')).toHaveLength(1)
+    expect(screen.getByText('23:59')).not.toBeNull()
+    view.rerender(<DaySeparator messages={[first, second, third]} />)
+    expect(screen.getAllByText('Monday')).toHaveLength(1)
+    expect(screen.getAllByText('Tuesday')).toHaveLength(1)
+    const content = view.container.textContent ?? ''
+    expect(content.indexOf('Late note')).toBeLessThan(content.indexOf('Response'))
+    expect(content.indexOf('Response')).toBeLessThan(content.indexOf('Follow-up'))
+    expect(screen.getByText('Follow-up').parentElement?.className).not.toContain('flex-row-reverse')
+  })
+
+  it('renders message text literally without treating it as markup or an action', () => {
+    const messages: DatedMessage[] = [
+      { id: 'literal-1', day: 'Today', time: '10:00', role: 'user', text: '<script>alert(1)</script>' },
+      { id: 'literal-2', day: 'Today', time: '10:01', role: 'assistant', text: '<button>approve</button>' },
+    ]
+    const view = render(<DaySeparator messages={messages} />)
+    expect(screen.getByText('<script>alert(1)</script>')).not.toBeNull()
+    expect(screen.getByText('<button>approve</button>')).not.toBeNull()
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'approve' })).toBeNull()
+    expect(screen.getByText('10:00')).not.toBeNull()
+    expect(screen.getByText('10:01')).not.toBeNull()
+  })
+
+  it('uses supplied speaker identities and role tones without fabricated details', () => {
+    const turns: SpeakerTurn[] = [
+      { id: 'turn-u', kind: 'user', name: 'Ari', text: 'Please inspect this.' },
+      { id: 'turn-a', kind: 'agent', name: 'Gideon', detail: 'answer', text: 'Checking.' },
+      { id: 'turn-s', kind: 'subagent', name: 'Research worker', text: 'Two sources found.' },
+      { id: 'turn-t', kind: 'tool', name: 'Search', detail: '2 results', text: 'Completed.' },
+    ]
+    const view = render(<SpeakerIdentity turns={turns} />)
+    expect(screen.getByText('Ari').closest('div.flex')?.previousElementSibling?.className).toContain('text-foreground/55')
+    expect(screen.getByText('Gideon').closest('div.flex')?.previousElementSibling?.className).toContain('text-blue-600')
+    expect(screen.getByText('Research worker').closest('div.flex')?.previousElementSibling?.className).toContain('rounded-full')
+    expect(screen.getByText('Search').closest('div.flex')?.previousElementSibling?.className).toContain('text-foreground/40')
+    expect(view.container.textContent).not.toContain('undefined')
+    expect(screen.getByText('answer')).not.toBeNull()
+    expect(screen.getByText('2 results')).not.toBeNull()
+    expect(view.container.querySelectorAll('svg')).toHaveLength(4)
+  })
+
+  it('updates speaker order and text from new turn data without keeping stale rows', () => {
+    const early: SpeakerTurn = { id: 'early', kind: 'user', name: 'User', text: 'First question' }
+    const reply: SpeakerTurn = { id: 'reply', kind: 'agent', name: 'Gideon', text: 'First answer' }
+    const view = render(<SpeakerIdentity turns={[early, reply]} />)
+    expect(view.container.textContent?.indexOf('First question')).toBeLessThan(
+      view.container.textContent?.indexOf('First answer') ?? 0)
+    const updated: SpeakerTurn = { ...reply, text: 'Corrected answer', detail: 'revised' }
+    view.rerender(<SpeakerIdentity turns={[updated]} />)
+    expect(screen.queryByText('First question')).toBeNull()
+    expect(screen.queryByText('First answer')).toBeNull()
+    expect(screen.getByText('Corrected answer')).not.toBeNull()
+    expect(screen.getByText('revised')).not.toBeNull()
+    expect(view.container.querySelectorAll('svg')).toHaveLength(1)
+  })
+
+  it('keeps speaker names and details as text when external data contains markup', () => {
+    const turns: SpeakerTurn[] = [{ id: 'unsafe', kind: 'tool', name: '<img src=x>',
+      detail: '<script>bad()</script>', text: '<a href="javascript:bad()">Open</a>' }]
+    const view = render(<SpeakerIdentity turns={turns} />)
+    expect(screen.getByText('<img src=x>')).not.toBeNull()
+    expect(screen.getByText('<script>bad()</script>')).not.toBeNull()
+    expect(screen.getByText('<a href="javascript:bad()">Open</a>')).not.toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(view.container.querySelector('a')).toBeNull()
+  })
+
+  it('lets a controlled regenerate menu pick a real option and mark it current', () => {
+    const picked: string[] = []
+    const options: RegenerateOption[] = [
+      { id: 'same', label: 'Retry response', detail: 'current setting' },
+      { id: 'brief', label: 'Try a brief response', detail: 'shorter answer' },
+    ]
+    function RegenerationFlow() {
+      const [open, setOpen] = useState(false)
+      const [currentId, setCurrentId] = useState('same')
+      return <RegenerateMenu options={options} open={open} currentId={currentId}
+        onOpenChange={setOpen} onPick={(id) => {
+          picked.push(id)
+          setCurrentId(id)
+          setOpen(false)
+        }} />
+    }
+    render(<RegenerationFlow />)
+    const toggle = screen.getByRole('button', { name: 'Regenerate response options' })
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: /Try a brief response/ }))
+    expect(picked).toEqual(['brief'])
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: /Try a brief response/ }).textContent).toContain('current')
+    expect(screen.getByRole('button', { name: /Retry response/ }).textContent).toContain('current setting')
+  })
+
+  it('uses stable option ids when two regenerate choices share a visible label', () => {
+    const pick = vi.fn()
+    const options: RegenerateOption[] = [
+      { id: 'provider-a', label: 'Retry', detail: 'first available route' },
+      { id: 'provider-b', label: 'Retry', detail: 'second available route' },
+    ]
+    const view = render(<RegenerateMenu options={options} open currentId="provider-a" onPick={pick} />)
+    const choices = screen.getAllByRole('button', { name: /Retry/ })
+    expect(choices).toHaveLength(2)
+    expect(choices[0].textContent).toContain('current')
+    expect(choices[1].textContent).toContain('second available route')
+    fireEvent.click(choices[1])
+    expect(pick).toHaveBeenCalledWith('provider-b')
+    expect(pick).toHaveBeenCalledTimes(1)
+    expect(view.container.querySelector('[data-slot="regenerate-menu"]')).not.toBeNull()
+  })
+
+  it('keeps regenerate choices noninteractive until a pick callback exists', () => {
+    const options: RegenerateOption[] = [{ id: 'retry', label: 'Retry answer', detail: 'same settings' }]
+    const pick = vi.fn()
+    const view = render(<RegenerateMenu options={options} open currentId="retry" />)
+    expect(screen.getByText('Retry answer').parentElement?.tagName).toBe('DIV')
+    expect(screen.queryByRole('button')).toBeNull()
+    view.rerender(<RegenerateMenu options={options} open currentId="retry" onPick={pick} />)
+    const choice = screen.getByRole('button', { name: /Retry answer/ })
+    expect(choice.getAttribute('type')).toBe('button')
+    fireEvent.click(choice)
+    expect(pick).toHaveBeenCalledWith('retry')
+    expect(pick).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves confidence disclosure between real claims as focus changes', () => {
+    const claims: ConfidenceClaim[] = [
+      { id: 'source', text: 'Quoted passage', confidence: 'grounded', basis: 'record 42' },
+      { id: 'estimate', text: 'Estimated effect', confidence: 'inferred', basis: 'observed trend' },
+      { id: 'unknown', text: 'Open issue', confidence: 'uncertain', basis: 'not checked' },
+    ]
+    function ConfidenceFlow() {
+      const [hoveredId, setHoveredId] = useState('')
+      return <ConfidenceMarker claims={claims} hoveredId={hoveredId} onHover={setHoveredId} />
+    }
+    render(<ConfidenceFlow />)
+    const source = screen.getByRole('button', { name: 'Quoted passage' })
+    const estimate = screen.getByRole('button', { name: 'Estimated effect' })
+    const unknown = screen.getByRole('button', { name: 'Open issue' })
+    fireEvent.focus(source)
+    expect(screen.getByRole('status').textContent).toContain('from a source · record 42')
+    expect(source.getAttribute('aria-describedby')).toBe(screen.getByRole('status').id)
+    fireEvent.focus(estimate)
+    expect(screen.getByRole('status').textContent).toContain('inferred · observed trend')
+    expect(source.getAttribute('aria-describedby')).toBeNull()
+    fireEvent.mouseEnter(unknown)
+    expect(screen.getByRole('status').textContent).toContain('unverified · not checked')
+    fireEvent.mouseLeave(unknown)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('shows an externally selected confidence basis without inventing an action', () => {
+    const claim: ConfidenceClaim = { id: 'cited', text: 'Supported observation',
+      confidence: 'grounded', basis: 'signed transcript' }
+    const view = render(<ConfidenceMarker claims={[claim]} hoveredId="cited" />)
+    const text = screen.getByText('Supported observation')
+    expect(text.tagName).toBe('SPAN')
+    expect(screen.queryByRole('button')).toBeNull()
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain('signed transcript')
+    expect(text.getAttribute('aria-describedby')).toBe(status.id)
+    expect(view.container.querySelectorAll('svg')).toHaveLength(0)
+  })
+
+  it('escapes confidence claim text and evidence supplied by a remote source', () => {
+    const claim: ConfidenceClaim = { id: 'remote', text: '<script>not markup</script>',
+      confidence: 'uncertain', basis: '<img src=x onerror=alert(1)>' }
+    const view = render(<ConfidenceMarker claims={[claim]} hoveredId="remote" onHover={() => {}} />)
+    expect(screen.getByRole('button', { name: '<script>not markup</script>' })).not.toBeNull()
+    expect(screen.getByRole('status').textContent).toContain('<img src=x onerror=alert(1)>')
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(view.container.querySelectorAll('[aria-describedby]')).toHaveLength(1)
   })
 })
