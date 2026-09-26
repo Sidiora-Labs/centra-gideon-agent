@@ -78,6 +78,36 @@
   background: var(--color-surface-low);
 }
 
+@media (max-width: 768px) {
+  .gideon-shell .gideon-topbar {
+    height: auto !important;
+    min-height: 0;
+    flex-wrap: wrap;
+    align-content: start;
+    padding-inline: var(--spacing-m) !important;
+    padding-bottom: var(--spacing-xs);
+  }
+
+  .gideon-shell:not([data-hosted-mobile='true']) .gideon-topbar {
+    padding-top: max(64px, var(--shell-corner-rh, 0px));
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-left],
+  .gideon-shell .gideon-topbar > [data-header-right] {
+    flex: 0 0 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 0 !important;
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-right] {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .gideon-shell .gideon-topbar > [data-header-right]:empty { display: none; }
+}
+
 @media (max-width: 767px) {
   .gideon-workspace {
     margin: 0;
