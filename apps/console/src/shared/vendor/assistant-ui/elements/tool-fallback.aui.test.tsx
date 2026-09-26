@@ -39,12 +39,14 @@ function render(ui: ReactElement) {
   };
 }
 
-function ToolMessage({ part }: { part: ToolCallMessagePartProps }) {
+type PersistedToolCall = Extract<Exclude<ThreadMessageLike["content"], string>[number], { type: "tool-call" }>;
+
+function ToolMessage({ part, status }: { part: PersistedToolCall; status: NonNullable<ThreadMessageLike["status"]> }) {
   const message: ThreadMessageLike = {
     id: "tool-message",
     role: "assistant",
     content: [part],
-    status: part.status?.type === "running" ? { type: "running" } : { type: "complete", reason: "stop" },
+    status,
   };
   const [messages, setMessages] = useState<ThreadMessageLike[]>([message]);
   useEffect(() => setMessages([message]), [part]);
@@ -160,24 +162,22 @@ describe("ToolFallback", () => {
   });
 
   it("follows a real tool-message part from running output to completed output", async () => {
-    const running: ToolCallMessagePartProps = {
+    const running: PersistedToolCall = {
       type: "tool-call",
       toolCallId: "call-1",
       toolName: "test-tool",
       args: { query: "docs" },
       argsText: '{"query":"docs"}',
-      status: { type: "running" },
     };
-    const view = baseRender(<ToolMessage part={running} />);
+    const view = baseRender(<ToolMessage part={running} status={{ type: "running" }} />);
     expect(screen.getByRole("button", { name: /Used tool: test-tool/ })).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: /Used tool: test-tool/ }));
     expect(screen.getByText('{"query":"docs"}')).toBeInTheDocument();
 
     view.rerender(<ToolMessage part={{
       ...running,
-      status: { type: "complete" },
       result: "2 documents",
-    }} />);
+    }} status={{ type: "complete", reason: "stop" }} />);
     await waitFor(() => expect(view.container.querySelector('[data-slot="tool-fallback-trigger-icon"]'))
       .not.toHaveClass("animate-spin"));
     fireEvent.click(screen.getByRole("button", { name: /Used tool: test-tool/ }));
