@@ -11,7 +11,7 @@
     "code-runner.tsx": "3621e90c9ab954da9055ceb6696ff438dad0a4454b082fce031090babad2be4c"
   },
   "adapted_modules": {
-    "elicitation-form.tsx": "0a712c5630a2e4693b66724d2c18ac58f86575d5ce4d3874ccaeef210bd11baa",
+    "elicitation-form.tsx": "e41fb8c832f933e6eee19a12dbfea72ba854df2aca5e0fc11f524c7fba07330c",
     "mcp-server-panel.tsx": "14b82c682eec29a594cefbbbc992966d99c092e4f053552c5fe8612df11f15c1",
     "tool-error.tsx": "cb6b22cfa0e39019e3d63bbc6b9f9d621de5de95243a0da268e5c9fae345919a",
     "permission-grant.tsx": "a91e15d004d3ba9316f3773c4d40eaa8f0b07c152dc5f786c2281841e9e8b343",
@@ -22,6 +22,8 @@
     "replace donor @/lib/utils import with shared vendor ../lib/utils",
     "retain donor typed props, caller actions and presentation behavior",
     "disable action buttons when the caller has not supplied an action",
-    "allow unknown retry telemetry and show attempt fraction only when both counts are supplied"
+    "allow unknown retry telemetry and show attempt fraction only when both counts are supplied",
+    "allow a caller to render live schema controls while retaining donor read-only field defaults",
+    "expose an optional Cancel action and caller labels without changing the default donor actions"
   ]
 }
