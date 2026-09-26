@@ -289,4 +289,30 @@ describe('real prompt library producer', () => {
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByText('All prompts')).toBeInTheDocument()
   })
+
+  it('retries a rejected prompt render with the filled values intact and inserts once', async () => {
+    const variables: PromptVariable[] = [{ name: 'goal', type: 'text', required: true }]
+    vi.spyOn(api, 'prompts').mockResolvedValue([{ name: 'plan', title: 'Plan a change', variables }])
+    vi.spyOn(api, 'prompt').mockResolvedValue({ name: 'plan', title: 'Plan a change', variables })
+    let available = false
+    const renderPrompt = vi.spyOn(api, 'renderPrompt').mockImplementation(async (_name, values) => {
+      if (!available) throw new Error('Render unavailable')
+      return { name: 'plan', rendered: `Plan ${values.goal}` }
+    })
+    const onInsert = vi.fn()
+    const onClose = vi.fn()
+    render(<PromptPalette onInsert={onInsert} onClose={onClose} />)
+    fireEvent.click(await screen.findByRole('option', { name: /Plan a change/ }))
+    const goal = await screen.findByRole('textbox', { name: /goal/ })
+    fireEvent.change(goal, { target: { value: 'release' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
+    expect(await screen.findByText('Render unavailable')).toBeInTheDocument()
+    expect(goal).toHaveValue('release')
+    expect(onInsert).not.toHaveBeenCalled()
+    available = true
+    fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
+    await waitFor(() => expect(onInsert).toHaveBeenCalledExactlyOnceWith('Plan release'))
+    expect(renderPrompt).toHaveBeenLastCalledWith('plan', { goal: 'release' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })
