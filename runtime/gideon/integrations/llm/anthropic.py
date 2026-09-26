@@ -47,7 +47,7 @@ def _read_cache_usage(usage: object) -> tuple[int, int]:
     return creation, read
 
 
-def _translate_tools(tools: list[dict]) -> list[dict]:
+def _translate_tools(tools: list[dict], *, cache_enabled: bool = False) -> list[dict]:
     translated = []
     for tool in tools:
         if not isinstance(tool, dict):
@@ -65,6 +65,8 @@ def _translate_tools(tools: list[dict]) -> list[dict]:
                 or {"type": "object", "properties": {}},
             )
         )
+    if cache_enabled and translated:
+        translated[-1] = _mark_block(dict(translated[-1]))
     return translated
 
 
@@ -331,6 +333,7 @@ class AnthropicProvider(ConversationProtocol):
         translate: bool,
     ) -> dict[str, Any]:
         prepared = self._with_pending_image(messages)
+        cache_enabled = translate and any(CACHE_HINT_KEY in message for message in prepared)
         system, prepared = (
             _translate_messages(prepared) if translate else ("", prepared)
         )
@@ -338,7 +341,7 @@ class AnthropicProvider(ConversationProtocol):
         if system:
             request["system"] = system
         if tools:
-            request["tools"] = _translate_tools(tools)
+            request["tools"] = _translate_tools(tools, cache_enabled=cache_enabled)
         budget = _THINKING_BUDGETS.get(reasoning_effort or "")
         if budget:
             request["thinking"] = {

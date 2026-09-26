@@ -29,15 +29,31 @@ def _cache_boundary(messages: list[dict]) -> int:
 
 
 def mark_cacheable_prefix(
-    messages: list[dict], mode: PromptCache, *, generation: int = 0
+    messages: list[dict], mode: PromptCache, *, generation: int = 0,
+    max_markers: int = 1,
 ) -> list[dict]:
     if not messages or mode is not PromptCache.EXPLICIT:
         return messages
-    boundary = _cache_boundary(messages)
-    replacement = dict(
-        messages[boundary], **{CACHE_HINT_KEY: {"generation": generation}}
-    )
+    if max_markers <= 1:
+        boundaries = {_cache_boundary(messages)}
+    else:
+        eligible = [
+            index for index, message in enumerate(messages)
+            if message.get("role") != "tool"
+            and not message.get(_VOLATILE_HINT_KEY)
+            and message.get("content")
+        ]
+        stable_system = next(
+            (index for index in reversed(eligible) if messages[index].get("role") == "system"),
+            None,
+        )
+        boundaries = set(eligible[-max_markers:])
+        if stable_system is not None:
+            boundaries.add(stable_system)
+            if len(boundaries) > max_markers:
+                boundaries.remove(min(index for index in boundaries if index != stable_system))
     return [
-        replacement if index == boundary else message
+        dict(message, **{CACHE_HINT_KEY: {"generation": generation}})
+        if index in boundaries else message
         for index, message in enumerate(messages)
     ]

@@ -103,7 +103,7 @@ function writeCachedDetail(key: string, d: ChatDetail): void {
   writeQuery(detailKey(key), d, true)
 }
 
-type ApproveAction = 'approved' | 'rejected' | 'trust' | 'trust_agent' | 'trust_reads' | 'yolo'
+type ApproveAction = 'approved' | 'rejected' | 'revised' | 'trust' | 'trust_agent' | 'trust_reads' | 'yolo'
 
 const MEMORY_MODES: { id: MemoryMode; label: string; hint: string }[] = [
   { id: 'persistent', label: 'Persistent', hint: 'Remember across sessions' },
@@ -694,7 +694,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         patchLastAssistant((segs) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
-          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
+          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
           return segs
         })
         breakText.current = true
@@ -949,7 +949,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const approve = useCallback((id: string, action: ApproveAction) => {
+  const approve = useCallback((id: string, action: ApproveAction, revision?: string) => {
     const s = sessionRef.current
     if (!s) return
     const raised: ApprovalMode | null =
@@ -957,7 +957,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       : action === 'trust_reads' ? 'trust_reads'
       : action === 'yolo' ? 'yolo'
       : null
-    api.approve(s, action, id)
+    api.approve(s, action, id, revision)
       .then((result) => {
         const screening = result.approval_screening
         if (screening?.verdict === 'denied') {
@@ -2723,7 +2723,7 @@ function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, 
   segments: Segment[]; isLast: boolean
   messageTs?: string
   streaming?: boolean
-  onApprove: (id: string, action: ApproveAction) => void
+  onApprove: (id: string, action: ApproveAction, revision?: string) => void
   onSwitchToAgent: (continuation: string) => void
   onOpenFile: (path: string) => void
   onSetupModel: () => void

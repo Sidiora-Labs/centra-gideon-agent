@@ -42,6 +42,8 @@ class TurnUsage:
     cache_creation_tokens: int = 0
     cost_usd: float = 0.0
     priced: bool = True
+    model_calls: int | None = None
+    usage_status: str = "absent"
     duration_ms: int = 0
     instance_id: str | None = None
     provider_instance: str | None = None
@@ -468,6 +470,13 @@ class EventAccounting:
 
     def record(self, source, session_key, agent, provider):
         counts, cost, has_pricing = self.values()
+        metadata = getattr(self.event, "tool_meta", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        calls = metadata.get("model_calls")
+        calls = calls if isinstance(calls, int) and calls >= 0 else None
+        status = metadata.get("usage_status")
+        if status not in {"measured", "partial", "absent", "no_model_calls"}:
+            status = "measured" if any(counts.values()) or cost else "absent"
         return TurnUsage(
             ts=datetime.now(timezone.utc).isoformat(),
             session_key=session_key,
@@ -477,7 +486,11 @@ class EventAccounting:
             model=self.model,
             **counts,
             cost_usd=cost,
-            priced=bool(cost) or has_pricing(self.model),
+            priced=status == "no_model_calls" or (
+                status == "measured" and (bool(cost) or has_pricing(self.model))
+            ),
+            model_calls=calls,
+            usage_status=status,
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),
         )
 
@@ -525,6 +538,8 @@ def _blank_agg() -> dict:
         "cost_usd": 0.0,
         "turns": 0,
         "priced": True,
+        "model_calls": 0,
+        "usage_status_counts": {},
     }
 
 
@@ -533,6 +548,14 @@ def _fold(agg: dict, row: dict) -> None:
         agg[key] += int(row.get(key, 0) or 0)
     agg["cost_usd"] += float(row.get("cost_usd", 0.0) or 0.0)
     agg["turns"] += 1
+    calls = row.get("model_calls")
+    if isinstance(calls, int) and calls >= 0:
+        agg["model_calls"] += calls
+    status = row.get("usage_status") or (
+        "measured" if any(row.get(key, 0) for key in _TOKEN_FIELDS) else "absent"
+    )
+    statuses = agg["usage_status_counts"]
+    statuses[status] = statuses.get(status, 0) + 1
     if not row.get("priced", True):
         agg["priced"] = False
 

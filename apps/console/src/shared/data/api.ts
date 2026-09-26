@@ -4135,9 +4135,9 @@ export const api = {
     post<{ ok: boolean; session?: string; queued?: boolean; steered?: boolean }>('/api/chat?ws=1', { message, session, meta, ...(queue_mode ? { queue_mode } : {}), ...(input_origin ? { input_origin } : {}) }),
   cancelQueued: (session: string, queueId: string) => del(`/api/chat/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(queueId)}`),
   stopChat: (session: string, force = false) => post(`/api/chat/sessions/${session}/stop${force ? '?force=true' : ''}`),
-  approve: (session: string, action: string, request_id?: string) =>
+  approve: (session: string, action: string, request_id?: string, revision?: string) =>
     post<{ ok: boolean; mode?: ApprovalMode; approval_screening?: ApprovalScreeningVerdict }>(
-      `/api/chat/sessions/${session}/approve`, { action, request_id }),
+      `/api/chat/sessions/${session}/approve`, { action, request_id, revision }),
 
   sideOpen: (session: string) => post<{ ok: boolean }>(`/api/chat/sessions/${session}/side/open`, {}),
   sideTurn: (session: string, question: string) => post<{ ok: boolean; run_id: string }>(`/api/chat/sessions/${session}/side/turn`, { question }),

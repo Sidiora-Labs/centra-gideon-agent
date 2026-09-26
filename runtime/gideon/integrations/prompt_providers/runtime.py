@@ -21,35 +21,9 @@ from typing import Any, Callable
 from gideon.integrations.prompt_providers.base import (
     PromptSnippet,
     PromptTemplate,
-    PromptVariable,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _variables_with_inline(
-    content: str,
-    declared: list[PromptVariable],
-    values: dict[str, Any],
-) -> list[PromptVariable]:
-    from gideon.integrations.prompt_providers.engine import extract_inline_variables
-
-    seen = {variable.name for variable in declared}
-    variables = [
-        *declared,
-        *(
-            variable
-            for variable in extract_inline_variables(content)
-            if variable.name not in seen
-        ),
-    ]
-    seen.update(variable.name for variable in variables)
-    variables.extend(
-        PromptVariable(name=name)
-        for name in values
-        if isinstance(name, str) and name not in seen
-    )
-    return variables
 
 
 def _render_with_inline(
@@ -57,14 +31,9 @@ def _render_with_inline(
     values: dict[str, Any],
     resolver: Callable[[str], "PromptSnippet | None"],
 ) -> str:
-    from gideon.integrations.prompt_providers.engine import render
+    from gideon.integrations.prompt_providers.engine import render_template
 
-    return render(
-        template.content,
-        _variables_with_inline(template.content, template.variables, values),
-        values,
-        resolver=resolver,
-    )
+    return render_template(template, values, resolver=resolver)
 
 
 def snippet_resolver() -> Callable[[str], "PromptSnippet | None"]:
