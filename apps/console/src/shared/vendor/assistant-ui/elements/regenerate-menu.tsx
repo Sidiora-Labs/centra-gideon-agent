@@ -15,17 +15,19 @@ export function RegenerateMenu({
   options,
   open,
   currentId,
+  labels,
   onOpenChange,
   onPick,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "options" | "open" | "currentId" | "onOpenChange" | "onPick"
+  "children" | "options" | "open" | "currentId" | "labels" | "onOpenChange" | "onPick"
 > & {
   options: readonly RegenerateOption[];
   open: boolean;
   currentId: string;
+  labels?: { options?: string; current?: string };
   onOpenChange?: (open: boolean) => void;
   onPick?: (id: string) => void;
 }) {
@@ -40,7 +42,7 @@ export function RegenerateMenu({
         <button
           type="button"
           aria-expanded={open}
-          aria-label="Regenerate response options"
+          aria-label={labels?.options ?? "Regenerate response options"}
           onClick={() => onOpenChange(!open)}
           className={cn(
             ghostButton,
@@ -66,7 +68,7 @@ export function RegenerateMenu({
                   {option.label}
                 </span>
                 <span className={cn(mono, "text-foreground/30 shrink-0")}>
-                  {option.id === currentId ? "current" : option.detail}
+                  {option.id === currentId ? (labels?.current ?? "current") : option.detail}
                 </span>
               </>
             );

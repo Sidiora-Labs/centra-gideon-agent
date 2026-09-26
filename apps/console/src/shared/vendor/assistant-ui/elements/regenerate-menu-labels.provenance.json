@@ -1,0 +1,5 @@
+{
+  "module": "regenerate-menu.tsx",
+  "local_sha256": "22504cf2f883c3f9665ec6ba400e943ddd9801e14828c79a5980784c21d5561c",
+  "adaptation": "Optional caller labels for the model-options trigger and current-choice badge; donor English defaults and callback behavior remain."
+}
