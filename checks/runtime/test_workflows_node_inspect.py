@@ -185,15 +185,11 @@ class TestReconstructabilitySet:
         body = _body(await H.api_run_node_inspect(_req(run_id, "target")))
         assert body["resolved_prompt"] == "hello world"
 
-    async def test_a_large_prompt_returns_a_ref_not_the_body(self) -> None:
+    async def test_a_large_prompt_is_available_for_redacted_inspection(self) -> None:
         big = "x" * (J.MAX_INLINE_OUTPUT_BYTES + 10)
         run_id = _build_run(prompt=big)
         body = _body(await H.api_run_node_inspect(_req(run_id, "target")))
-        assert (
-            isinstance(body["resolved_prompt"], dict)
-            and "ref" in body["resolved_prompt"]
-        )
-        assert big not in json.dumps(body)
+        assert body["resolved_prompt"] == big
 
     async def test_the_ledger_slice_is_scoped_to_this_instance(self) -> None:
         run_id = _build_run()

@@ -699,6 +699,7 @@ class NodeInstance:
     item_total: int = 0
     #: liveness stays owned by `DelegationSupervisor.get` -- and it is per-INSTANCE because a
     subagent_id: str = ""
+    subagent_claim_holder: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return RecordCodecs.write("NodeInstance", self)

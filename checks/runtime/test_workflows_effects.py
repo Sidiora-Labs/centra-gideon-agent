@@ -289,6 +289,36 @@ class TestEffectLifecycle:
 
 
 class TestRedoBoundary:
+    @pytest.mark.parametrize("effect_status", [EffectStatus.ATTEMPTED, EffectStatus.COMMITTED])
+    async def test_unreplayable_effect_outcome_blocks_interrupted_resume(
+        self, effect_status: EffectStatus
+    ) -> None:
+        from gideon.automation.workflows.journal import Journal
+
+        spec = _action_spec()
+        run = _make_run(spec)
+        Journal(run.id).effect(
+            "root.children[0]",
+            idempotency_key=idempotency_key(run.id, "root.children[0]", 0),
+            effect_status=effect_status.value,
+            epoch=0,
+            node_id="send",
+            provider="notify",
+        )
+        store.write_state(run.id, {"root.children[0]": NodeInstance(path="root.children[0]")})
+        fired: list[dict] = []
+        controller = RunController(
+            run,
+            spec,
+            services=EngineServices(get_provider=_provider(_Result(stdout='{"id":"repeat"}'), calls=fired)),
+        )
+
+        assert await controller.run_to_completion(timeout=20) == RunStatus.FAILED
+        assert fired == []
+        inst = store.read_state(run.id)["root.children[0]"]
+        assert inst.failure is not None
+        assert inst.failure.terminal_reason == "effect_outcome_unknown"
+
     def _completed_with_effect(self, run_id: str, spec: dict) -> None:
         """Simulate a prior epoch-0 completion whose effect committed."""
         from gideon.automation.workflows.journal import Journal

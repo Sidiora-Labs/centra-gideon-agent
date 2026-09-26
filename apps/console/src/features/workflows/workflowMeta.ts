@@ -79,7 +79,8 @@ export function nodeDepth(instancePath: string): number {
 }
 
 export function fmtElapsed(secs: number | undefined): string {
-  if (!secs || secs <= 0) return ''
+  if (secs === undefined || !Number.isFinite(secs)) return ''
+  if (secs <= 0) return '0s'
   if (secs < 60) return `${Math.round(secs)}s`
   const m = Math.floor(secs / 60)
   if (m < 60) return `${m}m ${Math.round(secs % 60)}s`
