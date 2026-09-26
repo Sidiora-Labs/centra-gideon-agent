@@ -80,6 +80,7 @@ describe('GeoJSON artifact coordinates', () => {
     expect(container.querySelectorAll('[data-slot="geo-map"]')).toHaveLength(1)
     expect(container.querySelectorAll('[data-slot="map-answer"]')).toHaveLength(1)
     expect(screen.getByText('52.5, 13.4')).toBeTruthy()
+    expect(screen.getByText('Coordinates: latitude, longitude.')).toBeTruthy()
     expect(screen.getByRole('img', { name: 'Berlin' })).toBeTruthy()
     expect(screen.queryAllByRole('button')).toHaveLength(0)
     expect(screen.queryByRole('table')).toBeNull()

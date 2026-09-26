@@ -17,6 +17,9 @@ small (every component costs prompt space) so the two stay legibly in step.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -175,3 +178,64 @@ def library_manifest() -> dict:
         ],
         "prompt": library_prompt(),
     }
+
+
+def uispec_catalog() -> tuple[dict[str, Any], ...]:
+    """Vetted snapshot derived from the donor trees; the frontend contract test checks drift."""
+    path = Path(__file__).with_name("uispec_catalog.json")
+    return tuple(json.loads(path.read_text(encoding="utf-8")))
+
+
+def uispec_library_prompt() -> str:
+    """Separate JSON UISpec protocol for records supplied to visualize."""
+    lines = [
+        'Structured UISpec: emit a <widget kind="uispec"> block only for an explicit',
+        'data.generative_ui v1 envelope with a complete real recordId and bindings.',
+        'Return exactly the supplied JSON envelope. Do not invent, change, or complete records.',
+        'Template names and required binding keys/types follow. Actions without an',
+        'authorized product capability render unavailable; do not promise delivery.',
+    ]
+    for entry in uispec_catalog():
+        fields = ", ".join(f"{key}: {kind}" for key, kind in entry["bindings"].items())
+        lines.append(f'{entry["template"]} ({entry["title"]}): {fields}')
+    return "\n".join(lines)
+
+
+def validate_uispec_envelope(value: Any) -> dict[str, Any] | None:
+    """Bound authoring input; tree construction and action checks remain in the FE."""
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "template", "recordId", "bindings"}:
+        return None
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+        return None
+    entry = next((item for item in uispec_catalog() if item["template"] == value["template"]), None)
+    record_id, bindings = value["recordId"], value["bindings"]
+    if not entry or not isinstance(record_id, str) or not 0 < len(record_id) <= 128 or not isinstance(bindings, dict):
+        return None
+    if set(bindings) != set(entry["bindings"]):
+        return None
+
+    def bounded(item: Any, depth: int = 0) -> bool:
+        if depth > 4:
+            return False
+        if item is None or isinstance(item, bool):
+            return True
+        if isinstance(item, str):
+            return len(item) <= 4096
+        if isinstance(item, (int, float)):
+            return abs(item) < float("inf")
+        if isinstance(item, list):
+            return len(item) <= 128 and all(bounded(part, depth + 1) for part in item)
+        if isinstance(item, dict):
+            return len(item) <= 32 and all(isinstance(key, str) and key not in {"__proto__", "constructor", "prototype"} and bounded(part, depth + 1) for key, part in item.items())
+        return False
+
+    for key, kind in entry["bindings"].items():
+        bound = bindings[key]
+        actual = "array" if isinstance(bound, list) else "null" if bound is None else "boolean" if isinstance(bound, bool) else "number" if isinstance(bound, (int, float)) else "string" if isinstance(bound, str) else "object" if isinstance(bound, dict) else "invalid"
+        if actual != kind or not bounded(bound):
+            return None
+        if (key.endswith(".src") or key == "src") and (not isinstance(bound, str) or not bound.lower().startswith(("https://", "http://"))):
+            return None
+    if len(json.dumps(value, ensure_ascii=False)) > 65536:
+        return None
+    return value

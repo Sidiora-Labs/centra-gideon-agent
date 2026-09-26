@@ -476,13 +476,17 @@ def _list_tools() -> list[dict[str, Any]]:
                 "it (e.g. 'show the monthly totals as a bar chart'). Returns a "
                 '`<widget kind="genui">` block to embed directly in your reply. Use this '
                 "instead of hand-writing a widget when you have data to show; it emits ONLY "
-                "registered components, so invalid output is dropped, never rendered."
+                "registered components, so invalid output is dropped, never rendered. "
+                "For a real record matching a structured UISpec template, pass data as "
+                "{generative_ui: {schemaVersion: 1, template, recordId, bindings}}. "
+                "All required bindings must come from the actual record; no missing data "
+                "is invented. Unsupported actions remain unavailable."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "data": {
-                        "description": "The data to visualize (JSON object/array, or text)",
+                        "description": "Data to visualize, or an explicit generative_ui v1 envelope with a real recordId and complete template bindings",
                     },
                     "hint": {
                         "type": "string",

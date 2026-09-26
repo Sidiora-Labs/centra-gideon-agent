@@ -287,7 +287,7 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
     );
   }
 
-  if (result.error) {
+  if (result.error || result.svg === null) {
     return (
       <div
         data-slot="mermaid-fallback"

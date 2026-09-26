@@ -9,6 +9,7 @@ export function QuotaBanner({
   used,
   limit,
   unit,
+  remainingLabel,
   resetsIn,
   upgradeLabel,
   onUpgrade,
@@ -20,6 +21,7 @@ export function QuotaBanner({
   | "used"
   | "limit"
   | "unit"
+  | "remainingLabel"
   | "resetsIn"
   | "upgradeLabel"
   | "onUpgrade"
@@ -27,6 +29,7 @@ export function QuotaBanner({
   used: number;
   limit: number;
   unit: string;
+  remainingLabel?: string;
   resetsIn?: string;
   upgradeLabel: string;
   onUpgrade?: () => void;
@@ -53,7 +56,7 @@ export function QuotaBanner({
             tight && "text-amber-700 dark:text-amber-400",
           )}
         >
-          {left} {unit} left
+          {left} {remainingLabel ?? `${unit} left`}
         </span>
         {resetsIn && <span className={cn(mono, "text-foreground/30 ms-auto tabular-nums")}>
           resets {resetsIn}

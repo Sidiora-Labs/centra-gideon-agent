@@ -100,11 +100,13 @@ export function RecordedCost({ run, session, lines }: { run: UsageAgg | null; se
 export interface ConfiguredQuotaSummary {
   plan: { name: string; token_limit: number | null; cycle_end: string }
   usage: { tokens: number; basis: string }
+  reservations?: { reserved_tokens: number }
 }
 export function ConfiguredQuota({ summary }: { summary: ConfiguredQuotaSummary }) {
   return summary.plan.token_limit != null && summary.plan.token_limit > 0
     ? <div aria-label={`Configured quota ${summary.plan.name}`}>
       <QuotaBanner used={summary.usage.tokens} limit={summary.plan.token_limit} unit="tokens"
+        remainingLabel={summary.reservations ? 'tokens unconsumed before reservations' : undefined}
         resetsIn={summary.plan.cycle_end ? `on ${summary.plan.cycle_end}` : undefined} upgradeLabel="" />
       <p>Owner configured limit · {summary.usage.basis}</p>
     </div>

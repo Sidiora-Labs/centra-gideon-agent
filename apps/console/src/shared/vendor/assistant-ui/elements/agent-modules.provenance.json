@@ -41,7 +41,8 @@
     },
     "agent-card.tsx": {
       "source_sha256": "98e8467bf23f8c7e6d2caecc0285e60b8e46ff98cc89bb6703763e6cda63b6fe",
-      "adaptation": "@/lib/utils -> ../lib/utils; optional unknown metadata and handlerless action hidden"
+      "adapted_sha256": "cd2e98a07599cd7f221f2e4001c3e230b85f499514175a74a838e0e97c95bc13",
+      "adaptation": "@/lib/utils -> ../lib/utils; optional unknown metadata and handlerless action hidden; optional child slot carries recorded Gideon status and counts; blank description and skill descriptions hidden"
     },
     "agent-handoff.tsx": {
       "source_sha256": "08291b474fe732f217d16e12a49c1ceff11f3c4d41f3f363c5341525cec048a4",
@@ -65,11 +66,11 @@
     },
     "cost-meter.tsx": {
       "source_sha256": "ce6dfcd42759516b7fc4b475a88a9523f7e081a0c7f1df5e5da039533c6e7f89",
-      "adaptation": "@/lib/utils -> ../lib/utils"
+      "adaptation": "@/lib/utils -> ../lib/utils; absent session cost hidden and absent model breakdown labeled unavailable"
     },
     "quota-banner.tsx": {
       "source_sha256": "a3a0eba1fb25d44d29e8cadc80ec2432350d8d4b2498a937d2db924d35e5160f",
-      "adaptation": "@/lib/utils -> ../lib/utils; absent reset date and handlerless upgrade action hidden; reset date label accepts exact cycle end"
+      "adaptation": "@/lib/utils -> ../lib/utils; absent reset date and handlerless upgrade action hidden; reset date label accepts exact cycle end; optional remaining label distinguishes observed usage from local reservations"
     }
   }
 }

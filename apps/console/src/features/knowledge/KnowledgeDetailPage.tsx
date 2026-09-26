@@ -9,6 +9,7 @@ import { SidePanel } from '../../shared/ui/SidePanel'
 import { IconButton } from '../../shared/ui/IconButton'
 import { Markdown } from '../../shared/ui/Markdown'
 import { KnowledgeDetail } from './KnowledgeDetail'
+import { KnowledgeImageGallery, KnowledgeLinkPreview, KnowledgeMediaPlayer } from '../chat/auiKnowledgeResults'
 import { AnnotationList } from './ReadingView'
 import { DuplicateList } from './DuplicateList'
 import { KnowledgeEgoGraph, type KnowledgeGraphPayload } from './KnowledgeEgoGraph'
@@ -168,7 +169,7 @@ export function KnowledgeDetailPage({ id, onBack, onOpenItem, query, setQuery }:
   )
 }
 
-function KnowledgeExtras({ item, pool, related, onOpenItem, annotations, onRemoveAnnotation,
+export function KnowledgeExtras({ item, pool, related, onOpenItem, annotations, onRemoveAnnotation,
   duplicates, duplicatesError, onRetryDuplicates, onMerged }: {
   item: KnowledgeItem
   pool: ExtractedContent[]
@@ -185,11 +186,12 @@ function KnowledgeExtras({ item, pool, related, onOpenItem, annotations, onRemov
   const relations = item.relations ?? []
   const showDuplicates = duplicates.length > 0 || !!duplicatesError
   if (pool.length === 0 && entities.length === 0 && relations.length === 0 && related.length === 0
-    && annotations.length === 0 && !showDuplicates && !item.content) {
+    && annotations.length === 0 && !showDuplicates && !item.content && !item.url) {
     return <p data-type="body-s" className="text-on-surface-low">No extracted content, entities, or related items yet.</p>
   }
   return (
     <div className="flex flex-col gap-l">
+      {item.url && <KnowledgeLinkPreview title={item.url_title || item.title || item.url} url={item.url} description={item.summary} />}
       {
 }
       <HighlightsSection annotations={annotations} onRemove={onRemoveAnnotation} />
@@ -228,6 +230,10 @@ function KnowledgeExtras({ item, pool, related, onOpenItem, annotations, onRemov
           </div>
         </Section>
       )}
+      <KnowledgeImageGallery items={related} onOpen={onOpenItem} />
+      {related.filter(candidate => candidate.type === 'audio' || candidate.type === 'video'
+        || candidate.mime_type?.startsWith('audio/') || candidate.mime_type?.startsWith('video/')).map(candidate =>
+        <KnowledgeMediaPlayer key={candidate.id} item={candidate} />)}
       <RelatedSection related={related} onOpenItem={onOpenItem} />
     </div>
   )

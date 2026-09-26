@@ -69,4 +69,20 @@ describe('agent detail names its trigger bindings (#629)', () => {
     expect(await screen.findByText('knowledge-grounding')).toBeTruthy()
     expect(hooksMock).not.toHaveBeenCalled()
   })
+
+  it('shows the donor status only when the API supplies a session count', () => {
+    hooksMock.mockResolvedValue([])
+    const view = mount(agentWith({ triggers: [], running_sessions: 2 }))
+    expect(screen.getByText('termbase-auditor: 2 running')).toBeInTheDocument()
+
+    view.rerender(<NativeAgentDetail agent={agentWith({ triggers: [], running_sessions: 0 })}
+      isDefault={false} editing={false} onSaved={() => {}} onDeleted={() => {}}
+      onSetDefault={() => {}} onEditingChange={() => {}} />)
+    expect(screen.getByText('termbase-auditor: idle')).toBeInTheDocument()
+
+    view.rerender(<NativeAgentDetail agent={agentWith({ triggers: [] })}
+      isDefault={false} editing={false} onSaved={() => {}} onDeleted={() => {}}
+      onSetDefault={() => {}} onEditingChange={() => {}} />)
+    expect(screen.queryByText(/termbase-auditor: (idle|\d+ running)/)).toBeNull()
+  })
 })
