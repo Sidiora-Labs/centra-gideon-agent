@@ -11,7 +11,7 @@ export type HunkDecision = "pending" | "kept" | "discarded";
 export interface DiffHunk {
   id: string;
   range: string;
-  decision: HunkDecision;
+  decision?: HunkDecision;
   lines: readonly DiffLine[];
 }
 
@@ -23,17 +23,19 @@ export function ReviewableDiff({
   onKeep,
   onDiscard,
   onApply,
+  mode = "review",
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "filename" | "hunks" | "onKeep" | "onDiscard" | "onApply"
+  "children" | "filename" | "hunks" | "onKeep" | "onDiscard" | "onApply" | "mode"
 > & {
   filename: string;
   hunks: readonly DiffHunk[];
   onKeep?: (id: string) => void;
   onDiscard?: (id: string) => void;
   onApply?: () => void;
+  mode?: "review" | "applied";
 }) {
   const kept = hunks.filter((hunk) => hunk.decision === "kept").length;
   const pending = hunks.filter((hunk) => hunk.decision === "pending").length;
@@ -52,7 +54,7 @@ export function ReviewableDiff({
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="font-mono text-xs">{filename}</span>
         <span className={cn(mono, "text-foreground/35 tabular-nums")}>
-          {kept} of {hunks.length} kept
+          {mode === "applied" ? "Applied" : `${kept} of ${hunks.length} kept`}
         </span>
       </div>
 
@@ -62,14 +64,14 @@ export function ReviewableDiff({
             key={hunk.id}
             className={cn(
               "border-foreground/[0.06] border-t transition-opacity duration-300",
-              hunk.decision === "discarded" && "opacity-40",
+              mode === "review" && hunk.decision === "discarded" && "opacity-40",
             )}
           >
             <div className="flex items-center gap-2 px-4 py-1.5">
               <span className={cn(mono, "text-foreground/30")}>
                 {hunk.range}
               </span>
-              <span className="ms-auto flex items-center gap-1">
+              {mode === "review" && <span className="ms-auto flex items-center gap-1">
                 {hunk.decision === "pending" && (onKeep || onDiscard) ? (
                   <>
                     {onDiscard && (
@@ -108,7 +110,7 @@ export function ReviewableDiff({
                     {hunk.decision}
                   </span>
                 )}
-              </span>
+              </span>}
             </div>
             <div className={cn(codeScroll, "pb-1.5 font-mono text-xs")}>
               <div className={codeSurface}>
@@ -136,7 +138,7 @@ export function ReviewableDiff({
         ))}
       </div>
 
-      <div className="border-foreground/[0.06] flex items-center justify-between border-t px-4 py-2.5">
+      {mode === "review" && <div className="border-foreground/[0.06] flex items-center justify-between border-t px-4 py-2.5">
         <span className={cn(mono, "text-foreground/35")}>
           {pending > 0 ? `${pending} left to review` : "All reviewed"}
         </span>
@@ -153,7 +155,7 @@ export function ReviewableDiff({
             Apply {kept}
           </button>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

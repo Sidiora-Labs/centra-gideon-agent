@@ -13,6 +13,7 @@ export interface FileTreeNode {
   kind: "folder" | "file";
   additions?: number;
   deletions?: number;
+  snapshotComplete?: boolean;
 }
 
 export function FileTree({
@@ -20,18 +21,21 @@ export function FileTree({
   visibleCount,
   totalAdditions,
   totalDeletions,
+  onFileClick,
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "nodes" | "visibleCount" | "totalAdditions" | "totalDeletions"
+  "children" | "nodes" | "visibleCount" | "totalAdditions" | "totalDeletions" | "onFileClick"
 > & {
   nodes: readonly FileTreeNode[];
   visibleCount: number;
-  totalAdditions: number;
-  totalDeletions: number;
+  totalAdditions?: number;
+  totalDeletions?: number;
+  onFileClick?: (path: string) => void;
 }) {
   const files = nodes.filter((node) => node.kind === "file").length;
+  const totalsComplete = nodes.every((node) => node.kind !== "file" || node.snapshotComplete !== false);
 
   return (
     <div
@@ -46,24 +50,22 @@ export function FileTree({
     >
       <div className="flex items-baseline justify-between px-1">
         <span className="text-[13.5px] font-medium">{files} files changed</span>
-        <span className={cn(mono, "tabular-nums")}>
-          <span className="text-emerald-600 dark:text-emerald-400">
-            +{totalAdditions}
-          </span>{" "}
-          <span className="text-red-600 dark:text-red-400">
-            −{totalDeletions}
-          </span>
-        </span>
+        {totalsComplete && (totalAdditions !== undefined || totalDeletions !== undefined) &&
+          <span className={cn(mono, "tabular-nums")}>
+            {totalAdditions !== undefined && <span className="text-emerald-600 dark:text-emerald-400">
+              +{totalAdditions}
+            </span>}{" "}
+            {totalDeletions !== undefined && <span className="text-red-600 dark:text-red-400">
+              −{totalDeletions}
+            </span>}
+          </span>}
       </div>
 
       <div className="flex flex-col">
-        {take(nodes, visibleCount).map((node) => (
-          <div
-            key={node.path}
-            className="fade-in slide-in-from-left-1 animate-in fill-mode-both hover:bg-foreground/[0.03] flex items-center gap-2 rounded-lg px-1 py-1 text-[13px] transition-colors duration-300"
-            style={{ paddingInlineStart: `${0.25 + node.depth * 0.85}rem` }}
-          >
-            {node.kind === "folder" ? (
+        {take(nodes, visibleCount).map((node) => {
+          const rowClass = "fade-in slide-in-from-left-1 animate-in fill-mode-both hover:bg-foreground/[0.03] flex items-center gap-2 rounded-lg px-1 py-1 text-[13px] transition-colors duration-300";
+          const style = { paddingInlineStart: `${0.25 + node.depth * 0.85}rem` };
+          const content = node.kind === "folder" ? (
               <>
                 <ChevronDownIcon className="text-foreground/25 size-3 shrink-0" />
                 <FolderIcon className="text-foreground/35 size-3.5 shrink-0" />
@@ -78,21 +80,24 @@ export function FileTree({
                   {node.name}
                 </span>
                 <span className={cn(mono, "shrink-0 tabular-nums")}>
-                  {node.additions ? (
+                  {node.snapshotComplete !== false && node.additions ? (
                     <span className="text-emerald-600 dark:text-emerald-400">
                       +{node.additions}
                     </span>
                   ) : null}{" "}
-                  {node.deletions ? (
+                  {node.snapshotComplete !== false && node.deletions ? (
                     <span className="text-red-600 dark:text-red-400">
                       −{node.deletions}
                     </span>
                   ) : null}
                 </span>
               </>
-            )}
-          </div>
-        ))}
+            );
+          return node.kind === "file" && onFileClick
+            ? <button key={node.path} type="button" onClick={() => onFileClick(node.path)}
+                title={node.path} className={cn(rowClass, "w-full text-start")} style={style}>{content}</button>
+            : <div key={node.path} className={rowClass} style={style}>{content}</div>;
+        })}
       </div>
     </div>
   );
