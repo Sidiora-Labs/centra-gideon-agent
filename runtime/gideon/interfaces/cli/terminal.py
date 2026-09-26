@@ -148,6 +148,7 @@ class TerminalApp:
         self.screen = screen
         screen.keypad(True)
         screen.nodelay(True)
+        curses.raw()
         with contextlib.suppress(curses.error):
             curses.curs_set(1)
         await self.client.connect()
@@ -169,6 +170,7 @@ class TerminalApp:
                 self._reader.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._reader
+            curses.noraw()
 
     def _read_key(self) -> int:
         try:
