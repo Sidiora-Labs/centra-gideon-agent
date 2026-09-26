@@ -37,7 +37,7 @@ export function TopBar({ left, right, keepCornerPadding = false, contentAligned 
         {
 }
         <div className={`flex min-w-0 flex-1 items-center gap-s pl-l ${TITLE_TRUNCATES}`} data-header-left>{left}</div>
-        <div className="flex shrink-0 items-center gap-s pr-l">{right}</div>
+        <div className="flex shrink-0 items-center gap-s pr-l" data-header-right>{right}</div>
       </header>
     )
   }
@@ -50,7 +50,7 @@ export function TopBar({ left, right, keepCornerPadding = false, contentAligned 
       {
 }
       <div className={`flex items-center gap-s min-w-0 flex-1 ${TITLE_TRUNCATES}`} data-header-left>{left}</div>
-      <div className="flex items-center gap-s shrink-0">{right}</div>
+      <div className="flex items-center gap-s shrink-0" data-header-right>{right}</div>
     </header>
   )
 }
