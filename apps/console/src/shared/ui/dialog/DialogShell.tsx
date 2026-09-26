@@ -58,36 +58,36 @@ export function DialogShell({ request, onClose, active = true }: {
   const resting = { opacity: 1, scale: 1, y: 0 }
   const hidden = { opacity: 0, scale: reduced ? 1 : 0.98, y: reduced ? 0 : expr(12, 0.3) }
   return createPortal(
-    <motion.div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-l sm:p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
+    <motion.div className="fixed inset-0 z-[var(--z-modal)] flex min-h-0 items-center justify-center overflow-y-auto overscroll-contain p-s sm:p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={spring.effects}>
       <div className="absolute inset-0 bg-canvas/70 backdrop-blur-sm" onClick={cancel} aria-hidden="true" />
       <motion.div ref={trapRef} role={isAlert || danger ? 'alertdialog' : 'dialog'} aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
         aria-describedby={body ? `${identity}-body` : undefined}
-        className="relative flex max-h-full w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface shadow-sheet"
+        className="relative flex min-h-0 min-w-0 max-h-[calc(100dvh-1rem)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface shadow-sheet"
         initial={hidden} animate={resting} exit={hidden} transition={reduced ? spring.effects : physics.fluid}>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <header className="flex items-start gap-m border-b border-outline-variant/30 bg-surface-high/40 px-l py-l">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain break-words">
+        <header className="flex min-w-0 items-start gap-m border-b border-outline-variant/30 bg-surface-high/40 px-s py-m sm:px-l sm:py-l">
           {(danger || Icon) && <span className={`shrink-0 ${danger ? 'text-danger' : 'text-primary'}`} style={{ marginTop: 'calc(2px * var(--space-scale))' }}>
             {Icon ? <Icon size={18} /> : <AlertTriangle size={18} />}
           </span>}
           <div className="min-w-0 flex-1">
             <h2 data-type="title-l" className="break-words text-on-surface">{title}</h2>
-            {body && <div id={`${identity}-body`} data-type="body-s" className="mt-s whitespace-pre-line text-on-surface-var">{body}</div>}
+            {body && <div id={`${identity}-body`} data-type="body-s" className="mt-s whitespace-pre-line break-words text-on-surface-var">{body}</div>}
           </div>
         </header>
-        {isPrompt && fields.length > 0 && <div className="flex flex-col gap-m px-l py-l">
+        {isPrompt && fields.length > 0 && <div className="flex min-w-0 flex-col gap-m px-s py-m sm:px-l sm:py-l">
           {fields.map((field, index) => <PromptField key={field.name} field={field} value={state.values[field.name] ?? ''}
             error={state.errors[field.name]} autoFocus={index === 0} id={`${identity}-field-${index}`}
             onChange={(value) => dispatch({ type: 'edit', name: field.name, value })} />)}
         </div>}
         </div>
-        <footer className="flex shrink-0 flex-wrap justify-end gap-s border-t border-outline-variant/30 px-l py-l">
+        <footer className="grid min-w-0 shrink-0 grid-cols-1 gap-s border-t border-outline-variant/30 px-s py-m sm:flex sm:flex-wrap sm:justify-end sm:px-l sm:py-l">
           {!isAlert && <button type="button" onClick={cancel} autoFocus={danger && !isPrompt} data-type="body-s"
-            className="h-9 rounded-lg border border-outline-variant/50 bg-surface-high px-l text-on-surface-var hover:bg-surface-highest">{cancelLabel ?? 'Cancel'}</button>}
+            className="h-auto min-h-11 min-w-0 max-w-full break-words rounded-lg border border-outline-variant/50 bg-surface-high px-l py-s text-center text-on-surface-var hover:bg-surface-highest sm:min-h-9">{cancelLabel ?? 'Cancel'}</button>}
           <button type="button" onClick={submit} autoFocus={!danger && !isPrompt}
             {...unavailableWhen(isPrompt && !canSubmit, 'Fill in the required fields first')} data-type="body-s"
-            className="h-9 rounded-lg px-l transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+            className="h-auto min-h-11 min-w-0 max-w-full break-words rounded-lg px-l py-s text-center transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-40 sm:min-h-9"
             style={danger ? { background: 'var(--color-danger)', color: 'var(--color-on-danger)' } : { background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}>
             {confirmLabel ?? (isPrompt ? 'Save' : isAlert ? 'OK' : 'Confirm')}
           </button>
@@ -104,10 +104,10 @@ function PromptField({ field, id, value, error, autoFocus, onChange }: {
     'aria-required': field.required || undefined, 'aria-invalid': !!error, 'aria-describedby': error ? `${id}-error` : undefined }
   const chrome = `w-full rounded-lg border bg-surface-high px-m text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary ${error ? 'border-danger' : 'border-outline-variant/40'}`
   return <div>
-    {field.label && <label htmlFor={id} data-type="body-s" className="mb-xs block text-on-surface-var">{field.label}</label>}
+    {field.label && <label htmlFor={id} data-type="body-s" className="mb-xs block break-words text-on-surface-var">{field.label}</label>}
     {field.type === 'textarea'
-      ? <textarea {...props} rows={4} onChange={(event) => onChange(event.target.value)} data-type="body-m" className={`${chrome} min-h-[88px] resize-y py-s`} />
-      : <input {...props} type={field.type === 'password' ? 'password' : 'text'} onChange={(event) => onChange(event.target.value)} data-type="body-m" className={`${chrome} h-10`} />}
-    {error && <div id={`${id}-error`} role="alert" data-type="caption" className="mt-xs text-danger">{error}</div>}
+      ? <textarea {...props} rows={4} onChange={(event) => onChange(event.target.value)} data-type="body-m" className={`${chrome} min-w-0 max-w-full min-h-[88px] resize-y py-s`} />
+      : <input {...props} type={field.type === 'password' ? 'password' : 'text'} onChange={(event) => onChange(event.target.value)} data-type="body-m" className={`${chrome} min-w-0 max-w-full h-10`} />}
+    {error && <div id={`${id}-error`} role="alert" data-type="caption" className="mt-xs break-words text-danger">{error}</div>}
   </div>
 }
