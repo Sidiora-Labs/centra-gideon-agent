@@ -1,15 +1,16 @@
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
+import { SearchField } from '../../shared/ui/SearchField'
 import { FieldError } from '../../shared/ui/forms'
 import { Loader2, Search, ChevronLeft, FileText, CornerDownLeft } from 'lucide-react'
 import { Modal } from '../../shared/ui/Modal'
-import { SearchField } from '../../shared/ui/SearchField'
 import { Button } from '../../shared/ui/Button'
 import { Toggle } from '../../shared/ui/Toggle'
 import { api, type PromptItem, type PromptVariable } from '../../shared/data/api'
 import { seedRenderValues } from '../prompts/promptMeta'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { PromptLibrary } from '../../shared/vendor/assistant-ui/elements/prompt-library'
 
 export function PromptPalette({ onInsert, onSend, onClose }: {
   onInsert: (text: string) => void
@@ -20,8 +21,10 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [items, setItems] = useState<PromptItem[] | null>(null)
   const [q, setQ] = useState('')
+  const [selectedName, setSelectedName] = useState('')
   const [picked, setPicked] = useState<PromptItem | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const picking = useRef(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
@@ -38,6 +41,8 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
   }, [items, q])
 
   async function pick(p: PromptItem) {
+    if (picking.current) return
+    picking.current = true
     setErr(''); setLoadingDetail(true)
     try {
       const full = await api.prompt(p.name)
@@ -51,7 +56,7 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
       setPicked(full)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not load that prompt')
-    } finally { setLoadingDetail(false) }
+    } finally { picking.current = false; setLoadingDetail(false) }
   }
 
   return (
@@ -62,21 +67,14 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
         <FillIn prompt={picked} onBack={() => setPicked(null)} onInsert={(t) => { onInsert(t); onClose() }} onSend={onSend ? (t) => { onSend(t); onClose() } : undefined} />
       ) : (
         <div className="flex min-h-[320px] flex-col gap-3">
-          <div className="flex items-center gap-2 rounded-md bg-surface-high px-2.5 py-1.5">
-            <SearchField variant="inline" size="md" clearable={false} autoFocus
-              value={q} onChange={setQ} placeholder="Search your prompts…" ariaLabel="Search prompts"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && filtered && filtered.length > 0 && !loadingDetail) { e.preventDefault(); void pick(filtered[0]) }
-                else if (e.key === 'Escape' && q) { e.preventDefault(); setQ('') }
-              }}
-              trailingSlot={loadingDetail ? <Loader2 size={14} className="shrink-0 animate-spin text-on-surface-low" /> : null} />
-          </div>
-          {
-}
-          <ResultAnnouncement count={filtered?.length ?? 0} noun="prompts"
-            active={!!q.trim() && filtered !== null} />
-          {
-}
+          <SearchField variant="inline" size="md" clearable={false} autoFocus value={q} onChange={setQ}
+            placeholder="Search your prompts…" ariaLabel="Search prompts"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && filtered && filtered.length > 0 && !loadingDetail) { e.preventDefault(); void pick(filtered[0]) }
+              else if (e.key === 'Escape' && q) { e.preventDefault(); setQ('') }
+            }} />
+          {loadingDetail && <div role="status" className="flex items-center gap-2 px-1 text-sm text-on-surface-low"><Loader2 size={14} className="animate-spin" /> Loading prompt…</div>}
+          <ResultAnnouncement count={filtered?.length ?? 0} noun="prompts" active={!!q.trim() && filtered !== null} />
           {!!filtered?.length && (
             <div data-type="caption" className="flex items-center gap-3 px-1 text-on-surface-low">
               <span className="inline-flex items-center gap-1"><CornerDownLeft size={11} /> picks the first match</span>
@@ -84,27 +82,22 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
             </div>
           )}
           {err && <FieldError>{err}</FieldError>}
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-outline-variant/40">
-            {loadErr ? <LoadError what="prompts" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} /> : filtered === null ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {loadErr ? <LoadError what="prompts" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} /> : items === null ? (
               <div className="flex h-40 items-center justify-center"><Loader2 size={18} className="animate-spin text-on-surface-low" /></div>
-            ) : filtered.length === 0 ? (
+            ) : items.length === 0 ? (
               <div data-type="body-s" className="flex h-40 flex-col items-center justify-center gap-1 px-4 text-center text-on-surface-low">
-                {q ? `No prompts match “${q.trim()}”.` : 'No user prompts yet. Create one on the Prompts page.'}
+                No user prompts yet. Create one on the Prompts page.
+              </div>
+            ) : filtered?.length === 0 ? (
+              <div data-type="body-s" className="flex h-40 items-center justify-center px-4 text-center text-on-surface-low">
+                No prompts match “{q.trim()}”.
               </div>
             ) : (
-              <div className="flex flex-col">
-                {filtered.map((p) => (
-                  <button key={p.name} type="button" onClick={() => pick(p)}
-                    className="flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-surface-high">
-                    <FileText size={15} className="mt-0.5 shrink-0 text-on-surface-low" />
-                    <span className="min-w-0 flex-1">
-                      <span data-type="body-s" className="block truncate text-on-surface">{p.title || p.name}</span>
-                      {p.description && <span data-type="caption" className="block truncate text-on-surface-low">{p.description}</span>}
-                    </span>
-                    {(p.variables?.length ?? 0) > 0 && <span data-type="caption" className="shrink-0 rounded-pill bg-surface-highest px-1.5 py-0.5 text-on-surface-low">{p.variables!.length} var{p.variables!.length > 1 ? 's' : ''}</span>}
-                  </button>
-                ))}
-              </div>
+              <PromptLibrary className="[&_[role=combobox]]:hidden" prompts={(filtered ?? []).map(prompt => ({ id: prompt.name, name: prompt.title || prompt.name,
+                body: prompt.content ?? prompt.description ?? '', variables: (prompt.variables ?? []).map(variable => variable.name) }))}
+                query="" selectedId={filtered?.some(prompt => prompt.name === selectedName) ? selectedName : filtered?.[0]?.name || ''} onQueryChange={setQ}
+                onSelect={name => { if (loadingDetail) return; setSelectedName(name); const prompt = items.find(item => item.name === name); if (prompt) void pick(prompt) }} />
             )}
           </div>
         </div>
