@@ -64,7 +64,7 @@ test("configuration requires an explicit HTTPS origin and exact resource schema"
   assert.equal(validateHostedOrigin("https://gideon.example:8443"), "https://gideon.example:8443");
   for (const url of ["", " https://gideon.example", "http://gideon.example", "https://gideon.example/",
     "https://gideon.example/path", "https://gideon.example?next=/chat", "https://gideon.example/#/chat",
-    "https://user:pass@gideon.example", "https://gideon.example:443", "javascript:alert(1)", 12]) {
+    "https://user:pass@gideon.example", "https://gideon.example:443", "javascript:alert(1)", "https://", 12]) {
     assert.throws(() => validateHostedOrigin(url), /HTTPS origin/);
   }
   assert.throws(() => readHostedConfig({ platform: "win32", isPackaged: true, resourcesPath: "" }), /resources path/);
@@ -140,6 +140,7 @@ test("Mac/Linux sessions retain environment configuration and existing local sta
   configureHostedEndpoint(null);
   assert.equal(hostedGatewayUrl({ GIDEON_CLOUD_URL: "https://existing.example/path" }), "https://existing.example");
   assert.equal(hostedGatewayUrl({ GIDEON_CLOUD_URL: "http://insecure.example" }), "");
+  assert.equal(hostedGatewayUrl({ GIDEON_CLOUD_URL: "https://" }), "");
   const row = { id: "ep_owned", label: "Owned", base_url: "http://localhost:4321", kind: "local", device_session_ref: "" };
   const registry = withHostedEndpoint({ active: row.id, endpoints: [row] }, {});
   assert.deepEqual(registry, { active: row.id, endpoints: [row] });

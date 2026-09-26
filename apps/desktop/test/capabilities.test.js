@@ -60,6 +60,26 @@ describe("capability vocabulary", () => {
 });
 
 describe("probe", () => {
+  it("reports missing native permission APIs without inventing a grant", async () => {
+    const caps = makeCapabilities({ platform: "darwin" });
+    const snapshot = caps.snapshot();
+    assert.deepStrictEqual(Object.keys(snapshot).sort(), [...CAPABILITIES].sort());
+    assert.deepStrictEqual(snapshot.audio_capture, {
+      available: false,
+      granted: "unavailable",
+      requestable: false,
+      reason: "permission state unavailable in this build",
+    });
+    assert.strictEqual(snapshot.screen_capture.available, false);
+    assert.strictEqual(snapshot.native_notifications.granted, "not-determined");
+    assert.deepStrictEqual(await caps.request("audio_capture"), {
+      granted: false,
+      state: "unavailable",
+      prompted: false,
+      reason: "permission state unavailable in this build",
+    });
+  });
+
   it("reports every capability unavailable off the implemented platform", () => {
     const caps = makeCapabilities({ platform: "linux", systemPreferences: sysPrefsStub() });
     for (const cap of CAPABILITIES) {
