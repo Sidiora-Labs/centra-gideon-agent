@@ -35,5 +35,23 @@ test('a persisted user message keeps a natural bubble width on desktop and mobil
     expect(geometry.lines, `${width}px short user message wrapped`).toBe(1)
     expect(geometry.rightGap, `${width}px bubble lost right alignment`).toBeLessThan(2)
     expect(geometry.overflow, `${width}px bubble clipped its text`).toBe(false)
+    if (width === 390) {
+      const viewport = page.locator('[data-slot="aui_thread-viewport"]')
+      await viewport.evaluate((element) => { element.scrollTop = 0 })
+      const launcher = page.getByRole('button', { name: 'Open session map' })
+      await expect(launcher).toBeVisible()
+      const clearOfMessage = await bubble.evaluate((element) => {
+        const message = element.getBoundingClientRect()
+        const button = document.querySelector<HTMLButtonElement>('[aria-label="Open session map"]')!.getBoundingClientRect()
+        const viewport = document.querySelector('[data-slot="aui_thread-viewport"]')!.getBoundingClientRect()
+        return button.bottom <= viewport.top &&
+          !(button.left < message.right && button.right > message.left && button.top < message.bottom && button.bottom > message.top)
+      })
+      expect(clearOfMessage, 'session map launcher covers the first message').toBe(true)
+      await launcher.click()
+      await expect(page.getByRole('dialog', { name: 'Session map drawer' })).toBeVisible()
+      await page.getByRole('dialog', { name: 'Session map drawer' }).getByRole('button', { name: 'Close session map' }).click()
+      await expect(page.getByRole('dialog', { name: 'Session map drawer' })).toHaveCount(0)
+    }
   }
 })

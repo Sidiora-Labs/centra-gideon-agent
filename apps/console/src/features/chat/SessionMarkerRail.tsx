@@ -153,8 +153,9 @@ export function SessionMarkerRail({
         </div>
       </aside>
       <button type="button" aria-label="Open session map" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}
-        className="absolute right-3 top-3 z-20 inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md md:hidden">
+        className="relative inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-pill px-3 border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md md:hidden">
         <ListTree size={18} aria-hidden="true" />
+        <span>Session map</span>
       </button>
       {drawerOpen && (
         <div className="fixed inset-0 z-[var(--z-content)] md:hidden">

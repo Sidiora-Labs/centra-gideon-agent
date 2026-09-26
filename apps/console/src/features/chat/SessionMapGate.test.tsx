@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { render, within } from '@testing-library/react'
+import { fireEvent, render, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { SessionMarkerRail } from './SessionMarkerRail'
@@ -20,6 +20,20 @@ function map(turns: ChatTurn[]) {
 }
 
 describe('Session Map gate semantics', () => {
+  it('keeps the mobile launcher labelled and opens and closes its drawer', () => {
+    const turns: ChatTurn[] = [{ role: 'user', segments: [{ kind: 'text', text: 'A real turn' }] }]
+    const view = render(map(turns))
+    const launcher = within(view.container).getByRole('button', { name: 'Open session map' })
+    expect(launcher).toHaveTextContent('Session map')
+    expect(launcher).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(launcher)
+    const drawer = within(view.container).getByRole('dialog', { name: 'Session map drawer' })
+    expect(launcher).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(within(drawer).getAllByRole('button', { name: 'Close session map' })[0])
+    expect(within(view.container).queryByRole('dialog', { name: 'Session map drawer' })).toBeNull()
+    expect(launcher).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('announces the current message and growing message count over three turns', () => {
     const turns: ChatTurn[] = []
     const view = render(map(turns))
