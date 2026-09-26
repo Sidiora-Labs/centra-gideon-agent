@@ -14,9 +14,9 @@ import { IncidentBanner } from './IncidentBanner'
 import { ChatPage } from '../../features/ChatPage'
 import { useIdentity } from './identity'
 import { Onboarding } from './Onboarding'
-import { peekOnboardingExit, clearOnboardingExit } from '../../features/onboarding/exitTo'
+import { peekOnboardingExit, clearOnboardingExit, setOnboardingExit } from '../../features/onboarding/exitTo'
 import { ProductTour } from '../../features/onboarding/ProductTour'
-import { useHashRoute } from './useHashRoute'
+import { parseRouteHash, useHashRoute } from './useHashRoute'
 import { installRoutePreload, lazyRoute } from './routePreload'
 import { useIsMobile } from './useIsMobile'
 import type { RouteProps } from './useQueryState'
@@ -221,8 +221,14 @@ function AppInner() {
 
   useEffect(() => {
     if (!loaded) return
-    if (!onboarded && route !== 'onboarding') navigate('onboarding')
-    else if (onboarded && route === 'onboarding') navigate(peekOnboardingExit() || 'dashboard')
+    if (!onboarded && route !== 'onboarding') {
+      if (ROUTABLE.has(route)) setOnboardingExit(location.hash)
+      navigate('onboarding?step=name', { replace: true })
+    }
+    else if (onboarded && route === 'onboarding') {
+      const destination = peekOnboardingExit()
+      navigate(ROUTABLE.has(parseRouteHash(destination, 'dashboard').route) ? destination : 'dashboard', { replace: true })
+    }
     else if (onboarded && route !== 'companion' && !ROUTABLE.has(route)) navigate('dashboard', { replace: true })
     else if (onboarded) clearOnboardingExit()
   }, [loaded, onboarded, route, navigate])
@@ -244,7 +250,7 @@ function AppInner() {
   if (query.embed === '1') embedRef.current = true
 
   if (!loaded) return <div data-visual-state="waiting" className="grid h-full place-items-center" style={{ background: 'var(--color-canvas)' }}><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
-  if (route === 'onboarding' || !onboarded) return <Onboarding />
+  if (route === 'onboarding' || !onboarded) return <Onboarding query={query} setQuery={setQuery} />
 
   if (route === 'companion') {
     return (

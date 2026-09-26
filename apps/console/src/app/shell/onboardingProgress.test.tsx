@@ -55,6 +55,7 @@ const ORIGINAL_MATCH_MEDIA = window.matchMedia
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
   Object.defineProperty(window, 'matchMedia', {
     configurable: true, writable: true,
     value: (query: string) => ({
@@ -121,7 +122,7 @@ describe('every step transition persists its resume point', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'stub-tried' }))
     fireEvent.click(await screen.findByRole('button', { name: /Start using/ }))
     await waitFor(() => expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' }))
-    expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace')
+    await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace'))
     const steps = saveOnboardingState.mock.calls.map(([p]) => p.step)
     expect(steps).toEqual(['essentials', 'first_success', 'done'])
   })
@@ -231,7 +232,7 @@ describe('skip at any step lands in a working dashboard', () => {
     renderFlow()
     await waitFor(() => expect(onboarding).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: /^Skip setup/ }))
-    await waitFor(() => expect(setName).toHaveBeenCalledWith('Operator'))
+    await waitFor(() => expect(setName).toHaveBeenCalledWith('Operator', undefined))
     expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' })
     expect(readNavDisclosure().mode).toBe('starter')
   })
@@ -279,5 +280,5 @@ it('records the tour request before the completed flow releases the identity gat
   fireEvent.click(await screen.findByRole('button', { name: /Take the quick tour/ }))
   expect(consumeProductTourRequest()).toBe(true)
   expect(saveOnboardingState).toHaveBeenCalledWith({ step: 'done' })
-  expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace')
+  await waitFor(() => expect(setName).toHaveBeenCalledWith('Ada Lovelace', 'ada-lovelace'))
 })

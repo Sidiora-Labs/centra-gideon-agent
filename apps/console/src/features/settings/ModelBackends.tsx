@@ -36,6 +36,7 @@ function RemoteProvidersSkeleton() {
 
 export function RemoteModelProviders() {
   const [adding, setAdding] = useState(false)
+  const [added, setAdded] = useState(false)
   const { data, error, refresh } = useQuery('settings:remote-model-providers', async () => {
     const [provs, rows] = await Promise.all([
       api.modelProviders(),
@@ -58,6 +59,7 @@ export function RemoteModelProviders() {
   const providers = data.providers.filter((p) => p.type !== 'ollama')
   return (
     <div>
+      {added && <p role="status" className="mb-m text-ok">Provider added. Test its connection, then choose a model in Models.</p>}
       {providers.length === 0 ? (
         <p data-type="body-s" className="mb-3 text-on-surface-low">No remote model providers yet. Add an instance to contribute models to the pool.</p>
       ) : (
@@ -69,7 +71,7 @@ export function RemoteModelProviders() {
       )}
 
       {adding
-        ? <AddInstanceForm onDone={(created) => { setAdding(false); if (created) reload() }} />
+        ? <AddInstanceForm onDone={(created) => { setAdding(false); if (created) { setAdded(true); reload() } }} />
         : <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus size={15} /> Add instance</Button>}
     </div>
   )
