@@ -24,7 +24,6 @@ export function GideonAppMark({ name }: { name: AppMarkName }) {
   const mark = APP_MARKS[name]
   return <span className="gideon-collection-art" aria-hidden="true">
     <svg data-app-mark={name} viewBox="0 0 160 100" fill="none" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="1" width="158" height="98" rx="17" className="gideon-collection-art-mat" />
       <path d={mark.outline} className="gideon-collection-art-outline" />
       <path d={mark.accent} className="gideon-collection-art-accent" />
     </svg>
