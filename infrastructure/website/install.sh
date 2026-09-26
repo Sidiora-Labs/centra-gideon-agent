@@ -36,13 +36,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
                                                                                
 print_container() {
     cat <<'EOF'
-Run Gideon with Docker Compose (self-hosters / Windows):
+Run Gideon in one container from this checkout (self-hosters / Windows):
 
-  cp .env.example .env        # optional: set provider keys / options
-  docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
+  docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .
+  docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local
 
-The dashboard comes up on http://127.0.0.1:10000 with a persistent volume.
-Details, backups, and updates: docs/guides/CONTAINERS.md in this checkout
+Open the token URL printed by `docker logs gideon`. State and workspaces
+survive container recreation in the gideon_home volume. For provider keys,
+add `--env-file .env` before the image name after creating .env.
+Details, backups, and updates: docs/guides/CONTAINERS.md in this checkout.
 EOF
 }
 
@@ -54,7 +56,7 @@ detect_platform() {
         Linux | Darwin) : ;;
         *)
             warn "unsupported OS '$os' — the uv path targets Linux and macOS."
-            warn "On Windows, use the Docker Compose path:  sh install.sh --container"
+            warn "On Windows, use the Docker path:  sh install.sh --container"
             ;;
     esac
     say "${_dim}Detected platform: $os $arch${_reset}"
@@ -170,7 +172,7 @@ main() {
             -h | --help)
                 say "Usage: install.sh [--container]"
                 say "  (no args)    install Gideon from this checkout or GIDEON_PACKAGE_SOURCE via uv"
-                say "  --container  print the Docker Compose snippet instead"
+                say "  --container  print the single-container Docker commands instead"
                 exit 0
                 ;;
             *) die "unknown argument: $arg (try --help)" ;;

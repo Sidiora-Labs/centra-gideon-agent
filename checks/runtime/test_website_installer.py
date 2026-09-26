@@ -457,12 +457,14 @@ class TestOfflineArgumentPaths:
         assert proc.returncode == 0, proc.stderr
         assert "--container" in proc.stdout
 
-    def test_container_prints_the_compose_snippet(
+    def test_container_prints_the_single_container_commands(
         self, sandbox_env: dict[str, str]
     ) -> None:
         proc = self._run(sandbox_env, "--container")
         assert proc.returncode == 0, proc.stderr
-        assert "docker compose" in proc.stdout
+        assert "docker build -f infrastructure/docker/Dockerfile.backend --target single" in proc.stdout
+        assert "docker run -d --name gideon" in proc.stdout
+        assert "-v gideon_home:/data" in proc.stdout
 
     def test_unknown_argument_fails_closed(self, sandbox_env: dict[str, str]) -> None:
         """An unrecognised flag must not fall through into an install."""

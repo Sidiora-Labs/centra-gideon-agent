@@ -1493,6 +1493,10 @@ Examples:
         rc = snapshot_main(parsed=args)
         if rc:
             raise SystemExit(rc)
+        if not args.list_snapshots:
+            from gideon.operations.durability.service import JobResult, persist_job_result
+
+            persist_job_result(JobResult("nightly_snapshot"))
     elif args.command == "project":
         from gideon.interfaces.cli.project import project_main
 

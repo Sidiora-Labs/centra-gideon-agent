@@ -23,16 +23,22 @@ contract = "Every numbered requirement has an observable product result, a worke
 title = "Inbound ACP server for compatible editors"
 acceptance = "Implement the complete reachable feature: Inbound ACP server for compatible editors"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Inbound ACP server for compatible editors"
+
 
 [req.011]
 title = "Standard A2A task operations"
 acceptance = "Implement the complete reachable feature: Standard A2A task operations"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Standard A2A task operations"
+
 
 [req.012]
 title = "MCP OAuth resources prompts and delegated connections"
 acceptance = "Implement the complete reachable feature: MCP OAuth resources prompts and delegated connections"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: MCP OAuth resources prompts and delegated connections"
+
 
 [task.integrations-protocols]
 title = "integrations-protocols end-to-end implementation"
@@ -40,18 +46,22 @@ status = "pending"
 wave = 1
 owner_lane = "integrations-protocols"
 requires = []
-reqs = ["010", "011", "012"]
+reqs = ["010.1", "011.1", "012.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.013]
 title = "Missing messaging integrations across twelve requested channels"
 acceptance = "Implement the complete reachable feature: Missing messaging integrations across twelve requested channels"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Missing messaging integrations across twelve requested channels"
+
 
 [req.128]
 title = "Independent outbound channel queues and retry"
 acceptance = "Implement the complete reachable feature: Independent outbound channel queues and retry"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Independent outbound channel queues and retry"
+
 
 [task.integrations-channels]
 title = "integrations-channels end-to-end implementation"
@@ -59,18 +69,22 @@ status = "pending"
 wave = 2
 owner_lane = "integrations-channels"
 requires = []
-reqs = ["013", "128"]
+reqs = ["013.1", "128.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.003]
 title = "Full terminal chat interface with live tools approvals session navigation and agent controls"
 acceptance = "Implement the complete reachable feature: Full terminal chat interface with live tools approvals session navigation and agent controls"
 hosted = "customer"
+ac_1 = "Implement the complete reachable feature: Full terminal chat interface with live tools approvals session navigation and agent controls"
+
 
 [req.004]
 title = "Guided terminal setup for providers and models"
 acceptance = "Implement the complete reachable feature: Guided terminal setup for providers and models"
 hosted = "not_applicable"
+ac_1 = "Implement the complete reachable feature: Guided terminal setup for providers and models"
+
 
 [task.integrations-terminal]
 title = "integrations-terminal end-to-end implementation"
@@ -78,35 +92,44 @@ status = "pending"
 wave = 3
 owner_lane = "integrations-terminal"
 requires = []
-reqs = ["003", "004"]
+reqs = ["003.1", "004.1"]
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
 
 [req.131]
 title = "Persistent container workspaces"
 acceptance = "Implement the complete reachable feature: Persistent container workspaces"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Persistent container workspaces"
+
 
 [req.133]
 title = "Manual backup status updates"
 acceptance = "Implement the complete reachable feature: Manual backup status updates"
 hosted = "operator_managed"
+ac_1 = "Implement the complete reachable feature: Manual backup status updates"
+
 
 [req.134]
 title = "Single-container installation"
 acceptance = "Implement the complete reachable feature: Single-container installation"
 hosted = "not_applicable"
+ac_1 = "Implement the complete reachable feature: Single-container installation"
+
 
 [req.135]
 title = "Repair nonexistent installation commands"
 acceptance = "Implement the complete reachable feature: Repair nonexistent installation commands"
 hosted = "not_applicable"
+ac_1 = "Implement the complete reachable feature: Repair nonexistent installation commands"
+
 
 [task.integrations-distribution]
 title = "integrations-distribution end-to-end implementation"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "integrations-distribution"
 requires = []
-reqs = ["131", "133", "134", "135"]
+reqs = ["131.1", "133.1", "134.1", "135.1"]
+touches = ["README.md", "apps/console/src/features/settings/DurabilityPanel.tsx", "checks/runtime/test_durability_service.py", "checks/runtime/test_single_container_distribution.py", "checks/runtime/test_website_installer.py", "docs/guides/CONTAINERS.md", "docs/guides/GETTING_STARTED.md", "infrastructure/docker/Dockerfile.backend", "infrastructure/website/install.sh", "infrastructure/website/install.sh.sha256", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/operations/self_update.py"]
+verify_cmd = "PYTHONPATH=runtime GIDEON_SINGLE_CONTAINER_IMAGE=gideon-distribution-check /tmp/gideon-runtime-venv/bin/python -m pytest -q checks/runtime/test_single_container_distribution.py checks/runtime/test_website_installer.py checks/runtime/test_durability_service.py::TestEndpoints::test_cli_snapshot_updates_manual_status checks/runtime/test_durability_service.py::TestEndpoints::test_status checks/runtime/test_cli_update_kinds.py::test_container_kind_prints_the_two_commands_and_exits_zero checks/runtime/test_cli_update_kinds.py::test_container_env_beats_a_git_tree"
 acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
-

@@ -51,6 +51,8 @@ Open the console address the gateway prints. `npm run build` writes the console 
 
 For a packaged install instead, `sh infrastructure/website/install.sh` bootstraps with `uv`. To check those installer bytes before you run them, see [Verify the one-liner](docs/guides/GETTING_STARTED.md#verify-the-one-liner). The full walkthrough, from nothing installed to a first chat, is in [docs/guides/GETTING_STARTED.md](docs/guides/GETTING_STARTED.md).
 
+For one-container Docker from this checkout, build with `docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .`, then run `docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local`. The default workspace and state share the persistent volume; `docker logs gideon` prints the access URL.
+
 ## Develop
 
 ```sh
