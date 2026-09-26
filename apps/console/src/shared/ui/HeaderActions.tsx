@@ -48,7 +48,7 @@ export function useHeaderChild(reg: Omit<ChildReg, 'id'>): { visible: boolean; t
     if (!ctx) return
     ctx.register({ id, ...regRef.current })
     return () => ctx.unregister(id)
-  }, [ctx, id, reg.priority, reg.canIcon, reg.menu.label, reg.menu.danger, reg.menu.hint])
+  }, [ctx, id, reg.priority, reg.canIcon, reg.neverOverflow, reg.menu.label, reg.menu.danger, reg.menu.hint])
   if (!ctx) return { visible: true, tier: 'full' }
   const visible = ctx.tier !== 'overflow' || !ctx.visibleIds || ctx.visibleIds.has(id)
   return { visible, tier: ctx.tier }
@@ -72,7 +72,9 @@ export function railCeiling(
   return Math.max(0, inner - dots - title)
 }
 
-export function HeaderActions({ children, className }: { children: ReactNode; className?: string }) {
+export function HeaderActions({ children, className, preferLabeledOverflow = false }: {
+  children: ReactNode; className?: string; preferLabeledOverflow?: boolean
+}) {
   const outerRef = useRef<HTMLDivElement>(null)
   const probeFull = useRef<HTMLDivElement>(null)
   const probeText = useRef<HTMLDivElement>(null)
@@ -144,7 +146,7 @@ export function HeaderActions({ children, className }: { children: ReactNode; cl
       let next: Tier
       if (fits(wFull, 'full')) next = 'full'
       else if (fits(wText, 'text')) next = 'text'
-      else if (fits(wIcon, 'icon')) next = 'icon'
+      else if (!preferLabeledOverflow && fits(wIcon, 'icon')) next = 'icon'
       else next = 'overflow'
 
       if (next !== 'overflow') {
@@ -173,7 +175,7 @@ export function HeaderActions({ children, className }: { children: ReactNode; cl
       }
       for (const { r } of ordered) {
         if (keep.has(r.id)) continue
-        if (!r.canIcon) continue
+        if (!r.canIcon || (preferLabeledOverflow && r.priority !== 'primary')) continue
         const w = iconW(r.id)
         if (used + w <= avail) { used += w; keep.add(r.id) }
       }
@@ -195,7 +197,7 @@ export function HeaderActions({ children, className }: { children: ReactNode; cl
     const left = header?.querySelector<HTMLElement>('[data-header-left]')
     if (left) ro.observe(left)
     return () => ro.disconnect()
-  }, [regVersion])
+  }, [regVersion, preferLabeledOverflow])
 
   const ctx = useMemo<ClusterCtx>(() => ({ tier, visibleIds, register, unregister }), [tier, visibleIds, register, unregister])
 
@@ -285,7 +287,7 @@ const variants: Record<Variant, string> = {
 
 export function HeaderControl({
   icon: Icon, label, onClick, variant = 'ghost', active, ariaExpanded, disabled, danger,
-  priority = 'default', hint, className,
+  priority = 'default', hint, className, preserveLabel = false,
 }: {
   icon?: LucideIcon
   label: string
@@ -298,15 +300,17 @@ export function HeaderControl({
   priority?: Priority
   hint?: string
   className?: string
+  preserveLabel?: boolean
 }) {
   const { visible, tier } = useHeaderChild({
     priority,
     canIcon: !!Icon,
+    neverOverflow: preserveLabel,
     menu: { label, icon: Icon, hint, danger, onSelect: disabled ? undefined : onClick },
   })
   if (!visible) return null
 
-  const iconOnly = (tier === 'icon' || tier === 'overflow') && !!Icon
+  const iconOnly = (tier === 'icon' || tier === 'overflow') && !!Icon && !preserveLabel
   const showLabel = !iconOnly
   const showIcon = !!Icon
   const eff: Variant = danger ? 'danger' : variant
