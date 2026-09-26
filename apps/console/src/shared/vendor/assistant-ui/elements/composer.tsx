@@ -61,6 +61,14 @@ export interface ComposerUsage {
   total: number;
 }
 
+export interface ComposerMeasuredContext {
+  percent?: number | null;
+  usedTokens?: number | null;
+  windowTokens?: number | null;
+  breakdown?: readonly { label: string; tokens: number; tint: string }[] | null;
+  sources?: readonly string[];
+}
+
 const ATTACHMENT_ICONS: Record<
   NonNullable<ComposerAttachment["kind"]>,
   LucideIcon
@@ -483,11 +491,53 @@ export function ComposerModelItem({
   );
 }
 
+const formatTokens = (tokens: number) => tokens.toLocaleString("en-US");
+
 export function ComposerContext({
   usage,
+  measured,
   className,
   ...props
-}: Omit<ComponentProps<"div">, "children"> & { usage: ComposerUsage }) {
+}: Omit<ComponentProps<"div">, "children"> &
+  ({ usage: ComposerUsage; measured?: ComposerMeasuredContext } | { usage?: ComposerUsage; measured: ComposerMeasuredContext })) {
+  if (measured !== undefined || usage === undefined) {
+    const percent = measured?.percent;
+    const displayPercent = typeof percent === "number" && Number.isFinite(percent)
+      ? Math.round(clamp(percent, 0, 100)) : undefined;
+    const breakdown = measured?.breakdown;
+    return (
+      <div data-slot="composer-context" className={cn("group/ctx relative", className)} {...props}>
+        <div className={cn(
+          floating,
+          "absolute end-0 bottom-full z-10 mb-2 flex w-60 origin-bottom-right flex-col gap-3.5 rounded-2xl p-4",
+          "transition-[opacity,scale] duration-200 motion-reduce:transition-none",
+          "pointer-events-none scale-[0.97] opacity-0",
+          "group-hover/ctx:pointer-events-auto group-hover/ctx:scale-100 group-hover/ctx:opacity-100",
+          "group-focus-within/ctx:pointer-events-auto group-focus-within/ctx:scale-100 group-focus-within/ctx:opacity-100",
+        )}>
+          <p className="text-[13.5px] font-medium">
+            {displayPercent !== undefined ? `Context: ${displayPercent}% used` : "Context: unknown"}
+          </p>
+          {measured?.usedTokens != null && measured.windowTokens != null && (
+            <p className={mono}>{formatTokens(measured.usedTokens)} / {formatTokens(measured.windowTokens)} tokens</p>
+          )}
+          {breakdown && breakdown.length > 0 ? breakdown.map((part) => (
+            <div key={part.label} className="flex items-center gap-2 text-xs">
+              <span aria-hidden className="size-1.5 rounded-full" style={{ backgroundColor: part.tint }} />
+              <span className="flex-1">{part.label}</span>
+              <span>{formatTokens(part.tokens)} tokens</span>
+            </div>
+          )) : <p className="text-foreground/45 text-xs">Breakdown unavailable</p>}
+          {measured?.sources && measured.sources.length > 0 && (
+            <p className="text-foreground/45 max-h-24 overflow-y-auto break-words text-xs">Sources: {measured.sources.join(", ")}</p>
+          )}
+        </div>
+        <button type="button" aria-label={displayPercent !== undefined ? `Context: ${displayPercent}% used` : "Context: unknown"} className={cn(ghostButton, "size-8")}>
+          {displayPercent !== undefined ? `${displayPercent}%` : "?"}
+        </button>
+      </div>
+    );
+  }
   const used = usage.system + usage.tools + usage.messages;
   const fraction = usage.total === 0 ? 0 : used / usage.total;
   const warn = fraction > 0.85;
