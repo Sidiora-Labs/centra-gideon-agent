@@ -193,7 +193,7 @@ describe('real prompt library producer', () => {
     vi.spyOn(api, 'renderPrompt').mockResolvedValue({ name: 'plan', rendered: 'Plan the deployment' })
     const onInsert = vi.fn()
     const onClose = vi.fn()
-    const host = render(<PromptPalette onInsert={onInsert} onClose={onClose} />)
+    render(<PromptPalette onInsert={onInsert} onClose={onClose} />)
     await waitFor(() => expect(screen.getByText('Plan a change')).toBeInTheDocument())
     expect(document.querySelector('[data-slot="prompt-library"]')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('option', { name: 'Plan a change' }))
