@@ -48,6 +48,29 @@ describe('actual tool call rendering', () => {
     expect(view.container.textContent).toContain('done')
   })
 
+  it('summarizes real short command input and keeps a long command in the disclosure', () => {
+    const view = render(<ToolCard seg={tool({ input: 'lookup account 7', output: 'found', done: true })} />)
+    expect(view.container.querySelector('[data-slot="tool-call"]')?.textContent).toContain('lookup account 7')
+    const longInput = 'lookup ' + 'account '.repeat(12)
+    view.rerender(<ToolCard seg={tool({ input: longInput, output: 'found', done: true })} />)
+    expect(view.container.querySelector('[data-slot="tool-call"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Custom lookup.*Completed/i }))
+    expect(view.container.textContent).toContain(longInput)
+  })
+
+  it('keeps structured arguments readable without inventing a query', () => {
+    const view = render(<ToolCard seg={tool({ inputObj: { path: 'account/7', mode: 'fast' }, done: true })} />)
+    expect(view.container.textContent).toContain('path=account/7 · mode=fast')
+    view.rerender(<ToolCard seg={tool({ inputObj: { path: 'account/7', filter: 'a'.repeat(90) }, done: true })} />)
+    expect(view.container.textContent).toContain('account/7')
+    expect(view.container.textContent).not.toContain('filter=')
+    view.rerender(<ToolCard seg={tool({ inputObj: { path: 'a'.repeat(90), mode: 'fast' }, done: true })} />)
+    expect(view.container.textContent).toContain('a'.repeat(77) + '…')
+    view.rerender(<ToolCard seg={tool({ inputObj: { nested: { path: 'account/7' } }, done: true })} />)
+    expect(view.container.querySelector('[data-slot="tool-call"]')).toBeNull()
+    expect(view.container.textContent).not.toContain('nested=')
+  })
+
   it('preserves purpose and approval metadata when the donor card cannot display them', () => {
     const view = render(<ToolCard seg={tool({ detail: 'account 7', purpose: 'Check a stored receipt', auto: true, done: true, output: 'receipt found' })} />)
     expect(view.container.querySelector('[data-slot="tool-call"]')).toBeNull()
