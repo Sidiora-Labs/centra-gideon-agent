@@ -16,16 +16,18 @@ interface CitationProps {
   source: Source;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSourceOpen?: () => void;
 }
 
-function Citation({ index, source, open, onOpenChange }: CitationProps) {
+function Citation({ index, source, open, onOpenChange, onSourceOpen }: CitationProps) {
   return (
     <PreviewCard.Root open={open} onOpenChange={onOpenChange}>
       <PreviewCard.Trigger
         delay={0}
-        render={<button type="button" />}
+        render={<button type="button" aria-label={onSourceOpen ? `Open source ${source.title}` : undefined} onClick={onSourceOpen} />}
         className={cn(
           "mx-0.5 inline-flex h-4 min-w-4 translate-y-[-2px] cursor-default items-center justify-center rounded-[5px] px-1 align-middle font-mono text-[10px] font-medium tabular-nums transition-colors",
+          onSourceOpen && "cursor-pointer",
           open
             ? "bg-foreground text-background"
             : "bg-foreground/[0.06] text-foreground/45 hover:text-foreground/90",
@@ -55,9 +57,9 @@ function Citation({ index, source, open, onOpenChange }: CitationProps) {
             <p className="mt-2 text-[13px] leading-snug font-medium">
               {source.title}
             </p>
-            <p className="text-foreground/50 mt-1 text-[13px] leading-relaxed">
+            {source.snippet && <p className="text-foreground/50 mt-1 text-[13px] leading-relaxed">
               {source.snippet}
-            </p>
+            </p>}
           </PreviewCard.Popup>
         </PreviewCard.Positioner>
       </PreviewCard.Portal>
@@ -69,12 +71,16 @@ export interface InlineCitationProps extends ComponentProps<"p"> {
   sources: Source[];
   openIndex: number | null;
   onOpenIndexChange: (index: number | null) => void;
+  startIndex?: number;
+  onSourceOpen?: (index: number) => void;
 }
 
 export function InlineCitation({
   sources,
   openIndex,
   onOpenIndexChange,
+  startIndex = 0,
+  onSourceOpen,
   children,
   className,
   ...props
@@ -93,10 +99,11 @@ export function InlineCitation({
       {sources.map((source, index) => (
         <Citation
           key={`${source.domain}:${index}`}
-          index={index}
+          index={startIndex + index}
           source={source}
           open={openIndex === index}
           onOpenChange={(open) => onOpenIndexChange(open ? index : null)}
+          onSourceOpen={onSourceOpen ? () => onSourceOpen(index) : undefined}
         />
       ))}
     </p>

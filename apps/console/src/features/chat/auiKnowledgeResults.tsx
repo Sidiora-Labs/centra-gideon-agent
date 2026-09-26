@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { api, type KnowledgeContextCard, type KnowledgeContextResult, type KnowledgeItem, type ResearchReport, type SemanticEntry } from '../../shared/data/api'
-import { paper, field } from '../../shared/vendor/assistant-ui/elements/surfaces'
+import { paper } from '../../shared/vendor/assistant-ui/elements/surfaces'
 import { MapAnswer } from '../../shared/vendor/assistant-ui/elements/map-answer'
 import { WebSearch } from '../../shared/vendor/assistant-ui/elements/web-search'
 import { RetrievalChunks } from '../../shared/vendor/assistant-ui/elements/retrieval-chunks'
+import { InlineCitation, type Source } from '../../shared/vendor/assistant-ui/elements/inline-citation'
 
 export type KnowledgeOpen = (id: string) => void
 
@@ -28,12 +30,31 @@ export function KnowledgeLinkPreview({ title, url, description }: {
   </div>
 }
 
-export function KnowledgeCitation({ card, onOpen }: { card: KnowledgeContextCard; onOpen?: KnowledgeOpen }) {
+function citationSource(card: KnowledgeContextCard): Source {
+  const url = safeUrl(card.deep_link)
+  return {
+    title: card.section ? `${card.title}, ${card.section}` : card.title,
+    domain: url ? new URL(url).host : card.provider || card.source_type || '',
+    snippet: card.summary || card.content || '',
+  }
+}
+
+export function KnowledgeCitation({ card, onOpen, index = 0 }: { card: KnowledgeContextCard; onOpen?: KnowledgeOpen; index?: number }) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null)
   const label = card.section ? `${card.title}, ${card.section}` : card.title
-  return <span data-slot="inline-citation" className={`${field} inline-flex rounded-md px-2 py-0.5 text-xs`}>
-    {onOpen ? <button type="button" onClick={() => onOpen(card.id)} aria-label={`Open source ${label}`}>{label}</button>
-      : <span>{label}</span>}
-  </span>
+  return <InlineCitation sources={[citationSource(card)]} startIndex={index} openIndex={openIndex}
+    onOpenIndexChange={setOpenIndex} onSourceOpen={onOpen ? () => onOpen(card.id) : undefined}>
+    {label}
+  </InlineCitation>
+}
+
+function KnowledgeCitationCluster({ cards, onOpen }: { cards: KnowledgeContextCard[]; onOpen?: KnowledgeOpen }) {
+  const [openIndex, setOpenIndex] = useState<number | null>(null)
+  return <InlineCitation aria-label="Knowledge citations" sources={cards.map(citationSource)}
+    openIndex={openIndex} onOpenIndexChange={setOpenIndex}
+    onSourceOpen={onOpen ? (index) => onOpen(cards[index].id) : undefined}>
+    Sources
+  </InlineCitation>
 }
 
 export function KnowledgeWebSearch({ result, onOpen }: {
@@ -53,9 +74,7 @@ export function KnowledgeWebSearch({ result, onOpen }: {
   return <section data-slot="web-search" aria-label={`Knowledge search results for ${result.query}`} className="space-y-2">
     <WebSearch query={result.query} results={rows} visibleResults={rows.length} searching={false} cycle={0}
       onSelect={onOpen ? (row) => onOpen(row.id!) : undefined} />
-    <div className="flex flex-wrap gap-1" aria-label="Knowledge citations">
-      {result.results.map((card) => <KnowledgeCitation key={card.id} card={card} onOpen={onOpen} />)}
-    </div>
+    <KnowledgeCitationCluster cards={result.results} onOpen={onOpen} />
   </section>
 }
 
@@ -76,9 +95,7 @@ export function KnowledgeRetrievalChunks({ result, onOpen }: {
   return <section data-slot="retrieval-chunks" aria-label="Retrieved passages" className="space-y-2">
     <RetrievalChunks query={result.query} chunks={chunks} visibleCount={chunks.length} searching={false}
       onSelect={onOpen ? (chunk) => onOpen(chunk.id) : undefined} />
-    <div className="flex flex-wrap gap-1" aria-label="Knowledge citations">
-      {result.results.map((card) => <KnowledgeCitation key={card.id} card={card} onOpen={onOpen} />)}
-    </div>
+    <KnowledgeCitationCluster cards={result.results} onOpen={onOpen} />
   </section>
 }
 
@@ -171,8 +188,8 @@ export function KnowledgeMediaPlayer({ item }: { item: KnowledgeItem }) {
 export function KnowledgeSources({ result, onOpen }: { result: KnowledgeContextResult; onOpen?: KnowledgeOpen }) {
   return <section data-slot="sources" aria-label="Knowledge sources" className={`${paper} rounded-xl p-3`}>
     <h3>{result.results.length} sources</h3>
-    <ol className="mt-2 space-y-1">{result.results.map((card) => <li key={card.id}>
-      <KnowledgeCitation card={card} onOpen={onOpen} />
+    <ol className="mt-2 space-y-1">{result.results.map((card, index) => <li key={card.id}>
+      <KnowledgeCitation card={card} onOpen={onOpen} index={index} />
     </li>)}</ol>
   </section>
 }

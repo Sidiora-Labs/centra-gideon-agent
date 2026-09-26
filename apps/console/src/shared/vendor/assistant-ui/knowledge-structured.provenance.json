@@ -13,7 +13,7 @@
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/inline-citation.tsx",
       "local_path": "apps/console/src/shared/vendor/assistant-ui/elements/inline-citation.tsx",
       "donor_sha256": "b0475e4269251537e10d8dcb12b7cf856af60eed27c6dffa7313ca02fdc5edce",
-      "local_sha256": "fef71a0fb283e75032e3fefdf1ccfb09f1a007aa5cc30b24abea9fb3c9f6493f"
+      "local_sha256": "5a88fb2eb571d5670f55479d0b6db6cc6d7d18147e812c2a13b81ae38a93260b"
     },
     {
       "donor_path": "packages/ui/src/components/react/assistant-ui/elements/image-generation.tsx",

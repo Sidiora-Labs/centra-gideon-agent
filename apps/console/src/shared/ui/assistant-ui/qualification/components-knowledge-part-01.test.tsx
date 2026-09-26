@@ -64,7 +64,8 @@ describe('knowledge result adapters', () => {
   it('shows a citation without an action when no opener was supplied', () => {
     render(<KnowledgeCitation card={source} />)
     expect(screen.getByText('Incident review, Timeline')).toBeTruthy()
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.getByRole('button', { name: '1' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Open source/ })).toBeNull()
   })
 
   it('renders the recorded passage and locator without inventing a score', () => {
