@@ -8,6 +8,7 @@ import { api, type WorkflowIntrospection, type WorkflowTimelineRow } from '../..
 import { fmtElapsed } from './workflowMeta'
 import { runCostStat, runCostText, templateCostStat } from '../../shared/data/runCost'
 import { UNRECORDED_LABEL, runTokensStat } from '../../shared/data/unrecorded'
+import { CostMeter } from '../../shared/vendor/assistant-ui/elements/cost-meter'
 
 export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: () => void }) {
   const [data, setData] = useState<WorkflowIntrospection | null>(null)
@@ -77,10 +78,15 @@ export function IntrospectPanel({ runId, onClose }: { runId: string; onClose: ()
                 <h3 data-type="label-s" className="flex items-center gap-xs text-on-surface fw-500">
                   <DollarSign size={13} aria-hidden /> Cost and latency
                 </h3>
+                {data.stats.priced && (
+                  <CostMeter runCost={runCostStat(data.stats.cost_usd, true)} className="max-w-full" />
+                )}
                 <dl data-type="caption" className="grid grid-cols-2 gap-xs sm:grid-cols-4">
                   {
 }
-                  <Stat label="Cost (est.)" value={runCostStat(data.stats.cost_usd, data.stats.priced)} />
+                  {!data.stats.priced && (
+                    <Stat label="Cost (est.)" value={runCostStat(data.stats.cost_usd, false)} />
+                  )}
                   <Stat label="Tokens" value={runTokensStat(data.stats.tokens, data.stats.tokens_recorded)} />
                   <Stat label="Duration" value={fmtElapsed(data.stats.duration_secs)} />
                   <Stat label="To first output" value={`${Math.round(data.stats.first_byte_ms)} ms`} />

@@ -24,8 +24,8 @@ export function CostMeter({
   "children" | "runCost" | "sessionCost" | "lines"
 > & {
   runCost: string;
-  sessionCost: string;
-  lines: readonly CostLine[];
+  sessionCost?: string;
+  lines?: readonly CostLine[];
 }) {
   return (
     <div
@@ -43,11 +43,19 @@ export function CostMeter({
           {runCost}
         </span>
         <span className={cn(mono, "text-foreground/30")}>this run</span>
-        <span className={cn(mono, "text-foreground/35 ms-auto tabular-nums")}>
-          {sessionCost} session
-        </span>
+        {sessionCost !== undefined && (
+          <span className={cn(mono, "text-foreground/35 ms-auto tabular-nums")}>
+            {sessionCost} session
+          </span>
+        )}
       </div>
 
+      {lines === undefined ? (
+        <p className={cn(mono, "text-foreground/50 text-xs")} role="status">
+          Cost breakdown unavailable
+        </p>
+      ) : (
+        <>
       <div className="bg-foreground/[0.06] flex h-1.5 w-full overflow-hidden rounded-full">
         {lines.map((line, i) => {
           const width = pct(line.share, 1);
@@ -94,6 +102,8 @@ export function CostMeter({
           </div>
         ))}
       </div>
+        </>
+      )}
     </div>
   );
 }

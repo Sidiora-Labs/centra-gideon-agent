@@ -66,7 +66,7 @@
     },
     "cost-meter.tsx": {
       "source_sha256": "ce6dfcd42759516b7fc4b475a88a9523f7e081a0c7f1df5e5da039533c6e7f89",
-      "adaptation": "@/lib/utils -> ../lib/utils"
+      "adaptation": "@/lib/utils -> ../lib/utils; absent session cost hidden and absent model breakdown labeled unavailable"
     },
     "quota-banner.tsx": {
       "source_sha256": "a3a0eba1fb25d44d29e8cadc80ec2432350d8d4b2498a937d2db924d35e5160f",
