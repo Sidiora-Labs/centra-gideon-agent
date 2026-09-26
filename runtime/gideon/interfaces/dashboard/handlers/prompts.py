@@ -1053,16 +1053,27 @@ async def api_skills_create(request: web.Request) -> web.Response:
         return web.json_response({"error": "name is required"}, status=400)
     if not content:
         return web.json_response({"error": "content is required"}, status=400)
+    safe_name = re.sub(r"[^a-z0-9\-/]", "-", name.lower()).strip("-").strip("/")
+    safe_name = re.sub(r"/+", "/", safe_name)
+    if not safe_name:
+        return web.json_response({"error": "invalid skill name"}, status=400)
+    if content.startswith("---\n"):
+        end = content.find("\n---", 3)
+        if end >= 0:
+            header, remainder = content[:end], content[end:]
+            if re.search(r"(?m)^name:\s*.*$", header):
+                header = re.sub(r"(?m)^name:\s*.*$", f"name: {safe_name}", header, count=1)
+            else:
+                header += f"\nname: {safe_name}"
+            if not re.search(r"(?m)^source:\s*.*$", header):
+                header += "\nsource: dashboard"
+            content = header + remainder
     errors = validate_skill_md(content)
     if errors:
         return web.json_response(
             {"error": f"SKILL.md validation failed: {'; '.join(errors)}"},
             status=400,
         )
-    safe_name = re.sub(r"[^a-z0-9\-/]", "-", name.lower()).strip("-").strip("/")
-    safe_name = re.sub(r"/+", "/", safe_name)
-    if not safe_name:
-        return web.json_response({"error": "invalid skill name"}, status=400)
     skills = _get_skills(state)
     ok = skills.create_skill(safe_name, content)
     if not ok:

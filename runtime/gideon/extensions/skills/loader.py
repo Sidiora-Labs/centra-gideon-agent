@@ -416,7 +416,7 @@ def skill_provenance(meta: dict[str, str]) -> str:
     public value set stable for hand-authored and third-party skills.
     """
     value = meta.get("source", "").strip().lower()
-    if value in (AUTO_SKILL_SOURCE_VALUE, TAUGHT_SKILL_SOURCE_VALUE):
+    if value in (AUTO_SKILL_SOURCE_VALUE, TAUGHT_SKILL_SOURCE_VALUE, "dashboard"):
         return value
     return ""
 

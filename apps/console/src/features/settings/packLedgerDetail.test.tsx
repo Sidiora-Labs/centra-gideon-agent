@@ -126,11 +126,24 @@ describe('the detail block gate', () => {
 
 describe('staged triggers', () => {
   it('offers to add staged triggers to Automations', () => {
-    expect(text({ ...base, staged_triggers: ['month-end'] })).toContain('Add triggers to Automations')
+    expect(text({ ...base, staged_triggers: ['month-end'] })).toContain('Activate pack')
   })
 })
 
 describe('staged roster', () => {
+  it('reports the active roster and staged trigger after deployment', () => {
+    const active = {
+      ...base,
+      roster: [{ slug: 'cfo', target: 'cfo', activation: 'always' } as NonNullable<InstalledPackRec['roster']>[number]],
+      staged_triggers: ['month-end'],
+      roster_active: ['cfo'],
+      triggers_added: ['month-end'],
+    }
+    const { container } = render(<PackRow pack={active} />)
+    expect(container.textContent).toContain('Active · 1 agents, 1 triggers added disabled')
+    expect(screen.queryByRole('button', { name: 'Activate pack' })).toBeNull()
+  })
+
   it('deploys the roster and its staged triggers with one click', async () => {
     const roster = vi.spyOn(api, 'packRosterDeploy').mockResolvedValue({
       ok: true, pack: base.name, deployed: ['cfo'], dormant: [], missing: [],
@@ -140,11 +153,11 @@ describe('staged roster', () => {
     })
     render(<PackRow pack={{
       ...base,
-      roster: [{ slug: 'cfo', target: 'cfo', tier: 'always' }],
+      roster: [{ slug: 'cfo', target: 'cfo', activation: 'always' } as NonNullable<InstalledPackRec['roster']>[number]],
       staged_triggers: ['month-end'],
     }} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Deploy roster' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Activate pack' }))
 
     await waitFor(() => {
       expect(roster).toHaveBeenCalledOnce()

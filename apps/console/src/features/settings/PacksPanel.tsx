@@ -65,7 +65,7 @@ export function PacksPanel() {
       {installedErr ? <LoadError what="installed packs" error={installedErr} onRetry={onInstalled} /> : installed === undefined ? <FormSkeleton sections={1} what="installed packs" /> : <PackStoreSection installed={installed} onInstalled={onInstalled} />}
 
       <Section title="Installed packs" hint="Each imported pack, its skipped-connector markers, a re-runnable setup interview when it ships one, and an update that never overwrites a component you have edited.">
-        {!installedErr && installed !== undefined && <InstalledPacks packs={installed} />}
+        {!installedErr && installed !== undefined && <InstalledPacks packs={installed} onChanged={onInstalled} />}
       </Section>
     </div>
   )
@@ -236,13 +236,13 @@ export function PackStoreSection({ installed, onInstalled }: {
   )
 }
 
-export function InstalledPacks({ packs }: { packs: InstalledPackRec[] }) {
+export function InstalledPacks({ packs, onChanged = () => {} }: { packs: InstalledPackRec[]; onChanged?: () => void }) {
   if (packs.length === 0) {
     return <div data-type="body-s" className="rounded-lg bg-surface-container px-4 py-3 text-on-surface-low">No packs installed yet. Choose one from the <a href="#pack-store" className="underline">Pack store above</a>.</div>
   }
   return (
     <div className="flex flex-col gap-2">
-      {packs.map((p) => <PackRow key={p.name} pack={p} />)}
+      {packs.map((p) => <PackRow key={p.name} pack={p} onChanged={onChanged} />)}
     </div>
   )
 }
@@ -284,9 +284,15 @@ function ConnectorLine({ c }: { c: InstalledPackRec['connectors'][number] }) {
 /** Exported for test: the gate and the per-mode connector rendering are only observable by
  *  rendering the row against a stubbed ledger record — jsdom reports every box as 0, so nothing
  *  about them is measurable from layout. */
-export function PackRow({ pack }: { pack: InstalledPackRec }) {
+export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec; onChanged?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [update, setUpdate] = useState<PackUpdateRec | null>(null)
+  const state = pack as InstalledPackRec & { roster_active?: string[]; triggers_added?: string[] }
+  const always = (pack.roster ?? []).filter((row) => (row as { activation?: string }).activation === 'always')
+  const rosterReady = always.length === 0 || always.every((row) => state.roster_active?.includes(row.target || row.slug || ''))
+  const triggersReady = !pack.staged_triggers?.length || pack.staged_triggers.every((id) => state.triggers_added?.includes(id))
+  const hasStaged = always.length > 0 || !!pack.staged_triggers?.length
+  const active = hasStaged && rosterReady && triggersReady
   const checkUpdate = () => {
     setBusy(true)
     api.packUpdate(pack.name, false).then((r) => {
@@ -317,31 +323,21 @@ export function PackRow({ pack }: { pack: InstalledPackRec }) {
       notify(`Couldn't start setup: ${String((e as Error)?.message || e)}`, 'error')
     }).finally(() => setBusy(false))
   }
-  const deployTriggers = () => {
+  const activatePack = async () => {
     setBusy(true)
-    api.packTriggersDeploy(pack.name).then((r) => {
-      notify(
-        r.skipped.length
-          ? `${r.deployed.length} trigger${r.deployed.length === 1 ? '' : 's'} added disabled; ${r.skipped.length} skipped.`
-          : `${r.deployed.length} trigger${r.deployed.length === 1 ? '' : 's'} added to Automations, disabled until you arm them.`,
-        r.skipped.length ? 'info' : 'success',
-      )
-    }).catch((e) => notify(`Couldn't add triggers: ${String((e as Error)?.message || e)}`, 'error'))
-      .finally(() => setBusy(false))
-  }
-  const deployRoster = () => {
-    setBusy(true)
-    Promise.all([
-      api.packRosterDeploy(pack.name),
+    const results = await Promise.allSettled([
+      always.length ? api.packRosterDeploy(pack.name) : Promise.resolve(null),
       pack.staged_triggers?.length ? api.packTriggersDeploy(pack.name) : Promise.resolve(null),
-    ]).then(([roster, triggers]) => {
-      const triggerCount = triggers?.deployed.length ?? 0
-      notify(
-        `${roster.deployed.length} roster member${roster.deployed.length === 1 ? '' : 's'} deployed with ${triggerCount} disabled trigger${triggerCount === 1 ? '' : 's'}.`,
-        roster.missing.length || triggers?.skipped.length ? 'info' : 'success',
-      )
-    }).catch((e) => notify(`Couldn't deploy roster: ${String((e as Error)?.message || e)}`, 'error'))
-      .finally(() => setBusy(false))
+    ] as const)
+    const failures = results.filter((result) => result.status === 'rejected')
+    if (failures.length) notify(`Couldn't fully activate ${pack.name}: ${failures.map((result) => String((result as PromiseRejectedResult).reason)).join('; ')}`, 'error')
+    else {
+      const roster = results[0].status === 'fulfilled' ? results[0].value : null
+      const triggers = results[1].status === 'fulfilled' ? results[1].value : null
+      notify(`${pack.name}: ${roster?.deployed.length ?? 0} agents active; ${triggers?.deployed.length ?? 0} triggers added disabled for review.`, roster?.missing.length || triggers?.skipped.length ? 'info' : 'success')
+    }
+    onChanged()
+    setBusy(false)
   }
   const components = pack.components ?? []
   const connectors = pack.connectors ?? []
@@ -355,12 +351,9 @@ export function PackRow({ pack }: { pack: InstalledPackRec }) {
           {pack.setup_pending && (
             <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={finishSetup}>Finish setup</Button>
           )}
-          {!!pack.roster?.length && (
-            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={deployRoster}>Deploy roster</Button>
-          )}
-          {!pack.roster?.length && !!pack.staged_triggers?.length && (
-            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={deployTriggers}>Add triggers to Automations</Button>
-          )}
+          {hasStaged && (active
+            ? <span data-type="caption" className="text-ok">Active · {state.roster_active?.length ?? 0} agents, {state.triggers_added?.length ?? 0} triggers added disabled</span>
+            : <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={activatePack}>Activate pack</Button>)}
           <Button variant="ghost" size="sm" loading={busy} loadingLabel="Checking…" onClick={checkUpdate}>
             Check for update
           </Button>

@@ -41,7 +41,7 @@ import logging
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -102,6 +102,7 @@ class InstallResult:
     needs_client_install: bool = False
     client_install: dict[str, Any] | None = None
     log_excerpt: str = ""
+    hooks: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def fix_prompt(self) -> str:
@@ -141,6 +142,7 @@ class InstallResult:
             "scan": self.scan.to_dict() if self.scan else None,
             "log_excerpt": self.log_excerpt,
             "fix_prompt": self.fix_prompt,
+            "hooks": self.hooks,
         }
 
 
@@ -746,6 +748,11 @@ def install(
                 scan=report,
                 needs_consent=True,
                 error="install needs consent: scanner raised warnings",
+                hooks=[
+                    {"name": h["name"], "event": h["event"], "provider": h["provider"]}
+                    for h in manifest.extra.get("hooks", [])
+                    if isinstance(h, dict) and all(k in h for k in ("name", "event", "provider"))
+                ],
             )
 
         import sys as _sys
