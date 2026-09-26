@@ -294,8 +294,8 @@ export function Composer(props: ComposerProps) {
         <span className="h-0.5 w-7 rounded-full bg-outline-variant transition-colors group-hover:bg-primary" />
       </div>
       {mobile ? <AssistantMobileComposer editor={editor} value={value} keyboardOpen={surface.focused} keyboardHint={null}
-        running={action === 'stop'} actions={[]} className="max-w-none rounded-2xl border-0 bg-transparent p-0"
-        onAttach={controls.attach && onAttach ? () => files.current?.click() : undefined}
+        running={action === 'stop'} actions={[]} embedded className="max-w-none"
+        style={{ background: 'transparent', border: 0, borderRadius: 0, padding: 0, maxWidth: 'none' }}
         onSend={surface.action.canSubmit ? surface.submit : undefined} onStop={action === 'stop' ? onStop : undefined} /> : editor}
       {savedDraft && <DraftRestore draft={savedDraft.draft} savedAt={savedDraft.savedAt}
         onRestore={() => { onChange(savedDraft.draft); setSavedDraft(null) }}
