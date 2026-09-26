@@ -3,11 +3,12 @@ import { fvs } from '../../shared/theme/fontWeight'
 import { ChevronRight, Loader2, Check, Zap, Maximize2, Lightbulb, AlertTriangle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { spring } from '../../shared/theme/motion'
-import type { ToolSegment } from './chatTypes'
+import { guardrailNoticeForTool, type ToolSegment } from './chatTypes'
 import { renderToolInput, renderToolOutput, iconForTool, labelForTool, inputOf } from './toolRenderers/registry'
 import { requestToolResultFull } from './toolResultBridge'
 import { ToolCall } from '../../shared/vendor/assistant-ui/elements/tool-call'
 import { ToolError } from '../../shared/vendor/assistant-ui/elements/tool-error'
+import { GuardrailNotice } from '../../shared/vendor/assistant-ui/elements/guardrail-notice'
 import { ToolFallbackRoot, ToolFallbackTrigger, ToolFallbackContent } from '../../shared/vendor/assistant-ui/elements/tool-fallback.aui'
 import { nativeRendererForTool } from './toolRenderers/native'
 import { sniffContentType } from './toolRenderers/registry'
@@ -80,12 +81,14 @@ export function ToolCard({ seg, connected = false }: { seg: ToolSegment; connect
 }
 
 function ToolCardDetails({ seg }: { seg: ToolSegment }) {
-  const donorError = seg.done && seg.agentError?.what ? seg.agentError.what : null
+  const guardrail = seg.done ? guardrailNoticeForTool(seg) : null
+  const donorError = seg.done && !guardrail && seg.agentError?.what ? seg.agentError.what : null
   return (
     <div className="border-t border-outline-variant/30 px-3 py-2">
       {seg.purpose && <p data-type="caption" className="mb-1.5 text-on-surface-var">{seg.purpose}</p>}
       {renderToolInput(seg)}
       {renderToolOutput(seg)}
+      {guardrail && <GuardrailNotice title={labelForTool(seg)} explanation={guardrail.reason} />}
       {donorError && <ToolError name={labelForTool(seg)} target={secondaryDetail(seg) || seg.tool} message={donorError} />}
       {seg.done && (seg.output == null || seg.output === '') && (
         <p data-type="caption" className="text-on-surface-low">No output.</p>
@@ -110,7 +113,7 @@ function ToolCardDetails({ seg }: { seg: ToolSegment }) {
             <span className="font-mono">{seg.agentError.code}</span>
           </div>
           <dl data-type="caption" className="flex flex-col gap-0.5">
-            {!donorError && <div className="flex gap-1.5">
+            {!donorError && !guardrail && <div className="flex gap-1.5">
               <dt className="shrink-0 text-on-surface-low" style={fvs(600)}>What</dt>
               <dd className="min-w-0 text-on-surface-var">{seg.agentError.what}</dd>
             </div>}
