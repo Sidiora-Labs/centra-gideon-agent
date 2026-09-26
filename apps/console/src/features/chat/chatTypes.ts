@@ -283,6 +283,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       visible += 1
       const at = lastAssistant()
       at.visibleIndex = visible
+      if (m.ts && !Number.isNaN(new Date(m.ts).getTime())) at.ts = m.ts
       at.segments.push({ kind: 'text', text: m.content })
       if (m.meta?.summary) at.summary = m.meta.summary
       if (Array.isArray(m.meta?.memory_citations) && m.meta!.memory_citations.length) {

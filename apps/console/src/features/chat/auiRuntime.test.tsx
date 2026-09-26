@@ -186,6 +186,31 @@ describe('Gideon assistant-ui runtime', () => {
     ])
   })
 
+  it('uses only recorded assistant history timestamps across coalesced rows', () => {
+    const first = '2026-09-26T10:00:00+00:00'
+    const latest = '2026-09-26T10:01:00+00:00'
+    const history: ChatHistoryMsg[] = [
+      { role: 'user', content: 'Summarize', ts: '2026-09-26T09:59:00+00:00' },
+      { role: 'assistant', content: 'First part', ts: first },
+      { role: 'streaming', content: 'Unstamped stream part' },
+      { role: 'assistant', content: 'Final part', ts: latest },
+      { role: 'assistant', content: 'Legacy unstamped part', ts: '' },
+      { role: 'assistant', content: 'Invalid stamped part', ts: 'not-a-date' },
+      { role: 'user', content: 'Again' },
+      { role: 'assistant', content: 'No timestamp available' },
+    ]
+    const turns = hydrateTurns(history)
+    const ui = setup({ turns })
+    expect(turns[1].segments).toHaveLength(5)
+    expect(turns[1].ts).toBe(latest)
+    expect(ui.aui().thread.getState().messages[1].createdAt?.toISOString()).toBe('2026-09-26T10:01:00.000Z')
+    expect(turns[3].ts).toBeUndefined()
+    expect(convertGideonTurn(turns[3], 3, 'session/a', false)).not.toHaveProperty('createdAt')
+    expect(ui.aui().thread.getState().messages.map((message) => message.id)).toEqual(
+      turns.map((_, index) => gideonAuiId('session/a', index)),
+    )
+  })
+
   it('binds final gateway stop records to the preceding assistant without changing turn identity', () => {
     const stoppedMeta = { kind: 'stop_event', id: 'stop-1', state: 'stopped', outcome: 'soft' }
     const failedResetMeta = { kind: 'stop_event', id: 'stop-2', state: 'stop_failed_reset', outcome: 'hard' }
