@@ -35,7 +35,7 @@ export function BackgroundAgentRuns({ agents, onOpen }: { agents: SpawnedAgent[]
     id: agent.id, title: agent.agent || agent.task || agent.id,
     state: agent.done ? agent.error ? 'failed' : 'ready' : 'running',
     elapsed: agent.elapsed == null ? 'Duration unavailable' : `${Math.round(agent.elapsed)}s`,
-    summary: agent.error || agent.result,
+    summary: agent.error || agent.result || agent.task,
   }))} onCollect={onOpen} />
 }
 
