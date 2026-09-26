@@ -4,10 +4,12 @@
   border: 1px solid color-mix(in srgb, var(--color-outline-variant) 58%, transparent);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--color-on-surface) 5%, transparent);
 }
 
 .gideon-topbar {
   border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 38%, transparent);
+  background: var(--color-surface);
 }
 
 .gideon-corner-left {
@@ -81,6 +83,7 @@
     margin: 0;
     border: 0;
     border-radius: 0;
+    box-shadow: none;
   }
 
   .gideon-corner-left { padding-inline: var(--spacing-xs); }
