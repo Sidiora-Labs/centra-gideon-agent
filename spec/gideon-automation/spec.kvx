@@ -1,0 +1,297 @@
+[meta]
+feature = "gideon-automation"
+status = "in_progress"
+version = "1.0.0"
+leader = "root"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+requested_items = 135
+manager_count = 4
+worker_count = 16
+agent_model = "gpt-6-sol"
+
+[design.integration]
+contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
+branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+
+[design.hosted]
+contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
+
+[design.delivery]
+contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
+
+[req.034]
+title = "Render zero elapsed duration as 0s"
+acceptance = "Implement the complete reachable feature: Render zero elapsed duration as 0s"
+hosted = "customer"
+
+[req.060]
+title = "General-loop pause resume and workflow lifecycle"
+acceptance = "Implement the complete reachable feature: General-loop pause resume and workflow lifecycle"
+hosted = "customer"
+
+[req.061]
+title = "Correct workflow failure attribution and actual cause"
+acceptance = "Implement the complete reachable feature: Correct workflow failure attribution and actual cause"
+hosted = "customer"
+
+[req.062]
+title = "Reliable failed-stage retry"
+acceptance = "Implement the complete reachable feature: Reliable failed-stage retry"
+hosted = "customer"
+
+[req.063]
+title = "Previous-iteration bindings including first-cycle defaults"
+acceptance = "Implement the complete reachable feature: Previous-iteration bindings including first-cycle defaults"
+hosted = "customer"
+
+[req.064]
+title = "Consistent fan-out totals"
+acceptance = "Implement the complete reachable feature: Consistent fan-out totals"
+hosted = "customer"
+
+[req.065]
+title = "Distinct best-of-N candidate answers"
+acceptance = "Implement the complete reachable feature: Distinct best-of-N candidate answers"
+hosted = "customer"
+
+[req.066]
+title = "Output schema mismatch notices"
+acceptance = "Implement the complete reachable feature: Output schema mismatch notices"
+hosted = "customer"
+
+[req.067]
+title = "Enforced declared workflow input types"
+acceptance = "Implement the complete reachable feature: Enforced declared workflow input types"
+hosted = "customer"
+
+[req.068]
+title = "Interrupted workflow resume without repeated effects"
+acceptance = "Implement the complete reachable feature: Interrupted workflow resume without repeated effects"
+hosted = "customer"
+
+[req.069]
+title = "Escalation details in progress and run views"
+acceptance = "Implement the complete reachable feature: Escalation details in progress and run views"
+hosted = "customer"
+
+[req.070]
+title = "Remove terminal-run continuation controls"
+acceptance = "Implement the complete reachable feature: Remove terminal-run continuation controls"
+hosted = "customer"
+
+[req.071]
+title = "Loop draft start timeout task title and approval response repairs"
+acceptance = "Implement the complete reachable feature: Loop draft start timeout task title and approval response repairs"
+hosted = "customer"
+
+[req.072]
+title = "Associate findings with canonical tasks"
+acceptance = "Implement the complete reachable feature: Associate findings with canonical tasks"
+hosted = "customer"
+
+[req.074]
+title = "Show actual redacted workflow node prompt"
+acceptance = "Implement the complete reachable feature: Show actual redacted workflow node prompt"
+hosted = "customer"
+
+[task.automation-workflows]
+title = "automation-workflows end-to-end implementation"
+status = "pending"
+wave = 1
+owner_lane = "automation-workflows"
+requires = []
+reqs = ["034", "060", "061", "062", "063", "064", "065", "066", "067", "068", "069", "070", "071", "072", "074"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.015]
+title = "Contextual proactive planner for silence notifications contributions and background work"
+acceptance = "Implement the complete reachable feature: Contextual proactive planner for silence notifications contributions and background work"
+hosted = "customer"
+
+[req.016]
+title = "Persistent multi-agent rounds roles handoffs and interruption recovery"
+acceptance = "Implement the complete reachable feature: Persistent multi-agent rounds roles handoffs and interruption recovery"
+hosted = "customer"
+
+[req.017]
+title = "Intent-based workflow discovery and natural-language launch"
+acceptance = "Implement the complete reachable feature: Intent-based workflow discovery and natural-language launch"
+hosted = "customer"
+
+[req.085]
+title = "Scheduled daily spending limits visible pause and reset resume"
+acceptance = "Implement the complete reachable feature: Scheduled daily spending limits visible pause and reset resume"
+hosted = "operator_managed"
+
+[req.109]
+title = "Trigger dry-run outcomes and originating-trigger links"
+acceptance = "Implement the complete reachable feature: Trigger dry-run outcomes and originating-trigger links"
+hosted = "customer"
+
+[req.110]
+title = "Model requirement only for model-using triggers"
+acceptance = "Implement the complete reachable feature: Model requirement only for model-using triggers"
+hosted = "customer"
+
+[req.111]
+title = "Consistent trigger create and update semantics"
+acceptance = "Implement the complete reachable feature: Consistent trigger create and update semantics"
+hosted = "customer"
+
+[req.112]
+title = "Consistent trigger status and latest error"
+acceptance = "Implement the complete reachable feature: Consistent trigger status and latest error"
+hosted = "customer"
+
+[task.automation-proactivity]
+title = "automation-proactivity end-to-end implementation"
+status = "pending"
+wave = 2
+owner_lane = "automation-proactivity"
+requires = []
+reqs = ["015", "016", "017", "085", "109", "110", "111", "112"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.079]
+title = "Complete task pagination across lists DAGs and prerequisite pickers"
+acceptance = "Implement the complete reachable feature: Complete task pagination across lists DAGs and prerequisite pickers"
+hosted = "customer"
+
+[req.080]
+title = "Scoped task progress and critical paths"
+acceptance = "Implement the complete reachable feature: Scoped task progress and critical paths"
+hosted = "customer"
+
+[req.081]
+title = "Cancelled tasks distinct from completed"
+acceptance = "Implement the complete reachable feature: Cancelled tasks distinct from completed"
+hosted = "customer"
+
+[req.082]
+title = "Refused task save feedback and fitting controls"
+acceptance = "Implement the complete reachable feature: Refused task save feedback and fitting controls"
+hosted = "customer"
+
+[req.083]
+title = "Preserve execution-owned fields on task reset"
+acceptance = "Implement the complete reachable feature: Preserve execution-owned fields on task reset"
+hosted = "customer"
+
+[req.084]
+title = "Consistent task-list names and counts"
+acceptance = "Implement the complete reachable feature: Consistent task-list names and counts"
+hosted = "customer"
+
+[req.100]
+title = "Consistent Needs you count and contents"
+acceptance = "Implement the complete reachable feature: Consistent Needs you count and contents"
+hosted = "customer"
+
+[req.101]
+title = "Attention links to exact inbox items"
+acceptance = "Implement the complete reachable feature: Attention links to exact inbox items"
+hosted = "customer"
+
+[req.102]
+title = "Accurate active native inbox empty state"
+acceptance = "Implement the complete reachable feature: Accurate active native inbox empty state"
+hosted = "customer"
+
+[req.103]
+title = "Room-member read failure rather than endless spinner"
+acceptance = "Implement the complete reachable feature: Room-member read failure rather than endless spinner"
+hosted = "customer"
+
+[req.104]
+title = "Proposal decision outcomes and target names"
+acceptance = "Implement the complete reachable feature: Proposal decision outcomes and target names"
+hosted = "customer"
+
+[req.105]
+title = "No proposal refill and clear reviewed proposals"
+acceptance = "Implement the complete reachable feature: No proposal refill and clear reviewed proposals"
+hosted = "customer"
+
+[req.106]
+title = "Notification rules control promised delivery"
+acceptance = "Implement the complete reachable feature: Notification rules control promised delivery"
+hosted = "customer"
+
+[req.107]
+title = "Mention escalation matches user name"
+acceptance = "Implement the complete reachable feature: Mention escalation matches user name"
+hosted = "customer"
+
+[req.108]
+title = "Notification filter reset action"
+acceptance = "Implement the complete reachable feature: Notification filter reset action"
+hosted = "customer"
+
+[req.113]
+title = "Learning inactivity begins at first pass"
+acceptance = "Implement the complete reachable feature: Learning inactivity begins at first pass"
+hosted = "customer"
+
+[task.automation-tasks]
+title = "automation-tasks end-to-end implementation"
+status = "pending"
+wave = 3
+owner_lane = "automation-tasks"
+requires = []
+reqs = ["079", "080", "081", "082", "083", "084", "100", "101", "102", "103", "104", "105", "106", "107", "108", "113"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.014]
+title = "Plugin hooks observers background services and richer installation"
+acceptance = "Implement the complete reachable feature: Plugin hooks observers background services and richer installation"
+hosted = "operator_managed"
+
+[req.114]
+title = "Close terminally failed app installation dialogs"
+acceptance = "Implement the complete reachable feature: Close terminally failed app installation dialogs"
+hosted = "customer"
+
+[req.115]
+title = "Custom app configuration widgets"
+acceptance = "Implement the complete reachable feature: Custom app configuration widgets"
+hosted = "customer"
+
+[req.116]
+title = "Advanced configuration disclosure and required fields"
+acceptance = "Implement the complete reachable feature: Advanced configuration disclosure and required fields"
+hosted = "customer"
+
+[req.117]
+title = "New skills work on first creation"
+acceptance = "Implement the complete reachable feature: New skills work on first creation"
+hosted = "customer"
+
+[req.118]
+title = "Hide internal prompts from user-facing skill lists"
+acceptance = "Implement the complete reachable feature: Hide internal prompts from user-facing skill lists"
+hosted = "customer"
+
+[req.119]
+title = "One-click staged agent-pack activation and active-state reporting"
+acceptance = "Implement the complete reachable feature: One-click staged agent-pack activation and active-state reporting"
+hosted = "customer"
+
+[req.120]
+title = "Markdown app and tool descriptions"
+acceptance = "Implement the complete reachable feature: Markdown app and tool descriptions"
+hosted = "customer"
+
+[req.121]
+title = "Widget form submission and failure feedback"
+acceptance = "Implement the complete reachable feature: Widget form submission and failure feedback"
+hosted = "customer"
+
+[task.automation-apps]
+title = "automation-apps end-to-end implementation"
+status = "pending"
+wave = 4
+owner_lane = "automation-apps"
+requires = []
+reqs = ["014", "114", "115", "116", "117", "118", "119", "120", "121"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+

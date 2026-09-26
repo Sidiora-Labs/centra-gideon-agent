@@ -1,0 +1,1116 @@
+[meta]
+feature = "gideon-feature-fleet"
+status = "in_progress"
+version = "1.0.0"
+leader = "root"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+requested_items = 135
+manager_count = 4
+worker_count = 16
+agent_model = "gpt-6-sol"
+
+[design.integration]
+contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
+branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+
+[design.hosted]
+contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
+
+[design.delivery]
+contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
+
+[req.001]
+title = "Import Claude Code and Hermes conversation histories"
+acceptance = "The actual Gideon user or operator path delivers: Import Claude Code and Hermes conversation histories. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.002]
+title = "Recall exact conversation content removed during compaction"
+acceptance = "The actual Gideon user or operator path delivers: Recall exact conversation content removed during compaction. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.003]
+title = "Full terminal chat interface with live tools approvals session navigation and agent controls"
+acceptance = "The actual Gideon user or operator path delivers: Full terminal chat interface with live tools approvals session navigation and agent controls. State persists and failures are visible where relevant."
+owner_lane = "integrations-terminal"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.004]
+title = "Guided terminal setup for providers and models"
+acceptance = "The actual Gideon user or operator path delivers: Guided terminal setup for providers and models. State persists and failures are visible where relevant."
+owner_lane = "integrations-terminal"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[req.005]
+title = "Downloadable default local model for first chat"
+acceptance = "The actual Gideon user or operator path delivers: Downloadable default local model for first chat. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[req.006]
+title = "Persistent rearrangeable workspace for chat runs files diffs and agents"
+acceptance = "The actual Gideon user or operator path delivers: Persistent rearrangeable workspace for chat runs files diffs and agents. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.007]
+title = "Live workflow graphs and node details inside chat"
+acceptance = "The actual Gideon user or operator path delivers: Live workflow graphs and node details inside chat. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.008]
+title = "Session shelf for delivered artifacts separate from working files"
+acceptance = "The actual Gideon user or operator path delivers: Session shelf for delivered artifacts separate from working files. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.009]
+title = "Inspect interrupt and adjust supported model or effort on live delegated agents"
+acceptance = "The actual Gideon user or operator path delivers: Inspect interrupt and adjust supported model or effort on live delegated agents. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.010]
+title = "Inbound ACP server for compatible editors"
+acceptance = "The actual Gideon user or operator path delivers: Inbound ACP server for compatible editors. State persists and failures are visible where relevant."
+owner_lane = "integrations-protocols"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.011]
+title = "Standard A2A task operations"
+acceptance = "The actual Gideon user or operator path delivers: Standard A2A task operations. State persists and failures are visible where relevant."
+owner_lane = "integrations-protocols"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.012]
+title = "MCP OAuth resources prompts and delegated connections"
+acceptance = "The actual Gideon user or operator path delivers: MCP OAuth resources prompts and delegated connections. State persists and failures are visible where relevant."
+owner_lane = "integrations-protocols"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.013]
+title = "Missing messaging integrations across twelve requested channels"
+acceptance = "The actual Gideon user or operator path delivers: Missing messaging integrations across twelve requested channels. State persists and failures are visible where relevant."
+owner_lane = "integrations-channels"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.014]
+title = "Plugin hooks observers background services and richer installation"
+acceptance = "The actual Gideon user or operator path delivers: Plugin hooks observers background services and richer installation. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.015]
+title = "Contextual proactive planner for silence notifications contributions and background work"
+acceptance = "The actual Gideon user or operator path delivers: Contextual proactive planner for silence notifications contributions and background work. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.016]
+title = "Persistent multi-agent rounds roles handoffs and interruption recovery"
+acceptance = "The actual Gideon user or operator path delivers: Persistent multi-agent rounds roles handoffs and interruption recovery. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.017]
+title = "Intent-based workflow discovery and natural-language launch"
+acceptance = "The actual Gideon user or operator path delivers: Intent-based workflow discovery and natural-language launch. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.018]
+title = "Presentation intake outlines templates rendering and visual critique"
+acceptance = "The actual Gideon user or operator path delivers: Presentation intake outlines templates rendering and visual critique. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.019]
+title = "Specialist design skills with render preview refine cycles"
+acceptance = "The actual Gideon user or operator path delivers: Specialist design skills with render preview refine cycles. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.020]
+title = "Deep research with readable sources broader coverage and evidence-backed reports"
+acceptance = "The actual Gideon user or operator path delivers: Deep research with readable sources broader coverage and evidence-backed reports. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.021]
+title = "Resource-aware experiment campaigns with attempts observations and results"
+acceptance = "The actual Gideon user or operator path delivers: Resource-aware experiment campaigns with attempts observations and results. State persists and failures are visible where relevant."
+owner_lane = "runtime-experiments"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.022]
+title = "Local and SSH machine resource registry"
+acceptance = "The actual Gideon user or operator path delivers: Local and SSH machine resource registry. State persists and failures are visible where relevant."
+owner_lane = "runtime-experiments"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[req.023]
+title = "Recorded run replay and divergence inspection"
+acceptance = "The actual Gideon user or operator path delivers: Recorded run replay and divergence inspection. State persists and failures are visible where relevant."
+owner_lane = "runtime-experiments"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.024]
+title = "Offline agent-strategy experiment workspace"
+acceptance = "The actual Gideon user or operator path delivers: Offline agent-strategy experiment workspace. State persists and failures are visible where relevant."
+owner_lane = "runtime-experiments"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[req.025]
+title = "Turn-boundary runtime configuration replacement"
+acceptance = "The actual Gideon user or operator path delivers: Turn-boundary runtime configuration replacement. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.026]
+title = "Recover empty thinking-only and post-tool empty responses"
+acceptance = "The actual Gideon user or operator path delivers: Recover empty thinking-only and post-tool empty responses. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.027]
+title = "Revise proposed actions before execution"
+acceptance = "The actual Gideon user or operator path delivers: Revise proposed actions before execution. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.028]
+title = "Use provider-served context windows"
+acceptance = "The actual Gideon user or operator path delivers: Use provider-served context windows. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.029]
+title = "Multiple provider-supported prompt cache boundaries"
+acceptance = "The actual Gideon user or operator path delivers: Multiple provider-supported prompt cache boundaries. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.030]
+title = "Recoverable provider fallback"
+acceptance = "The actual Gideon user or operator path delivers: Recoverable provider fallback. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.031]
+title = "Performance quality and cost informed routing"
+acceptance = "The actual Gideon user or operator path delivers: Performance quality and cost informed routing. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.032]
+title = "Roll child and stage usage into parent totals"
+acceptance = "The actual Gideon user or operator path delivers: Roll child and stage usage into parent totals. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.033]
+title = "Distinguish absent usage zero cost and no model calls"
+acceptance = "The actual Gideon user or operator path delivers: Distinguish absent usage zero cost and no model calls. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.034]
+title = "Render zero elapsed duration as 0s"
+acceptance = "The actual Gideon user or operator path delivers: Render zero elapsed duration as 0s. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.035]
+title = "Complete history restoration beyond 500 messages"
+acceptance = "The actual Gideon user or operator path delivers: Complete history restoration beyond 500 messages. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.036]
+title = "Preserve conversation content through long responses and edit resend"
+acceptance = "The actual Gideon user or operator path delivers: Preserve conversation content through long responses and edit resend. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.037]
+title = "Recover streaming after lost terminal events"
+acceptance = "The actual Gideon user or operator path delivers: Recover streaming after lost terminal events. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.038]
+title = "Recover composer after immediate failure while preserving drafts"
+acceptance = "The actual Gideon user or operator path delivers: Recover composer after immediate failure while preserving drafts. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.039]
+title = "Preserve active run across session creation remount"
+acceptance = "The actual Gideon user or operator path delivers: Preserve active run across session creation remount. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.040]
+title = "Render completed answers exactly once"
+acceptance = "The actual Gideon user or operator path delivers: Render completed answers exactly once. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.041]
+title = "Search result scroll highlight and source"
+acceptance = "The actual Gideon user or operator path delivers: Search result scroll highlight and source. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.042]
+title = "Short per-turn navigation labels"
+acceptance = "The actual Gideon user or operator path delivers: Short per-turn navigation labels. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.043]
+title = "Improved session map layout and navigation"
+acceptance = "The actual Gideon user or operator path delivers: Improved session map layout and navigation. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.044]
+title = "Preserve starter agent and model selections"
+acceptance = "The actual Gideon user or operator path delivers: Preserve starter agent and model selections. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.045]
+title = "Preserve destination deep links through connection screens"
+acceptance = "The actual Gideon user or operator path delivers: Preserve destination deep links through connection screens. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.046]
+title = "Improve automatic chat titles"
+acceptance = "The actual Gideon user or operator path delivers: Improve automatic chat titles. State persists and failures are visible where relevant."
+owner_lane = "experience-workspace"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.047]
+title = "Ordered background memory extraction"
+acceptance = "The actual Gideon user or operator path delivers: Ordered background memory extraction. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.048]
+title = "Delegated-run memory contributions"
+acceptance = "The actual Gideon user or operator path delivers: Delegated-run memory contributions. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.049]
+title = "Persist entity aliases"
+acceptance = "The actual Gideon user or operator path delivers: Persist entity aliases. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.050]
+title = "Persist model-proposed typed knowledge relationships"
+acceptance = "The actual Gideon user or operator path delivers: Persist model-proposed typed knowledge relationships. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.051]
+title = "Entity deletion interface and persistent tombstones"
+acceptance = "The actual Gideon user or operator path delivers: Entity deletion interface and persistent tombstones. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.052]
+title = "Knowledge regeneration failures and useful retries"
+acceptance = "The actual Gideon user or operator path delivers: Knowledge regeneration failures and useful retries. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.053]
+title = "Bounded reranking calls"
+acceptance = "The actual Gideon user or operator path delivers: Bounded reranking calls. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.054]
+title = "Meta-refresh page ingestion"
+acceptance = "The actual Gideon user or operator path delivers: Meta-refresh page ingestion. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.055]
+title = "Expose ingestion contradictions"
+acceptance = "The actual Gideon user or operator path delivers: Expose ingestion contradictions. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.056]
+title = "Large-document OCR and partial-extraction reporting"
+acceptance = "The actual Gideon user or operator path delivers: Large-document OCR and partial-extraction reporting. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.057]
+title = "Capture dynamically rendered monitored pages"
+acceptance = "The actual Gideon user or operator path delivers: Capture dynamically rendered monitored pages. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.058]
+title = "Mic dictation vocabulary and learned corrections"
+acceptance = "The actual Gideon user or operator path delivers: Mic dictation vocabulary and learned corrections. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.059]
+title = "Speech correction editor"
+acceptance = "The actual Gideon user or operator path delivers: Speech correction editor. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.060]
+title = "General-loop pause resume and workflow lifecycle"
+acceptance = "The actual Gideon user or operator path delivers: General-loop pause resume and workflow lifecycle. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.061]
+title = "Correct workflow failure attribution and actual cause"
+acceptance = "The actual Gideon user or operator path delivers: Correct workflow failure attribution and actual cause. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.062]
+title = "Reliable failed-stage retry"
+acceptance = "The actual Gideon user or operator path delivers: Reliable failed-stage retry. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.063]
+title = "Previous-iteration bindings including first-cycle defaults"
+acceptance = "The actual Gideon user or operator path delivers: Previous-iteration bindings including first-cycle defaults. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.064]
+title = "Consistent fan-out totals"
+acceptance = "The actual Gideon user or operator path delivers: Consistent fan-out totals. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.065]
+title = "Distinct best-of-N candidate answers"
+acceptance = "The actual Gideon user or operator path delivers: Distinct best-of-N candidate answers. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.066]
+title = "Output schema mismatch notices"
+acceptance = "The actual Gideon user or operator path delivers: Output schema mismatch notices. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.067]
+title = "Enforced declared workflow input types"
+acceptance = "The actual Gideon user or operator path delivers: Enforced declared workflow input types. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.068]
+title = "Interrupted workflow resume without repeated effects"
+acceptance = "The actual Gideon user or operator path delivers: Interrupted workflow resume without repeated effects. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.069]
+title = "Escalation details in progress and run views"
+acceptance = "The actual Gideon user or operator path delivers: Escalation details in progress and run views. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.070]
+title = "Remove terminal-run continuation controls"
+acceptance = "The actual Gideon user or operator path delivers: Remove terminal-run continuation controls. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.071]
+title = "Loop draft start timeout task title and approval response repairs"
+acceptance = "The actual Gideon user or operator path delivers: Loop draft start timeout task title and approval response repairs. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.072]
+title = "Associate findings with canonical tasks"
+acceptance = "The actual Gideon user or operator path delivers: Associate findings with canonical tasks. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.073]
+title = "Consistent prompt defaults required values includes and substitutions"
+acceptance = "The actual Gideon user or operator path delivers: Consistent prompt defaults required values includes and substitutions. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.074]
+title = "Show actual redacted workflow node prompt"
+acceptance = "The actual Gideon user or operator path delivers: Show actual redacted workflow node prompt. State persists and failures are visible where relevant."
+owner_lane = "automation-workflows"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.075]
+title = "Relevant skill routing and context overflow reporting"
+acceptance = "The actual Gideon user or operator path delivers: Relevant skill routing and context overflow reporting. State persists and failures are visible where relevant."
+owner_lane = "runtime-models"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.076]
+title = "Reconcile agent configuration with files"
+acceptance = "The actual Gideon user or operator path delivers: Reconcile agent configuration with files. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.077]
+title = "Explicit native compact command"
+acceptance = "The actual Gideon user or operator path delivers: Explicit native compact command. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.078]
+title = "Dynamic active agents directory"
+acceptance = "The actual Gideon user or operator path delivers: Dynamic active agents directory. State persists and failures are visible where relevant."
+owner_lane = "runtime-sessions"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.079]
+title = "Complete task pagination across lists DAGs and prerequisite pickers"
+acceptance = "The actual Gideon user or operator path delivers: Complete task pagination across lists DAGs and prerequisite pickers. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.080]
+title = "Scoped task progress and critical paths"
+acceptance = "The actual Gideon user or operator path delivers: Scoped task progress and critical paths. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.081]
+title = "Cancelled tasks distinct from completed"
+acceptance = "The actual Gideon user or operator path delivers: Cancelled tasks distinct from completed. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.082]
+title = "Refused task save feedback and fitting controls"
+acceptance = "The actual Gideon user or operator path delivers: Refused task save feedback and fitting controls. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.083]
+title = "Preserve execution-owned fields on task reset"
+acceptance = "The actual Gideon user or operator path delivers: Preserve execution-owned fields on task reset. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.084]
+title = "Consistent task-list names and counts"
+acceptance = "The actual Gideon user or operator path delivers: Consistent task-list names and counts. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.085]
+title = "Scheduled daily spending limits visible pause and reset resume"
+acceptance = "The actual Gideon user or operator path delivers: Scheduled daily spending limits visible pause and reset resume. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.086]
+title = "Synchronize provider configuration bindings and settings"
+acceptance = "The actual Gideon user or operator path delivers: Synchronize provider configuration bindings and settings. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.087]
+title = "Clear explicitly emptied credentials"
+acceptance = "The actual Gideon user or operator path delivers: Clear explicitly emptied credentials. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.088]
+title = "Complete colon-containing model labels"
+acceptance = "The actual Gideon user or operator path delivers: Complete colon-containing model labels. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.089]
+title = "Actual selected model in onboarding"
+acceptance = "The actual Gideon user or operator path delivers: Actual selected model in onboarding. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.090]
+title = "Subscribe to queued model downloads"
+acceptance = "The actual Gideon user or operator path delivers: Subscribe to queued model downloads. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.091]
+title = "Manual configuration for installed unconfigured providers"
+acceptance = "The actual Gideon user or operator path delivers: Manual configuration for installed unconfigured providers. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.092]
+title = "Visible provider-add outcome"
+acceptance = "The actual Gideon user or operator path delivers: Visible provider-add outcome. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.093]
+title = "Remove nonexistent search-provider bindings"
+acceptance = "The actual Gideon user or operator path delivers: Remove nonexistent search-provider bindings. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.094]
+title = "URL-based resumable onboarding navigation"
+acceptance = "The actual Gideon user or operator path delivers: URL-based resumable onboarding navigation. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.095]
+title = "Onboarding focus and scrolling"
+acceptance = "The actual Gideon user or operator path delivers: Onboarding focus and scrolling. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.096]
+title = "Catalog source failure versus empty catalog"
+acceptance = "The actual Gideon user or operator path delivers: Catalog source failure versus empty catalog. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.097]
+title = "Unicode assistant names and truthful saved values"
+acceptance = "The actual Gideon user or operator path delivers: Unicode assistant names and truthful saved values. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.098]
+title = "Functional settings and lossless writes"
+acceptance = "The actual Gideon user or operator path delivers: Functional settings and lossless writes. State persists and failures are visible where relevant."
+owner_lane = "experience-onboarding"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.099]
+title = "Distinct loading empty failed disabled unchanged and successful interface states"
+acceptance = "The actual Gideon user or operator path delivers: Distinct loading empty failed disabled unchanged and successful interface states. State persists and failures are visible where relevant."
+owner_lane = "experience-polish"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.100]
+title = "Consistent Needs you count and contents"
+acceptance = "The actual Gideon user or operator path delivers: Consistent Needs you count and contents. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.101]
+title = "Attention links to exact inbox items"
+acceptance = "The actual Gideon user or operator path delivers: Attention links to exact inbox items. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.102]
+title = "Accurate active native inbox empty state"
+acceptance = "The actual Gideon user or operator path delivers: Accurate active native inbox empty state. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.103]
+title = "Room-member read failure rather than endless spinner"
+acceptance = "The actual Gideon user or operator path delivers: Room-member read failure rather than endless spinner. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.104]
+title = "Proposal decision outcomes and target names"
+acceptance = "The actual Gideon user or operator path delivers: Proposal decision outcomes and target names. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.105]
+title = "No proposal refill and clear reviewed proposals"
+acceptance = "The actual Gideon user or operator path delivers: No proposal refill and clear reviewed proposals. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.106]
+title = "Notification rules control promised delivery"
+acceptance = "The actual Gideon user or operator path delivers: Notification rules control promised delivery. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.107]
+title = "Mention escalation matches user name"
+acceptance = "The actual Gideon user or operator path delivers: Mention escalation matches user name. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.108]
+title = "Notification filter reset action"
+acceptance = "The actual Gideon user or operator path delivers: Notification filter reset action. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.109]
+title = "Trigger dry-run outcomes and originating-trigger links"
+acceptance = "The actual Gideon user or operator path delivers: Trigger dry-run outcomes and originating-trigger links. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.110]
+title = "Model requirement only for model-using triggers"
+acceptance = "The actual Gideon user or operator path delivers: Model requirement only for model-using triggers. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.111]
+title = "Consistent trigger create and update semantics"
+acceptance = "The actual Gideon user or operator path delivers: Consistent trigger create and update semantics. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.112]
+title = "Consistent trigger status and latest error"
+acceptance = "The actual Gideon user or operator path delivers: Consistent trigger status and latest error. State persists and failures are visible where relevant."
+owner_lane = "automation-proactivity"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.113]
+title = "Learning inactivity begins at first pass"
+acceptance = "The actual Gideon user or operator path delivers: Learning inactivity begins at first pass. State persists and failures are visible where relevant."
+owner_lane = "automation-tasks"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.114]
+title = "Close terminally failed app installation dialogs"
+acceptance = "The actual Gideon user or operator path delivers: Close terminally failed app installation dialogs. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.115]
+title = "Custom app configuration widgets"
+acceptance = "The actual Gideon user or operator path delivers: Custom app configuration widgets. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.116]
+title = "Advanced configuration disclosure and required fields"
+acceptance = "The actual Gideon user or operator path delivers: Advanced configuration disclosure and required fields. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.117]
+title = "New skills work on first creation"
+acceptance = "The actual Gideon user or operator path delivers: New skills work on first creation. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.118]
+title = "Hide internal prompts from user-facing skill lists"
+acceptance = "The actual Gideon user or operator path delivers: Hide internal prompts from user-facing skill lists. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.119]
+title = "One-click staged agent-pack activation and active-state reporting"
+acceptance = "The actual Gideon user or operator path delivers: One-click staged agent-pack activation and active-state reporting. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.120]
+title = "Markdown app and tool descriptions"
+acceptance = "The actual Gideon user or operator path delivers: Markdown app and tool descriptions. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.121]
+title = "Widget form submission and failure feedback"
+acceptance = "The actual Gideon user or operator path delivers: Widget form submission and failure feedback. State persists and failures are visible where relevant."
+owner_lane = "automation-apps"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.122]
+title = "First file preview and empty-folder upload"
+acceptance = "The actual Gideon user or operator path delivers: First file preview and empty-folder upload. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.123]
+title = "Missing project folder explanation"
+acceptance = "The actual Gideon user or operator path delivers: Missing project folder explanation. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.124]
+title = "File-search globs match full paths"
+acceptance = "The actual Gideon user or operator path delivers: File-search globs match full paths. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.125]
+title = "Canonical changed-file paths without annotations"
+acceptance = "The actual Gideon user or operator path delivers: Canonical changed-file paths without annotations. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.126]
+title = "CSV writing and text versus binary artifact editing"
+acceptance = "The actual Gideon user or operator path delivers: CSV writing and text versus binary artifact editing. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.127]
+title = "Working artifact empty-state actions"
+acceptance = "The actual Gideon user or operator path delivers: Working artifact empty-state actions. State persists and failures are visible where relevant."
+owner_lane = "experience-creative"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.128]
+title = "Independent outbound channel queues and retry"
+acceptance = "The actual Gideon user or operator path delivers: Independent outbound channel queues and retry. State persists and failures are visible where relevant."
+owner_lane = "integrations-channels"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.129]
+title = "Keyboard control semantics contrast and dialog geometry"
+acceptance = "The actual Gideon user or operator path delivers: Keyboard control semantics contrast and dialog geometry. State persists and failures are visible where relevant."
+owner_lane = "experience-polish"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.130]
+title = "Consistent density-controlled spacing"
+acceptance = "The actual Gideon user or operator path delivers: Consistent density-controlled spacing. State persists and failures are visible where relevant."
+owner_lane = "experience-polish"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.131]
+title = "Persistent container workspaces"
+acceptance = "The actual Gideon user or operator path delivers: Persistent container workspaces. State persists and failures are visible where relevant."
+owner_lane = "integrations-distribution"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.132]
+title = "Accepted skills in portable exports and imports"
+acceptance = "The actual Gideon user or operator path delivers: Accepted skills in portable exports and imports. State persists and failures are visible where relevant."
+owner_lane = "runtime-memory"
+hosted = "customer"
+implementation_status = "pending"
+
+[req.133]
+title = "Manual backup status updates"
+acceptance = "The actual Gideon user or operator path delivers: Manual backup status updates. State persists and failures are visible where relevant."
+owner_lane = "integrations-distribution"
+hosted = "operator_managed"
+implementation_status = "pending"
+
+[req.134]
+title = "Single-container installation"
+acceptance = "The actual Gideon user or operator path delivers: Single-container installation. State persists and failures are visible where relevant."
+owner_lane = "integrations-distribution"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[req.135]
+title = "Repair nonexistent installation commands"
+acceptance = "The actual Gideon user or operator path delivers: Repair nonexistent installation commands. State persists and failures are visible where relevant."
+owner_lane = "integrations-distribution"
+hosted = "not_applicable"
+implementation_status = "pending"
+
+[task.runtime-memory]
+title = "runtime-memory product slice"
+status = "pending"
+wave = 1
+owner_lane = "runtime-memory"
+requires = []
+requirements = ["001", "002", "047", "048", "049", "050", "051", "052", "053", "054", "055", "056", "057", "132"]
+feature = "gideon-runtime"
+
+[task.runtime-models]
+title = "runtime-models product slice"
+status = "pending"
+wave = 1
+owner_lane = "runtime-models"
+requires = []
+requirements = ["025", "026", "027", "028", "029", "030", "031", "032", "033", "073", "075"]
+feature = "gideon-runtime"
+
+[task.runtime-sessions]
+title = "runtime-sessions product slice"
+status = "pending"
+wave = 1
+owner_lane = "runtime-sessions"
+requires = []
+requirements = ["035", "036", "037", "038", "039", "040", "076", "077", "078"]
+feature = "gideon-runtime"
+
+[task.runtime-experiments]
+title = "runtime-experiments product slice"
+status = "pending"
+wave = 1
+owner_lane = "runtime-experiments"
+requires = []
+requirements = ["021", "022", "023", "024"]
+feature = "gideon-runtime"
+
+[task.experience-workspace]
+title = "experience-workspace product slice"
+status = "pending"
+wave = 1
+owner_lane = "experience-workspace"
+requires = []
+requirements = ["006", "007", "008", "009", "041", "042", "043", "044", "045", "046"]
+feature = "gideon-experience"
+
+[task.experience-onboarding]
+title = "experience-onboarding product slice"
+status = "pending"
+wave = 1
+owner_lane = "experience-onboarding"
+requires = []
+requirements = ["005", "086", "087", "088", "089", "090", "091", "092", "093", "094", "095", "096", "097", "098"]
+feature = "gideon-experience"
+
+[task.experience-creative]
+title = "experience-creative product slice"
+status = "pending"
+wave = 1
+owner_lane = "experience-creative"
+requires = []
+requirements = ["018", "019", "020", "058", "059", "122", "123", "124", "125", "126", "127"]
+feature = "gideon-experience"
+
+[task.experience-polish]
+title = "experience-polish product slice"
+status = "pending"
+wave = 1
+owner_lane = "experience-polish"
+requires = []
+requirements = ["099", "129", "130"]
+feature = "gideon-experience"
+
+[task.automation-workflows]
+title = "automation-workflows product slice"
+status = "pending"
+wave = 1
+owner_lane = "automation-workflows"
+requires = []
+requirements = ["034", "060", "061", "062", "063", "064", "065", "066", "067", "068", "069", "070", "071", "072", "074"]
+feature = "gideon-automation"
+
+[task.automation-proactivity]
+title = "automation-proactivity product slice"
+status = "pending"
+wave = 1
+owner_lane = "automation-proactivity"
+requires = []
+requirements = ["015", "016", "017", "085", "109", "110", "111", "112"]
+feature = "gideon-automation"
+
+[task.automation-tasks]
+title = "automation-tasks product slice"
+status = "pending"
+wave = 1
+owner_lane = "automation-tasks"
+requires = []
+requirements = ["079", "080", "081", "082", "083", "084", "100", "101", "102", "103", "104", "105", "106", "107", "108", "113"]
+feature = "gideon-automation"
+
+[task.automation-apps]
+title = "automation-apps product slice"
+status = "pending"
+wave = 1
+owner_lane = "automation-apps"
+requires = []
+requirements = ["014", "114", "115", "116", "117", "118", "119", "120", "121"]
+feature = "gideon-automation"
+
+[task.integrations-protocols]
+title = "integrations-protocols product slice"
+status = "pending"
+wave = 1
+owner_lane = "integrations-protocols"
+requires = []
+requirements = ["010", "011", "012"]
+feature = "gideon-integrations"
+
+[task.integrations-channels]
+title = "integrations-channels product slice"
+status = "pending"
+wave = 1
+owner_lane = "integrations-channels"
+requires = []
+requirements = ["013", "128"]
+feature = "gideon-integrations"
+
+[task.integrations-terminal]
+title = "integrations-terminal product slice"
+status = "pending"
+wave = 1
+owner_lane = "integrations-terminal"
+requires = []
+requirements = ["003", "004"]
+feature = "gideon-integrations"
+
+[task.integrations-distribution]
+title = "integrations-distribution product slice"
+status = "pending"
+wave = 1
+owner_lane = "integrations-distribution"
+requires = []
+requirements = ["131", "133", "134", "135"]
+feature = "gideon-integrations"
+
+[task.integrate]
+title = "Integrate all product slices and applicable hosted counterparts into local main"
+status = "pending"
+wave = 2
+owner_lane = "root"
+requires = ["runtime-memory", "runtime-models", "runtime-sessions", "runtime-experiments", "experience-workspace", "experience-onboarding", "experience-creative", "experience-polish", "automation-workflows", "automation-proactivity", "automation-tasks", "automation-apps", "integrations-protocols", "integrations-channels", "integrations-terminal", "integrations-distribution"]

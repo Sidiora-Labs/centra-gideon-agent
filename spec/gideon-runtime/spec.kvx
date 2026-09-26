@@ -1,0 +1,247 @@
+[meta]
+feature = "gideon-runtime"
+status = "in_progress"
+version = "1.0.0"
+leader = "root"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+requested_items = 135
+manager_count = 4
+worker_count = 16
+agent_model = "gpt-6-sol"
+
+[design.integration]
+contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
+branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+
+[design.hosted]
+contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
+
+[design.delivery]
+contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
+
+[req.001]
+title = "Import Claude Code and Hermes conversation histories"
+acceptance = "Implement the complete reachable feature: Import Claude Code and Hermes conversation histories"
+hosted = "customer"
+
+[req.002]
+title = "Recall exact conversation content removed during compaction"
+acceptance = "Implement the complete reachable feature: Recall exact conversation content removed during compaction"
+hosted = "customer"
+
+[req.047]
+title = "Ordered background memory extraction"
+acceptance = "Implement the complete reachable feature: Ordered background memory extraction"
+hosted = "customer"
+
+[req.048]
+title = "Delegated-run memory contributions"
+acceptance = "Implement the complete reachable feature: Delegated-run memory contributions"
+hosted = "customer"
+
+[req.049]
+title = "Persist entity aliases"
+acceptance = "Implement the complete reachable feature: Persist entity aliases"
+hosted = "customer"
+
+[req.050]
+title = "Persist model-proposed typed knowledge relationships"
+acceptance = "Implement the complete reachable feature: Persist model-proposed typed knowledge relationships"
+hosted = "customer"
+
+[req.051]
+title = "Entity deletion interface and persistent tombstones"
+acceptance = "Implement the complete reachable feature: Entity deletion interface and persistent tombstones"
+hosted = "customer"
+
+[req.052]
+title = "Knowledge regeneration failures and useful retries"
+acceptance = "Implement the complete reachable feature: Knowledge regeneration failures and useful retries"
+hosted = "customer"
+
+[req.053]
+title = "Bounded reranking calls"
+acceptance = "Implement the complete reachable feature: Bounded reranking calls"
+hosted = "customer"
+
+[req.054]
+title = "Meta-refresh page ingestion"
+acceptance = "Implement the complete reachable feature: Meta-refresh page ingestion"
+hosted = "customer"
+
+[req.055]
+title = "Expose ingestion contradictions"
+acceptance = "Implement the complete reachable feature: Expose ingestion contradictions"
+hosted = "customer"
+
+[req.056]
+title = "Large-document OCR and partial-extraction reporting"
+acceptance = "Implement the complete reachable feature: Large-document OCR and partial-extraction reporting"
+hosted = "customer"
+
+[req.057]
+title = "Capture dynamically rendered monitored pages"
+acceptance = "Implement the complete reachable feature: Capture dynamically rendered monitored pages"
+hosted = "customer"
+
+[req.132]
+title = "Accepted skills in portable exports and imports"
+acceptance = "Implement the complete reachable feature: Accepted skills in portable exports and imports"
+hosted = "customer"
+
+[task.runtime-memory]
+title = "runtime-memory end-to-end implementation"
+status = "pending"
+wave = 1
+owner_lane = "runtime-memory"
+requires = []
+reqs = ["001", "002", "047", "048", "049", "050", "051", "052", "053", "054", "055", "056", "057", "132"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.025]
+title = "Turn-boundary runtime configuration replacement"
+acceptance = "Implement the complete reachable feature: Turn-boundary runtime configuration replacement"
+hosted = "operator_managed"
+
+[req.026]
+title = "Recover empty thinking-only and post-tool empty responses"
+acceptance = "Implement the complete reachable feature: Recover empty thinking-only and post-tool empty responses"
+hosted = "customer"
+
+[req.027]
+title = "Revise proposed actions before execution"
+acceptance = "Implement the complete reachable feature: Revise proposed actions before execution"
+hosted = "customer"
+
+[req.028]
+title = "Use provider-served context windows"
+acceptance = "Implement the complete reachable feature: Use provider-served context windows"
+hosted = "operator_managed"
+
+[req.029]
+title = "Multiple provider-supported prompt cache boundaries"
+acceptance = "Implement the complete reachable feature: Multiple provider-supported prompt cache boundaries"
+hosted = "operator_managed"
+
+[req.030]
+title = "Recoverable provider fallback"
+acceptance = "Implement the complete reachable feature: Recoverable provider fallback"
+hosted = "operator_managed"
+
+[req.031]
+title = "Performance quality and cost informed routing"
+acceptance = "Implement the complete reachable feature: Performance quality and cost informed routing"
+hosted = "operator_managed"
+
+[req.032]
+title = "Roll child and stage usage into parent totals"
+acceptance = "Implement the complete reachable feature: Roll child and stage usage into parent totals"
+hosted = "customer"
+
+[req.033]
+title = "Distinguish absent usage zero cost and no model calls"
+acceptance = "Implement the complete reachable feature: Distinguish absent usage zero cost and no model calls"
+hosted = "customer"
+
+[req.073]
+title = "Consistent prompt defaults required values includes and substitutions"
+acceptance = "Implement the complete reachable feature: Consistent prompt defaults required values includes and substitutions"
+hosted = "customer"
+
+[req.075]
+title = "Relevant skill routing and context overflow reporting"
+acceptance = "Implement the complete reachable feature: Relevant skill routing and context overflow reporting"
+hosted = "customer"
+
+[task.runtime-models]
+title = "runtime-models end-to-end implementation"
+status = "pending"
+wave = 2
+owner_lane = "runtime-models"
+requires = []
+reqs = ["025", "026", "027", "028", "029", "030", "031", "032", "033", "073", "075"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.035]
+title = "Complete history restoration beyond 500 messages"
+acceptance = "Implement the complete reachable feature: Complete history restoration beyond 500 messages"
+hosted = "customer"
+
+[req.036]
+title = "Preserve conversation content through long responses and edit resend"
+acceptance = "Implement the complete reachable feature: Preserve conversation content through long responses and edit resend"
+hosted = "customer"
+
+[req.037]
+title = "Recover streaming after lost terminal events"
+acceptance = "Implement the complete reachable feature: Recover streaming after lost terminal events"
+hosted = "customer"
+
+[req.038]
+title = "Recover composer after immediate failure while preserving drafts"
+acceptance = "Implement the complete reachable feature: Recover composer after immediate failure while preserving drafts"
+hosted = "customer"
+
+[req.039]
+title = "Preserve active run across session creation remount"
+acceptance = "Implement the complete reachable feature: Preserve active run across session creation remount"
+hosted = "customer"
+
+[req.040]
+title = "Render completed answers exactly once"
+acceptance = "Implement the complete reachable feature: Render completed answers exactly once"
+hosted = "customer"
+
+[req.076]
+title = "Reconcile agent configuration with files"
+acceptance = "Implement the complete reachable feature: Reconcile agent configuration with files"
+hosted = "customer"
+
+[req.077]
+title = "Explicit native compact command"
+acceptance = "Implement the complete reachable feature: Explicit native compact command"
+hosted = "customer"
+
+[req.078]
+title = "Dynamic active agents directory"
+acceptance = "Implement the complete reachable feature: Dynamic active agents directory"
+hosted = "customer"
+
+[task.runtime-sessions]
+title = "runtime-sessions end-to-end implementation"
+status = "pending"
+wave = 3
+owner_lane = "runtime-sessions"
+requires = []
+reqs = ["035", "036", "037", "038", "039", "040", "076", "077", "078"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.021]
+title = "Resource-aware experiment campaigns with attempts observations and results"
+acceptance = "Implement the complete reachable feature: Resource-aware experiment campaigns with attempts observations and results"
+hosted = "customer"
+
+[req.022]
+title = "Local and SSH machine resource registry"
+acceptance = "Implement the complete reachable feature: Local and SSH machine resource registry"
+hosted = "not_applicable"
+
+[req.023]
+title = "Recorded run replay and divergence inspection"
+acceptance = "Implement the complete reachable feature: Recorded run replay and divergence inspection"
+hosted = "customer"
+
+[req.024]
+title = "Offline agent-strategy experiment workspace"
+acceptance = "Implement the complete reachable feature: Offline agent-strategy experiment workspace"
+hosted = "not_applicable"
+
+[task.runtime-experiments]
+title = "runtime-experiments end-to-end implementation"
+status = "pending"
+wave = 4
+owner_lane = "runtime-experiments"
+requires = []
+reqs = ["021", "022", "023", "024"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+

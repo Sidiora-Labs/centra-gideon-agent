@@ -1,0 +1,112 @@
+[meta]
+feature = "gideon-integrations"
+status = "in_progress"
+version = "1.0.0"
+leader = "root"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+requested_items = 135
+manager_count = 4
+worker_count = 16
+agent_model = "gpt-6-sol"
+
+[design.integration]
+contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
+branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+
+[design.hosted]
+contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
+
+[design.delivery]
+contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
+
+[req.010]
+title = "Inbound ACP server for compatible editors"
+acceptance = "Implement the complete reachable feature: Inbound ACP server for compatible editors"
+hosted = "operator_managed"
+
+[req.011]
+title = "Standard A2A task operations"
+acceptance = "Implement the complete reachable feature: Standard A2A task operations"
+hosted = "operator_managed"
+
+[req.012]
+title = "MCP OAuth resources prompts and delegated connections"
+acceptance = "Implement the complete reachable feature: MCP OAuth resources prompts and delegated connections"
+hosted = "operator_managed"
+
+[task.integrations-protocols]
+title = "integrations-protocols end-to-end implementation"
+status = "pending"
+wave = 1
+owner_lane = "integrations-protocols"
+requires = []
+reqs = ["010", "011", "012"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.013]
+title = "Missing messaging integrations across twelve requested channels"
+acceptance = "Implement the complete reachable feature: Missing messaging integrations across twelve requested channels"
+hosted = "operator_managed"
+
+[req.128]
+title = "Independent outbound channel queues and retry"
+acceptance = "Implement the complete reachable feature: Independent outbound channel queues and retry"
+hosted = "operator_managed"
+
+[task.integrations-channels]
+title = "integrations-channels end-to-end implementation"
+status = "pending"
+wave = 2
+owner_lane = "integrations-channels"
+requires = []
+reqs = ["013", "128"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.003]
+title = "Full terminal chat interface with live tools approvals session navigation and agent controls"
+acceptance = "Implement the complete reachable feature: Full terminal chat interface with live tools approvals session navigation and agent controls"
+hosted = "customer"
+
+[req.004]
+title = "Guided terminal setup for providers and models"
+acceptance = "Implement the complete reachable feature: Guided terminal setup for providers and models"
+hosted = "not_applicable"
+
+[task.integrations-terminal]
+title = "integrations-terminal end-to-end implementation"
+status = "pending"
+wave = 3
+owner_lane = "integrations-terminal"
+requires = []
+reqs = ["003", "004"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.131]
+title = "Persistent container workspaces"
+acceptance = "Implement the complete reachable feature: Persistent container workspaces"
+hosted = "operator_managed"
+
+[req.133]
+title = "Manual backup status updates"
+acceptance = "Implement the complete reachable feature: Manual backup status updates"
+hosted = "operator_managed"
+
+[req.134]
+title = "Single-container installation"
+acceptance = "Implement the complete reachable feature: Single-container installation"
+hosted = "not_applicable"
+
+[req.135]
+title = "Repair nonexistent installation commands"
+acceptance = "Implement the complete reachable feature: Repair nonexistent installation commands"
+hosted = "not_applicable"
+
+[task.integrations-distribution]
+title = "integrations-distribution end-to-end implementation"
+status = "pending"
+wave = 4
+owner_lane = "integrations-distribution"
+requires = []
+reqs = ["131", "133", "134", "135"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+

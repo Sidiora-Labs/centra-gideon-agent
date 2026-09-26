@@ -1,0 +1,46 @@
+[meta]
+name = "Gideon Feature Fleet"
+active_feature = "gideon-feature-fleet"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+[mode]
+name = "parallel"
+[limits]
+max_in_progress = 20
+[agents]
+driver = "codex"
+max = 20
+ttl = 14400
+codex_args = "--model gpt-6-sol"
+[hierarchy]
+enabled = true
+main = "main"
+remote = "origin"
+worktrees = ".codegraph/worktrees"
+test_gate = "python3 -m compileall -q runtime/gideon"
+lint_gate = "git diff --check HEAD^ HEAD"
+pr = "manual"
+checkpoint = "manual"
+[role.main]
+title = "Fleet Leader"
+agent = "root"
+branch = "{main}"
+base = ""
+[role.feature]
+title = "Feature Manager"
+agent = "manager-{feature}"
+branch = "feature/{feature}"
+base = "{main}"
+model = "gpt-6-sol"
+[role.worker]
+title = "Feature Worker"
+agent = "worker-{feature}-{wave}"
+branch = "wave/{feature}/{wave}"
+base = "feature/{feature}"
+model = "gpt-6-sol"
+[principle]
+task_driven = "Implement the current numbered requirements, extending existing end-to-end Gideon paths."
+source_of_truth = "Root alone owns authoritative requirement state; workers report per-item completion and managers integrate their branches."
+[hard_rules]
+local_integration = "User authorizes local task commits and cg fleet main merges. No remote pushes or deployment. Do not stage dependencies or unrelated preexisting changes."
+identity = "Use Gideon identity only in source, comments, specs and commit messages."
+hosted = "Preserve operator-managed provider/model/infrastructure policy and all existing hosted changes."

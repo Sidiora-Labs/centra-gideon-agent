@@ -1,0 +1,247 @@
+[meta]
+feature = "gideon-experience"
+status = "in_progress"
+version = "1.0.0"
+leader = "root"
+source_of_truth = "spec/gideon-feature-fleet/spec.kvx"
+requested_items = 135
+manager_count = 4
+worker_count = 16
+agent_model = "gpt-6-sol"
+
+[design.integration]
+contract = "Extend existing Gideon runtime and console end to end; preserve existing capabilities and product identity. Root owns requirement state and local main integration. Four managers integrate sixteen non-overlapping worker lanes through cg fleet."
+branch_policy = "Local task commits, feature merges and main integration are authorized. No remote push, PR publication or deployment. Preserve preexisting tracked and untracked hosted changes."
+
+[design.hosted]
+contract = "Hosted remains an operator-managed service. Customer features use existing managed models, routing, auth and resources. Do not expose provider credentials, local model installation, arbitrary infrastructure controls or operator configuration. Items marked operator_managed are adapted behind current policy; not_applicable items remain OSS-only."
+
+[design.delivery]
+contract = "Every numbered requirement has an observable product result, a worker owner, a hosted disposition and an honest implementation state. A backend without its requested consumer is incomplete. Reuse existing implementations where behavior already matches."
+
+[req.006]
+title = "Persistent rearrangeable workspace for chat runs files diffs and agents"
+acceptance = "Implement the complete reachable feature: Persistent rearrangeable workspace for chat runs files diffs and agents"
+hosted = "customer"
+
+[req.007]
+title = "Live workflow graphs and node details inside chat"
+acceptance = "Implement the complete reachable feature: Live workflow graphs and node details inside chat"
+hosted = "customer"
+
+[req.008]
+title = "Session shelf for delivered artifacts separate from working files"
+acceptance = "Implement the complete reachable feature: Session shelf for delivered artifacts separate from working files"
+hosted = "customer"
+
+[req.009]
+title = "Inspect interrupt and adjust supported model or effort on live delegated agents"
+acceptance = "Implement the complete reachable feature: Inspect interrupt and adjust supported model or effort on live delegated agents"
+hosted = "customer"
+
+[req.041]
+title = "Search result scroll highlight and source"
+acceptance = "Implement the complete reachable feature: Search result scroll highlight and source"
+hosted = "customer"
+
+[req.042]
+title = "Short per-turn navigation labels"
+acceptance = "Implement the complete reachable feature: Short per-turn navigation labels"
+hosted = "customer"
+
+[req.043]
+title = "Improved session map layout and navigation"
+acceptance = "Implement the complete reachable feature: Improved session map layout and navigation"
+hosted = "customer"
+
+[req.044]
+title = "Preserve starter agent and model selections"
+acceptance = "Implement the complete reachable feature: Preserve starter agent and model selections"
+hosted = "customer"
+
+[req.045]
+title = "Preserve destination deep links through connection screens"
+acceptance = "Implement the complete reachable feature: Preserve destination deep links through connection screens"
+hosted = "customer"
+
+[req.046]
+title = "Improve automatic chat titles"
+acceptance = "Implement the complete reachable feature: Improve automatic chat titles"
+hosted = "customer"
+
+[task.experience-workspace]
+title = "experience-workspace end-to-end implementation"
+status = "pending"
+wave = 1
+owner_lane = "experience-workspace"
+requires = []
+reqs = ["006", "007", "008", "009", "041", "042", "043", "044", "045", "046"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.005]
+title = "Downloadable default local model for first chat"
+acceptance = "Implement the complete reachable feature: Downloadable default local model for first chat"
+hosted = "not_applicable"
+
+[req.086]
+title = "Synchronize provider configuration bindings and settings"
+acceptance = "Implement the complete reachable feature: Synchronize provider configuration bindings and settings"
+hosted = "operator_managed"
+
+[req.087]
+title = "Clear explicitly emptied credentials"
+acceptance = "Implement the complete reachable feature: Clear explicitly emptied credentials"
+hosted = "operator_managed"
+
+[req.088]
+title = "Complete colon-containing model labels"
+acceptance = "Implement the complete reachable feature: Complete colon-containing model labels"
+hosted = "customer"
+
+[req.089]
+title = "Actual selected model in onboarding"
+acceptance = "Implement the complete reachable feature: Actual selected model in onboarding"
+hosted = "operator_managed"
+
+[req.090]
+title = "Subscribe to queued model downloads"
+acceptance = "Implement the complete reachable feature: Subscribe to queued model downloads"
+hosted = "operator_managed"
+
+[req.091]
+title = "Manual configuration for installed unconfigured providers"
+acceptance = "Implement the complete reachable feature: Manual configuration for installed unconfigured providers"
+hosted = "operator_managed"
+
+[req.092]
+title = "Visible provider-add outcome"
+acceptance = "Implement the complete reachable feature: Visible provider-add outcome"
+hosted = "operator_managed"
+
+[req.093]
+title = "Remove nonexistent search-provider bindings"
+acceptance = "Implement the complete reachable feature: Remove nonexistent search-provider bindings"
+hosted = "operator_managed"
+
+[req.094]
+title = "URL-based resumable onboarding navigation"
+acceptance = "Implement the complete reachable feature: URL-based resumable onboarding navigation"
+hosted = "customer"
+
+[req.095]
+title = "Onboarding focus and scrolling"
+acceptance = "Implement the complete reachable feature: Onboarding focus and scrolling"
+hosted = "customer"
+
+[req.096]
+title = "Catalog source failure versus empty catalog"
+acceptance = "Implement the complete reachable feature: Catalog source failure versus empty catalog"
+hosted = "customer"
+
+[req.097]
+title = "Unicode assistant names and truthful saved values"
+acceptance = "Implement the complete reachable feature: Unicode assistant names and truthful saved values"
+hosted = "customer"
+
+[req.098]
+title = "Functional settings and lossless writes"
+acceptance = "Implement the complete reachable feature: Functional settings and lossless writes"
+hosted = "operator_managed"
+
+[task.experience-onboarding]
+title = "experience-onboarding end-to-end implementation"
+status = "pending"
+wave = 2
+owner_lane = "experience-onboarding"
+requires = []
+reqs = ["005", "086", "087", "088", "089", "090", "091", "092", "093", "094", "095", "096", "097", "098"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.018]
+title = "Presentation intake outlines templates rendering and visual critique"
+acceptance = "Implement the complete reachable feature: Presentation intake outlines templates rendering and visual critique"
+hosted = "customer"
+
+[req.019]
+title = "Specialist design skills with render preview refine cycles"
+acceptance = "Implement the complete reachable feature: Specialist design skills with render preview refine cycles"
+hosted = "customer"
+
+[req.020]
+title = "Deep research with readable sources broader coverage and evidence-backed reports"
+acceptance = "Implement the complete reachable feature: Deep research with readable sources broader coverage and evidence-backed reports"
+hosted = "customer"
+
+[req.058]
+title = "Mic dictation vocabulary and learned corrections"
+acceptance = "Implement the complete reachable feature: Mic dictation vocabulary and learned corrections"
+hosted = "customer"
+
+[req.059]
+title = "Speech correction editor"
+acceptance = "Implement the complete reachable feature: Speech correction editor"
+hosted = "customer"
+
+[req.122]
+title = "First file preview and empty-folder upload"
+acceptance = "Implement the complete reachable feature: First file preview and empty-folder upload"
+hosted = "customer"
+
+[req.123]
+title = "Missing project folder explanation"
+acceptance = "Implement the complete reachable feature: Missing project folder explanation"
+hosted = "customer"
+
+[req.124]
+title = "File-search globs match full paths"
+acceptance = "Implement the complete reachable feature: File-search globs match full paths"
+hosted = "customer"
+
+[req.125]
+title = "Canonical changed-file paths without annotations"
+acceptance = "Implement the complete reachable feature: Canonical changed-file paths without annotations"
+hosted = "customer"
+
+[req.126]
+title = "CSV writing and text versus binary artifact editing"
+acceptance = "Implement the complete reachable feature: CSV writing and text versus binary artifact editing"
+hosted = "customer"
+
+[req.127]
+title = "Working artifact empty-state actions"
+acceptance = "Implement the complete reachable feature: Working artifact empty-state actions"
+hosted = "customer"
+
+[task.experience-creative]
+title = "experience-creative end-to-end implementation"
+status = "pending"
+wave = 3
+owner_lane = "experience-creative"
+requires = []
+reqs = ["018", "019", "020", "058", "059", "122", "123", "124", "125", "126", "127"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
+[req.099]
+title = "Distinct loading empty failed disabled unchanged and successful interface states"
+acceptance = "Implement the complete reachable feature: Distinct loading empty failed disabled unchanged and successful interface states"
+hosted = "customer"
+
+[req.129]
+title = "Keyboard control semantics contrast and dialog geometry"
+acceptance = "Implement the complete reachable feature: Keyboard control semantics contrast and dialog geometry"
+hosted = "customer"
+
+[req.130]
+title = "Consistent density-controlled spacing"
+acceptance = "Implement the complete reachable feature: Consistent density-controlled spacing"
+hosted = "customer"
+
+[task.experience-polish]
+title = "experience-polish end-to-end implementation"
+status = "pending"
+wave = 4
+owner_lane = "experience-polish"
+requires = []
+reqs = ["099", "129", "130"]
+acceptance = "All assigned numbered capabilities implemented or matched to existing complete behavior, with applicable hosted adaptation. No omitted consumer paths."
+
