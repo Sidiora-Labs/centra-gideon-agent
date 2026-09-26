@@ -2331,6 +2331,13 @@ export interface SessionTemplate {
   reasoning_effort: string; first_prompt: string; created_at: number
 }
 export type SessionTemplateInput = Omit<SessionTemplate, 'id' | 'created_at'>
+export interface ChatSessionShare {
+  slug: string; name: string; created_at: string; shared_by: string | null
+  url: string; audience: 'private'; readonly: true; redacted: true
+}
+export interface ChatSessionShareDetail extends ChatSessionShare {
+  turns: Array<{ id: string; role: 'user' | 'assistant'; text: string }>
+}
 export interface PortabilityManifest {
   version: number; format: string; created_at: string; hostname: string; user: string
   contents: Record<string, number>
@@ -4159,8 +4166,16 @@ export const api = {
   sessionExportUrl: (key: string, format: 'md' | 'json') =>
     `/api/chat/sessions/${encodeURIComponent(key)}/export?format=${format}`,
   shareSession: (key: string) =>
-    post<{ ok: boolean; slug: string; name: string; kind: ArtifactKind; readonly: boolean; redacted: boolean }>(
+    post<{ ok: boolean; kind: ArtifactKind } & ChatSessionShare>(
       `/api/chat/sessions/${encodeURIComponent(key)}/share`, {}),
+  sessionShares: (key: string) =>
+    get<{ shares: ChatSessionShare[] }>(`/api/chat/sessions/${encodeURIComponent(key)}/shares`),
+  sessionShare: (key: string, slug: string) =>
+    get<ChatSessionShareDetail>(
+      `/api/chat/sessions/${encodeURIComponent(key)}/shares/${encodeURIComponent(slug)}`),
+  revokeSessionShare: (key: string, slug: string) =>
+    del(
+      `/api/chat/sessions/${encodeURIComponent(key)}/shares/${encodeURIComponent(slug)}`),
   createChatSession: (opts: { name?: string; agent?: string; model?: string; memory_mode?: MemoryMode; mode?: string; project_id?: string } = {}) =>
     post<ChatSession>('/api/chat/sessions', opts),
   setSessionAgent: (session: string, agent: string) => post(`/api/chat/sessions/${session}/agent`, { agent }),
