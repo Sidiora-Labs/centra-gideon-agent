@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { OwnerScope } from "../../shared/auth.web";
 import { WorkspaceFrame, type WorkspaceFrameState } from "../../shared/shell/WorkspaceFrame.web";
 import { createShellRoute, type ShellReturnContext, type ShellRoute } from "../../shared/shell/shellRoutes";
 import { getLibraryRecord, listKnowledgeItems, LibraryReadError, type KnowledgeItem, type KnowledgeList } from "./libraryApi";
 import { libraryHomeRoute, libraryItemRoute, libraryRecordHref, parseLibraryRecord, type LibraryRecordRef } from "./libraryRoutes";
+import { useShellTheme } from "../../shared/shell/shellTheme";
 
 export type LibraryWorkspaceProps = {
   route: ShellRoute;
@@ -13,44 +14,53 @@ export type LibraryWorkspaceProps = {
   returnTo?: ShellReturnContext;
 };
 
-type LoadState<T> = { scopeKey: string; value?: T; error?: LibraryReadError; loading: boolean };
+type LoadState<T> = { key: string; value?: T; error?: LibraryReadError; loading: boolean };
 
 export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }: LibraryWorkspaceProps) {
   const record = useMemo(() => parseLibraryRecord(route), [route]);
-  const [listState, setListState] = useState<LoadState<KnowledgeList>>({ scopeKey: "", loading: true });
-  const [itemState, setItemState] = useState<LoadState<KnowledgeItem>>({ scopeKey: "", loading: true });
+  const { palette } = useShellTheme();
+  const listKey = `${scope.cacheKey}\u0000list`;
+  const itemKey = `${scope.cacheKey}\u0000${record ? `${record.kind}:${record.id}` : "no-record"}`;
+  const [listState, setListState] = useState<LoadState<KnowledgeList>>({ key: "", loading: true });
+  const [itemState, setItemState] = useState<LoadState<KnowledgeItem>>({ key: "", loading: true });
   const [reload, setReload] = useState(0);
+  const requestGeneration = useRef(0);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const generation = ++requestGeneration.current;
+    const isCurrent = () => !controller.signal.aborted && requestGeneration.current === generation;
     if (record) {
-      const controller = new AbortController();
-      setItemState(current => ({ scopeKey: scope.cacheKey, value: current.scopeKey === scope.cacheKey ? current.value : undefined, loading: true }));
+      setItemState(current => ({ key: itemKey, value: current.key === itemKey ? current.value : undefined, loading: true }));
       void getLibraryRecord(scope, record, controller.signal).then(value => {
-        setItemState({ scopeKey: scope.cacheKey, value, loading: false });
+        if (isCurrent()) setItemState({ key: itemKey, value, loading: false });
       }).catch((error: unknown) => {
-        if (!controller.signal.aborted) setItemState(current => ({ scopeKey: scope.cacheKey,
-          value: current.scopeKey === scope.cacheKey ? current.value : undefined,
-          error: error instanceof LibraryReadError ? error : new LibraryReadError("failed", "The Library record could not be opened."), loading: false }));
+        if (!isCurrent()) return;
+        const readError = error instanceof LibraryReadError ? error : new LibraryReadError("failed", "The Library record could not be opened.");
+        setItemState(current => ({ key: itemKey,
+          ...(readError.kind === "unavailable" && current.key === itemKey && current.value ? { value: current.value } : {}),
+          error: readError, loading: false }));
       });
       return () => controller.abort();
     }
-    const controller = new AbortController();
-    setListState(current => ({ scopeKey: scope.cacheKey, value: current.scopeKey === scope.cacheKey ? current.value : undefined, loading: true }));
+    setListState(current => ({ key: listKey, value: current.key === listKey ? current.value : undefined, loading: true }));
     void listKnowledgeItems(scope, controller.signal).then(value => {
-      setListState({ scopeKey: scope.cacheKey, value, loading: false });
+      if (isCurrent()) setListState({ key: listKey, value, loading: false });
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setListState(current => ({ scopeKey: scope.cacheKey,
-        value: current.scopeKey === scope.cacheKey ? current.value : undefined,
-        error: error instanceof LibraryReadError ? error : new LibraryReadError("failed", "The Library could not be loaded."), loading: false }));
+      if (!isCurrent()) return;
+      const readError = error instanceof LibraryReadError ? error : new LibraryReadError("failed", "The Library could not be loaded.");
+      setListState(current => ({ key: listKey,
+        ...(readError.kind === "unavailable" && current.key === listKey && current.value ? { value: current.value } : {}),
+        error: readError, loading: false }));
     });
     return () => controller.abort();
-  }, [record?.kind, record?.id, scope.cacheKey, reload]);
+  }, [record?.kind, record?.id, scope.cacheKey, listKey, itemKey, reload]);
 
-  const activeList = listState.scopeKey === scope.cacheKey ? listState : { scopeKey: scope.cacheKey, loading: true };
-  const activeItem = itemState.scopeKey === scope.cacheKey ? itemState : { scopeKey: scope.cacheKey, loading: true };
+  const activeList = listState.key === listKey ? listState : { key: listKey, loading: true };
+  const activeItem = itemState.key === itemKey ? itemState : { key: itemKey, loading: true };
   const error = record ? activeItem.error : activeList.error;
   const hasCurrentData = record ? !!activeItem.value : !!activeList.value;
-  const stale = !!error && hasCurrentData;
+  const stale = error?.kind === "unavailable" && hasCurrentData;
   const frameState: WorkspaceFrameState = error?.kind === "forbidden" && !hasCurrentData
     ? { kind: "denied", message: error.message }
     : !error && !hasCurrentData && ((record ? activeItem.loading : activeList.loading))
@@ -83,9 +93,20 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
     : error?.kind === "missing" ? error.message
       : error && !hasCurrentData && error.kind !== "forbidden" ? error.message : undefined;
 
+  const libraryPalette = {
+    "--gideon-text": palette.text,
+    "--gideon-surface": palette.canvas,
+    "--gideon-card": palette.card,
+    "--gideon-border": palette.line,
+    "--gideon-muted": palette.muted,
+    "--gideon-accent": palette.blueDark,
+    "--gideon-notice": palette.orange,
+    "--gideon-notice-text": palette.text,
+  } as React.CSSProperties;
+
   return <WorkspaceFrame route={route} mode="full" title={title} state={frameState}
     onBack={record ? goBack : undefined} onGoToChat={() => navigate(createShellRoute("chat"))}
-    actions={!record ? <button type="button" onClick={retry} disabled={activeList.loading}>Refresh</button> : undefined}>
+    actions={<button type="button" onClick={retry} disabled={record ? activeItem.loading : activeList.loading}>Refresh</button>}>
     <style>{`
       .gideon-library { display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); min-height:100%; color:var(--gideon-text, #e8eaf0); background:var(--gideon-surface, #11151d); }
       .gideon-library__rail { padding:24px 18px; border-right:1px solid var(--gideon-border, #2a303a); }
@@ -96,15 +117,16 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
       .gideon-library__link:hover,.gideon-library__link:focus-visible { border-color:var(--gideon-accent, #92adff); outline:2px solid transparent; }
       .gideon-library__meta { display:block; margin-top:5px; color:var(--gideon-muted, #9ba4b2); font-size:13px; }
       .gideon-library__content { line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; }
-      .gideon-library__notice { margin:0 0 18px; padding:12px 14px; border-radius:10px; background:#38321f; color:#f2d99a; }
+      .gideon-library__notice { margin:0 0 18px; padding:12px 14px; border-radius:10px; background:var(--gideon-notice); color:var(--gideon-notice-text); }
       .gideon-library__actions { display:flex; gap:10px; margin-bottom:16px; }
+      .gideon-library--reader { display:block; }
       @media(max-width:700px) { .gideon-library { display:block; min-height:100dvh; } .gideon-library__rail { display:none; } .gideon-library__main { padding:18px 16px 36px; } .gideon-library__link { padding:16px; } }
     `}</style>
-    {libraryStateMessage && <p className="gideon-library__notice" role={stale ? "status" : "alert"} data-library-state={stale ? "stale" : error?.kind}>
+    {libraryStateMessage && <p className="gideon-library__notice" style={libraryPalette} role={stale ? "status" : "alert"} data-library-state={stale ? "stale" : error?.kind}>
       {libraryStateMessage}{(stale || !hasCurrentData) && <> <button type="button" onClick={retry}>{stale ? "Retry refresh" : "Retry"}</button></>}
     </p>}
-    {!record && activeList.value && <LibraryList items={activeList.value.items} route={route} navigate={navigate} />}
-    {record && activeItem.value && <LibraryReader item={activeItem.value} />}
+    {!record && activeList.value && <LibraryList items={activeList.value.items} route={route} navigate={navigate} paletteStyle={libraryPalette} />}
+    {record && activeItem.value && <div className="gideon-library gideon-library--reader" style={libraryPalette}><LibraryReader item={activeItem.value} /></div>}
     {record && error?.kind === "missing" && !activeItem.value && <section role="alert" data-library-state="missing">
       <h2>Knowledge item unavailable</h2><p>{error.message}</p><button type="button" onClick={goBack}>Return to Library</button>
     </section>}
@@ -123,8 +145,8 @@ export function LibraryItemLink({ item, origin, navigate }: { item: KnowledgeIte
   </a>;
 }
 
-function LibraryList({ items, route, navigate }: { items: readonly KnowledgeItem[]; route: ShellRoute; navigate: (route: ShellRoute) => void }) {
-  return <div className="gideon-library">
+function LibraryList({ items, route, navigate, paletteStyle }: { items: readonly KnowledgeItem[]; route: ShellRoute; navigate: (route: ShellRoute) => void; paletteStyle: React.CSSProperties }) {
+  return <div className="gideon-library" style={paletteStyle}>
     <aside className="gideon-library__rail"><p className="gideon-library__eyebrow">Library</p><h2>Browse</h2>
       <nav aria-label="Research and Knowledge"><ul className="gideon-library__list"><li><a className="gideon-library__link" href="#library-items" onClick={event => { event.preventDefault(); document.getElementById("library-items")?.scrollIntoView({ behavior: "smooth" }); }}>All knowledge</a></li></ul></nav>
     </aside>

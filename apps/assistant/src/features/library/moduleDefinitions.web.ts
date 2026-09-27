@@ -1,18 +1,6 @@
-import React from "react";
 import type { ModuleDefinition, ModuleProps } from "../../shared/shell/webModules.web";
 import { LibraryReadError, getLibraryRecord, listKnowledgeItems } from "./libraryApi";
-import { LibraryWorkspace } from "./LibraryWorkspace.web";
 import { parseLibraryRecord } from "./libraryRoutes";
-
-function LibraryModule(props: ModuleProps) {
-  return React.createElement(LibraryWorkspace, {
-    route: props.route,
-    scope: props.scope,
-    navigate: props.navigate,
-    onReturn: props.onReturn,
-    returnTo: props.returnTo,
-  });
-}
 
 function matchesLibraryRoute(route: ModuleProps["route"]): boolean {
   return route.destination === "apps" && (
@@ -38,10 +26,13 @@ async function resolveLibraryRoute(scope: ModuleProps["scope"], route: ModulePro
 
 export const libraryModuleDefinitions: readonly ModuleDefinition[] = [
   {
-    id: "library",
+    id: "knowledge",
     mode: "full",
     matches: matchesLibraryRoute,
     resolve: resolveLibraryRoute,
-    load: async () => ({ default: LibraryModule }),
+    load: async () => {
+      const { LibraryWorkspace } = await import("./LibraryWorkspace.web");
+      return { default: LibraryWorkspace };
+    },
   },
 ];
