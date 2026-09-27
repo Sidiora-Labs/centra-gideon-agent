@@ -146,6 +146,14 @@ window.navigateShell = async next => {
   }
   window.currentScope = scope
   window.openNativeDetail = window.navigateShell
+  window.mountNotificationOwnerA = () => {
+    const detailRoute = createShellRoute('activity', { view: 'detail',
+      record: { kind: 'notification', id: 'notification-1' }, returnTo: { destination: 'activity' } })
+    window.route = detailRoute
+    flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
+      React.createElement(ActivityDetail, { route: detailRoute, scope,
+        navigate: window.navigateShell, onReturn: () => {} }))))
+  }
   window.switchOwner = async () => {
     window.currentScope = ownerScope(location.origin, { user: 'owner-b' })
     flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
@@ -211,19 +219,36 @@ window.loaded = true
     await until(evaluate, `document.querySelector('[data-activity-detail="artifact"]')?.getAttribute('data-read-state') === 'missing'`)
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Record unavailable')`)).toBe(true)
 
-    await fetch(`http://127.0.0.1:${api.control_port}/delay`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seconds: 1, path: '/api/notifications' }) })
-    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail', record: { kind: 'notification', id: 'notification-1' } })`)
+    await evaluate('window.mountNotificationOwnerA()')
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(true)
     await fetch(`http://127.0.0.1:${api.control_port}/delay`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seconds: 1, path: '/api/notifications' }) })
+      body: JSON.stringify({ seconds: 30, requests: 1, hold: true, path: '/api/notifications' }) })
     await evaluate('window.notificationReads = 0')
-    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail', record: { kind: 'notification', id: 'notification-1' } })`)
-    await until(evaluate, `window.notificationReads === 1`)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent?.includes('Reload record'))?.click()`)
+    const delayStateUrl = `http://127.0.0.1:${api.control_port}/delay-state`
+    let delayState: { entered: number; completed: number } = { entered: 0, completed: 0 }
+    for (let attempt = 0; attempt < 200 && delayState.entered !== 1; attempt++) {
+      delayState = await (await fetch(delayStateUrl)).json() as typeof delayState
+      if (delayState.entered !== 1) await new Promise(done => setTimeout(done, 25))
+    }
+    expect(delayState.entered).toBe(1)
+    expect(delayState.completed).toBe(0)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
     await evaluate('window.switchOwner()')
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'denied'`)
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
-    await new Promise(done => setTimeout(done, 1200))
+    delayState = await (await fetch(delayStateUrl)).json() as typeof delayState
+    expect(delayState.completed).toBe(0)
+    await fetch(`http://127.0.0.1:${api.control_port}/delay-release`, { method: 'POST' })
+    for (let attempt = 0; attempt < 200; attempt++) {
+      delayState = await (await fetch(delayStateUrl)).json() as typeof delayState
+      if (delayState.completed === 1) break
+      await new Promise(done => setTimeout(done, 25))
+    }
+    expect(delayState.completed).toBe(1)
+    await new Promise(done => setTimeout(done, 100))
     expect(await evaluate(`document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state')`)).toBe('denied')
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
   }, 30_000)

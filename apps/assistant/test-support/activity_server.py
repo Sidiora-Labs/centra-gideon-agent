@@ -100,12 +100,25 @@ async def main(origin: str) -> None:
             name="Native result", content="Result", kind="markdown", source="chat", slug="native-result",
         )
 
-        settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0}
+        settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0,
+            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None}
 
         @web.middleware
         async def delay_reads(request: web.Request, handler):
-            if request.path == settings["delay_path"] and settings["delay"]:
-                await asyncio.sleep(settings["delay"])
+            should_delay = request.path == settings["delay_path"] and settings["delay"] and (
+                settings["delay_remaining"] is None or settings["delay_remaining"] > 0)
+            if should_delay:
+                if settings["delay_remaining"] is not None:
+                    settings["delay_remaining"] -= 1
+                settings["delay_entered"] += 1
+                try:
+                    release = settings["delay_release"]
+                    if release is not None:
+                        await release.wait()
+                    else:
+                        await asyncio.sleep(settings["delay"])
+                except asyncio.CancelledError:
+                    raise
             try:
                 response = await handler(request)
             except Exception:
@@ -114,6 +127,8 @@ async def main(origin: str) -> None:
                 raise
             if request.path == "/api/workflows/runs" and response.status >= 400:
                 settings["workflow_failures"] += 1
+            if should_delay:
+                settings["delay_completed"] += 1
             return response
 
         app = web.Application(middlewares=[delay_reads, token_auth.token_auth_middleware(port=10000)])
@@ -142,6 +157,20 @@ async def main(origin: str) -> None:
             body = await request.json()
             settings["delay"] = float(body["seconds"])
             settings["delay_path"] = body.get("path", "/api/tasks")
+            settings["delay_remaining"] = body.get("requests")
+            settings["delay_entered"] = 0
+            settings["delay_completed"] = 0
+            settings["delay_release"] = asyncio.Event() if body.get("hold") else None
+            return web.json_response({"ok": True})
+
+        async def control_delay_state(request: web.Request) -> web.Response:
+            return web.json_response({"entered": settings["delay_entered"],
+                "completed": settings["delay_completed"], "remaining": settings["delay_remaining"]})
+
+        async def control_delay_release(request: web.Request) -> web.Response:
+            release = settings["delay_release"]
+            if release is not None:
+                release.set()
             return web.json_response({"ok": True})
 
         async def control_empty_inbox(request: web.Request) -> web.Response:
@@ -195,6 +224,8 @@ async def main(origin: str) -> None:
 
         control = web.Application()
         control.router.add_post("/delay", control_delay)
+        control.router.add_get("/delay-state", control_delay_state)
+        control.router.add_post("/delay-release", control_delay_release)
         control.router.add_post("/empty-inbox", control_empty_inbox)
         control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)
