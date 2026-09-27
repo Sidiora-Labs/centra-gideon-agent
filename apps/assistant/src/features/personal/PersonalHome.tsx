@@ -2,7 +2,7 @@ import React, { useEffect, useState, type CSSProperties } from 'react'
 import { GatewayError } from '../../shared/transport.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { createShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
-import { createPersonalClient, type PersonalAvailability, type PersonalClient, type IdentityStory, type NativeValue } from './client'
+import { createPersonalClient, type PersonalAvailability, type PersonalClient, type IdentityStory, type NativeValue, type PersonalRecord } from './client'
 import { PERSONAL_SPACES, personalSpaceRoute, type PersonalSpace } from './routes'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
@@ -35,12 +35,20 @@ function NativeStatus({ label, load }: { label: string; load: () => Promise<Pers
     void load().then(result => {
       if (!active) return
       if (result.state === 'unavailable') { setStatus('unavailable'); setMessage(result.reason); return }
-      const value = result.value
-      const rows = Array.isArray(value) ? value : value && typeof value === 'object' && 'journal' in value
-        ? value.journal ? [value.journal] : [] : value && typeof value === 'object' ? Object.values(value) : []
-      const stale = Array.isArray(value) && value.some(item => item && typeof item === 'object' && 'freshness' in item && item.freshness === 'stale')
-      setStatus(stale ? 'stale' : rows.length ? 'ready' : 'empty')
-      setMessage(stale ? `Showing saved ${label.toLowerCase()} records. Refresh is needed to confirm they are current.` : rows.length ? `${rows.length} native ${label.toLowerCase()} record${rows.length === 1 ? '' : 's'} are available.` : `No ${label.toLowerCase()} records yet.`)
+      let value: unknown = result.value
+      for (let depth = 0; depth < 2 && value && typeof value === 'object'; depth++) {
+        if ('state' in value && value.state === 'unavailable' && 'reason' in value && typeof value.reason === 'string') {
+          setStatus('unavailable'); setMessage(value.reason); return
+        }
+        if ('state' in value && value.state === 'available' && 'value' in value) {
+          value = value.value
+          continue
+        }
+        break
+      }
+      const summary = summarizePersonalValue(label, value)
+      setStatus(summary.state)
+      setMessage(summary.message)
     }).catch(error => {
       if (!active) return
       setStatus(error instanceof GatewayError && error.status === 403 ? 'denied' : 'error')
@@ -54,14 +62,51 @@ function NativeStatus({ label, load }: { label: string; load: () => Promise<Pers
   </section>
 }
 
+export function summarizePersonalValue(label: string, value: unknown): Readonly<{
+  state: 'ready' | 'empty' | 'stale';
+  message: string;
+}> {
+  const name = label.toLowerCase()
+  if (Array.isArray(value)) {
+    const stale = value.some(item => item && typeof item === 'object' && 'freshness' in item && item.freshness === 'stale')
+    if (stale) return { state: 'stale', message: `Showing saved ${name} records. Refresh is needed to confirm they are current.` }
+    if (!value.length) return { state: 'empty', message: `No ${name} records yet.` }
+    return { state: 'ready', message: `${value.length} native ${name} record${value.length === 1 ? '' : 's'} ${value.length === 1 ? 'is' : 'are'} available.` }
+  }
+  if (!value || typeof value !== 'object') return { state: 'empty', message: `No ${name} data is available yet.` }
+  if ('kind' in value && value.kind === 'autobiography' && 'stories' in value && Array.isArray(value.stories)) {
+    const stories = value.stories
+    const stale = stories.some(item => item && typeof item === 'object' && 'freshness' in item && item.freshness === 'stale')
+    if (stale) return { state: 'stale', message: 'Showing saved autobiography stories. Refresh is needed to confirm they are current.' }
+    if (!stories.length) return { state: 'empty', message: 'No autobiography stories yet.' }
+    return { state: 'ready', message: `${stories.length} autobiography stor${stories.length === 1 ? 'y is' : 'ies are'} available.` }
+  }
+  if ('kind' in value && value.kind === 'twin' && 'profile' in value && value.profile && typeof value.profile === 'object'
+    && 'documents' in value.profile && Array.isArray(value.profile.documents)) {
+    const count = value.profile.documents.length
+    return count
+      ? { state: 'ready', message: `${count} identity twin source document${count === 1 ? ' is' : 's are'} available.` }
+      : { state: 'empty', message: 'The identity twin has no source documents yet.' }
+  }
+  if ('journal' in value && (value.journal === null || typeof value.journal === 'object')) {
+    return value.journal
+      ? { state: 'ready', message: 'A journal entry is saved for this date.' }
+      : { state: 'empty', message: 'No journal entry is saved for this date yet.' }
+  }
+  if ('advertising' in value && typeof value.advertising === 'boolean' && 'detail' in value && typeof value.detail === 'string') {
+    return { state: 'ready', message: value.detail }
+  }
+  return { state: 'ready', message: `Native ${name} data was returned.` }
+}
+
 export type IdentityWorkspaceData =
-  | Readonly<{ kind: 'autobiography'; stories: readonly IdentityStory[] }>
+  | Readonly<{ kind: 'autobiography'; stories: readonly PersonalRecord<IdentityStory>[] }>
   | Readonly<{ kind: 'twin'; profile: NativeValue }>
 
 export async function readIdentitySpace(client: PersonalClient, placement: string | undefined): Promise<PersonalAvailability<IdentityWorkspaceData>> {
   if (placement === 'capabilities/identity/autobiography') {
     const stories = await client.readIdentityStories()
-    return { state: 'available', value: { kind: 'autobiography', stories: stories.map(item => item.value) } }
+    return { state: 'available', value: { kind: 'autobiography', stories } }
   }
   if (placement === 'capabilities/identity/twin') {
     return { state: 'available', value: { kind: 'twin', profile: await client.readIdentityProfile() } }
