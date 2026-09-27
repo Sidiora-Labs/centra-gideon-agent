@@ -135,6 +135,7 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
         client.clear(); setSnapshot(null); setDrafts([]); setDraft(null)
         setComposer(null); setTo(''); setSubject(''); setBody(''); setArtifactIds(''); setNotice('')
         setArtifactChoices([]); setArtifactError(''); setArtifactLoading(false)
+        setBusy(false); setReadBusy(false)
         loadedAccountRef.current = chosen.id
       }
       client.selectConnection(chosen.id, 'mail-mirror')
@@ -149,7 +150,16 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
       else setMailError(current => current || (draftRows.reason instanceof Error ? draftRows.reason.message : 'Draft refresh failed'))
       loadedScopeRef.current = scope.cacheKey; setLoadedScopeKey(scope.cacheKey)
     } catch (error) {
-      if (requestIsCurrent()) setAccountError(error instanceof Error ? error.message : 'Could not load mailbox accounts')
+      if (requestIsCurrent()) {
+        const denied = error as { status?: number; authRequired?: boolean }
+        if (denied.authRequired === true || denied.status === 401 || denied.status === 403) {
+          client.clear(); setAccounts([]); setAccount(null); setSnapshot(null); setDrafts([]); setDraft(null)
+          setComposer(null); setTo(''); setSubject(''); setBody(''); setArtifactIds(''); setNotice('')
+          setArtifactChoices([]); setArtifactError(''); setArtifactLoading(false); setBusy(false); setReadBusy(false)
+          loadedAccountRef.current = null; loadedScopeRef.current = ''
+        }
+        setAccountError(error instanceof Error ? error.message : 'Could not load mailbox accounts')
+      }
     } finally { if (requestIsCurrent()) setLoading(false) }
   }, [client, desiredAccountId, scope.cacheKey])
 
