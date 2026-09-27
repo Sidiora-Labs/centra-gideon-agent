@@ -23,7 +23,9 @@ const workerEntries = {
   html: "language/html/html.worker.js",
   typescript: "language/typescript/ts.worker.js",
 };
-const monacoEntry = "editor/editor.api.js";
+// editor.main registers the language definitions and language services used by
+// native artifact editors (including Markdown, JSON, and TypeScript).
+const monacoEntry = "editor/editor.main.js";
 
 function parseArguments(args) {
   const index = args.indexOf("--out-dir");
@@ -114,7 +116,7 @@ export async function buildTrustedWebAssets({ outputDirectory, assistantDirector
     [shellPath, "console shell stylesheet"],
     ...fontFiles.map((font) => [path.join(fontsDirectory, font), `console font ${font}`]),
     ...Object.entries(workerEntries).map(([family, entry]) => [path.join(monacoDirectory, entry), `Monaco ${family} worker source`]),
-    [path.join(monacoDirectory, monacoEntry), "Monaco editor API source"],
+    [path.join(monacoDirectory, monacoEntry), "Monaco editor and language registrations source"],
   ];
   for (const [filePath, label] of sourceFiles) await requireFile(filePath, label);
 
@@ -243,7 +245,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const outputDirectory = parseArguments(process.argv.slice(2));
   try {
     const assets = await buildTrustedWebAssets({ outputDirectory });
-    console.log(`Built ${assets.length} trusted console stylesheet, font, and Monaco worker assets in ${outputDirectory}`);
+    console.log(`Built ${assets.length} trusted console stylesheet, font, and Monaco editor, language, and worker assets in ${outputDirectory}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
