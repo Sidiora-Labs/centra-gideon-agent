@@ -113,11 +113,13 @@ function matchesPlacement(id: string, route: ShellRoute): boolean {
 }
 
 async function loadRouteComponent(id: string): Promise<{ default: React.ComponentType<ModuleProps> }> {
-  const [{ PersonalHome }, { IdeasScreen }, { LearningWorkspace }] = await Promise.all([
-    import('./PersonalHome'), import('./IdeasScreen'), import('./LearningWorkspace.web'),
+  const [{ PersonalHome }, { IdeasScreen }, { LearningWorkspace }, { GoalsScreen }, { GoalPlanWorkspace }] = await Promise.all([
+    import('./PersonalHome'), import('./IdeasScreen'), import('./LearningWorkspace.web'), import('./GoalsScreen'), import('./GoalPlanWorkspace.web'),
   ])
   const RouteView = (props: ModuleProps) => {
     const placement = props.route.placement?.id ?? id
+    if (!props.route.record && placement === 'goals' && props.route.view === 'list') return React.createElement(GoalsScreen, props)
+    if (props.route.record && ['human-goal', 'goal-plan'].includes(props.route.record.kind)) return React.createElement(GoalPlanWorkspace, props)
     if (!props.route.record && (placement === 'ideas' || placement === 'capabilities/knowledge/ideas')
       && (props.route.view === 'list' || props.route.view === 'workspace')) return React.createElement(IdeasScreen, props)
     if (!props.route.record && placement === 'learning' && props.route.view === 'workspace') return React.createElement(LearningWorkspace, props)
