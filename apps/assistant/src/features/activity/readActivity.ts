@@ -34,6 +34,12 @@ export type ActivitySnapshot = Readonly<{
 const PAGE_LIMIT = 20
 const UNPAGED_LIMIT = 100
 
+export function nextActivityOffset(offset: number, received: number, total: number | null): number | null {
+  if (!received) return null
+  const next = offset + received
+  return total === null ? received === PAGE_LIMIT ? next : null : next < total ? next : null
+}
+
 export function emptyActivitySnapshot(scope: OwnerScope | null): ActivitySnapshot {
   const sources = {} as Record<ActivityReadSource, ActivitySourceState>
   for (const source of ACTIVITY_SOURCES) {
@@ -85,15 +91,15 @@ async function nativeRows(source: ActivityReadSource, offset: number, signal?: A
   switch (source) {
     case 'task': {
       const result = page<TaskItem>(await gatewayJson<unknown>(`/api/tasks?${params}&mine=1`, { signal }), 'tasks')
-      return { records: result.rows, total: result.total, paged: true }
+      return { records: result.rows, total: null, paged: true }
     }
     case 'workflow_run': {
       const result = page<WorkflowRunSummary>(await gatewayJson<unknown>(`/api/workflows/runs?${params}&mine=1`, { signal }), 'runs')
-      return { records: result.rows, total: result.total, paged: true }
+      return { records: result.rows, total: null, paged: true }
     }
     case 'trigger_run': {
       const result = page<ScheduleRun>(await gatewayJson<unknown>(`/api/triggers/history?${params}`, { signal }), 'runs')
-      return { records: result.rows, total: result.total, paged: true }
+      return { records: result.rows, total: null, paged: true }
     }
     case 'inbox_item': return { records: rows<InboxItem>(await gatewayJson<unknown>('/api/inbox/open', { signal })), total: null, paged: false }
     case 'approval': return { records: rows<PendingApproval>(await gatewayJson<unknown>('/api/approvals', { signal })), total: null, paged: false }
@@ -128,16 +134,16 @@ export async function readActivitySource(scope: OwnerScope, source: ActivityRead
     const mapped = window.map(record => mapActivitySource(scope, source, record as never))
     const entries = mapped.flatMap(value => value.availability === 'available' ? [value.entry] : [])
     const omittedWithoutId = mapped.length - entries.length
-    const nextOffset = result.paged && result.records.length > 0 &&
-      (result.records.length === PAGE_LIMIT || (result.total !== null && offset + result.records.length < result.total))
-      ? offset + result.records.length : null
-    const combined = offset > 0 ? [...previous.entries, ...entries] : entries
-    const coverage: SourceCoverage = omittedWithoutId ? 'missing_ids'
+    const nextOffset = result.paged ? nextActivityOffset(offset, result.records.length, result.total) : null
+    const combined = [...new Map((offset > 0 ? [...previous.entries, ...entries] : entries)
+      .map(entry => [entry.identity.key, entry] as const)).values()]
+    const cumulativeOmittedWithoutId = (offset > 0 ? previous.omittedWithoutId : 0) + omittedWithoutId
+    const coverage: SourceCoverage = cumulativeOmittedWithoutId ? 'missing_ids'
       : nextOffset !== null ? 'paged'
         : !result.paged && result.records.length > UNPAGED_LIMIT ? 'bounded' : 'complete'
     return { source, phase: combined.length ? 'ready' : 'empty', freshness: 'current', entries: combined,
       error: null, total: result.total, nextOffset, coverage,
-      omittedWithoutId: (offset > 0 ? previous.omittedWithoutId : 0) + omittedWithoutId }
+      omittedWithoutId: cumulativeOmittedWithoutId }
   } catch (error) {
     return failedSource(previous, error)
   }
