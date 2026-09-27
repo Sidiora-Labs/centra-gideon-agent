@@ -8,8 +8,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
-import { Card, Button } from "../../ui";
 import { ShellIdentity } from "./ShellIdentity";
+import { ShellNavigation } from "./ShellNavigation";
 import { resolveShellTheme, ShellThemeControls, ShellThemeProvider, shellPalettes } from "./shellTheme.web";
 import type { BootstrapState } from "../bootstrap.web";
 
@@ -25,7 +25,7 @@ function rendered(preference: "light" | "dark" | "system") {
   return renderToStaticMarkup(
     <ShellThemeProvider initialPreference={preference}>
       <ShellIdentity state={ready} onRefresh={() => {}} onSignOut={() => {}} />
-      <Card><Button onPress={() => {}}>Continue</Button></Card>
+      <ShellNavigation selected="chat" onSelect={() => {}} availableWidth={360} fontScale={1} />
       <ShellThemeControls />
     </ShellThemeProvider>,
   );
@@ -43,7 +43,7 @@ function contrast(foreground: string, background: string) {
 }
 
 describe("assistant theme", () => {
-  it("renders the retained identity, card and controls in scoped light and dark modes", () => {
+  it("renders identity, navigation and controls in scoped light and dark modes", () => {
     const light = rendered("light");
     const dark = rendered("dark");
     expect(light).toContain('data-gideon-assistant=""');
@@ -51,8 +51,8 @@ describe("assistant theme", () => {
     expect(dark).toContain('data-theme="dark"');
     expect(light).toContain("Signed in as owner-one");
     expect(dark).toContain("Signed in as owner-one");
-    expect(light).toContain("Continue");
-    expect(dark).toContain("Continue");
+    expect(light).toContain("Assistant destinations");
+    expect(dark).toContain("Assistant destinations");
     expect(light).not.toBe(dark);
     expect(light).not.toContain("private");
     expect(dark).not.toContain("private");
@@ -100,6 +100,7 @@ describe("assistant theme", () => {
     const sourceDirectory = dirname(fileURLToPath(import.meta.url));
     await build({ stdin: { contents: fixture, resolveDir: sourceDirectory, sourcefile: "theme-fixture.tsx", loader: "tsx" },
       bundle: true, platform: "browser", format: "iife", outfile: join(directory, "app.js"),
+      resolveExtensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
       alias: { "react-native": "react-native-web" },
       define: { "process.env.NODE_ENV": '"production"', __DEV__: "false" }, logLevel: "silent" });
     await writeFile(join(directory, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><button id="outside" style="transition:opacity 4s">Outside</button><script src="/app.js"></script></body></html>');

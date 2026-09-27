@@ -55,6 +55,7 @@ export function ShellThemeControls() {
       accessibilityRole: "radio",
       accessibilityLabel: `${choice[0].toUpperCase()}${choice.slice(1)} theme`,
       accessibilityState: { checked: preference === choice },
+      "aria-checked": preference === choice,
       onPress: () => setPreference(choice),
       style: { minHeight: 44, minWidth: 70, paddingHorizontal: 14, borderRadius: 22, justifyContent: "center",
         alignItems: "center", backgroundColor: preference === choice ? palette.blue : palette.secondary },
