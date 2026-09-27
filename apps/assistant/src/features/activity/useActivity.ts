@@ -74,7 +74,11 @@ export class ActivityController {
     this.publish(withActivitySource(this.snapshot, { ...previous, phase: 'loading', freshness: 'stale' }))
     const result = await readActivitySource(scope, source, previous, previous.nextOffset)
     if (generation !== this.generation || this.scope?.cacheKey !== scope.cacheKey) return
-    this.publish(withActivitySource(this.snapshot, result))
+    const visible = this.liveDisconnected && result.coverage !== 'no_read_route'
+      ? { ...result, freshness: 'stale' as const,
+        error: 'Live Activity updates are disconnected. Reconnecting before refreshing canonical records.' }
+      : result
+    this.publish(withActivitySource(this.snapshot, visible))
   }
 
   markDisconnected(cacheKey: string): void {

@@ -211,6 +211,10 @@ window.loaded = true
     await until(evaluate, `document.querySelector('[data-source-health="task"]')?.getAttribute('data-phase') === 'ready'`)
     expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness')`)).toBe('stale')
     expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.textContent.includes('Live Activity updates are disconnected')`)).toBe(true)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Load more Tasks').click()`)
+    await until(evaluate, `document.querySelector('[data-source-health="task"]')?.getAttribute('data-phase') === 'ready'
+      && document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness') === 'stale'`)
+    expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.textContent.includes('Live Activity updates are disconnected')`)).toBe(true)
     await control(server.control, '/task', { title: 'Recovered after reconnect' })
     await control(server.control, '/websocket-offline', { offline: false })
     await until(evaluate, `Array.from(document.querySelectorAll('[data-source="task"]')).some(card => card.textContent.includes('Recovered after reconnect'))`)
