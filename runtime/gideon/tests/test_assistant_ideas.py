@@ -63,7 +63,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
     token = token_auth.generate_token("idea-owner", ttl_seconds=3600)
     async with TestClient(TestServer(app)) as client:
         unauthenticated = await client.get("/api/assistant/ideas/decisions")
-        assert unauthenticated.status == 401
+        assert unauthenticated.status == 403
         client.session.cookie_jar.update_cookies(
             {f"gideon_token_{port}": token}, response_url=client.make_url("/")
         )
