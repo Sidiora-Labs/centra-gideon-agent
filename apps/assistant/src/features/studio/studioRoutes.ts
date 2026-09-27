@@ -55,8 +55,15 @@ const TARGETS: Readonly<Record<string, StudioTarget | null>> = Object.freeze({
 type RecordBinding = Readonly<{ kind: string; endpoint: string; queryKey: string }>
 const RECORDS: Readonly<Record<string, RecordBinding>> = Object.freeze({
   'capabilities/creative/ingredients': { kind: 'creative.ingredient', endpoint: '/api/capabilities/creative/ingredients', queryKey: 'ingredient' },
+  'capabilities/creative/boards': { kind: 'creative.board', endpoint: '/api/capabilities/creative/boards', queryKey: 'board' },
+  'capabilities/creative/universes': { kind: 'creative.universe', endpoint: '/api/capabilities/creative/universes', queryKey: 'universe' },
+  'capabilities/creative/authors': { kind: 'creative.author', endpoint: '/api/capabilities/creative/authors', queryKey: 'author' },
   'capabilities/creative/works': { kind: 'creative.work', endpoint: '/api/capabilities/creative/works', queryKey: 'work' },
   'capabilities/creative/series': { kind: 'creative.series', endpoint: '/api/capabilities/creative/series', queryKey: 'series' },
+  'capabilities/creative/production': { kind: 'creative.series', endpoint: '/api/capabilities/creative/series', queryKey: 'series' },
+  'capabilities/creative/direction': { kind: 'creative.work', endpoint: '/api/capabilities/creative/works', queryKey: 'work' },
+  'capabilities/creative/commissions': { kind: 'creative.work', endpoint: '/api/capabilities/creative/works', queryKey: 'work' },
+  'capabilities/creative/exports': { kind: 'creative.work', endpoint: '/api/capabilities/creative/works', queryKey: 'work' },
   'capabilities/media/sketches': { kind: 'media.sketch', endpoint: '/api/capabilities/media/sketches', queryKey: 'sketch' },
   'capabilities/media/library': { kind: 'media.artifact', endpoint: '/api/capabilities/media/library', queryKey: 'artifact' },
   'capabilities/media/timelines': { kind: 'media.timeline', endpoint: '/api/capabilities/media/timelines', queryKey: 'timeline' },
@@ -131,7 +138,7 @@ export async function resolveStudioRoute(route: ShellRoute, scope: OwnerScope): 
   const entry = studioDestination(route)
   if (!entry || !scope.cacheKey || !scope.ownerId || !scope.runtimeOrigin
     || (typeof location !== 'undefined' && scope.runtimeOrigin !== location.origin)) return 'unavailable'
-  if (entry.id !== 'capabilities/media/library') return 'unavailable'
+  if (entry.id !== 'capabilities/media/library' && studioTarget(route)?.area !== 'creative') return 'unavailable'
   const binding = RECORDS[entry.id]
   if (route.record && (!binding || binding.kind !== route.record.kind)) return 'unavailable'
   try {
@@ -141,7 +148,15 @@ export async function resolveStudioRoute(route: ShellRoute, scope: OwnerScope): 
     const native = await gatewayJson<unknown>(`${binding.endpoint}/${encodeURIComponent(route.record.id)}`)
     if (!native || typeof native !== 'object' || !('id' in native) || native.id !== route.record.id) return 'unavailable'
     const metadata = route.placement?.query
-    if (metadata?.revision && Number(metadata.revision) !== (native as { revision?: unknown }).revision) return 'unavailable'
+    if (metadata?.revision) {
+      const revision = Number(metadata.revision)
+      if (!Number.isSafeInteger(revision) || revision < 1 || !binding) return 'unavailable'
+      if (entry.id === 'capabilities/creative/works' || entry.id === 'capabilities/creative/exports'
+        || entry.id === 'capabilities/creative/direction' || entry.id === 'capabilities/creative/commissions') {
+        const history = await gatewayJson<{ items?: { revision: number }[] }>(`${binding.endpoint}/${encodeURIComponent(route.record.id)}/revisions`)
+        if (!history.items?.some(item => item.revision === revision)) return 'missing'
+      } else if (revision !== (native as { revision?: unknown }).revision) return 'unavailable'
+    }
     if (metadata?.artifactVersion && Number(metadata.artifactVersion) !== (native as { version?: unknown }).version) return 'unavailable'
     if (metadata?.artifactId && metadata.artifactId !== route.record.id && entry.id === 'capabilities/media/library') return 'unavailable'
     return 'available'

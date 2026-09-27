@@ -76,12 +76,18 @@ asyncio.run(main())
       import { createRoot } from 'react-dom/client';
       import { ownerScope } from '/src/shared/auth.web';
       import { createStudioRoute } from '/src/features/studio/studioRoutes';
+      import { parseShellRoute, serializeShellRoute } from '/src/shared/shell/shellRoutes';
       import WriterWorkspace from '/src/features/studio/WriterWorkspace.web';
       const scope = ownerScope(location.origin, { user: 'writer-test-owner' });
       window.writerDraftStorageKey = 'gideon-writer:' + scope.cacheKey;
       function App() {
-        const [route, setRoute] = React.useState(createStudioRoute('capabilities/creative/works'));
-        return React.createElement(WriterWorkspace, { route, scope, navigate: setRoute, onReturn: () => {} });
+        const [route, setRoute] = React.useState(() => {
+          const parsed = parseShellRoute(location.pathname + location.search, location.origin);
+          return parsed.kind === 'route' && parsed.destination === 'apps' && parsed.placement?.id?.startsWith('capabilities/creative/')
+            ? parsed : createStudioRoute('capabilities/creative/works');
+        });
+        const navigate = next => { history.pushState(null, '', serializeShellRoute(next)); setRoute(next); };
+        return React.createElement(WriterWorkspace, { route, scope, navigate, onReturn: () => {} });
       }
       createRoot(document.getElementById('root')).render(React.createElement(App));
       window.writerFill = (label, value) => {
@@ -98,10 +104,27 @@ asyncio.run(main())
         Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value').set.call(field, value);
         field.dispatchEvent(new Event('change', { bubbles: true }));
       };
+      window.writerChooseRevision = value => {
+        const field = document.querySelector('[aria-label="Selected work revision"]');
+        if (!field || ![...field.options].some(option => option.value === value)) throw new Error('Missing revision ' + value);
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      };
       window.writerClick = label => {
         const button = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === label);
         if (!button) throw new Error('Missing button ' + label);
         button.click();
+      };
+      window.writerHoldPreview = () => {
+        const original = window.fetch;
+        window.writerReleasePreview = undefined;
+        window.fetch = (input, options) => {
+          const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
+          if (!url.pathname.endsWith('/export') || !url.pathname.includes('/creative/works/')) return original(input, options);
+          window.fetch = original;
+          return new Promise(resolve => { window.writerReleasePreview = () => resolve(original(input, options)); });
+        };
       };
     `
     await writeFile(entryFile, entry)
@@ -140,6 +163,25 @@ asyncio.run(main())
     await browser.waitFor("[...document.querySelectorAll('button')].find(item => item.textContent.trim() === 'Save new draft' && !item.disabled)", 'draft save enabled')
     await browser.evaluate("writerClick('Save new draft')")
     await browser.waitFor("document.body.textContent.includes('Work revision 2')", 'saved manuscript')
+    await browser.waitFor("location.search.includes('revision=2')", 'canonical current revision route')
+    const workAtRevisionTwo = await browser.evaluate<{ id: string }>("fetch('/api/capabilities/creative/works').then(response => response.json()).then(data => data.items[0])")
+    await browser.evaluate("writerChooseRevision('1')")
+    await browser.waitFor("location.search.includes('revision=1')", 'historical revision route')
+    await browser.navigate(`${origin}${await browser.evaluate<string>('location.pathname + location.search')}`)
+    await browser.waitFor("document.querySelector('[aria-label=\"Selected work revision\"]')?.value === '1'", 'historical revision after reload')
+    await browser.waitFor("document.querySelector('[aria-label=\"Selected work revision\"] option[value=\"2\"]')", 'revision choices after reload')
+    await browser.evaluate("writerChooseRevision('2')")
+    await browser.waitFor("location.search.includes('revision=2')", 'returned current revision route')
+    await browser.evaluate('writerHoldPreview()')
+    await browser.evaluate("writerClick('Preview selected')")
+    await browser.waitFor('Boolean(window.writerReleasePreview)', 'held native preview response')
+    await browser.evaluate("writerClick('New work')")
+    await browser.waitFor("!location.search.includes('recordId=')", 'new work cleared canonical selection')
+    await browser.evaluate('window.writerReleasePreview()')
+    await browser.waitFor("![...document.querySelectorAll('button')].some(item => item.textContent.trim() === 'Loading preview…')", 'stale preview finished')
+    expect(await browser.evaluate<boolean>("Boolean(document.querySelector('[aria-label=\"Manuscript preview\"]'))")).toBe(false)
+    await browser.evaluate("writerClick('Writer browser work')")
+    await browser.waitFor("location.search.includes('recordId=') && document.body.textContent.includes('Work revision 2')", 'reselected canonical work')
     await browser.evaluate("writerClick('Preview selected')")
     await browser.waitFor("document.querySelector('[aria-label=\"Manuscript preview\"]')?.textContent.includes('The last train crossed the city.')", 'rendered selected draft')
     await browser.evaluate("writerClick('Export selected')")
@@ -164,6 +206,7 @@ asyncio.run(main())
     const manuscriptEditor = "[...document.querySelectorAll('textarea')].find(item => item.closest('label')?.querySelector('span.sr-only')?.textContent.trim() === 'Manuscript')"
     await browser.waitFor(`${manuscriptEditor}?.value === 'A recoverable unsaved ending.'`, 'local draft edit')
     const work = await browser.evaluate<{ id: string; revision: number }>("fetch('/api/capabilities/creative/works').then(response => response.json()).then(data => data.items[0])")
+    expect(work.id).toBe(workAtRevisionTwo.id)
     expect(await browser.evaluate<string>(`localStorage.getItem(window.writerDraftStorageKey + ':' + ${JSON.stringify(work.id)}) || ''`)).toBe('A recoverable unsaved ending.')
     const changed = await browser.evaluate<number>(`fetch('/api/capabilities/creative/works/${encodeURIComponent(work.id)}', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:${work.revision},prompt:'Externally revised'})}).then(response => response.status)`)
     expect(changed).toBe(200)
@@ -180,6 +223,11 @@ asyncio.run(main())
     await browser.evaluate("writerClick('Save universe')")
     await browser.waitFor("document.body.textContent.includes('Universe revision 1')", 'saved universe')
     const universe = await browser.evaluate<{ id: string; revision: number }>("fetch('/api/capabilities/creative/universes').then(response => response.json()).then(data => data.items[0])")
+    expect(await browser.evaluate<string>('location.search')).toContain('recordKind=creative.universe')
+    expect(await browser.evaluate<string>('location.search')).toContain(encodeURIComponent(universe.id))
+    expect(await browser.evaluate<string>('location.search')).toContain(`contextWorkId=${encodeURIComponent(work.id)}`)
+    await browser.navigate(`${origin}${await browser.evaluate<string>('location.pathname + location.search')}`)
+    await browser.waitFor("document.body.textContent.includes('Universe revision 1')", 'selected universe after route reload')
     await browser.evaluate("writerClick('Writing')")
     await browser.waitFor("document.body.textContent.includes('Work revision 4')", 'work before linking universe')
     await browser.waitFor(`!![...document.querySelectorAll('label')].find(item => item.textContent.trim().startsWith('Pin universe'))?.querySelector('option[value="${universe.id}"]')`, 'available universe')
