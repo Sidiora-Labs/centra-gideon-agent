@@ -1,6 +1,7 @@
+import { useEffect, useRef } from 'react'
 import MediaPage from '../../../../console/src/features/capabilities/media/Page'
 import type { OwnerScope } from '../../shared/auth.web'
-import type { ShellRoute } from '../../shared/shell/shellRoutes'
+import { serializeShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { studioRecordRef } from './studioContracts'
 import { createStudioRoute, studioRouteRecord, studioTarget } from './studioRoutes'
 
@@ -26,9 +27,17 @@ export default function MediaWorkspace({ route, scope, navigate }: {
   navigate: (route: ShellRoute) => void
 }) {
   const view = studioTarget(route)?.view
+  const routeKey = `${scope.cacheKey}\0${scope.ownerId}\0${scope.runtimeOrigin}\0${serializeShellRoute(route)}`
+  const active = useRef({ mounted: false, routeKey })
+  active.current.routeKey = routeKey
+  useEffect(() => {
+    active.current.mounted = true
+    return () => { active.current.mounted = false }
+  }, [])
   if (!view || !destinations[view]) return <p role="alert">This media workspace is unavailable.</p>
   const record = studioRouteRecord(route, scope)
   function open(nextView: string, id?: string) {
+    if (!active.current.mounted || active.current.routeKey !== routeKey) return
     const destination = destinations[nextView]
     if (!destination) return
     const kind = recordKinds[nextView]

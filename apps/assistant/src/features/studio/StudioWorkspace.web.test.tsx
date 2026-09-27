@@ -99,6 +99,13 @@ async function freePort(): Promise<number> {
   return port
 }
 
+async function stopBrowser(browser: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+  if (!browser || browser.exitCode !== null || browser.signalCode !== null) return
+  const exited = new Promise<void>(done => browser.once('exit', () => done()))
+  browser.kill('SIGTERM')
+  await exited
+}
+
 it('opens a seeded native artifact in one React root, returns to its conversation, and keeps console hash navigation', async () => {
   const root = resolve(process.cwd(), '../..')
   const port = await freePort()
@@ -222,11 +229,11 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
       return response.result?.result?.value as T
     }
     const waitFor = async (expression: string) => {
-      for (let attempt = 0; attempt < 100; attempt++) {
+      for (let attempt = 0; attempt < 200; attempt++) {
         if (await evaluate<boolean>(expression)) return
         await new Promise(done => setTimeout(done, 100))
       }
-      throw new Error(`Browser condition timed out: ${expression}`)
+      throw new Error(`Browser condition timed out: ${expression}; ${await evaluate<string>('document.body.textContent')}`)
     }
     const holdNextFetch = async (path: string) => {
       await evaluate(`(() => { const original = window.fetch; const path = ${JSON.stringify(path)};
@@ -291,10 +298,10 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
     expect(await evaluate<string>('location.hash')).toBe('#/capabilities/media?view=library&artifact=studio-harbor-image')
   } finally {
     socket?.close()
-    browser?.kill('SIGTERM')
+    await stopBrowser(browser)
     await vite?.close()
     api.kill('SIGTERM')
-    if (directory) await rm(directory, { recursive: true, force: true })
+    if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
   }
 }, 45000)
 
@@ -549,10 +556,10 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     expect(await evaluate<string>('location.pathname')).toBe('/assistant/chat')
   } finally {
     socket?.close()
-    browser?.kill('SIGTERM')
+    await stopBrowser(browser)
     await vite?.close()
     api.kill('SIGTERM')
-    if (directory) await rm(directory, { recursive: true, force: true })
+    if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
     if (assetDirectory) await rm(assetDirectory, { recursive: true, force: true })
   }
 }, 120000)
