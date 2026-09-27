@@ -99,6 +99,24 @@ async function freePort(): Promise<number> {
   return port
 }
 
+async function stopBrowser(browser: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+  if (!browser || browser.exitCode !== null || browser.signalCode !== null) return
+  const closed = new Promise<void>(done => browser.once('close', () => done()))
+  const waitForClose = async () => {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const result = await Promise.race([
+      closed.then(() => true),
+      new Promise<boolean>(done => { timeout = setTimeout(() => done(false), 5000) }),
+    ])
+    if (timeout) clearTimeout(timeout)
+    return result
+  }
+  browser.kill('SIGTERM')
+  if (await waitForClose()) return
+  browser.kill('SIGKILL')
+  if (!await waitForClose()) throw new Error('Chromium did not close after SIGKILL')
+}
+
 it('opens a seeded native artifact in one React root, returns to its conversation, and keeps console hash navigation', async () => {
   const root = resolve(process.cwd(), '../..')
   const port = await freePort()
@@ -222,12 +240,20 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
       return response.result?.result?.value as T
     }
     const waitFor = async (expression: string) => {
-      for (let attempt = 0; attempt < 100; attempt++) {
+      for (let attempt = 0; attempt < 200; attempt++) {
         if (await evaluate<boolean>(expression)) return
         await new Promise(done => setTimeout(done, 100))
       }
-      throw new Error(`Browser condition timed out: ${expression}`)
+      throw new Error(`Browser condition timed out: ${expression}; ${await evaluate<string>('document.body.textContent')}`)
     }
+    const waitForNativeLibrary = () => waitFor(`(() => {
+      const status = [...document.querySelectorAll('[role="status"]')]
+        .some(node => node.textContent?.trim() === '2 matching artifacts');
+      const labels = [...document.querySelectorAll('article button')]
+        .map(button => button.textContent?.trim());
+      return status && labels.length === 2 && labels.includes('Sketch export')
+        && labels.includes('Studio harbor image');
+    })()`)
     const holdNextFetch = async (path: string) => {
       await evaluate(`(() => { const original = window.fetch; const path = ${JSON.stringify(path)};
         window.__studioRelease = undefined;
@@ -246,7 +272,7 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
     await evaluate("document.getElementById('wrong-owner').click()")
     await waitFor("document.getElementById('owner-result').textContent === 'denied'")
     await evaluate("document.getElementById('open-assistant').click()")
-    await waitFor("document.body.textContent.includes('1 matching artifacts')")
+    await waitForNativeLibrary()
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Studio harbor image').click()")
     await waitFor("Boolean(document.querySelector('[aria-label=\"Media details\"]'))")
     expect(await evaluate<string>('location.hash')).toBe('')
@@ -280,21 +306,21 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
     await evaluate("document.getElementById('restore-owner').click()")
     await waitFor("Boolean(document.querySelector('[aria-label=\"Media details\"]'))")
     await evaluate("document.getElementById('open-console').click()")
-    await waitFor("document.body.textContent.includes('1 matching artifacts')")
+    await waitForNativeLibrary()
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Studio harbor image').click()")
     await waitFor("location.hash.includes('artifact=studio-harbor-image')")
     expect(await evaluate<string>('location.hash')).toBe('#/capabilities/media?view=library&artifact=studio-harbor-image')
     await evaluate("document.getElementById('controlled-empty').click()")
-    await waitFor("document.body.textContent.includes('1 matching artifacts')")
+    await waitForNativeLibrary()
     expect(await evaluate<boolean>('window.__controlledDetailAtCommit')).toBe(false)
     expect(await evaluate<boolean>("Boolean(document.querySelector('[aria-label=\"Media details\"]'))")).toBe(false)
     expect(await evaluate<string>('location.hash')).toBe('#/capabilities/media?view=library&artifact=studio-harbor-image')
   } finally {
     socket?.close()
-    browser?.kill('SIGTERM')
+    await stopBrowser(browser)
     await vite?.close()
     api.kill('SIGTERM')
-    if (directory) await rm(directory, { recursive: true, force: true })
+    if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
   }
 }, 45000)
 
@@ -549,10 +575,10 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     expect(await evaluate<string>('location.pathname')).toBe('/assistant/chat')
   } finally {
     socket?.close()
-    browser?.kill('SIGTERM')
+    await stopBrowser(browser)
     await vite?.close()
     api.kill('SIGTERM')
-    if (directory) await rm(directory, { recursive: true, force: true })
+    if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
     if (assetDirectory) await rm(assetDirectory, { recursive: true, force: true })
   }
 }, 120000)

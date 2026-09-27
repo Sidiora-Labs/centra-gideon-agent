@@ -23,13 +23,13 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
   if (!key) throw new Error('The isolated image journey requires a provider credential')
   const api = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
     [join(root, 'apps/assistant/test-support/studio_server.py'), origin],
-    { env: { PATH: process.env.PATH || '', PYTHONPATH: join(root, 'runtime'), GIDEON_TEST_IMAGE_API_KEY: key } })
+    { env: { PATH: process.env.PATH || '', PYTHONPATH: join(root, 'runtime'), GIDEON_TEST_IMAGE_PROVIDER: '1', GIDEON_TEST_IMAGE_API_KEY: key } })
   let vite: Awaited<ReturnType<typeof createViteServer>> | undefined
   let browser: ChildProcessWithoutNullStreams | undefined
   let socket: WebSocket | undefined
   let directory: string | undefined
   try {
-    const seeded = await new Promise<{ api_port: number; completed_job_id: string; completed_artifact: { artifact_id: string; version: number } }>((done, fail) => {
+    const seeded = await new Promise<{ api_port: number; sketch_id: string; completed_job_id: string; completed_artifact: { artifact_id: string; version: number } }>((done, fail) => {
       let stdout = '', stderr = ''
       const timer = setTimeout(() => fail(new Error(`Media API start timed out: ${stderr}`)), 20000)
       api.stdout.on('data', chunk => {
@@ -53,10 +53,12 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
       function App() {
         const [route, setRoute] = React.useState(() => { const parsed = parseShellRoute(location.href, location.origin); return parsed.kind === 'route' ? parsed : createStudioRoute('capabilities/media/jobs', back) });
         const scope = ownerScope(location.origin, { user: 'studio-owner' });
-        const navigate = next => { history.pushState(null, '', serializeShellRoute(next)); setRoute(next) };
+        const navigate = next => { window.__mediaNavigations = (window.__mediaNavigations || 0) + 1; history.pushState(null, '', serializeShellRoute(next)); setRoute(next) };
         return <><button id="open-jobs" onClick={() => navigate(createStudioRoute('capabilities/media/jobs', back,
           studioRecordRef(scope, { kind: 'media.job', id: ${JSON.stringify(seeded.completed_job_id)} }), scope))}>Open jobs</button>
           <button id="open-images" onClick={() => navigate(createStudioRoute('capabilities/media/images', back))}>Open images</button>
+          <button id="open-sketches" onClick={() => navigate(createStudioRoute('capabilities/media/sketches', back,
+            studioRecordRef(scope, { kind: 'media.sketch', id: ${JSON.stringify(seeded.sketch_id)} }), scope))}>Open sketches</button>
           <button id="open-videos" onClick={() => navigate(createStudioRoute('capabilities/media/videos', back))}>Open videos</button>
           <div style={{height:'calc(100vh - 45px)'}}><StudioWorkspace route={route} scope={scope} navigate={navigate}
             returnTo={back} onReturn={() => { document.body.dataset.returned = JSON.stringify(back) }} /></div></>;
@@ -182,6 +184,41 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
     expect(await evaluate<string>('document.body.textContent')).toContain('Unavailable')
     expect(await evaluate<boolean>("[...document.querySelectorAll('button')].some(button => button.textContent.includes('Queue video') && button.disabled)")).toBe(true)
     expect(await evaluate<string>('location.hash')).toBe('')
+    await evaluate("document.getElementById('open-sketches').click()")
+    await waitFor(`Boolean(document.querySelector('[aria-label="Drawing canvas"]')) && document.body.textContent.includes(${JSON.stringify(seeded.sketch_id)})`)
+    await evaluate(`(() => {
+      const original = window.fetch.bind(window);
+      window.__heldMediaRequest = null;
+      window.__heldMediaStatus = null;
+      window.__releaseMediaSubmit = null;
+      window.fetch = (input, init) => {
+        if (String(input) === '/api/capabilities/media/jobs' && init?.method === 'POST') {
+          window.fetch = original;
+          window.__heldMediaRequest = JSON.parse(init.body);
+          return new Promise(resolve => {
+            window.__releaseMediaSubmit = () => original(input, init).then(response => {
+              window.__heldMediaStatus = response.status;
+              resolve(response);
+            });
+          });
+        }
+        return original(input, init);
+      };
+    })()`)
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Queue PNG export')).click()")
+    await waitFor("Boolean(window.__releaseMediaSubmit)")
+    const held = await evaluate<{ operation: string; request_id: string }>('window.__heldMediaRequest')
+    expect(held.operation).toBe('sketch_export')
+    await evaluate("document.getElementById('open-videos').click()")
+    await waitFor("Boolean(document.querySelector('[aria-label=\"Video generation\"]'))")
+    const routeBeforeRelease = await evaluate<string>('location.pathname + location.search + location.hash')
+    const navigationsBeforeRelease = await evaluate<number>('window.__mediaNavigations')
+    await evaluate('window.__releaseMediaSubmit()')
+    await waitFor("window.__heldMediaStatus === 202")
+    await waitFor(`fetch('/api/capabilities/media/jobs').then(response => response.json()).then(value => value.items.some(job => job.operation === 'sketch_export' && job.sketch_id === ${JSON.stringify(seeded.sketch_id)} && job.id !== ${JSON.stringify(seeded.completed_job_id)} && job.status === 'succeeded'))`)
+    expect(await evaluate<number>('window.__mediaNavigations')).toBe(navigationsBeforeRelease)
+    expect(await evaluate<string>('location.pathname + location.search + location.hash')).toBe(routeBeforeRelease)
+    expect(await evaluate<boolean>("Boolean(document.querySelector('[aria-label=\"Video generation\"]'))")).toBe(true)
   } finally {
     socket?.close()
     browser?.kill('SIGTERM')
