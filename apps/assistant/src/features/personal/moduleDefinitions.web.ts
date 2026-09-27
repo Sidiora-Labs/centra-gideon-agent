@@ -44,14 +44,12 @@ const RECORD_KINDS = new Map<string, readonly string[]>([
   ['learning', ['learning-capture', 'learning-review']],
   ['companion', ['companion-item']],
   ['capabilities/knowledge/ideas', ['idea']],
-  ['capabilities/knowledge/journals', ['journal-entry']],
   ['capabilities/identity/autobiography', ['identity-story']],
   ['capabilities/identity/goals', ['human-goal']],
   ['capabilities/identity/goal-plans', ['goal-plan']],
   ['capabilities/wellbeing/memory', ['memory-fact']],
   ['capabilities/wellbeing/overview', ['health-measurement']],
   ['capabilities/wellbeing/measurements', ['health-measurement']],
-  ['capabilities/knowledge/journals', ['journal-entry']],
 ])
 
 function availability(error: unknown): RouteAvailability {
@@ -78,12 +76,7 @@ async function resolve(scope: OwnerScope, route: ShellRoute): Promise<RouteAvail
         const rows = kind === 'learning-capture' ? await client.readLearningCaptures() : await client.readLearningReviews()
         if (rows.state === 'unavailable') return 'unavailable'
         if (!rows.value.some(row => row.identity.nativeId === id)) return 'missing'
-      } else if (kind === 'journal-entry') {
-        const result = await client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
-        if (result.state === 'unavailable') return 'unavailable'
-        if (result.value.journal?.identity.nativeId !== id) return 'missing'
-      }
-      else return 'unavailable'
+      } else return 'unavailable'
       return 'available'
     }
     if (placement === 'goals' || placement === 'capabilities/identity/goals') await client.readGoals()

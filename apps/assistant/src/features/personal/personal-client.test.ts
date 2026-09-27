@@ -160,6 +160,8 @@ describe('personal native contracts', () => {
     const learning = personalModuleDefinitions.find(module => module.id === 'learning')!
     expect(learning.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'learning' } }))).toBe(true)
     expect(learning.matches(createShellRoute('ideas', { view: 'list', placement: { id: 'learning' } }))).toBe(false)
+    const journals = personalModuleDefinitions.find(module => module.id === 'capabilities/knowledge/journals')!
+    expect(journals.matches(createShellRoute('ideas', { view: 'detail', placement: { id: 'capabilities/knowledge/journals' }, record: { kind: 'journal-entry', id: 'journal-native-19' } }))).toBe(false)
   })
 
   it('does not resolve unimplemented Identity and Health placements as ready', async () => {

@@ -186,13 +186,6 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
       const found = result.value.find(item => item.identity.nativeId === record.id)
       return found ? { state: 'available' as const, value: found } : { state: 'unavailable' as const, reason: 'The selected learning record is unavailable.' }
     }
-    if (record.kind === 'journal-entry') {
-      const result = await client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
-      if (result.state === 'unavailable') return result
-      return result.value.journal?.identity.nativeId === record.id
-        ? { state: 'available' as const, value: result.value.journal }
-        : { state: 'unavailable' as const, reason: 'The selected journal record is unavailable.' }
-    }
     return { state: 'unavailable' as const, reason: 'This personal record detail is unavailable.' }
   }, [client, route.record?.id, route.record?.kind])
   const themeStyle = {
