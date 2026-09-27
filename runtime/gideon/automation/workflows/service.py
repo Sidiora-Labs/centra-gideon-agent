@@ -338,6 +338,7 @@ async def author_def(
     strict: bool = True,
     workspace: dict[str, Any] | None = None,
     expected_revision: int | None = None,
+    create_only: bool = False,
 ) -> dict[str, Any]:
     """Validate a spec and (optionally) save it.
 
@@ -429,12 +430,20 @@ async def author_def(
             "no writable workflow definition provider is registered",
         )
     try:
+        if create_only and writable[0].name != "native":
+            return _service_failure("WF_DEF_CREATE_UNSUPPORTED", "create-only saves are supported only for native workflow definitions")
         if expected_revision is not None and writable[0].name != "native":
             return _service_failure("WF_DEF_REVISION_UNSUPPORTED", "revision checks are supported only for native workflow definitions")
-        saved = await writable[0].save_def(**spec, **({"expected_revision": expected_revision} if expected_revision is not None else {}))
+        saved = await writable[0].save_def(
+            **spec,
+            **({"expected_revision": expected_revision} if expected_revision is not None else {}),
+            **({"create_only": True} if create_only else {}),
+        )
     except Exception as exc:
-        from gideon.automation.workflows.native_defs import DefinitionRevisionConflict
+        from gideon.automation.workflows.native_defs import DefinitionNameConflict, DefinitionRevisionConflict
 
+        if isinstance(exc, DefinitionNameConflict):
+            return _service_failure("WF_DEF_ALREADY_EXISTS", str(exc), current_revision=exc.current_revision)
         if isinstance(exc, DefinitionRevisionConflict):
             return _service_failure("WF_DEF_VERSION_MISMATCH", str(exc), current_revision=exc.current_revision)
         return _service_failure(
