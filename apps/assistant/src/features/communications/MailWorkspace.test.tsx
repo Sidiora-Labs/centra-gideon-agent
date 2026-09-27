@@ -120,6 +120,85 @@ describe('mail workspace contracts', () => {
     expect(providerItemKey(first.identity)).not.toBe(providerItemKey(second.identity))
   })
 
+  it('resolves real native auth denial and missing mailbox responses', async () => {
+    const python = process.env.GIDEON_TEST_PYTHON || 'python3'
+    const apiDirectory = await mkdtemp(join(tmpdir(), 'gideon-mail-resolver-'))
+    directories.push(apiDirectory)
+    const serverSource = String.raw`
+import asyncio, json, os, sys
+from pathlib import Path
+from aiohttp import web
+from gideon.core.config import config_dir
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth
+from gideon.interfaces.dashboard.handlers.capabilities_communications import register
+from gideon.security.auth import credentials
+from gideon.workspace.capabilities.communications import PeopleStore, mirrors
+
+async def main(origin):
+  home=Path(os.environ['GIDEON_HOME']); home.mkdir(parents=True,exist_ok=True)
+  assert config_dir().resolve() == home.resolve(), (config_dir(), home)
+  (home/'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'providers': []}),encoding='utf-8')
+  credentials.set_password('communications-owner','correct-horse-battery-staple')
+  token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
+  store=PeopleStore(root=home/'capabilities'/'communications')
+  account=mirrors.save_account(store,{'name':'Resolver mailbox','kind':'maildir','alias':'custom','owner_email':'owner@example.test'})
+  app=web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+  app['port']=10000; app['allowed_origins']={origin}
+  app.router.add_get('/api/auth/status',auth.api_login_status)
+  app.router.add_get('/api/auth/session',auth.api_auth_session)
+  app.router.add_post('/api/auth/login',auth.api_auth_login)
+  app.router.add_post('/api/auth/logout',auth.api_auth_logout)
+  register(app)
+  runner=web.AppRunner(app); await runner.setup()
+  site=web.TCPSite(runner,'127.0.0.1',0); await site.start()
+  port=site._server.sockets[0].getsockname()[1]
+  print(json.dumps({'port':port,'account':account['id']}),flush=True)
+  try: await asyncio.Event().wait()
+  finally: await runner.cleanup()
+
+asyncio.run(main(sys.argv[1]))
+`
+    const script = join(apiDirectory, 'resolver_server.py')
+    await writeFile(script, serverSource)
+    const child = spawn(python, [script, 'http://127.0.0.1:4178'], { env: {
+      ...process.env, GIDEON_HOME: join(apiDirectory, 'home'), PYTHONPATH: join(root, 'runtime'), GIDEON_TEST_MODEL: '',
+    } })
+    children.push(child)
+    const server = await new Promise<{ port: number; account: string }>((done, fail) => {
+      let stdout = ''; let stderr = ''
+      const timeout = setTimeout(() => fail(new Error(`Native Mail resolver server start timed out: ${stderr}`)), 15000)
+      child.stdout.on('data', chunk => { stdout += String(chunk); if (stdout.includes('\n')) { clearTimeout(timeout); done(JSON.parse(stdout.split('\n')[0])) } })
+      child.stderr.on('data', chunk => { stderr += String(chunk) })
+      child.once('exit', code => { clearTimeout(timeout); fail(new Error(`Native Mail resolver server exited ${code}: ${stderr}`)) })
+    })
+    const entryDirectory = await mkdtemp(join(root, 'apps/assistant/.mail-resolver-browser-'))
+    directories.push(entryDirectory)
+    const entry = join(entryDirectory, 'resolver-entry.ts')
+    await writeFile(entry, `
+      import { ownerScope } from '../src/shared/auth.web'
+      import { createShellRoute } from '../src/shared/shell/shellRoutes'
+      import { communicationsModuleDefinitions } from '../src/features/communications/moduleDefinitions.web'
+      window.__resolveMail = async account => {
+        const scope = ownerScope(location.origin, { user: 'communications-owner' })
+        const route = createShellRoute('apps', { placement: { id: 'capabilities/communications/outbound', query: { account } } })
+        return communicationsModuleDefinitions[0].resolve!(scope, route)
+      }
+    `)
+    vite = await startViteEntryServer({ root: join(root, 'apps/assistant'), port: 4178, entryFile: entry,
+      apiOrigin: `http://127.0.0.1:${server.port}` })
+    browser = await startBrowserHarness()
+    await browser.navigate('http://127.0.0.1:4178/assistant/apps?v=1')
+    await browser.waitFor(`typeof window.__resolveMail === 'function'`, 'Native Mail resolver entry did not load')
+    const login = await browser.evaluate<number>(`fetch('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:JSON.stringify({username:'communications-owner',password:'correct-horse-battery-staple',totp:''})}).then(response=>response.status)`)
+    expect(login).toBe(200)
+    expect(await browser.evaluate(`window.__resolveMail(${JSON.stringify(server.account)})`)).toBe('available')
+    expect(await browser.evaluate(`window.__resolveMail('nonexistent-native-account')`)).toBe('missing')
+    const logout = await browser.evaluate<number>(`fetch('/api/auth/logout',{method:'POST',credentials:'same-origin',headers:{'X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'}}).then(response=>response.status)`)
+    expect(logout).toBe(200)
+    expect(await browser.evaluate(`window.__resolveMail(${JSON.stringify(server.account)})`)).toBe('denied')
+  }, 45000)
+
   it('drives authenticated native mail, local read state and send-once draft review in Chromium', async () => {
     currentPhase = 'starting real auth, Maildir, IMAP, artifact, and loopback SMTP services'
     const python = process.env.GIDEON_TEST_PYTHON || 'python3'
@@ -128,7 +207,7 @@ import asyncio, json, os, socket, socketserver, sys, threading
 from pathlib import Path
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-import gideon.core.config.loader as loader
+from gideon.core.config import config_dir
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
@@ -144,8 +223,7 @@ from gideon.workspace.artifacts.handlers import register_artifact_routes
 async def main(origin):
   home=Path(os.environ['GIDEON_HOME'])
   home.mkdir(parents=True,exist_ok=True)
-  loader.config_dir=lambda: home
-  credentials.config_dir=lambda: home
+  assert config_dir().resolve() == home.resolve(), (config_dir(), home)
   (home/'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'providers': []}), encoding='utf-8')
   os.environ['GIDEON_CREDENTIAL_BACKEND']='dotenv'
   save_credential('TEST_MAIL_CREDENTIAL','loopback-only-fixture-credential')
