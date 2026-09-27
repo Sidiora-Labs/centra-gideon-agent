@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -348,6 +348,7 @@ it('opens Slides through the registered Studio module, reloads its native artifa
   let browser: ChildProcessWithoutNullStreams | undefined
   let socket: WebSocket | undefined
   let directory: string | undefined
+  let assetDirectory: string | undefined
   try {
     const started = await new Promise<{ api_port: number }>((done, fail) => {
       let stdout = '', stderr = ''
@@ -377,7 +378,7 @@ it('opens Slides through the registered Studio module, reloads its native artifa
         const [returned, setReturned] = React.useState(null);
         const navigate = next => { history.pushState(null, '', serializeShellRoute(next)); setRoute(next); };
         return <><button id="open-design" onClick={() => navigate(createStudioRoute('design', back))}>Open Design</button>
-          {route.destination === 'apps' ? <div style={{height:'100vh'}}><React.Suspense fallback={<p>Loading Studio</p>}>
+          {route.destination === 'apps' ? <div className="gideon-trusted-module full" style={{height:'100vh'}}><React.Suspense fallback={<p>Loading Studio</p>}>
             <Studio route={route} scope={scope} navigate={navigate} returnTo={route.returnTo}
               onReturn={() => { setReturned(route.returnTo); navigate(createShellRoute('chat', {sessionId:route.returnTo?.sessionId})); }} />
           </React.Suspense></div> : <output id="return-context">{JSON.stringify(returned)}</output>}
@@ -385,6 +386,15 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       }
       createRoot(document.getElementById('root')).render(<App />);
     `
+    assetDirectory = await mkdtemp(join(tmpdir(), 'gideon-studio-slides-assets-'))
+    const assets = spawn(process.execPath, [join(root, 'apps/assistant/tooling/buildTrustedWebAssets.mjs'), '--out-dir', assetDirectory],
+      { cwd: join(root, 'apps/assistant') })
+    await new Promise<void>((done, fail) => {
+      let stderr = ''
+      assets.stderr.on('data', chunk => { stderr += String(chunk) })
+      assets.once('exit', code => code === 0 ? done() : fail(new Error(`Studio styles exited ${code}: ${stderr}`)))
+      assets.once('error', fail)
+    })
     const modules = join(root, 'apps/assistant/node_modules')
     vite = await createViteServer({ configFile: false, root: join(root, 'apps/assistant'),
       resolve: { alias: [
@@ -399,9 +409,16 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       plugins: [{ name: 'studio-slides-entry',
         resolveId(id) { if (id === '/studio-slides.tsx') return '\0studio-slides' },
         async load(id) { if (id === '\0studio-slides') return (await transformWithEsbuild(entry, 'studio-slides.tsx', { loader: 'tsx', jsx: 'automatic' })).code },
-        configureServer(server) { server.middlewares.use('/assistant', (_request, response) => {
+        configureServer(server) { server.middlewares.use('/studio-assets', async (request, response, next) => {
+          const asset = request.url?.slice(1) ?? ''
+          if (!/^(gideon-console\.css|fonts\/[a-z-]+\.woff2)$/.test(asset)) return next()
+          try {
+            response.setHeader('Content-Type', asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'font/woff2')
+            response.end(await readFile(join(assetDirectory!, asset)))
+          } catch (error) { next(error) }
+        }); server.middlewares.use('/assistant', (_request, response) => {
           response.setHeader('Content-Type', 'text/html; charset=utf-8')
-          response.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root"></div><script type="module" src="/studio-slides.tsx"></script></body></html>')
+          response.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/studio-assets/gideon-console.css"></head><body style="margin:0"><div id="root"></div><script type="module" src="/studio-slides.tsx"></script></body></html>')
         }) },
       }],
       server: { host: '127.0.0.1', port, strictPort: true, fs: { allow: [root] },
@@ -435,6 +452,14 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       pending.set(id, done)
       socket!.send(JSON.stringify({ id, method, params }))
     })
+    const capture = async (name: string) => {
+      const evidenceDirectory = process.env.GIDEON_STUDIO_EVIDENCE_DIR
+      if (!evidenceDirectory) return
+      const response = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+      if (!response.result?.data) throw new Error(`Studio screenshot failed: ${name}`)
+      await mkdir(evidenceDirectory, { recursive: true })
+      await writeFile(join(evidenceDirectory, `${name}.png`), Buffer.from(response.result.data, 'base64'))
+    }
     const evaluate = async <T,>(expression: string): Promise<T> => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
       if (response.result?.exceptionDetails) throw new Error(JSON.stringify(response.result.exceptionDetails))
@@ -448,14 +473,18 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       }
       throw new Error(`Browser condition timed out: ${expression}`)
     }
+    await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
     await send('Page.navigate', { url: `${origin}/assistant` })
     await waitFor("Boolean(document.getElementById('open-design'))")
     expect(await evaluate<number>("fetch('/api/artifacts?kind=pptx').then(response => response.status)")).toBe(403)
     expect(await evaluate<number>(`fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'slides-owner',password:'correct-horse-battery-staple',totp:''})}).then(response => response.status)`)).toBe(200)
     await evaluate("document.getElementById('open-design').click()")
     await waitFor("Boolean([...document.querySelectorAll('button')].find(button => button.textContent === 'Open Slides'))")
+    await waitFor("getComputedStyle(document.querySelector('section.bg-surface')).backgroundColor === 'rgb(32, 32, 36)'")
+    await capture('design-desktop')
     await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Open Slides').click()")
     await waitFor("Boolean(document.querySelector('[aria-label=\"New presentation outline\"]'))")
+    await capture('slides-create-desktop')
     await evaluate(`(() => { const input = document.querySelector('[aria-label="New presentation name"]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Quarterly review');
       input.dispatchEvent(new Event('input', {bubbles:true}));
@@ -473,9 +502,13 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     expect(routeQuery.get('recordId')).toBe('quarterly-review')
     expect(routeQuery.get('from')).toBe('chat')
     expect(await evaluate<string>('location.hash')).toBe('')
+    await capture('slides-created-desktop')
     await send('Page.reload', { ignoreCache: true })
     await waitFor("Boolean(document.querySelector('[aria-label=\"Slide title\"]'))")
     expect(await evaluate<string>("document.querySelector('[aria-label=\"Slide title\"]').value")).toBe('Results')
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    await capture('slides-reloaded-narrow')
+    expect(await evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth + 1')).toBe(true)
     await evaluate("document.querySelector('.gideon-workspace-back').click()")
     await waitFor("Boolean(document.getElementById('return-context'))")
     expect(await evaluate<string>("document.getElementById('return-context').textContent")).toContain('"selectionId":"message-4","scrollY":360')
@@ -486,5 +519,6 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     await vite?.close()
     api.kill('SIGTERM')
     if (directory) await rm(directory, { recursive: true, force: true })
+    if (assetDirectory) await rm(assetDirectory, { recursive: true, force: true })
   }
-}, 60000)
+}, 120000)
