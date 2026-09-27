@@ -47,6 +47,7 @@ from gideon.workspace.artifacts.models import (
     ArtifactVersionConflict,
     ext_for_mime,
     is_binary_kind,
+    is_valid_slug,
     kind_for_mime,
 )
 
@@ -208,6 +209,74 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=400)
     _audit(request, "artifact.create", "ok", f"slug={art.slug}")
     return web.json_response(_serialize(art, include_content=True), status=201)
+
+
+async def api_artifact_deck_create(request: web.Request) -> web.Response:
+    """Render a deck model into a new, versioned PPTX artifact."""
+    from gideon.workspace.documents.model_codec import get_codec
+    from gideon.workspace.documents.registry import get_writer
+
+    if _is_restricted_session(request.app["state"], request):
+        _audit(request, "artifact.deck_create", "denied", "restricted_session")
+        return json_error("forbidden", message="restricted session", status=403)
+    prov, refusal = _writable_provider(request)
+    if refusal is not None:
+        return refusal
+    refusal = _refuse_if_oversized(request, MAX_CONTENT_BYTES)
+    if refusal is not None:
+        return refusal
+    try:
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
+    except Exception:
+        return json_error("invalid_json", status=400)
+    if not isinstance(body, dict):
+        return json_error("invalid_body", message="JSON body must be an object", status=400)
+    name = body.get("name")
+    slug = body.get("slug")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 200:
+        return json_error("invalid_name", message="name must be 1 to 200 characters", status=400)
+    if slug is not None and (not isinstance(slug, str) or not is_valid_slug(slug)):
+        return json_error("invalid_slug", message="slug is invalid", status=400)
+    if slug and prov.get(slug) is not None:
+        return json_error("slug_conflict", message="artifact slug already exists", status=409)
+    codec = get_codec("pptx")
+    writer = get_writer("pptx")
+    if codec is None or writer is None:
+        return json_error("render_unavailable", message="PPTX rendering is unavailable", status=503)
+    try:
+        model = codec.from_dict(body.get("model"))
+    except ValueError as exc:
+        return json_error("invalid_model", message=str(exc), status=400)
+    if not model.slides:
+        return json_error("invalid_model", message="provide at least one slide", status=400)
+    try:
+        data = await asyncio.to_thread(writer, model)
+    except Exception:
+        logger.exception("deck create render failed")
+        _audit(request, "artifact.deck_create", "error", "render_failed")
+        return json_error("render_failed", message="PPTX rendering failed", status=500)
+    if not isinstance(data, bytes) or not data:
+        return json_error("render_failed", message="PPTX renderer returned no document", status=500)
+    if len(data) > MAX_BINARY_CONTENT_BYTES:
+        return json_error("request_too_large", message="rendered PPTX exceeds the binary artifact limit", status=413)
+    try:
+        art = prov.create_binary(
+            name=name.strip(), data=data,
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            kind="pptx", source="manual", slug=slug,
+            actor="user", session_id=_session_key(request),
+        )
+    except (ValueError, PermissionError, NotImplementedError) as exc:
+        _audit(request, "artifact.deck_create", "error", str(exc))
+        return json_error("artifact_create_failed", message=str(exc), status=400)
+    if prov.raw_bytes(art.slug, version=art.version) is None:
+        prov.delete(art.slug)
+        _audit(request, "artifact.deck_create", "error", "binary_missing")
+        return json_error("artifact_create_failed", message="rendered PPTX was not stored", status=500)
+    _audit(request, "artifact.deck_create", "ok", f"slug={art.slug} version={art.version}")
+    return web.json_response(_serialize(art), status=201)
 
 
 async def api_artifact_detail(request: web.Request) -> web.Response:
@@ -1470,6 +1539,7 @@ def register_artifact_routes(app: web.Application) -> None:
     registration needed."""
     app.router.add_get("/api/artifacts", api_artifacts_list)
     app.router.add_post("/api/artifacts", api_artifacts_create)
+    app.router.add_post("/api/artifacts/deck", api_artifact_deck_create)
     app.router.add_get("/api/artifacts/pinned", api_artifacts_pinned)
     app.router.add_get("/api/artifacts/deployed", api_artifacts_deployed)
     app.router.add_get("/api/artifacts/folders", api_artifact_folders)
