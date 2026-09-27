@@ -22,8 +22,12 @@ let evaluate: (expression: string) => Promise<any>
 const nativeFetch = (path: string, init: RequestInit = {}) => fetch(`${api}${path}`, {
   ...init, headers: { Authorization: `Bearer ${credential}`, ...init.headers },
 })
-const control = async (action: string, path = '') => {
-  const response = await fetch(`${controlApi}/test/${action}${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+const nativePut = (path: string, body: Record<string, unknown>) => nativeFetch(path, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+})
+const control = async (action: string, path = '', method = 'GET') => {
+  const query = path ? `?path=${encodeURIComponent(path)}&method=${method}` : ''
+  const response = await fetch(`${controlApi}/test/${action}${query}`)
   if (!response.ok) throw new Error(`Fixture control ${action} failed: ${response.status}`)
   return response.json() as Promise<{ writes: { task: number; project: number }; held: boolean }>
 }
@@ -195,7 +199,7 @@ describe('native task and project workspaces', () => {
     expect(await evaluate('document.body.textContent.includes("Source task")')).toBe(true)
     await evaluate("window.setField('Add a comment', 'Reviewed on mobile')")
     await evaluate("window.clickNamed('Post comment')")
-    await waitFor('document.querySelector("[aria-label=\\"Task comments\\"]")?.textContent.includes("Reviewed on mobile")')
+    await waitFor('document.body.textContent.includes("Comment added.")')
     const commentResponse = await nativeFetch(`/api/tasks/${encodeURIComponent(taskId)}/comments`)
     const comments = await commentResponse.json() as { comments: Array<{ body: string }> }
     expect(comments.comments.some(row => row.body === 'Reviewed on mobile')).toBe(true)
@@ -297,6 +301,86 @@ describe('native task and project workspaces', () => {
     expect(after.writes.project).toBe(before.writes.project)
     const record = await (await nativeFetch(`/api/projects/${encodeURIComponent(projectId)}`)).json() as { brief: string }
     expect(record.brief).not.toBe('Must not cross project route')
+  }, 30000)
+
+  it('accepts exactly one native task write for a shared revision and keeps legacy writes working', async () => {
+    const path = `/api/tasks/${encodeURIComponent(taskId)}`
+    const initial = await (await nativeFetch(path)).json() as { updated_at: string }
+    const results = await Promise.all([
+      nativePut(path, { description: 'Competing task write A', expected_revision: initial.updated_at }),
+      nativePut(path, { description: 'Competing task write B', expected_revision: initial.updated_at }),
+    ])
+    expect(results.map(row => row.status).sort()).toEqual([200, 409])
+    const conflict = await results.find(row => row.status === 409)!.json() as { error: { code: string } }
+    expect(conflict.error.code).toBe('version_conflict')
+    const winner = await (await nativeFetch(path)).json() as { description: string; updated_at: string }
+    expect(['Competing task write A', 'Competing task write B']).toContain(winner.description)
+    expect(winner.updated_at).not.toBe(initial.updated_at)
+    const legacy = await nativePut(path, { description: 'Legacy task update' })
+    expect(legacy.status).toBe(200)
+    const final = await (await nativeFetch(path)).json() as { description: string; updated_at: string }
+    expect(final.description).toBe('Legacy task update')
+    expect(final.updated_at).not.toBe(winner.updated_at)
+  }, 30000)
+
+  it('accepts exactly one native project write for a shared revision and keeps legacy writes working', async () => {
+    const path = `/api/projects/${encodeURIComponent(projectId)}`
+    const initial = await (await nativeFetch(path)).json() as { updated_at: string }
+    const results = await Promise.all([
+      nativePut(path, { brief: 'Competing project write A', expected_revision: initial.updated_at }),
+      nativePut(path, { brief: 'Competing project write B', expected_revision: initial.updated_at }),
+    ])
+    expect(results.map(row => row.status).sort()).toEqual([200, 409])
+    const conflict = await results.find(row => row.status === 409)!.json() as { error: { code: string } }
+    expect(conflict.error.code).toBe('version_conflict')
+    const winner = await (await nativeFetch(path)).json() as { brief: string; updated_at: string }
+    expect(['Competing project write A', 'Competing project write B']).toContain(winner.brief)
+    expect(winner.updated_at).not.toBe(initial.updated_at)
+    const legacy = await nativePut(path, { brief: 'Legacy project update' })
+    expect(legacy.status).toBe(200)
+    const final = await (await nativeFetch(path)).json() as { brief: string; updated_at: string }
+    expect(final.brief).toBe('Legacy project update')
+    expect(final.updated_at).not.toBe(winner.updated_at)
+  }, 30000)
+
+  it('preserves a task draft and ID when the native record changes after preflight', async () => {
+    await evaluate(`window.renderWorkspace('project', ${JSON.stringify(projectId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Project context\\"]")?.textContent.includes("Save project")')
+    await evaluate(`window.renderWorkspace('task', ${JSON.stringify(taskId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Task plan\\"]")?.textContent.includes("Save task")')
+    await evaluate("window.setField('Description', 'Draft after task write race')")
+    const path = `/api/tasks/${encodeURIComponent(taskId)}`
+    await control('arm', path, 'PUT')
+    await evaluate("window.clickNamed('Save task')")
+    await control('wait')
+    expect((await nativePut(path, { description: 'Concurrent task edit' })).status).toBe(200)
+    await control('release')
+    await control('settled')
+    await waitFor('document.querySelector("[role=alert]")?.textContent.includes("changed while saving")')
+    expect(await evaluate('Array.from(document.querySelectorAll("label")).find(node => node.textContent.startsWith("Description"))?.querySelector("textarea")?.value'))
+      .toBe('Draft after task write race')
+    expect(await evaluate('document.body.textContent.includes(' + JSON.stringify(taskId) + ')')).toBe(true)
+    const final = await (await nativeFetch(path)).json() as { description: string }
+    expect(final.description).toBe('Concurrent task edit')
+  }, 30000)
+
+  it('preserves a project draft and ID when the native record changes after preflight', async () => {
+    await evaluate(`window.renderWorkspace('project', ${JSON.stringify(projectId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Project context\\"]")?.textContent.includes("Save project")')
+    await evaluate("window.setField('Brief', 'Draft after project write race')")
+    const path = `/api/projects/${encodeURIComponent(projectId)}`
+    await control('arm', path, 'PUT')
+    await evaluate("window.clickNamed('Save project')")
+    await control('wait')
+    expect((await nativePut(path, { brief: 'Concurrent project edit' })).status).toBe(200)
+    await control('release')
+    await control('settled')
+    await waitFor('document.querySelector("[role=alert]")?.textContent.includes("changed while saving")')
+    expect(await evaluate('Array.from(document.querySelectorAll("label")).find(node => node.textContent.startsWith("Brief"))?.querySelector("textarea")?.value'))
+      .toBe('Draft after project write race')
+    expect(await evaluate('document.body.textContent.includes(' + JSON.stringify(projectId) + ')')).toBe(true)
+    const final = await (await nativeFetch(path)).json() as { brief: string }
+    expect(final.brief).toBe('Concurrent project edit')
   }, 30000)
 
   it('retains a task draft and source ID after its real credential is revoked', async () => {
