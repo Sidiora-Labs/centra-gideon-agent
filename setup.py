@@ -1,4 +1,4 @@
-"""Build the runtime and include an available console bundle."""
+"""Build the runtime and include available web application bundles."""
 
 from pathlib import Path
 from shutil import copytree
@@ -20,6 +20,13 @@ class RuntimeBuild(build_py):
                     dirs_exist_ok=True,
                 )
                 break
+        assistant = root / "apps/assistant/dist/web"
+        if (assistant / "index.html").is_file():
+            copytree(
+                assistant,
+                Path(self.build_lib) / "gideon/static/assistant",
+                dirs_exist_ok=True,
+            )
 
 
 setup(cmdclass={"build_py": RuntimeBuild})

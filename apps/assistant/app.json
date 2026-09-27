@@ -8,6 +8,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": { "supportsTablet": true },
-    "web": { "bundler": "metro", "name": "Gideon" }
+    "web": { "bundler": "metro", "name": "Gideon", "output": "single" },
+    "experiments": { "baseUrl": "/assistant" }
   }
 }

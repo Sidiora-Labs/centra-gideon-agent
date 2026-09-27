@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
+    "build:assistant": "npm --prefix ../assistant run build:web",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.sw.json",
     "test": "vitest run",
