@@ -272,6 +272,7 @@ def list_runs(
     status: str | RunStatus = "",
     root_run_id: str = "",
     project_id: str = "",
+    owner_username: str = "",
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[WorkflowRun], int]:
@@ -298,6 +299,12 @@ def list_runs(
         if criteria
         else ""
     )
+    if owner_username.strip():
+        clause += (
+            (" AND " if clause else " WHERE ")
+            + "(TRIM(owner_username) = '' OR LOWER(TRIM(owner_username)) = ?)"
+        )
+        bindings.append(owner_username.strip().lower())
     with _connection() as database:
         count = database.execute(
             "SELECT COUNT(*) FROM runs" + clause, bindings

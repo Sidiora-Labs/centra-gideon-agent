@@ -91,15 +91,15 @@ async function nativeRows(source: ActivityReadSource, offset: number, signal?: A
   switch (source) {
     case 'task': {
       const result = page<TaskItem>(await gatewayJson<unknown>(`/api/tasks?${params}&mine=1`, { signal }), 'tasks')
-      return { records: result.rows, total: null, paged: true }
+      return { records: result.rows, total: result.total, paged: true }
     }
     case 'workflow_run': {
       const result = page<WorkflowRunSummary>(await gatewayJson<unknown>(`/api/workflows/runs?${params}&mine=1`, { signal }), 'runs')
-      return { records: result.rows, total: null, paged: true }
+      return { records: result.rows, total: result.total, paged: true }
     }
     case 'trigger_run': {
       const result = page<ScheduleRun>(await gatewayJson<unknown>(`/api/triggers/history?${params}`, { signal }), 'runs')
-      return { records: result.rows, total: null, paged: true }
+      return { records: result.rows, total: result.total, paged: true }
     }
     case 'inbox_item': return { records: rows<InboxItem>(await gatewayJson<unknown>('/api/inbox/open', { signal })), total: null, paged: false }
     case 'approval': return { records: rows<PendingApproval>(await gatewayJson<unknown>('/api/approvals', { signal })), total: null, paged: false }
