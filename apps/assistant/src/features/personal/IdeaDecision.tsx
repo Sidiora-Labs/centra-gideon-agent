@@ -35,9 +35,12 @@ export function IdeaDecision({ idea, decision, onDecision }: Props) {
 
   useEffect(() => {
     setPrompt(decision?.edited_prompt ?? idea.title)
+  }, [ideaKey, idea.title, decision?.edited_prompt])
+
+  useEffect(() => {
     setMessage('')
     requestId.current = ''
-  }, [ideaKey, idea.title, decision?.edited_prompt])
+  }, [ideaKey, idea.title])
 
   async function decide(action: 'accept' | 'dismiss') {
     if (busy || decision || !idea.revisionHash) return

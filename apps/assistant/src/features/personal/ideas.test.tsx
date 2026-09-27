@@ -31,9 +31,9 @@ async function availablePort(): Promise<number> {
 const nativeServer = String.raw`
 import asyncio, json, os, sys, time
 from pathlib import Path
-from types import SimpleNamespace
 from aiohttp import web
-from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.core.config import AppConfig
+from gideon.engine.session import ConversationDirectory
 from gideon.engine.tasks.handlers import register_task_routes
 from gideon.cognition.learning import proposals
 from gideon.cognition.suggestions import SuggestionsCache, api_suggestions
@@ -41,6 +41,7 @@ from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers import assistant_ideas, capabilities_knowledge_ideas, capabilities_knowledge_capture, capabilities_knowledge_reviews, knowledge, learning
 from gideon.security.auth import credentials
+from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace.capabilities.knowledge.ideas import IdeaLists
 from gideon.workspace.capabilities.knowledge.idea_format import preview
 
@@ -49,12 +50,12 @@ async def main(origin):
   (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'learning': {'enabled': True}, 'evals': {'enabled': False}}), encoding='utf-8')
   credentials.set_password('personal-owner', 'native-owner-password')
   token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
-  store = KnowledgeStore(str(home / 'knowledge.db'))
+  state = ConsoleState(ConversationDirectory(AppConfig.load()), time.time())
+  store = state.knowledge_store
   now = '2026-09-27T10:00:00+00:00'
   content = f'''---\nid: 50d3e623-0be4-4e04-8ca9-68109c5c1267\ntitle: Native saved ideas\ncategory: personal\nstatus: draft\ncreated: {now}\nmodified: {now}\ntags:\n  - idea-loom\n---\n# Prompt\nExplore a grounded next step from captured notes.\n\n## Help\nConsider a grounded action from the source.\n## Ideas\n1. Build a source-linked learning plan\n2. Preserve the source evidence with the next task\n'''
   idea_preview = preview(content)
   IdeaLists(store, home).import_list({'request_id': 'idea-list-seed-001', 'content': content, 'preview_id': idea_preview['preview_id'], 'expected_hash': ''})
-  state = SimpleNamespace(knowledge_store=store, context_builder=None, _background_tasks=set(), _restricted_keys=set(), _sessions={})
   cache = SuggestionsCache(); cache.suggestions = ['Use this cached prompt in a draft']; cache.generated_at = time.time()
   state._suggestions_cache = cache
   proposals.enqueue(kind='skill', title='Review skill proposal', body='A proposal body backed by a real local test record.', target='learning-test', provenance='local_capture', source_excerpt='The source capture supports this proposal.', evidence_refs=['capture:learning-evidence-1'], evidence_strength='direct', confidence=0.91, occurrences=1, min_evidence=1)
