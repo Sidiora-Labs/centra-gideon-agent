@@ -34,6 +34,7 @@ class CustomerBrowserSession:
     version: int
     created_at: float
     updated_at: float
+    control_holder: str = "assistant"
 
     def public(self) -> dict[str, str | int | float]:
         return {
@@ -43,6 +44,7 @@ class CustomerBrowserSession:
             "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "control_holder": self.control_holder,
         }
 
 
@@ -51,6 +53,9 @@ class CustomerBrowserSessionStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
+            prior = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='customer_browser_sessions'").fetchone()
+            if prior and "'active'" not in prior[0]:
+                db.execute("ALTER TABLE customer_browser_sessions RENAME TO customer_browser_sessions_old")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS customer_browser_sessions (
                     id TEXT PRIMARY KEY,
@@ -58,13 +63,24 @@ class CustomerBrowserSessionStore:
                     owner_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
                     canonical_key TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('reserved', 'closed', 'error')),
+                    status TEXT NOT NULL CHECK(status IN ('reserved', 'active', 'closed', 'error')),
                     version INTEGER NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
+                    control_holder TEXT NOT NULL DEFAULT 'assistant',
                     UNIQUE(account_id, canonical_key)
                 )"""
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(customer_browser_sessions)")}
+            if "control_holder" not in columns:
+                db.execute("ALTER TABLE customer_browser_sessions ADD COLUMN control_holder TEXT NOT NULL DEFAULT 'assistant'")
+            if prior and "'active'" not in prior[0]:
+                db.execute("""INSERT INTO customer_browser_sessions
+                    (id, account_id, owner_id, conversation_id, canonical_key, status,
+                     version, created_at, updated_at)
+                    SELECT id, account_id, owner_id, conversation_id, canonical_key, status,
+                           version, created_at, updated_at FROM customer_browser_sessions_old""")
+                db.execute("DROP TABLE customer_browser_sessions_old")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
@@ -143,7 +159,7 @@ class CustomerBrowserSessionStore:
     ) -> CustomerBrowserSession:
         if type(expected_version) is not int or expected_version < 1:
             raise ValueError("expected_version must be a positive integer")
-        if action not in {"close", "reopen", "error"}:
+        if action not in {"close", "reopen", "error", "activate", "takeover", "handback", "touch"}:
             raise ValueError("invalid session action")
         with self._db() as db:
             row = db.execute(
@@ -153,17 +169,22 @@ class CustomerBrowserSessionStore:
             if current.version != expected_version:
                 raise StaleSessionVersion
             allowed = {
-                "close": {"reserved", "error"},
+                "close": {"reserved", "active", "error"},
                 "reopen": {"closed", "error"},
-                "error": {"reserved"},
+                "error": {"reserved", "active"},
+                "activate": {"reserved"},
+                "takeover": {"active"} if current.control_holder == "assistant" else set(),
+                "handback": {"active"} if current.control_holder == "customer" else set(),
+                "touch": {"active"},
             }
             if current.status not in allowed[action]:
                 raise InvalidSessionTransition
-            status = {"close": "closed", "reopen": "reserved", "error": "error"}[action]
+            status = {"close": "closed", "reopen": "reserved", "error": "error", "activate": "active", "takeover": "active", "handback": "active", "touch": "active"}[action]
+            holder = "customer" if action == "takeover" else "assistant" if action in {"handback", "reopen"} else current.control_holder
             db.execute(
                 """UPDATE customer_browser_sessions
-                   SET status=?, version=version+1, updated_at=? WHERE id=?""",
-                (status, time.time(), session_id),
+                   SET status=?, control_holder=?, version=version+1, updated_at=? WHERE id=?""",
+                (status, holder, time.time(), session_id),
             )
             changed = db.execute(
                 "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
