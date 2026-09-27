@@ -69,6 +69,9 @@ async def main(origin: str) -> None:
         state._notification_log = [{
             "kind": "system", "title": "Result ready", "body": "Open the result",
             "ts": str(time.time()), "acked": False,
+        }, {
+            "id": "notification-1", "kind": "system", "title": "Receipt available",
+            "body": "Gideon recorded an update", "ts": str(time.time()), "acked": False,
         }]
 
         for index in range(22):
