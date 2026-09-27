@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from '../../../test-support/browserHarness'
 import { filterMailItems, mailDraftRouteId, unreadMailItems } from './MailWorkspace.web'
 import { providerItemKey, type CommunicationItem, type MirrorMessage, type OutboundDraftItem } from './types'
@@ -575,6 +576,11 @@ asyncio.run(main(sys.argv[1]))
     await waitFor(send, `document.querySelector('#mail-detail-title')?.innerText==='Native fixture message'`)
     await evaluate(send, `window.__navigate({...window.__route,returnTo:{destination:'chat',sessionId:'previous-conversation'}})`)
     await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Back to messages')).click()`)
+    await waitFor(send, `window.__route.destination==='apps' && window.__route.view==='list' && document.querySelector('[aria-label="Mailbox account"]')?.value===${JSON.stringify(maildirId)}`)
+    expect(await evaluate(send, `({destination:window.__route.destination,view:window.__route.view,account:window.__route.placement?.query?.account,returnTo:window.__route.returnTo})`)).toMatchObject({
+      destination: 'apps', view: 'list', account: maildirId, returnTo: { destination: 'chat', sessionId: 'previous-conversation' },
+    })
+    await evaluate(send, `document.querySelector('.gideon-workspace-back')?.click()`)
     await waitFor(send, `document.body.innerText.includes('Returned to chat previous-conversation')`)
     await evaluate(send, `window.__navigate({destination:'apps',view:'list',placement:{id:'capabilities/communications/outbound',query:{account:${JSON.stringify(maildirId)}}}})`)
     await waitFor(send, `document.querySelector('[aria-label="Mailbox account"]') && document.body.innerText.includes('Native fixture message')`)
@@ -587,4 +593,138 @@ asyncio.run(main(sys.argv[1]))
     await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText==='Retry accounts').click()`)
     await waitFor(send, `document.body.innerText.includes('Mailbox account unavailable') && !document.body.innerText.includes('Native fixture message') && !document.body.innerText.includes('Drafts (')`)
   }, 90000)
+
+  it('closes the actual App Mail placement through native record reload with one frame and typed return context', async () => {
+    await browser?.close()
+    browser = undefined
+    await vite?.close()
+    vite = undefined
+    currentPhase = 'starting native auth and Mail mirror services for the actual App'
+    const python = process.env.GIDEON_TEST_PYTHON || 'python3'
+    const directory = await mkdtemp(join(tmpdir(), 'gideon-mail-app-'))
+    directories.push(directory)
+    const script = join(directory, 'mail_app_server.py')
+    await writeFile(script, String.raw`
+import asyncio, json, os, sys
+from pathlib import Path
+from aiohttp import web
+from gideon.core.config import config_dir
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth
+from gideon.interfaces.dashboard.handlers.capabilities_communications import register
+from gideon.interfaces.dashboard.handlers.capabilities_communications_outbound import register as register_outbound
+from gideon.security.auth import credentials
+from gideon.workspace.capabilities.communications import PeopleStore, mirrors
+
+async def main(origin):
+  home=Path(os.environ['GIDEON_HOME']); home.mkdir(parents=True,exist_ok=True)
+  assert config_dir().resolve() == home.resolve(), (config_dir(), home)
+  (home/'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'providers': []}),encoding='utf-8')
+  credentials.set_password('communications-owner','correct-horse-battery-staple')
+  token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
+  store=PeopleStore(root=home/'capabilities'/'communications')
+  account=mirrors.save_account(store,{'name':'App Mailbox','kind':'maildir','alias':'custom','owner_email':'owner@example.test'})
+  mirrors.upload(store,account['id'],{'folder':'INBOX','content':'From: Sender <sender@example.test>\nTo: Owner <owner@example.test>\nSubject: App native record\nDate: Sat, 26 Sep 2026 09:30:00 +0000\nMessage-ID: <app-native-record@example.test>\n\nThis native record must survive direct routing and reload.\n'})
+  mirrors.sync(store,account['id'])
+  app=web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+  app['port']=10000; app['allowed_origins']={origin}
+  app.router.add_get('/api/auth/status',auth.api_login_status)
+  app.router.add_get('/api/auth/session',auth.api_auth_session)
+  app.router.add_post('/api/auth/login',auth.api_auth_login)
+  app.router.add_post('/api/auth/logout',auth.api_auth_logout)
+  register(app); register_outbound(app)
+  runner=web.AppRunner(app); await runner.setup()
+  site=web.TCPSite(runner,'127.0.0.1',0); await site.start()
+  port=site._server.sockets[0].getsockname()[1]
+  print(json.dumps({'api_port':port,'account_id':account['id'],'message_id':'<app-native-record@example.test>'}),flush=True)
+  try: await asyncio.Event().wait()
+  finally: await runner.cleanup()
+
+asyncio.run(main(sys.argv[1]))
+`)
+    const port = await availablePort()
+    const origin = `http://127.0.0.1:${port}`
+    const child = spawn(python, [script, origin], { env: {
+      ...process.env, GIDEON_HOME: join(directory, 'home'), PYTHONPATH: join(root, 'runtime'), GIDEON_TEST_MODEL: '',
+    } })
+    children.push(child)
+    const startup = await new Promise<{ api_port: number; account_id: string; message_id: string }>((done, fail) => {
+      let stdout = ''; let stderr = ''
+      const timeout = setTimeout(() => fail(new Error(`Actual App Mail service start timed out: ${stderr}`)), 15000)
+      child.stdout.on('data', chunk => { stdout += String(chunk); if (stdout.includes('\n')) { clearTimeout(timeout); done(JSON.parse(stdout.split('\n')[0])) } })
+      child.stderr.on('data', chunk => { stderr += String(chunk) })
+      child.once('exit', code => { clearTimeout(timeout); fail(new Error(`Actual App Mail service exited ${code}: ${stderr}`)) })
+    })
+    const entryDirectory = await mkdtemp(join(root, 'apps/assistant/.mail-app-entry-'))
+    directories.push(entryDirectory)
+    const trustedAssetsDirectory = await mkdtemp(join(root, 'apps/assistant/.mail-app-assets-'))
+    directories.push(trustedAssetsDirectory)
+    await promisify(execFile)(process.execPath, [join(root, 'apps/assistant/tooling/buildTrustedWebAssets.mjs'), '--out-dir', trustedAssetsDirectory], {
+      cwd: join(root, 'apps/assistant'),
+    })
+    const entry = join(entryDirectory, 'entry.tsx')
+    await writeFile(entry, `
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import App from '/App.tsx'
+      import { parseShellRoute } from '../src/shared/shell/shellRoutes'
+      window.__mailAppDocumentMarker = String(performance.timeOrigin) + '-' + String(Math.random())
+      window.__mailAppRoute = () => parseShellRoute(location.href, location.origin)
+      createRoot(document.getElementById('root')!).render(React.createElement(App))
+    `)
+    vite = await startViteEntryServer({ root: join(root, 'apps/assistant'), port, entryFile: entry,
+      apiOrigin: `http://127.0.0.1:${startup.api_port}`, staticAssetsDirectory: trustedAssetsDirectory })
+    browser = await startBrowserHarness()
+    const send = browser.command
+    const returnSelection = 'prior-chat-message'
+    const routeUrl = `${origin}/assistant/apps?v=1&view=workspace&placement=capabilities%2Fcommunications%2Foutbound&q.account=${encodeURIComponent(startup.account_id)}&from=chat&fromSelection=${returnSelection}&fromScroll=384`
+    currentPhase = 'loading the real App sign-in and direct canonical Mail placement'
+    await browser.navigate(routeUrl)
+    await waitFor(send, `document.querySelector('#gideon-username') && document.querySelector('#gideon-password')`)
+    await evaluate(send, `(()=>{const set=(id,value)=>{const field=document.querySelector(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}))};set('#gideon-username','communications-owner');set('#gideon-password','correct-horse-battery-staple');return true})()`)
+    await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText==='Sign in').click()`)
+    await waitFor(send, `document.querySelector('[data-gideon-module="capabilities/communications/outbound"]') && document.querySelector('[aria-label="Mailbox account"]')?.value===${JSON.stringify(startup.account_id)} && document.body.innerText.includes('App native record')`)
+    const directState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {destination:route.destination,view:route.view,placement:route.placement,returnTo:route.returnTo,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
+    expect(directState).toEqual({
+      destination: 'apps', view: 'workspace', placement: { id: 'capabilities/communications/outbound', query: { account: startup.account_id } },
+      returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 }, frames: 1, module: 1,
+    })
+
+    currentPhase = 'opening the native message record through App navigation'
+    await evaluate(send, `document.querySelector('[aria-label="Messages"] button')?.click()`)
+    await waitFor(send, `window.__mailAppRoute().view==='detail' && window.__mailAppRoute().record?.kind==='mail-message' && document.querySelector('#mail-detail-title')?.innerText==='App native record'`)
+    const recordState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {record:route.record,placement:route.placement,returnTo:route.returnTo,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
+    expect(recordState).toEqual({
+      record: { kind: 'mail-message', id: JSON.stringify([JSON.stringify([origin, 'communications-owner']), startup.account_id, 'mail-mirror', 'mail-mirror-message', startup.message_id]) },
+      placement: { id: 'capabilities/communications/outbound', query: { account: startup.account_id } },
+      returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 }, frames: 1, module: 1,
+    })
+    const beforeReloadDocument = await evaluate<{ marker: string; timeOrigin: number }>(send,
+      `({marker:window.__mailAppDocumentMarker,timeOrigin:performance.timeOrigin})`)
+    expect(beforeReloadDocument.marker).toBeTruthy()
+    await send('Page.reload', { ignoreCache: true })
+    await waitFor(send, `window.__mailAppDocumentMarker && window.__mailAppDocumentMarker!==${JSON.stringify(beforeReloadDocument.marker)} && performance.timeOrigin!==${beforeReloadDocument.timeOrigin} && document.querySelector('[data-gideon-module="capabilities/communications/outbound"]') && document.querySelector('#mail-detail-title')?.innerText==='App native record' && document.querySelector('.gideon-workspace-frame')`)
+    const afterReloadDocument = await evaluate<{ marker: string; timeOrigin: number }>(send,
+      `({marker:window.__mailAppDocumentMarker,timeOrigin:performance.timeOrigin})`)
+    expect(afterReloadDocument.marker).not.toBe(beforeReloadDocument.marker)
+    expect(afterReloadDocument.timeOrigin).not.toBe(beforeReloadDocument.timeOrigin)
+    const reloadedState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {record:route.record,placement:route.placement,returnTo:route.returnTo,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
+    expect(reloadedState).toEqual(recordState)
+    currentPhase = 'returning from the reloaded native Mail record to its selected account list'
+    await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Back to messages'))?.click()`)
+    await waitFor(send, `window.__mailAppRoute().destination==='apps' && window.__mailAppRoute().view==='list' && window.__mailAppRoute().placement?.query?.account===${JSON.stringify(startup.account_id)} && document.querySelector('[aria-label="Mailbox account"]')?.value===${JSON.stringify(startup.account_id)} && document.querySelector('[aria-label="Messages"]')`)
+    const listReturnState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {route:{destination:route.destination,view:route.view,placement:route.placement,returnTo:route.returnTo},account:document.querySelector('[aria-label="Mailbox account"]')?.value,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
+    expect(listReturnState).toEqual({
+      route: { destination: 'apps', view: 'list', placement: { id: 'capabilities/communications/outbound', query: { account: startup.account_id } },
+        returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 } },
+      account: startup.account_id, frames: 1, module: 1,
+    })
+    currentPhase = 'returning from the Mail list header to the typed source Chat context'
+    await evaluate(send, `document.querySelector('.gideon-workspace-back')?.click()`)
+    await waitFor(send, `window.__mailAppRoute().destination==='chat' && document.querySelector('#gideon-message-composer')`)
+    const returnedState = await evaluate<{ route: { destination: string; returnTo?: { destination: string; selectionId?: string; scrollY?: number } }; composer: boolean }>(
+      send, `({route:window.__mailAppRoute(),composer:!!document.querySelector('#gideon-message-composer')})`)
+    expect(returnedState.route).toMatchObject({ destination: 'chat', returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 } })
+    expect(returnedState.composer).toBe(true)
+  }, 60000)
 })
