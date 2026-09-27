@@ -49,7 +49,10 @@ async function server(origin: string): Promise<string> {
   return `http://127.0.0.1:${(JSON.parse(line) as { api_port: number }).api_port}`
 }
 
-async function browser(address: string): Promise<(expression: string) => Promise<any>> {
+async function browser(address: string): Promise<{
+  evaluate: (expression: string) => Promise<any>
+  command: (method: string, params?: Record<string, unknown>) => Promise<any>
+}> {
   const directory = await mkdtemp(join(tmpdir(), 'gideon-conversation-browser-'))
   directories.push(directory)
   const debuggingPort = await port()
@@ -91,11 +94,12 @@ async function browser(address: string): Promise<(expression: string) => Promise
     debuggerSocket!.send(JSON.stringify({ id, method, params }))
   })
   await command('Page.navigate', { url: address })
-  return async expression => {
+  const evaluate = async (expression: string) => {
     const response = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text)
     return response.result?.value
   }
+  return { evaluate, command }
 }
 
 describe('canonical Gideon conversation', () => {
@@ -136,7 +140,7 @@ window.loaded = true
       server: { host: '127.0.0.1', port: webPort, strictPort: true, proxy: { '/api': { target: api, ws: true } } },
     })
     await vite.listen()
-    const evaluate = await browser(`${origin}/conversation`)
+    const { evaluate, command } = await browser(`${origin}/conversation`)
     await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
     const result = await evaluate(`(async () => {
       const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
@@ -150,7 +154,7 @@ window.loaded = true
         const frame = JSON.parse(event.data)
         if (frame.data?.session === session) frames.push({ type: frame.type, role: frame.data.role || '' })
       })
-      window.controller.setDraft('Reply with one word: ready.')
+      window.controller.setDraft('  Reply with one word: ready.  ')
       await window.controller.send()
       if (expectAnswer) {
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
@@ -167,13 +171,18 @@ window.loaded = true
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (!window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not disconnect')) } }, 50) })
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not reconnect')) } }, 50) })
       const reconnected = window.controller.snapshot().messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length
+      window.controller.setDraft('Reply with one word: ready again.')
+      const secondSend = window.controller.send()
+      window.controller.setDraft('Edited while sending')
+      await secondSend
+      const retainedEdit = window.controller.snapshot().draft
       await window.controller.open('missing-session')
       window.controller.setDraft('Retain this draft')
       await window.controller.send()
       const failed = { draft: window.controller.snapshot().draft, phase: window.controller.snapshot().phase }
       await window.signOutOwner()
       window.controller.setOwner(null)
-      return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, failed, cleared: window.controller.snapshot() }
+      return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, retainedEdit, failed, cleared: window.controller.snapshot() }
     })()`)
     expect(result.session).toMatch(/^chat-/)
     expect(result.connected).toBe(true)
@@ -192,7 +201,77 @@ window.loaded = true
     console.log('Persisted assistant answer:', result.assistantPersisted)
     expect(result.socketChanged).toBe(true)
     expect(result.reconnected).toBe(1)
+    expect(result.retainedEdit).toBe('Edited while sending')
     expect(result.failed).toEqual({ draft: 'Retain this draft', phase: 'failed' })
     expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
-  }, 30000)
+
+    await evaluate(`(async () => {
+      const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
+      window.recoveryOwner = owner
+      window.controller.setOwner(window.ownerScope(location.origin, owner))
+      window.secondSession = await window.controller.create()
+      await window.controller.open(${JSON.stringify(result.session)})
+      return true
+    })()`)
+    await command('Fetch.enable', { patterns: [
+      { urlPattern: `${origin}/api/chat?ws=1`, requestStage: 'Request' },
+      { urlPattern: `${origin}/api/chat/sessions/${result.session}`, requestStage: 'Request' },
+    ] })
+    let postFailed = false
+    let faultDone = false
+    let newPostRequest = ''
+    let pauseNewPost: (requestId: string) => void = () => {}
+    const newPostPaused = new Promise<string>(done => { pauseNewPost = done })
+    const fault = new Promise<void>((done, reject) => {
+      const timer = setTimeout(() => reject(new Error('Gateway fault sequence timed out')), 10000)
+      debuggerSocket!.addEventListener('message', event => {
+        const frame = JSON.parse(String(event.data)) as { method?: string; params?: { requestId: string; request: { method: string; url: string } } }
+        if (frame.method !== 'Fetch.requestPaused' || !frame.params) return
+        const { requestId, request } = frame.params
+        if (request.method === 'POST' && request.url.includes('/api/chat?ws=1')) {
+          if (!postFailed) {
+            postFailed = true
+            void command('Fetch.failRequest', { requestId, errorReason: 'ConnectionClosed' }).catch(reject)
+          } else {
+            newPostRequest = requestId
+            pauseNewPost(requestId)
+          }
+        } else if (postFailed && request.method === 'GET' && request.url.endsWith(`/api/chat/sessions/${result.session}`)) {
+          void (async () => {
+            await evaluate(`(async () => {
+              window.controller.setOwner(null)
+              window.controller.setOwner(window.ownerScope(location.origin, window.recoveryOwner))
+              await window.controller.open(window.secondSession)
+              window.controller.setDraft('New owner send')
+              window.newSend = window.controller.send()
+              return true
+            })()`)
+            await newPostPaused
+            await command('Fetch.failRequest', { requestId, errorReason: 'ConnectionClosed' })
+            faultDone = true
+            clearTimeout(timer)
+            done()
+          })().catch(reject)
+        } else {
+          void command('Fetch.continueRequest', { requestId }).catch(reject)
+        }
+      })
+    })
+    const stale = evaluate(`(async () => {
+      window.controller.setDraft('Network fault while sending')
+      await window.controller.send()
+      return { state: window.controller.snapshot(), submitting: window.controller.submitting }
+    })()`)
+    const [staleResult] = await Promise.all([stale, fault])
+    expect(postFailed && faultDone).toBe(true)
+    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'sending', error: '' })
+    expect(staleResult.state.sessionId).not.toBe(result.session)
+    expect(staleResult.submitting).toBe(true)
+    expect(newPostRequest).not.toBe('')
+    await command('Fetch.failRequest', { requestId: newPostRequest, errorReason: 'ConnectionClosed' })
+    const newerResult = await evaluate('(async () => { await window.newSend; return { state: window.controller.snapshot(), submitting: window.controller.submitting } })()')
+    await command('Fetch.disable')
+    expect(newerResult.state).toMatchObject({ draft: 'New owner send', phase: 'failed' })
+    expect(newerResult.submitting).toBe(false)
+  }, 45000)
 })

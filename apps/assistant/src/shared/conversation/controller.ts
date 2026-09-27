@@ -39,6 +39,7 @@ export class ConversationController {
   private loadToken = 0
   private dirtyDuringLoad = false
   private submitting = false
+  private submitToken = 0
   private lastChunkSeq = 0
   private closed = false
 
@@ -73,6 +74,7 @@ export class ConversationController {
     this.loading = false
     this.dirtyDuringLoad = false
     this.submitting = false
+    this.submitToken++
     this.lastChunkSeq = 0
     this.update(scope ? { ...EMPTY, scope, phase: 'idle' } : EMPTY)
     if (scope && !this.closed) this.connect()
@@ -141,9 +143,11 @@ export class ConversationController {
   }
 
   async send(): Promise<void> {
-    const text = this.state.draft.trim()
+    const submittedDraft = this.state.draft
+    const text = submittedDraft.trim()
     if (!this.state.scope || !text || this.submitting || this.state.phase === 'uncertain') return
     this.submitting = true
+    const submitToken = ++this.submitToken
     let sessionId = this.state.sessionId
     const scope = this.state.scope
     let generation = this.generation
@@ -160,7 +164,7 @@ export class ConversationController {
       )
       if (!accepted.ok || (accepted.session && accepted.session !== sessionId)) throw new Error('Gideon did not confirm the send')
       if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
-      this.update({ draft: this.state.draft === text ? '' : this.state.draft, phase: 'sending', running: true })
+      this.update({ draft: this.state.draft === submittedDraft ? '' : this.state.draft, phase: 'sending', running: true })
       await this.refresh()
     } catch (error) {
       if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
@@ -169,18 +173,19 @@ export class ConversationController {
           const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
           if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
           if (receivedPrompt(detail, clientTs)) {
-            this.update({ draft: this.state.draft === text ? '' : this.state.draft, messages: canonicalMessages(detail),
+            this.update({ draft: this.state.draft === submittedDraft ? '' : this.state.draft, messages: canonicalMessages(detail),
               running: detail.running, phase: detail.running ? 'sending' : 'ready', error: '' })
             return
           }
         } catch {
+          if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
           this.update({ phase: 'uncertain', error: 'Send outcome is unknown. Refresh the conversation before trying again.' })
           return
         }
       }
-      this.update({ draft: this.state.draft || text, phase: 'failed', error: String((error as Error).message || error) })
+      this.update({ draft: this.state.draft || submittedDraft, phase: 'failed', error: String((error as Error).message || error) })
     } finally {
-      this.submitting = false
+      if (submitToken === this.submitToken) this.submitting = false
     }
   }
 
