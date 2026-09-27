@@ -2,12 +2,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const root = resolve(process.cwd(), '../..')
 const children: ChildProcessWithoutNullStreams[] = []
+const childErrors = new WeakMap<ChildProcessWithoutNullStreams, string[]>()
 const directories: string[] = []
 let vite: ViteDevServer | undefined
 let debuggerSocket: WebSocket | undefined
@@ -36,18 +37,20 @@ async function port(): Promise<number> {
 async function nativeServer(origin: string): Promise<{ api: string; control: string }> {
   const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
     [join(root, 'apps/assistant/test-support/activity_server.py'), origin],
-    { env: { ...process.env } })
+    { env: { ...process.env, PYTHONPATH: [join(root, 'runtime'), process.env.PYTHONPATH]
+      .filter(Boolean).join(delimiter) } })
   children.push(child)
+  const errors: string[] = []
+  childErrors.set(child, errors)
+  child.stderr.on('data', chunk => errors.push(String(chunk)))
   const line = await new Promise<string>((done, reject) => {
     let output = ''
-    let errors = ''
-    const timeout = setTimeout(() => reject(new Error(`Activity server timed out: ${errors}`)), 15000)
+    const timeout = setTimeout(() => reject(new Error(`Activity server timed out: ${errors.join('')}`)), 15000)
     child.stdout.on('data', chunk => {
       output += String(chunk)
       if (output.includes('\n')) { clearTimeout(timeout); done(output.split('\n')[0]) }
     })
-    child.stderr.on('data', chunk => { errors += String(chunk) })
-    child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Activity server exited ${code}: ${errors}`)) })
+    child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Activity server exited ${code}: ${errors.join('')}`)) })
   })
   const ports = JSON.parse(line) as { api_port: number; control_port: number }
   return { api: `http://127.0.0.1:${ports.api_port}`, control: `http://127.0.0.1:${ports.control_port}` }
@@ -170,11 +173,20 @@ window.loaded = true
           ids: page.tasks?.map(task => task.id), titles: page.tasks?.map(task => task.title),
           authors: page.tasks?.map(task => task.author), assignees: page.tasks?.map(task => task.assignee) } } })()`)
     const ownershipResponse = await fetch(`${server.control}/task-ownership?owner=owner-a`)
-    const ownership = await ownershipResponse.json() as { total: number; owner: string; tasks: Array<{
+    const ownershipBody = await ownershipResponse.text()
+    const activityServer = children.find(child => childErrors.has(child))
+    expect(ownershipResponse.status, `${ownershipBody}\n${activityServer ? childErrors.get(activityServer)?.join('') : ''}`).toBe(200)
+    const ownership = JSON.parse(ownershipBody) as { total: number; owner: string; owned_total: number;
+      registry_file: string;
+      owned_ids: string[]; tasks: Array<{
       id: string; title: string; author: string; assignee: string; belongs_to: boolean }> }
+    expect(ownership.registry_file).toBe(join(root, 'runtime/gideon/engine/tasks/registry.py'))
     first.rawTaskPage.fixture = { total: ownership.total, owner: ownership.owner,
+      owned_total: ownership.owned_total,
+      owned_ids: ownership.owned_ids,
       rejected: ownership.tasks.filter(task => !task.belongs_to),
-      omitted: ownership.tasks.filter(task => !first.rawTaskPage.ids.includes(task.id)) }
+      ownedIdsMissingFromPage: ownership.owned_ids.filter((id: string) => !first.rawTaskPage.ids.includes(id)),
+      pageIdsMissingFromOwnedRegistry: first.rawTaskPage.ids.filter((id: string) => !ownership.owned_ids.includes(id)) }
     expect(first.sources.task.entries, JSON.stringify(first.rawTaskPage)).toHaveLength(20)
     expect(first.sources.task.total).toBe(22)
     expect(first.sources.task.nextOffset).toBe(20)

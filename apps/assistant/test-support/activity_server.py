@@ -242,7 +242,8 @@ async def main(origin: str) -> None:
             rows, total = await task_registry.list_all_tasks(limit=500, offset=0)
             owned, owned_total = await task_registry.list_all_tasks(owner=owner, limit=500, offset=0)
             return web.json_response({"total": total, "owner": owner,
-                "owned_total": owned_total, "owned_ids": [row.id for row in owned], "tasks": [
+                "owned_total": owned_total, "owned_ids": [row.id for row in owned],
+                "registry_file": str(Path(task_registry.__file__).resolve()), "tasks": [
                 {"id": row.id, "title": row.title, "author": row.author,
                  "assignee": row.assignee, "belongs_to": row.belongs_to(owner)}
                 for row in rows
