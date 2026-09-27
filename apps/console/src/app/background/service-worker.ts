@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { APP_SHELL, SHELL_DOCUMENT, mayCache, strategyFor } from '../shell/swPolicy'
+import { APP_SHELL, SHELL_DOCUMENT, cacheableResponse, shellDocument, strategyFor } from '../shell/swPolicy'
 import { COMPANION_PATH, PUSH_CUE_MESSAGE, isPushPayload, notificationFor, shouldFocus, soundMapFromRules, type PushPayload } from '../shell/pushPolicy'
 
 declare const __SW_CACHE_VERSION__: string
@@ -13,13 +13,16 @@ class OfflineShell {
     await cache.addAll([...APP_SHELL])
   }
   async activate() {
-    const expired = (await caches.keys()).filter((key) => key !== CACHE_NAME)
+    const expired = (await caches.keys()).filter((key) => key.startsWith('gideon-shell-') && key !== CACHE_NAME)
     await Promise.all(expired.map((key) => caches.delete(key)))
   }
   async store(request: Request, response: Response) {
-    if (response.status !== 200 || !mayCache(new URL(request.url), sw.location.origin)) return
+    const requested = new URL(request.url)
+    const document = request.mode === 'navigate' ? shellDocument(requested, sw.location.origin) : undefined
+    const cacheUrl = document ? new URL(document, sw.location.origin) : requested
+    if (!cacheableResponse(cacheUrl, response, sw.location.origin)) return
     const cache = await caches.open(CACHE_NAME)
-    await cache.put(request, response.clone())
+    await cache.put(cacheUrl.href, response.clone())
   }
   async navigation(request: Request): Promise<Response> {
     try {
@@ -28,7 +31,9 @@ class OfflineShell {
       return response
     } catch (error) {
       const cache = await caches.open(CACHE_NAME)
-      const fallback = await cache.match(SHELL_DOCUMENT)
+      const document = shellDocument(new URL(request.url), sw.location.origin)
+      const fallback = document === SHELL_DOCUMENT ? await cache.match(SHELL_DOCUMENT)
+        : document ? await cache.match(document) : undefined
       if (fallback) return fallback
       throw error
     }

@@ -5,11 +5,11 @@ export function serviceWorkerBlockedReason(nav: Navigator = navigator, win: { is
   ]
   return requirements.find(([available]) => !available)?.[1] ?? null
 }
-export async function registerServiceWorker(enabled: boolean = import.meta.env.PROD): Promise<ServiceWorkerRegistration | null> {
+export async function registerServiceWorker(enabled: boolean = process.env.NODE_ENV === 'production'): Promise<ServiceWorkerRegistration | null> {
   if (!enabled) return null
   const reason = serviceWorkerBlockedReason()
   if (reason) { console.info(`Gideon: offline support and install are unavailable — ${reason}.`); return null }
-  try { return await navigator.serviceWorker.register('/sw.js', { scope: '/' }) }
+  try { return await navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }) }
   catch (error) {
     console.warn('Gideon: service-worker registration failed', error)
     return null
