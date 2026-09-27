@@ -165,7 +165,13 @@ window.nextSession = (status, afterVersion) => new Promise((resolve, reject) => 
   }, 30000)
   window.sessionWaiters.push(waiter)
 })
-window.signIn = async () => { window.scope = ownerScope(location.origin, await signInOwner('browser-owner', 'correct-horse-battery-staple')); return window.scope.ownerId }
+window.signIn = async () => {
+  const login = await signInOwner('browser-owner', 'correct-horse-battery-staple')
+  const owner = await readOwnerSession()
+  if (login.user !== 'browser-owner' || owner.user !== 'browser-owner') throw new Error('The native login did not identify browser-owner')
+  window.scope = ownerScope(location.origin, owner)
+  return owner.user
+}
 window.mount = async (conversationId = 'browser-chat') => {
   window.client = new BrowserClient(window.scope)
   const opened = await window.client.open(conversationId)
@@ -182,13 +188,14 @@ window.switchOwner = async () => {
   if (login.user !== 'browser-other' || owner.user !== 'browser-other') throw new Error('The native login did not switch owners: ' + owner.user)
   window.scope = ownerScope(location.origin, owner)
   window.client = new BrowserClient(window.scope)
+  const foreign = await window.client.get(window.oldSessionId)
   const opened = await window.client.open('dashboard:other-owner')
   if (opened.state !== 'ready') throw new Error(opened.message)
   window.session = opened.value
   root.render(React.createElement(ShellThemeProvider, { initialPreference: 'light' },
     React.createElement(BrowserControls, { client: window.client, session: opened.value,
       onSessionChange: value => { window.sessionChanges++; window.session = value; window.sessionWaiters.forEach(waiter => waiter(value)) } })))
-  return { owner: owner.user, session: opened.value }
+  return { owner: owner.user, foreign, session: opened.value }
 }
 window.holdNextBrowserGet = () => {
   const original = window.fetch.bind(window)
@@ -329,6 +336,7 @@ describe('owned browser controls', () => {
     await until(evaluate, 'window.session.controlHolder', 'customer')
     await evaluate(`window.setField('url', ${JSON.stringify(fixture.owned_url)}); window.setField('text', 'old-owner draft')`)
     const oldOwnerState = await evaluate('window.session')
+    await evaluate('window.oldSessionId = window.session.id')
 
     await evaluate('window.held = window.holdNextBrowserGet(); true')
     await evaluate('window.click("Refresh state")')
@@ -336,6 +344,7 @@ describe('owned browser controls', () => {
     await rotateOwner('browser-other')
     const switched = await evaluate('window.switchOwner()')
     expect(switched.owner).toBe('browser-other')
+    expect(switched.foreign).toMatchObject({ state: 'missing' })
     const next = switched.session
     expect(next.id).not.toBe(original.id)
     expect(next.id).not.toBe(oldOwnerState.id)
