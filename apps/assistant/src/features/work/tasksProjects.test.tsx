@@ -25,6 +25,13 @@ const nativeFetch = (path: string, init: RequestInit = {}) => fetch(`${api}${pat
 const nativePut = (path: string, body: Record<string, unknown>) => nativeFetch(path, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
+const nativeTask = async (body: Record<string, unknown>) => {
+  const response = await nativeFetch('/api/tasks', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  expect(response.status).toBe(201)
+  return response.json() as Promise<{ id: string; status: string; updated_at: string }>
+}
 const control = async (action: string, path = '', method = 'GET') => {
   const query = path ? `?path=${encodeURIComponent(path)}&method=${method}` : ''
   const response = await fetch(`${controlApi}/test/${action}${query}`)
@@ -341,6 +348,60 @@ describe('native task and project workspaces', () => {
     const final = await (await nativeFetch(path)).json() as { brief: string; updated_at: string }
     expect(final.brief).toBe('Legacy project update')
     expect(final.updated_at).not.toBe(winner.updated_at)
+  }, 30000)
+
+  it('rejects a stale dependent edit after native reconciliation and retains concurrent creation', async () => {
+    const prerequisite = await nativeTask({ title: 'Reconciliation prerequisite' })
+    const dependent = await nativeTask({ title: 'Reconciliation dependent', dependencies: [prerequisite.id] })
+    const path = `/api/tasks/${encodeURIComponent(dependent.id)}`
+    const before = await (await nativeFetch(path)).json() as { status: string; updated_at: string; description: string }
+    expect(before.status).toBe('blocked')
+    const completed = await nativePut(`/api/tasks/${encodeURIComponent(prerequisite.id)}`, { status: 'done' })
+    expect(completed.status).toBe(200)
+    const after = await (await nativeFetch(path)).json() as { status: string; updated_at: string; description: string }
+    expect(after.status).toBe('open')
+    expect(after.updated_at).not.toBe(before.updated_at)
+    const stale = await nativePut(path, { description: 'Rejected stale edit', expected_revision: before.updated_at })
+    expect(stale.status).toBe(409)
+    expect((await (await nativeFetch(path)).json() as { description: string }).description).toBe(after.description)
+
+    const parentPath = `/api/tasks/${encodeURIComponent(prerequisite.id)}`
+    const parent = await (await nativeFetch(parentPath)).json() as { updated_at: string }
+    const [created, edited] = await Promise.all([
+      nativeTask({ title: 'Concurrent created task', dependencies: [prerequisite.id] }),
+      nativePut(parentPath, { description: 'Concurrent parent edit', expected_revision: parent.updated_at }),
+    ])
+    expect(edited.status).toBe(200)
+    expect((await (await nativeFetch(parentPath)).json() as { description: string }).description).toBe('Concurrent parent edit')
+    expect((await nativeFetch(`/api/tasks/${encodeURIComponent(created.id)}`)).status).toBe(200)
+  }, 30000)
+
+  it('serializes native deletion with an accepted edit and invalidates the old revision', async () => {
+    const prerequisite = await nativeTask({ title: 'Deletion prerequisite' })
+    const dependent = await nativeTask({ title: 'Deletion dependent', dependencies: [prerequisite.id] })
+    const parentPath = `/api/tasks/${encodeURIComponent(prerequisite.id)}`
+    const dependentPath = `/api/tasks/${encodeURIComponent(dependent.id)}`
+    const before = await (await nativeFetch(dependentPath)).json() as { updated_at: string }
+    await control('arm', parentPath, 'DELETE')
+    const deletion = nativeFetch(parentPath, { method: 'DELETE' })
+    await control('wait')
+    const edit = await nativePut(dependentPath, {
+      description: 'Keep accepted edit through deletion', expected_revision: before.updated_at,
+    })
+    expect(edit.status).toBe(200)
+    await control('release')
+    expect((await deletion).status).toBe(200)
+    await control('settled')
+    const after = await (await nativeFetch(dependentPath)).json() as {
+      description: string; dependencies: unknown[]; updated_at: string
+    }
+    expect(after.description).toBe('Keep accepted edit through deletion')
+    expect(after.dependencies).toEqual([])
+    expect(after.updated_at).not.toBe(before.updated_at)
+    const stale = await nativePut(dependentPath, {
+      description: 'Must not overwrite deletion', expected_revision: before.updated_at,
+    })
+    expect(stale.status).toBe(409)
   }, 30000)
 
   it('preserves a task draft and ID when the native record changes after preflight', async () => {
