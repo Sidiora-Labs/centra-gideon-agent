@@ -5,46 +5,50 @@ const dialogScopeClass = "gideon-trusted-module-dialog-root";
 let preparation: Promise<void> | undefined;
 
 function assistantBaseUrl(): URL {
-  const configuredBase = document.querySelector("base[href]")?.getAttribute("href");
-  const base = new URL(configuredBase ?? window.location.href, window.location.href);
-  base.search = "";
-  base.hash = "";
-  if (!base.pathname.endsWith("/")) base.pathname += "/";
-  return base;
+  return new URL("/assistant/", window.location.origin);
 }
 
 function loadConsoleStylesheet(href: string): Promise<void> {
+  const waitForStylesheet = (link: HTMLLinkElement) => new Promise<void>((resolve, reject) => {
+    const loaded = () => {
+      link.removeEventListener("load", loaded);
+      link.removeEventListener("error", failed);
+      resolve();
+    };
+    const failed = () => {
+      link.removeEventListener("load", loaded);
+      link.removeEventListener("error", failed);
+      link.remove();
+      reject(new Error("compiled Gideon console stylesheet failed to load"));
+    };
+    link.addEventListener("load", loaded, { once: true });
+    link.addEventListener("error", failed, { once: true });
+  });
+
   const existing = document.getElementById(stylesheetId);
   if (existing instanceof HTMLLinkElement) {
     if (existing.href !== href) existing.href = href;
     if (existing.sheet) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("compiled Gideon console stylesheet failed to load")), { once: true });
-    });
+    return waitForStylesheet(existing);
   }
 
   const link = document.createElement("link");
   link.id = stylesheetId;
   link.rel = "stylesheet";
   link.href = href;
-  return new Promise((resolve, reject) => {
-    link.addEventListener("load", () => resolve(), { once: true });
-    link.addEventListener("error", () => reject(new Error("compiled Gideon console stylesheet failed to load")), { once: true });
-    document.head.append(link);
-  });
+  const loaded = waitForStylesheet(link);
+  document.head.append(link);
+  return loaded;
 }
 
 function trackConsoleDialogScope(): void {
+  const doc = document;
   const ownedPortalRoots = new Set<Element>();
   const sync = () => {
-    const trustedModuleMounted = document.querySelector(".gideon-trusted-module");
+    const trustedModuleMounted = doc.querySelector(".gideon-trusted-module");
     const activePortalRoots = new Set<Element>();
     if (trustedModuleMounted) {
-      for (const dialog of Array.from(document.body.querySelectorAll('[role="dialog"], [role="alertdialog"]'))) {
-        if (!dialog.classList.contains("max-w-[420px]")) continue;
-        const portalRoot = dialog.closest(".fixed.inset-0");
-        if (!portalRoot) continue;
+      for (const portalRoot of doc.body.querySelectorAll("[data-gideon-dialog-portal]")) {
         portalRoot.classList.add(dialogScopeClass);
         activePortalRoots.add(portalRoot);
       }
@@ -55,7 +59,7 @@ function trackConsoleDialogScope(): void {
   };
 
   sync();
-  new MutationObserver(sync).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(sync).observe(doc.body, { childList: true, subtree: true });
 }
 
 export function prepareTrustedWebRuntime(): Promise<void> {
