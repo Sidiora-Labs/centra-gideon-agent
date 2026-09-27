@@ -239,7 +239,7 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
     setTo(item.value.to.join(', ')); setSubject(item.value.subject); setBody(item.value.body)
     setArtifactIds(item.value.attachments.map(file => file.artifact_id).join('\n'))
     setNotice('Editing this draft. Saving a change clears its prior approval and requires a fresh review.')
-    navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account?.id) }))
+    navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account?.id), returnTo: returnContext }))
   }
   async function saveDraft(review: boolean) {
     if (!account) return
@@ -412,7 +412,7 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
         </>}
         {detail && account && <MailDetail account={account} item={selectedDraft ?? selectedMessage!} thread={selectedThread} onBack={returnFromDetail}
           onReply={startCompose} onSetReadState={(item, isRead) => void setMessageReadState(item, isRead)} readBusy={readBusy}
-          onEditDraft={editDraft} onReviewDraft={item => { setDraft(item); navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account.id) })) }} />}
+          onEditDraft={editDraft} onReviewDraft={item => { setDraft(item); navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account.id), returnTo: returnContext })) }} />}
         {!detail && route.view === 'detail' && !loading && <section role="alert" style={panel}>
           <h2>Message or draft unavailable</h2><p style={subtle}>This mailbox did not return the requested provider item for the selected account.</p>
           <button type="button" onClick={() => void loadAccounts()} style={button}>Refresh selected account</button>
