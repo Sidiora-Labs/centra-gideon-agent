@@ -98,10 +98,22 @@ it('keeps authenticated browser previews bound to the current owner, version and
         const session = await fetch('/api/auth/session').then(response => response.json());
         if (session.user !== signedIn.user) throw new Error('Owner sign-in and native session disagree');
         const nextScope = ownerScope(location.origin, session);
+        window.scope = nextScope;
         window.switchPreviewScope(nextScope);
         return { user: session.user,
           masked: document.querySelector('[aria-label="Browser preview"] img') === null &&
-            document.body.textContent.includes('Waiting for a current preview') };
+            document.body.textContent.includes('Waiting for a current preview'),
+          oldErrorMasked: !document.querySelector('[aria-label="Browser preview"]')?.textContent.includes('Sign in to open this browser.') };
+      };
+      window.mountOtherPreview = async () => {
+        const client = new BrowserClient(window.scope);
+        const opened = await client.open('dashboard:other-owner');
+        if (opened.state !== 'ready') throw new Error(opened.message);
+        const started = await client.mutate(opened.value, 'start');
+        if (started.state !== 'ready') throw new Error(started.message);
+        window.otherSession = started.value;
+        root.render(React.createElement(DirectPreview, { session: started.value }));
+        return started.value;
       };
       window.clickButton = (label, area) => {
         const container = area ? [...document.querySelectorAll('[aria-label="Browser preview"]')].find(node => node.querySelector('h2')?.textContent === area) : document;
@@ -179,16 +191,29 @@ it('keeps authenticated browser previews bound to the current owner, version and
     const rotated = readNativeLine('browser owner rotation')
     native.stdin.write(`${JSON.stringify({ rotate_owner: 'browser-other' })}\n`)
     expect((await rotated).owner_rotated).toBe('browser-other')
-    expect(await browser.evaluate<{ user: string; masked: boolean }>('window.switchToOtherOwner()'))
-      .toEqual({ user: 'browser-other', masked: true })
-    expect(await browser.evaluate<string>("fetch('/api/auth/session').then(response => response.json()).then(session => session.user)")).toBe('browser-other')
+    await browser.evaluate("clickButton('Refresh preview', 'Live preview')")
+    await browser.waitFor("document.querySelector('[aria-label=\"Browser preview\"] [role=\"alert\"]')?.textContent.includes('Sign in to open this browser.')", 'revoked owner preview rejected')
     expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] img') === null")).toBe(true)
     await browser.evaluate('window.releasePreview()')
+    expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] img') === null")).toBe(true)
+    expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] [role=\"alert\"]')?.textContent.includes('Sign in to open this browser.')")).toBe(true)
+    expect(await browser.evaluate<{ user: string; masked: boolean; oldErrorMasked: boolean }>('window.switchToOtherOwner()'))
+      .toEqual({ user: 'browser-other', masked: true, oldErrorMasked: true })
+    expect(await browser.evaluate<string>("fetch('/api/auth/session').then(response => response.json()).then(session => session.user)")).toBe('browser-other')
+    expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] img') === null")).toBe(true)
     await browser.waitFor("document.body.textContent.includes('This conversation or browser is unavailable.')", 'new owner denied the old session')
     expect(await browser.evaluate<boolean>(`document.querySelector('[aria-label="Browser preview"] img') === null`)).toBe(true)
     expect(await browser.evaluate<{ id: string; version: number; controlHolder: string }>(
       '({ id: window.directSession?.id, version: window.directSession?.version, controlHolder: window.directSession?.controlHolder })'))
       .toEqual({ id: directSession.id, version: directSession.version, controlHolder: directSession.controlHolder })
+    const otherSession = await browser.evaluate<{ id: string; conversationId: string; version: number; controlHolder: string }>('window.mountOtherPreview()')
+    expect(otherSession.id).not.toBe(directSession.id)
+    expect(otherSession.conversationId).toBe('other-owner')
+    await browser.waitFor(`window.displayedPreviewIs(${otherSession.version}, '${otherSession.controlHolder}') &&
+      document.querySelector('[aria-label="Browser preview"] img')?.complete &&
+      document.querySelector('[aria-label="Browser preview"] img')?.naturalWidth > 0`, 'new owner current preview image')
+    expect(await browser.evaluate<string>("fetch(document.querySelector('[aria-label=\"Browser preview\"] img').src).then(response => response.blob()).then(image => image.type)"))
+      .toBe('image/png')
   } finally {
     if (browser) await browser.close()
     if (vite) await vite.close()
