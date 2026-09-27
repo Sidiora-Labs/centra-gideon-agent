@@ -19,10 +19,12 @@ const readId = () => new URLSearchParams(location.hash.split('?')[1]).get('work'
 const control = 'min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 const values = (w: Work): Values => ({ title: w.title, kind: w.kind, prompt: w.prompt, author_ref: w.author_ref, universe_ref: w.universe_ref, active_draft_id: w.active_draft_id })
 
-export default function Works({ apiRoot = '/api/capabilities/creative/works' }: { apiRoot?: string }) {
+export default function Works({ apiRoot = '/api/capabilities/creative/works', workId, onSelectWork, onWorkLoaded, draftStorageKey }: {
+  apiRoot?: string; workId?: string; onSelectWork?: (id: string) => void; onWorkLoaded?: (work: Work | null) => void; draftStorageKey?: string
+}) {
   const [repairRefresh, setRepairRefresh] = useState(0)
   const t = (value: string) => value
-  const [id, setId] = useState(readId)
+  const [id, setId] = useState(() => workId ?? readId())
   const [selected, setSelected] = useState<Work | null>(null)
   const [draft, setDraft] = useState<Values>(blank)
   const [items, setItems] = useState<Work[]>([])
@@ -47,18 +49,25 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works' }: 
   const [draftRequestId, setDraftRequestId] = useState(() => crypto.randomUUID())
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load writing works'))
   function choose(next: string) {
-    location.hash = `/capabilities/creative?view=works${next ? `&work=${next}` : ''}`
+    if (!onSelectWork) location.hash = `/capabilities/creative?view=works${next ? `&work=${encodeURIComponent(next)}` : ''}`
+    else onSelectWork(next)
     setId(next); setError(''); setContext(''); setCreating(true)
-    if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setDrafts([]); setText(''); setNote(''); setRequestId(crypto.randomUUID()); setDraftRequestId(crypto.randomUUID()) }
+    if (!next) { setSelected(null); onWorkLoaded?.(null); setDraft(blank()); setHistory([]); setDrafts([]); setText(''); setNote(''); setRequestId(crypto.randomUUID()); setDraftRequestId(crypto.randomUUID()) }
   }
   function startNew() { choose(''); setCreating(true) }
   async function load(workId: string) {
     return Promise.all([requestJson<Work>(`${apiRoot}/${workId}`), requestJson<{ items: Work[] }>(`${apiRoot}/${workId}/revisions`), requestJson<{ items: Draft[] }>(`${apiRoot}/${workId}/drafts`)])
   }
   function apply([work, versions, manuscripts]: Awaited<ReturnType<typeof load>>, preserveText = false) {
-    setSelected(work); setDraft(values(work)); setHistory(versions.items); setDrafts(manuscripts.items); if (!preserveText) setText(work.text || '')
+    setSelected(work); onWorkLoaded?.(work); setDraft(values(work)); setHistory(versions.items); setDrafts(manuscripts.items)
+    if (!preserveText) {
+      let recovered = ''
+      if (draftStorageKey) { try { recovered = localStorage.getItem(`${draftStorageKey}:${work.id}`) || '' } catch {} }
+      setText(recovered || work.text || '')
+    }
   }
-  useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  useEffect(() => { if (workId !== undefined) setId(workId) }, [workId])
+  useEffect(() => { if (onSelectWork) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectWork])
   useEffect(() => {
     let alive = true; setLoading(true)
     Promise.all([requestJson<{ items: Work[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`),
@@ -88,6 +97,7 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works' }: 
     setBusy(true); setError('')
     try {
       await requestJson(`${apiRoot}/${id}/drafts`, 'POST', { request_id: draftRequestId, revision: selected!.revision, text, note })
+      if (draftStorageKey) { try { localStorage.removeItem(`${draftStorageKey}:${id}`) } catch {} }
       apply(await load(id)); setDraftRequestId(crypto.randomUUID()); setNote(''); setRefresh(v => v + 1)
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
@@ -113,7 +123,7 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works' }: 
       <Button disabled={busy || (!!id && !selected)} onClick={() => void save()}>{t('Save work details')}</Button>
       </Surface>
       {selected && <><Surface className="space-y-m p-l"><div className="flex flex-wrap items-start justify-between gap-m"><div><h2 data-type="title-m" className="text-on-surface">{t('Manuscript')}</h2><p className="text-on-surface-low">{t('Write in the focused editor, then preserve this text as a new immutable draft.')}</p></div><Button variant="secondary" onClick={() => void readContext()}>{t('Read pinned context')}</Button></div>{context && <label className="block">{t('Pinned writing context')}<textarea className={control} readOnly value={context} /></label>}
-        {selected.draft_missing && <p role="alert">{t('Draft artifact missing')}</p>}<label className="block"><span className="sr-only">{t('Manuscript')}</span><textarea className={`${control} min-h-[24rem] font-serif leading-7`} value={text} onChange={e => setText(e.target.value)} /></label><div className="flex flex-col gap-m sm:flex-row sm:items-end"><label className="block min-w-0 flex-1">{t('Draft note')}<input className={control} value={note} onChange={e => setNote(e.target.value)} /></label><Button disabled={busy || !text.trim()} onClick={() => void saveText()}>{t('Save new draft')}</Button></div>
+        {selected.draft_missing && <p role="alert">{t('Draft artifact missing')}</p>}<label className="block"><span className="sr-only">{t('Manuscript')}</span><textarea className={`${control} min-h-[24rem] font-serif leading-7`} value={text} onChange={e => { setText(e.target.value); if (draftStorageKey) { try { localStorage.setItem(`${draftStorageKey}:${id}`, e.target.value) } catch {} } }} /></label><div className="flex flex-col gap-m sm:flex-row sm:items-end"><label className="block min-w-0 flex-1">{t('Draft note')}<input className={control} value={note} onChange={e => setNote(e.target.value)} /></label><Button disabled={busy || !text.trim()} onClick={() => void saveText()}>{t('Save new draft')}</Button></div>
       </Surface>
         <Editorial key={selected.id + "-editorial"} id={selected.id} revision={selected.revision} text={selected.text || ""} apiRoot={apiRoot} onPrepared={() => setRepairRefresh(v => v + 1)} />
         <Continuity key={selected.id + "-continuity"} id={selected.id} revision={selected.revision} text={selected.text || ""} apiRoot={apiRoot} />
