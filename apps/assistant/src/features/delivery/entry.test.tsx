@@ -14,6 +14,7 @@ const directories: string[] = [];
 let vite: ViteDevServer | undefined;
 let browser: WebSocket | undefined;
 const browserErrors: string[] = [];
+const documentRequests: string[] = [];
 
 afterAll(async () => {
   browser?.close();
@@ -104,6 +105,9 @@ async function startBrowser(): Promise<(method: string, params?: Record<string, 
   browser.addEventListener("message", event => {
     const message = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: any; result?: any; error?: { message: string } };
     if (message.method === "Runtime.exceptionThrown") browserErrors.push(JSON.stringify(message.params?.exceptionDetails));
+    if (message.method === "Network.requestWillBeSent" && message.params?.type === "Document") {
+      documentRequests.push(message.params.request.url);
+    }
     if (message.id === undefined) return;
     const waiter = pending.get(message.id);
     if (!waiter) return;
@@ -129,6 +133,14 @@ async function waitFor(send: (method: string, params?: Record<string, unknown>) 
     .catch(error => { throw new Error(`${error}: ${browserErrors.join(" | ")}`); });
 }
 
+async function waitForDocumentRequest(url: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (documentRequests.includes(url)) return;
+    await new Promise(done => setTimeout(done, 100));
+  }
+  throw new Error(`Timed out waiting for document request: ${url}`);
+}
+
 describe("assistant web entry", () => {
   it("keeps assistant and console return links equivalent without leaking private query fields", () => {
     const context = { destination: "chat" as const, sessionId: "session/one", placement: {
@@ -144,6 +156,7 @@ describe("assistant web entry", () => {
     await startVite(port, await startApi(origin));
     const send = await startBrowser();
     await send("Page.enable");
+    await send("Network.enable");
     await send("Runtime.enable");
     await send("Page.navigate", { url: `${origin}/assistant/chat?v=1` });
     await waitFor(send, `document.querySelector('#gideon-password')`);
@@ -166,13 +179,13 @@ describe("assistant web entry", () => {
     await waitFor(send, `document.body.innerText.includes('0 messages in this conversation.')`);
     expect(await evaluate(send, `location.href`)).toBe(sessionUrl);
     await send("Page.reload", { ignoreCache: true });
-    await waitFor(send, `document.body.innerText.includes('0 messages in this conversation.')`);
+    await waitFor(send, `performance.getEntriesByType('navigation')[0]?.type === 'reload' && document.body.innerText.includes('0 messages in this conversation.')`);
     await evaluate(send, `document.querySelector('[aria-label="Ideas"]')?.click()`);
     await waitFor(send, `location.pathname === '/assistant/ideas' && document.body.innerText.includes('Open Ideas in Gideon console')`);
     await evaluate(send, `history.back()`);
     await waitFor(send, `location.href === ${JSON.stringify(sessionUrl)} && document.body.innerText.includes('0 messages in this conversation.')`);
     await evaluate(send, `Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Return to previous workspace')?.click()`);
-    await waitFor(send, `location.pathname === '/' && location.hash === '#/apps?tab=details'`);
+    await waitForDocumentRequest(`${origin}/#/apps?tab=details`);
     await send("Page.navigate", { url: `${origin}/assistant/chat?v=1&view=detail&recordKind=session&recordId=absent-session` });
     await waitFor(send, `document.body.innerText.includes('The requested item may have been removed.')`);
     await evaluate(send, `Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Go to Chat')?.click()`);
