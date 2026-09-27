@@ -62,20 +62,54 @@ async def main(origin):
         credentials.set_password('studio-owner', 'correct-horse-battery-staple')
         token_auth.use_ephemeral_secret()
         registry.register_provider(NativeArtifactProvider(home / 'artifacts'))
-        app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+        artifact_release = asyncio.Event()
+        artifact_release.set()
+        artifact_entered = asyncio.Event()
+        artifact_finished = asyncio.Event()
+        @web.middleware
+        async def hold_artifact_list(request, handler):
+            if request.method == 'GET' and request.path == '/api/artifacts' and request.query.get('kind') == 'pptx':
+                if not artifact_release.is_set():
+                    artifact_entered.set()
+                    await artifact_release.wait()
+                response = await handler(request)
+                artifact_finished.set()
+                return response
+            return await handler(request)
+        app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000), hold_artifact_list])
         app['port'] = 10000
         app['allowed_origins'] = {origin}
         app['state'] = SimpleNamespace(_restricted_keys=set(), _sessions={})
         app.router.add_post('/api/auth/login', auth.api_auth_login)
         app.router.add_get('/api/auth/session', auth.api_auth_session)
         register_artifact_routes(app)
+        control = web.Application()
+        async def arm_hold(_request):
+            artifact_entered.clear()
+            artifact_finished.clear()
+            artifact_release.clear()
+            return web.json_response({'armed': True})
+        async def release_hold(_request):
+            artifact_release.set()
+            return web.json_response({'released': True})
+        async def hold_status(_request):
+            return web.json_response({'entered': artifact_entered.is_set(), 'finished': artifact_finished.is_set()})
+        control.router.add_post('/hold', arm_hold)
+        control.router.add_post('/release', release_hold)
+        control.router.add_get('/status', hold_status)
         runner = web.AppRunner(app)
+        control_runner = web.AppRunner(control)
         await runner.setup()
+        await control_runner.setup()
         site = web.TCPSite(runner, '127.0.0.1', 0)
+        control_site = web.TCPSite(control_runner, '127.0.0.1', 0)
         await site.start()
-        print(json.dumps({'api_port': site._server.sockets[0].getsockname()[1]}), flush=True)
+        await control_site.start()
+        print(json.dumps({'api_port': site._server.sockets[0].getsockname()[1], 'control_port': control_site._server.sockets[0].getsockname()[1]}), flush=True)
         try: await asyncio.Event().wait()
-        finally: await runner.cleanup()
+        finally:
+            await runner.cleanup()
+            await control_runner.cleanup()
 
 asyncio.run(main(sys.argv[1]))
 `;
@@ -118,13 +152,13 @@ describe("named Gideon miniapps", () => {
         env: { ...process.env, PYTHONPATH: join(root, "runtime") },
       });
     children.push(api);
-    const startup = await new Promise<{ api_port: number }>((done, fail) => {
+    const startup = await new Promise<{ api_port: number; control_port: number }>((done, fail) => {
       let stdout = "";
       let stderr = "";
       const timer = setTimeout(() => fail(new Error(`Native Studio server did not start: ${stderr}`)), 20000);
       api.stdout.on("data", chunk => {
         stdout += String(chunk);
-        if (stdout.includes("\n")) { clearTimeout(timer); done(JSON.parse(stdout.split("\n")[0]) as { api_port: number }); }
+        if (stdout.includes("\n")) { clearTimeout(timer); done(JSON.parse(stdout.split("\n")[0]) as { api_port: number; control_port: number }); }
       });
       api.stderr.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-4000); });
       api.once("exit", code => { clearTimeout(timer); fail(new Error(`Native Studio server exited ${code}: ${stderr}`)); });
@@ -144,7 +178,8 @@ import { ownerScope } from '/src/shared/auth.web.tsx';
 function Journey() {
   const [identity, setIdentity] = React.useState(null);
   const [scopeOwner, setScopeOwner] = React.useState('studio-owner');
-  const [route, setRoute] = React.useState(() => createShellRoute('apps', { view: 'workspace', placement: { id: 'apps' } }));
+  const appsRoute = () => createShellRoute('apps', { view: 'workspace', placement: { id: 'apps' }, returnTo: { destination: 'chat' } });
+  const [route, setRoute] = React.useState(appsRoute);
   const [loaded, setLoaded] = React.useState(null);
   const scope = ownerScope(location.origin, { user: scopeOwner });
   React.useEffect(() => { void signInOwner('studio-owner', 'correct-horse-battery-staple').then(setIdentity); }, []);
@@ -166,10 +201,10 @@ function Journey() {
     return () => { active = false; };
   }, [identity, route]);
   const navigate = next => { setRoute(next); };
-  const returnToApps = () => { setRoute(createShellRoute('apps', { view: 'workspace', placement: { id: 'apps' } })); };
+  const returnToApps = () => { setRoute(appsRoute()); };
   if (!identity) return <p role="status">Signing in to the native Studio account…</p>;
   if (route.destination === 'apps' && route.placement?.id === 'apps') return <AppsScreen route={route} scope={scope}
-    navigate={navigate} onReturn={returnToApps} />;
+    navigate={navigate} onReturn={() => setRoute(createShellRoute('chat'))} />;
   if (loaded?.error) return <p role="alert">{loaded.error}</p>;
   if (!loaded?.default) return <p role="status">Opening the owning workspace…</p>;
   return React.createElement(loaded.default, { route, scope, navigate, returnTo: route.returnTo, onReturn: returnToApps });
@@ -212,6 +247,30 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
     expect(await browser.evaluate<string>("location.pathname + location.search")).toBe(previousRoute);
     expect(await browser.evaluate<boolean>("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button')?.disabled"))
       .toBe(true);
+
+    await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'studio-owner'}))");
+    await browser.waitFor("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button:not(:disabled)')", "Slides control for original owner");
+    const controlOrigin = `http://127.0.0.1:${startup.control_port}`;
+    expect((await fetch(`${controlOrigin}/hold`, { method: "POST" })).ok).toBe(true);
+    await browser.evaluate("performance.clearResourceTimings(); [...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button')?.click()");
+    const waitForNative = async (field: "entered" | "finished") => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const state = await (await fetch(`${controlOrigin}/status`)).json() as { entered: boolean; finished: boolean };
+        if (state[field]) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(`Native Slides ${field} state was not observed`);
+    };
+    await waitForNative("entered");
+    await browser.evaluate("document.querySelector('button[aria-label=\"Back\"]')?.click()");
+    await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[aria-label=\"Gideon miniapps\"]')", "Apps unmounted during native check");
+    await browser.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+    expect((await fetch(`${controlOrigin}/release`, { method: "POST" })).ok).toBe(true);
+    await waitForNative("finished");
+    await browser.waitFor("performance.getEntriesByType('resource').some(entry => entry.name.includes('/api/artifacts?kind=pptx') && entry.responseEnd > 0)", "held native Slides response completed");
+    expect(await browser.evaluate<string>("location.pathname")).toBe("/assistant/chat");
+    expect(await browser.evaluate<boolean>("!!document.querySelector('[aria-label=\"Gideon miniapps\"]')")).toBe(false);
     expect(browser.diagnostics().filter(message => !message.includes("Download the React DevTools") && !message.includes("net::ERR_ABORTED"))).toEqual([]);
   }, 120000);
 });

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OwnerScope } from "../../shared/auth.web";
 import type { ShellReturnContext, ShellRoute } from "../../shared/shell/shellRoutes";
 import { moduleForRoute } from "../../shared/shell/webModules.web";
@@ -45,7 +45,12 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
   );
   const currentScope = useRef(scope.cacheKey);
   currentScope.current = scope.cacheKey;
-  const attempts = useRef(new Map<string, number>());
+  const active = useRef(true);
+  const attempt = useRef(0);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; attempt.current++; };
+  }, [scope.cacheKey]);
   const states = stored.scopeKey === scope.cacheKey ? stored.states : {};
   const setState = (id: string, state: MiniappCheckState) => setStored(previous => ({
     scopeKey: scope.cacheKey,
@@ -53,12 +58,11 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
   }));
 
   async function open(miniapp: Miniapp) {
-    const attempt = (attempts.current.get(miniapp.id) ?? 0) + 1;
-    attempts.current.set(miniapp.id, attempt);
+    const request = ++attempt.current;
     const scopeKey = scope.cacheKey;
     setState(miniapp.id, "checking");
     const result = await checkFirstAction(scope, miniapp);
-    if (currentScope.current !== scopeKey || attempts.current.get(miniapp.id) !== attempt) return;
+    if (!active.current || currentScope.current !== scopeKey || attempt.current !== request) return;
     setState(miniapp.id, result);
     if (result === "ready") navigate({ ...miniapp.route, returnTo });
   }
