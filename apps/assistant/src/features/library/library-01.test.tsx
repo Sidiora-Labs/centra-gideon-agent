@@ -80,8 +80,10 @@ asyncio.run(main(sys.argv[1]))
 `;
 
 async function startApi(origin: string): Promise<{ url: string; recordId: string }> {
+  const gideonHome = await mkdtemp(join(tmpdir(), "gideon-library-home-"));
+  directories.push(gideonHome);
   const child = spawn(process.env.GIDEON_TEST_PYTHON || "python3", ["-c", knowledgeServer, origin], {
-    env: { ...process.env, PYTHONPATH: join(root, "runtime") },
+    env: { ...process.env, GIDEON_HOME: gideonHome, PYTHONPATH: join(root, "runtime") },
   });
   children.push(child);
   const line = await new Promise<string>((done, fail) => {
