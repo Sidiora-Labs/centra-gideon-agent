@@ -223,27 +223,40 @@ window.loaded = true
       entry.identity.sourceId !== 'workflow-other')).toBe(true)
 
     await control(server.control, '/trigger-pages', {})
+    const rawTriggerPage = await evaluate(`(async () => { const response = await fetch(
+      '/api/triggers/history?limit=20&offset=0', { credentials: 'same-origin', headers: {
+        Accept: 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } });
+      return { status: response.status, ...(await response.json()) } })()`)
     await evaluate('window.activity.refresh()')
     const triggerPage = await evaluate('window.activity.getSnapshot().sources.trigger_run')
-    expect(triggerPage.entries).toHaveLength(19)
-    expect(triggerPage.total).toBe(23)
-    expect(triggerPage.omittedWithoutId).toBe(1)
+    expect(rawTriggerPage.status).toBe(200)
+    expect(rawTriggerPage.total).toBe(123)
+    expect(rawTriggerPage.runs).toHaveLength(20)
+    expect(triggerPage.entries).toHaveLength(20)
+    expect(triggerPage.total).toBe(123)
+    expect(triggerPage.omittedWithoutId).toBe(0)
     expect(triggerPage.nextOffset).toBe(20)
-    await evaluate(`window.activity.loadMore('trigger_run')`)
+    for (let page = 0; page < 6; page++) {
+      await evaluate(`window.activity.loadMore('trigger_run')`)
+    }
     const triggerTail = await evaluate('window.activity.getSnapshot().sources.trigger_run')
-    expect(triggerTail.entries).toHaveLength(22)
-    expect(triggerTail.total).toBe(23)
+    expect(triggerTail.entries).toHaveLength(122)
+    expect(triggerTail.total).toBe(123)
     expect(triggerTail.nextOffset).toBeNull()
     expect(triggerTail.omittedWithoutId).toBe(1)
     expect(triggerTail.coverage).toBe('missing_ids')
-    expect(new Set(triggerTail.entries.map((entry: { identity: { key: string } }) =>
-      entry.identity.key)).size).toBe(22)
+    expect(new Set(triggerTail.entries.map((entry: { identity: { sourceId: string } }) =>
+      entry.identity.sourceId)).size).toBe(122)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'trigger-1')).toBe(true)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'lifecycle:hook-1:last')).toBe(true)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'event:event-1:summary')).toBe(true)
+    expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
+      entry.identity.sourceId === 'trigger-page-119')).toBe(true)
+    await evaluate(`window.activity.loadMore('trigger_run')`)
+    expect((await evaluate('window.activity.getSnapshot().sources.trigger_run')).entries).toHaveLength(122)
 
     await control(server.control, '/workflow-store', { unavailable: true })
     await evaluate('window.activity.refresh()')
