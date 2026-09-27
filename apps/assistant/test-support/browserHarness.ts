@@ -31,7 +31,10 @@ export async function startViteEntryServer(options: {
     configFile: false,
     root,
     resolve: {
-      alias: [{ find: /^react-native$/, replacement: "react-native-web" }],
+      alias: [
+        { find: /^react-native$/, replacement: "react-native-web" },
+        { find: "expo-status-bar", replacement: resolve(root, "node_modules/expo-status-bar/src/StatusBar.web.ts") },
+      ],
       extensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"],
       dedupe: ["react", "react-dom"],
     },

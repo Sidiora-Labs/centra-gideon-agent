@@ -8,7 +8,7 @@
     "build:web": "expo export --platform web --output-dir dist/web && node tooling/buildTrustedWebAssets.mjs --out-dir dist/web/assets && test -s dist/web/index.html && test -s dist/web/assets/gideon-console.css && test -s dist/web/assets/workers/gideon-monaco-editor.worker.js && cp ../console/public/assistant-source-notices.txt dist/web/assistant-source-notices.txt",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "vitest run src/shared/shell/shellJourney.web.test.tsx && node --experimental-strip-types --test"
+    "test:e2e": "node --experimental-strip-types --test"
   },
   "dependencies": {
     "@assistant-ui/react-markdown": "0.14.17",
