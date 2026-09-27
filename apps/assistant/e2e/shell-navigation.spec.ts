@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -46,10 +46,16 @@ function contentType(file: string) {
   } as Record<string, string>)[extname(file)] ?? "application/octet-stream";
 }
 
-async function serveExport(exportDirectory: string, apiOrigin: string, port = 0) {
+async function serveExport(exportDirectory: string, serviceWorkerFile: string, apiOrigin: string, port = 0) {
   const api = new URL(apiOrigin);
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://gideon.test").pathname;
+    if (pathname === "/sw.js") {
+      response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      response.setHeader("Service-Worker-Allowed", "/");
+      response.end(await readFile(serviceWorkerFile));
+      return;
+    }
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       const proxy = httpRequest({ hostname: api.hostname, port: api.port, path: request.url,
         method: request.method, headers: { ...request.headers, host: api.host } }, upstream => {
@@ -104,6 +110,35 @@ async function serveExport(exportDirectory: string, apiOrigin: string, port = 0)
 
   const listeningPort = await listen(server, port);
   return { server, origin: `http://127.0.0.1:${listeningPort}` };
+}
+
+async function buildRootServiceWorker(temporary: string, exportDirectory: string) {
+  const stagedApps = join(temporary, "worker-build/apps");
+  const stagedConsole = join(stagedApps, "console");
+  const stagedAssistant = join(stagedApps, "assistant");
+  await Promise.all([
+    cp(join(repository, "apps/console/src/app"), join(stagedConsole, "src/app"), { recursive: true }),
+    cp(join(repository, "apps/console/public"), join(stagedConsole, "public"), { recursive: true }),
+    cp(join(assistant, "src"), join(stagedAssistant, "src"), { recursive: true }),
+    cp(join(assistant, "tooling"), join(stagedAssistant, "tooling"), { recursive: true }),
+    cp(join(assistant, "public"), join(stagedAssistant, "public"), { recursive: true }),
+    cp(exportDirectory, join(stagedAssistant, "dist/web"), { recursive: true }),
+  ]);
+  await mkdir(join(stagedConsole, "dist"), { recursive: true });
+  await mkdir(join(stagedAssistant, "dist"), { recursive: true });
+  for (const file of ["app.json", "metro.config.cjs", "package.json", "package-lock.json"]) {
+    await cp(join(assistant, file), join(stagedAssistant, file));
+  }
+  const builderPath = join(repository, "apps/console/tooling/buildServiceWorker.mjs");
+  const builderSource = (await readFile(builderPath, "utf8")).replace(
+    "import esbuild from 'esbuild'",
+    `import esbuild from ${JSON.stringify(pathToFileURL(join(assistant, "node_modules/esbuild/lib/main.js")).href)}`,
+  );
+  assert.notEqual(builderSource, await readFile(builderPath, "utf8"), "the official worker builder dependency resolves from the assistant package");
+  const builder = await import(`data:text/javascript;base64,${Buffer.from(builderSource).toString("base64")}`) as {
+    buildServiceWorker: (consoleRoot: string) => Promise<{ version: string; path: string }>;
+  };
+  return builder.buildServiceWorker(stagedConsole);
 }
 
 async function startBrowser(directory: string): Promise<BrowserHarness> {
@@ -197,13 +232,26 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   assert.ok((await stat(join(exportDirectory, "index.html"))).size > 0);
   assert.ok((await stat(join(exportDirectory, "assets/gideon-console.css"))).size > 0);
 
-  const served = await serveExport(exportDirectory, fixture.apiOrigin, webPort);
+  const worker = await buildRootServiceWorker(temporary, exportDirectory);
+  assert.ok((await stat(worker.path)).size > 0);
+  const served = await serveExport(exportDirectory, worker.path, fixture.apiOrigin, webPort);
   webServer = served.server;
+  const workerResponse = await fetch(`${served.origin}/sw.js`);
+  assert.equal(workerResponse.status, 200);
+  assert.match(workerResponse.headers.get("content-type") ?? "", /javascript/);
+  assert.match(await workerResponse.text(), new RegExp(`gideon-shell-${worker.version}`));
   browser = await startBrowser(temporary);
 
   const sessionBootstrap = `${served.origin}/assistant/chat?v=1`;
   await browser.command("Page.navigate", { url: sessionBootstrap });
   await signIn(browser, username);
+  await browser.waitFor(`navigator.serviceWorker?.getRegistration('/').then(registration=>registration?.scope===location.origin+'/')`, "assistant root worker registration");
+  await browser.command("Page.reload", { ignoreCache: true });
+  await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes(${JSON.stringify(`Signed in as ${username}`)})`, "authenticated reload under service worker");
+  await browser.waitFor(`navigator.serviceWorker?.controller?.scriptURL===location.origin+'/sw.js'`, "assistant service worker control");
+  const workerRegistration = await browser.evaluate<{ scope: string; scriptURL: string }>(`navigator.serviceWorker.getRegistration('/').then(registration=>({scope:registration?.scope??'',scriptURL:registration?.active?.scriptURL??''}))`);
+  assert.equal(workerRegistration.scope, `${served.origin}/`);
+  assert.equal(workerRegistration.scriptURL, `${served.origin}/sw.js`);
   const session = await browser.evaluate<{ key: string }>(`fetch('/api/chat/sessions',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:'{}'}).then(async r=>{if(!r.ok)throw Error('session creation failed: '+r.status);return r.json()})`);
   assert.ok(session.key);
   const sessionHref = routeHref(served.origin, "chat", {
