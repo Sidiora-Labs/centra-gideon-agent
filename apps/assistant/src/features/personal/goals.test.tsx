@@ -260,7 +260,14 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.evaluate("document.getElementById('goal-session-title').closest('form').querySelector('button[type=submit]').click()")
     await browser.waitFor("document.body.innerText.includes('Session saved to this goal.')", 'real native goal session')
     expect(await browser.evaluate<boolean>("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === false")).toBe(true)
-    await browser.evaluate(`(()=>{const option=Array.from(document.querySelectorAll('#goal-source-select option')).find(item=>item.textContent.includes('Planting bed workshop'));if(!option)return false;const select=document.getElementById('goal-source-select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,option.value);select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===option.value})()`)
+    try {
+      await browser.waitFor(`(()=>{const select=document.getElementById('goal-source-select');const option=Array.from(select?.options??[]).find(item=>item.textContent.includes('Planting bed workshop'));return !!select && !select.disabled && !!option && !option.disabled})()`, 'saved session appears as an enabled source option')
+    } catch (error) {
+      const sourceState = await browser.evaluate(`(()=>{const select=document.getElementById('goal-source-select');return {value:select?.value??null,disabled:select?.disabled??null,options:Array.from(select?.options??[]).map(option=>({value:option.value,text:option.textContent,disabled:option.disabled})),loading:document.body.innerText.includes('Loading the human goal and its plan…'),status:Array.from(document.querySelectorAll('[role="status"]')).map(item=>item.textContent)}})()`)
+      throw new Error(`${String(error)}; source select state=${JSON.stringify(sourceState)}`)
+    }
+    const selectedSession = await browser.evaluate<boolean>(`(()=>{const select=document.getElementById('goal-source-select');const option=Array.from(select?.options??[]).find(item=>item.textContent.includes('Planting bed workshop'));if(!select||!option||select.disabled||option.disabled)return false;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,option.value);select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===option.value})()`)
+    expect(selectedSession).toBe(true)
     await browser.waitFor("document.querySelector('#goal-source-select')?.closest('.gideon-goal-plan__add-row').querySelector('button')?.disabled===false", 'session source state rendered before linking')
     await browser.evaluate("document.querySelectorAll('.gideon-goal-plan__add-row button')[1].click()")
     await browser.waitFor("document.querySelector('#goal-sources')?.parentElement?.innerText.includes('Planting bed workshop') && document.querySelector('#goal-sources')?.parentElement?.innerText.includes('session')", 'linked source row rendered before completion')
