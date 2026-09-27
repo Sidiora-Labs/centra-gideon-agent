@@ -223,6 +223,7 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.evaluate("history.pushState(null,'',location.pathname+'?v=1&view=detail&recordKind=idea&recordId=50d3e623-0be4-4e04-8ca9-68109c5c1267&placement=ideas&from=ideas&fromPlacement=ideas');dispatchEvent(new PopStateEvent('popstate'))")
     await browser.waitFor("document.querySelector('.gideon-personal-record h2')?.innerText === 'Native saved ideas'",'record-aware Idea detail')
     await browser.evaluate("document.querySelector('.gideon-personal-record summary')?.click()")
+    await browser.waitFor("document.querySelector('.gideon-personal-record code')?.innerText === '50d3e623-0be4-4e04-8ca9-68109c5c1267'",'saved Idea source identity')
     expect(await browser.evaluate<string>("document.querySelector('.gideon-personal-record code')?.innerText || ''")).toBe('50d3e623-0be4-4e04-8ca9-68109c5c1267')
     expect(await browser.evaluate<string>("new URLSearchParams(location.search).get('from') || ''")).toBe('ideas')
 
@@ -232,8 +233,30 @@ createRoot(document.getElementById('root')!).render(<Root />);
     expect(await browser.evaluate<boolean>("document.querySelectorAll('.gideon-learning pre').length === 0")).toBe(true)
     expect(await browser.evaluate<boolean>("Array.from(document.querySelectorAll('.gideon-learning__data')).every(panel => panel.innerText.includes('Retry') || panel.querySelector('dl, ul, p'))")).toBe(true)
     expect(await browser.evaluate<boolean>("document.body.innerText.includes('Capture error')")).toBe(false)
-    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-learning__proposal')).find(button=>button.innerText.includes('Review skill proposal'))?.click()")
+    const proposalClick = await browser.evaluate<{ clicked: boolean; route: string; title: string }>(`(()=>{
+      const button=Array.from(document.querySelectorAll('.gideon-learning__proposal')).find(button=>button.innerText.includes('Review skill proposal'));
+      const originalFetch=window.fetch.bind(window);
+      Reflect.set(window,'__learningProposalResponses',[]);
+      window.fetch=async (...args)=>{
+        const response=await originalFetch(...args);
+        const url=String(args[0] instanceof Request ? args[0].url : args[0]);
+        if(url.includes('/api/learning/proposals/')) Reflect.get(window,'__learningProposalResponses')?.push({url,status:response.status});
+        return response;
+      };
+      button?.click();
+      return {clicked:Boolean(button),route:location.href,title:button?.innerText||''};
+    })()`)
+    expect(proposalClick).toMatchObject({ clicked: true, route: expect.stringContaining('placement=learning'), title: expect.stringContaining('Review skill proposal') })
     await browser.waitFor("document.body.innerText.includes('A proposal body backed by a real local test record.')",'native proposal detail')
+    const proposalDetail = await browser.evaluate<{ route: string; detailTitle: string; body: string; responses: Array<{ url: string; status: number }> }>(`({
+      route:location.href,
+      detailTitle:document.querySelector('#proposal-detail-title')?.innerText||'',
+      body:document.body.innerText,
+      responses:Reflect.get(window,'__learningProposalResponses')||[]
+    })`)
+    expect(proposalDetail.route).toContain('placement=learning')
+    expect(proposalDetail.detailTitle).toBe('Review skill proposal')
+    expect(proposalDetail.responses).toEqual([expect.objectContaining({ url: expect.stringContaining('/api/learning/proposals/'), status: 200 })])
     expect(await browser.evaluate<boolean>("document.body.innerText.includes('Only the authenticated human reviewer can decide a pending proposal')")).toBe(true)
     await browser.evaluate("document.querySelector('.gideon-learning__ack input').click()")
     const dismiss=await browser.evaluate<boolean>("Array.from(document.querySelectorAll('.gideon-learning__decision button')).find(button=>button.innerText.includes('Dismiss'))?.disabled")
