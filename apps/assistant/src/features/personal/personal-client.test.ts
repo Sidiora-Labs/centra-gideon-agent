@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createPersonalClient, clearPersonalOwnerCache } from './client'
 import { personalDetailRoute, personalSpaceRoute } from './routes'
 import { parseShellRoute, serializeShellRoute } from '../../shared/shell/shellRoutes'
+import { createShellRoute } from '../../shared/shell/shellRoutes'
+import { personalModuleDefinitions } from './moduleDefinitions.web'
 import type { OwnerScope } from '../../shared/auth.web'
 
 const scope: OwnerScope = Object.freeze({ runtimeOrigin: 'http://127.0.0.1', ownerId: 'owner-a', cacheKey: JSON.stringify(['http://127.0.0.1', 'owner-a']) })
@@ -85,5 +87,21 @@ describe('personal native contracts', () => {
     expect(roundTrip).toMatchObject({ destination: 'ideas', view: 'detail', record: { kind: 'journal-entry', id: 'journal-native-19' }, returnTo: { destination: 'chat', sessionId: 'session-8', selectionId: 'session-8' } })
     expect(personalSpaceRoute('goals').placement?.id).toBe('goals')
     expect(personalSpaceRoute('learning').placement?.id).toBe('learning')
+  })
+
+  it('registers family routes only at the published personal placement IDs', () => {
+    const ids = personalModuleDefinitions.map(module => module.id)
+    expect(ids).toContain('ideas')
+    expect(ids).toContain('goals')
+    expect(ids).toContain('learning')
+    expect(ids).toContain('companion')
+    expect(ids).toContain('capabilities/identity/twin')
+    expect(ids).toContain('capabilities/wellbeing/memory')
+    expect(ids).toContain('capabilities/knowledge/journals')
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const module of personalModuleDefinitions) {
+      const route = createShellRoute(module.id === 'goals' ? 'goals' : 'ideas', { view: 'workspace', placement: { id: module.id } })
+      expect(module.matches(route)).toBe(true)
+    }
   })
 })

@@ -1,18 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { GatewayError } from '../../shared/transport.web'
-import type { OwnerScope } from '../../shared/auth.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
-import { createShellRoute, type ShellReturnContext, type ShellRoute } from '../../shared/shell/shellRoutes'
+import { createShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { createPersonalClient, type PersonalAvailability } from './client'
 import { PERSONAL_SPACES, personalSpaceRoute, type PersonalSpace } from './routes'
+import type { ModuleProps } from '../../shared/shell/webModules.web'
 
-export type PersonalModuleProps = Readonly<{
-  route: ShellRoute
-  scope: OwnerScope
-  navigate: (route: ShellRoute) => void
-  onReturn: () => void
-  returnTo?: ShellReturnContext
-}>
+export type PersonalModuleProps = ModuleProps
 
 type Draft = { idea: string; goal: string }
 const drafts = new Map<string, Draft>()
@@ -21,6 +15,7 @@ const emptyDraft = (): Draft => ({ idea: '', goal: '' })
 
 function spaceForRoute(route: ShellRoute): PersonalSpace {
   const placement = route.placement?.id
+  if (placement === 'capabilities/identity/goals' || placement === 'capabilities/identity/goal-plans') return 'goals'
   if (placement?.startsWith('capabilities/identity/')) return 'identity'
   if (placement?.startsWith('capabilities/wellbeing/')) return placement === 'capabilities/wellbeing/memory' ? 'memory' : 'health'
   if (placement === 'capabilities/knowledge/journals') return 'journal'
@@ -40,7 +35,8 @@ function NativeStatus({ label, load }: { label: string; load: () => Promise<Pers
       if (!active) return
       if (result.state === 'unavailable') { setStatus('unavailable'); setMessage(result.reason); return }
       const value = result.value
-      const rows = Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : []
+      const rows = Array.isArray(value) ? value : value && typeof value === 'object' && 'journal' in value
+        ? value.journal ? [value.journal] : [] : value && typeof value === 'object' ? Object.values(value) : []
       const stale = Array.isArray(value) && value.some(item => item && typeof item === 'object' && 'freshness' in item && item.freshness === 'stale')
       setStatus(stale ? 'stale' : rows.length ? 'ready' : 'empty')
       setMessage(stale ? `Showing saved ${label.toLowerCase()} records. Refresh is needed to confirm they are current.` : rows.length ? `${rows.length} native ${label.toLowerCase()} record${rows.length === 1 ? '' : 's'} are available.` : `No ${label.toLowerCase()} records yet.`)

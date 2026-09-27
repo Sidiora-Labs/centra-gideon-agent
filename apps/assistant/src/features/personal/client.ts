@@ -17,6 +17,7 @@ export type LearningReview = Readonly<{ id: string; date?: string; status?: stri
 export type MemoryFact = Readonly<{ key: string; value: unknown; source?: string; confidence?: number } & NativeValue>
 export type HealthMeasurement = Readonly<{ id: string; kind: string; observed_at: string; revision?: number } & NativeValue>
 export type JournalRecord = Readonly<{ id: string; title: string; content: string; revision: number; fingerprint: string } & NativeValue>
+export type JournalSnapshot = Readonly<{ date: string; timezone: string; journal: PersonalRecord<JournalRecord> | null }>
 
 const clients = new Map<string, Set<PersonalClient>>()
 const activeOwnerByOrigin = new Map<string, string>()
@@ -93,6 +94,17 @@ export class PersonalClient {
     if (generation !== this.generation) throw new Error('Personal account changed while the write was in progress; reload before continuing')
     return value
   }
+  private async scopedRequest<T>(path: string, signal?: AbortSignal): Promise<T> {
+    const generation = this.generation
+    try {
+      const value = await gatewayJson<T>(path, { signal })
+      if (generation !== this.generation) throw new Error('Personal account changed while the request was in progress; refresh this selection')
+      return value
+    } catch (error) {
+      if (generation !== this.generation) throw new Error('Personal account changed while the request was in progress; refresh this selection')
+      throw error
+    }
+  }
 
   async readIdeas(signal?: AbortSignal): Promise<readonly PersonalRecord<IdeaRecord>[]> {
     return this.read('/api/capabilities/knowledge/ideas', 'idea', signal)
@@ -149,7 +161,7 @@ export class PersonalClient {
     return result
   }
   async readIdentityProfile(signal?: AbortSignal): Promise<NativeValue> {
-    return gatewayJson('/api/capabilities/identity/twin', { signal })
+    return this.scopedRequest('/api/capabilities/identity/twin', signal)
   }
 
   async readLearningCaptures(signal?: AbortSignal): Promise<PersonalAvailability<readonly PersonalRecord<LearningCapture>[]>> {
@@ -175,7 +187,7 @@ export class PersonalClient {
   }
 
   async readCompanion(): Promise<PersonalAvailability<NativeValue>> {
-    try { return { state: 'available', value: await gatewayJson('/api/companion/discovery') } }
+    try { return { state: 'available', value: await this.scopedRequest('/api/companion/discovery') } }
     catch (error) { if (error instanceof GatewayError && [404, 501].includes(error.status)) return { state: 'unavailable', reason: 'Companion is unavailable on this Gideon instance.' }; throw error }
   }
 
@@ -204,7 +216,7 @@ export class PersonalClient {
   }
 
   async readHealthMeasurements(signal?: AbortSignal): Promise<readonly PersonalRecord<HealthMeasurement>[]> {
-    const result = await gatewayJson<{ measurements: HealthMeasurement[] }>('/api/capabilities/wellbeing/measurements', { signal })
+    const result = await this.scopedRequest<{ measurements: HealthMeasurement[] }>('/api/capabilities/wellbeing/measurements', signal)
     return result.measurements.map(value => record<HealthMeasurement>(this.scope, 'health-measurement', value))
   }
   async readHealthMeasurement(id: string, signal?: AbortSignal): Promise<PersonalRecord<HealthMeasurement>> {
@@ -215,14 +227,17 @@ export class PersonalClient {
     return record<HealthMeasurement>(this.scope, 'health-measurement', value as HealthMeasurement)
   }
 
-  async readJournal(date: string, timezone: string, signal?: AbortSignal): Promise<PersonalAvailability<NativeValue>> {
+  async readJournal(date: string, timezone: string, signal?: AbortSignal): Promise<PersonalAvailability<JournalSnapshot>> {
     const query = new URLSearchParams({ date, timezone })
-    try { return { state: 'available', value: await gatewayJson(`/api/capabilities/knowledge/journals?${query}`, { signal }) } }
+    try {
+      const value = await this.scopedRequest<{ date: string; timezone: string; journal: JournalRecord | null }>(`/api/capabilities/knowledge/journals?${query}`, signal)
+      return { state: 'available', value: { ...value, journal: value.journal ? record(this.scope, 'journal-entry', value.journal) : null } }
+    }
     catch (error) { if (error instanceof GatewayError && [404, 501].includes(error.status)) return { state: 'unavailable', reason: 'Journal is unavailable on this Gideon instance.' }; throw error }
   }
   async readJournalDraft(date: string, timezone: string, signal?: AbortSignal): Promise<NativeValue> {
     const query = new URLSearchParams({ date, timezone })
-    return gatewayJson(`/api/capabilities/knowledge/journals/draft?${query}`)
+    return this.scopedRequest(`/api/capabilities/knowledge/journals/draft?${query}`, signal)
   }
   async saveJournal(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
     if (typeof input.request_id !== 'string' || !input.request_id || typeof input.revision !== 'number') throw new TypeError('Journal writes require their native request ID and revision')
