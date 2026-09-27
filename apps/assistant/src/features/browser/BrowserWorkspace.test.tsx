@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createInterface } from 'node:readline'
 import { expect, it } from 'vitest'
 import { startBrowserHarness, startViteEntryServer } from '../../../test-support/browserHarness'
 
@@ -26,26 +27,35 @@ it('keeps authenticated browser previews bound to the current owner, version and
   const native = spawn(python, [join(assistant, 'test-support/browser_server.py'), origin], {
     cwd: repository,
     env: { ...process.env, PYTHONPATH: join(repository, 'runtime') },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
+  const nativeLines = createInterface({ input: native.stdout })
+  let nativeErrors = ''
+  native.stderr.on('data', chunk => { nativeErrors = (nativeErrors + String(chunk)).slice(-4000) })
+  function readNativeLine(label: string): Promise<Record<string, unknown>> {
+    return new Promise((done, reject) => {
+      const timeout = setTimeout(() => finish(new Error(`${label} timed out: ${nativeErrors}`)), 20000)
+      const onLine = (line: string) => {
+        try { finish(undefined, JSON.parse(line) as Record<string, unknown>) }
+        catch (error) { finish(new Error(`Invalid ${label}: ${String(error)}`)) }
+      }
+      const onExit = (code: number | null) => finish(new Error(`Browser server exited ${code}: ${nativeErrors}`))
+      function finish(error?: Error, value?: Record<string, unknown>) {
+        clearTimeout(timeout)
+        nativeLines.off('line', onLine)
+        native.off('exit', onExit)
+        if (error) reject(error)
+        else done(value || {})
+      }
+      nativeLines.on('line', onLine)
+      native.once('exit', onExit)
+    })
+  }
   let vite: Awaited<ReturnType<typeof startViteEntryServer>> | undefined
   let browser: Awaited<ReturnType<typeof startBrowserHarness>> | undefined
   try {
-    const startup = await new Promise<{ api_port: number; other_token: string }>((done, reject) => {
-      let output = ''
-      let errors = ''
-      const timeout = setTimeout(() => reject(new Error(`Browser server timed out: ${errors}`)), 20000)
-      native.stdout.on('data', chunk => {
-        output += String(chunk)
-        const line = output.split('\n')[0]
-        if (!line) return
-        clearTimeout(timeout)
-        try { done(JSON.parse(line) as { api_port: number; other_token: string }) }
-        catch (error) { reject(new Error(`Invalid browser server startup: ${String(error)}`)) }
-      })
-      native.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-4000) })
-      native.once('exit', code => { clearTimeout(timeout); reject(new Error(`Browser server exited ${code}: ${errors}`)) })
-    })
+    const startup = await readNativeLine('browser server startup')
+    if (typeof startup.api_port !== 'number') throw new Error('Browser server omitted its API port')
     await writeFile(entryFile, `
       import React from 'react';
       import { flushSync } from 'react-dom';
@@ -84,10 +94,14 @@ it('keeps authenticated browser previews bound to the current owner, version and
         return opened.value;
       };
       window.switchToOtherOwner = async () => {
+        const signedIn = await signInOwner('browser-other', 'other-correct-horse-battery-staple');
         const session = await fetch('/api/auth/session').then(response => response.json());
+        if (session.user !== signedIn.user) throw new Error('Owner sign-in and native session disagree');
         const nextScope = ownerScope(location.origin, session);
         window.switchPreviewScope(nextScope);
-        return session.user;
+        return { user: session.user,
+          masked: document.querySelector('[aria-label="Browser preview"] img') === null &&
+            document.body.textContent.includes('Waiting for a current preview') };
       };
       window.clickButton = (label, area) => {
         const container = area ? [...document.querySelectorAll('[aria-label="Browser preview"]')].find(node => node.querySelector('h2')?.textContent === area) : document;
@@ -110,12 +124,16 @@ it('keeps authenticated browser previews bound to the current owner, version and
         };
       };
       window.routeNow = () => parseShellRoute(location.pathname + location.search, location.origin);
+      window.displayedPreviewIs = (version, holder) =>
+        [...document.querySelectorAll('[aria-label="Browser preview"] img')]
+          .every(image => Number(image.dataset.version) === version && image.dataset.controlHolder === holder);
       window.loaded = true;
       root.render(React.createElement(App));
     `)
     vite = await startViteEntryServer({ root: assistant, port, entryFile, apiOrigin: `http://127.0.0.1:${startup.api_port}` })
     browser = await startBrowserHarness({ windowSize: { width: 390, height: 844 } })
     await browser.navigate(`${origin}/assistant/apps?v=1&view=workspace&placement=browser%2Fsession&session=browser-chat&from=chat&fromSession=browser-chat`)
+    await vite.waitForRequestsIdle()
     await browser.waitFor("window.loaded === true", 'browser route app loaded')
     expect(await browser.evaluate<string>('window.signIn()')).toBe('browser-owner')
     await browser.waitFor("document.body.textContent.includes('Ready to connect')", 'owner browser reservation')
@@ -127,6 +145,7 @@ it('keeps authenticated browser previews bound to the current owner, version and
     await browser.evaluate("clickButton('Connect browser')")
     await browser.waitFor("document.body.textContent.includes('Live preview')", 'active browser preview')
     await browser.waitFor("document.querySelector('[aria-label=\"Browser preview\"] img')?.complete && document.querySelector('[aria-label=\"Browser preview\"] img')?.naturalWidth > 0", 'real preview image')
+    const versionBeforeTakeover = await browser.evaluate<number>("Number(document.querySelector('[aria-label=\"Browser preview\"] img')?.dataset.version)")
     expect(await browser.evaluate<string>(`[...document.querySelectorAll('[aria-label="Browser preview"]')].find(node => node.querySelector('h2')?.textContent === 'Live preview')?.textContent || ''`)).toContain('Gideon has control')
     expect(await browser.evaluate<string>(`[...document.querySelectorAll('[aria-label="Browser preview"] img')][0]?.style.pointerEvents || ''`)).toBe('none')
     await browser.evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })")
@@ -135,13 +154,14 @@ it('keeps authenticated browser previews bound to the current owner, version and
     await browser.waitFor('typeof window.releasePreview === "function"', 'delayed native preview response')
     await browser.evaluate("clickButton('Take control')")
     await browser.waitFor("document.body.textContent.includes('You have control')", 'versioned control takeover')
-    await browser.waitFor("document.body.textContent.includes('Waiting for a current preview')", 'stale preview hidden after takeover')
-    expect(await browser.evaluate<boolean>(`[...document.querySelectorAll('[aria-label="Browser preview"] img')].length === 0`)).toBe(true)
+    await browser.waitFor(`window.displayedPreviewIs(${versionBeforeTakeover + 1}, 'customer')`, 'only current takeover preview shown')
+    expect(await browser.evaluate<boolean>(`window.displayedPreviewIs(${versionBeforeTakeover + 1}, 'customer')`)).toBe(true)
     await browser.evaluate('window.releasePreview()')
-    await browser.waitFor("document.body.textContent.includes('You have control')", 'late old preview ignored')
-    expect(await browser.evaluate<boolean>(`[...document.querySelectorAll('[aria-label="Browser preview"] img')].length === 0`)).toBe(true)
+    await browser.waitFor(`window.displayedPreviewIs(${versionBeforeTakeover + 1}, 'customer')`, 'late old preview ignored')
+    expect(await browser.evaluate<boolean>(`window.displayedPreviewIs(${versionBeforeTakeover + 1}, 'customer')`)).toBe(true)
     await browser.evaluate("clickButton('Refresh preview', 'Live preview')")
-    await browser.waitFor("[...document.querySelectorAll('[aria-label=\"Browser preview\"] img')].some(image => image.complete && image.naturalWidth > 0)", 'current preview after takeover')
+    await browser.waitFor(`window.displayedPreviewIs(${versionBeforeTakeover + 1}, 'customer') &&
+      [...document.querySelectorAll('[aria-label="Browser preview"] img')].some(image => image.complete && image.naturalWidth > 0)`, 'current preview after takeover')
     expect(await browser.evaluate<number>("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")).toBeLessThanOrEqual(391)
     expect(await browser.evaluate<number>("document.querySelector('[aria-label=\"Browser workspace\"] button')?.getBoundingClientRect().height || 0")).toBeGreaterThanOrEqual(44)
     await browser.evaluate("clickButton('Return to conversation')")
@@ -155,18 +175,20 @@ it('keeps authenticated browser previews bound to the current owner, version and
     await browser.evaluate('window.holdPreview()')
     await browser.evaluate("clickButton('Refresh preview', 'Live preview')")
     await browser.waitFor('typeof window.releasePreview === "function"', 'owner preview response received and held')
-    await browser.command('Network.setCookie', { name: 'gideon_token_10021', value: startup.other_token,
-      url: origin, path: '/', httpOnly: true, sameSite: 'Lax' })
-    expect(await browser.evaluate<string>('window.switchToOtherOwner()')).toBe('browser-other')
-    expect(await browser.evaluate<string>("document.body.textContent.includes('Waiting for a current preview') ? 'masked' : 'visible'"))
-      .toBe('masked')
+    expect(await browser.evaluate<string>("fetch('/api/auth/session').then(response => response.json()).then(session => session.user)")).toBe('browser-owner')
+    const rotated = readNativeLine('browser owner rotation')
+    native.stdin.write(`${JSON.stringify({ rotate_owner: 'browser-other' })}\n`)
+    expect((await rotated).owner_rotated).toBe('browser-other')
+    expect(await browser.evaluate<{ user: string; masked: boolean }>('window.switchToOtherOwner()'))
+      .toEqual({ user: 'browser-other', masked: true })
+    expect(await browser.evaluate<string>("fetch('/api/auth/session').then(response => response.json()).then(session => session.user)")).toBe('browser-other')
     expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] img') === null")).toBe(true)
     await browser.evaluate('window.releasePreview()')
     await browser.waitFor("document.body.textContent.includes('This conversation or browser is unavailable.')", 'new owner denied the old session')
     expect(await browser.evaluate<boolean>(`document.querySelector('[aria-label="Browser preview"] img') === null`)).toBe(true)
     expect(await browser.evaluate<{ id: string; version: number; controlHolder: string }>(
       '({ id: window.directSession?.id, version: window.directSession?.version, controlHolder: window.directSession?.controlHolder })'))
-      .toMatchObject(directSession)
+      .toEqual({ id: directSession.id, version: directSession.version, controlHolder: directSession.controlHolder })
   } finally {
     if (browser) await browser.close()
     if (vite) await vite.close()
