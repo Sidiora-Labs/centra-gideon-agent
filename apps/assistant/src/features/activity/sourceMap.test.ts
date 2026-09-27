@@ -59,6 +59,65 @@ describe('Activity source identity', () => {
     expectTypeOf<ActivityEntry<'task'>['identity']['sourceId']>().not.toEqualTypeOf<NativeId<'workflow_run'>>()
   })
 
+  it('keeps each native source ID when related IDs conflict', () => {
+    const related: ActivityRelatedIds = {
+      taskId: nativeId('task', 'wrong-task') ?? undefined,
+      workflowRunId: nativeId('workflow_run', 'wrong-workflow') ?? undefined,
+      triggerRunId: nativeId('trigger_run', 'wrong-trigger') ?? undefined,
+      chatSessionId: nativeId('chat_session', 'wrong-chat') ?? undefined,
+      inboxItemId: nativeId('inbox_item', 'wrong-inbox') ?? undefined,
+      approvalId: nativeId('approval', 'wrong-approval') ?? undefined,
+      notificationId: nativeId('notification', 'wrong-notification') ?? undefined,
+      artifactId: nativeId('artifact', 'wrong-artifact') ?? undefined,
+    }
+    const approval: PendingApproval = {
+      id: 'approval-1', source: 'tool', tool: 'send', session: 'chat-1', ts: 1_779_000_000,
+    }
+    const inbox: InboxItem = {
+      id: 'inbox-1', channel: 'assistant', channel_name: 'Assistant', message: 'Review send',
+      sender_id: 'system', sender_name: 'Gideon', classification: 'needs_reply', confidence: 'high',
+      status: 'pending', item_kind: 'agent_request', refs: { task_id: 'referenced-task' },
+    }
+    const artifact: Artifact = {
+      slug: 'artifact-1', name: 'Result', kind: 'markdown', source: 'chat', description: 'Output',
+      tags: [], version: 1, created_at: '2026-09-26T12:00:00Z', updated_at: '2026-09-26T12:00:00Z',
+      events: [], source_path: 'result.md', readonly: true,
+    }
+    const notice: NotificationItem & { id: string } = {
+      id: 'notice-1', kind: 'system', title: 'Result ready', body: 'Open the result',
+      ts: '2026-09-26T12:00:00Z', acked: false,
+    }
+    const cases = [
+      { mapped: entry(mapActivitySource(ownerA, 'task', task, { related })), field: 'taskId', id: 'same-id' },
+      { mapped: entry(mapActivitySource(ownerA, 'workflow_run', workflow, { related })),
+        field: 'workflowRunId', id: 'same-id' },
+      { mapped: entry(mapActivitySource(ownerA, 'trigger_run', {
+        job_id: 'schedule-1', job_name: 'Daily summary', status: 'running', run_id: 'trigger-1',
+      }, { related })), field: 'triggerRunId', id: 'trigger-1' },
+      { mapped: entry(mapActivitySource(ownerA, 'chat_session', {
+        key: 'chat-1', title: 'The conversation', running: true, messages: [],
+      }, { related })), field: 'chatSessionId', id: 'chat-1' },
+      { mapped: entry(mapActivitySource(ownerA, 'inbox_item', inbox, { related })),
+        field: 'inboxItemId', id: 'inbox-1' },
+      { mapped: entry(mapActivitySource(ownerA, 'approval', approval, { related })),
+        field: 'approvalId', id: 'approval-1' },
+      { mapped: entry(mapActivitySource(ownerA, 'notification', notice, { related })),
+        field: 'notificationId', id: 'notice-1' },
+      { mapped: entry(mapActivitySource(ownerA, 'artifact', artifact, { related })),
+        field: 'artifactId', id: 'artifact-1' },
+    ] as const
+
+    for (const { mapped, field, id } of cases) {
+      expect(mapped.identity.sourceId).toBe(id)
+      expect(mapped.related[field]).toBe(id)
+      expect(mapped.destination.route.record).toEqual({ kind: mapped.identity.sourceKind, id })
+      expect(mapped.related[field]).not.toBe(related[field])
+    }
+    expect(cases[0].mapped.related.workflowRunId).toBe('wrong-workflow')
+    expect(cases[5].mapped.related.taskId).toBe('wrong-task')
+    expect(cases[7].mapped.related.taskId).toBe('wrong-task')
+  })
+
   it('retains distinct native task and workflow outcomes, including unknown task status', () => {
     const taskCases = [
       ['open', 'queued'], ['in_progress', 'working'], ['blocked', 'blocked'],

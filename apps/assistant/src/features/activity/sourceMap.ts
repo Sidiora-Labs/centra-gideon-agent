@@ -114,7 +114,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       title = task.title
       summary = task.description ?? null
       status = nativeStatus(kind, task.status)
-      related = { taskId: nativeId('task', task.id) ?? undefined, ...related }
+      related = { ...related, taskId: nativeId('task', task.id) ?? undefined }
       break
     }
     case 'workflow_run': {
@@ -124,7 +124,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       title = run.workflow_name
       summary = run.error_message ?? null
       status = nativeStatus(kind, run.status)
-      related = { workflowRunId: nativeId('workflow_run', run.id) ?? undefined, ...related }
+      related = { ...related, workflowRunId: nativeId('workflow_run', run.id) ?? undefined }
       break
     }
     case 'trigger_run': {
@@ -134,7 +134,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       title = run.job_name ?? 'Scheduled run'
       summary = run.summary ?? run.error ?? null
       status = nativeStatus(kind, run.status)
-      related = { triggerRunId: id as NativeId<'trigger_run'> | null ?? undefined, ...related }
+      related = { ...related, triggerRunId: id as NativeId<'trigger_run'> | null ?? undefined }
       break
     }
     case 'chat_session': {
@@ -147,7 +147,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       const stopping = 'stopping' in chat && chat.stopping
       const running = chat.running
       status = nativeStatus(kind, approval ? 'waiting_approval' : stopping ? 'stopping' : running ? 'working' : null)
-      related = { chatSessionId: id as NativeId<'chat_session'> | null ?? undefined, ...related }
+      related = { ...related, chatSessionId: id as NativeId<'chat_session'> | null ?? undefined }
       break
     }
     case 'inbox_item': {
@@ -172,8 +172,8 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       summary = approval.tool_purpose ?? null
       status = nativeStatus(kind, 'pending')
       actionability = 'review'
-      related = { approvalId: nativeId('approval', approval.id) ?? undefined,
-        chatSessionId: nativeId('chat_session', approval.session) ?? undefined, ...related }
+      related = { chatSessionId: nativeId('chat_session', approval.session) ?? undefined,
+        ...related, approvalId: nativeId('approval', approval.id) ?? undefined }
       break
     }
     case 'notification': {
@@ -184,7 +184,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       summary = notification.body
       status = nativeStatus(kind, notification.acked ? 'acknowledged' : 'notice')
       actionability = 'none'
-      related = { notificationId: id as NativeId<'notification'> | null ?? undefined, ...related }
+      related = { ...related, notificationId: id as NativeId<'notification'> | null ?? undefined }
       break
     }
     case 'artifact': {
@@ -194,7 +194,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       title = artifact.name
       summary = artifact.description
       status = nativeStatus(kind, artifact.kind)
-      related = { artifactId: nativeId('artifact', artifact.slug) ?? undefined, ...related }
+      related = { ...related, artifactId: nativeId('artifact', artifact.slug) ?? undefined }
       break
     }
   }
