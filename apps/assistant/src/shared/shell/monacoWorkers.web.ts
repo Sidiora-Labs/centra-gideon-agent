@@ -30,6 +30,12 @@ export async function configureMonacoWorkers(assetRoot: URL): Promise<void> {
     if ((await response.arrayBuffer()).byteLength === 0) throw new Error(`Monaco ${family} worker asset is empty`);
   }));
 
+  const [{ loader }, monaco] = await Promise.all([
+    import("@monaco-editor/react"),
+    import("monaco-editor/editor/editor.api.js"),
+  ]);
+  loader.config({ monaco });
+
   const environment = {
     getWorker(_moduleId: string, label: string): Worker {
       const family = monacoWorkerFamily(label);
