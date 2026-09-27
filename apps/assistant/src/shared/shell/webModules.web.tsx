@@ -14,6 +14,8 @@ import { codeModuleDefinition } from "../../features/code/moduleDefinitions.web"
 import { studioModules } from "../../features/studio/moduleDefinitions.web";
 import { personalModuleDefinitions } from "../../features/personal/moduleDefinitions.web";
 import { libraryModuleDefinitions } from "../../features/library/moduleDefinitions.web";
+import { browserModuleDefinition } from "../../features/browser/moduleDefinitions.web";
+import { communicationsModuleDefinitions } from "../../features/communications/moduleDefinitions.web";
 
 export type ModuleProps = {
   route: ShellRoute;
@@ -113,16 +115,15 @@ const registeredDefinitions: readonly ModuleDefinition[] = [
   ...studioModules,
   ...personalModuleDefinitions,
   ...libraryModuleDefinitions,
+  browserModuleDefinition,
+  ...communicationsModuleDefinitions,
 ];
 
 export const moduleDefinitions: readonly ModuleDefinition[] = Object.freeze(registeredDefinitions);
 
 export function moduleForRoute(route: ShellRoute): ModuleDefinition | undefined {
   const matches = moduleDefinitions.filter((definition) => definition.matches(route));
-  if (matches.length > 1) {
-    throw new Error(`Assistant route has multiple module owners: ${matches.map(({ id }) => id).join(", ")}`);
-  }
-  return matches[0];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export async function resolveModuleRoute(scope: OwnerScope, route: ShellRoute): Promise<RouteAvailability | undefined> {
