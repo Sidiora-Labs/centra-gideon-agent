@@ -46,6 +46,24 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
   const catalogRequest = useRef(0);
   const recipeRequest = useRef(0);
   const writeRequest = useRef(0);
+  const writeInFlight = useRef(false);
+
+  useEffect(() => {
+    catalogRequest.current += 1;
+    recipeRequest.current += 1;
+    writeRequest.current += 1;
+    writeInFlight.current = false;
+    setBusy(false);
+    setCatalog(undefined);
+    setError(undefined);
+    setLocation("");
+    setName("");
+    setProvider("");
+    setMatches([]);
+    setSelectedRecipe(undefined);
+    setEditingSourceId(undefined);
+    setReplacementLocation("");
+  }, [ownerKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -88,7 +106,8 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
 
   async function addSource(event: React.FormEvent) {
     event.preventDefault();
-    if (!selectedKind && !selectedRecipe) return;
+    if (writeInFlight.current || (!selectedKind && !selectedRecipe)) return;
+    writeInFlight.current = true;
     const current = ++writeRequest.current;
     const providerName = selectedRecipe?.provider ?? provider;
     const kindName = selectedRecipe?.kind ?? selectedKind?.kind ?? "";
@@ -108,10 +127,17 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
       setCatalog(value => value ? { ...value, sources: [...value.sources, created] } : value);
     } catch (reason) {
       if (isCurrent()) setError(reason instanceof LibraryReadError ? reason.message : "Gideon could not create this watched source.");
-    } finally { if (isCurrent()) setBusy(false); }
+    } finally {
+      if (isCurrent()) {
+        writeInFlight.current = false;
+        setBusy(false);
+      }
+    }
   }
 
   async function saveSource(source: WatchedSource, input: { enabled?: boolean; spec?: Record<string, unknown>; budget?: Record<string, unknown> }) {
+    if (writeInFlight.current) return;
+    writeInFlight.current = true;
     const current = ++writeRequest.current;
     setBusy(true);
     setError(undefined);
@@ -124,7 +150,12 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
       }
     } catch (reason) {
       if (writeRequest.current === current && activeOwnerScope.current === ownerKey) setError(reason instanceof LibraryReadError ? reason.message : "Gideon could not update this watched source.");
-    } finally { if (writeRequest.current === current && activeOwnerScope.current === ownerKey) setBusy(false); }
+    } finally {
+      if (writeRequest.current === current && activeOwnerScope.current === ownerKey) {
+        writeInFlight.current = false;
+        setBusy(false);
+      }
+    }
   }
 
   return <section aria-labelledby="library-sources-title" className="gideon-library-sources">
@@ -136,16 +167,16 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
     {catalog && sourceKinds.length > 0 && <form onSubmit={event => void addSource(event)} aria-label="Add watched source">
       <h4>Add a source</h4>
       <label htmlFor="library-source-name">Name</label>
-      <input id="library-source-name" value={name} onChange={event => setName(event.currentTarget.value)} placeholder="Optional name" />
+      <input id="library-source-name" value={name} onChange={event => setName(event.currentTarget.value)} placeholder="Optional name" disabled={busy} />
       <label htmlFor="library-source-provider">Available provider</label>
-      <select id="library-source-provider" value={selectedRecipe?.provider ?? provider} onChange={event => { setProvider(event.currentTarget.value); setSelectedRecipe(undefined); }}>
+      <select id="library-source-provider" value={selectedRecipe?.provider ?? provider} onChange={event => { setProvider(event.currentTarget.value); setSelectedRecipe(undefined); }} disabled={busy}>
         {sourceKinds.map(kind => <option key={kind.provider} value={kind.provider}>{kind.display_name}</option>)}
       </select>
       <label htmlFor="library-source-location">{selectedKind?.form === "dir" ? "Directory path" : selectedKind?.form === "feed" ? "Feed URL" : "Listing page URL"}</label>
       <input id="library-source-location" value={location} onChange={event => { setLocation(event.currentTarget.value); setSelectedRecipe(undefined); }}
-        type={selectedKind?.form === "dir" ? "text" : "url"} required autoComplete="url" />
+        type={selectedKind?.form === "dir" ? "text" : "url"} required autoComplete="url" disabled={busy} />
       {matches.length > 0 && <fieldset><legend>Matching native source recipes</legend>
-        {matches.map(match => <label key={match.id}><input type="radio" name="library-source-recipe" checked={selectedRecipe?.id === match.id}
+        {matches.map(match => <label key={match.id}><input type="radio" name="library-source-recipe" checked={selectedRecipe?.id === match.id} disabled={busy}
           onChange={() => { setSelectedRecipe(match); setProvider(match.provider); }} />{match.displayName} — {match.description}</label>)}
       </fieldset>}
       {selectedKind?.form === "feed" && <p>New feed sources start with the {selectedKind.formats?.includes("rss") ? "RSS" : selectedKind.formats?.[0] ?? "configured"} parser. Validation and later poll health come from the native provider.</p>}
@@ -163,10 +194,10 @@ export function SourcesWorkspace({ scope, activeOwnerScope }: {
             {source.remediation?.guidance && <p>{source.remediation.guidance}</p>}
             {source.remediation?.detail && <p>{source.remediation.detail}</p>}
             {recipeAction === "allow_render" && <button type="button" disabled={busy} onClick={() => void saveSource(source, { budget: { ...(source.budget ?? {}), allow_render: true } })}>Allow native render tier</button>}
-            {recipeAction === "edit_url" && <button type="button" onClick={() => { setEditingSourceId(source.id); setReplacementLocation(String(source.spec.url ?? "")); }}>Edit listing URL</button>}
+            {recipeAction === "edit_url" && <button type="button" disabled={busy} onClick={() => { setEditingSourceId(source.id); setReplacementLocation(String(source.spec.url ?? "")); }}>Edit listing URL</button>}
             {editingSourceId === source.id && <form onSubmit={event => { event.preventDefault(); void saveSource(source, { spec: { ...source.spec, url: replacementLocation.trim() } }); }}>
-              <label htmlFor={`library-source-url-${source.id}`}>Listing URL</label><input id={`library-source-url-${source.id}`} type="url" required value={replacementLocation} onChange={event => setReplacementLocation(event.currentTarget.value)} />
-              <button type="submit" disabled={busy}>Save URL</button><button type="button" onClick={() => setEditingSourceId(undefined)}>Cancel</button>
+              <label htmlFor={`library-source-url-${source.id}`}>Listing URL</label><input id={`library-source-url-${source.id}`} type="url" required value={replacementLocation} onChange={event => setReplacementLocation(event.currentTarget.value)} disabled={busy} />
+              <button type="submit" disabled={busy}>Save URL</button><button type="button" disabled={busy} onClick={() => setEditingSourceId(undefined)}>Cancel</button>
             </form>}
             {!source.event_driven && source.enrolled && <button type="button" disabled={busy} onClick={() => void saveSource(source, { enabled: !source.enabled })}>{source.enabled ? "Pause source" : "Resume source"}</button>}
           </li>;

@@ -21,6 +21,16 @@ async function availablePort(): Promise<number> {
   return port;
 }
 
+async function waitForSourceWrite(nativeServer: NativeServer): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${nativeServer.controlOrigin}/source-write`);
+    if (response.ok && (await response.json() as { started?: boolean }).started) return;
+    await new Promise(resolveWait => setTimeout(resolveWait, 25));
+  }
+  throw new Error("The native source create handler was not reached.");
+}
+
 afterEach(async () => {
   await browser?.close();
   await vite?.close();
@@ -61,13 +71,21 @@ async def main(origin):
   register_provider(DirSourceProvider(store))
   register_provider(FeedSourceProvider(store))
   register_provider(WebSourceProvider(store))
+  source_write_started = asyncio.Event()
+  source_write_release = asyncio.Event()
+  @web.middleware
+  async def hold_source_create(request, handler):
+    if request.method == "POST" and request.path == "/api/knowledge/sources":
+      source_write_started.set()
+      await asyncio.wait_for(source_write_release.wait(), timeout=15)
+    return await handler(request)
   paused_id = store.create_source(name="Paused source", provider="watched-feed", kind="feed",
     spec={"kind":"rss", "url":"https://example.invalid/feed.xml"}, enabled=False)
   failed_id = store.create_source(name="Failed source", provider="watched-feed", kind="feed",
     spec={"kind":"rss", "url":"https://example.invalid/failed.xml"})
   store.record_poll(failed_id, cursor="", new_count=0, health_status="error", error_summary="The last native feed poll failed.")
   orphan_id = store.create_source(name="Unenrolled source", provider="removed-provider", kind="external", spec={})
-  app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+  app = web.Application(middlewares=[hold_source_create, token_auth.token_auth_middleware(port=10000)])
   app["port"] = 10000
   app["allowed_origins"] = {origin}
   app["state"] = SimpleNamespace(knowledge_store=store)
@@ -82,15 +100,29 @@ async def main(origin):
   app.router.add_post("/api/knowledge/sources", create_watched_source)
   app.router.add_patch("/api/knowledge/sources/{id}", update_watched_source)
   app.router.add_get("/api/knowledge/source-recipes", list_source_recipes)
+  control = web.Application()
+  async def source_write_state(_request):
+    return web.json_response({"started": source_write_started.is_set()})
+  async def release_source_write(_request):
+    source_write_release.set()
+    return web.json_response({"released": True})
+  control.router.add_get("/source-write", source_write_state)
+  control.router.add_post("/source-write/release", release_source_write)
   runner = web.AppRunner(app)
   await runner.setup()
   site = web.TCPSite(runner, "127.0.0.1", 0)
   await site.start()
   port = site._server.sockets[0].getsockname()[1]
-  print(json.dumps({"api_port": port, "control_port": port, "paused_id": paused_id,
+  control_runner = web.AppRunner(control)
+  await control_runner.setup()
+  control_site = web.TCPSite(control_runner, "127.0.0.1", 0)
+  await control_site.start()
+  control_port = control_site._server.sockets[0].getsockname()[1]
+  print(json.dumps({"api_port": port, "control_port": control_port, "paused_id": paused_id,
     "failed_id": failed_id, "orphan_id": orphan_id}), flush=True)
   try: await asyncio.Event().wait()
   finally:
+    await control_runner.cleanup()
     await runner.cleanup()
     store.db.close()
 
@@ -176,6 +208,14 @@ describe("Library import and watched source journey", () => {
     await browser.evaluate(`(${browserSetValue})('library-source-name','Gideon releases')`);
     await browser.waitFor("document.querySelector('#library-source-name')?.value==='Gideon releases' && !document.querySelector('form[aria-label=\"Add watched source\"] button[type=submit]')?.disabled", "ready watched source form");
     await browser.evaluate("document.querySelector('form[aria-label=\"Add watched source\"] button[type=submit]')?.click()");
+    await waitForSourceWrite(native);
+    const createFormState = await browser.evaluate<{ disabled?: boolean[]; values?: string[] }>("(()=>{const form=document.querySelector('form[aria-label=\"Add watched source\"]');return {disabled:[...form.querySelectorAll('input,select,button')].map(control=>control.disabled),values:[document.querySelector('#library-source-name')?.value,document.querySelector('#library-source-location')?.value,document.querySelector('#library-source-provider')?.value]}})()");
+    expect(createFormState.disabled?.every(Boolean)).toBe(true);
+    expect(createFormState.values?.slice(0, 2)).toEqual(["Gideon releases", "https://github.com/astral-sh/uv"]);
+    expect(createFormState.values?.[2]).toBeTruthy();
+    await browser.evaluate("document.querySelector('form[aria-label=\"Add watched source\"]')?.requestSubmit()");
+    const release = await fetch(`${native.controlOrigin}/source-write/release`, { method: "POST" });
+    expect(release.ok).toBe(true);
     await browser.waitFor("[...document.querySelectorAll('[data-source-id]')].some(row=>row.querySelector('h5')?.textContent==='Gideon releases')", "saved native watched source");
     const sourceStatus = await browser.evaluate<Array<{ name?: string | null; text?: string | null }>>("[...document.querySelectorAll('[data-source-id]')].map(row=>({name:row.querySelector('h5')?.textContent,text:row.textContent}))");
     expect(sourceStatus.some(row => row.name === "Gideon releases" && row.text?.includes("Not checked yet"))).toBe(true);
@@ -185,6 +225,7 @@ describe("Library import and watched source journey", () => {
 
     const newSource = await browser.evaluate<string | undefined>("[...document.querySelectorAll('[data-source-id]')].find(source=>source.querySelector('h5')?.textContent==='Gideon releases')?.getAttribute('data-source-id')||undefined");
     expect(newSource).toMatch(/^src-[a-f0-9]{8}$/);
+    expect(await browser.evaluate<number>("[...document.querySelectorAll('[data-source-id]')].filter(source=>source.querySelector('h5')?.textContent==='Gideon releases').length")).toBe(1);
     await browser.evaluate("[...document.querySelectorAll('[data-source-id]')].find(row=>row.querySelector('h5')?.textContent==='Gideon releases')?.querySelector('button')?.click()");
     await browser.waitFor("[...document.querySelectorAll('[data-source-id]')].find(row=>row.querySelector('h5')?.textContent==='Gideon releases')?.textContent.includes('Paused')", "persisted native pause");
   }, 60000);
