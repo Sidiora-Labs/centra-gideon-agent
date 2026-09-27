@@ -1,0 +1,109 @@
+.gideon-workspace-frame {
+  width: 100%;
+  max-width: 100%;
+  color: inherit;
+  background: transparent;
+}
+
+.gideon-workspace-frame[data-workspace-mode="compact"] {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.gideon-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px clamp(12px, 2.2vw, 24px);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.gideon-workspace-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gideon-workspace-heading h1 {
+  overflow: hidden;
+  margin: 0;
+  font: inherit;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.gideon-workspace-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 65%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.gideon-workspace-back,
+.gideon-workspace-recovery {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gideon-workspace-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 14px clamp(12px, 2.2vw, 24px) max(20px, env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+.gideon-workspace-message {
+  max-width: 72ch;
+  margin: 0 0 14px;
+  line-height: 1.55;
+}
+
+.gideon-workspace-loading {
+  width: 24px;
+  height: 24px;
+  margin: 16px auto;
+  border: 2px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: gideon-workspace-spin 0.8s linear infinite;
+}
+
+@keyframes gideon-workspace-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .gideon-workspace-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .gideon-workspace-actions {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gideon-workspace-loading { animation: none; }
+}
