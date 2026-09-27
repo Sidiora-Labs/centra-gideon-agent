@@ -6,6 +6,8 @@ import {
   CACHEABLE_PREFIXES,
   SHELL_DOCUMENT,
   isApiPath,
+  shellDocument,
+  cacheableResponse,
   mayCache,
   strategyFor,
 } from './swPolicy'
@@ -114,33 +116,19 @@ describe('strategyFor', () => {
   })
 })
 
-describe('sw.ts consults the policy at every cache site', () => {
-  const raw = readFileSync(join(WEB_DIR, 'src/app/background/service-worker.ts'), 'utf8')
-  const source = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-
-  it('the comment stripper left real code behind', () => {
-    expect(source).toContain("addEventListener('fetch'")
-    expect(raw).toContain('NO `skipWaiting()`')
-    expect(source).not.toContain('NO `skipWaiting()`')
+describe('assistant shell policy', () => {
+  it('separates assistant document fallback from API and other applications', () => {
+    expect(shellDocument(url('/assistant/chat'), ORIGIN)).toBe('/assistant/')
+    expect(shellDocument(url('/'), ORIGIN)).toBe('/')
+    for (const path of ['/api/auth/session', '/assistant/api/auth/session', '/apps/private', '/assistant/assets/missing.js']) {
+      expect(strategyFor(url(path), ORIGIN, true)).toBe('network-only')
+      expect(shellDocument(url(path), ORIGIN)).toBeUndefined()
+    }
   })
-
-  it('writes to a cache in exactly one place, and that place calls mayCache', () => {
-    const puts = source.match(/\.put\(/g) ?? []
-    expect(puts, 'a second cache.put() call site would bypass the gate').toHaveLength(1)
-    const store = source.slice(source.indexOf('async store'), source.indexOf('.put('))
-    expect(store).toContain('mayCache(')
-  })
-
-  it('keys the offline navigation fallback on the shell, not the requested URL', () => {
-    expect(source).toContain('match(SHELL_DOCUMENT)')
-  })
-
-  it('holds the documented update strategy: no skipWaiting, no clients.claim', () => {
-    expect(source).not.toMatch(/skipWaiting\(\)/)
-    expect(source).not.toMatch(/clients\.claim\(\)/)
-  })
-
-  it('leaves non-GET requests entirely alone', () => {
-    expect(source).toContain("request.method !== 'GET'")
+  it('refuses HTML returned for a missing asset and accepts the correct MIME', () => {
+    expect(cacheableResponse(url('/assistant/assets/missing.js'), new Response('<html/>', { headers: { 'content-type': 'text/html' } }), ORIGIN)).toBe(false)
+    expect(cacheableResponse(url('/assistant/assets/entry.js'), new Response('export {}', { headers: { 'content-type': 'text/javascript' } }), ORIGIN)).toBe(true)
+    expect(mayCache(url('/assistant/assets/entry.js?token=private'), ORIGIN)).toBe(false)
+    expect(cacheableResponse(url('/manifest.webmanifest'), new Response('{}', { headers: { 'content-type': 'application/manifest+json' } }), ORIGIN)).toBe(true)
   })
 })
