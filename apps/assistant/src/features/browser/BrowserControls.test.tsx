@@ -110,6 +110,20 @@ import { BrowserClient } from '/src/features/browser/browserClient.ts'
 import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx'
 import { ShellThemeProvider } from '/src/shared/shell/shellTheme.web.ts'
 const root = createRoot(document.getElementById('root'))
+window.sessionWaiters = []
+window.nextSession = (status, afterVersion) => new Promise((resolve, reject) => {
+  const waiter = value => {
+    if (value.status !== status || value.version <= afterVersion) return
+    clearTimeout(timeout)
+    window.sessionWaiters = window.sessionWaiters.filter(item => item !== waiter)
+    resolve(value)
+  }
+  const timeout = setTimeout(() => {
+    window.sessionWaiters = window.sessionWaiters.filter(item => item !== waiter)
+    reject(new Error('Session update did not arrive: ' + status + ' after version ' + afterVersion))
+  }, 30000)
+  window.sessionWaiters.push(waiter)
+})
 window.signIn = async () => { window.scope = ownerScope(location.origin, await signInOwner('browser-owner', 'correct-horse-battery-staple')); return window.scope.ownerId }
 window.mount = async () => {
   window.client = new BrowserClient(window.scope)
@@ -118,7 +132,7 @@ window.mount = async () => {
   window.session = opened.value
   root.render(React.createElement(ShellThemeProvider, { initialPreference: 'light' },
     React.createElement(BrowserControls, { client: window.client, session: opened.value,
-      onSessionChange: value => { window.session = value } })))
+      onSessionChange: value => { window.session = value; window.sessionWaiters.forEach(waiter => waiter(value)) } })))
   return opened.value
 }
 window.click = async label => {
@@ -221,9 +235,12 @@ describe('owned browser controls', () => {
     expect(await evaluate('window.session.id')).toBe(opened.id)
     await evaluate('window.click("Connect browser")')
     await until(evaluate, 'window.session.status', 'active')
-    await evaluate('window.fixturePost("disconnect", { session_id: window.session.id })')
-    await evaluate('window.click("Refresh state")')
-    await until(evaluate, 'window.session.status', 'error')
+    const activeVersion = await evaluate('window.session.version')
+    expect(await evaluate('window.fixturePost("disconnect", { session_id: window.session.id })'))
+      .toMatchObject({ status: 200, body: { disconnected: true } })
+    const disconnected = await evaluate('(async () => { const changed = window.nextSession("error", window.session.version); await window.click("Refresh state"); return changed })()')
+    expect(disconnected.status).toBe('error')
+    expect(disconnected.version).toBeGreaterThan(activeVersion)
     expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"]")?.textContent')).toContain('Connection unavailable')
   }, 120000)
 })
