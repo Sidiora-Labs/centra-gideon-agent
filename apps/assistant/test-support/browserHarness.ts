@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 type PendingCommand = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
@@ -43,7 +43,20 @@ export async function startViteEntryServer(options: {
         dedupe: ["react", "react-dom"],
       },
       esbuild: { jsx: "automatic" },
-      optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] } },
+      optimizeDeps: {
+        entries: [relative(root, entryFile)],
+        include: [
+          "expo-status-bar",
+          "lucide-react-native",
+          "react",
+          "react-dom",
+          "react-dom/client",
+          "react-native-safe-area-context",
+          "react-native-web",
+          "react/jsx-dev-runtime",
+        ],
+        esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] },
+      },
       plugins: [{
         name: "gideon-actual-tsx-entry",
         configureServer(viteServer) {
@@ -106,6 +119,11 @@ export async function startBrowserHarness(options: {
     stdio: ["ignore", "ignore", "pipe"],
     env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "OPENAI_API_KEY")),
   });
+  let processClosed = false;
+  const processClose = new Promise<void>(resolveClose => child.once("close", () => {
+    processClosed = true;
+    resolveClose();
+  }));
   let browserErrors = "";
   child.stderr.on("data", chunk => { browserErrors = (browserErrors + String(chunk)).slice(-3000); });
   let target: { webSocketDebuggerUrl: string } | undefined;
@@ -238,13 +256,26 @@ export async function startBrowserHarness(options: {
       if (closed) return;
       closed = true;
       socket.close();
-      child.kill("SIGTERM");
-      await new Promise<void>(resolve => {
-        if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
-        child.once("exit", () => resolve());
-        setTimeout(resolve, 5000);
-      });
-      if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true });
+      if (!processClosed) {
+        child.kill("SIGTERM");
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const closedGracefully = await Promise.race([
+          processClose.then(() => true),
+          new Promise<boolean>(resolveTimeout => { timeout = setTimeout(() => resolveTimeout(false), 5000); }),
+        ]);
+        if (timeout) clearTimeout(timeout);
+        if (!closedGracefully) {
+          child.kill("SIGKILL");
+          let forceTimeout: ReturnType<typeof setTimeout> | undefined;
+          const closedAfterKill = await Promise.race([
+            processClose.then(() => true),
+            new Promise<boolean>(resolveTimeout => { forceTimeout = setTimeout(() => resolveTimeout(false), 5000); }),
+          ]);
+          if (forceTimeout) clearTimeout(forceTimeout);
+          if (!closedAfterKill) throw new Error("Chromium did not close after SIGKILL");
+        }
+      }
+      if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }
