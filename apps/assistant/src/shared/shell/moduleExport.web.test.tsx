@@ -22,8 +22,10 @@ function contentType(file: string): string {
   } as Record<string, string>)[extname(file)] ?? "application/octet-stream";
 }
 
-async function serveExport(exportDirectory: string, apiOrigin: string, port: number): Promise<{ server: HttpServer; origin: string }> {
+async function serveExport(exportDirectory: string, apiOrigin: string, port: number, options: { failConsoleCssOnce?: boolean } = {}): Promise<{ server: HttpServer; origin: string; consoleCssStatuses: number[] }> {
   const api = new URL(apiOrigin);
+  let failConsoleCss = options.failConsoleCssOnce ?? false;
+  const consoleCssStatuses: number[] = [];
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://gideon.test").pathname;
     if (pathname === "/api" || pathname.startsWith("/api/")) {
@@ -35,6 +37,16 @@ async function serveExport(exportDirectory: string, apiOrigin: string, port: num
       proxy.on("error", error => { response.writeHead(502); response.end(String(error)); });
       request.pipe(proxy);
       return;
+    }
+
+    if (pathname === "/assistant/assets/gideon-console.css") {
+      if (failConsoleCss) {
+        failConsoleCss = false;
+        consoleCssStatuses.push(404);
+        response.writeHead(404).end("stylesheet not ready");
+        return;
+      }
+      consoleCssStatuses.push(200);
     }
 
     const relative = pathname.replace(/^\/assistant(?:\/|$)/, "").replace(/^\/+/, "");
@@ -59,7 +71,7 @@ async function serveExport(exportDirectory: string, apiOrigin: string, port: num
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolveListen);
   });
-  return { server, origin: `http://127.0.0.1:${port}` };
+  return { server, origin: `http://127.0.0.1:${port}`, consoleCssStatuses };
 }
 
 async function reservePort(): Promise<number> {
@@ -86,15 +98,23 @@ describe("trusted modules in the Expo web export", () => {
       origin,
       repositoryRoot: root,
     });
-    const served = await serveExport(`${assistant}/dist/web`, native.apiOrigin, port);
+    const served = await serveExport(`${assistant}/dist/web`, native.apiOrigin, port, { failConsoleCssOnce: true });
     webServer = served.server;
     browser = await startBrowserHarness({ windowSize: { width: 1280, height: 900 } });
     await browser.command("Page.addScriptToEvaluateOnNewDocument", { source: `
       window.__gideonWorkerUrls = [];
+      window.__gideonWorkerMessages = [];
       const OriginalWorker = window.Worker;
       window.Worker = new Proxy(OriginalWorker, { construct(target, args) {
         window.__gideonWorkerUrls.push(new URL(args[0], location.href).href);
-        return Reflect.construct(target, args);
+        const worker = Reflect.construct(target, args);
+        worker.addEventListener('message', event => window.__gideonWorkerMessages.push({ direction: 'from-worker', type: event.data?.type ?? typeof event.data }));
+        const postMessage = worker.postMessage.bind(worker);
+        worker.postMessage = (message, ...transfer) => {
+          window.__gideonWorkerMessages.push({ direction: 'to-worker', type: message?.type ?? typeof message });
+          return postMessage(message, ...transfer);
+        };
+        return worker;
       }});
     ` });
     await browser.navigate(`${served.origin}/assistant/`);
@@ -113,7 +133,11 @@ describe("trusted modules in the Expo web export", () => {
     try {
     const taskId = String(native.startup.task_id);
     await browser.navigate(`${served.origin}/assistant/activity?v=1&view=detail&placement=tasks&recordKind=task&recordId=${encodeURIComponent(taskId)}&from=chat`);
+    await browser.waitFor(`document.querySelector('section[aria-label="Workspace unavailable"] button')?.textContent.includes('Retry workspace')`, "real stylesheet failure retry control", 60000);
+    expect(served.consoleCssStatuses).toEqual([404]);
+    await browser.evaluate(`([...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Retry workspace'))?.click()`);
     await browser.waitFor(`document.querySelector('[data-gideon-module="tasks"]')?.innerText.includes('Native task detail fixture')`, "native TaskDetail inside trusted module", 60000);
+    expect(served.consoleCssStatuses).toEqual([404, 200]);
     const taskSurface = await browser.evaluate<{ rootCount: number; frameCount: number; iframeCount: number; detail: boolean }>(`({
       rootCount: document.querySelectorAll('#root').length,
       frameCount: document.querySelectorAll('main.gideon-workspace-frame').length,
@@ -121,17 +145,25 @@ describe("trusted modules in the Expo web export", () => {
       detail: document.querySelector('[data-gideon-module="tasks"]')?.innerText.includes('Native task detail fixture') || false
     })`);
     expect(taskSurface).toEqual({ rootCount: 1, frameCount: 1, iframeCount: 0, detail: true });
+    await browser.waitFor("document.querySelector('main.gideon-workspace-frame')?.querySelector('h1')?.textContent === 'Trusted module task'", "native task title in shell heading");
+    await browser.evaluate(`([...document.querySelectorAll('[data-gideon-module="tasks"] button')].find(button=>button.textContent?.trim()==='Delete'))?.click()`);
+    await browser.waitFor("document.querySelector('[data-gideon-dialog-portal] [role=alertdialog]')", "native task confirmation dialog");
+    const scopedDialog = await browser.evaluate<{ scoped: boolean; mode: string | null }>(`(()=>{const portal=document.querySelector('[data-gideon-dialog-portal]');return {scoped:portal?.classList.contains('gideon-trusted-module-dialog-root')||false,mode:document.querySelector('main.gideon-workspace-frame')?.getAttribute('data-workspace-mode')||null}})()`);
+    expect(scopedDialog).toEqual({ scoped: true, mode: "full" });
+    await browser.evaluate(`([...document.querySelectorAll('[role=alertdialog] button')].find(button=>button.textContent?.trim()==='Cancel'))?.click()`);
+    await browser.waitFor("!document.querySelector('[data-gideon-dialog-portal] [role=alertdialog]')", "native task confirmation closed");
 
     const artifactSlug = String(native.startup.artifact_slug);
     await browser.navigate(`${served.origin}/assistant/apps?v=1&view=workspace&placement=artifacts%2Feditor&recordKind=artifact&recordId=${encodeURIComponent(artifactSlug)}&from=chat`);
     await browser.waitFor("document.querySelector('[data-gideon-module=\"artifacts/editor\"] button')", "native artifact editor actions");
     await browser.evaluate(`([...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Edit'))?.click()`);
-    await browser.waitFor("document.querySelector('.monaco-editor textarea.inputarea')", "initialized Monaco editor", 60000);
+    await browser.waitFor("document.querySelector('[data-gideon-module=\"artifacts/editor\"] .monaco-editor')", "Monaco editor host", 60000);
     await browser.waitFor("window.__gideonWorkerUrls?.length > 0", "local Monaco worker startup", 60000);
-    const editorSurface = await browser.evaluate<{ rootCount: number; frameCount: number; iframeCount: number; geometry: boolean; focusable: boolean; workers: string[]; resources: string[]; htmlMode: string | null; storedMode: string | null }>(`(()=>{
+    await browser.waitFor("window.__gideonWorkerMessages?.some(message=>message.direction==='to-worker') && window.__gideonWorkerMessages?.some(message=>message.direction==='from-worker')", "local Monaco worker message round trip", 60000);
+    const editorSurface = await browser.evaluate<{ rootCount: number; frameCount: number; iframeCount: number; geometry: boolean; focusable: boolean; workers: string[]; workerMessages: Array<{ direction: string; type: string }>; resources: string[]; htmlMode: string | null; storedMode: string | null }>(`(()=>{
       const module=document.querySelector('[data-gideon-module="artifacts/editor"]');
       const rect=module?.getBoundingClientRect();
-      const input=document.querySelector('.monaco-editor textarea.inputarea');
+      const input=document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]');
       input?.focus();
       return {
         rootCount:document.querySelectorAll('#root').length,
@@ -140,6 +172,7 @@ describe("trusted modules in the Expo web export", () => {
         geometry:!!rect&&rect.width>600&&rect.height>300&&getComputedStyle(module).display==='flex',
         focusable:!!input&&document.activeElement===input,
         workers:[...window.__gideonWorkerUrls],
+        workerMessages:[...window.__gideonWorkerMessages],
         resources:performance.getEntriesByType('resource').map(entry=>entry.name),
         htmlMode:document.documentElement.dataset.mode||null,
         storedMode:localStorage.getItem('mode')
@@ -152,6 +185,8 @@ describe("trusted modules in the Expo web export", () => {
     expect(editorSurface.focusable).toBe(true);
     expect(editorSurface.workers.length).toBeGreaterThan(0);
     expect(editorSurface.workers.every(url => new URL(url).origin === origin && new URL(url).pathname.startsWith("/assistant/assets/workers/"))).toBe(true);
+    expect(editorSurface.workerMessages.some(message => message.direction === "to-worker")).toBe(true);
+    expect(editorSurface.workerMessages.some(message => message.direction === "from-worker")).toBe(true);
     expect(editorSurface.resources.some(url => url.includes("/assistant/assets/gideon-console.css"))).toBe(true);
     expect(editorSurface.resources.some(url => /monaco/i.test(url) && /cdn|jsdelivr/i.test(url))).toBe(false);
     expect(editorSurface.htmlMode).toBe(null);
@@ -172,7 +207,7 @@ describe("trusted modules in the Expo web export", () => {
     await browser.command("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2 });
     await browser.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft" });
     await browser.command("Input.insertText", { text: "Keyboard editor verification" });
-    await browser.waitFor("document.querySelector('.monaco-editor .view-lines')?.innerText.includes('Keyboard editor verification')", "keyboard edits reflected in Monaco model");
+    await browser.waitFor("document.querySelector('.monaco-editor .view-lines')?.innerText.replaceAll(String.fromCharCode(160),' ').includes('Keyboard editor verification')", "keyboard edits reflected in Monaco model");
     await browser.evaluate(`document.querySelector('[aria-label="Return to previous workspace"]')?.click()`);
     await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[data-gideon-module]')", "typed return to assistant chat");
     } catch (error) {
