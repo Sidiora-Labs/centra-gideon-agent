@@ -19,7 +19,7 @@ from gideon.engine.session import ConversationDirectory
 from gideon.engine.hooks import ScriptHookStore
 from gideon.engine.tasks import registry as task_registry
 from gideon.engine.tasks.handlers import api_tasks_get, api_tasks_list
-from gideon.integrations.inbox import InboxItem, InboxStore
+from gideon.integrations.inbox import InboxItem, InboxStore, ItemKind, emit_attention_item
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.messaging import api_notifications
@@ -30,7 +30,9 @@ from gideon.interfaces.dashboard.handlers.triggers import (
     api_triggers,
 )
 from gideon.interfaces.dashboard.handlers_inbox import api_inbox_list, api_inbox_open_items
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_note_create, _redact_item
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.ws import api_ws
 from gideon.security.auth import credentials
 from gideon.workspace.artifacts import registry as artifact_registry
 from gideon.workspace.artifacts.handlers import api_artifact_detail, api_artifacts_list
@@ -118,7 +120,7 @@ async def main(origin: str) -> None:
 
         settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0,
             "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None,
-            "replace_on_success": False}
+            "replace_on_success": False, "ws_offline": False}
 
         @web.middleware
         async def delay_reads(request: web.Request, handler):
@@ -165,6 +167,7 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/triggers", api_triggers)
         app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
+        app.router.add_post("/api/inbox/notes", api_inbox_note_create)
         app.router.add_get("/api/approvals", api_approvals)
 
         async def resolve_approval(request: web.Request) -> web.Response:
@@ -182,6 +185,13 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
         app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
+
+        async def activity_websocket(request: web.Request) -> web.StreamResponse:
+            if settings["ws_offline"]:
+                return web.json_response({"error": "temporarily unavailable"}, status=503)
+            return await api_ws(request)
+
+        app.router.add_get("/api/ws", activity_websocket)
 
         async def control_delay(request: web.Request) -> web.Response:
             body = await request.json()
@@ -227,12 +237,45 @@ async def main(origin: str) -> None:
         async def control_failures(request: web.Request) -> web.Response:
             return web.json_response({"workflow": settings["workflow_failures"]})
 
+        async def control_task_ownership(request: web.Request) -> web.Response:
+            owner = request.query.get("owner", "owner-a")
+            rows, total = await task_registry.list_all_tasks(limit=500, offset=0)
+            owned, owned_total = await task_registry.list_all_tasks(owner=owner, limit=500, offset=0)
+            return web.json_response({"total": total, "owner": owner,
+                "owned_total": owned_total, "owned_ids": [row.id for row in owned],
+                "registry_file": str(Path(task_registry.__file__).resolve()), "tasks": [
+                {"id": row.id, "title": row.title, "author": row.author,
+                 "assignee": row.assignee, "belongs_to": row.belongs_to(owner)}
+                for row in rows
+            ]})
+
         async def control_add_task(request: web.Request) -> web.Response:
             body = await request.json()
             task = await task_registry.create_task(
                 title=body["title"], status=body.get("status", "open"), author="owner-a",
             )
             return web.json_response({"id": task.id})
+
+        async def control_out_of_order_notes(request: web.Request) -> web.Response:
+            payloads = []
+            for title in ("Older live note", "Newer live note"):
+                item_id = emit_attention_item(state, source="user", kind="note",
+                    item_kind=ItemKind.USER_NOTE.value, title=title, body="Native snapshot record.", store=inbox)
+                payloads.append(_redact_item(inbox.items[item_id].to_dict()))
+            state.broadcast_ws("inbox_new_item", payloads[1])
+            state.broadcast_ws("inbox_new_item", payloads[0])
+            state.broadcast_ws("inbox_new_item", payloads[1])
+            return web.json_response({"ids": [payload["id"] for payload in payloads]})
+
+        async def control_websocket_offline(request: web.Request) -> web.Response:
+            body = await request.json()
+            settings["ws_offline"] = bool(body["offline"])
+            if settings["ws_offline"]:
+                await state.close_all_ws()
+            return web.json_response({"offline": settings["ws_offline"]})
+
+        async def control_websocket_state(request: web.Request) -> web.Response:
+            return web.json_response({"open": sum(not ws.closed for ws in state._ws_clients)})
 
         async def control_trigger_pages(request: web.Request) -> web.Response:
             started_at = time.time()
@@ -277,7 +320,11 @@ async def main(origin: str) -> None:
         control.router.add_post("/replace-on-success", control_replace_on_success)
         control.router.add_get("/approval-state", control_approval_state)
         control.router.add_get("/failures", control_failures)
+        control.router.add_get("/task-ownership", control_task_ownership)
         control.router.add_post("/task", control_add_task)
+        control.router.add_post("/out-of-order-notes", control_out_of_order_notes)
+        control.router.add_post("/websocket-offline", control_websocket_offline)
+        control.router.add_get("/websocket-state", control_websocket_state)
         control.router.add_post("/trigger-pages", control_trigger_pages)
         control.router.add_post("/workflow-store", control_workflow_store)
         api_runner = web.AppRunner(app)

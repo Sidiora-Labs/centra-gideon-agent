@@ -2,20 +2,26 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
 
 const root = resolve(process.cwd(), '../..')
 const children: ChildProcessWithoutNullStreams[] = []
+const childErrors = new WeakMap<ChildProcessWithoutNullStreams, string[]>()
 const directories: string[] = []
 let vite: ViteDevServer | undefined
 let debuggerSocket: WebSocket | undefined
 
 afterAll(async () => {
   debuggerSocket?.close()
-  for (const child of children) child.kill('SIGTERM')
   if (vite) await vite.close()
+  for (const child of children) {
+    if (child.exitCode !== null || child.signalCode !== null) continue
+    const closed = new Promise<void>(done => child.once('close', () => done()))
+    child.kill('SIGTERM')
+    await Promise.race([closed, new Promise<void>(done => setTimeout(done, 3_000))])
+  }
   for (const directory of directories) await rm(directory, { recursive: true, force: true })
 })
 
@@ -31,18 +37,20 @@ async function port(): Promise<number> {
 async function nativeServer(origin: string): Promise<{ api: string; control: string }> {
   const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
     [join(root, 'apps/assistant/test-support/activity_server.py'), origin],
-    { env: { ...process.env } })
+    { env: { ...process.env, PYTHONPATH: [join(root, 'runtime'), process.env.PYTHONPATH]
+      .filter(Boolean).join(delimiter) } })
   children.push(child)
+  const errors: string[] = []
+  childErrors.set(child, errors)
+  child.stderr.on('data', chunk => errors.push(String(chunk)))
   const line = await new Promise<string>((done, reject) => {
     let output = ''
-    let errors = ''
-    const timeout = setTimeout(() => reject(new Error(`Activity server timed out: ${errors}`)), 15000)
+    const timeout = setTimeout(() => reject(new Error(`Activity server timed out: ${errors.join('')}`)), 15000)
     child.stdout.on('data', chunk => {
       output += String(chunk)
       if (output.includes('\n')) { clearTimeout(timeout); done(output.split('\n')[0]) }
     })
-    child.stderr.on('data', chunk => { errors += String(chunk) })
-    child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Activity server exited ${code}: ${errors}`)) })
+    child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Activity server exited ${code}: ${errors.join('')}`)) })
   })
   const ports = JSON.parse(line) as { api_port: number; control_port: number }
   return { api: `http://127.0.0.1:${ports.api_port}`, control: `http://127.0.0.1:${ports.control_port}` }
@@ -108,8 +116,10 @@ describe('canonical Gideon Activity reads', () => {
     const webPort = await port()
     const origin = `http://127.0.0.1:${webPort}`
     const server = await nativeServer(origin)
+    const viteCache = await mkdtemp(join(tmpdir(), 'gideon-activity-read-vite-'))
+    directories.push(viteCache)
     vite = await createServer({
-      configFile: false, root: join(root, 'apps/assistant'),
+      configFile: false, root: join(root, 'apps/assistant'), cacheDir: viteCache,
       plugins: [{
         name: 'activity-integration',
         resolveId(id) { if (id === '/activity-entry.ts') return '\0activity-entry' },
@@ -154,9 +164,30 @@ window.loaded = true
     await evaluate(`(async () => { const owner = await window.signInOwner('owner-a', 'correct-horse-battery-staple');
       window.scopeA = window.ownerScope(location.origin, owner); window.activity.setScope(window.scopeA);
       await window.activity.refresh(); return true })()`)
-    const first = await evaluate(`(() => { const snapshot = window.activity.getSnapshot();
-      return { sources: snapshot.sources, ids: snapshot.entries.map(e => e.identity.key) } })()`)
-    expect(first.sources.task.entries).toHaveLength(20)
+    const first = await evaluate(`(async () => { const snapshot = window.activity.getSnapshot();
+      const response = await fetch('/api/tasks?limit=20&offset=0&mine=1', { credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } });
+      const page = await response.json();
+      return { sources: snapshot.sources, ids: snapshot.entries.map(e => e.identity.key),
+        rawTaskPage: { status: response.status, total: page.total, owner: page.owner,
+          ids: page.tasks?.map(task => task.id), titles: page.tasks?.map(task => task.title),
+          authors: page.tasks?.map(task => task.author), assignees: page.tasks?.map(task => task.assignee) } } })()`)
+    const ownershipResponse = await fetch(`${server.control}/task-ownership?owner=owner-a`)
+    const ownershipBody = await ownershipResponse.text()
+    const activityServer = children.find(child => childErrors.has(child))
+    expect(ownershipResponse.status, `${ownershipBody}\n${activityServer ? childErrors.get(activityServer)?.join('') : ''}`).toBe(200)
+    const ownership = JSON.parse(ownershipBody) as { total: number; owner: string; owned_total: number;
+      registry_file: string;
+      owned_ids: string[]; tasks: Array<{
+      id: string; title: string; author: string; assignee: string; belongs_to: boolean }> }
+    expect(ownership.registry_file).toBe(join(root, 'runtime/gideon/engine/tasks/registry.py'))
+    first.rawTaskPage.fixture = { total: ownership.total, owner: ownership.owner,
+      owned_total: ownership.owned_total,
+      owned_ids: ownership.owned_ids,
+      rejected: ownership.tasks.filter(task => !task.belongs_to),
+      ownedIdsMissingFromPage: ownership.owned_ids.filter((id: string) => !first.rawTaskPage.ids.includes(id)),
+      pageIdsMissingFromOwnedRegistry: first.rawTaskPage.ids.filter((id: string) => !ownership.owned_ids.includes(id)) }
+    expect(first.sources.task.entries, JSON.stringify(first.rawTaskPage)).toHaveLength(20)
     expect(first.sources.task.total).toBe(22)
     expect(first.sources.task.nextOffset).toBe(20)
     expect(first.sources.workflow_run.entries[0].identity.sourceId).toBe('workflow-1')
@@ -192,27 +223,40 @@ window.loaded = true
       entry.identity.sourceId !== 'workflow-other')).toBe(true)
 
     await control(server.control, '/trigger-pages', {})
+    const rawTriggerPage = await evaluate(`(async () => { const response = await fetch(
+      '/api/triggers/history?limit=20&offset=0', { credentials: 'same-origin', headers: {
+        Accept: 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } });
+      return { status: response.status, ...(await response.json()) } })()`)
     await evaluate('window.activity.refresh()')
     const triggerPage = await evaluate('window.activity.getSnapshot().sources.trigger_run')
-    expect(triggerPage.entries).toHaveLength(19)
-    expect(triggerPage.total).toBe(23)
-    expect(triggerPage.omittedWithoutId).toBe(1)
+    expect(rawTriggerPage.status).toBe(200)
+    expect(rawTriggerPage.total).toBe(123)
+    expect(rawTriggerPage.runs).toHaveLength(20)
+    expect(triggerPage.entries).toHaveLength(20)
+    expect(triggerPage.total).toBe(123)
+    expect(triggerPage.omittedWithoutId).toBe(0)
     expect(triggerPage.nextOffset).toBe(20)
-    await evaluate(`window.activity.loadMore('trigger_run')`)
+    for (let page = 0; page < 6; page++) {
+      await evaluate(`window.activity.loadMore('trigger_run')`)
+    }
     const triggerTail = await evaluate('window.activity.getSnapshot().sources.trigger_run')
-    expect(triggerTail.entries).toHaveLength(22)
-    expect(triggerTail.total).toBe(23)
+    expect(triggerTail.entries).toHaveLength(122)
+    expect(triggerTail.total).toBe(123)
     expect(triggerTail.nextOffset).toBeNull()
     expect(triggerTail.omittedWithoutId).toBe(1)
     expect(triggerTail.coverage).toBe('missing_ids')
-    expect(new Set(triggerTail.entries.map((entry: { identity: { key: string } }) =>
-      entry.identity.key)).size).toBe(22)
+    expect(new Set(triggerTail.entries.map((entry: { identity: { sourceId: string } }) =>
+      entry.identity.sourceId)).size).toBe(122)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'trigger-1')).toBe(true)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'lifecycle:hook-1:last')).toBe(true)
     expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
       entry.identity.sourceId === 'event:event-1:summary')).toBe(true)
+    expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
+      entry.identity.sourceId === 'trigger-page-119')).toBe(true)
+    await evaluate(`window.activity.loadMore('trigger_run')`)
+    expect((await evaluate('window.activity.getSnapshot().sources.trigger_run')).entries).toHaveLength(122)
 
     await control(server.control, '/workflow-store', { unavailable: true })
     await evaluate('window.activity.refresh()')
