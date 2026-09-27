@@ -337,6 +337,7 @@ async def author_def(
     provenance: str = "chat",
     strict: bool = True,
     workspace: dict[str, Any] | None = None,
+    expected_revision: int | None = None,
 ) -> dict[str, Any]:
     """Validate a spec and (optionally) save it.
 
@@ -428,8 +429,14 @@ async def author_def(
             "no writable workflow definition provider is registered",
         )
     try:
-        saved = await writable[0].save_def(**spec)
+        if expected_revision is not None and writable[0].name != "native":
+            return _service_failure("WF_DEF_REVISION_UNSUPPORTED", "revision checks are supported only for native workflow definitions")
+        saved = await writable[0].save_def(**spec, **({"expected_revision": expected_revision} if expected_revision is not None else {}))
     except Exception as exc:
+        from gideon.automation.workflows.native_defs import DefinitionRevisionConflict
+
+        if isinstance(exc, DefinitionRevisionConflict):
+            return _service_failure("WF_DEF_VERSION_MISMATCH", str(exc), current_revision=exc.current_revision)
         return _service_failure(
             "WF_DEF_SAVE_FAILED", f"could not save the definition: {exc}"
         )
@@ -443,7 +450,7 @@ async def author_def(
     )
 
 
-async def set_a2a_published(name: str, published: bool) -> dict[str, Any]:
+async def set_a2a_published(name: str, published: bool, *, expected_revision: int | None = None) -> dict[str, Any]:
     """Flip one template's ``metadata.a2a_published`` (EXTERNAL-ACCESS §5, EA-8).
 
     A DEDICATED write path rather than routing the toggle through :func:`author_def`, and the
@@ -480,9 +487,22 @@ async def set_a2a_published(name: str, published: bool) -> dict[str, Any]:
             "WF_DEF_NO_WRITABLE_PROVIDER",
             "no writable workflow definition provider is registered",
         )
+    if expected_revision is not None and writable[0].name != "native":
+        return _service_failure("WF_DEF_REVISION_UNSUPPORTED", "revision checks are supported only for native workflow definitions")
     try:
-        saved = await writable[0].save_def(**spec)
+        if writable[0].name == "native":
+            saved = await writable[0].set_a2a_published(
+                name, published, expected_revision=expected_revision
+            )
+            if saved is None:
+                return _service_failure("WF_DEF_NOT_FOUND", f"no workflow definition named {name!r}")
+        else:
+            saved = await writable[0].save_def(**spec)
     except Exception as exc:
+        from gideon.automation.workflows.native_defs import DefinitionRevisionConflict
+
+        if isinstance(exc, DefinitionRevisionConflict):
+            return _service_failure("WF_DEF_VERSION_MISMATCH", str(exc), current_revision=exc.current_revision)
         return _service_failure(
             "WF_DEF_SAVE_FAILED", f"could not save the definition: {exc}"
         )
