@@ -82,8 +82,8 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
       if (plan.identity.ownerScopeKey !== scope.cacheKey || plan.identity.nativeId !== id || plan.value.goal.id !== id || plan.value.plan.goal_id !== id) throw new Error('The loaded plan belongs to a different account or goal.')
       if (!active || recordKeyRef.current !== recordKey) return
       const availableSources = [...sourceRows, ...goalSessions.map(item => ({ kind: 'session' as const, id: item.identity.nativeId, title: item.value.title, status: item.value.status }))]
-      const rejectedPlan = readPendingGoalWrite(planWriteKey)
-      const draft = rejectedPlan?.rejected ? rejectedPlan.body : null
+      const pendingPlan = readPendingGoalWrite(planWriteKey)
+      const draft = pendingPlan?.body ?? null
       const draftLinks = Array.isArray(draft?.links) ? draft.links as Array<{ kind: string; id: string }> : null
       setData(draftLinks ? { ...plan.value, plan: { ...plan.value.plan, links: draftLinks.map(link => availableSources.find(source => source.kind === link.kind && source.id === link.id) ?? { ...link, title: null, status: null, availability: 'missing' }) as typeof plan.value.plan.links[number][] } } : plan.value)
       setGoals(allGoals); setSessions(goalSessions)
@@ -93,7 +93,8 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
       setHorizon(draft?.horizon === 'short_term' || draft?.horizon === 'lifetime' ? draft.horizon : draft?.horizon === 'long_term' ? draft.horizon : plan.value.plan.horizon)
       setParentId(typeof draft?.parent_id === 'string' ? draft.parent_id : plan.value.plan.parent_id ?? '')
       setUnit(typeof draft?.unit === 'string' ? draft.unit : plan.value.plan.unit)
-      setTargetValue(draft?.target_value == null ? '' : String(draft.target_value))
+      const draftTargetValue = draft && Object.prototype.hasOwnProperty.call(draft, 'target_value') ? draft.target_value : plan.value.plan.target_value
+      setTargetValue(draftTargetValue == null ? '' : String(draftTargetValue))
       setNewMilestone(''); setCheckinValue(''); setCheckinNotes(''); setCheckinNotesEdited(false); setSessionTitle(''); setSessionStart(''); setSessionEnd('')
       setLoadedKey(recordKey)
       setLoadingKey(current => current === recordKey ? null : current)
@@ -124,8 +125,9 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
       setNotice('Plan saved at the current revision.'); refresh()
     } catch (reason) {
       if (reason instanceof GatewayError && [400, 409].includes(reason.status)) rejectPendingGoalWrite(planWriteKey)
-      if (reason instanceof GatewayError && reason.status === 409) refresh()
-      if (recordKeyRef.current === key) setError(errorText(reason))
+      const currentRecord = recordKeyRef.current === key
+      if (currentRecord && reason instanceof GatewayError && reason.status === 409) refresh()
+      if (currentRecord) setError(errorText(reason))
     }
     finally { setBusyKey(current => current === key ? null : current) }
   }
