@@ -9,6 +9,7 @@ PKG := runtime/gideon
 TESTS := checks/runtime
 HARNESS := checks/harness
 WEB_DIR := apps/console
+ASSISTANT_DIR := apps/assistant
 DESKTOP_DIR := apps/desktop
 PYI_BUNDLE_DIR := dist/gideon-backend
 BACKEND_RECIPE := tooling/packaging/runtime-bundle.spec
@@ -102,9 +103,13 @@ build:
 web-build:
 	npm ci
 	npm run build --workspace "$(WEB_DIR)"
+	npm --prefix "$(ASSISTANT_DIR)" ci
+	npm run build:assistant --workspace "$(WEB_DIR)"
 	mkdir -p "$(PKG)/static"
 	rm -rf "$(PKG)/static/dist"
 	ln -s "../../../$(WEB_DIR)/dist" "$(PKG)/static/dist"
+	rm -rf "$(PKG)/static/assistant"
+	ln -s "../../../$(ASSISTANT_DIR)/dist/web" "$(PKG)/static/assistant"
 
 pyinstaller: web-build
 	"$(VENV)/pyinstaller" "$(BACKEND_RECIPE)" --noconfirm
@@ -148,7 +153,7 @@ dev-down:
 clean:
 	rm -rf build dist *.egg-info runtime/*.egg-info
 	rm -rf .pytest_cache .mypy_cache .hypothesis .coverage htmlcov
-	rm -rf "$(PKG)/static/dist" "$(WEB_DIR)/dist"
+	rm -rf "$(PKG)/static/dist" "$(PKG)/static/assistant" "$(WEB_DIR)/dist" "$(ASSISTANT_DIR)/dist"
 	rm -rf "$(DESKTOP_DIR)/dist" "$(DESKTOP_DIR)/backend-dist"
 	rm -f "$(WEB_DIR)/tsconfig.tsbuildinfo"
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

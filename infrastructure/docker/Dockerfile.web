@@ -5,10 +5,28 @@ COPY apps/console/package.json apps/console/
 RUN npm ci --workspace=apps/console --prefer-offline
 COPY apps/console/ apps/console/
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=apps/console
+COPY apps/assistant/package.json apps/assistant/package-lock.json apps/assistant/app.json apps/assistant/
+RUN npm --prefix apps/assistant ci --prefer-offline
+COPY apps/assistant/ apps/assistant/
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build:assistant --workspace=apps/console
 FROM mirror.gcr.io/library/nginx:1.27-alpine AS runtime
 COPY --from=builder /app/apps/console/dist /usr/share/nginx/html
+COPY --from=builder /app/apps/assistant/dist/web /usr/share/nginx/html/assistant
 ENV GIDEON_INSTALL_KIND=container
 COPY infrastructure/docker/nginx.conf.template /etc/nginx/templates/default.conf.template
+RUN printf '%s\n' \
+    '    location = /assistant { return 308 /assistant/; }' \
+    '    location ^~ /assistant/ {' \
+    '        try_files $uri $uri/ @assistant_spa;' \
+    '    }' \
+    '    location @assistant_spa {' \
+    '        default_type text/plain;' \
+    '        if ($uri ~* \.(js|mjs|css|json|webmanifest|png|jpg|jpeg|gif|ico|svg|webp|woff2?|ttf|otf|wasm)$) { return 404 "Assistant asset not found"; }' \
+    '        rewrite ^ /assistant/index.html last;' \
+    '    }' \
+    > /tmp/assistant-routing.conf \
+    && sed -i '/^    set \$gateway_upstream /r /tmp/assistant-routing.conf' /etc/nginx/templates/default.conf.template \
+    && rm /tmp/assistant-routing.conf
 RUN rm -f /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.bak
 RUN apk add --no-cache openssl
 COPY infrastructure/docker/10-self-signed-cert.sh /docker-entrypoint.d/10-self-signed-cert.sh

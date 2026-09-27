@@ -27,6 +27,28 @@ from gideon.security.security import SUSPICIOUS_BASH_PATTERNS
 logger = logging.getLogger(__name__)
 
 _DIST_DIR = package_path("static", "dist")
+_ASSISTANT_DIST_DIR = package_path("static", "assistant")
+
+_ASSISTANT_MIME_TYPES = {
+    ".css": "text/css",
+    ".gif": "image/gif",
+    ".html": "text/html",
+    ".ico": "image/x-icon",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".mjs": "text/javascript",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".wasm": "application/wasm",
+    ".webmanifest": "application/manifest+json",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+}
 
 _STT_MIC_CAP_BYTES = 25 * 1024 * 1024
 
@@ -117,8 +139,10 @@ h1{font-size:1.5rem;font-weight:700;text-align:center;margin-bottom:8px;
 </body></html>"""
 
 
-async def index(request: web.Request) -> web.Response:
+async def index(request: web.Request) -> web.StreamResponse:
     """Serve the React dashboard HTML."""
+    if request.path == "/assistant" or request.path.startswith("/assistant/"):
+        return await assistant_entry(request)
     react_index = _DIST_DIR / "index.html"
     if not react_index.is_file():
         return web.Response(
@@ -130,6 +154,56 @@ async def index(request: web.Request) -> web.Response:
     from gideon.workspace.surface_layers import inject_safe_meta
 
     return web.Response(text=inject_safe_meta(html), content_type="text/html")
+
+
+async def assistant_entry(request: web.Request) -> web.StreamResponse:
+    """Serve the staged assistant SPA and its exported files under /assistant/."""
+    root = Path(_ASSISTANT_DIST_DIR).resolve()
+    entry = root / "index.html"
+    if not entry.is_file():
+        return web.Response(
+            status=503,
+            text=(
+                '<!doctype html><html lang="en"><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                "<title>Gideon Assistant unavailable</title>"
+                "<main><h1>Gideon Assistant is unavailable</h1>"
+                "<p>The assistant web artifact is not installed.</p>"
+                '<a href="/">Open the existing Gideon Console (fallback)</a>'
+                "</main></html>"
+            ),
+            content_type="text/html",
+        )
+
+    requested = request.path[len("/assistant") :].lstrip("/")
+    if not requested:
+        return web.FileResponse(entry, headers={"Content-Type": "text/html"})
+
+    candidate = (root / requested).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise web.HTTPNotFound()
+
+    if candidate.is_file():
+        content_type = _ASSISTANT_MIME_TYPES.get(candidate.suffix.lower())
+        if content_type:
+            return web.FileResponse(candidate, headers={"Content-Type": content_type})
+        return web.FileResponse(candidate)
+
+    # A browser document navigation to an extensionless route gets the SPA entry.
+    # Missing bundle/assets stay missing so HTML is never returned as JavaScript,
+    # CSS, or a font under nosniff clients.
+    if candidate.suffix or requested.split("/", 1)[0] == "_expo":
+        return web.Response(
+            status=404,
+            text="Assistant asset not found",
+            content_type="text/plain",
+        )
+    accept = request.headers.get("Accept", "")
+    if "text/html" in accept:
+        return web.FileResponse(entry, headers={"Content-Type": "text/html"})
+    return web.Response(status=404, text="Assistant route not found", content_type="text/plain")
 
 
 async def favicon(request: web.Request) -> web.StreamResponse:
