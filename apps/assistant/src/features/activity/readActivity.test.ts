@@ -14,8 +14,13 @@ let debuggerSocket: WebSocket | undefined
 
 afterAll(async () => {
   debuggerSocket?.close()
-  for (const child of children) child.kill('SIGTERM')
   if (vite) await vite.close()
+  for (const child of children) {
+    if (child.exitCode !== null || child.signalCode !== null) continue
+    const closed = new Promise<void>(done => child.once('close', () => done()))
+    child.kill('SIGTERM')
+    await Promise.race([closed, new Promise<void>(done => setTimeout(done, 3_000))])
+  }
   for (const directory of directories) await rm(directory, { recursive: true, force: true })
 })
 
@@ -108,8 +113,10 @@ describe('canonical Gideon Activity reads', () => {
     const webPort = await port()
     const origin = `http://127.0.0.1:${webPort}`
     const server = await nativeServer(origin)
+    const viteCache = await mkdtemp(join(tmpdir(), 'gideon-activity-read-vite-'))
+    directories.push(viteCache)
     vite = await createServer({
-      configFile: false, root: join(root, 'apps/assistant'),
+      configFile: false, root: join(root, 'apps/assistant'), cacheDir: viteCache,
       plugins: [{
         name: 'activity-integration',
         resolveId(id) { if (id === '/activity-entry.ts') return '\0activity-entry' },
@@ -154,9 +161,14 @@ window.loaded = true
     await evaluate(`(async () => { const owner = await window.signInOwner('owner-a', 'correct-horse-battery-staple');
       window.scopeA = window.ownerScope(location.origin, owner); window.activity.setScope(window.scopeA);
       await window.activity.refresh(); return true })()`)
-    const first = await evaluate(`(() => { const snapshot = window.activity.getSnapshot();
-      return { sources: snapshot.sources, ids: snapshot.entries.map(e => e.identity.key) } })()`)
-    expect(first.sources.task.entries).toHaveLength(20)
+    const first = await evaluate(`(async () => { const snapshot = window.activity.getSnapshot();
+      const response = await fetch('/api/tasks?limit=20&offset=0&mine=1', { credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } });
+      const page = await response.json();
+      return { sources: snapshot.sources, ids: snapshot.entries.map(e => e.identity.key),
+        rawTaskPage: { status: response.status, total: page.total, ids: page.tasks?.map(task => task.id),
+          titles: page.tasks?.map(task => task.title) } } })()`)
+    expect(first.sources.task.entries, JSON.stringify(first.rawTaskPage)).toHaveLength(20)
     expect(first.sources.task.total).toBe(22)
     expect(first.sources.task.nextOffset).toBe(20)
     expect(first.sources.workflow_run.entries[0].identity.sourceId).toBe('workflow-1')
