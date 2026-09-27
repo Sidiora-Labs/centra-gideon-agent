@@ -47,7 +47,22 @@ export function ChatScreen({
   selectedMessageId,
 }: ChatScreenProps) {
   const { palette } = useShellTheme();
-  const state = useSyncExternalStore(controller.subscribe, controller.snapshot, controller.snapshot);
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot, controller.snapshot);
+  const ownerMismatch = snapshot.scope?.cacheKey !== scope.cacheKey;
+  const sessionMismatch = Boolean(sessionId && snapshot.sessionId !== sessionId);
+  const contextMismatch = ownerMismatch || sessionMismatch;
+  const state = contextMismatch ? {
+    ...snapshot,
+    scope: null,
+    sessionId: sessionId ?? null,
+    title: "",
+    messages: [],
+    draft: "",
+    phase: "loading" as const,
+    connected: false,
+    running: false,
+    error: "",
+  } : snapshot;
   const list = useRef<ScrollView>(null);
   const followLatest = useRef(true);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
@@ -58,6 +73,11 @@ export function ChatScreen({
   const waitingForAnswer = state.running || state.phase === "sending";
   const canCompose = state.phase !== "signed-out" && state.phase !== "loading"
     && state.phase !== "recovering";
+
+  function matchesCurrentContext(): boolean {
+    const current = controller.snapshot();
+    return current.scope?.cacheKey === scope.cacheKey && (!sessionId || current.sessionId === sessionId);
+  }
 
   useEffect(() => {
     controller.setOwner(scope);
@@ -77,15 +97,19 @@ export function ChatScreen({
   }, [key, scrollY]);
 
   function setDraft(value: string) {
+    if (!matchesCurrentContext()) return;
     controller.setDraft(value);
   }
 
   function send() {
+    if (!matchesCurrentContext()) return;
     void controller.send();
   }
 
   function recover() {
-    if (state.sessionId) void controller.refresh();
+    if (!matchesCurrentContext()) return;
+    const current = controller.snapshot();
+    if (current.sessionId) void controller.refresh();
     else void controller.send();
   }
 
@@ -141,7 +165,9 @@ export function ChatScreen({
                 <Pressable
                   key={suggestion}
                   accessibilityRole="button"
+                  disabled={contextMismatch}
                   onPress={() => {
+                    if (!matchesCurrentContext()) return;
                     controller.setDraft(suggestion);
                     void controller.send();
                   }}
@@ -196,7 +222,7 @@ export function ChatScreen({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={state.phase === "uncertain" ? "Refresh before retrying" : "Recover conversation"}
-              disabled={busy}
+              disabled={busy || contextMismatch}
               onPress={recover}
               style={({ pressed }) => [chatStyles.retry, { backgroundColor: palette.card }, pressed && { opacity: 0.75 }]}
             >
@@ -214,7 +240,9 @@ export function ChatScreen({
       {awayFromLatest && (
         <Pressable
           accessibilityRole="button"
+          disabled={contextMismatch}
           onPress={() => {
+            if (!matchesCurrentContext()) return;
             followLatest.current = true;
             setAwayFromLatest(false);
             list.current?.scrollToEnd({ animated: true });
@@ -230,7 +258,9 @@ export function ChatScreen({
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={chatStyles.footer}>
         {returnTo && onReturn && (
-          <Pressable accessibilityRole="button" accessibilityLabel="Return to previous workspace" onPress={onReturn} style={{ alignSelf: "center", padding: 10 }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Return to previous workspace" disabled={contextMismatch} onPress={() => {
+            if (matchesCurrentContext()) onReturn();
+          }} style={{ alignSelf: "center", padding: 10 }}>
             <Text style={[chatStyles.statusText, { color: palette.blueDark }]}>Return to previous workspace</Text>
           </Pressable>
         )}
@@ -239,8 +269,8 @@ export function ChatScreen({
         )}
         <Composer
           value={state.draft}
-          disabled={!canCompose}
-          sendDisabled={state.phase === "uncertain"}
+          disabled={!canCompose || contextMismatch}
+          sendDisabled={state.phase === "uncertain" || contextMismatch}
           busy={state.phase === "sending" || state.running}
           placeholder={state.phase === "uncertain" ? "Refresh before retrying…" : "Message Gideon…"}
           onChange={setDraft}
