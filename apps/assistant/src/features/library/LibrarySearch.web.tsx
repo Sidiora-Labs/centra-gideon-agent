@@ -67,7 +67,6 @@ export function LibrarySearch({ scope, route, navigate, onChanged, activeOwnerSc
 
   async function updateItem(item: KnowledgeItem, action: "favorite" | "read", value: boolean | "unread" | "reading" | "read") {
     const currentScope = scope.cacheKey;
-    const before = items;
     setBusyIds(ids => new Set(ids).add(item.id)); setNotice(undefined); setError(undefined);
     try {
       if (action === "favorite") await setLibraryFavorite(scope, item.id, value as boolean);
@@ -79,8 +78,7 @@ export function LibrarySearch({ scope, route, navigate, onChanged, activeOwnerSc
       onChanged?.();
     } catch (reason) {
       if (!isOwnerCurrent() || currentScope !== scope.cacheKey) return;
-      setItems(before);
-      setError(reason instanceof LibraryReadError ? `${reason.message} Your earlier state remains.` : "The update failed. Your earlier state remains.");
+      setError(reason instanceof LibraryReadError ? `${reason.message} Retry the update.` : "The update failed. Retry the action.");
     } finally {
       if (isOwnerCurrent() && currentScope === scope.cacheKey) setBusyIds(ids => { const next = new Set(ids); next.delete(item.id); return next; });
     }
@@ -90,7 +88,6 @@ export function LibrarySearch({ scope, route, navigate, onChanged, activeOwnerSc
     const collection = collections.find(candidate => candidate.id === collectionId && candidate.kind === "manual");
     if (!collection) { setError("Choose a manual collection first."); return; }
     const currentScope = scope.cacheKey;
-    const before = items;
     setBusyIds(ids => new Set(ids).add(item.id)); setError(undefined); setNotice(undefined);
     try {
       await addLibraryCollectionItem(scope, collection.id, item.id);
@@ -99,7 +96,6 @@ export function LibrarySearch({ scope, route, navigate, onChanged, activeOwnerSc
       onChanged?.();
     } catch (reason) {
       if (!isOwnerCurrent() || currentScope !== scope.cacheKey) return;
-      setItems(before);
       setError(reason instanceof Error ? `${reason.message} The item was not added.` : "The item was not added. Retry the action.");
     } finally {
       if (isOwnerCurrent() && currentScope === scope.cacheKey) setBusyIds(ids => { const next = new Set(ids); next.delete(item.id); return next; });

@@ -42,6 +42,7 @@ function LibraryHomeContent({ scope, navigate, route, activeOwnerScope }: {
       setError(undefined);
     }).catch((reason: unknown) => {
       if (!isCurrent()) return;
+      if (!(reason instanceof LibraryReadError) || reason.kind !== "unavailable") setSnapshot(undefined);
       setError(reason instanceof LibraryReadError ? reason.message : "Your Library could not be loaded.");
     }).finally(() => { if (isCurrent()) setBusy(false); });
     return () => controller.abort();
@@ -53,8 +54,10 @@ function LibraryHomeContent({ scope, navigate, route, activeOwnerScope }: {
         {([ ["home", "Overview"], ["search", "Search"], ["collections", "Collections"] ] as const).map(([id, label]) =>
           <button type="button" key={id} aria-pressed={panel === id} onClick={() => setPanel(id)}>{label}</button>)}
       </nav>
+      {panel === "home" && <button type="button" onClick={refresh}>Refresh overview</button>}
     </header>
     {error && <p role="alert" className="gideon-library__notice">{error} <button type="button" onClick={refresh}>Retry</button></p>}
+    {panel === "home" && error && snapshot && <p role="status">Showing earlier Library information. Retry to refresh.</p>}
     {panel === "home" && <>
       {busy && !snapshot && <p role="status">Loading Library…</p>}
       {snapshot && <>
