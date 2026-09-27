@@ -9,6 +9,7 @@ from pathlib import Path
 from aiohttp import web
 
 import gideon.core.config.loader as loader
+from gideon.automation.event_triggers import EventTrigger, EventTriggerStore
 from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 from gideon.automation.workflows import store as workflow_store
 from gideon.automation.workflows.handlers import api_runs_list
@@ -16,6 +17,7 @@ from gideon.automation.workflows.models import RunStatus, WorkflowRun
 from gideon.cognition.history import ConversationLog
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
+from gideon.engine.hooks import ScriptHookStore
 from gideon.engine.tasks import registry as task_registry
 from gideon.engine.tasks.handlers import api_tasks_list
 from gideon.integrations.inbox import InboxItem, InboxStore
@@ -69,10 +71,19 @@ async def main(origin: str) -> None:
             "ts": str(time.time()), "acked": False,
         }]
 
-        await task_registry.create_task(title="Another owner's task", status="open", author="owner-b")
-        await asyncio.sleep(1.05)
         for index in range(22):
             await task_registry.create_task(title=f"Native task {index}", status="open", author="owner-a")
+        await asyncio.sleep(1.05)
+        await task_registry.create_task(title="Another owner's task", status="open", author="owner-b")
+        for index in range(21):
+            workflow_store.create(WorkflowRun(
+                id=f"workflow-page-{index}", workflow_name="native-workflow", status=RunStatus.NEEDS_INPUT,
+                owner_username="owner-a", created_at=f"2020-01-01T00:00:{index:02d}Z",
+            ))
+        workflow_store.create(WorkflowRun(
+            id="workflow-other", workflow_name="native-workflow", status=RunStatus.NEEDS_INPUT,
+            owner_username="owner-b", created_at="2999-01-01T00:00:00Z",
+        ))
         workflow_store.create(WorkflowRun(
             id="workflow-1", workflow_name="native-workflow", status=RunStatus.NEEDS_INPUT,
             owner_username="owner-a",
@@ -148,6 +159,16 @@ async def main(origin: str) -> None:
                     finished_at=started_at + index / 1000, status="success",
                     summary="Scheduled work ran",
                 ))
+            hooks = ScriptHookStore(home)
+            hooks.create({
+                "id": "hook-1", "name": "Native lifecycle hook", "last_run": started_at + 1,
+                "last_status": "ok", "run_count": 1,
+            })
+            state._hook_store = hooks
+            EventTriggerStore(home / "event_triggers.json").upsert(EventTrigger(
+                id="event-1", pattern="MemoryUpdate", fire_count=1,
+                last_fired_at=started_at + 2,
+            ))
             return web.json_response({"ok": True})
 
         async def control_workflow_store(request: web.Request) -> web.Response:
