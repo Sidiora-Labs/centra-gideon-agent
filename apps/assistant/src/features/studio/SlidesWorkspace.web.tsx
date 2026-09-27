@@ -78,7 +78,9 @@ async function renderPreview(slug: string, version: number): Promise<DeckPreview
   return readGatewayJson(response)
 }
 
-export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: OwnerScope; artifactId?: string }) {
+export default function SlidesWorkspace({ scope, artifactId = '', onSelectArtifact }: {
+  scope: OwnerScope; artifactId?: string; onSelectArtifact?: (slug: string) => void
+}) {
   const viewKey = JSON.stringify([scope.cacheKey, scope.runtimeOrigin, scope.ownerId, artifactId])
   const viewRef = useRef({ key: viewKey, generation: 0 })
   const requestRef = useRef(0)
@@ -215,7 +217,8 @@ export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: Own
       }
       setDecks(previous => [created, ...previous.filter(item => item.slug !== created.slug)])
       setNewName(''); setOutline('')
-      await loadDeck(created.slug, request)
+      if (onSelectArtifact) onSelectArtifact(created.slug)
+      else await loadDeck(created.slug, request)
     } catch (reason) { if (current(request)) { setError(`Presentation render failed: ${failure(reason)}`); setExportState({ kind: 'failed', message: failure(reason) }) } }
     finally { if (current(request)) setBusy(false) }
   }
@@ -240,7 +243,8 @@ export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: Own
     <header className="flex flex-wrap items-end gap-3">
       <div className="min-w-0 flex-1"><h2 className="text-xl font-semibold">Slides</h2><p className="text-sm text-on-surface-var">Edit a saved presentation, preview its exact version, and export the rendered PPTX.</p></div>
       <label className="grid min-w-48 gap-1 text-sm">Presentation
-        <select aria-label="Presentation" value={open?.record.slug ?? ''} disabled={busy} onChange={event => void loadDeck(event.target.value)}>
+        <select aria-label="Presentation" value={open?.record.slug ?? ''} disabled={busy}
+          onChange={event => { if (onSelectArtifact) onSelectArtifact(event.target.value); else void loadDeck(event.target.value) }}>
           <option value="">Choose a PPTX</option>{decks.map(deck => <option key={deck.slug} value={deck.slug}>{deck.name} · v{deck.version}</option>)}
         </select>
       </label>

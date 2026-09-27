@@ -54,6 +54,7 @@ const TARGETS: Readonly<Record<string, StudioTarget | null>> = Object.freeze({
 
 type RecordBinding = Readonly<{ kind: string; endpoint: string; queryKey: string }>
 const RECORDS: Readonly<Record<string, RecordBinding>> = Object.freeze({
+  design: { kind: 'artifact', endpoint: '/api/artifacts', queryKey: 'artifact' },
   'capabilities/creative/ingredients': { kind: 'creative.ingredient', endpoint: '/api/capabilities/creative/ingredients', queryKey: 'ingredient' },
   'capabilities/creative/boards': { kind: 'creative.board', endpoint: '/api/capabilities/creative/boards', queryKey: 'board' },
   'capabilities/creative/universes': { kind: 'creative.universe', endpoint: '/api/capabilities/creative/universes', queryKey: 'universe' },
@@ -84,9 +85,15 @@ export function studioTarget(route: ShellRoute): StudioTarget | null {
   return TARGETS[id]
 }
 
-export function createStudioRoute(id: string, returnTo?: ShellReturnContext, ref?: StudioRecordRef, scope?: OwnerScope): ShellRoute {
+export function isSlidesRoute(route: ShellRoute): boolean {
+  return studioDestination(route)?.id === 'design' && route.placement?.subview === '/slides'
+}
+
+export function createStudioRoute(id: string, returnTo?: ShellReturnContext, ref?: StudioRecordRef, scope?: OwnerScope, subview?: string): ShellRoute {
   const entry = DESTINATIONS.find(item => item.id === id && item.owner === 'studio')
   if (!entry || !Object.hasOwn(TARGETS, id)) throw new TypeError('Unknown Studio destination')
+  if (subview && (id !== 'design' || subview !== '/slides')) throw new TypeError('Unknown Studio subview')
+  if (id === 'design' && ref && subview !== '/slides') throw new TypeError('A presentation requires the Slides subview')
   if (ref && (!scope || !sameStudioOwner(scope, ref) || RECORDS[id]?.kind !== ref.kind)) {
     throw new TypeError('This native record does not belong to the Studio destination or owner')
   }
@@ -101,15 +108,19 @@ export function createStudioRoute(id: string, returnTo?: ShellReturnContext, ref
     if (ref.artifact.version !== undefined) details.artifactVersion = String(ref.artifact.version)
     details.artifactAvailable = String(ref.artifact.available)
   }
-  return createShellRoute('apps', { view: 'workspace', placement: { id, query: details },
+  return createShellRoute('apps', { view: 'workspace', placement: { id, subview, query: details },
     record: ref ? { kind: ref.kind, id: ref.id } : undefined, returnTo })
+}
+
+export function createSlidesRoute(returnTo?: ShellReturnContext, ref?: StudioRecordRef, scope?: OwnerScope): ShellRoute {
+  return createStudioRoute('design', returnTo, ref, scope, '/slides')
 }
 
 const JOB_STATES: ReadonlySet<string> = new Set<StudioJobState>(['queued', 'running', 'completed', 'failed', 'cancelled', 'unknown'])
 
 export function studioRouteRecord(route: ShellRoute, scope: OwnerScope): StudioRecordRef | null {
   const id = studioDestination(route)?.id
-  if (!id || !route.record || RECORDS[id]?.kind !== route.record.kind) return null
+  if (!id || !route.record || RECORDS[id]?.kind !== route.record.kind || (id === 'design' && !isSlidesRoute(route))) return null
   const query = route.placement?.query ?? {}
   const positive = (value: string | undefined): number | undefined => {
     if (value === undefined) return undefined
@@ -138,12 +149,27 @@ export async function resolveStudioRoute(route: ShellRoute, scope: OwnerScope): 
   const entry = studioDestination(route)
   if (!entry || !scope.cacheKey || !scope.ownerId || !scope.runtimeOrigin
     || (typeof location !== 'undefined' && scope.runtimeOrigin !== location.origin)) return 'unavailable'
-  if (entry.id !== 'capabilities/media/library' && studioTarget(route)?.area !== 'creative') return 'unavailable'
+  const slides = isSlidesRoute(route)
+  if (entry.id === 'design' && !slides && (route.placement?.subview || route.record)) return 'unavailable'
+  if (!slides && entry.id !== 'design' && entry.id !== 'capabilities/media/library' && studioTarget(route)?.area !== 'creative') return 'unavailable'
   const binding = RECORDS[entry.id]
   if (route.record && (!binding || binding.kind !== route.record.kind)) return 'unavailable'
   try {
     const session = await readOwnerSession()
     if (session.user !== scope.ownerId) return 'denied'
+    if (slides) {
+      if (!route.record) {
+        const listing = await gatewayJson<unknown>('/api/artifacts?kind=pptx')
+        return !!listing && typeof listing === 'object' && 'artifacts' in listing && Array.isArray(listing.artifacts) ? 'available' : 'unavailable'
+      }
+      const deck = await gatewayJson<unknown>(`/api/artifacts/${encodeURIComponent(route.record.id)}/model`)
+      if (!deck || typeof deck !== 'object' || !('slug' in deck) || deck.slug !== route.record.id
+        || !('kind' in deck) || deck.kind !== 'pptx' || !('version' in deck)
+        || !Number.isSafeInteger(deck.version) || !('model' in deck) || !deck.model || typeof deck.model !== 'object'
+        || !('slides' in deck.model) || !Array.isArray(deck.model.slides)) return 'unavailable'
+      const version = route.placement?.query?.revision ?? route.placement?.query?.artifactVersion
+      return version && Number(version) !== deck.version ? 'missing' : 'available'
+    }
     if (!route.record || !binding) return 'available'
     const native = await gatewayJson<unknown>(`${binding.endpoint}/${encodeURIComponent(route.record.id)}`)
     if (!native || typeof native !== 'object' || !('id' in native) || native.id !== route.record.id) return 'unavailable'
