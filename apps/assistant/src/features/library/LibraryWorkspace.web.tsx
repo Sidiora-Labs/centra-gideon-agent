@@ -6,6 +6,7 @@ import { getLibraryRecord, LibraryReadError, type KnowledgeItem } from "./librar
 import { libraryHomeRoute, libraryItemRoute, libraryRecordHref, parseLibraryRecord, type LibraryRecordRef } from "./libraryRoutes";
 import { useShellTheme } from "../../shared/shell/shellTheme";
 import { LibraryHome } from "./LibraryHome.web";
+import { KnowledgeReader } from "./KnowledgeReader.web";
 
 export type LibraryWorkspaceProps = {
   route: ShellRoute;
@@ -20,6 +21,8 @@ type LoadState<T> = { key: string; value?: T; error?: LibraryReadError; loading:
 export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }: LibraryWorkspaceProps) {
   const record = useMemo(() => parseLibraryRecord(route), [route]);
   const { palette } = useShellTheme();
+  const activeOwnerScope = useRef(scope.cacheKey);
+  activeOwnerScope.current = scope.cacheKey;
   const itemKey = `${scope.cacheKey}\u0000${record ? `${record.kind}:${record.id}` : "no-record"}`;
   const [itemState, setItemState] = useState<LoadState<KnowledgeItem>>({ key: "", loading: true });
   const [reload, setReload] = useState(0);
@@ -94,7 +97,7 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
     onBack={record ? goBack : undefined} onGoToChat={() => navigate(createShellRoute("chat"))}
     actions={record && <button type="button" onClick={retry} disabled={activeItem.loading}>Refresh</button>}>
     <style>{`
-      .gideon-library { display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); min-height:100%; color:var(--gideon-text, #e8eaf0); background:var(--gideon-surface, #11151d); }
+      .gideon-library { display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); min-height:100%; color:var(--gideon-text, #e8eaf0); background:var(--gideon-surface, #11151d); font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
       .gideon-library__rail { padding:24px 18px; border-right:1px solid var(--gideon-border, #2a303a); }
       .gideon-library__main { min-width:0; padding:clamp(20px, 4vw, 44px); }
       .gideon-library__eyebrow { color:var(--gideon-muted, #9ba4b2); font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
@@ -106,8 +109,36 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
       .gideon-library__notice { margin:0 0 18px; padding:12px 14px; border-radius:10px; background:var(--gideon-notice); color:var(--gideon-notice-text); }
       .gideon-library__actions { display:flex; gap:10px; margin-bottom:16px; }
       .gideon-library--index { display:block; }
-      .gideon-library--reader { display:block; }
+      .gideon-library--reader { display:block; min-width:0; width:100%; }
+      .gideon-library button,.gideon-library input:not([type=radio]),.gideon-library select,.gideon-library textarea { box-sizing:border-box; max-width:100%; padding:9px 12px; border:1px solid var(--gideon-border); border-radius:9px; color:var(--gideon-text); background:var(--gideon-card); font:inherit; }
+      .gideon-library button { cursor:pointer; font-weight:600; }
+      .gideon-library button:hover:not(:disabled) { border-color:var(--gideon-accent); }
+      .gideon-library button:disabled { cursor:wait; opacity:.62; }
+      .gideon-library :is(button,input,select,textarea,a,summary):focus-visible { outline:2px solid var(--gideon-accent); outline-offset:2px; }
+      .gideon-library input[type=radio] { accent-color:var(--gideon-accent); }
+      .gideon-library input[type=file] { width:100%; }
+      .gideon-library a { color:var(--gideon-accent); }
+      .gideon-library-reader { width:100%; min-width:0; }
+      .gideon-library-reader__header { margin:0 0 24px; padding-bottom:20px; border-bottom:1px solid var(--gideon-border); }
+      .gideon-library-reader__metadata { display:flex; flex-wrap:wrap; gap:8px 22px; margin:18px 0 0; }
+      .gideon-library-reader__metadata div { min-width:0; }
+      .gideon-library-reader__metadata dt { color:var(--gideon-muted); font-size:12px; }
+      .gideon-library-reader__metadata dd { margin:3px 0 0; overflow-wrap:anywhere; }
+      .gideon-library-reader__pdf { width:100%; }
+      .gideon-library-reader__file-actions { display:flex; flex-wrap:wrap; gap:10px 18px; margin:0 0 12px; }
+      .gideon-library-reader__pdf-frame { display:block; width:100%; height:min(74vh, 960px); min-height:520px; border:1px solid var(--gideon-border); border-radius:12px; background:var(--gideon-card); }
+      .gideon-library-reader__extracted { margin-top:14px; }
+      .gideon-library-reader__extracted summary { width:fit-content; padding:8px 0; cursor:pointer; color:var(--gideon-accent); }
+      .gideon-library-reader__text-panel,.gideon-library-reader__annotations { margin-top:30px; padding-top:20px; border-top:1px solid var(--gideon-border); }
+      .gideon-library-reader__text { max-width:100%; padding:22px; border:1px solid var(--gideon-border); border-radius:12px; color:var(--gideon-text); background:var(--gideon-card); line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
+      .gideon-library-reader__annotations form { display:grid; gap:10px; max-width:760px; margin-top:18px; }
+      .gideon-library-reader__annotations textarea { width:100%; min-height:86px; resize:vertical; }
+      .gideon-library-reader__annotations form button { justify-self:start; }
+      .gideon-library-reader__annotation-list { display:grid; gap:14px; padding-left:24px; }
+      .gideon-library-reader__annotation-list li { padding:14px 16px; border:1px solid var(--gideon-border); border-radius:12px; background:var(--gideon-card); }
+      .gideon-library-reader__annotation-list blockquote { margin:0; padding-left:12px; border-left:3px solid var(--gideon-accent); white-space:pre-wrap; }
       @media(max-width:700px) { .gideon-library { display:block; min-height:100dvh; } .gideon-library__rail { display:none; } .gideon-library__main { padding:18px 16px 36px; } .gideon-library__link { padding:16px; } }
+      @media(max-width:700px) { .gideon-library-reader__pdf-frame { height:62vh; min-height:360px; } .gideon-library-reader__metadata { display:grid; grid-template-columns:minmax(0,1fr); } .gideon-library-reader__text { padding:16px; } }
     `}</style>
     {libraryStateMessage && <p className="gideon-library__notice" style={libraryPalette} role={stale ? "status" : "alert"} data-library-state={stale ? "stale" : error?.kind}>
       {libraryStateMessage}{(stale || !hasCurrentData) && <> <button type="button" onClick={retry}>{stale ? "Retry refresh" : "Retry"}</button></>}
@@ -115,7 +146,7 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
     {!record && <div className="gideon-library gideon-library--index" style={libraryPalette}>
       <div className="gideon-library__main"><LibraryHome scope={scope} route={route} navigate={navigate} /></div>
     </div>}
-    {record && activeItem.value && <div className="gideon-library gideon-library--reader" style={libraryPalette}><LibraryReader item={activeItem.value} /></div>}
+    {record && activeItem.value && <div className="gideon-library gideon-library--reader" style={libraryPalette}><KnowledgeReader key={`${scope.cacheKey}\u0000${record.kind}:${record.id}`} scope={scope} item={activeItem.value} activeOwnerScope={activeOwnerScope} /></div>}
     {record && error?.kind === "missing" && !activeItem.value && <section role="alert" data-library-state="missing">
       <h2>Knowledge item unavailable</h2><p>{error.message}</p><button type="button" onClick={goBack}>Return to Library</button>
     </section>}
@@ -132,18 +163,6 @@ export function LibraryItemLink({ item, origin, navigate }: { item: KnowledgeIte
   }}>
     <strong>{item.title}</strong><span className="gideon-library__meta">{item.item_type ?? item.kind ?? "Knowledge item"}{item.provider ? ` · ${item.provider}` : ""}</span>
   </a>;
-}
-
-function LibraryReader({ item }: { item: KnowledgeItem }) {
-  return <article className="gideon-library__main" aria-labelledby="library-reader-title">
-    <p className="gideon-library__eyebrow">{item.item_type ?? item.kind ?? "Knowledge item"}</p>
-    <h2 id="library-reader-title">{item.title}</h2>
-    {(item.source_url || item.provider || item.created_at) && <p className="gideon-library__meta">
-      {item.provider ? `Source: ${item.provider}` : "Gideon knowledge"}{item.created_at ? ` · Added ${item.created_at}` : ""}
-      {item.source_url && <> · <a href={item.source_url} target="_blank" rel="noreferrer">Open original source</a></>}
-    </p>}
-    <div className="gideon-library__content">{item.content || "This item has no extracted text. Its record remains available in your Library."}</div>
-  </article>;
 }
 
 function recordTitle(record: LibraryRecordRef): string {

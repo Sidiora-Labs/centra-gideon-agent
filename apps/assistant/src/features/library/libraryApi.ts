@@ -1,5 +1,5 @@
 import type { OwnerScope } from "../../shared/auth.web";
-import { GatewayError, gatewayHeaders, gatewayJson, gatewayPath, readGatewayJson, type GatewayMethod } from "../../shared/transport.web";
+import { GatewayError, gatewayHeaders, gatewayJson, gatewayPath, gatewayResource, readGatewayJson, type GatewayMethod } from "../../shared/transport.web";
 import type { LibraryRecordRef } from "./libraryRoutes";
 
 export type KnowledgeItem = Readonly<{
@@ -10,6 +10,7 @@ export type KnowledgeItem = Readonly<{
   provider?: string;
   source_id?: string | null;
   source_url?: string | null;
+  mime_type?: string;
   created_at?: string;
   updated_at?: string;
   content?: string;
@@ -53,6 +54,15 @@ export type KnowledgeIngestResult = Readonly<{
   itemType: string;
   status: string;
   deduped: boolean;
+}>;
+
+export type LibraryAnnotation = Readonly<{
+  id: string;
+  item_id: string;
+  quote: string;
+  occurrence: number;
+  note: string;
+  created_at: string;
 }>;
 
 export type WatchedSourceKind = Readonly<{
@@ -274,6 +284,58 @@ export async function getKnowledgeItem(scope: OwnerScope, id: string, signal?: A
   } catch (error) {
     throw readError(error, true);
   }
+}
+
+export async function getLibraryItemText(scope: OwnerScope, itemId: string, signal?: AbortSignal): Promise<string> {
+  if (!itemId.trim()) throw new TypeError("A native knowledge item ID is required");
+  try {
+    assertScope(scope);
+    const response = await gatewayResource(`/api/knowledge/items/${encodeURIComponent(itemId)}/content`, signal);
+    return await response.text();
+  } catch (error) {
+    throw readError(error, true);
+  }
+}
+
+export async function getLibraryOriginalPdf(scope: OwnerScope, itemId: string, signal?: AbortSignal): Promise<Blob> {
+  if (!itemId.trim()) throw new TypeError("A native knowledge item ID is required");
+  try {
+    assertScope(scope);
+    const response = await gatewayResource(`/api/knowledge/items/${encodeURIComponent(itemId)}/file`, signal);
+    const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "application/pdf") throw new LibraryReadError("failed", "Gideon returned a non-PDF file for this document.");
+    const blob = await response.blob();
+    if (await blob.slice(0, 5).text() !== "%PDF-") throw new LibraryReadError("failed", "Gideon returned an invalid PDF file.");
+    return blob;
+  } catch (error) {
+    throw readError(error, true);
+  }
+}
+
+function parseAnnotation(value: unknown): LibraryAnnotation {
+  if (!isObject(value) || typeof value.id !== "string" || typeof value.item_id !== "string" ||
+      typeof value.quote !== "string" || typeof value.occurrence !== "number" ||
+      typeof value.note !== "string" || typeof value.created_at !== "string") {
+    throw new LibraryReadError("failed", "Gideon returned an invalid reading note.");
+  }
+  return value as LibraryAnnotation;
+}
+
+export async function listLibraryAnnotations(scope: OwnerScope, itemId: string, signal?: AbortSignal): Promise<readonly LibraryAnnotation[]> {
+  const payload = requireObject(await requestJson(scope, `/api/knowledge/items/${encodeURIComponent(itemId)}/annotations`, { signal }), "Gideon returned invalid reading notes.");
+  if (!Array.isArray(payload.annotations)) throw new LibraryReadError("failed", "Gideon returned invalid reading notes.");
+  return payload.annotations.map(parseAnnotation);
+}
+
+export async function createLibraryAnnotation(scope: OwnerScope, itemId: string, input: { quote: string; occurrence: number; note: string }, signal?: AbortSignal): Promise<LibraryAnnotation> {
+  const payload = requireObject(await requestJson(scope, `/api/knowledge/items/${encodeURIComponent(itemId)}/annotations`, {
+    method: "POST", body: input, signal,
+  }), "Gideon did not confirm the reading note.");
+  return parseAnnotation(payload.annotation);
+}
+
+export async function deleteLibraryAnnotation(scope: OwnerScope, annotationId: string, signal?: AbortSignal): Promise<void> {
+  await requestJson(scope, `/api/knowledge/annotations/${encodeURIComponent(annotationId)}`, { method: "DELETE", signal });
 }
 
 export async function ingestKnowledgeFile(scope: OwnerScope, file: File, signal?: AbortSignal): Promise<KnowledgeIngestResult> {
