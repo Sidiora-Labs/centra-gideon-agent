@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import fcntl
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -75,13 +77,24 @@ class DefinitionDraft:
             result[provisioning.WORKSPACE_KEY] = dict(workspace)
         return result
 
-    def save(self) -> WorkflowDef:
-        document = self.document(_read(self.name))
-        target = _def_path(self.name)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(target, json.dumps(document, indent=2, ensure_ascii=False))
-        self.snapshot(document)
-        return WorkflowDef.from_dict(document)
+    def save(self, expected_revision: int | None = None) -> WorkflowDef:
+        root = defs_root()
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / ".definitions.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                prior = _read(self.name)
+                current_revision = prior.version if prior is not None else None
+                if expected_revision is not None and current_revision != expected_revision:
+                    raise DefinitionRevisionConflict(current_revision)
+                document = self.document(prior)
+                target = _def_path(self.name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write(target, json.dumps(document, indent=2, ensure_ascii=False))
+                self.snapshot(document)
+                return WorkflowDef.from_dict(document)
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
     def snapshot(self, document: dict[str, Any]) -> None:
         try:
@@ -123,24 +136,72 @@ class NativeWorkflowDefProvider(WorkflowDefProvider):
     async def get_def(self, name: str) -> Any | None:
         return _read(name) if valid_name(name) else None
 
-    async def save_def(self, **fields: Any) -> Any:
-        return DefinitionDraft(fields).save()
+    async def save_def(self, *, expected_revision: int | None = None, **fields: Any) -> Any:
+        return await asyncio.to_thread(DefinitionDraft(fields).save, expected_revision)
+
+    async def set_a2a_published(
+        self, name: str, published: bool, *, expected_revision: int | None = None
+    ) -> Any | None:
+        if not valid_name(name):
+            return None
+        return await asyncio.to_thread(
+            self._set_a2a_published_locked, name, published, expected_revision
+        )
+
+    @staticmethod
+    def _set_a2a_published_locked(
+        name: str, published: bool, expected_revision: int | None
+    ) -> Any | None:
+        root = defs_root()
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / ".definitions.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                current = _read(name)
+                if current is None:
+                    return None
+                if expected_revision is not None and current.version != expected_revision:
+                    raise DefinitionRevisionConflict(current.version)
+                path = _def_path(name)
+                document = read_definition(path, name, logger)
+                if document is None:
+                    return None
+                metadata = dict(document.get("metadata") or {})
+                metadata["a2a_published"] = bool(published)
+                document["metadata"] = metadata
+                document["version"] = current.version + 1
+                document["updated_at"] = _now()
+                atomic_write(path, json.dumps(document, indent=2, ensure_ascii=False))
+                DefinitionDraft(document).snapshot(document)
+                return WorkflowDef.from_dict(document)
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
     async def delete_def(self, name: str) -> bool:
         if not valid_name(name):
             return False
-        target = _def_path(name)
-        if not target.is_file():
-            return False
-        try:
-            target.unlink()
-            empty = next(target.parent.iterdir(), None) is None
-            if empty:
-                target.parent.rmdir()
-        except OSError:
-            logger.warning("could not delete workflow def %s", name, exc_info=True)
-            return False
-        return True
+        return await asyncio.to_thread(self._delete_locked, name)
+
+    @staticmethod
+    def _delete_locked(name: str) -> bool:
+        root = defs_root()
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / ".definitions.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                target = _def_path(name)
+                if not target.is_file():
+                    return False
+                target.unlink()
+                empty = next(target.parent.iterdir(), None) is None
+                if empty:
+                    target.parent.rmdir()
+                return True
+            except OSError:
+                logger.warning("could not delete workflow def %s", name, exc_info=True)
+                return False
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _read(name: str) -> WorkflowDef | None:
@@ -152,6 +213,12 @@ def _read(name: str) -> WorkflowDef | None:
     except (ValueError, TypeError):
         logger.warning("workflow def %s: unusable spec", name)
         return None
+
+
+class DefinitionRevisionConflict(Exception):
+    def __init__(self, current_revision: int | None):
+        self.current_revision = current_revision
+        super().__init__(f"workflow definition revision changed to {current_revision}")
 
 
 def _now() -> str:
