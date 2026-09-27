@@ -42,7 +42,10 @@ export const communicationsModuleDefinitions: readonly ModuleDefinition[] = Obje
       const drafts = await client.readOutboundDrafts()
       return drafts.some(item => providerItemKey(item.identity) === route.record?.id) ? 'available' : 'missing'
     } catch (error) {
-      return error instanceof GatewayError && error.status === 404 ? 'missing' : 'unavailable'
+      if (!(error instanceof GatewayError)) return 'unavailable'
+      if (error.status === 404) return 'missing'
+      if (error.status === 401 || (error.status === 403 && error.authRequired)) return 'denied'
+      return 'unavailable'
     } finally { client.dispose() }
   },
   load: () => import('./MailWorkspace.web'),
