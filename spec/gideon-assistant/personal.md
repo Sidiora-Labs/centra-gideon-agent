@@ -73,7 +73,7 @@ Work follows the shared `shell` route and workspace contract, the `delivery` ide
 
 - [ ] **personal-06 — Open a complete Health workspace.**
   - Add `apps/assistant/src/features/personal/HealthWorkspace.web.tsx` using existing Health records and controls.
-  - Preserve overview, readings, labs, body composition, vision, biological age, lifestyle, consumption, interventions, cognition, memory practice, life calendar, genome, imports, exports, shared health, privacy, and organizations routes.
+  - Preserve overview, readings, labs, body composition, vision, epigenetic (biological age), lifestyle, consumption, interventions, cognition, memory practice, life calendar, genome, imports, exports, shared health, privacy, and organizations routes.
   - Use dedicated detail screens and charts where a record cannot be understood from a compact card.
   - Separate user-entered data from connected-provider data and show connection readiness and last successful sync.
   - Show measurement units, observation time, source, revision, and freshness before comparisons or trend summaries.
