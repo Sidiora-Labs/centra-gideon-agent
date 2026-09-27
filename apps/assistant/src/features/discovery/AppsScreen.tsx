@@ -9,6 +9,7 @@ import {
   type AppAvailabilityFilter, type AppCategoryFilter, type AppSourceFilter, type InstalledApp,
   type InstalledAppsLoadError,
 } from "./appSearch";
+import { MiniappCollection } from "./MiniappCollection";
 
 type LoadState =
   | { phase: "loading" }
@@ -81,6 +82,7 @@ export default function AppsScreen({ route, scope, navigate, returnTo, onReturn 
   return <WorkspaceFrame route={route} mode="full" title="Apps" onBack={returnTo || route.returnTo ? onReturn : undefined}>
     <div style={{ margin: "0 auto", maxWidth: 1100, padding: "20px clamp(16px, 4vw, 36px) 48px" }}>
       <p style={{ color: palette.muted, marginTop: 0 }}>Explore Gideon destinations and apps installed for this owner.</p>
+      <MiniappCollection scope={scope} navigate={navigate} returnTo={returnContext(route)} />
       <div role="search" aria-label="Search Apps" style={{ display: "grid", gap: 12,
         gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", marginBottom: 16 }}>
         <label style={{ display: "grid", gap: 5 }}>Search destinations and installed apps
