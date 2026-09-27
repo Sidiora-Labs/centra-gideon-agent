@@ -152,7 +152,14 @@ describe('personal native contracts', () => {
     expect(idea.matches(createShellRoute('goals', { view: 'workspace', placement: { id: 'ideas' } }))).toBe(false)
     expect(idea.matches(createShellRoute('ideas', { view: 'detail', placement: { id: 'ideas' }, record: { kind: 'health-measurement', id: 'health-1' } }))).toBe(false)
     expect(idea.matches(createShellRoute('ideas', { view: 'detail', placement: { id: 'ideas' } }))).toBe(false)
-    expect(idea.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'ideas' } }))).toBe(false)
+    expect(idea.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'ideas' } }))).toBe(true)
+    const knowledgeIdeas = personalModuleDefinitions.find(module => module.id === 'capabilities/knowledge/ideas')!
+    expect(knowledgeIdeas.matches(createShellRoute('ideas', { view: 'list', placement: { id: 'capabilities/knowledge/ideas' } }))).toBe(true)
+    expect(knowledgeIdeas.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'capabilities/knowledge/ideas' } }))).toBe(true)
+    expect(knowledgeIdeas.matches(createShellRoute('goals', { view: 'workspace', placement: { id: 'capabilities/knowledge/ideas' } }))).toBe(false)
+    const learning = personalModuleDefinitions.find(module => module.id === 'learning')!
+    expect(learning.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'learning' } }))).toBe(true)
+    expect(learning.matches(createShellRoute('ideas', { view: 'list', placement: { id: 'learning' } }))).toBe(false)
   })
 
   it('does not resolve unimplemented Identity and Health placements as ready', async () => {
