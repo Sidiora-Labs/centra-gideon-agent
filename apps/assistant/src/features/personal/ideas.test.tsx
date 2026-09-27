@@ -173,7 +173,7 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.waitFor("document.querySelector('.gideon-personal-record h2')?.innerText === 'Native saved ideas'",'record-aware Idea detail')
     expect(await browser.evaluate<boolean>("document.querySelector('.gideon-personal-record details')?.open === false")).toBe(true)
     await browser.evaluate("document.querySelector('.gideon-personal-record summary')?.click()")
-    expect(await browser.evaluate<string>("document.querySelector('.gideon-personal-record details')?.innerText || ''")).toContain('50d3e623-0be4-4e04-8ca9-68109c5c1267')
+    expect(await browser.evaluate<string>("document.querySelector('.gideon-personal-record code')?.innerText || ''")).toBe('50d3e623-0be4-4e04-8ca9-68109c5c1267')
     expect(await browser.evaluate<string>("new URLSearchParams(location.search).get('from') || ''")).toBe('ideas')
     await browser.evaluate("history.pushState(null,'',location.pathname+'?v=1&view=workspace&placement=ideas');dispatchEvent(new PopStateEvent('popstate'))")
     await browser.waitFor("document.querySelector('.gideon-ideas__card')",'Ideas list after detail return')

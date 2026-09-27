@@ -36,7 +36,7 @@ export function personalSelectionKey(ownerKey: string, route: ShellRoute): strin
   return JSON.stringify([ownerKey, serializeShellRoute(route)])
 }
 
-function NativeStatus({ label, load, selectionKey, recordDetail = false }: { label: string; load: () => Promise<PersonalAvailability<unknown>>; selectionKey: string; recordDetail?: boolean }) {
+function NativeStatus({ label, load, selectionKey, recordDetail = false, recordId }: { label: string; load: () => Promise<PersonalAvailability<unknown>>; selectionKey: string; recordDetail?: boolean; recordId?: string }) {
   const [storedStatus, setStoredStatus] = useState<KeyedPersonalStatus>(() => ({ key: selectionKey, status: 'loading', message: '' }))
   const { status, message } = statusForSelection(storedStatus, selectionKey)
   const [attempt, setAttempt] = useState(0)
@@ -68,19 +68,19 @@ function NativeStatus({ label, load, selectionKey, recordDetail = false }: { lab
   }, [attempt, label, load, selectionKey])
   return <section aria-live="polite" className="gideon-personal-status" data-state={status}>
     <p role={status === 'error' ? 'alert' : 'status'}>{status === 'loading' ? `Loading ${label.toLowerCase()}…` : message}</p>
-    {recordDetail && status === 'ready' && <RecordSummary label={label} value={storedStatus.key === selectionKey ? storedStatus.value : undefined} />}
+    {recordDetail && status === 'ready' && <RecordSummary label={label} value={storedStatus.key === selectionKey ? storedStatus.value : undefined} recordId={recordId} />}
     {(status === 'error' || status === 'denied' || status === 'stale' || status === 'unavailable') && <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry {label.toLowerCase()}</button>}
   </section>
 }
 
-function RecordSummary({ label, value }: { label: string; value: unknown }) {
+function RecordSummary({ label, value, recordId }: { label: string; value: unknown; recordId?: string }) {
   let selected = value
   if (selected && typeof selected === 'object' && 'value' in selected && 'identity' in selected) selected = selected.value
   if (selected && typeof selected === 'object' && 'value' in selected) selected = selected.value
   const title = selected && typeof selected === 'object' && 'title' in selected && typeof selected.title === 'string' ? selected.title : label
   const identity = selected && typeof selected === 'object' && 'identity' in selected ? selected.identity : undefined
   const id = identity && typeof identity === 'object' && 'nativeId' in identity && typeof identity.nativeId === 'string' ? identity.nativeId
-    : selected && typeof selected === 'object' && 'id' in selected && typeof selected.id === 'string' ? selected.id : ''
+    : selected && typeof selected === 'object' && 'id' in selected && typeof selected.id === 'string' ? selected.id : recordId ?? ''
   return <div className="gideon-personal-record"><h2>{title}</h2><details><summary>Source details</summary><p>Record ID: <code>{id || 'Not supplied'}</code></p></details></div>
 }
 
@@ -222,7 +222,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
           <NativeStatus label="Goals" load={loadGoals} selectionKey={selectionKey} />
         </section>
       </div>}
-      {route.record ? <NativeStatus label={title} load={loadRecord} selectionKey={selectionKey} recordDetail />
+      {route.record ? <NativeStatus label={title} load={loadRecord} selectionKey={selectionKey} recordDetail recordId={route.record.id} />
         : !ideas && !goals && <NativeStatus label={title} load={loadFocused} selectionKey={selectionKey} />}
       <nav aria-label="Personal spaces" className="gideon-personal-spaces">
         {PERSONAL_SPACES.map(item => <button key={item.id} type="button" aria-current={item.id === space ? 'page' : undefined}
