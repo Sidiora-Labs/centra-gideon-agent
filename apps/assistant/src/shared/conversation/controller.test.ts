@@ -148,6 +148,17 @@ window.loaded = true
       window.controller.setOwner(window.ownerScope(location.origin, owner))
       const session = await window.controller.create()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
+      window.controller.receive({ type: 'tool_call', data: { session, tool_call_id: 'call-live-31', tool: 'Read file', kind: 'read', input_preview: 'notes.md' } })
+      window.controller.receive({ type: 'tool_result', data: { session, tool_call_id: 'call-live-31', output: 'Current notes', ok: true, content_type: 'text/plain', raw_ref: 'result-live-31', truncated: false } })
+      window.controller.receive({ type: 'approval', data: { session, id: 'approval-live-8', tool: 'Delete task', tool_kind: 'task.delete', tool_input: 'task-3', risk: 'destructive' } })
+      window.controller.receive({ type: 'approval_resolved', data: { session, id: 'approval-live-8', approved: false, decision: 'rejected' } })
+      window.controller.receive({ type: 'activity_event', data: { session, event_id: 'activity-live-2', kind: 'status', text: 'Checking current task status', origin: 'task' } })
+      await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+        const live = window.controller.snapshot().messages.filter(message => ['tool', 'permission', 'activity'].includes(message.role))
+        if (live.length === 3) { clearInterval(timer); done() }
+        else if (++n > 100) { clearInterval(timer); reject(Error('live lifecycle frames were not retained: ' + JSON.stringify(window.controller.snapshot()))) }
+      }, 25) })
+      const liveSegments = window.controller.snapshot().messages.filter(message => ['tool', 'permission', 'activity'].includes(message.role))
       const socket = window.controller.socket
       const frames = []
       socket.addEventListener('message', event => {
@@ -162,7 +173,7 @@ window.loaded = true
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
+      const evidence = { session, liveSegments, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
         visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
@@ -190,6 +201,14 @@ window.loaded = true
     expect(result.visible).toBe(1)
     expect(result.draft).toBe('')
     expect(new Set(result.ids).size).toBe(result.ids.length)
+    expect(result.liveSegments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: expect.stringContaining(':tool:call-live-31'), role: 'tool',
+        meta: expect.objectContaining({ tool_call_id: 'call-live-31', done: true, ok: true, output: 'Current notes', raw_ref: 'result-live-31' }) }),
+      expect.objectContaining({ id: expect.stringContaining(':approval:approval-live-8'), role: 'permission',
+        meta: expect.objectContaining({ approval_id: 'approval-live-8', resolved: 'rejected' }) }),
+      expect.objectContaining({ id: expect.stringContaining(':activity:activity-live-2'), role: 'activity',
+        meta: expect.objectContaining({ event_id: 'activity-live-2', origin: 'task' }) }),
+    ]))
     if (process.env.GIDEON_TEST_MODEL) {
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_chunk')
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_done')

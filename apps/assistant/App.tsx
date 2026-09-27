@@ -161,7 +161,7 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
               returnTo={snapshot.phase === "ready" && snapshot.route.destination === "chat"
                 ? snapshot.route.returnTo : undefined}
               onReturn={returnTo && returnTo.destination !== "chat" ? returnToAssistant : undefined}
-              scrollY={returnTo?.scrollY} selectedMessageId={returnTo?.selectionId} />}
+              scrollY={returnTo?.scrollY} selectedMessageId={returnTo?.selectionId} navigate={navigate} />}
             </WorkspaceFrame>}
         </View>
 
