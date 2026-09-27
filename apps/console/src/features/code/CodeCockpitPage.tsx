@@ -48,6 +48,8 @@ import { useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { overlayEnter, messageEnter, listItemEnter, stagger, physics } from '../../shared/theme/motion'
 import { Expandable } from '../../shared/ui/motion'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { navigateToAssistant } from '../../app/shell/assistantRouteBridge'
+import { codeRoute } from '../../../../assistant/src/features/code/codeRoute'
 
 const EMPTY_ARTIFACTS = new Set<string>()
 
@@ -438,6 +440,7 @@ export function CodeCockpitPage({ id, onBack, onDeleted, onNewTarget, onOpenProj
           {
 }
           {onNewTarget && !active && !!ws && <HeaderControl icon={Target} label="New target" priority="low" onClick={() => onNewTarget(ws)} />}
+          <HeaderControl icon={Code2} label="Open Code workspace" priority="low" onClick={() => navigateToAssistant(codeRoute({ kind: 'code-project', id }))} />
           <HeaderControl icon={ListChecks} label="All projects" priority="low" onClick={onBack} />
           <HeaderControl icon={Trash2} label="Delete project" danger priority="low" onClick={() => { void del() }} />
         </HeaderActions>} />
