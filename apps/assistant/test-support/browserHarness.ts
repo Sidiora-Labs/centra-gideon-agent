@@ -119,6 +119,11 @@ export async function startBrowserHarness(options: {
     stdio: ["ignore", "ignore", "pipe"],
     env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "OPENAI_API_KEY")),
   });
+  let processClosed = false;
+  const processClose = new Promise<void>(resolveClose => child.once("close", () => {
+    processClosed = true;
+    resolveClose();
+  }));
   let browserErrors = "";
   child.stderr.on("data", chunk => { browserErrors = (browserErrors + String(chunk)).slice(-3000); });
   let target: { webSocketDebuggerUrl: string } | undefined;
@@ -251,13 +256,26 @@ export async function startBrowserHarness(options: {
       if (closed) return;
       closed = true;
       socket.close();
-      child.kill("SIGTERM");
-      await new Promise<void>(resolve => {
-        if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
-        child.once("exit", () => resolve());
-        setTimeout(resolve, 5000);
-      });
-      if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true });
+      if (!processClosed) {
+        child.kill("SIGTERM");
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const closedGracefully = await Promise.race([
+          processClose.then(() => true),
+          new Promise<boolean>(resolveTimeout => { timeout = setTimeout(() => resolveTimeout(false), 5000); }),
+        ]);
+        if (timeout) clearTimeout(timeout);
+        if (!closedGracefully) {
+          child.kill("SIGKILL");
+          let forceTimeout: ReturnType<typeof setTimeout> | undefined;
+          const closedAfterKill = await Promise.race([
+            processClose.then(() => true),
+            new Promise<boolean>(resolveTimeout => { forceTimeout = setTimeout(() => resolveTimeout(false), 5000); }),
+          ]);
+          if (forceTimeout) clearTimeout(forceTimeout);
+          if (!closedAfterKill) throw new Error("Chromium did not close after SIGKILL");
+        }
+      }
+      if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }
