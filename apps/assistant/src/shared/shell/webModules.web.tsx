@@ -3,11 +3,17 @@ import type { OwnerScope } from "../auth.web";
 import type { ShellRoute, ShellReturnContext } from "./shellRoutes";
 import type { RouteAvailability } from "./routeState.web";
 import type { WorkspaceFrameMode } from "./WorkspaceFrame.web";
-import { useEffect, useState } from "react";
+import { createElement, useEffect, useState, type ReactNode } from "react";
 import { GatewayError, gatewayJson } from "../transport.web";
 import { serializeShellRoute } from "./shellRoutes";
 import { useShellTheme } from "./shellTheme";
-import { ThemeProvider } from "../../../../console/src/app/shell/theme";
+import { activityModuleDefinitions } from "../../features/activity/moduleDefinitions.web";
+import { discoveryModuleDefinitions } from "../../features/discovery/moduleDefinitions.web";
+import { workModuleDefinitions } from "../../features/work/moduleDefinitions.web";
+import { codeModuleDefinition } from "../../features/code/moduleDefinitions.web";
+import { studioModules } from "../../features/studio/moduleDefinitions.web";
+import { personalModuleDefinitions } from "../../features/personal/moduleDefinitions.web";
+import { libraryModuleDefinitions } from "../../features/library/moduleDefinitions.web";
 
 export type ModuleProps = {
   route: ShellRoute;
@@ -24,6 +30,8 @@ export type ModuleDefinition = {
   resolve: (scope: OwnerScope, route: ShellRoute) => Promise<RouteAvailability>;
   load: () => Promise<{ default: ComponentType<ModuleProps> }>;
 };
+
+type ControlledThemeProvider = ComponentType<{ children: ReactNode; controlledMode?: "dark" | "light" }>;
 
 type NativeRecord = { id: string; title: string; status: string } | { slug: string; name: string; kind: string };
 
@@ -66,38 +74,55 @@ async function loadArtifactModule(): Promise<{ default: ComponentType<ModuleProp
   return { default: adapters.ArtifactModule };
 }
 
-export const moduleDefinitions: readonly ModuleDefinition[] = Object.freeze([
-  {
-    id: "tasks",
-    mode: "full",
-    matches: (route) => route.destination === "activity" &&
-      (route.view === "detail" || route.view === "workspace") &&
-      route.placement?.id === "tasks" && route.record?.kind === "task",
-    resolve: (scope, route) => {
-      const id = taskId(route);
-      return id ? resolveNativeRecord(scope, `/api/tasks/${encodeURIComponent(id)}`,
-        (task: { id: string; title: string; status: string }) => task.id === id &&
-          typeof task.title === "string" && typeof task.status === "string") : Promise.resolve("unavailable");
-    },
-    load: loadTaskModule,
+const taskModuleDefinition: ModuleDefinition = Object.freeze({
+  id: "tasks",
+  mode: "full",
+  matches: (route) => route.destination === "activity" &&
+    (route.view === "detail" || route.view === "workspace") &&
+    route.placement?.id === "tasks" && route.record?.kind === "task",
+  resolve: (scope, route) => {
+    const id = taskId(route);
+    return id ? resolveNativeRecord(scope, `/api/tasks/${encodeURIComponent(id)}`,
+      (task: { id: string; title: string; status: string }) => task.id === id &&
+        typeof task.title === "string" && typeof task.status === "string") : Promise.resolve("unavailable");
   },
-  {
-    id: "artifacts/editor",
-    mode: "full",
-    matches: (route) => route.destination === "apps" && route.view === "workspace" &&
-      route.placement?.id === "artifacts/editor" && route.record?.kind === "artifact",
-    resolve: (scope, route) => {
-      const slug = artifactSlug(route);
-      return slug ? resolveNativeRecord(scope, `/api/artifacts/${encodeURIComponent(slug)}`,
-        (artifact: { slug: string; name: string; kind: string }) => artifact.slug === slug &&
-          typeof artifact.name === "string" && typeof artifact.kind === "string") : Promise.resolve("unavailable");
-    },
-    load: loadArtifactModule,
+  load: loadTaskModule,
+});
+
+const artifactModuleDefinition: ModuleDefinition = Object.freeze({
+  id: "artifacts/editor",
+  mode: "full",
+  matches: (route) => route.destination === "apps" && route.view === "workspace" &&
+    route.placement?.id === "artifacts/editor" && route.record?.kind === "artifact",
+  resolve: (scope, route) => {
+    const slug = artifactSlug(route);
+    return slug ? resolveNativeRecord(scope, `/api/artifacts/${encodeURIComponent(slug)}`,
+      (artifact: { slug: string; name: string; kind: string }) => artifact.slug === slug &&
+        typeof artifact.name === "string" && typeof artifact.kind === "string") : Promise.resolve("unavailable");
   },
-]);
+  load: loadArtifactModule,
+});
+
+const registeredDefinitions: readonly ModuleDefinition[] = [
+  taskModuleDefinition,
+  artifactModuleDefinition,
+  ...activityModuleDefinitions,
+  ...discoveryModuleDefinitions,
+  ...workModuleDefinitions,
+  codeModuleDefinition,
+  ...studioModules,
+  ...personalModuleDefinitions,
+  ...libraryModuleDefinitions,
+];
+
+export const moduleDefinitions: readonly ModuleDefinition[] = Object.freeze(registeredDefinitions);
 
 export function moduleForRoute(route: ShellRoute): ModuleDefinition | undefined {
-  return moduleDefinitions.find((definition) => definition.matches(route));
+  const matches = moduleDefinitions.filter((definition) => definition.matches(route));
+  if (matches.length > 1) {
+    throw new Error(`Assistant route has multiple module owners: ${matches.map(({ id }) => id).join(", ")}`);
+  }
+  return matches[0];
 }
 
 export async function resolveModuleRoute(scope: OwnerScope, route: ShellRoute): Promise<RouteAvailability | undefined> {
@@ -126,29 +151,42 @@ export function TrustedModuleContent({ definition, ...props }: ModuleProps & { d
   const { mode } = useShellTheme();
   const key = `${definition.id}:${props.scope.cacheKey}:${routeKey(props.route)}`;
   const [attempt, setAttempt] = useState(0);
-  const [loaded, setLoaded] = useState<{ key: string; Component: ComponentType<ModuleProps> } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    Component: ComponentType<ModuleProps>;
+    ThemeProvider: ControlledThemeProvider;
+  } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
 
   useEffect(() => {
     let active = true;
     setFailure(null);
-    void prepareTrustedRuntime().then(() => definition.load()).then(({ default: Component }) => {
-      if (active) setLoaded({ key, Component });
+    void prepareTrustedRuntime().then(async () => {
+      const [{ default: Component }, { ThemeProvider }] = await Promise.all([
+        definition.load(),
+        import("../../../../console/src/app/shell/theme"),
+      ]);
+      if (active) setLoaded({ key, Component, ThemeProvider });
     }).catch((error: unknown) => {
       if (active) setFailure({ key, message: error instanceof Error ? error.message : "The workspace could not be opened." });
     });
     return () => { active = false; };
   }, [definition, key, attempt]);
 
-  if (failure?.key === key) return <section role="alert" aria-label="Workspace unavailable" className="gideon-trusted-module-state">
-    <p>The trusted workspace could not be prepared. {failure.message}</p>
-    <button type="button" onClick={() => setAttempt((value) => value + 1)}>Retry workspace</button>
-    <button type="button" onClick={props.onReturn}>Return</button>
-  </section>;
-  if (loaded?.key !== key) return <p role="status" aria-live="polite" className="gideon-trusted-module-state">Preparing trusted workspace…</p>;
-  return <ThemeProvider controlledMode={mode}>
-    <div className={`gideon-trusted-module ${mode}`} data-gideon-module={definition.id}>
-      <loaded.Component key={key} {...props} />
-    </div>
-  </ThemeProvider>;
+  if (failure?.key === key) return createElement("section", {
+    role: "alert", "aria-label": "Workspace unavailable", className: "gideon-trusted-module-state",
+  },
+  createElement("p", null, "The trusted workspace could not be prepared. ", failure.message),
+  createElement("button", { type: "button", onClick: () => setAttempt(value => value + 1) }, "Retry workspace"),
+  createElement("button", { type: "button", onClick: props.onReturn }, "Return"));
+  if (loaded?.key !== key) return createElement("p", {
+    role: "status", "aria-live": "polite", className: "gideon-trusted-module-state",
+  }, "Preparing trusted workspace…");
+  return createElement(loaded.ThemeProvider, {
+    controlledMode: mode,
+    children: createElement("div", {
+      className: `gideon-trusted-module ${mode}`,
+      "data-gideon-module": definition.id,
+    }, createElement(loaded.Component, { ...props, key })),
+  });
 }
