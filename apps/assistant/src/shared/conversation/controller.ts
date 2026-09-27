@@ -1,0 +1,255 @@
+import { gatewayJson, GatewayError } from '../transport.web'
+import type { OwnerScope } from '../auth.web'
+import type { ChatDetail, ChatHistoryMessage, ChatSocketEvent, ConversationMessage, ConversationState } from './types'
+
+function messageId(session: string, message: ChatHistoryMessage, index: number): string {
+  const sourceId = message.meta?.id
+  if (typeof sourceId === 'string' && sourceId) return `${session}:message:${sourceId}`
+  if (message.ts) return `${session}:message:${message.role}:${message.ts}:${index}`
+  return `${session}:message:${index}`
+}
+
+export function canonicalMessages(detail: ChatDetail): readonly ConversationMessage[] {
+  return detail.messages.map((message, index) => ({
+    id: messageId(detail.key, message, index),
+    role: message.role,
+    content: message.content,
+    ts: message.ts,
+    meta: message.meta,
+    streaming: message.role === 'streaming',
+  }))
+}
+
+export function receivedPrompt(detail: ChatDetail, clientTs: string): boolean {
+  return detail.messages.some(message => message.role === 'user' && message.ts === clientTs)
+}
+
+const EMPTY: ConversationState = {
+  scope: null, sessionId: null, title: '', messages: [], draft: '', phase: 'signed-out',
+  connected: false, running: false, error: '',
+}
+
+export class ConversationController {
+  private state: ConversationState = EMPTY
+  private listeners = new Set<() => void>()
+  private socket: WebSocket | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private generation = 0
+  private loading = false
+  private loadToken = 0
+  private dirtyDuringLoad = false
+  private submitting = false
+  private lastChunkSeq = 0
+  private closed = false
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  snapshot = (): ConversationState => this.state
+
+  private update(patch: Partial<ConversationState>): void {
+    this.state = { ...this.state, ...patch }
+    for (const listener of this.listeners) listener()
+  }
+
+  private clearConnection(): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    const socket = this.socket
+    this.socket = null
+    if (socket) {
+      socket.onopen = socket.onclose = socket.onmessage = socket.onerror = null
+      socket.close()
+    }
+  }
+
+  setOwner(scope: OwnerScope | null): void {
+    if (scope?.cacheKey === this.state.scope?.cacheKey) return
+    this.generation++
+    this.loadToken++
+    this.clearConnection()
+    this.loading = false
+    this.dirtyDuringLoad = false
+    this.submitting = false
+    this.lastChunkSeq = 0
+    this.update(scope ? { ...EMPTY, scope, phase: 'idle' } : EMPTY)
+    if (scope && !this.closed) this.connect()
+  }
+
+  setDraft(draft: string): void {
+    if (!this.state.scope) return
+    this.update({ draft, error: this.state.phase === 'failed' ? '' : this.state.error,
+      phase: this.state.phase === 'failed' ? 'ready' : this.state.phase })
+  }
+
+  async create(): Promise<string> {
+    const scope = this.state.scope
+    if (!scope) throw new Error('Sign in to create a conversation')
+    const generation = this.generation
+    const draft = this.state.draft
+    this.update({ phase: 'loading', error: '' })
+    const created = await gatewayJson<{ key: string }>('/api/chat/sessions', { method: 'POST', body: {} })
+    if (generation !== this.generation || !created.key) throw new Error('Conversation owner changed')
+    await this.open(created.key)
+    if (scope.cacheKey === this.state.scope?.cacheKey) this.update({ draft })
+    return created.key
+  }
+
+  async open(sessionId: string): Promise<void> {
+    if (!this.state.scope) throw new Error('Sign in to open a conversation')
+    if (!sessionId) throw new TypeError('A session ID is required')
+    const changed = sessionId !== this.state.sessionId
+    this.generation++
+    this.loadToken++
+    this.clearConnection()
+    this.loading = false
+    this.dirtyDuringLoad = false
+    this.lastChunkSeq = 0
+    this.update({ sessionId, title: '', messages: [], draft: changed ? '' : this.state.draft,
+      phase: 'loading', running: false, error: '' })
+    this.connect()
+    await this.refresh()
+  }
+
+  async refresh(): Promise<void> {
+    const { scope, sessionId } = this.state
+    if (!scope || !sessionId) return
+    if (this.loading) { this.dirtyDuringLoad = true; return }
+    const generation = this.generation
+    const loadToken = ++this.loadToken
+    this.loading = true
+    this.dirtyDuringLoad = false
+    this.update({ phase: 'recovering', error: '' })
+    try {
+      const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
+      if (generation !== this.generation || loadToken !== this.loadToken || scope.cacheKey !== this.state.scope?.cacheKey || detail.key !== sessionId) return
+      this.lastChunkSeq = 0
+      this.update({ title: detail.title, messages: canonicalMessages(detail), running: detail.running,
+        phase: detail.running ? 'sending' : 'ready', error: '' })
+    } catch (error) {
+      if (generation === this.generation && loadToken === this.loadToken) this.update({ phase: 'failed', error: String((error as Error).message || error) })
+    } finally {
+      if (loadToken !== this.loadToken) return
+      this.loading = false
+      if (this.dirtyDuringLoad && generation === this.generation) {
+        this.dirtyDuringLoad = false
+        void this.refresh()
+      }
+    }
+  }
+
+  async send(): Promise<void> {
+    const text = this.state.draft.trim()
+    if (!this.state.scope || !text || this.submitting || this.state.phase === 'uncertain') return
+    this.submitting = true
+    let sessionId = this.state.sessionId
+    const scope = this.state.scope
+    let generation = this.generation
+    const clientTs = new Date().toISOString()
+    this.update({ phase: 'sending', error: '' })
+    try {
+      if (!sessionId) {
+        sessionId = await this.create()
+        generation = this.generation
+      }
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      const accepted = await gatewayJson<{ ok: boolean; session?: string; queued?: boolean }>(
+        '/api/chat?ws=1', { method: 'POST', body: { message: text, session: sessionId, meta: { client_ts: clientTs } } },
+      )
+      if (!accepted.ok || (accepted.session && accepted.session !== sessionId)) throw new Error('Gideon did not confirm the send')
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      this.update({ draft: this.state.draft === text ? '' : this.state.draft, phase: 'sending', running: true })
+      await this.refresh()
+    } catch (error) {
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      if (sessionId && !(error instanceof GatewayError && error.status < 500)) {
+        try {
+          const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
+          if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+          if (receivedPrompt(detail, clientTs)) {
+            this.update({ draft: this.state.draft === text ? '' : this.state.draft, messages: canonicalMessages(detail),
+              running: detail.running, phase: detail.running ? 'sending' : 'ready', error: '' })
+            return
+          }
+        } catch {
+          this.update({ phase: 'uncertain', error: 'Send outcome is unknown. Refresh the conversation before trying again.' })
+          return
+        }
+      }
+      this.update({ draft: this.state.draft || text, phase: 'failed', error: String((error as Error).message || error) })
+    } finally {
+      this.submitting = false
+    }
+  }
+
+  receive(event: ChatSocketEvent): void {
+    const { sessionId, scope } = this.state
+    if (!scope || !sessionId || event.data.session !== sessionId) return
+    if (this.loading) { this.dirtyDuringLoad = true; return }
+    if (event.type === 'chat_chunk') {
+      const content = event.data.content
+      const seq = event.data.seq
+      if (typeof content !== 'string' || typeof seq !== 'number' || seq <= this.lastChunkSeq) return
+      this.lastChunkSeq = seq
+      const messages = [...this.state.messages]
+      const last = messages[messages.length - 1]
+      if (last?.streaming) messages[messages.length - 1] = { ...last, content: last.content + content }
+      else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
+      this.update({ messages, running: true, phase: 'sending' })
+    } else if (event.type === 'chat_user_message' || event.type === 'chat_done') {
+      void this.refresh()
+    } else if (event.type === 'chat_message' && event.data.role === 'error') {
+      void this.refresh()
+    }
+  }
+
+  private connect(): void {
+    const scope = this.state.scope
+    if (!scope || this.closed) return
+    const generation = this.generation
+    const origin = new URL(scope.runtimeOrigin)
+    const address = `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}/api/ws`
+    let socket: WebSocket
+    try { socket = new WebSocket(address) } catch { this.reconnect(generation); return }
+    this.socket = socket
+    socket.onopen = () => {
+      if (generation !== this.generation || this.socket !== socket) return
+      this.update({ connected: true })
+      if (this.state.sessionId) void this.refresh()
+    }
+    socket.onmessage = event => {
+      if (generation !== this.generation || this.socket !== socket || typeof event.data !== 'string') return
+      try {
+        const parsed: unknown = JSON.parse(event.data)
+        if (parsed && typeof parsed === 'object' && 'type' in parsed && 'data' in parsed &&
+          typeof parsed.type === 'string' && parsed.data && typeof parsed.data === 'object') {
+          this.receive(parsed as ChatSocketEvent)
+        }
+      } catch { return }
+    }
+    socket.onerror = () => socket.close()
+    socket.onclose = () => {
+      if (generation !== this.generation || this.socket !== socket) return
+      this.socket = null
+      this.update({ connected: false, phase: this.state.sessionId ? 'recovering' : this.state.phase })
+      this.reconnect(generation)
+    }
+  }
+
+  private reconnect(generation: number): void {
+    if (this.timer || generation !== this.generation || this.closed) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      if (generation === this.generation) this.connect()
+    }, 1000)
+  }
+
+  dispose(): void {
+    this.closed = true
+    this.generation++
+    this.clearConnection()
+    this.listeners.clear()
+  }
+}
