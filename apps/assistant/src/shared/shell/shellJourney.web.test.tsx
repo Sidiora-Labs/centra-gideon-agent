@@ -1,13 +1,11 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type ViteDevServer } from "vite";
 import { afterAll, describe, expect, it } from "vitest";
-import { startBrowserHarness, type BrowserHarness } from "../../../test-support/browserHarness";
+import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from "../../../test-support/browserHarness";
 import { startNativeServer, type NativeServer } from "../../../test-support/nativeServer";
 
 const root = process.cwd().replace(/\/apps\/assistant$/, "");
-let vite: ViteDevServer | undefined;
+let vite: Awaited<ReturnType<typeof startViteEntryServer>> | undefined;
 let browser: BrowserHarness | undefined;
 let native: NativeServer | undefined;
 let entryDirectory: string | undefined;
@@ -34,34 +32,17 @@ describe("real browser authentication bootstrap", () => {
       origin,
       repositoryRoot: root,
     });
-    entryDirectory = await mkdtemp(join(tmpdir(), "gideon-auth-entry-"));
+    entryDirectory = await mkdtemp(join(root, "apps/assistant/.shell-journey-entry-"));
     const entryFile = `${entryDirectory}/auth-entry.tsx`;
-    await writeFile(entryFile, `import * as React from 'react';
-import { createRoot } from 'react-dom/client';
-import { AssistantBootstrapProvider, useAssistantBootstrap } from '/src/shared/bootstrap.web.tsx';
-function Ready() {
-  const bootstrap = useAssistantBootstrap();
-  React.useEffect(() => { window.__bootstrap = bootstrap; }, [bootstrap]);
-  return <p id="owner-ready">{bootstrap.state.owner?.user}</p>;
-}
-createRoot(document.getElementById('root')!).render(<AssistantBootstrapProvider><Ready /></AssistantBootstrapProvider>);`, "utf8");
-    vite = await createServer({
-      configFile: false,
+    await writeFile(entryFile, `import { createRoot } from 'react-dom/client';
+import App from '/App.tsx';
+createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
+    vite = await startViteEntryServer({
       root: `${root}/apps/assistant`,
-      esbuild: { jsx: "automatic" },
-      resolve: { dedupe: ["react", "react-dom"] },
-      plugins: [{
-        name: "gideon-real-auth-entry",
-        configureServer(viteServer) {
-          viteServer.middlewares.use("/assistant", (_request, response) => {
-            response.setHeader("Content-Type", "text/html; charset=utf-8");
-            response.end(`<!doctype html><html><body><div id="root"></div><script type="module" src="/@fs${entryFile}"></script></body></html>`);
-          });
-        },
-      }],
-      server: { host: "127.0.0.1", port, strictPort: true, fs: { allow: [root, entryDirectory] }, proxy: { "/api": native.apiOrigin } },
+      port,
+      entryFile,
+      apiOrigin: native.apiOrigin,
     });
-    await vite.listen();
     browser = await startBrowserHarness({ windowSize: { width: 1280, height: 900 } });
     await browser.navigate(`${origin}/assistant`);
     await browser.waitFor("document.querySelector('#gideon-password')", "real owner sign-in form");
@@ -69,8 +50,9 @@ createRoot(document.getElementById('root')!).render(<AssistantBootstrapProvider>
       const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
       set('gideon-username','owner-a');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true
     })()`);
-    await browser.waitFor(`document.querySelector('#owner-ready')?.textContent === 'owner-a'`, "authenticated owner bootstrap");
-    const session = await browser.evaluate<{ user: string; phase: string; ownerId: string; runtimeOrigin: string }>(`(()=>{const state=window.__bootstrap?.state;return {user:state?.owner?.user,phase:state?.phase,ownerId:state?.scope?.ownerId,runtimeOrigin:state?.scope?.runtimeOrigin}})()`);
-    expect(session).toEqual({ user: "owner-a", phase: "ready", ownerId: "owner-a", runtimeOrigin: origin });
+    await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as owner-a')`, "authenticated Gideon App");
+    const shell = await browser.evaluate<{ roots: number; owner: string }>(`({roots:document.querySelectorAll('#root').length,owner:document.querySelector('[data-gideon-assistant]')?.textContent||''})`);
+    expect(shell.roots).toBe(1);
+    expect(shell.owner).toContain("Signed in as owner-a");
   }, 60000);
 });

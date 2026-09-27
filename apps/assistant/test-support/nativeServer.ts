@@ -1,10 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export type NativeServer = Readonly<{
-  child: ChildProcessWithoutNullStreams;
+  child: ChildProcess;
   home: string;
   apiOrigin: string;
   controlOrigin: string;
@@ -72,7 +72,7 @@ export async function startNativeServer(options: {
         await new Promise<void>(resolveStop => {
           if (child.exitCode !== null || child.signalCode !== null) { resolveStop(); return; }
           child.once("exit", () => resolveStop());
-          setTimeout(resolveStop, 5000).unref();
+          setTimeout(resolveStop, 5000);
         });
         await rm(home, { recursive: true, force: true });
       },
