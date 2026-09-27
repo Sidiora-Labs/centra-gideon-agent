@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -25,18 +25,17 @@ const nativeFixture = String.raw`
 import asyncio, json, os, sys
 from pathlib import Path
 from aiohttp import web
-from gideon.core.config import loader
+from gideon.core.config import config_dir
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth, capabilities_identity_goals, capabilities_identity_goal_plans
-from gideon.security.auth import credentials
+from gideon.security.auth.credentials import set_password
 from gideon.workspace.capabilities.identity.goals import GoalStore
 
 async def main(origin):
     home = Path(os.environ['GIDEON_HOME'])
-    assert loader.config_dir() == home
-    assert credentials.config_dir() == home
+    assert config_dir() == home
     (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}}), encoding='utf-8')
-    credentials.set_password('goals-owner', 'native-goals-password')
+    set_password('goals-owner', 'native-goals-password')
     token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
     goals_path = home / 'capabilities/identity/goals.sqlite3'
     seeded = GoalStore(goals_path).save_goal(title='Parent objective', description='Existing parent for hierarchy', request_id='seed-parent-001', expected_revision=0)
@@ -46,7 +45,20 @@ async def main(origin):
     async def delay_second_plan(request, handler):
         if request.path == second_plan_path: await asyncio.sleep(0.6)
         return await handler(request)
-    app = web.Application(middlewares=[delay_second_plan, token_auth.token_auth_middleware(port=10000)])
+    @web.middleware
+    async def lose_committed_checkin_reply(request, handler):
+        if request.method != 'POST' or request.path != '/api/capabilities/identity/goal-plans/checkins':
+            return await handler(request)
+        body = await request.json()
+        response = await handler(request)
+        if response.status != 200: return response
+        attempts_path = home / 'checkin-attempts.json'
+        attempts = json.loads(attempts_path.read_text()) if attempts_path.exists() else []
+        attempts.append(body); attempts_path.write_text(json.dumps(attempts))
+        if len(attempts) == 1:
+            request.transport.close()
+        return response
+    app = web.Application(middlewares=[delay_second_plan, lose_committed_checkin_reply, token_auth.token_auth_middleware(port=10000)])
     app['port'] = 10000; app['allowed_origins'] = {origin}
     app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
     app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
@@ -145,9 +157,24 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-checkin-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'4');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').disabled===false", 'check-in measurement state rendered before save')
     await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
-    await browser.waitFor("document.body.innerText.includes('Measurement saved to this goal.')", 'real native metric check-in')
+    await browser.waitFor("document.body.innerText.includes('A measurement save needs confirmation.') && document.querySelector('#goal-checkins')?.parentElement?.innerText.includes('Retry check-in')", 'committed native check-in with lost reply and persisted retry')
+    const firstAttempt = JSON.parse(await readFile(join(native.home, 'checkin-attempts.json'), 'utf8')) as Array<Record<string, unknown>>
+    expect(firstAttempt).toHaveLength(1)
+    const beforeRetry = await browser.evaluate<{ checkins: unknown[] }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
+    expect(beforeRetry.checkins).toHaveLength(1)
+    await browser.navigate(`${origin}/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(identity.id)}&placement=goals`)
+    await browser.waitFor("document.querySelector('#goal-checkins')?.parentElement?.innerText.includes('Retry check-in') && document.getElementById('goal-checkin-value')?.value==='4'", 'pending check-in restored from scoped storage after reload')
+    await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
+    await browser.waitFor("document.body.innerText.includes('Measurement saved to this goal.')", 'idempotent retry reconciles the committed check-in')
+    await browser.waitFor("document.querySelector('#goal-checkins')?.parentElement?.innerText.includes('4 units') && document.getElementById('goal-session-title').disabled===false", 'native projection refresh finishes before entering the next draft')
+    const attempts = JSON.parse(await readFile(join(native.home, 'checkin-attempts.json'), 'utf8')) as Array<Record<string, unknown>>
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1]).toEqual(attempts[0])
+    const afterRetry = await browser.evaluate<{ checkins: Array<{ id: string; value: number }> }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
+    expect(afterRetry.checkins).toHaveLength(1)
+    expect(afterRetry.checkins[0]).toMatchObject({ value: 4 })
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-title');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Planting bed workshop');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
-    await browser.waitFor("document.getElementById('goal-session-title').closest('form').querySelector('button[type=submit]').disabled===false", 'session title state rendered before start entry')
+    await browser.waitFor("document.getElementById('goal-session-title')?.value==='Planting bed workshop'", 'session title state rendered before start entry')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-start');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'2030-01-01T10:00');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-session-start')?.value==='2030-01-01T10:00'", 'session start rendered before end entry')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-end');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'2030-01-01T11:00');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
@@ -158,7 +185,7 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.evaluate(`(()=>{const option=Array.from(document.querySelectorAll('#goal-source-select option')).find(item=>item.textContent.includes('Planting bed workshop'));if(!option)return false;const select=document.getElementById('goal-source-select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,option.value);select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===option.value})()`)
     await browser.waitFor("document.querySelector('#goal-source-select')?.closest('.gideon-goal-plan__add-row').querySelector('button')?.disabled===false", 'session source state rendered before linking')
     await browser.evaluate("document.querySelectorAll('.gideon-goal-plan__add-row button')[1].click()")
-    await browser.waitFor("document.querySelector('#goal-sources')?.parentElement?.innerText.includes('Planting bed workshop') && document.querySelector('#goal-sources')?.parentElement?.innerText.includes('Source ID')", 'linked source row rendered before completion')
+    await browser.waitFor("document.querySelector('#goal-sources')?.parentElement?.innerText.includes('Planting bed workshop') && document.querySelector('#goal-sources')?.parentElement?.innerText.includes('session')", 'linked source row rendered before completion')
     await browser.evaluate("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]').click()")
     await browser.waitFor("document.querySelector('.gideon-goal-plan__section-title span')?.innerText==='1 of 1 complete'", 'explicit milestone completion rendered before plan save')
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(button=>button.innerText==='Save plan').click()")
@@ -175,6 +202,20 @@ createRoot(document.getElementById('root')).render(<Root/>)
     expect(saved.plan.milestones).toContainEqual(expect.objectContaining({ done: true }))
     expect(saved.plan.links).toContainEqual(expect.objectContaining({ kind: 'session' }))
     expect(saved.ratio).toContain('100%')
+    const screenshotDirectory = process.env.GIDEON_EVIDENCE_DIR
+    if (screenshotDirectory) {
+      await mkdir(screenshotDirectory, { recursive: true })
+      const capture = async (name: string) => {
+        const result = await browser?.command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+        if (typeof result?.data !== 'string') throw new Error(`Chromium did not return screenshot data for ${name}`)
+        await writeFile(join(screenshotDirectory, name), Buffer.from(result.data, 'base64'))
+      }
+      await browser.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
+      await capture('personal-04-goals-desktop.png')
+      await browser.command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+      await capture('personal-04-goals-narrow.png')
+      await browser.command('Emulation.clearDeviceMetricsOverride')
+    }
     await browser.navigate(`${origin}/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(identity.id)}&placement=goals`)
     await browser.waitFor("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === true", 'persisted explicit milestone after reload')
     expect(await browser.evaluate<string>("document.querySelector('.gideon-goal-plan__identity code')?.innerText || ''")).toBe(identity.id)

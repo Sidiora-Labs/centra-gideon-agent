@@ -7,6 +7,39 @@ export type PersonalRecord<T> = Readonly<{ identity: PersonalIdentity; value: T;
 export type PersonalAvailability<T> = Readonly<{ state: 'available'; value: T }> | Readonly<{ state: 'unavailable'; reason: string }>
 export type PersonalWrite<T> = Readonly<{ value: T; requestId: string; expectedRevision?: number }>
 export type NativeValue = Readonly<Record<string, unknown>>
+export type PendingGoalWrite = Readonly<{ request_id: string; body: NativeValue; rejected?: boolean }>
+
+export function pendingGoalWriteKey(ownerScopeKey: string, goalId: string, operation: string): string {
+  return `gideon:personal:goal-write:${JSON.stringify([ownerScopeKey, goalId, operation])}`
+}
+
+export function readPendingGoalWrite(key: string): PendingGoalWrite | null {
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<PendingGoalWrite>
+    return typeof value.request_id === 'string' && value.body && typeof value.body === 'object'
+      ? value as PendingGoalWrite : null
+  } catch { return null }
+}
+
+export function preparePendingGoalWrite(key: string, fields: NativeValue): PendingGoalWrite {
+  const current = readPendingGoalWrite(key)
+  if (current && !current.rejected) return current
+  const request_id = crypto.randomUUID()
+  const operation = Object.freeze({ request_id, body: Object.freeze({ ...fields, request_id }) })
+  window.localStorage.setItem(key, JSON.stringify(operation))
+  return operation
+}
+
+export function clearPendingGoalWrite(key: string): void {
+  window.localStorage.removeItem(key)
+}
+
+export function rejectPendingGoalWrite(key: string): void {
+  const current = readPendingGoalWrite(key)
+  if (current) window.localStorage.setItem(key, JSON.stringify({ ...current, rejected: true }))
+}
 export type IdeaRecord = Readonly<{ id: string; title: string; revision?: number; status?: string; source_link?: string } & NativeValue>
 export type HumanGoal = Readonly<{ id: string; title: string; description: string; status: 'active' | 'completed' | 'archived'; target_date: string | null; revision: number } & NativeValue>
 export type HumanGoalInput = Readonly<{ title: string; description?: string; status?: 'active' | 'completed' | 'archived'; target_date?: string | null }>
