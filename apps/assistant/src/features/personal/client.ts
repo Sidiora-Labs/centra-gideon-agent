@@ -1,0 +1,237 @@
+import { GatewayError, gatewayJson } from '../../shared/transport.web'
+import type { OwnerScope } from '../../shared/auth.web'
+
+export type PersonalSourceKind = 'idea' | 'human-goal' | 'goal-plan' | 'identity-story' | 'learning-capture' | 'learning-review' | 'companion-item' | 'memory-fact' | 'health-measurement' | 'journal-entry'
+export type PersonalIdentity = Readonly<{ ownerScopeKey: string; sourceKind: PersonalSourceKind; nativeId: string }>
+export type PersonalRecord<T> = Readonly<{ identity: PersonalIdentity; value: T; revision?: number; freshness: 'current' | 'stale' }>
+export type PersonalAvailability<T> = Readonly<{ state: 'available'; value: T }> | Readonly<{ state: 'unavailable'; reason: string }>
+export type PersonalWrite<T> = Readonly<{ value: T; requestId: string; expectedRevision?: number }>
+export type NativeValue = Readonly<Record<string, unknown>>
+export type IdeaRecord = Readonly<{ id: string; title: string; revision?: number; status?: string; source_link?: string } & NativeValue>
+export type HumanGoal = Readonly<{ id: string; title: string; description: string; status: 'active' | 'completed' | 'archived'; target_date: string | null; revision: number } & NativeValue>
+export type HumanGoalInput = Readonly<{ title: string; description?: string; status?: 'active' | 'completed' | 'archived'; target_date?: string | null }>
+export type GoalPlan = Readonly<{ goal_id: string; revision?: number } & NativeValue>
+export type IdentityStory = Readonly<{ id: string; prompt: string; theme: string; text: string; parent_id: string | null; revision: number } & NativeValue>
+export type LearningCapture = Readonly<{ id: string; status: string; original_text: string; captured_at: string } & NativeValue>
+export type LearningReview = Readonly<{ id: string; date?: string; status?: string } & NativeValue>
+export type MemoryFact = Readonly<{ key: string; value: unknown; source?: string; confidence?: number } & NativeValue>
+export type HealthMeasurement = Readonly<{ id: string; kind: string; observed_at: string; revision?: number } & NativeValue>
+export type JournalRecord = Readonly<{ id: string; title: string; content: string; revision: number; fingerprint: string } & NativeValue>
+
+const clients = new Map<string, Set<PersonalClient>>()
+const activeOwnerByOrigin = new Map<string, string>()
+const enc = (value: string) => encodeURIComponent(value)
+
+function requireId(id: string): void {
+  if (!id.trim() || id.length > 512 || /[\u0000-\u001f\u007f]/.test(id)) throw new TypeError('A canonical native record ID is required')
+}
+
+function record<T extends NativeValue>(scope: OwnerScope, sourceKind: PersonalSourceKind, value: T): PersonalRecord<T> {
+  const id = value.id ?? value.key ?? value.goal_id
+  if (typeof id !== 'string' || !id) throw new TypeError(`Native ${sourceKind} record has no canonical ID`)
+  return Object.freeze({ identity: Object.freeze({ ownerScopeKey: scope.cacheKey, sourceKind, nativeId: id }), value,
+    ...(typeof value.revision === 'number' ? { revision: value.revision } : {}), freshness: 'current' })
+}
+
+type Entry = PersonalRecord<NativeValue>
+
+export class PersonalClient {
+  private readonly cache = new Map<string, Entry>()
+  private generation = 0
+  constructor(readonly scope: OwnerScope) {
+    const previous = activeOwnerByOrigin.get(scope.runtimeOrigin)
+    if (previous && previous !== scope.cacheKey) clearPersonalOwnerCache(previous)
+    activeOwnerByOrigin.set(scope.runtimeOrigin, scope.cacheKey)
+    const owners = clients.get(scope.cacheKey) ?? new Set<PersonalClient>()
+    owners.add(this)
+    clients.set(scope.cacheKey, owners)
+  }
+
+  clear(): void { this.generation++; this.cache.clear() }
+  dispose(): void {
+    this.clear()
+    const owners = clients.get(this.scope.cacheKey)
+    owners?.delete(this)
+    if (!owners?.size) clients.delete(this.scope.cacheKey)
+  }
+
+  private async read<T>(path: string, sourceKind: PersonalSourceKind, signal?: AbortSignal): Promise<readonly PersonalRecord<T & NativeValue>[]> {
+    const generation = this.generation
+    let payload: unknown
+    try { payload = await gatewayJson<unknown>(path, { signal }) }
+    catch (error) {
+      if (generation !== this.generation) throw new Error('Personal account changed while records were loading; refresh this selection')
+      const cached = [...this.cache.values()].filter(item => item.identity.sourceKind === sourceKind)
+      if (cached.length) return cached.map(item => Object.freeze({ ...item, freshness: 'stale' as const })) as unknown as readonly PersonalRecord<T & NativeValue>[]
+      throw error
+    }
+    if (generation !== this.generation) throw new Error('Personal account changed while records were loading; refresh this selection')
+    const rows: unknown[] = Array.isArray(payload) ? payload : payload && typeof payload === 'object'
+      ? Object.values(payload).find(value => Array.isArray(value)) as unknown[] ?? [] : []
+    if (payload && !Array.isArray(payload) && !rows.length && !Object.values(payload).some(Array.isArray)) {
+      throw new TypeError(`Native ${sourceKind} collection did not return records`)
+    }
+    const result = rows.map(value => record<T & NativeValue>(this.scope, sourceKind, value as T & NativeValue))
+    for (const item of result) this.cache.set(`${item.identity.sourceKind}:${item.identity.nativeId}`, item as Entry)
+    return result
+  }
+
+  private async detail<T>(path: string, id: string, sourceKind: PersonalSourceKind, signal?: AbortSignal): Promise<PersonalRecord<T & NativeValue>> {
+    requireId(id)
+    const generation = this.generation
+    const value = await gatewayJson<T>(path, { signal })
+    if (generation !== this.generation) throw new Error('Personal account changed while the record was loading; refresh this selection')
+    const result = record<T & NativeValue>(this.scope, sourceKind, value as T & NativeValue)
+    if (result.identity.nativeId !== id) throw new Error('Native response returned a different canonical record ID')
+    this.cache.set(`${sourceKind}:${id}`, result as Entry)
+    return result
+  }
+
+  private async write<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body: NativeValue, signal?: AbortSignal): Promise<T> {
+    const generation = this.generation
+    const value = await gatewayJson<T>(path, { method, body, signal })
+    if (generation !== this.generation) throw new Error('Personal account changed while the write was in progress; reload before continuing')
+    return value
+  }
+
+  async readIdeas(signal?: AbortSignal): Promise<readonly PersonalRecord<IdeaRecord>[]> {
+    return this.read('/api/capabilities/knowledge/ideas', 'idea', signal)
+  }
+  async readIdea(id: string, signal?: AbortSignal): Promise<PersonalRecord<IdeaRecord>> {
+    return this.detail<IdeaRecord>(`/api/capabilities/knowledge/ideas/${enc(id)}`, id, 'idea', signal)
+  }
+  async importIdeaList(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    return this.write('/api/capabilities/knowledge/ideas/import', 'POST', input, signal)
+  }
+  async scheduleIdeaSync(id: string, input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    requireId(id)
+    return this.write(`/api/capabilities/knowledge/ideas/${enc(id)}/schedule`, 'POST', input, signal)
+  }
+
+  async readGoals(signal?: AbortSignal): Promise<readonly PersonalRecord<HumanGoal>[]> {
+    return this.read('/api/capabilities/identity/goals/goals', 'human-goal', signal)
+  }
+  async readGoal(id: string, signal?: AbortSignal): Promise<PersonalRecord<HumanGoal>> {
+    return this.detail<HumanGoal>(`/api/capabilities/identity/goals/goals/${enc(id)}`, id, 'human-goal', signal)
+  }
+  async saveGoal(id: string | undefined, fields: HumanGoalInput, requestId: string, expectedRevision: number, signal?: AbortSignal): Promise<PersonalRecord<HumanGoal>> {
+    if (!requestId.trim() || !Number.isInteger(expectedRevision) || expectedRevision < 0) throw new TypeError('A request ID and expected goal revision are required')
+    const value = await this.write<NativeValue>(`/api/capabilities/identity/goals/goals`, 'POST', { ...fields, ...(id ? { id } : {}), request_id: requestId, expected_revision: expectedRevision }, signal)
+    const result = record<HumanGoal>(this.scope, 'human-goal', value as HumanGoal)
+    this.cache.set(`human-goal:${result.identity.nativeId}`, result)
+    return result
+  }
+  async readGoalPlans(signal?: AbortSignal): Promise<readonly PersonalRecord<GoalPlan>[]> {
+    return this.read('/api/capabilities/identity/goal-plans', 'goal-plan', signal)
+  }
+  async readGoalPlan(id: string, signal?: AbortSignal): Promise<PersonalRecord<GoalPlan>> {
+    return this.detail<GoalPlan>(`/api/capabilities/identity/goal-plans/${enc(id)}`, id, 'goal-plan', signal)
+  }
+  async configureGoalPlan(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    return this.write('/api/capabilities/identity/goal-plans/configure', 'POST', input, signal)
+  }
+  async addGoalCheckin(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    return this.write('/api/capabilities/identity/goal-plans/checkins', 'POST', input, signal)
+  }
+
+  async readIdentityStories(signal?: AbortSignal): Promise<readonly PersonalRecord<IdentityStory>[]> {
+    return this.read('/api/capabilities/identity/stories', 'identity-story', signal)
+  }
+  async readIdentityStory(id: string, signal?: AbortSignal): Promise<PersonalRecord<IdentityStory>> {
+    return this.detail<IdentityStory>(`/api/capabilities/identity/stories/${enc(id)}`, id, 'identity-story', signal)
+  }
+  async saveIdentityStory(id: string | undefined, input: NativeValue, requestId: string, expectedRevision: number, signal?: AbortSignal): Promise<PersonalRecord<NativeValue>> {
+    if (!requestId.trim()) throw new TypeError('A native request ID is required')
+    const value = await this.write<NativeValue>(id ? `/api/capabilities/identity/stories/${enc(id)}` : '/api/capabilities/identity/stories', id ? 'PUT' : 'POST',
+      { ...input, ...(id ? { expected_revision: expectedRevision } : { request_id: requestId }) }, signal)
+    const result = record(this.scope, 'identity-story', value)
+    this.cache.set(`identity-story:${result.identity.nativeId}`, result)
+    return result
+  }
+  async readIdentityProfile(signal?: AbortSignal): Promise<NativeValue> {
+    return gatewayJson('/api/capabilities/identity/twin', { signal })
+  }
+
+  async readLearningCaptures(signal?: AbortSignal): Promise<PersonalAvailability<readonly PersonalRecord<LearningCapture>[]>> {
+    return this.optionalRead<LearningCapture>('/api/capabilities/knowledge/captures', 'learning-capture', signal)
+  }
+  async readLearningReviews(signal?: AbortSignal): Promise<PersonalAvailability<readonly PersonalRecord<LearningReview>[]>> {
+    return this.optionalRead<LearningReview>('/api/capabilities/knowledge/reviews', 'learning-review', signal)
+  }
+  async saveLearningReview(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    return this.write('/api/capabilities/knowledge/reviews', 'POST', input, signal)
+  }
+  private async optionalRead<T extends NativeValue>(path: string, kind: PersonalSourceKind, signal?: AbortSignal): Promise<PersonalAvailability<readonly PersonalRecord<T>[]>> {
+    try { return { state: 'available', value: await this.read(path, kind, signal) } }
+    catch (error) {
+      if (error instanceof GatewayError && [404, 501].includes(error.status)) return { state: 'unavailable', reason: 'This native personal service is unavailable on this Gideon instance.' }
+      throw error
+    }
+  }
+  async createLearningCapture(text: string, requestId: string, signal?: AbortSignal): Promise<PersonalRecord<NativeValue>> {
+    if (!text.trim() || !requestId.trim()) throw new TypeError('Capture text and request ID are required')
+    const value = await this.write<NativeValue>('/api/capabilities/knowledge/captures', 'POST', { text, request_id: requestId }, signal)
+    return record(this.scope, 'learning-capture', value)
+  }
+
+  async readCompanion(): Promise<PersonalAvailability<NativeValue>> {
+    try { return { state: 'available', value: await gatewayJson('/api/companion/discovery') } }
+    catch (error) { if (error instanceof GatewayError && [404, 501].includes(error.status)) return { state: 'unavailable', reason: 'Companion is unavailable on this Gideon instance.' }; throw error }
+  }
+
+  async readMemory(signal?: AbortSignal): Promise<readonly PersonalRecord<MemoryFact>[]> {
+    return this.read('/api/memory/semantic', 'memory-fact', signal)
+  }
+  async readMemoryFact(id: string, signal?: AbortSignal): Promise<PersonalRecord<MemoryFact>> {
+    requireId(id)
+    const rows = await this.readMemory()
+    const match = rows.find(row => row.identity.nativeId === id)
+    if (!match) throw new GatewayError('Memory record not found', 404, 'not_found')
+    return match
+  }
+  async saveMemoryFact(input: MemoryFact, signal?: AbortSignal): Promise<PersonalRecord<MemoryFact>> {
+    if (typeof input.key !== 'string' || !input.key) throw new TypeError('Memory writes require the native key')
+    await this.write<NativeValue>('/api/memory/semantic', 'PUT', input, signal)
+    return record(this.scope, 'memory-fact', { ...input, id: input.key })
+  }
+  async forgetMemoryFact(id: string, signal?: AbortSignal): Promise<NativeValue> {
+    requireId(id)
+    const generation = this.generation
+    const value = await gatewayJson<NativeValue>(`/api/memory/semantic/${enc(id)}`, { method: 'DELETE', signal })
+    if (generation !== this.generation) throw new Error('Personal account changed while memory was being updated')
+    this.cache.delete(`memory-fact:${id}`)
+    return value
+  }
+
+  async readHealthMeasurements(signal?: AbortSignal): Promise<readonly PersonalRecord<HealthMeasurement>[]> {
+    const result = await gatewayJson<{ measurements: HealthMeasurement[] }>('/api/capabilities/wellbeing/measurements', { signal })
+    return result.measurements.map(value => record<HealthMeasurement>(this.scope, 'health-measurement', value))
+  }
+  async readHealthMeasurement(id: string, signal?: AbortSignal): Promise<PersonalRecord<HealthMeasurement>> {
+    return this.detail<HealthMeasurement>(`/api/capabilities/wellbeing/measurements/${enc(id)}`, id, 'health-measurement', signal)
+  }
+  async createHealthMeasurement(input: NativeValue, signal?: AbortSignal): Promise<PersonalRecord<HealthMeasurement>> {
+    const value = await this.write<NativeValue>('/api/capabilities/wellbeing/measurements', 'POST', input, signal)
+    return record<HealthMeasurement>(this.scope, 'health-measurement', value as HealthMeasurement)
+  }
+
+  async readJournal(date: string, timezone: string, signal?: AbortSignal): Promise<PersonalAvailability<NativeValue>> {
+    const query = new URLSearchParams({ date, timezone })
+    try { return { state: 'available', value: await gatewayJson(`/api/capabilities/knowledge/journals?${query}`, { signal }) } }
+    catch (error) { if (error instanceof GatewayError && [404, 501].includes(error.status)) return { state: 'unavailable', reason: 'Journal is unavailable on this Gideon instance.' }; throw error }
+  }
+  async readJournalDraft(date: string, timezone: string, signal?: AbortSignal): Promise<NativeValue> {
+    const query = new URLSearchParams({ date, timezone })
+    return gatewayJson(`/api/capabilities/knowledge/journals/draft?${query}`)
+  }
+  async saveJournal(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
+    if (typeof input.request_id !== 'string' || !input.request_id || typeof input.revision !== 'number') throw new TypeError('Journal writes require their native request ID and revision')
+    return this.write('/api/capabilities/knowledge/journals', 'POST', input, signal)
+  }
+}
+
+export function createPersonalClient(scope: OwnerScope): PersonalClient { return new PersonalClient(scope) }
+export function clearPersonalOwnerCache(cacheKey: string): void {
+  for (const client of clients.get(cacheKey) ?? []) client.clear()
+  for (const [origin, active] of activeOwnerByOrigin) if (active === cacheKey) activeOwnerByOrigin.delete(origin)
+}
