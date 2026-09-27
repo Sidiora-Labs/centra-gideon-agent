@@ -500,6 +500,12 @@ async def start_dashboard(
 
     register_browse_connector_routes(app)
 
+    from gideon.interfaces.dashboard.handlers.browser_sessions import (
+        register_browser_session_routes,
+    )
+
+    register_browser_session_routes(app)
+
     from gideon.interfaces.dashboard.handlers.push import register_push_routes
 
     register_push_routes(app)
