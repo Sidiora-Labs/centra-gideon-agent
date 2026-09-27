@@ -37,6 +37,7 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
     token_auth.revoke_all_sessions()
     log = ConversationLog(base_dir=tmp_path / "conversations")
     log.append("dashboard:chat-one", "user", "Open my browser")
+    log.append("channel-thread", "user", "A separate channel conversation")
     state = ConsoleState(None, time.time(), conversation_log=log)
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=PORT)])
     app["state"] = state
@@ -62,6 +63,12 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
             cookies=owned(alice),
         )
         assert missing.status == 404
+        channel_only = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "channel-thread"},
+            cookies=owned(alice),
+        )
+        assert channel_only.status == 404
 
         async def create():
             response = await client.post(
@@ -81,16 +88,49 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         assert first["version"] == 1
         session_id = first["id"]
 
+        alias = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "dashboard:chat-one"},
+            cookies=owned(alice),
+        )
+        assert alias.status == 200
+        assert (await alias.json())["session"] == first
+
         app[KEY] = CustomerBrowserSessionStore(path)
         retried = await create()
         assert retried[0] == 200
         assert retried[1] == first
+        alias_after_restart = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "dashboard:chat-one"},
+            cookies=owned(alice),
+        )
+        assert alias_after_restart.status == 200
+        assert (await alias_after_restart.json())["session"] == first
 
         own_read = await client.get(
             f"/api/browser/sessions/{session_id}", cookies=owned(alice)
         )
         assert own_read.status == 200
         assert (await own_read.json())["session"] == first
+
+        app_token = token_auth.generate_token("alice", ttl_seconds=3600, app="notes")
+        app_headers = {"Authorization": f"Bearer {app_token}"}
+        app_create = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "chat-one"},
+            cookies=owned(alice), headers=app_headers,
+        )
+        app_read = await client.get(
+            f"/api/browser/sessions/{session_id}",
+            cookies=owned(alice), headers=app_headers,
+        )
+        app_mutation = await client.post(
+            f"/api/browser/sessions/{session_id}/close",
+            json={"expected_version": 1},
+            cookies=owned(alice), headers=app_headers,
+        )
+        assert (app_create.status, app_read.status, app_mutation.status) == (401, 401, 401)
 
         other_existing = await client.get(
             f"/api/browser/sessions/{session_id}", cookies=owned(rotated_owner)
@@ -148,5 +188,22 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         store = CustomerBrowserSessionStore(path)
         with pytest.raises(SessionNotFound):
             store.get(session_id, "different-account", "alice")
+
+        token_auth.revoke_all_sessions()
+        revoked = await client.get(
+            f"/api/browser/sessions/{session_id}", cookies=owned(alice)
+        )
+        assert revoked.status in {401, 403}
+        new_owner = token_auth.generate_token("new-owner", ttl_seconds=3600)
+        rotated_existing = await client.get(
+            f"/api/browser/sessions/{session_id}", cookies=owned(new_owner)
+        )
+        rotated_absent = await client.get(
+            "/api/browser/sessions/absent", cookies=owned(new_owner)
+        )
+        assert (rotated_existing.status, await rotated_existing.text()) == (
+            rotated_absent.status, await rotated_absent.text()
+        )
+        assert rotated_existing.status == 404
 
     token_auth.revoke_all_sessions()
