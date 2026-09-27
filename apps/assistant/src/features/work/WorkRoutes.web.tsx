@@ -5,6 +5,7 @@ import { WorkspaceFrame, type WorkspaceFrameState } from '../../shared/shell/Wor
 import { WorkClient, type WorkEntry, type WorkRead } from './workClient'
 import { createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
 import WorkflowEditor from './WorkflowEditor.web'
+import WorkflowRunWorkspace from './WorkflowRunWorkspace.web'
 export { WORK_DESTINATIONS, createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
 
 type WorkView = WorkRead<WorkEntry[]> | WorkRead<WorkEntry>
@@ -182,6 +183,10 @@ function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps
     return <WorkflowEditor scope={scope} route={route} initialName={id} onBack={goBack}
       onDefinitionSelected={name => openWorkflow(name || undefined)}
       onDefinitionSaved={name => openWorkflow(name)} />
+  }
+
+  if (page.id === 'workflows/run') {
+    return <WorkflowRunWorkspace route={route} scope={scope} runId={id} onBack={goBack} navigate={navigate} />
   }
 
   return <WorkspaceFrame route={route} mode={page.kind === 'room' ? 'compact' : 'full'} title={page.label} actions={actions}
