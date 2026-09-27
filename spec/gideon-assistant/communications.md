@@ -56,15 +56,15 @@ archive as a live send-enabled account.
   - Acceptance: an event opened from a person or notification resolves to the correct account and occurrence;
     approval applies only to the reviewed target and revision.
 
-- [ ] **communications-04 — Own People and relationship actions.**
+- [ ] **communications-04 — Own People and contact actions.**
   - Add `apps/assistant/src/features/communications/PeopleWorkspace.web.tsx` and
     `apps/assistant/src/features/communications/PersonDetail.web.tsx`. Adapt native People records, identity
     aliases, care cadence, imported contacts, touchpoints, and timeline into a searchable list and person
     detail.
   - Show where each identity came from and require explicit review before combining records that may represent
     different people. Keep revision checks on edits and preserve distinct provider identities after a merge.
-  - People owns contact and relationship actions, including Compass contact actions. The personal feature may
-    link to a person and display a summary or reflection, but does not create a second contact store.
+  - People owns contact records, provider identities, and contact actions. The personal feature may link to a
+    person and display a summary or reflection, but does not create a second contact store.
   - A contact with no channels, no history, or disconnected provider remains useful for notes and manual
     touchpoints; the interface labels which actions are unavailable.
   - Acceptance: person links from mail, calendar, and personal context resolve to the same native person record;
