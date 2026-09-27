@@ -5,6 +5,7 @@ from aiohttp import web
 from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.engine.tasks import reconcile, registry
 from gideon.engine.tasks.models import Task
+from gideon.engine.tasks.native import TaskRevisionConflict
 from gideon.engine.tasks.provider import task_page_window
 from gideon.engine.tasks.rules import resolve_reject_write
 from gideon.http_errors import json_error
@@ -265,11 +266,16 @@ class TaskWrite:
                     "invalid_request", message="title required", status=400
                 )
         provider = body.pop("provider", "native" if create else None)
+        expected_revision = body.pop("expected_revision", None) if not create else None
+        if expected_revision is not None and (
+            not isinstance(expected_revision, str) or not expected_revision
+        ):
+            return json_error("invalid_request", message="expected_revision must be a nonempty string", status=400)
         created_task = None
         updated_task = None
         try:
             registry.validate_provider(provider)
-            if not create or provider == "native":
+            if (not create and expected_revision is None) or (create and provider == "native"):
                 _attach_project_general_list(body)
             if create:
                 created_task = await registry.create_task(
@@ -286,8 +292,12 @@ class TaskWrite:
                 if refusal:
                     return json_error("engine_owned_field", message=refusal, status=409)
                 updated_task = await registry.update_task(
-                    task_id, provider_name=provider, **body
+                    task_id, provider_name=provider,
+                    expected_revision=expected_revision, **body
                 )
+        except TaskRevisionConflict as exc:
+            return json_error("version_conflict", message=str(exc), status=409,
+                              current_revision=exc.current_revision)
         except reconcile.DependencyCycleError as exc:
             return json_error(
                 "invalid_request", message=str(exc), status=400, cycle=exc.cycle
