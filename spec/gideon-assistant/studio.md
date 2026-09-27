@@ -5,13 +5,15 @@ Studio gives creative work a durable home: a request can start in conversation, 
 ## 1. Open a real Studio workspace
 
 - [ ] Build the Studio destination and responsive workspace frame.
-  - Give Writer, Slides, Image, Video, Music, MIDI, Worlds, 3D, Assets, Jobs, and Live Media labelled entry points under Apps and relevant conversation results.
+  - Give Writer, Slides, Image, Video, Music, MIDI, Worlds, 3D, Assets, Jobs, and Live Media labelled entry points under Apps and relevant conversation results; preserve the named Create destinations inside those workspaces.
   - Keep the assistant header, theme, navigation, and return context while giving timelines, editors, and canvases their full usable width and height.
   - Make recent projects and in-progress jobs open the exact saved record rather than an overview.
   - Preserve a draft, selected asset, viewport, and scroll position when users move between a workspace and conversation.
+  - Define typed routes and result references carrying native record kind and ID, owner scope, revision, job state, provider capability, artifact availability, and the source conversation/run.
+  - Keep create, save, generate, render, export, and publish as distinct actions with truthful status and recoverable errors.
   - Show a useful first action when a collection is empty, and explain missing access without rendering sample data.
   - Provide keyboard reachability, named controls, visible focus, and mobile routes for the actions each modality can support.
-  - Implement in proposed `apps/assistant/src/features/studio/StudioWorkspace.web.tsx` and `apps/assistant/src/features/studio/studioRoutes.ts`.
+  - Implement in proposed `apps/assistant/src/features/studio/StudioWorkspace.web.tsx`, `apps/assistant/src/features/studio/studioRoutes.ts`, and `apps/assistant/src/features/studio/studioContracts.ts`.
   - Reuse existing `apps/console/src/features/capabilities/creative/Page.tsx`, `media/Page.tsx`, `music/Page.tsx`, and `experience/Page.tsx` through the shared shell module boundary.
   - Depends on shell and delivery foundations; later record links depend on conversation and discovery.
 
@@ -21,11 +23,14 @@ Studio gives creative work a durable home: a request can start in conversation, 
   - Start from a blank work, an existing work, or a conversation request; load the same record and current revision in each case.
   - Provide a text editor with outline/context, save state, stage, version history, and explicit restore or fork actions.
   - Keep editorial suggestions distinct from accepted text; adopting a suggestion creates a visible revision.
+  - Create and revise ingredients and moodboards, attach selected references to a work, and retain the selected reference when returning from Writer.
+  - Open universes, authors, and series as editable context records; show their relationships to the selected story or manuscript before changing them.
+  - Carry a series into production planning, revise direction and commission briefs, and show the saved stage or review outcome on the originating work.
   - Warn on unsaved changes before navigating away and offer recovery after a failed save or reload.
   - Preview the result as a document and export a selected revision to the available document formats.
   - Report a missing format writer or render failure in the export flow with a retry path and no false download.
   - Return a manuscript card to conversation with project, revision, and export links.
-  - Extend `apps/console/src/features/capabilities/creative/Works.tsx` and `ManuscriptExports.tsx` through proposed `apps/assistant/src/features/studio/WriterWorkspace.web.tsx`.
+  - Extend `apps/console/src/features/capabilities/creative/Works.tsx`, `Moodboards.tsx`, `Universes.tsx`, `Authors.tsx`, `Series.tsx`, `Production.tsx`, `CreativeDirection.tsx`, `Commissions.tsx`, and `ManuscriptExports.tsx` through proposed `apps/assistant/src/features/studio/WriterWorkspace.web.tsx`.
   - Depends on the Studio route and conversation result contract.
 
 ## 3. Compose and deliver slides
@@ -38,7 +43,7 @@ Studio gives creative work a durable home: a request can start in conversation, 
   - Export a selected version to a supported presentation format and link the resulting artifact back to the originating conversation.
   - Show a specific render error and preserve the editable deck if a writer is unavailable or rendering fails.
   - Use existing `apps/console/src/shared/ui/content/SlideDeck.tsx` and document artifact contracts in proposed `apps/assistant/src/features/studio/SlidesWorkspace.web.tsx`.
-  - Depends on the Studio route and shared asset/version behavior.
+  - Depends on the Studio route and typed result contract.
 
 ## 4. Generate and edit images and video
 
@@ -46,48 +51,55 @@ Studio gives creative work a durable home: a request can start in conversation, 
   - Show available models, sizes, durations, aspect ratios, source assets, masks, and controls only when the selected provider supports them.
   - Let an image request use an existing asset/version as source and preserve the exact inputs for a reproducible variant.
   - Let a video request choose references and use a timeline or shot view for ordered clips and revisions.
+  - Open a saved sketch for editing and PNG export; assemble animation frames, sprite assets, and episode sequences with their own previews and source links.
+  - Make cleanup operations and dataset selection visible before submitting a derived job, then show its input, outcome, and retry target.
+  - Keep a Downloads destination for completed, authorized media files with format, version, and missing-file recovery.
   - Submit a job once, show queued/running/failed/complete states, and reconnect to the same job after navigation or reload.
   - Preview complete media with accessible playback controls and open its asset history and download action.
   - Distinguish no provider, provider needs setup, unsupported option, failed job, and expired source with a relevant recovery action.
   - Keep incomplete jobs in Jobs and never present a request receipt as a finished image or video.
-  - Extend `apps/console/src/features/capabilities/media/ImagePage.tsx`, `VideoPage.tsx`, `TimelinePage.tsx`, `Readiness.tsx`, and `JobsPage.tsx` through proposed `apps/assistant/src/features/studio/MediaWorkspace.web.tsx`.
-  - Depends on the Studio route, conversation result contract, and asset/version behavior.
+  - Extend `apps/console/src/features/capabilities/media/ImagePage.tsx`, `VideoPage.tsx`, `TimelinePage.tsx`, `SpritePage.tsx`, `AnimationPage.tsx`, `EpisodePage.tsx`, `CleanupPage.tsx`, `DatasetsPage.tsx`, `DownloadPage.tsx`, `Readiness.tsx`, and `JobsPage.tsx` through proposed `apps/assistant/src/features/studio/MediaWorkspace.web.tsx`.
+  - Depends on the Studio route and conversation result contract.
 
 ## 5. Make music and MIDI usable as compositions
 
 - [ ] Build Music and MIDI workspaces around listening, editing, and delivery.
   - Open a composition, catalog track, or score by stable ID with title, source, revision, and linked assets.
+  - Keep repertoire as the place to add and revise pieces; open their linked tracks, scores, and performance versions.
+  - Build and revise decks from selected tracks, run review rounds with their recorded choices, and attach music videos to the exact music source version.
   - Show music generation provider readiness and job progress before a playable result appears.
   - Offer a focused playback view with transport, duration, track details, and an accessible non-audio description where available.
   - Edit MIDI notes with pitch, timing, velocity, and instrument controls; preview the changed score before committing a version.
   - Keep unsaved MIDI edits when a provider or preview fails, and show what can still be saved or exported locally.
   - Export an explicitly chosen score or audio version with format and provenance visible.
-  - Extend `apps/console/src/features/capabilities/music/GenerationPage.tsx`, `CatalogPage.tsx`, `ListeningPage.tsx`, and `MidiPage.tsx` through proposed `apps/assistant/src/features/studio/MusicWorkspace.web.tsx`.
-  - Depends on the Studio route, Jobs, and asset/version behavior.
+  - Extend `apps/console/src/features/capabilities/music/Page.tsx`, `GenerationPage.tsx`, `CatalogPage.tsx`, `ListeningPage.tsx`, `MidiPage.tsx`, `DeckPage.tsx`, `RoundsPage.tsx`, and `VideoPage.tsx` through proposed `apps/assistant/src/features/studio/MusicWorkspace.web.tsx`.
+  - Depends on the Studio route and typed job/result contract.
 
 ## 6. Build worlds and inspect 3D assets
 
 - [ ] Give Worlds and 3D separate canvases with common project continuity.
   - Open a world, story, scene, model, or assembly from a project or result card at the saved selection.
   - For worlds, show map or scene state, project assets, preview status, and explicit compile/publish steps with their own outcomes.
+  - Let a user establish world foundations, travel to a saved destination, and inspect the resulting world/session state without losing the source scene.
+  - Give social world and story destinations clear read, compose, and publish actions with identity and audience shown before a write.
   - For 3D, show orbit/pan/zoom, model parts, animation clips, assembly editing, and a revision history before export.
   - Keep browser canvas controls usable with keyboard and provide a labelled structure list when pointer controls are unavailable.
   - Distinguish a missing model, unsupported asset, failed compile, and provider unavailable state; preserve the editable project and retry target.
   - Make published output and downloaded files link to the exact source version and project.
-  - Extend `apps/console/src/features/capabilities/experience/Worlds.tsx`, `WorldEngine.tsx`, `GameAssets.tsx`, and `apps/console/src/features/capabilities/music/AssemblyPage.tsx`, `Models3DPage.tsx` through proposed `apps/assistant/src/features/studio/WorldWorkspace.web.tsx`.
-  - Depends on the Studio route, Jobs, and asset/version behavior.
+  - Extend `apps/console/src/features/capabilities/experience/Worlds.tsx`, `WorldFoundations.tsx`, `WorldTravel.tsx`, `WorldEngine.tsx`, `Moltworld.tsx`, `Moltbook.tsx`, `GameAssets.tsx`, and `apps/console/src/features/capabilities/music/AssemblyPage.tsx`, `Models3DPage.tsx` through proposed `apps/assistant/src/features/studio/WorldWorkspace.web.tsx`.
+  - Depends on the Studio route and typed job/result contract.
 
-## 7. Connect assets, versions, jobs, and exports
+## 7. Complete shared Studio result integration
 
-- [ ] Give every Studio modality a consistent result lifecycle.
+- [ ] Build shared asset, version, job, and export UI for every Studio destination.
   - Show an asset library with type, owner, origin project, source conversation/run, revision, preview, and usable actions.
   - Show version lineage and compare or restore only where the record supports it; keep prior versions addressable.
   - Aggregate generation/render/export jobs by native ID and status without inventing a second job store.
   - Make retry, cancel, download, and reopen actions conditional on the real job and artifact state.
   - Validate format, permission, and source version before an export; show a usable error if an artifact has gone missing.
-  - Let conversation and Activity result cards open the exact asset, version, job, or editor and return without losing place.
+  - Complete the shared route, card, preview, status, and return-context integration so conversation and Activity open the exact asset, version, job, or editor.
   - Add proposed `apps/assistant/src/features/studio/StudioAssets.web.tsx` and `studioRecords.ts`; reuse existing `apps/console/src/features/capabilities/media/LibraryPage.tsx`, `JobsPage.tsx`, and `apps/console/src/shared/ui/content/exporters.ts`.
-  - Depends on shell, conversation, discovery, and the modality workspaces.
+  - Depends on the Studio route and the shared conversation and discovery contracts.
 
 ## 8. Complete live media experiences
 
