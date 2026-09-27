@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -6,6 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 _ARTIFACT = Path(__file__).parents[2] / "apps" / "assistant" / "dist" / "web"
+_REPOSITORY = Path(__file__).parents[2]
 
 
 def _artifact_file(suffix: str) -> Path:
@@ -107,3 +111,38 @@ async def test_assistant_static_bypass_does_not_cover_api_mutations_or_traversal
         assert unknown_asset.status == 403
         assert unknown_asset.headers["X-Auth-Required"] == "true"
         await unknown_asset.read()
+
+
+def test_runtime_build_includes_the_complete_assistant_web_artifact(tmp_path):
+    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    build_lib = tmp_path / "runtime-build-lib"
+    isolated_home = tmp_path / "gideon-home"
+    env = os.environ.copy()
+    env["GIDEON_HOME"] = str(isolated_home)
+
+    subprocess.run(
+        [
+            sys.executable,
+            "setup.py",
+            "build_py",
+            "--build-lib",
+            str(build_lib),
+        ],
+        cwd=_REPOSITORY,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    packaged = build_lib / "gideon" / "static" / "assistant"
+    relative_paths = [
+        Path("index.html"),
+        Path("assistant-source-notices.txt"),
+        Path(_artifact_file(".js").relative_to(_ARTIFACT)),
+        Path(_artifact_file(".css").relative_to(_ARTIFACT)),
+    ]
+    for relative_path in relative_paths:
+        assert (packaged / relative_path).read_bytes() == (
+            _ARTIFACT / relative_path
+        ).read_bytes()
