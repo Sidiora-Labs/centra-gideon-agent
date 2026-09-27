@@ -21,6 +21,15 @@ async function availablePort(): Promise<number> {
   return port
 }
 
+async function waitForJsonFile(path: string, label: string): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    try { return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown> }
+    catch { await new Promise(resolve => setTimeout(resolve, 25)) }
+  }
+  throw new Error(`Timed out waiting for ${label}`)
+}
+
 const nativeFixture = String.raw`
 import asyncio, json, os, sys
 from pathlib import Path
@@ -29,6 +38,7 @@ from gideon.core.config import config_dir
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth, capabilities_identity_goals, capabilities_identity_goal_plans
 from gideon.security.auth.credentials import set_password
+from gideon.workspace.capabilities.identity.goal_plans import GoalPlanStore
 from gideon.workspace.capabilities.identity.goals import GoalStore
 
 async def main(origin):
@@ -41,9 +51,13 @@ async def main(origin):
     seeded = GoalStore(goals_path).save_goal(title='Parent objective', description='Existing parent for hierarchy', request_id='seed-parent-001', expected_revision=0)
     second = GoalStore(goals_path).save_goal(title='Second record during scope transition', description='Must not inherit the first goal view', request_id='seed-second-001', expected_revision=0)
     second_plan_path = f"/api/capabilities/identity/goal-plans/{second['id']}"
+    second_plan_reads = home / 'second-plan-read-count.txt'
     @web.middleware
     async def delay_second_plan(request, handler):
-        if request.path == second_plan_path: await asyncio.sleep(0.6)
+        if request.path == second_plan_path:
+            count = int(second_plan_reads.read_text()) if second_plan_reads.exists() else 0
+            second_plan_reads.write_text(str(count + 1), encoding='utf-8')
+            await asyncio.sleep(0.6)
         return await handler(request)
     @web.middleware
     async def lose_committed_checkin_reply(request, handler):
@@ -58,6 +72,16 @@ async def main(origin):
         if len(attempts) == 1:
             request.transport.close()
         return response
+    checkin_conflict_injected = False
+    @web.middleware
+    async def native_checkin_time_conflict(request, handler):
+        nonlocal checkin_conflict_injected
+        if request.method == 'POST' and request.path == '/api/capabilities/identity/goal-plans/checkins' and not checkin_conflict_injected:
+            body = await request.json()
+            if body.get('value') == 5:
+                GoalPlanStore(goals_path).checkin(goal_id=body['goal_id'], value=6, observed_at=body['observed_at'], notes='Competing native observation', request_id='competing-checkin-' + body['request_id'])
+                checkin_conflict_injected = True
+        return await handler(request)
     goal_conflict_injected = False
     @web.middleware
     async def native_goal_request_conflict(request, handler):
@@ -68,7 +92,23 @@ async def main(origin):
                 GoalStore(goals_path).save_goal(title='Competing native request', description='A distinct write holding the submitted request ID', request_id=body['request_id'])
                 goal_conflict_injected = True
         return await handler(request)
-    app = web.Application(middlewares=[delay_second_plan, lose_committed_checkin_reply, native_goal_request_conflict, token_auth.token_auth_middleware(port=10000)])
+    plan_conflict_entered = home / 'late-plan-conflict-entered.json'
+    plan_conflict_release = home / 'late-plan-conflict-release'
+    plan_conflict_completed = home / 'late-plan-conflict-completed.json'
+    @web.middleware
+    async def hold_stale_plan_conflict(request, handler):
+        if request.method != 'POST' or request.path != '/api/capabilities/identity/goal-plans/configure':
+            return await handler(request)
+        body = await request.json()
+        if body.get('expected_revision') != 3 or body.get('target_value') != 99:
+            return await handler(request)
+        plan_conflict_entered.write_text(json.dumps({'goal_id': body['goal_id'], 'expected_revision': body['expected_revision']}), encoding='utf-8')
+        while not plan_conflict_release.exists(): await asyncio.sleep(0.01)
+        GoalPlanStore(goals_path).configure(goal_id=body['goal_id'], parent_id=body['parent_id'], horizon=body['horizon'], milestones=body['milestones'], links=body['links'], unit=body['unit'], target_value=88, expected_revision=body['expected_revision'], request_id='concurrent-plan-' + body['request_id'])
+        response = await handler(request)
+        plan_conflict_completed.write_text(json.dumps({'status': response.status}), encoding='utf-8')
+        return response
+    app = web.Application(middlewares=[delay_second_plan, lose_committed_checkin_reply, native_checkin_time_conflict, native_goal_request_conflict, hold_stale_plan_conflict, token_auth.token_auth_middleware(port=10000)])
     app['port'] = 10000; app['allowed_origins'] = {origin}
     app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
     app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
@@ -170,8 +210,15 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.waitFor("document.querySelector('.gideon-goal-plan__add-row button')?.disabled===false", 'milestone draft state rendered before Add')
     await assertAction(await browser.evaluate<boolean>("(()=>{const button=Array.from(document.querySelectorAll('.gideon-goal-plan__add-row button')).find(item=>item.innerText==='Add milestone');if(!button||button.disabled)return false;button.click();return true})()"), 'Add milestone')
     await browser.waitFor(`Array.from(document.querySelectorAll('.gideon-goal-plan__milestones input[aria-label="Milestone title"]')).some(input=>input.value==='Prepare the first planting beds')`, 'milestone appears before Save')
+    await browser.evaluate(`(()=>{const input=document.getElementById('goal-target-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'12');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-target-value')?.value==='12'", 'non-null plan target rendered before save')
     await assertAction(await browser.evaluate<boolean>("(()=>{const button=Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(item=>item.innerText==='Save plan');if(!button||button.disabled)return false;button.click();return true})()"), 'Save plan')
     await browser.waitFor("document.body.innerText.includes('Plan saved at the current revision.')", 'hierarchy and milestone save')
+    const firstPlan = await browser.evaluate<{ target_value: number | null }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json()).then(value=>value.plan)`)
+    expect(firstPlan.target_value).toBe(12)
+    const firstPlanTimeOrigin = await browser.evaluate<number>('performance.timeOrigin')
+    await browser.navigate(`${origin}/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(identity.id)}&placement=goals`)
+    await browser.waitFor(`performance.timeOrigin!==${firstPlanTimeOrigin} && document.getElementById('goal-target-value')?.value==='12'`, 'native non-null target restored in a fresh document')
     expect(await browser.evaluate<boolean>("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === false")).toBe(true)
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-checkin-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'4');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').disabled===false", 'check-in measurement state rendered before save')
@@ -192,19 +239,16 @@ createRoot(document.getElementById('root')).render(<Root/>)
     const afterRetry = await browser.evaluate<{ checkins: Array<{ id: string; value: number }> }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
     expect(afterRetry.checkins).toHaveLength(1)
     expect(afterRetry.checkins[0]).toMatchObject({ value: 4 })
-    const duplicateObservedAt = Date.parse(String(firstAttempt[0].observed_at))
-    await browser.evaluate(`(()=>{const epoch=${duplicateObservedAt};const NativeDate=Date;class FixedDate extends NativeDate{constructor(...values){super(...(values.length?values:[epoch]))}static now(){return epoch}};Object.defineProperty(window,'Date',{value:FixedDate,configurable:true});return true})()`)
     await browser.evaluate(`(()=>{const value=document.getElementById('goal-checkin-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(value,'5');value.dispatchEvent(new Event('input',{bubbles:true}));const notes=document.getElementById('goal-checkin-notes');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(notes,'Clear this rejected note');notes.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-checkin-value')?.value==='5' && document.getElementById('goal-checkin-notes')?.value==='Clear this rejected note'", 'check-in edit rendered before a real duplicate-time conflict')
     await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
     await browser.waitFor("document.body.innerText.includes('The measurement was rejected. Review the value and try again.') && document.getElementById('goal-checkin-notes')?.value==='Clear this rejected note'", 'native duplicate observation returns a real rejected check-in')
     await browser.evaluate(`(()=>{const notes=document.getElementById('goal-checkin-notes');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(notes,'');notes.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-checkin-notes')?.value===''", 'cleared check-in note remains empty after editing')
-    await browser.evaluate(`(()=>{const epoch=${duplicateObservedAt + 1000};const NativeDate=Date;class FixedDate extends NativeDate{constructor(...values){super(...(values.length?values:[epoch]))}static now(){return epoch}};Object.defineProperty(window,'Date',{value:FixedDate,configurable:true});return true})()`)
     await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
     await browser.waitFor("document.body.innerText.includes('Measurement saved to this goal.')", 'edited rejected check-in saves through the native endpoint')
     const clearedNote = await browser.evaluate<{ checkins: Array<{ value: number; notes: string }> }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
-    expect(clearedNote.checkins).toHaveLength(2)
+    expect(clearedNote.checkins).toHaveLength(3)
     expect(clearedNote.checkins.find(item=>item.value===5)?.notes).toBe('')
     await browser.waitFor("document.querySelector('#goal-checkins')?.parentElement?.innerText.includes('5 units')", 'cleared-note check-in refresh completes before the next action')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-title');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Planting bed workshop');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
@@ -224,7 +268,7 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.waitFor("document.querySelector('.gideon-goal-plan__section-title span')?.innerText==='1 of 1 complete'", 'explicit milestone completion rendered before plan save')
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(button=>button.innerText==='Save plan').click()")
     await browser.waitFor("document.body.innerText.includes('Plan saved at the current revision.')", 'explicit human milestone completion and source link')
-    const saved = await browser.evaluate<{ queryId: string; checked: boolean; checkin: string; session: string; source: string; hierarchy: string; ratio: string; plan: { revision: number; parent_id: string; milestones: { done: boolean }[]; links: { kind: string; id: string }[] }; parentChildren: string[] }>(`(async()=>{const [plan,parent]=await Promise.all([fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json()),fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(parentId)}').then(response=>response.json())]);return {queryId:new URLSearchParams(location.search).get('recordId')||'',checked:document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked??false,checkin:document.querySelector('#goal-checkins')?.parentElement?.innerText||'',session:document.querySelector('#goal-sessions')?.parentElement?.innerText||'',source:document.querySelector('#goal-sources')?.parentElement?.innerText||'',hierarchy:document.querySelector('#goal-hierarchy')?.parentElement?.innerText||'',ratio:Array.from(document.querySelectorAll('.gideon-goal-plan__panel p')).find(item=>item.innerText.includes('Explicit progress'))?.innerText||'',plan:plan.plan,parentChildren:parent.children}})()`)
+    const saved = await browser.evaluate<{ queryId: string; checked: boolean; checkin: string; session: string; source: string; hierarchy: string; ratio: string; plan: { revision: number; parent_id: string; target_value: number | null; milestones: { done: boolean }[]; links: { kind: string; id: string }[] }; parentChildren: string[] }>(`(async()=>{const [plan,parent]=await Promise.all([fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json()),fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(parentId)}').then(response=>response.json())]);return {queryId:new URLSearchParams(location.search).get('recordId')||'',checked:document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked??false,checkin:document.querySelector('#goal-checkins')?.parentElement?.innerText||'',session:document.querySelector('#goal-sessions')?.parentElement?.innerText||'',source:document.querySelector('#goal-sources')?.parentElement?.innerText||'',hierarchy:document.querySelector('#goal-hierarchy')?.parentElement?.innerText||'',ratio:Array.from(document.querySelectorAll('.gideon-goal-plan__panel p')).find(item=>item.innerText.includes('Explicit progress'))?.innerText||'',plan:plan.plan,parentChildren:parent.children}})()`)
     expect(saved).toMatchObject({ queryId: identity.id, checked: true })
     expect(saved.checkin).toContain('4 units')
     expect(saved.session).toContain('Planting bed workshop')
@@ -233,9 +277,16 @@ createRoot(document.getElementById('root')).render(<Root/>)
     expect(saved.parentChildren).toContain(identity.id)
     expect(saved.plan.revision).toBe(2)
     expect(saved.plan.parent_id).toBe(parentId)
+    expect(saved.plan.target_value).toBe(12)
     expect(saved.plan.milestones).toContainEqual(expect.objectContaining({ done: true }))
     expect(saved.plan.links).toContainEqual(expect.objectContaining({ kind: 'session' }))
     expect(saved.ratio).toContain('100%')
+    await browser.evaluate(`(()=>{const input=document.getElementById('goal-target-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-target-value')?.value===''", 'explicit target clearing rendered before save')
+    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(button=>button.innerText==='Save plan').click()")
+    await browser.waitFor("document.body.innerText.includes('Plan saved at the current revision.')", 'explicit null plan target saved')
+    const clearedTarget = await browser.evaluate<{ revision: number; target_value: number | null }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json()).then(value=>value.plan)`)
+    expect(clearedTarget).toMatchObject({ revision: 3, target_value: null })
     const screenshotDirectory = process.env.GIDEON_EVIDENCE_DIR
     if (screenshotDirectory) {
       await mkdir(screenshotDirectory, { recursive: true })
@@ -253,10 +304,26 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.navigate(`${origin}/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(identity.id)}&placement=goals`)
     await browser.waitFor("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === true", 'persisted explicit milestone after reload')
     expect(await browser.evaluate<string>("document.querySelector('.gideon-goal-plan__identity code')?.innerText || ''")).toBe(identity.id)
+    expect(await browser.evaluate<string>("document.getElementById('goal-target-value')?.value ?? 'missing'")).toBe('')
+    await browser.evaluate(`(()=>{const input=document.getElementById('goal-target-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'99');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-target-value')?.value==='99'", 'old goal plan draft rendered before held save')
+    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(button=>button.innerText==='Save plan').click()")
+    const heldConflict = await waitForJsonFile(join(native.home, 'late-plan-conflict-entered.json'), 'held old-goal plan write')
+    expect(heldConflict).toMatchObject({ goal_id: identity.id, expected_revision: 3 })
     await browser.evaluate(`(()=>{history.pushState(null,'','/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(secondId)}&placement=goals');dispatchEvent(new PopStateEvent('popstate'));return true})()`)
     await browser.waitFor(`new URLSearchParams(location.search).get('recordId')===${JSON.stringify(secondId)} && !document.body.innerText.includes('Build a neighborhood garden')`, 'record transition masks the previous goal synchronously')
     expect(await browser.evaluate<boolean>("!document.body.innerText.includes('Prepare the first planting beds') && document.querySelector('.gideon-goal-plan__milestones input[aria-label=\"Milestone title\"]')===null")).toBe(true)
     await browser.waitFor(`new URLSearchParams(location.search).get('recordId')===${JSON.stringify(secondId)} && document.body.innerText.includes('Loading the human goal and its plan…') && !document.body.innerText.includes('Build a neighborhood garden')`, 'prior goal remains masked while the second native plan is pending')
     await browser.waitFor(`document.querySelector('.gideon-goal-plan__header h1')?.innerText==='Second record during scope transition'`, 'new native goal content loaded after transition')
+    await browser.evaluate(`(()=>{const input=document.getElementById('goal-target-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'77');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-target-value')?.value==='77'", 'new goal draft rendered while the old write is held')
+    const secondPlanReadBaseline = Number(await readFile(join(native.home, 'second-plan-read-count.txt'), 'utf8'))
+    expect(secondPlanReadBaseline).toBeGreaterThanOrEqual(1)
+    await writeFile(join(native.home, 'late-plan-conflict-release'), 'release', 'utf8')
+    const completedConflict = await waitForJsonFile(join(native.home, 'late-plan-conflict-completed.json'), 'native old-goal conflict response')
+    expect(completedConflict).toEqual({ status: 409 })
+    await new Promise(resolve => setTimeout(resolve, 750))
+    expect(await readFile(join(native.home, 'second-plan-read-count.txt'), 'utf8')).toBe(String(secondPlanReadBaseline))
+    await browser.waitFor(`new URLSearchParams(location.search).get('recordId')===${JSON.stringify(secondId)} && document.getElementById('goal-target-value')?.value==='77'`, 'new goal draft remains after the old conflict finishes')
   }, 60_000)
 })
