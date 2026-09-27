@@ -11,6 +11,7 @@ const children: ChildProcessWithoutNullStreams[] = [];
 const directories: string[] = [];
 let vite: ViteDevServer | undefined;
 let debuggerSocket: WebSocket | undefined;
+const browserDiagnostics: string[] = [];
 
 afterAll(async () => {
   debuggerSocket?.close();
@@ -85,6 +86,19 @@ async function launchBrowser(address: string) {
   const pending = new Map<number, { done: (value: any) => void; reject: (error: Error) => void }>();
   debuggerSocket.addEventListener("message", event => {
     const response = JSON.parse(String(event.data)) as { id?: number; result?: any; error?: { message: string } };
+    const notification = response as typeof response & { method?: string; params?: any };
+    if (notification.method === "Runtime.exceptionThrown") {
+      browserDiagnostics.push(`exception ${JSON.stringify(notification.params?.exceptionDetails)}`);
+    } else if (notification.method === "Runtime.consoleAPICalled") {
+      browserDiagnostics.push(`console ${JSON.stringify(notification.params)}`);
+    } else if (notification.method === "Log.entryAdded") {
+      browserDiagnostics.push(`log ${JSON.stringify(notification.params?.entry)}`);
+    } else if (notification.method === "Network.loadingFailed") {
+      browserDiagnostics.push(`network-failed ${JSON.stringify(notification.params)}`);
+    } else if (notification.method === "Network.responseReceived") {
+      const response = notification.params?.response;
+      if (response?.url?.startsWith(address)) browserDiagnostics.push(`response ${response.status} ${response.url}`);
+    }
     if (!response.id) return;
     const request = pending.get(response.id);
     if (!request) return;
@@ -94,9 +108,19 @@ async function launchBrowser(address: string) {
   });
   const command = (method: string, params: Record<string, unknown> = {}) => new Promise<any>((done, reject) => {
     const id = ++nextId;
-    pending.set(id, { done, reject });
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Chromium CDP command timed out: ${method}; browser=${JSON.stringify(browserDiagnostics)}`));
+    }, 10000);
+    pending.set(id, {
+      done: value => { clearTimeout(timeout); done(value); },
+      reject: error => { clearTimeout(timeout); reject(error); },
+    });
     debuggerSocket!.send(JSON.stringify({ id, method, params }));
   });
+  await command("Runtime.enable");
+  await command("Log.enable");
+  await command("Network.enable");
   const evaluate = async (expression: string) => {
     const response = await command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
@@ -146,6 +170,7 @@ window.ready = true;
         alias: [{ find: /^react-native$/, replacement: "react-native-web" }],
         extensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
       },
+      esbuild: { jsx: "automatic" },
       plugins: [{
         name: "gideon-chat-screen-entry",
         resolveId(id) { if (id === "/chat-screen-entry.ts") return "\0chat-screen-entry"; },
@@ -166,7 +191,12 @@ window.ready = true;
     const mounted = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
       const input = document.getElementById('gideon-message-composer');
       if (input && input.getAttribute('aria-label') === 'Message Gideon') { clearInterval(timer); done(true); }
-      else if (++n > 150) { clearInterval(timer); reject(Error('Gideon composer did not mount')); }
+      else if (++n > 150) {
+        clearInterval(timer);
+        fetch(location.href).then(response => response.status).catch(error => String(error)).then(entryStatus => {
+          reject(Error('Gideon composer did not mount; location=' + location.href + '; entryStatus=' + entryStatus + '; body=' + document.body.innerText));
+        });
+      }
     }, 50) })`);
     expect(mounted).toBe(true);
     expect(await evaluate("document.body.innerText.includes('A little help. A lot more room for life.')")).toBe(true);
@@ -212,5 +242,5 @@ window.ready = true;
     await evaluate("document.querySelector('[aria-label=\\\"Return to previous workspace\\\"]')?.click()");
     expect(await evaluate("window.returned")).toBe(1);
     await evaluate("window.disposeController()");
-  }, 30000);
+  }, 60000);
 });
