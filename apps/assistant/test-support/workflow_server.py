@@ -14,6 +14,8 @@ async def main() -> None:
         from gideon.automation.workflows.handlers import register_workflow_routes
         from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
         from gideon.automation.workflows.defs import register_provider
+        from gideon.automation.workflows import store as workflow_store
+        from gideon.automation.workflows.models import InstanceState, NodeInstance, RunStatus, WorkflowRun
         from gideon.interfaces.dashboard.token_auth import auth_middleware
         from gideon.security.auth.modes import AuthConfig, AuthMode
 
@@ -26,6 +28,14 @@ async def main() -> None:
                 {"kind": "transform", "id": "finish", "label": "Finish", "config": {"expr": "{{nodes.seed.output.value}}"}, "needs": ["seed"]},
             ]},
         )
+        run_id = "assistant-run-fixture"
+        workflow_store.create(WorkflowRun(id=run_id, workflow_name=workflow_name,
+            status=RunStatus.COMPLETE, owner_username="workflow-owner"))
+        workflow_store.write_spec(run_id, {"root": {"kind": "sequence", "id": "main", "children": [
+            {"kind": "transform", "id": "finish", "label": "Finish", "config": {"expr": {"value": 1}}},
+        ]}})
+        workflow_store.write_state(run_id, {"root.children[0]": NodeInstance(
+            path="root.children[0]", state=InstanceState.DONE, attempt=1)})
         credential = secrets.token_urlsafe(24)
         os.environ["GIDEON_WORKFLOW_TEST_API_KEY"] = credential
         held_detail = False
@@ -78,7 +88,7 @@ async def main() -> None:
         site = web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
-        print(json.dumps({"port": port, "credential": credential, "workflow_name": workflow_name}), flush=True)
+        print(json.dumps({"port": port, "credential": credential, "workflow_name": workflow_name, "run_id": run_id}), flush=True)
         try:
             await asyncio.Event().wait()
         finally:
