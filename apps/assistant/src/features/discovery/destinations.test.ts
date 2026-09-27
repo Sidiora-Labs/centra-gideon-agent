@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseShellRoute, serializeShellRoute } from "../../shared/shell/shellRoutes";
 import { DESTINATIONS, DESTINATION_GROUP_COUNTS, validateDestinations, type DestinationEntry } from "./destinations";
