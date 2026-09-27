@@ -117,6 +117,8 @@ describe('native workflow run workspace', () => {
     await evaluate('location.reload()')
     await waitFor(`document.querySelector('[aria-label="Run timeline"]')?.textContent.includes('${runId}')`)
     await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="status"]')?.textContent.includes('Review recorded for run ${runId}')`)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button').length === 2 && Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button')[0].disabled && Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button')[1].disabled`)).toBe(true)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[0].disabled`)).toBe(false)
     const afterSuccessfulRecovery = await fetch(`${api}/__test/stats`).then(response => response.json()) as { triage_attempts: number; calibration_count: number }
     expect(afterSuccessfulRecovery).toMatchObject({ triage_attempts: 1, calibration_count: 1 })
     await fetch(`${api}/__test/drop-next-triage`, { method: 'POST' })
@@ -124,9 +126,12 @@ describe('native workflow run workspace', () => {
     await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="alert"]')?.textContent.includes('will not be replayed automatically')`)
     await evaluate('location.reload()')
     await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="alert"]')?.textContent.includes('will not be replayed automatically')`)
+    await waitFor(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelector('[data-review-state="complete"]')`)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelector('[data-review-state="complete"]')?.textContent.includes('Receipt:')`)).toBe(true)
     const afterAmbiguousRecovery = await fetch(`${api}/__test/stats`).then(response => response.json()) as { triage_attempts: number; calibration_count: number }
     expect(afterAmbiguousRecovery).toMatchObject({ triage_attempts: 2, calibration_count: 2 })
-    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[1].disabled`)).toBe(true)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelector('[data-review-state="unknown"]') !== null && Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[0].disabled && Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[1].disabled`)).toBe(true)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button')[0].disabled && Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button')[1].disabled`)).toBe(true)
     await evaluate(`document.querySelector('[aria-label="Back"]').click()`)
     await waitFor('window.currentRoute?.destination === "chat" && window.currentRoute?.sessionId === "run-source"')
   }, 30000)

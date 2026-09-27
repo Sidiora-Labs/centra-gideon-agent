@@ -8,19 +8,25 @@ export type ReviewIntent = Readonly<{
   updatedAt: number
 }>
 
+export type ReviewIntents = readonly ReviewIntent[]
+
 const storageKey = (owner: string, runId: string) => `gideon:workflow-review:${encodeURIComponent(owner)}:${encodeURIComponent(runId)}`
 
-export function readReviewIntent(owner: string, runId: string): ReviewIntent | null {
+export function readReviewIntents(owner: string, runId: string): ReviewIntents {
   try {
     const raw = localStorage.getItem(storageKey(owner, runId))
-    if (!raw) return null
-    const intent = JSON.parse(raw) as ReviewIntent
-    return intent.runId === runId && Array.isArray(intent.decisions) ? intent : null
-  } catch { return null }
+    if (!raw) return []
+    const stored = JSON.parse(raw) as ReviewIntent | ReviewIntents
+    const valid = (intent: ReviewIntent) => intent?.runId === runId
+      && Array.isArray(intent.decisions) && intent.decisions.length > 0
+      && ['pending', 'complete', 'unknown'].includes(intent.state)
+    if (Array.isArray(stored)) return stored.filter(valid)
+    return valid(stored as ReviewIntent) ? [stored as ReviewIntent] : []
+  } catch { return [] }
 }
 
-export function writeReviewIntent(owner: string, intent: ReviewIntent): void {
-  localStorage.setItem(storageKey(owner, intent.runId), JSON.stringify(intent))
+export function writeReviewIntents(owner: string, runId: string, intents: ReviewIntents): void {
+  localStorage.setItem(storageKey(owner, runId), JSON.stringify(intents))
 }
 
 export function timelineEvents(runId: string, detail: {

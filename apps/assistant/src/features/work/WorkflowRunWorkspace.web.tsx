@@ -5,7 +5,7 @@ import type { ShellRoute, ShellReturnContext } from '../../shared/shell/shellRou
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { gatewayJson } from '../../shared/transport.web'
 import { createWorkRoute } from './workRouteModel'
-import { readReviewIntent, timelineEvents, unresolvedReviewMessage, writeReviewIntent, type ReviewIntent } from './workflowRunState'
+import { readReviewIntents, timelineEvents, unresolvedReviewMessage, writeReviewIntents, type ReviewIntent, type ReviewIntents } from './workflowRunState'
 
 type Props = { route: ShellRoute; scope: OwnerScope; runId?: string; onBack: () => void; navigate: (route: ShellRoute) => void }
 type Runs = { runs: WorkflowRunSummary[]; total: number }
@@ -19,7 +19,7 @@ export default function WorkflowRunWorkspace({ route, scope, runId, onBack, navi
   const [review, setReview] = useState<WorkflowReviewPayload | null>(null)
   const [outbox, setOutbox] = useState<WorkflowOutboxEntry[]>([])
   const [deliverable, setDeliverable] = useState<WorkflowRunDeliverable | null>(null)
-  const [intent, setIntent] = useState<ReviewIntent | null>(null)
+  const [intents, setIntents] = useState<ReviewIntents>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,7 +35,7 @@ export default function WorkflowRunWorkspace({ route, scope, runId, onBack, navi
         if (live) setRows(value.runs)
       }).catch(reason => { if (live) setError(message(reason)) })
     } else {
-      setIntent(readReviewIntent(scope.cacheKey, runId))
+      setIntents(readReviewIntents(scope.cacheKey, runId))
       Promise.all([
         gatewayJson<WorkflowRunDetailData>(runPath(runId), { signal: controller.signal }),
         gatewayJson<{ continuations: WorkflowContinuation[] }>(`${runPath(runId)}/continuations`, { signal: controller.signal }).catch(() => ({ continuations: [] })),
@@ -62,20 +62,26 @@ export default function WorkflowRunWorkspace({ route, scope, runId, onBack, navi
   }
 
   const triage = async (key: string, outcome: 'accept' | 'reject') => {
-    if (!runId || !review || busy || intent?.state === 'unknown' || intent?.state === 'pending') return
+    const prior = intents.find(item => item.decisions.some(decision => decision.key === key))
+    if (!runId || !review || busy || prior) return
     const next: ReviewIntent = { runId, decisions: [{ key, outcome }], state: 'pending', updatedAt: Date.now() }
-    writeReviewIntent(scope.cacheKey, next); setIntent(next); setBusy(true); setError(''); setNotice('')
+    const saveIntent = (intent: ReviewIntent) => {
+      const updated = [...intents.filter(item => !item.decisions.some(decision => decision.key === key)), intent]
+      writeReviewIntents(scope.cacheKey, runId, updated)
+      setIntents(updated)
+    }
+    saveIntent(next); setBusy(true); setError(''); setNotice('')
     try {
       const receipt = await gatewayJson<WorkflowTriageResult>(`${runPath(runId)}/review/triage`, {
         method: 'POST', body: { decisions: next.decisions },
       })
       const complete: ReviewIntent = { ...next, state: 'complete', receipt, updatedAt: Date.now() }
-      writeReviewIntent(scope.cacheKey, complete); setIntent(complete)
+      saveIntent(complete)
       setNotice(unresolvedReviewMessage(complete, review))
       setRevision(value => value + 1)
     } catch (reason) {
       const unknown: ReviewIntent = { ...next, state: 'unknown', updatedAt: Date.now() }
-      writeReviewIntent(scope.cacheKey, unknown); setIntent(unknown)
+      saveIntent(unknown)
       setError(`${unresolvedReviewMessage(unknown, review)} ${message(reason)}`)
     } finally { setBusy(false) }
   }
@@ -110,12 +116,21 @@ export default function WorkflowRunWorkspace({ route, scope, runId, onBack, navi
         {!item.expired && <button style={button} disabled={busy} onClick={() => void act('Resume continuation', `${runPath(runId)}/resume`, { resume_token: item.resume_token })}>Resume continuation</button>}
       </li>)}</ul> : <p>No pending continuation.</p>}</section>
       <section aria-label="Exact run review"><h2>Review</h2>
-        {intent && <p role={intent.state === 'unknown' ? 'alert' : 'status'}>{unresolvedReviewMessage(intent, review)}</p>}
         {review?.findings.length ? <ul>{review.findings.map(finding => <li key={finding.key}>
+          {(() => {
+            const intent = intents.find(item => item.decisions.some(decision => decision.key === finding.key)) ?? null
+            return intent && <p role={intent.state === 'unknown' ? 'alert' : 'status'} data-review-state={intent.state}>{unresolvedReviewMessage(intent, review)}</p>
+          })()}
           <p>{finding.severity}: {finding.problem} · {finding.anchor_state} · finding <code>{finding.key}</code></p>
           <p>Source: <code>{finding.origin_run_id}</code> / node <code>{finding.origin_node_id}</code> · {finding.resolved_path}:{finding.resolved_line}</p>
-          <button style={button} disabled={busy || intent?.state === 'unknown' || intent?.state === 'pending'} onClick={() => void triage(finding.key, 'accept')}>Accept finding</button>
-          <button style={button} disabled={busy || intent?.state === 'unknown' || intent?.state === 'pending'} onClick={() => void triage(finding.key, 'reject')}>Reject finding</button>
+          {(() => {
+            const intent = intents.find(item => item.decisions.some(decision => decision.key === finding.key))
+            const locked = Boolean(intent)
+            return <>
+              <button style={button} disabled={busy || locked} onClick={() => void triage(finding.key, 'accept')}>Accept finding</button>
+              <button style={button} disabled={busy || locked} onClick={() => void triage(finding.key, 'reject')}>Reject finding</button>
+            </>
+          })()}
         </li>)}</ul> : <p>No review findings for this run.</p>}
       </section>
       <section aria-label="Run outputs"><h2>Outputs and artifacts</h2><ul>{detail.nodes.map(node => <li key={node.instance_path + node.node_id}>
