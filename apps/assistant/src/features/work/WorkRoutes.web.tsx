@@ -4,6 +4,7 @@ import { serializeShellRoute, type ShellReturnContext, type ShellRoute } from '.
 import { WorkspaceFrame, type WorkspaceFrameState } from '../../shared/shell/WorkspaceFrame.web'
 import { WorkClient, type WorkEntry, type WorkRead } from './workClient'
 import { createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
+import WorkflowEditor from './WorkflowEditor.web'
 export { WORK_DESTINATIONS, createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
 
 type WorkView = WorkRead<WorkEntry[]> | WorkRead<WorkEntry>
@@ -110,11 +111,14 @@ function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps
   }
   const open = (destination: string, recordId?: string, subview?: string) =>
     navigate(createWorkRoute(destination, recordId, sourceContext(route), subview))
+  const openWorkflow = (name?: string) =>
+    navigate(createWorkRoute('workflows/definition', name, sourceContext(route)))
   const entry = 'value' in view && !Array.isArray(view.value) ? view.value as WorkEntry : null
   const rows = 'value' in view && Array.isArray(view.value) ? view.value as WorkEntry[] : null
   const stale = view.state === 'stale'
   const actions = <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
     {id && <button type="button" style={buttonStyle} onClick={() => open(page.id.split('/')[0])}>Catalogue</button>}
+    {page.id === 'workflows' && <button type="button" style={buttonStyle} onClick={() => openWorkflow()}>New workflow</button>}
     {page.kind === 'skill' && id && page.intent !== 'edit' &&
       <button type="button" style={buttonStyle} onClick={() => open('skills', id, '/edit')}>Edit</button>}
     {page.kind === 'skill' && id && page.intent !== 'availability' &&
@@ -174,6 +178,12 @@ function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps
     } finally { if (epoch === actionEpoch.current) setSaving(false) }
   }
 
+  if (page.id === 'workflows/definition') {
+    return <WorkflowEditor scope={scope} route={route} initialName={id} onBack={goBack}
+      onDefinitionSelected={name => openWorkflow(name || undefined)}
+      onDefinitionSaved={name => openWorkflow(name)} />
+  }
+
   return <WorkspaceFrame route={route} mode={page.kind === 'room' ? 'compact' : 'full'} title={page.label} actions={actions}
     onBack={goBack} state={stateFor(view, () => setRefresh(current => current + 1))}>
     <div style={{ width: '100%', minWidth: 0, display: 'grid', gap: 16 }}>
@@ -183,7 +193,9 @@ function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps
         gap: 10, padding: 0, margin: 0, listStyle: 'none' }}>
         {rows.map(row => <li key={`${row.identity.kind}:${row.identity.id}`}>
           <button type="button" style={{ ...buttonStyle, display: 'grid', gap: 5, width: '100%' }}
-            onClick={() => open(page.id, row.identity.id, page.subview)}>
+            onClick={() => page.id === 'workflows'
+              ? openWorkflow(row.identity.id)
+              : open(page.id, row.identity.id, page.subview)}>
             <strong>{row.title}</strong>
             <span>{row.status ?? row.identity.kind}</span>
             {summary(row.record) && <span>{summary(row.record)}</span>}

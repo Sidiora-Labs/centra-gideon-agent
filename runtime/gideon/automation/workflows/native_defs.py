@@ -77,7 +77,9 @@ class DefinitionDraft:
             result[provisioning.WORKSPACE_KEY] = dict(workspace)
         return result
 
-    def save(self, expected_revision: int | None = None) -> WorkflowDef:
+    def save(
+        self, expected_revision: int | None = None, create_only: bool = False
+    ) -> WorkflowDef:
         root = defs_root()
         root.mkdir(parents=True, exist_ok=True)
         with (root / ".definitions.lock").open("a+") as lock:
@@ -85,6 +87,8 @@ class DefinitionDraft:
             try:
                 prior = _read(self.name)
                 current_revision = prior.version if prior is not None else None
+                if create_only and prior is not None:
+                    raise DefinitionNameConflict(current_revision)
                 if expected_revision is not None and current_revision != expected_revision:
                     raise DefinitionRevisionConflict(current_revision)
                 document = self.document(prior)
@@ -136,8 +140,13 @@ class NativeWorkflowDefProvider(WorkflowDefProvider):
     async def get_def(self, name: str) -> Any | None:
         return _read(name) if valid_name(name) else None
 
-    async def save_def(self, *, expected_revision: int | None = None, **fields: Any) -> Any:
-        return await asyncio.to_thread(DefinitionDraft(fields).save, expected_revision)
+    async def save_def(
+        self, *, expected_revision: int | None = None, create_only: bool = False,
+        **fields: Any,
+    ) -> Any:
+        return await asyncio.to_thread(
+            DefinitionDraft(fields).save, expected_revision, create_only
+        )
 
     async def set_a2a_published(
         self, name: str, published: bool, *, expected_revision: int | None = None
@@ -219,6 +228,12 @@ class DefinitionRevisionConflict(Exception):
     def __init__(self, current_revision: int | None):
         self.current_revision = current_revision
         super().__init__(f"workflow definition revision changed to {current_revision}")
+
+
+class DefinitionNameConflict(Exception):
+    def __init__(self, current_revision: int):
+        self.current_revision = current_revision
+        super().__init__("a workflow with that name already exists; choose another name")
 
 
 def _now() -> str:

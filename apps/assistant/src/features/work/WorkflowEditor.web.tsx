@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OwnerScope } from '../../shared/auth.web'
 import { gatewayJson } from '../../shared/transport.web'
+import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
+import type { ShellRoute } from '../../shared/shell/shellRoutes'
 import type { WorkflowDef, WorkflowDefSummary, WorkflowNode } from '../../../../console/src/shared/data/api'
 import WorkflowNodeInspector, { type WorkflowEditableNode } from './WorkflowNodeInspector.web'
 
@@ -67,15 +69,22 @@ function editableNode(item: GraphNode): WorkflowEditableNode {
     prompt: typeof config.prompt === 'string' ? config.prompt : '', needs: item.node.needs ?? [] }
 }
 
-export type WorkflowEditorProps = Readonly<{ scope: OwnerScope }>
+export type WorkflowEditorProps = Readonly<{
+  scope: OwnerScope
+  initialName?: string
+  route?: ShellRoute
+  onBack?: () => void
+  onDefinitionSelected?: (name: string) => void
+  onDefinitionSaved?: (name: string) => void
+}>
 
-export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
+export default function WorkflowEditor({ scope, initialName, route, onBack, onDefinitionSelected, onDefinitionSaved }: WorkflowEditorProps) {
   const generation = useRef({ cacheKey: scope.cacheKey, value: 0 })
   const operation = useRef(0)
   if (generation.current.cacheKey !== scope.cacheKey)
     generation.current = { cacheKey: scope.cacheKey, value: generation.current.value + 1 }
   const [definitions, setDefinitions] = useState<WorkflowDefSummary[]>([])
-  const [selectedName, setSelectedName] = useState('')
+  const [selectedName, setSelectedName] = useState(initialName ?? '')
   const [definition, setDefinition] = useState<Definition | null>(null)
   const [draft, setDraft] = useState<Definition | null>(null)
   const [loading, setLoading] = useState(true)
@@ -105,7 +114,6 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
       if (generation.current.value !== token || generation.current.cacheKey !== scope.cacheKey) return
       const rows = Array.isArray(result.defs) ? result.defs : []
       setDefinitions(rows)
-      if (!current.current.selectedName && rows.length) setSelectedName(rows[0].name)
       if (!rows.length && !current.current.draft) { setDefinition(null); setDraft(null) }
     } catch (cause) {
       if (generation.current.value === token && generation.current.cacheKey === scope.cacheKey)
@@ -118,10 +126,10 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
   useEffect(() => {
     const token = generation.current.value
     setStateCacheKey(scope.cacheKey)
-    setDefinitions([]); setSelectedName(''); setDefinition(null); setDraft(null); setLoading(true)
+    setDefinitions([]); setSelectedName(initialName ?? ''); setDefinition(null); setDraft(null); setLoading(true)
     setBusy(false); setError(''); setIssues([]); setNotice(''); setSelectedKey(''); setNewName('')
     void refreshList(token)
-  }, [refreshList, scope.cacheKey])
+  }, [initialName, refreshList, scope.cacheKey])
 
   useEffect(() => {
     if (stateCacheKey !== scope.cacheKey || !selectedName || selectedName === 'new') return
@@ -170,7 +178,7 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
       config: { prompt: '' }, needs: [] }
     const children = [...(draft.root.children ?? []), node]
     const root = { ...draft.root, children }
-    setDraft({ ...draft, root }); setSelectedKey(`children/${children.length - 1}`)
+    setDraft({ ...draft, root }); setSelectedKey(`/children/${children.length - 1}`)
   }
   const createWorkflow = () => {
     const name = newName.trim()
@@ -206,13 +214,14 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
         }
         if (!stillCurrent()) return
         const result = await gatewayJson<Response>('/api/workflows', { method: 'POST', body: { ...draft, save: true,
-          ...(definition ? { expected_revision: definition.version } : {}) } })
+          ...(definition ? { expected_revision: definition.version } : { create_only: true }) } })
         if (!stillCurrent()) return
         setIssues(result.issues ?? [])
         if (result.saved && result.definition) {
           setDefinition(result.definition); setDraft(structuredClone(result.definition)); setSelectedName(result.definition.name)
           setNotice(`Saved ${result.definition.name} as version ${result.definition.version ?? 'current'}.`)
           await refreshList(token)
+          if (!definition) onDefinitionSaved?.(result.definition.name)
         } else if (result.valid === false) setNotice('The save was refused because validation found issues; your draft is preserved.')
         else throw new Error('Gideon did not confirm that the workflow was saved.')
         return
@@ -240,13 +249,14 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
     } finally { if (generation.current.value === token && operation.current === operationId) setBusy(false) }
   }
 
-  return <main aria-label="Workflow definition editor" style={{ width: '100%', minWidth: 0, display: 'grid', gap: 16 }}>
+  const editor = <main aria-label="Workflow definition editor" style={{ width: '100%', minWidth: 0, display: 'grid', gap: 16 }}>
     <header style={{ display: 'grid', gap: 10 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end' }}>
         <label style={{ display: 'grid', gap: 5, minWidth: 240, flex: '1 1 300px' }}>Workflow definition
           <select aria-label="Workflow definition" value={visibleSelectedName} onChange={event => {
             operation.current++; setBusy(false)
             setSelectedName(event.target.value); setDefinition(null); setDraft(null)
+            onDefinitionSelected?.(event.target.value)
           }} style={{ minHeight: 42, font: 'inherit' }}>
             <option value="">Choose a workflow</option>
             {visibleDefinitions.map(row => <option key={row.name} value={row.name}>{row.name} · v{row.version}</option>)}
@@ -273,7 +283,8 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
           {visibleDraft?.metadata?.a2a_published ? 'Withdraw publication' : 'Publish workflow'}
         </button>
         <button type="button" style={buttonStyle} disabled={!visibleDefinition || busy || hasChanges} onClick={() => void submit('start')}>Start workflow</button>
-        {nodes.length > 0 && <button type="button" style={buttonStyle} disabled={!visibleDraft || busy} onClick={addStep}>Add stage</button>}
+        {visibleDraft?.root.kind === 'sequence' &&
+          <button type="button" style={buttonStyle} disabled={busy} onClick={addStep}>Add stage</button>}
       </div>
     </header>
 
@@ -310,4 +321,5 @@ export default function WorkflowEditor({ scope }: WorkflowEditorProps) {
     </div>}
     {ownerMatches && !loading && !visibleDraft && !error && <p role="status">Choose a native workflow definition or create a draft.</p>}
   </main>
+  return route ? <WorkspaceFrame route={route} mode="full" title="Workflow builder" onBack={onBack}>{editor}</WorkspaceFrame> : editor
 }

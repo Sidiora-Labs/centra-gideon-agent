@@ -65,3 +65,41 @@ async def test_native_publish_and_graph_save_share_revision_transaction(tmp_path
             workflow_defs.unregister_provider("native")
         else:
             workflow_defs.register_provider(prior_provider)
+
+
+@pytest.mark.asyncio
+async def test_native_create_only_rejects_one_of_two_concurrent_same_name_saves(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    from gideon.automation.workflows import defs as workflow_defs
+    from gideon.automation.workflows import service
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+
+    provider = NativeWorkflowDefProvider()
+    prior_provider = workflow_defs.get_provider("native")
+    workflow_defs.register_provider(provider)
+    try:
+        async def create(description: str):
+            return await service.author_def(
+                name="assistant-create-race",
+                description=description,
+                root={"id": "root", "kind": "transform", "config": {"expr": {"value": 1}}},
+                provenance="user",
+                create_only=True,
+            )
+
+        results = await asyncio.gather(
+            create("Create writer A"), create("Create writer B")
+        )
+        successes = [result for result in results if result["ok"]]
+        conflicts = [result for result in results if not result["ok"]]
+        assert len(successes) == len(conflicts) == 1
+        assert conflicts[0]["code"] == "WF_DEF_ALREADY_EXISTS"
+        current = await provider.get_def("assistant-create-race")
+        assert current is not None
+        assert current.version == 1
+        assert current.description == successes[0]["definition"]["description"]
+    finally:
+        if prior_provider is None:
+            workflow_defs.unregister_provider("native")
+        else:
+            workflow_defs.register_provider(prior_provider)

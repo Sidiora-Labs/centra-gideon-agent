@@ -56,6 +56,8 @@ _STATUS_MAP: dict[str, tuple[int, str]] = {
     "WF_DEF_NO_WRITABLE_PROVIDER": (409, "read_only"),
     "WF_DEF_VERSION_MISMATCH": (409, "version_conflict"),
     "WF_DEF_REVISION_UNSUPPORTED": (409, "revision_unsupported"),
+    "WF_DEF_ALREADY_EXISTS": (409, "already_exists"),
+    "WF_DEF_CREATE_UNSUPPORTED": (409, "create_unsupported"),
     "WF_DEF_SAVE_FAILED": (500, "save_failed"),
     "WF_DEF_DELETE_FAILED": (500, "delete_failed"),
     "WF_RUN_MISSING_INPUTS": (400, "missing_inputs"),
@@ -253,6 +255,9 @@ async def api_def_save(request: web.Request) -> web.Response:
     expected_revision = body.get("expected_revision")
     if expected_revision is not None and (not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 1):
         return web.json_response({"error": {"code": "invalid_request", "message": "expected_revision must be a positive integer"}}, status=400)
+    create_only = body.get("create_only", False)
+    if not isinstance(create_only, bool):
+        return web.json_response({"error": {"code": "invalid_request", "message": "create_only must be a boolean"}}, status=400)
     result = await service.author_def(
         name=str(body.get("name", "") or ""),
         root=root,
@@ -269,6 +274,7 @@ async def api_def_save(request: web.Request) -> web.Response:
             body.get("workspace") if isinstance(body.get("workspace"), dict) else None
         ),
         expected_revision=expected_revision,
+        create_only=create_only,
     )
     _audit(
         request,

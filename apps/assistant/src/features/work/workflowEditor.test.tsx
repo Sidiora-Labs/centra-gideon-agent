@@ -19,6 +19,7 @@ let editorUrl = ''
 let evaluate: (expression: string) => Promise<any>
 let pressEnter: () => Promise<void>
 let resetEditor: () => Promise<void>
+let reloadPage: () => Promise<void>
 
 const nativeFetch = (path: string, init: RequestInit = {}) => fetch(`${api}${path}`, {
   ...init, headers: { Authorization: `Bearer ${credential}`, ...init.headers },
@@ -76,10 +77,33 @@ beforeAll(async () => {
       load(id) { if (id === '\0workflow-entry') return `
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import WorkRoutes, { createWorkRoute } from '/src/features/work/WorkRoutes.web.tsx'
 import WorkflowEditor from '/src/features/work/WorkflowEditor.web.tsx'
+import { parseShellRoute, serializeShellRoute } from '/src/shared/shell/shellRoutes.ts'
 const root = createRoot(document.getElementById('root'))
 let scope = { runtimeOrigin: location.origin, ownerId: 'native-owner', cacheKey: 'native-owner' }
-window.renderEditor = () => root.render(React.createElement(WorkflowEditor, { scope }))
+let route
+const routeFromLocation = () => {
+  const serialized = new URL(location.href).searchParams.get('shell')
+  if (!serialized) return createWorkRoute('workflows', undefined, { destination: 'chat', sessionId: 'workflow-source' })
+  const parsed = parseShellRoute(new URL(serialized, location.origin), location.origin)
+  return parsed.kind === 'route' ? parsed : createWorkRoute('workflows')
+}
+const renderRoute = next => {
+  route = next
+  window.currentRoute = route
+  root.render(React.createElement(WorkRoutes, { scope, route, navigate: nextRoute => {
+    const shell = serializeShellRoute(nextRoute)
+    history.pushState({}, '', location.pathname + '?shell=' + encodeURIComponent(shell))
+    renderRoute(nextRoute)
+  } }))
+}
+window.renderEditor = () => root.render(React.createElement(WorkflowEditor, { scope, initialName: '${workflowName}' }))
+window.renderCatalogue = () => {
+  history.replaceState({}, '', location.pathname)
+  renderRoute(createWorkRoute('workflows', undefined, { destination: 'chat', sessionId: 'workflow-source' }))
+}
+renderRoute(routeFromLocation())
 window.switchOwner = () => { scope = { ...scope, ownerId: 'other-owner', cacheKey: 'other-owner' }; window.renderEditor() }
 window.loaded = true
 ` },
@@ -149,6 +173,10 @@ window.loaded = true
     await command('Page.navigate', { url: editorUrl })
     await waitFor('document.readyState === "complete" && window.loaded === true')
     await waitFor('typeof window.renderEditor === "function"')
+  }
+  reloadPage = async () => {
+    await command('Page.reload', { ignoreCache: false })
+    await waitFor('document.readyState === "complete" && window.loaded === true')
   }
 }, 30000)
 
@@ -251,5 +279,47 @@ describe('native workflow definition editor', () => {
     await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Start workflow').click()`)
     await waitFor('document.querySelector("[role=alert]")?.textContent.includes("supervisor")')
     expect(await evaluate('document.body.textContent.includes("Workflow started")')).toBe(false)
+  }, 30000)
+
+  it('opens the native catalogue definition on its shell route, reloads it, and returns to its source', async () => {
+    await resetEditor()
+    await evaluate('window.renderCatalogue()')
+    await waitFor(`document.querySelector('[aria-label="Workflows"]')?.textContent.includes('${workflowName}')`)
+    await evaluate(`Array.from(document.querySelectorAll('[aria-label="Workflows"] button')).find(button => button.textContent.includes('${workflowName}')).click()`)
+    await waitFor('document.querySelector("[aria-label=\\"Workflow graph\\"]")?.textContent.includes("Prepared input")')
+    const firstRoute = JSON.parse(await evaluate('JSON.stringify(window.currentRoute)'))
+    expect(firstRoute).toMatchObject({ destination: 'activity', view: 'detail',
+      record: { kind: 'workflow', id: workflowName }, placement: { id: 'workflows/definition' },
+      returnTo: { destination: 'chat', sessionId: 'workflow-source' } })
+
+    await reloadPage()
+    await waitFor('document.querySelector("[aria-label=\\"Workflow graph\\"]")?.textContent.includes("Prepared input")')
+    expect(await evaluate('document.querySelector("[aria-label=\\"Workflow definition\\"]")?.value')).toBe(workflowName)
+    await evaluate('document.querySelector("[aria-label=\\"Back\\"]").click()')
+    await waitFor('window.currentRoute?.destination === "chat" && window.currentRoute?.sessionId === "workflow-source"')
+  }, 30000)
+
+  it('keeps a new workflow draft when native create-only rejects a duplicate name', async () => {
+    await resetEditor()
+    await evaluate('window.renderCatalogue()')
+    await waitFor('!!document.querySelector("[aria-label=\\"Workflows\\"]")')
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'New workflow').click()`)
+    await waitFor('!!document.querySelector("[aria-label=\\"New workflow name\\"]")')
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="New workflow name"]'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; setter.call(input, '${workflowName}'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'New workflow').click()`)
+    await waitFor('document.body.textContent.includes("New workflow draft")')
+    expect(await evaluate('document.querySelector("[aria-label=\\"Workflow graph\\"]")?.textContent.includes("step-0")')).toBe(false)
+    expect(await evaluate('document.querySelectorAll("[aria-label=\\"Workflow graph\\"] ol > li").length')).toBe(1)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Add stage').click()`)
+    await waitFor('document.querySelector("[aria-label=\\"Workflow node inspector\\"]")?.textContent.includes("Selected stage")')
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="Node instructions"]'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(input, 'Return one concise result.'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="Workflow description"]'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(input, 'Duplicate name draft must survive'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save workflow').click()`)
+    await waitFor('document.querySelector("[role=alert]")?.textContent.includes("already exists")')
+    expect(await evaluate('document.querySelector("[aria-label=\\"Workflow description\\"]")?.value')).toBe('Duplicate name draft must survive')
+    expect(await evaluate('document.querySelector("[aria-label=\\"New workflow name\\"]")?.value')).toBe(workflowName)
+    expect(JSON.parse(await evaluate('JSON.stringify(window.currentRoute)'))).toMatchObject({
+      placement: { id: 'workflows/definition' }, returnTo: { destination: 'chat', sessionId: 'workflow-source' },
+    })
   }, 30000)
 })
