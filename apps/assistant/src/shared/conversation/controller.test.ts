@@ -1,0 +1,175 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer as createNetServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { createServer, type ViteDevServer } from 'vite'
+import { afterAll, describe, expect, it } from 'vitest'
+import { canonicalMessages, receivedPrompt } from './controller'
+import type { ChatDetail } from './types'
+
+const root = resolve(process.cwd(), '../..')
+const children: ChildProcessWithoutNullStreams[] = []
+const directories: string[] = []
+let vite: ViteDevServer | undefined
+let debuggerSocket: WebSocket | undefined
+
+afterAll(async () => {
+  debuggerSocket?.close()
+  for (const child of children) child.kill('SIGTERM')
+  if (vite) await vite.close()
+  for (const directory of directories) await rm(directory, { recursive: true, force: true })
+})
+
+async function port(): Promise<number> {
+  const server = createNetServer()
+  await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
+  const address = server.address()
+  const value = typeof address === 'object' && address ? address.port : 0
+  await new Promise<void>(done => server.close(() => done()))
+  return value
+}
+
+async function server(origin: string): Promise<string> {
+  const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
+    [join(root, 'apps/assistant/test-support/conversation_server.py'), origin],
+    { env: { ...process.env, PYTHONPATH: join(root, 'runtime') } })
+  children.push(child)
+  const line = await new Promise<string>((done, reject) => {
+    let output = ''
+    let errors = ''
+    const timeout = setTimeout(() => reject(new Error(`Conversation server timed out: ${errors}`)), 15000)
+    child.stdout.on('data', chunk => {
+      output += String(chunk)
+      if (output.includes('\n')) { clearTimeout(timeout); done(output.split('\n')[0]) }
+    })
+    child.stderr.on('data', chunk => { errors += String(chunk) })
+    child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Conversation server exited ${code}: ${errors}`)) })
+  })
+  return `http://127.0.0.1:${(JSON.parse(line) as { api_port: number }).api_port}`
+}
+
+async function browser(address: string): Promise<(expression: string) => Promise<any>> {
+  const directory = await mkdtemp(join(tmpdir(), 'gideon-conversation-browser-'))
+  directories.push(directory)
+  const debuggingPort = await port()
+  const child = spawn(process.env.CHROMIUM_BIN || 'chromium', [
+    '--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
+    `--remote-debugging-port=${debuggingPort}`, `--user-data-dir=${directory}`, 'about:blank',
+  ])
+  children.push(child)
+  let target: { webSocketDebuggerUrl: string } | undefined
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const targets = await (await fetch(`http://127.0.0.1:${debuggingPort}/json`)).json() as
+        Array<{ type: string; webSocketDebuggerUrl: string }>
+      target = targets.find(item => item.type === 'page')
+      if (target) break
+    } catch { await new Promise(done => setTimeout(done, 100)) }
+    if (!target) await new Promise(done => setTimeout(done, 100))
+  }
+  if (!target) throw new Error('Chromium did not start')
+  debuggerSocket = new WebSocket(target.webSocketDebuggerUrl)
+  await new Promise<void>((done, reject) => {
+    debuggerSocket!.addEventListener('open', () => done(), { once: true })
+    debuggerSocket!.addEventListener('error', () => reject(new Error('Chromium debugger failed')), { once: true })
+  })
+  let nextId = 0
+  const pending = new Map<number, { done: (value: any) => void; reject: (error: Error) => void }>()
+  debuggerSocket.addEventListener('message', event => {
+    const response = JSON.parse(String(event.data)) as { id?: number; result?: any; error?: { message: string } }
+    if (!response.id) return
+    const request = pending.get(response.id)
+    if (!request) return
+    pending.delete(response.id)
+    if (response.error) request.reject(new Error(response.error.message))
+    else request.done(response.result)
+  })
+  const command = (method: string, params: Record<string, unknown> = {}) => new Promise<any>((done, reject) => {
+    const id = ++nextId
+    pending.set(id, { done, reject })
+    debuggerSocket!.send(JSON.stringify({ id, method, params }))
+  })
+  await command('Page.navigate', { url: address })
+  return async expression => {
+    const response = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text)
+    return response.result?.value
+  }
+}
+
+describe('canonical Gideon conversation', () => {
+  it('retains producer IDs and recognizes only the submitted user timestamp', () => {
+    const detail: ChatDetail = { key: 'session-a', title: '', running: false, messages: [
+      { role: 'user', content: 'hello', ts: '2026-09-27T12:00:00Z' },
+      { role: 'assistant', content: 'answer', ts: '2026-09-27T12:00:01Z', meta: { id: 'turn-1' } },
+    ] }
+    expect(canonicalMessages(detail).map(message => message.id)).toEqual([
+      'session-a:message:user:2026-09-27T12:00:00Z:0', 'session-a:message:turn-1',
+    ])
+    expect(receivedPrompt(detail, '2026-09-27T12:00:00Z')).toBe(true)
+    expect(receivedPrompt(detail, '2026-09-27T12:00:01Z')).toBe(false)
+  })
+
+  it('uses authenticated browser requests, canonical history and the real gateway socket', async () => {
+    const webPort = await port()
+    const origin = `http://127.0.0.1:${webPort}`
+    const api = await server(origin)
+    const entry = `
+import { ConversationController } from '/src/shared/conversation/controller.ts'
+import { ownerScope, signInOwner, signOutOwner } from '/src/shared/auth.web.tsx'
+window.controller = new ConversationController()
+window.signInOwner = signInOwner
+window.signOutOwner = signOutOwner
+window.ownerScope = ownerScope
+window.loaded = true
+`
+    vite = await createServer({ configFile: false, root: join(root, 'apps/assistant'),
+      plugins: [{ name: 'conversation-entry',
+        resolveId(id) { if (id === '/conversation-entry.ts') return '\0conversation-entry' },
+        load(id) { if (id === '\0conversation-entry') return entry },
+        configureServer(server) { server.middlewares.use('/conversation', (_request, response) => {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.end('<!doctype html><script type="module" src="/conversation-entry.ts"></script>')
+        }) },
+      }],
+      server: { host: '127.0.0.1', port: webPort, strictPort: true, proxy: { '/api': { target: api, ws: true } } },
+    })
+    await vite.listen()
+    const evaluate = await browser(`${origin}/conversation`)
+    await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
+    const result = await evaluate(`(async () => {
+      const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
+      window.controller.setOwner(window.ownerScope(location.origin, owner))
+      const session = await window.controller.create()
+      window.controller.setDraft('A real gateway turn')
+      await window.controller.send()
+      const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
+      await window.controller.refresh()
+      const snapshot = window.controller.snapshot()
+      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length,
+        visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length,
+        draft: snapshot.draft, ids: snapshot.messages.map(m => m.id) }
+      window.controller.socket.close()
+      await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (!window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not disconnect')) } }, 50) })
+      await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not reconnect')) } }, 50) })
+      const reconnected = window.controller.snapshot().messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length
+      await window.controller.open('missing-session')
+      window.controller.setDraft('Retain this draft')
+      await window.controller.send()
+      const failed = { draft: window.controller.snapshot().draft, phase: window.controller.snapshot().phase }
+      await window.signOutOwner()
+      window.controller.setOwner(null)
+      return { ...evidence, reconnected, failed, cleared: window.controller.snapshot() }
+    })()`)
+    expect(result.session).toMatch(/^chat-/)
+    expect(result.connected).toBe(true)
+    expect(result.persisted).toBe(1)
+    expect(result.visible).toBe(1)
+    expect(result.draft).toBe('')
+    expect(new Set(result.ids).size).toBe(result.ids.length)
+    expect(result.reconnected).toBe(1)
+    expect(result.failed).toEqual({ draft: 'Retain this draft', phase: 'failed' })
+    expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
+  }, 30000)
+})
