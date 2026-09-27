@@ -208,6 +208,21 @@ describe('real OSS assistant authentication', () => {
     expect(await waitFor(send, `!!document.querySelector('#gideon-password') && !document.querySelector('#owner-ready')`)).toBe(true)
     expect(await evaluate(send, `window.__cleared`)).toContain(totpReady.cacheKey)
 
+    await mode('password')
+    await refresh()
+    expect(await waitFor(send, `!!document.querySelector('#gideon-password') && !document.querySelector('#gideon-totp')`)).toBe(true)
+    await evaluate(send, `(()=>{
+      const setValue=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
+      setValue('gideon-username','owner-a');setValue('gideon-password',${JSON.stringify(password)});
+      document.querySelector('form').requestSubmit();return true
+    })()`)
+    const expiring = await waitFor(send, `document.querySelector('#owner-ready')?.textContent === 'owner-a' && window.__state?.phase === 'ready' && window.__state.scope`)
+    const revoke = await fetch(`${server.control}/revoke`, { method: 'POST' })
+    expect(revoke.ok).toBe(true)
+    await evaluate(send, `window.__bootstrap.signOut()`)
+    expect(await waitFor(send, `!!document.querySelector('#gideon-password') && !document.querySelector('#owner-ready') && !document.querySelector('button')?.textContent?.includes('Retry sign-out')`)).toBe(true)
+    expect(await evaluate(send, `window.__cleared`)).toContain(expiring.cacheKey)
+
     await mode('local')
     const token = (await (await fetch(`${server.control}/token`)).json() as { token: string }).token
     const paired = await evaluate(send, `fetch('/api/auth/session?token='+encodeURIComponent(${JSON.stringify(token)}),{credentials:'same-origin',headers:{'X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'}}).then(response=>response.ok)`)

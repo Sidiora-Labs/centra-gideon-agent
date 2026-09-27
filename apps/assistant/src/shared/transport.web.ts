@@ -9,6 +9,7 @@ export class GatewayError extends Error {
     readonly status: number,
     readonly code = '',
     readonly retryAfterSeconds?: number,
+    readonly authRequired = false,
   ) {
     super(message)
     this.name = 'GatewayError'
@@ -80,6 +81,7 @@ export async function readGatewayJson<T>(response: Response, protectedRequest = 
       response.status,
       code,
       Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+      response.status === 403 && response.headers.get('X-Auth-Required') === 'true',
     )
   }
   if (payload === undefined) throw new GatewayError('Gateway returned an invalid response', response.status)
