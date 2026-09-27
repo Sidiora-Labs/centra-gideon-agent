@@ -22,7 +22,6 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
     monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)
     monkeypatch.delenv("GIDEON_BYPASS_LOCAL_NETWORKS", raising=False)
     from gideon.cognition.history import ConversationLog
-    from gideon.core.config import loader
     from gideon.integrations.browse.customer_control import ControlDenied
     from gideon.integrations.browse.grant import request_grant
     from gideon.integrations.browse.killswitch import engage, release
@@ -30,10 +29,7 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
     from gideon.interfaces.dashboard import token_auth
     from gideon.interfaces.dashboard.handlers.browser_sessions import CONTROL_KEY, register_browser_session_routes
     from gideon.interfaces.dashboard.state import ConsoleState
-    from gideon.security.auth import credentials
 
-    monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
-    monkeypatch.setattr(credentials, "config_dir", lambda: tmp_path)
     (tmp_path / "config.json").write_text(json.dumps({
         "auth": {"login_enabled": True},
         "security": {"egress": {"allow_hosts": ["127.0.0.1"]}},
