@@ -11,6 +11,8 @@ Repository paths below are implementation targets. `apps/console/src/features/co
 - [ ] **1. Open the right project and workspace.**
   - Add a Code route that takes a project ID, optional workspace context ID, and optional file or result target.
   - Use the existing project list and saved workspace contexts to show the active path, branch, dirty state, linked terminals, and tasks.
+  - Preserve Saved context as a destination with capture, select, compare to live state, and revision-checked delete controls.
+  - Show missing linked terminals or tasks during comparison without silently replacing the saved context.
   - Allow a project picker and recent project return without replacing the selected conversation.
   - Resolve launch parameters through typed route state so a copied link opens the same project for an authorized user.
   - Use the server's project and workspace IDs, rather than a display name, to select records.
@@ -18,8 +20,8 @@ Repository paths below are implementation targets. `apps/console/src/features/co
   - Show last known state while refreshing, then identify any branch or workspace change before the user acts.
   - Make unknown, deleted, inaccessible, and empty projects distinct states with a real route back to the picker.
   - Preserve selected project, pane, and scroll position when moving between Code and Chat or Activity.
-  - Add the web host under `apps/assistant/src/features/code/CodeWorkspace.web.tsx`; adapt `apps/console/src/features/code/CodeCockpitPage.tsx` and `apps/console/src/features/capabilities/workspace/Projects.tsx` as trusted feature modules.
-  - Acceptance: opening a linked project lands on that project's workspace; returning to the conversation restores its draft and context.
+  - Add the web host under `apps/assistant/src/features/code/CodeWorkspace.web.tsx`; adapt `apps/console/src/features/code/CodeCockpitPage.tsx`, `apps/console/src/features/capabilities/workspace/Page.tsx`, and `Projects.tsx` as trusted feature modules.
+  - Acceptance: opening a linked project lands on that project's workspace; Saved context actions work; returning to the conversation restores its draft and context.
 
 - [ ] **2. Browse and edit project files.**
   - Put a searchable file tree, tabs, path bar, preview, and editor in the wide workspace; keep the existing file service as the authority for reads and writes.
@@ -55,9 +57,12 @@ Repository paths below are implementation targets. `apps/console/src/features/co
   - Identify an intentional session close separately from a dropped socket.
   - Avoid exposing an old terminal's output when the user changes project or account.
   - Offer reconnect to a surviving session and explicit close; a connection loss must not imply that the shell stopped.
+  - Preserve Native terminals as an availability-gated, read-only mirror of authorized local panes; discovery, observe, and disconnect remain distinct actions.
+  - Preserve Provider CLI as a real configured-provider launcher with working directory, optional startup image, PTY attach, close, and provider-unavailable states.
+  - Native pane lifecycle remains under the native application; Provider CLI sign-in remains in its terminal.
   - Preserve keyboard input, terminal resize, copy behavior, focus escape, and screen-reader labels.
-  - Use `apps/console/src/features/terminal/TerminalView.tsx`, `TerminalPage.tsx`, `terminalBridge.ts`, and `SandboxPicker.tsx` through a proposed Code terminal pane.
-  - Acceptance: create, reconnect to, and close a real PTY from the selected workspace; state after reload matches the server session.
+  - Use `apps/console/src/features/terminal/TerminalView.tsx`, `TerminalPage.tsx`, `terminalBridge.ts`, `SandboxPicker.tsx`, `apps/console/src/features/capabilities/workspace/ExternalTerminals.tsx`, and `ProviderTerminals.tsx`.
+  - Acceptance: create, reconnect to, and close a real PTY; Native terminals and Provider CLI retain their actual controls and availability; state after reload matches the server session.
 
 - [ ] **5. Show processes, ports, and Git for the selected project.**
   - Reuse workspace process, log-window, port, project, and Git services with their native IDs and revision checks.
@@ -69,8 +74,10 @@ Repository paths below are implementation targets. `apps/console/src/features/co
   - Show branch, dirty files, file diffs, and recent commits without implying that a view made a commit.
   - Require confirmation for process stop or other destructive action, and show access denial or unavailable services honestly.
   - Keep log updates bounded and allow users to resume at the last cursor after a disconnect.
-  - Adapt `apps/console/src/features/capabilities/workspace/Processes.tsx`, `Ports.tsx`, and `Git.tsx` into Code panels.
-  - Acceptance: project status matches the existing services, and a failed stop or port action remains visibly failed.
+  - Preserve Desktop as a separate existing workspace destination with availability check, project selection, start, frame, input, and revision-checked stop.
+  - Preserve Storage as a read-only usage destination with refresh, scan limits, partial-scan reasons, and registered project totals.
+  - Adapt `apps/console/src/features/capabilities/workspace/Processes.tsx`, `Ports.tsx`, `Git.tsx`, `Desktops.tsx`, and `Storage.tsx` into Code panels.
+  - Acceptance: project status matches the existing services; Desktop and Storage controls work when available; a failed stop or port action remains visibly failed.
 
 - [ ] **6. Define the customer Computer lifecycle and isolation contract.**
   - Bind a customer-owned Computer record to an authorized project, workspace path, terminal sessions, files, processes, and ports.
@@ -82,7 +89,7 @@ Repository paths below are implementation targets. `apps/console/src/features/co
   - Decide the required isolation tier for each product mode. An isolated request must fail visibly if the selected sandbox cannot start; it must never report an isolated Computer while running a host shell.
   - Keep workspace files according to the stated retention policy when a Computer stops; release live processes and sessions by an explicit lifecycle rule.
   - Prevent a project switch or second account from inheriting another owner's terminal or path.
-  - Keep customer Computer separate from operator desktop controls and their permissions.
+  - Keep customer Computer separate from operator computer-use controls and their permissions; the existing owner Desktop remains a distinct workspace destination.
   - Add the owned lifecycle in `runtime/gideon/interfaces/dashboard/handlers/` and `runtime/gideon/workspace/capabilities/workspace/`; adapt the terminal handler's sandbox failure path.
   - Acceptance: an authorized user starts, reconnects to, and stops a Computer; an unavailable required sandbox leaves no silently active host shell.
 
@@ -93,6 +100,7 @@ Repository paths below are implementation targets. `apps/console/src/features/co
   - Verify account switching clears workspace tabs, terminal output, and result previews from the prior owner.
   - Verify keyboard navigation can reach pane switching, save, close, and return actions.
   - Verify a stopped Computer remains visibly stopped while its retained files can still be inspected when policy allows.
+  - Verify Saved context, Desktop, Native terminals, Provider CLI, and Storage each open by name with their existing actions, limits, and truthful unavailable states.
   - On desktop and tablet, let editor, terminal, diff, and status panes use the available width and resize without clipping.
   - On phones, prioritize readable status, file review, and focused terminal access with clear touch targets; preserve keyboard access on all sizes.
   - Show a precise unavailable state for any missing provider or capability, with the permitted next action.
