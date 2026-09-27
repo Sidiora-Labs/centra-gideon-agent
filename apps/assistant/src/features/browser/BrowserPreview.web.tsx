@@ -73,6 +73,7 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
     {frame && snapshot && <div style={{ borderRadius: 10, border: `1px solid ${palette.line}`, overflow: 'hidden',
       background: palette.canvas, minHeight: 180 }}>
       <img src={snapshot.imageUrl} alt={`Browser page: ${frame.title || frame.url || 'blank page'}`}
+        data-version={frame.version} data-control-holder={frame.controlHolder}
         draggable={false} style={{ width: '100%', height: 'auto', display: 'block', pointerEvents: 'none', userSelect: 'none' }} />
     </div>}
   </section>
