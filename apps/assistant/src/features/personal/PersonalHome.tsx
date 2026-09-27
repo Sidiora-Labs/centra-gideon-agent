@@ -9,10 +9,10 @@ import { useShellTheme } from '../../shared/shell/shellTheme.web'
 
 export type PersonalModuleProps = ModuleProps
 
-type Draft = { idea: string; goal: string }
+type Draft = { idea: string }
 const drafts = new Map<string, Draft>()
 const activeDraftScopeByOrigin = new Map<string, string>()
-const emptyDraft = (): Draft => ({ idea: '', goal: '' })
+const emptyDraft = (): Draft => ({ idea: '' })
 
 function spaceForRoute(route: ShellRoute): PersonalSpace {
   const placement = route.placement?.id
@@ -153,13 +153,11 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
     value: { ...(previous.scopeKey === scope.cacheKey ? previous.value : draft), [key]: value },
   }))
   const ideas = !route.record && space === 'ideas'
-  const goals = !route.record && space === 'goals'
   const title = PERSONAL_SPACES.find(item => item.id === space)?.label ?? 'Personal'
   const back = returnTo ? () => navigate(createShellRoute(returnTo.destination, {
     view: returnTo.record ? 'detail' : 'list', record: returnTo.record, placement: returnTo.placement, sessionId: returnTo.sessionId,
   })) : onReturn
   const loadIdeas = React.useCallback(() => client.readIdeas().then(value => ({ state: 'available' as const, value })), [client])
-  const loadGoals = React.useCallback(() => client.readGoals().then(value => ({ state: 'available' as const, value })), [client])
   const loadFocused = React.useCallback(() => {
     switch (space) {
       case 'identity': return readIdentitySpace(client, route.placement?.id)
@@ -201,22 +199,16 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
   return <div className="gideon-personal-home" style={themeStyle}>
     <WorkspaceFrame route={route} mode="full" title={title} onBack={back}>
       <p className="gideon-personal-intro">Keep personal decisions and progress connected to their source records.</p>
-      {(ideas || goals) && <div className="gideon-personal-entry-grid">
+      {ideas && <div className="gideon-personal-entry-grid">
         <section aria-labelledby="personal-ideas-title" className="gideon-personal-entry">
           <div><h2 id="personal-ideas-title">Ideas</h2><p>Review evidence-backed suggestions and keep a note for later.</p></div>
           <label htmlFor="personal-idea-draft">Quick note</label>
           <textarea id="personal-idea-draft" value={draft.idea} onChange={event => updateDraft('idea', event.currentTarget.value)} rows={3} />
           <NativeStatus label="Ideas" load={loadIdeas} selectionKey={selectionKey} />
         </section>
-        <section aria-labelledby="personal-goals-title" className="gideon-personal-entry">
-          <div><h2 id="personal-goals-title">Compass Goals</h2><p>Track human goals separately from tasks and automation.</p></div>
-          <label htmlFor="personal-goal-draft">Goal draft</label>
-          <textarea id="personal-goal-draft" value={draft.goal} onChange={event => updateDraft('goal', event.currentTarget.value)} rows={3} />
-          <NativeStatus label="Goals" load={loadGoals} selectionKey={selectionKey} />
-        </section>
       </div>}
       {route.record ? <NativeStatus label={title} load={loadRecord} selectionKey={selectionKey} recordDetail recordId={route.record.id} />
-        : !ideas && !goals && <NativeStatus label={title} load={loadFocused} selectionKey={selectionKey} />}
+        : !ideas && <NativeStatus label={title} load={loadFocused} selectionKey={selectionKey} />}
       <nav aria-label="Personal spaces" className="gideon-personal-spaces">
         {PERSONAL_SPACES.map(item => <button key={item.id} type="button" aria-current={item.id === space ? 'page' : undefined}
           onClick={() => navigate(personalSpaceRoute(item.id, { returnTo: {

@@ -1,16 +1,52 @@
 import { GatewayError, gatewayJson } from '../../shared/transport.web'
 import type { OwnerScope } from '../../shared/auth.web'
 
-export type PersonalSourceKind = 'idea' | 'human-goal' | 'goal-plan' | 'identity-story' | 'learning-capture' | 'learning-review' | 'companion-item' | 'memory-fact' | 'health-measurement' | 'journal-entry'
+export type PersonalSourceKind = 'idea' | 'human-goal' | 'goal-plan' | 'goal-session' | 'identity-story' | 'learning-capture' | 'learning-review' | 'companion-item' | 'memory-fact' | 'health-measurement' | 'journal-entry'
 export type PersonalIdentity = Readonly<{ ownerScopeKey: string; sourceKind: PersonalSourceKind; nativeId: string }>
 export type PersonalRecord<T> = Readonly<{ identity: PersonalIdentity; value: T; revision?: number; freshness: 'current' | 'stale' }>
 export type PersonalAvailability<T> = Readonly<{ state: 'available'; value: T }> | Readonly<{ state: 'unavailable'; reason: string }>
 export type PersonalWrite<T> = Readonly<{ value: T; requestId: string; expectedRevision?: number }>
 export type NativeValue = Readonly<Record<string, unknown>>
+export type PendingGoalWrite = Readonly<{ request_id: string; body: NativeValue; rejected?: boolean }>
+
+export function pendingGoalWriteKey(ownerScopeKey: string, goalId: string, operation: string): string {
+  return `gideon:personal:goal-write:${JSON.stringify([ownerScopeKey, goalId, operation])}`
+}
+
+export function readPendingGoalWrite(key: string): PendingGoalWrite | null {
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<PendingGoalWrite>
+    return typeof value.request_id === 'string' && value.body && typeof value.body === 'object'
+      ? value as PendingGoalWrite : null
+  } catch { return null }
+}
+
+export function preparePendingGoalWrite(key: string, fields: NativeValue): PendingGoalWrite {
+  const current = readPendingGoalWrite(key)
+  if (current && !current.rejected) return current
+  const request_id = crypto.randomUUID()
+  const operation = Object.freeze({ request_id, body: Object.freeze({ ...fields, request_id }) })
+  window.localStorage.setItem(key, JSON.stringify(operation))
+  return operation
+}
+
+export function clearPendingGoalWrite(key: string): void {
+  window.localStorage.removeItem(key)
+}
+
+export function rejectPendingGoalWrite(key: string): void {
+  const current = readPendingGoalWrite(key)
+  if (current) window.localStorage.setItem(key, JSON.stringify({ ...current, rejected: true }))
+}
 export type IdeaRecord = Readonly<{ id: string; title: string; revision?: number; status?: string; source_link?: string } & NativeValue>
 export type HumanGoal = Readonly<{ id: string; title: string; description: string; status: 'active' | 'completed' | 'archived'; target_date: string | null; revision: number } & NativeValue>
 export type HumanGoalInput = Readonly<{ title: string; description?: string; status?: 'active' | 'completed' | 'archived'; target_date?: string | null }>
-export type GoalPlan = Readonly<{ goal_id: string; revision?: number } & NativeValue>
+export type GoalMilestone = Readonly<{ id: string; title: string; done: boolean; target_date: string | null }>
+export type GoalPlan = Readonly<{ goal_id: string; revision: number; parent_id: string | null; horizon: 'short_term' | 'long_term' | 'lifetime'; milestones: readonly GoalMilestone[]; links: readonly Readonly<{ kind: 'task' | 'loop' | 'session'; id: string; title?: string | null; status?: string | null; availability?: string }>[]; unit: string; target_value: number | null } & NativeValue>
+export type GoalPlanProjection = Readonly<{ goal: HumanGoal; plan: GoalPlan; children: readonly string[]; checkins: readonly NativeValue[]; velocity: NativeValue | null; linked_sources: readonly NativeValue[]; milestones_complete_ratio: number | null }>
+export type GoalSession = Readonly<{ id: string; goal_id: string; title: string; start_at: string; end_at: string; status: 'scheduled' | 'completed' | 'cancelled'; notes: string; revision: number } & NativeValue>
 export type IdentityStory = Readonly<{ id: string; prompt: string; theme: string; text: string; parent_id: string | null; revision: number } & NativeValue>
 export type LearningCapture = Readonly<{ id: string; status: string; original_text: string; captured_at: string } & NativeValue>
 export type LearningReview = Readonly<{ id: string; date?: string; status?: string } & NativeValue>
@@ -134,16 +170,57 @@ export class PersonalClient {
     return result
   }
   async readGoalPlans(signal?: AbortSignal): Promise<readonly PersonalRecord<GoalPlan>[]> {
-    return this.read('/api/capabilities/identity/goal-plans', 'goal-plan', signal)
+    const rows = await this.scopedRequest<unknown>('/api/capabilities/identity/goal-plans', signal)
+    if (!Array.isArray(rows)) throw new TypeError('Native goal-plan collection did not return records')
+    return rows.map(value => this.goalPlanRecord(value))
   }
-  async readGoalPlan(id: string, signal?: AbortSignal): Promise<PersonalRecord<GoalPlan>> {
-    return this.detail<GoalPlan>(`/api/capabilities/identity/goal-plans/${enc(id)}`, id, 'goal-plan', signal)
+  private goalPlanRecord(value: unknown): PersonalRecord<GoalPlan> {
+    if (!value || typeof value !== 'object' || !('goal' in value) || !('plan' in value)) throw new TypeError('Native goal-plan projection is malformed')
+    const projection = value as GoalPlanProjection
+    if (!projection.goal || typeof projection.goal.id !== 'string' || projection.plan?.goal_id !== projection.goal.id) throw new TypeError('Native goal-plan projection returned mismatched goal identity')
+    return Object.freeze({ identity: Object.freeze({ ownerScopeKey: this.scope.cacheKey, sourceKind: 'goal-plan', nativeId: projection.goal.id }), value: projection.plan,
+      ...(typeof projection.plan.revision === 'number' ? { revision: projection.plan.revision } : {}), freshness: 'current' })
   }
-  async configureGoalPlan(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
-    return this.write('/api/capabilities/identity/goal-plans/configure', 'POST', input, signal)
+  async readGoalPlan(id: string, signal?: AbortSignal): Promise<PersonalRecord<GoalPlanProjection>> {
+    requireId(id)
+    const projection = await this.scopedRequest<GoalPlanProjection>(`/api/capabilities/identity/goal-plans/${enc(id)}`, signal)
+    if (!projection?.goal || projection.goal.id !== id || projection.plan?.goal_id !== id) throw new Error('Native response returned a different canonical goal ID')
+    return Object.freeze({ identity: Object.freeze({ ownerScopeKey: this.scope.cacheKey, sourceKind: 'goal-plan', nativeId: id }), value: projection,
+      ...(typeof projection.plan.revision === 'number' ? { revision: projection.plan.revision } : {}), freshness: 'current' })
+  }
+  async configureGoalPlan(input: NativeValue, signal?: AbortSignal): Promise<GoalPlan> {
+    const result = await this.write<GoalPlan>('/api/capabilities/identity/goal-plans/configure', 'POST', input, signal)
+    if (typeof input.goal_id !== 'string' || result.goal_id !== input.goal_id) throw new Error('Native response returned a different canonical goal ID')
+    return result
   }
   async addGoalCheckin(input: NativeValue, signal?: AbortSignal): Promise<NativeValue> {
-    return this.write('/api/capabilities/identity/goal-plans/checkins', 'POST', input, signal)
+    const result = await this.write<NativeValue>('/api/capabilities/identity/goal-plans/checkins', 'POST', input, signal)
+    if (typeof input.goal_id !== 'string' || result.goal_id !== input.goal_id) throw new Error('Native response returned a different canonical goal ID')
+    return result
+  }
+  async readGoalSessions(goalId: string, signal?: AbortSignal): Promise<readonly PersonalRecord<GoalSession>[]> {
+    requireId(goalId)
+    const rows = await this.scopedRequest<GoalSession[] | { sessions: GoalSession[] }>(`/api/capabilities/identity/goals/sessions?goal_id=${enc(goalId)}`, signal)
+    const sessions = Array.isArray(rows) ? rows : rows.sessions
+    return sessions.filter(session => session.goal_id === goalId).map(session => record(this.scope, 'goal-session', session))
+  }
+  async saveGoalSession(input: NativeValue, signal?: AbortSignal): Promise<PersonalRecord<GoalSession>> {
+    if (typeof input.goal_id !== 'string' || typeof input.request_id !== 'string') throw new TypeError('Goal sessions require their canonical goal ID and request ID')
+    const value = await this.write<GoalSession>('/api/capabilities/identity/goals/sessions', 'POST', input)
+    if (value.goal_id !== input.goal_id) throw new Error('Native response returned a different canonical goal ID')
+    return record(this.scope, 'goal-session', value)
+  }
+  async readGoalSources(signal?: AbortSignal): Promise<readonly Readonly<{ kind: 'task' | 'loop'; id: string; title: string; status: string }>[]> {
+    const optional = async (path: string) => {
+      try { return await this.scopedRequest<unknown>(path, signal) }
+      catch (error) { if (error instanceof GatewayError && [404, 501].includes(error.status)) return []; throw error }
+    }
+    const [tasks, loops] = await Promise.all([optional('/api/tasks'), optional('/api/loops')])
+    const values = (input: unknown, key: string): NativeValue[] => Array.isArray(input) ? input.filter((row): row is NativeValue => !!row && typeof row === 'object')
+      : input && typeof input === 'object' && key in input && Array.isArray((input as NativeValue)[key]) ? ((input as NativeValue)[key] as NativeValue[]) : []
+    const taskRows = values(tasks, 'tasks').flatMap(row => typeof row.id === 'string' && typeof row.title === 'string' ? [{ kind: 'task' as const, id: row.id, title: row.title, status: String(row.status ?? 'unknown') }] : [])
+    const loopRows = values(loops, 'loops').flatMap(row => typeof row.id === 'string' && typeof row.name === 'string' ? [{ kind: 'loop' as const, id: row.id, title: row.name, status: String(row.status ?? 'unknown') }] : [])
+    return [...taskRows, ...loopRows]
   }
 
   async readIdentityStories(signal?: AbortSignal): Promise<readonly PersonalRecord<IdentityStory>[]> {
