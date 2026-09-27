@@ -13,9 +13,20 @@ let browserDirectory = ''
 let socket: WebSocket | undefined
 let vite: ViteDevServer | undefined
 let api = ''
+let controlApi = ''
+let credential = ''
 let taskId = ''
 let projectId = ''
 let evaluate: (expression: string) => Promise<any>
+
+const nativeFetch = (path: string, init: RequestInit = {}) => fetch(`${api}${path}`, {
+  ...init, headers: { Authorization: `Bearer ${credential}`, ...init.headers },
+})
+const control = async (action: string, path = '') => {
+  const response = await fetch(`${controlApi}/test/${action}${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+  if (!response.ok) throw new Error(`Fixture control ${action} failed: ${response.status}`)
+  return response.json() as Promise<{ writes: { task: number; project: number }; held: boolean }>
+}
 
 async function port(): Promise<number> {
   const server = createNetServer()
@@ -51,8 +62,11 @@ beforeAll(async () => {
     native!.stderr.on('data', chunk => { errors += String(chunk) })
     native!.once('exit', code => { clearTimeout(timer); reject(new Error(`Native server exited ${code}: ${errors}`)) })
   })
-  const ready = JSON.parse(line) as { port: number; task_id: string; project_id: string }
+  const ready = JSON.parse(line) as { port: number; control_port: number; credential: string;
+    task_id: string; project_id: string }
   api = `http://127.0.0.1:${ready.port}`
+  controlApi = `http://127.0.0.1:${ready.control_port}`
+  credential = ready.credential
   taskId = ready.task_id
   projectId = ready.project_id
   const webPort = await port()
@@ -101,7 +115,9 @@ window.loaded = true
         })
       },
     }],
-    server: { host: '127.0.0.1', port: webPort, strictPort: true, proxy: { '/api': api } },
+    server: { host: '127.0.0.1', port: webPort, strictPort: true, proxy: {
+      '/api': { target: api, changeOrigin: true, headers: { Authorization: `Bearer ${credential}` } },
+    } },
   })
   await vite.listen()
   browserDirectory = await mkdtemp(join(tmpdir(), 'gideon-task-project-'))
@@ -180,13 +196,13 @@ describe('native task and project workspaces', () => {
     await evaluate("window.setField('Add a comment', 'Reviewed on mobile')")
     await evaluate("window.clickNamed('Post comment')")
     await waitFor('document.querySelector("[aria-label=\\"Task comments\\"]")?.textContent.includes("Reviewed on mobile")')
-    const commentResponse = await fetch(`${api}/api/tasks/${encodeURIComponent(taskId)}/comments`)
+    const commentResponse = await nativeFetch(`/api/tasks/${encodeURIComponent(taskId)}/comments`)
     const comments = await commentResponse.json() as { comments: Array<{ body: string }> }
     expect(comments.comments.some(row => row.body === 'Reviewed on mobile')).toBe(true)
     await evaluate("window.setField('Description', 'Saved through task workspace')")
     await evaluate("window.clickNamed('Save task')")
     await waitFor('document.body.textContent.includes("Task saved.")')
-    const saved = await (await fetch(`${api}/api/tasks/${encodeURIComponent(taskId)}`)).json() as { description: string }
+    const saved = await (await nativeFetch(`/api/tasks/${encodeURIComponent(taskId)}`)).json() as { description: string }
     expect(saved.description).toBe('Saved through task workspace')
   }, 30000)
 
@@ -196,7 +212,7 @@ describe('native task and project workspaces', () => {
     await waitFor('document.querySelector("[aria-label=\\"Task plan\\"]")?.textContent.includes("Save task")')
     await evaluate("window.setField('Description', 'Draft survives conflict')")
     await new Promise(done => setTimeout(done, 1100))
-    const changed = await fetch(`${api}/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PUT',
+    const changed = await nativeFetch(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PUT',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: 'External revision' }) })
     expect(changed.ok).toBe(true)
     await evaluate("window.clickNamed('Save task')")
@@ -212,7 +228,7 @@ describe('native task and project workspaces', () => {
     await evaluate("window.clickNamed('Open code workspace')")
     expect(await evaluate('window.lastRoute?.record?.id')).toBe(projectId)
     expect(await evaluate('window.lastRoute?.placement?.id')).toBe('projects/detail')
-    const existing = await fetch(`${api}/api/projects`, { method: 'POST',
+    const existing = await nativeFetch('/api/projects', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Existing project for rejection' }) })
     expect(existing.status).toBe(201)
     await evaluate("window.setField('Project name', 'Existing project for rejection')")
@@ -232,16 +248,66 @@ describe('native task and project workspaces', () => {
       await waitFor('document.body.textContent.includes("Planned native task")')
     } catch (error) {
       const body = await evaluate('document.body.textContent')
-      const nativeResponse = await (await fetch(`${api}/api/tasks`)).text()
+      const nativeResponse = await (await nativeFetch('/api/tasks')).text()
       throw new Error(`${String(error)}\nBrowser: ${body}\nNative: ${nativeResponse}`)
     }
-    const membership = await (await fetch(`${api}/api/task-lists?project_id=${encodeURIComponent(projectId)}`)).json() as
+    const membership = await (await nativeFetch(`/api/task-lists?project_id=${encodeURIComponent(projectId)}`)).json() as
       { task_lists: Array<{ id: string }> }
     const pages = await Promise.all(membership.task_lists.map(list =>
-      fetch(`${api}/api/tasks?task_list_id=${encodeURIComponent(list.id)}`).then(response => response.json() as Promise<{
+      nativeFetch(`/api/tasks?task_list_id=${encodeURIComponent(list.id)}`).then(response => response.json() as Promise<{
         tasks: Array<{ id: string; title: string; task_list_id: string }>
       }>)))
     expect(pages.flatMap(page => page.tasks).some(row => row.title === 'Planned native task' &&
       !!row.id && membership.task_lists.some(list => list.id === row.task_list_id))).toBe(true)
+  }, 30000)
+
+  it('does not send an old task edit after the owner changes during native preflight', async () => {
+    await evaluate(`window.renderWorkspace('task', ${JSON.stringify(taskId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Task plan\\"]")?.textContent.includes("Save task")')
+    await evaluate("window.setField('Description', 'Must not cross owner scope')")
+    const before = await control('state')
+    await control('arm', `/api/tasks/${encodeURIComponent(taskId)}`)
+    await evaluate("window.clickNamed('Save task')")
+    await control('wait')
+    await evaluate(`window.renderWorkspace('task', ${JSON.stringify(taskId)}, { runtimeOrigin: location.origin, ownerId: 'other-owner', cacheKey: 'other-owner' })`)
+    await waitFor('document.body.textContent.includes("Owner: other-owner")')
+    await control('release')
+    await control('settled')
+    await new Promise(done => setTimeout(done, 150))
+    const after = await control('state')
+    expect(after.writes.task).toBe(before.writes.task)
+    const record = await (await nativeFetch(`/api/tasks/${encodeURIComponent(taskId)}`)).json() as { description: string }
+    expect(record.description).not.toBe('Must not cross owner scope')
+  }, 30000)
+
+  it('does not send an old project edit after the route changes during native preflight', async () => {
+    await evaluate(`window.renderWorkspace('project', ${JSON.stringify(projectId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Project context\\"]")?.textContent.includes("Save project")')
+    await evaluate("window.setField('Brief', 'Must not cross project route')")
+    const before = await control('state')
+    await control('arm', `/api/projects/${encodeURIComponent(projectId)}`)
+    await evaluate("window.clickNamed('Save project')")
+    await control('wait')
+    await evaluate(`window.renderWorkspace('task', ${JSON.stringify(taskId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Task plan\\"]")?.textContent.includes("Save task")')
+    await control('release')
+    await control('settled')
+    await new Promise(done => setTimeout(done, 150))
+    const after = await control('state')
+    expect(after.writes.project).toBe(before.writes.project)
+    const record = await (await nativeFetch(`/api/projects/${encodeURIComponent(projectId)}`)).json() as { brief: string }
+    expect(record.brief).not.toBe('Must not cross project route')
+  }, 30000)
+
+  it('retains a task draft and source ID after its real credential is revoked', async () => {
+    await evaluate(`window.renderWorkspace('task', ${JSON.stringify(taskId)})`)
+    await waitFor('document.querySelector("[aria-label=\\"Task plan\\"]")?.textContent.includes("Save task")')
+    await evaluate("window.setField('Description', 'Draft after credential revocation')")
+    await control('revoke')
+    await evaluate("window.clickNamed('Save task')")
+    await waitFor('document.querySelector("[role=alert]")?.textContent.includes("Access denied")')
+    expect(await evaluate('Array.from(document.querySelectorAll("label")).find(node => node.textContent.startsWith("Description"))?.querySelector("textarea")?.value'))
+      .toBe('Draft after credential revocation')
+    expect(await evaluate('document.body.textContent.includes(' + JSON.stringify(taskId) + ')')).toBe(true)
   }, 30000)
 })

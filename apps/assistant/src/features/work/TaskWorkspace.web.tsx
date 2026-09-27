@@ -84,6 +84,7 @@ function TaskWorkspaceInstance({ route, scope, navigate, onReturn }: ModuleProps
         JSON.stringify(draftOf(latest)) !== JSON.stringify(draftOf(entry.record))) {
         throw new Error('This task changed since you opened it. Your draft is preserved; review the latest record before saving.')
       }
+      if (epoch.current !== current) return
       const updated = await gatewayJson<TaskItem>(path(id), { method: 'PUT', body: draft })
       if (updated.id !== id) throw new Error('Gideon returned a different task. Your draft is preserved.')
       if (epoch.current !== current) return
@@ -100,6 +101,7 @@ function TaskWorkspaceInstance({ route, scope, navigate, onReturn }: ModuleProps
     const current = epoch.current
     setBusy(true); setProblem(''); setNotice('')
     try {
+      if (epoch.current !== current) return
       const comment = await gatewayJson<TaskComment>(`${path(id)}/comments`, { method: 'POST', body: { body: commentDraft } })
       if (comment.task_id !== id) throw new Error('Gideon returned a comment for a different task.')
       if (epoch.current !== current) return

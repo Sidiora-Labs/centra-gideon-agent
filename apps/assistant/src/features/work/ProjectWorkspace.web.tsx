@@ -92,6 +92,7 @@ function ProjectWorkspaceInstance({ route, scope, navigate, onReturn }: ModulePr
         JSON.stringify(draftOf(latest)) !== JSON.stringify(draftOf(entry.record))) {
         throw new Error('This project changed since you opened it. Your draft is preserved; review the latest record before saving.')
       }
+      if (current !== epoch.current) return
       const updated = await gatewayJson<ProjectItem>(path, { method: 'PUT', body: draft })
       if (updated.id !== id) throw new Error('Gideon returned a different project. Your draft is preserved.')
       if (current !== epoch.current) return
@@ -108,6 +109,7 @@ function ProjectWorkspaceInstance({ route, scope, navigate, onReturn }: ModulePr
     const current = epoch.current
     setBusy(true); setProblem(''); setNotice('')
     try {
+      if (current !== epoch.current) return
       const created = await gatewayJson<TaskItem>('/api/tasks', { method: 'POST',
         body: { title: newTask.trim(), project_id: id } })
       if (!created.id) throw new Error('Gideon did not return a task ID.')
