@@ -1,13 +1,14 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { createServer, type ViteDevServer } from "vite";
 
-type PendingCommand = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
+type PendingCommand = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
 
 export type BrowserHarness = Readonly<{
-  child: ChildProcessWithoutNullStreams;
+  child: ChildProcess;
   command: (method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   evaluate: <T = unknown>(expression: string) => Promise<T>;
   navigate: (url: string) => Promise<void>;
@@ -15,6 +16,47 @@ export type BrowserHarness = Readonly<{
   diagnostics: () => readonly string[];
   close: () => Promise<void>;
 }>;
+
+export async function startViteEntryServer(options: {
+  root: string;
+  port: number;
+  entryFile: string;
+  apiOrigin: string;
+  route?: string;
+}): Promise<ViteDevServer> {
+  const root = resolve(options.root);
+  const entryFile = resolve(options.entryFile);
+  const route = options.route ?? "/assistant";
+  const server = await createServer({
+    configFile: false,
+    root,
+    resolve: {
+      alias: [{ find: /^react-native$/, replacement: "react-native-web" }],
+      extensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"],
+      dedupe: ["react", "react-dom"],
+    },
+    esbuild: { jsx: "automatic" },
+    optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] } },
+    plugins: [{
+      name: "gideon-actual-tsx-entry",
+      configureServer(viteServer) {
+        viteServer.middlewares.use(route, (_request, response) => {
+          response.setHeader("Content-Type", "text/html; charset=utf-8");
+          response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs${entryFile}"></script></body></html>`);
+        });
+      },
+    }],
+    server: {
+      host: "127.0.0.1",
+      port: options.port,
+      strictPort: true,
+      fs: { allow: [root, dirname(entryFile)] },
+      proxy: { "/api": { target: options.apiOrigin, ws: true } },
+    },
+  });
+  await server.listen();
+  return server;
+}
 
 async function availablePort(): Promise<number> {
   const server = createNetServer();
@@ -103,14 +145,26 @@ export async function startBrowserHarness(options: {
     const waiter = pending.get(message.id);
     if (!waiter) return;
     pending.delete(message.id);
+    clearTimeout(waiter.timeout);
     if (message.error) waiter.reject(new Error(message.error.message));
     else waiter.resolve(message.result ?? {});
+  });
+  socket.addEventListener("close", () => {
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(new Error(`Chromium debugger socket closed; ${[...firstDiagnostics.values()].join(" | ") || browserErrors || "no browser diagnostics"}`));
+    }
+    pending.clear();
   });
 
   const command = (method: string, params: Record<string, unknown> = {}) => new Promise<Record<string, unknown>>((resolve, reject) => {
     if (closed || socket.readyState !== WebSocket.OPEN) { reject(new Error("Chromium debugger is closed")); return; }
     const id = ++sequence;
-    pending.set(id, { resolve, reject });
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Chromium command timed out (${method}); ${[...firstDiagnostics.values()].join(" | ") || "no browser diagnostics"}`));
+    }, 30000);
+    pending.set(id, { resolve, reject, timeout });
     socket.send(JSON.stringify({ id, method, params }));
   });
   const evaluate = async <T,>(expression: string): Promise<T> => {
@@ -164,7 +218,7 @@ export async function startBrowserHarness(options: {
       await new Promise<void>(resolve => {
         if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
         child.once("exit", () => resolve());
-        setTimeout(resolve, 5000).unref();
+        setTimeout(resolve, 5000);
       });
       if (ownsProfile) await rm(profileDirectory, { recursive: true, force: true });
     },
