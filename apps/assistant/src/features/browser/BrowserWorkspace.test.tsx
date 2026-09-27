@@ -31,7 +31,7 @@ it('keeps authenticated browser previews bound to the current owner, version and
   let vite: Awaited<ReturnType<typeof startViteEntryServer>> | undefined
   let browser: Awaited<ReturnType<typeof startBrowserHarness>> | undefined
   try {
-    const startup = await new Promise<{ api_port: number }>((done, reject) => {
+    const startup = await new Promise<{ api_port: number; other_token: string }>((done, reject) => {
       let output = ''
       let errors = ''
       const timeout = setTimeout(() => reject(new Error(`Browser server timed out: ${errors}`)), 20000)
@@ -40,7 +40,7 @@ it('keeps authenticated browser previews bound to the current owner, version and
         const line = output.split('\n')[0]
         if (!line) return
         clearTimeout(timeout)
-        try { done(JSON.parse(line) as { api_port: number }) }
+        try { done(JSON.parse(line) as { api_port: number; other_token: string }) }
         catch (error) { reject(new Error(`Invalid browser server startup: ${String(error)}`)) }
       })
       native.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-4000) })
@@ -48,13 +48,22 @@ it('keeps authenticated browser previews bound to the current owner, version and
     })
     await writeFile(entryFile, `
       import React from 'react';
+      import { flushSync } from 'react-dom';
       import { createRoot } from 'react-dom/client';
       import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx';
       import { WorkspaceFrame } from '/src/shared/shell/WorkspaceFrame.web.tsx';
       import { parseShellRoute, serializeShellRoute } from '/src/shared/shell/shellRoutes.ts';
       import BrowserRoute, { isBrowserRoute } from '/src/features/browser/BrowserRoute.web.tsx';
+      import BrowserPreview from '/src/features/browser/BrowserPreview.web.tsx';
+      import { BrowserClient } from '/src/features/browser/browserClient.ts';
       import { browserModuleDefinition } from '/src/features/browser/moduleDefinitions.web.ts';
       const root = createRoot(document.getElementById('root'));
+      function DirectPreview({ session }) {
+        const [scope, setScope] = React.useState(window.scope);
+        const client = React.useMemo(() => new BrowserClient(scope), [scope.cacheKey]);
+        window.switchPreviewScope = next => flushSync(() => setScope(next));
+        return React.createElement(BrowserPreview, { client, session });
+      }
       function App() {
         const [route, setRoute] = React.useState(() => parseShellRoute(location.pathname + location.search, location.origin));
         window.currentRoute = route;
@@ -67,6 +76,19 @@ it('keeps authenticated browser previews bound to the current owner, version and
       }
       window.signIn = async () => { window.scope = ownerScope(location.origin, await signInOwner('browser-owner', 'correct-horse-battery-staple')); root.render(React.createElement(App)); return window.scope.ownerId; };
       window.resolveBrowser = async () => browserModuleDefinition.resolve(window.scope, window.currentRoute);
+      window.mountDirectPreview = async () => {
+        const opened = await new BrowserClient(window.scope).open('browser-chat');
+        if (opened.state !== 'ready') throw new Error(opened.message);
+        window.directSession = opened.value;
+        root.render(React.createElement(DirectPreview, { session: opened.value }));
+        return opened.value;
+      };
+      window.switchToOtherOwner = async () => {
+        const session = await fetch('/api/auth/session').then(response => response.json());
+        const nextScope = ownerScope(location.origin, session);
+        window.switchPreviewScope(nextScope);
+        return session.user;
+      };
       window.clickButton = (label, area) => {
         const container = area ? [...document.querySelectorAll('[aria-label="Browser preview"]')].find(node => node.querySelector('h2')?.textContent === area) : document;
         const button = [...(container || document).querySelectorAll('button')].find(node => node.textContent.trim() === label && !node.disabled);
@@ -80,9 +102,9 @@ it('keeps authenticated browser previews bound to the current owner, version and
           const url = new URL(typeof input === 'string' ? input : input.url, location.origin);
           if (!held && url.pathname.endsWith('/preview')) {
             held = true;
-            return new Promise((resolve, reject) => {
-              window.releasePreview = () => { window.fetch = original; original(input, init).then(resolve, reject); };
-            });
+            return original(input, init).then(response => new Promise(resolve => {
+              window.releasePreview = () => { window.fetch = original; resolve(response); };
+            }));
           }
           return original(input, init);
         };
@@ -107,6 +129,7 @@ it('keeps authenticated browser previews bound to the current owner, version and
     await browser.waitFor("document.querySelector('[aria-label=\"Browser preview\"] img')?.complete && document.querySelector('[aria-label=\"Browser preview\"] img')?.naturalWidth > 0", 'real preview image')
     expect(await browser.evaluate<string>(`[...document.querySelectorAll('[aria-label="Browser preview"]')].find(node => node.querySelector('h2')?.textContent === 'Live preview')?.textContent || ''`)).toContain('Gideon has control')
     expect(await browser.evaluate<string>(`[...document.querySelectorAll('[aria-label="Browser preview"] img')][0]?.style.pointerEvents || ''`)).toBe('none')
+    await browser.evaluate("Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })")
     await browser.evaluate('window.holdPreview()')
     await browser.evaluate("clickButton('Refresh preview', 'Live preview')")
     await browser.waitFor('typeof window.releasePreview === "function"', 'delayed native preview response')
@@ -126,6 +149,24 @@ it('keeps authenticated browser previews bound to the current owner, version and
     expect(await browser.evaluate<string>("location.search")).toContain('session=browser-chat')
     expect(await browser.evaluate<string>("document.activeElement?.textContent || ''")).toBe('Conversation')
     expect(await browser.evaluate<string>("document.body.textContent")).toContain('Returned to conversation browser-chat')
+
+    const directSession = await browser.evaluate<{ id: string; version: number; controlHolder: string }>('window.mountDirectPreview()')
+    await browser.waitFor("document.querySelector('[aria-label=\"Browser preview\"] img')?.complete && document.querySelector('[aria-label=\"Browser preview\"] img')?.naturalWidth > 0", 'current-owner direct preview')
+    await browser.evaluate('window.holdPreview()')
+    await browser.evaluate("clickButton('Refresh preview', 'Live preview')")
+    await browser.waitFor('typeof window.releasePreview === "function"', 'owner preview response received and held')
+    await browser.command('Network.setCookie', { name: 'gideon_token_10021', value: startup.other_token,
+      url: origin, path: '/', httpOnly: true, sameSite: 'Lax' })
+    expect(await browser.evaluate<string>('window.switchToOtherOwner()')).toBe('browser-other')
+    expect(await browser.evaluate<string>("document.body.textContent.includes('Waiting for a current preview') ? 'masked' : 'visible'"))
+      .toBe('masked')
+    expect(await browser.evaluate<boolean>("document.querySelector('[aria-label=\"Browser preview\"] img') === null")).toBe(true)
+    await browser.evaluate('window.releasePreview()')
+    await browser.waitFor("document.body.textContent.includes('This conversation or browser is unavailable.')", 'new owner denied the old session')
+    expect(await browser.evaluate<boolean>(`document.querySelector('[aria-label="Browser preview"] img') === null`)).toBe(true)
+    expect(await browser.evaluate<{ id: string; version: number; controlHolder: string }>(
+      '({ id: window.directSession?.id, version: window.directSession?.version, controlHolder: window.directSession?.controlHolder })'))
+      .toMatchObject(directSession)
   } finally {
     if (browser) await browser.close()
     if (vite) await vite.close()

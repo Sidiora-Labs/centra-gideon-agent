@@ -11,7 +11,9 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
   const imageUrl = useRef<string | null>(null)
-  const key = `${session.id}:${session.version}:${session.controlHolder}`
+  const key = `${client.scope.cacheKey}:${session.id}:${session.version}:${session.controlHolder}`
+  const activePreview = useRef({ key, client })
+  activePreview.current = { key, client }
   const fresh = snapshot?.key === key && snapshot.frame.version === session.version &&
     snapshot.frame.controlHolder === session.controlHolder
 
@@ -29,7 +31,7 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
       fetching = true
       const result = await client.preview(session)
       fetching = false
-      if (!current) return
+      if (!current || activePreview.current.key !== key || activePreview.current.client !== client) return
       if (result.state !== 'ready') { setError(result.message); return }
       const nextUrl = URL.createObjectURL(result.value.image)
       if (imageUrl.current) URL.revokeObjectURL(imageUrl.current)
