@@ -72,16 +72,10 @@ class TaskQuery:
             },
             task_list_id=self.list_id,
             provider_filter=self.values.get("provider"),
+            owner=_owner_username() if self.enabled("mine") else "",
             limit=limit,
             offset=offset,
         )
-        if self.enabled("mine"):
-            from gideon.cognition.identity import current_username
-
-            owner = current_username()
-            if owner:
-                tasks = [task for task in tasks if task.belongs_to(owner)]
-                total = len(tasks)
         return {
             "tasks": _task_rows(tasks),
             "total": total,

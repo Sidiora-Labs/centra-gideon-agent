@@ -24,6 +24,8 @@ describe("assistant destination registry", () => {
     expect(DESTINATIONS.find(entry => entry.id === "settings/security")).toMatchObject({
       category: "Settings", owner: "discovery", route: { destination: "apps", placement: { id: "settings/security" } },
     });
+    expect(DESTINATIONS.find(entry => entry.id === "capabilities/communications/outbound"))
+      .toMatchObject({ label: "Mail", category: "Personal", availability: { state: "pending", verification: "unverified" } });
   });
 
   it("uses the shell placement and preserves record, subview, query and return context", () => {
