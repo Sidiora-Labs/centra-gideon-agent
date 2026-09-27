@@ -112,20 +112,27 @@ describe("assistant theme", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Fixture server did not bind");
+    const debuggingServer = createServer();
+    await new Promise<void>((resolve) => debuggingServer.listen(0, "127.0.0.1", resolve));
+    const debuggingAddress = debuggingServer.address();
+    if (!debuggingAddress || typeof debuggingAddress === "string") throw new Error("Debugging port did not bind");
+    const debuggingPort = debuggingAddress.port;
+    await new Promise<void>((resolve) => debuggingServer.close(() => resolve()));
     const profile = join(directory, "chrome");
     const browser = spawn(process.env.CHROMIUM_BIN || "chromium", ["--headless=new", "--no-sandbox", "--disable-gpu",
-      "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"],
-    { stdio: "ignore" });
+      "--no-first-run", `--remote-debugging-port=${debuggingPort}`, `--user-data-dir=${profile}`, "about:blank"],
+    { stdio: ["ignore", "ignore", "pipe"] });
+    let browserErrors = "";
+    browser.stderr.on("data", (chunk: Buffer) => { browserErrors = (browserErrors + chunk.toString()).slice(-2000); });
     let socket: WebSocket | undefined;
     try {
       const started = Date.now();
-      let port = 0;
-      while (!port && Date.now() - started < 10000) {
-        try { port = Number((await readFile(join(profile, "DevToolsActivePort"), "utf8")).split("\n")[0]); }
+      let targets: { type: string; webSocketDebuggerUrl: string }[] | undefined;
+      while (!targets && Date.now() - started < 10000 && browser.exitCode === null) {
+        try { targets = await (await fetch(`http://127.0.0.1:${debuggingPort}/json/list`)).json() as typeof targets; }
         catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
       }
-      if (!port) throw new Error("Chromium debugging endpoint did not start");
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type: string; webSocketDebuggerUrl: string }[];
+      if (!targets) throw new Error(`Chromium debugging endpoint did not start: ${browserErrors}`);
       const target = targets.find((entry) => entry.type === "page");
       if (!target) throw new Error("Chromium page target was unavailable");
       socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -147,9 +154,9 @@ describe("assistant theme", () => {
       });
       const evaluate = async <T,>(expression: string): Promise<T> => {
         const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }) as {
-          result?: { value?: T }; exceptionDetails?: { text: string };
+          result?: { value?: T }; exceptionDetails?: { text: string; exception?: { description?: string } };
         };
-        if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+        if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
         return result.result?.value as T;
       };
       const until = async (expression: string) => {
@@ -167,11 +174,11 @@ describe("assistant theme", () => {
       expect(await evaluate<string>('document.querySelector("[aria-checked=true]")?.getAttribute("aria-label")')).toBe("System theme");
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
       await until('document.querySelector("[data-gideon-assistant]")?.getAttribute("data-theme") === "dark"');
-      await evaluate('document.querySelector("[aria-label=\"Light theme\"]").click()');
+      await evaluate("document.querySelector('[aria-label=\"Light theme\"]')?.click()");
       await until('document.querySelector("[data-gideon-assistant]")?.getAttribute("data-theme") === "light"');
-      await evaluate('document.querySelector("[aria-label=\"Dark theme\"]").click()');
+      await evaluate("document.querySelector('[aria-label=\"Dark theme\"]')?.click()");
       await until('document.querySelector("[data-gideon-assistant]")?.getAttribute("data-theme") === "dark"');
-      await evaluate('document.querySelector("[aria-label=\"System theme\"]").click()');
+      await evaluate("document.querySelector('[aria-label=\"System theme\"]')?.click()");
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" },
         { name: "prefers-reduced-motion", value: "reduce" }] });
       await until('document.querySelector("[data-gideon-assistant]")?.getAttribute("data-theme") === "light"');
