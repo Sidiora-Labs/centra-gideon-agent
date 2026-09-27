@@ -65,6 +65,7 @@ describe('owner-scoped resource delivery', () => {
       mime: string
       bytes: number[]
       websocket: string
+      contextualWebsocket: string
       ownerEvent: string
       retryHref: string
       download: { body: string; disposition: string; status: number }
@@ -86,17 +87,19 @@ describe('owner-scoped resource delivery', () => {
       const second=new WebSocket(delivery.ownedWebSocketUrl());
       await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Stream reconnect timed out')),5000);second.onmessage=()=>{clearTimeout(timer);resolve(true)};second.onerror=()=>{clearTimeout(timer);reject(Error('Stream reconnect failed'))}});
       second.close();
+      const contextualWebsocket=delivery.ownedWebSocketUrl('/api/ws?session=session-7&record=record-3&view=detail');
       const href=delivery.outboxDownloadHref('sample report.pdf');
       await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin',headers});
       const denied=await fetch(delivery.artifactHref(artifact.slug,true),{credentials:'same-origin'});
       const deniedStatus=denied.status;
       const deniedAuthRequired=denied.headers.get('X-Auth-Required')||'';
-      return {artifact,mime:raw.headers.get('Content-Type')||'',bytes,websocket:delivery.ownedWebSocketUrl(),ownerEvent:String(ownerEvent),retryHref:href,download,deniedStatus,deniedAuthRequired};
+      return {artifact,mime:raw.headers.get('Content-Type')||'',bytes,websocket:delivery.ownedWebSocketUrl(),contextualWebsocket,ownerEvent:String(ownerEvent),retryHref:href,download,deniedStatus,deniedAuthRequired};
     })()`)
     expect(result.artifact.slug).toBe('delivery-owned-pdf')
     expect(result.mime).toContain('application/pdf')
     expect(result.bytes.slice(0, 8)).toEqual([37, 80, 68, 70, 45, 49, 46, 52])
     expect(result.websocket).toBe('ws://' + `127.0.0.1:${port}` + '/api/ws')
+    expect(result.contextualWebsocket).toBe('ws://' + `127.0.0.1:${port}` + '/api/ws?session=session-7&record=record-3&view=detail')
     expect(JSON.parse(result.ownerEvent).type).toBe('sessions')
     expect(result.retryHref).toBe('/api/outbox/sample%20report.pdf')
     expect(result.download.status).toBe(200)
@@ -110,11 +113,20 @@ describe('owner-scoped resource delivery', () => {
     const resources = await import('./resources.web')
     expect(resources.artifactHref('trusted/slash')).toBe('/api/artifacts/trusted%2Fslash')
     expect(resources.outboxDownloadHref('notes.pdf')).toBe('/api/outbox/notes.pdf')
+    expect(resources.ownedResourceHref('/api/artifacts/item?session=session-7&record=record-3&view=detail&name=quarterly%20report')).toBe(
+      '/api/artifacts/item?session=session-7&record=record-3&view=detail&name=quarterly%20report',
+    )
+    for (const key of ['token', 'access_token', 'CLIENT-SECRET', 'authorization', 'password', 'credential', 'code', 'state']) {
+      expect(() => resources.ownedResourceHref(`/api/artifacts/item?${encodeURIComponent(key)}=private`)).toThrow(TypeError)
+    }
     for (const filename of ['../secret', 'folder/file', 'folder\\file', '']) {
       expect(() => resources.outboxDownloadHref(filename)).toThrow(TypeError)
     }
     for (const path of ['https://example.test/api/outbox/a', '//example.test/api/outbox/a', '/api/../../secret', '/api/x#token']) {
       expect(() => resources.ownedResourceHref(path)).toThrow(TypeError)
+    }
+    for (const key of ['token', 'access_token', 'client_secret', 'authorization', 'password', 'credential', 'code', 'state']) {
+      expect(() => resources.ownedWebSocketUrl(`/api/ws?${key}=private`)).toThrow(TypeError)
     }
   })
 })
