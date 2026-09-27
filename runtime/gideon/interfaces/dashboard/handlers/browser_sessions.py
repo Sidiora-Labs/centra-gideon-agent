@@ -16,6 +16,7 @@ from gideon.integrations.browse.customer_sessions import (
     StaleSessionVersion,
 )
 from gideon.core.constants import DASHBOARD_SESSION_PREFIX, dashboard_session_key
+from gideon.interfaces.dashboard.chat_utils import candidate_history_keys
 
 KEY = web.AppKey("customer_browser_sessions", CustomerBrowserSessionStore)
 _LOCAL_ACCOUNT = "local"
@@ -34,30 +35,37 @@ def _owner(request: web.Request) -> str:
     return owner
 
 
-def _canonical_conversation(request: web.Request, conversation_id: str) -> str | None:
-    name = conversation_id.removeprefix(DASHBOARD_SESSION_PREFIX)
-    if not name or name.startswith(DASHBOARD_SESSION_PREFIX):
-        return None
+def _canonical_conversation(
+    request: web.Request, conversation_id: str
+) -> tuple[str, str] | None:
     state = request.app["state"]
-    session = state.get_session(name)
-    if session is not None:
-        return name if (
-            getattr(session, "memory_mode", "persistent") == "persistent"
-            and not getattr(session, "_app", "")
-        ) else None
     log = state.conversation_log
-    if log is None:
-        return None
-    key = dashboard_session_key(name)
-    if not log.has_log(key):
-        return None
-    meta = log.get_metadata(key)
-    return name if (
-        bool(meta)
-        and not meta.get("app")
-        and meta.get("memory_mode", "persistent") == "persistent"
-        and not meta.get("closed")
-    ) else None
+    if log is not None:
+        for key in candidate_history_keys(conversation_id):
+            if not log.has_log(key):
+                continue
+            meta = log.get_metadata(key)
+            if (
+                not meta
+                or meta.get("app")
+                or meta.get("memory_mode", "persistent") != "persistent"
+                or meta.get("closed")
+            ):
+                return None
+            if key.startswith(DASHBOARD_SESSION_PREFIX):
+                name = key.removeprefix(DASHBOARD_SESSION_PREFIX)
+                public_id = key if log.has_log(name) else name
+            else:
+                public_id = key
+            return key, public_id
+    name = conversation_id.removeprefix(DASHBOARD_SESSION_PREFIX)
+    session = state.get_session(name)
+    if session is not None and (
+        getattr(session, "memory_mode", "persistent") == "persistent"
+        and not getattr(session, "_app", "")
+    ):
+        return dashboard_session_key(name), name
+    return None
 
 
 async def _body(request: web.Request) -> dict:
@@ -84,18 +92,17 @@ async def create(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(text="conversation_id is required")
     store = request.app[KEY]
     try:
-        canonical_id = conversation_id.removeprefix(DASHBOARD_SESSION_PREFIX)
-        if not canonical_id or canonical_id.startswith(DASHBOARD_SESSION_PREFIX):
+        canonical = _canonical_conversation(request, conversation_id)
+        if canonical is None:
             raise SessionNotFound
+        canonical_key, public_id = canonical
         existing = await asyncio.to_thread(
-            store.find_conversation, _LOCAL_ACCOUNT, owner, canonical_id
+            store.find_conversation, _LOCAL_ACCOUNT, owner, canonical_key
         )
         if existing is not None:
             return _reply(existing)
-        if _canonical_conversation(request, conversation_id) != canonical_id:
-            raise SessionNotFound
         session, created = await asyncio.to_thread(
-            store.reserve, _LOCAL_ACCOUNT, owner, canonical_id
+            store.reserve, _LOCAL_ACCOUNT, owner, public_id, canonical_key
         )
         return _reply(session, status=201 if created else 200)
     except SessionNotFound:

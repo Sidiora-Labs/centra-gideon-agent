@@ -38,6 +38,8 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
     log = ConversationLog(base_dir=tmp_path / "conversations")
     log.append("dashboard:chat-one", "user", "Open my browser")
     log.append("channel-thread", "user", "A separate channel conversation")
+    log.append("chat-two", "user", "Channel conversation")
+    log.append("dashboard:chat-two", "user", "Dashboard conversation")
     state = ConsoleState(None, time.time(), conversation_log=log)
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=PORT)])
     app["state"] = state
@@ -68,7 +70,29 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
             json={"conversation_id": "channel-thread"},
             cookies=owned(alice),
         )
-        assert channel_only.status == 404
+        assert channel_only.status == 201
+        channel_row = (await channel_only.json())["session"]
+        assert channel_row["conversation_id"] == "channel-thread"
+        assert app[KEY].get(channel_row["id"], "local", "alice").canonical_key == "channel-thread"
+
+        bare_collision = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "chat-two"},
+            cookies=owned(alice),
+        )
+        dashboard_collision = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "dashboard:chat-two"},
+            cookies=owned(alice),
+        )
+        assert (bare_collision.status, dashboard_collision.status) == (201, 201)
+        bare_row = (await bare_collision.json())["session"]
+        dashboard_row = (await dashboard_collision.json())["session"]
+        assert bare_row["id"] != dashboard_row["id"]
+        assert bare_row["conversation_id"] == "chat-two"
+        assert dashboard_row["conversation_id"] == "dashboard:chat-two"
+        assert app[KEY].get(bare_row["id"], "local", "alice").canonical_key == "chat-two"
+        assert app[KEY].get(dashboard_row["id"], "local", "alice").canonical_key == "dashboard:chat-two"
 
         async def create():
             response = await client.post(
@@ -107,6 +131,17 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         )
         assert alias_after_restart.status == 200
         assert (await alias_after_restart.json())["session"] == first
+        for name, original in (
+            ("channel-thread", channel_row),
+            ("chat-two", bare_row),
+            ("dashboard:chat-two", dashboard_row),
+        ):
+            retry = await client.post(
+                "/api/browser/sessions",
+                json={"conversation_id": name}, cookies=owned(alice),
+            )
+            assert retry.status == 200
+            assert (await retry.json())["session"] == original
 
         own_read = await client.get(
             f"/api/browser/sessions/{session_id}", cookies=owned(alice)
