@@ -78,7 +78,7 @@ The browser application starts from the actual Expo/React Native Web screen stru
   - Preserve document isolation for contributed app UIs and generated previews while the shell hosts trusted modules directly.
   - Native resolution must not import browser-only editors, CSS or workers. It returns an explicit supported handoff or unavailability action for a web-only route; native product parity is separate delivery work.
   - Acceptance: a user opens the representative module, interacts with it and returns to the same session and scroll context; module load failure can be retried without restarting the shell. Untrusted app content remains in its existing isolated host.
-  - Dependencies: shell-06 and `delivery` bootstrap; feature modules may add entries as their own specs complete.
+  - Dependencies: shell-06, `delivery` bootstrap and conversation-01 for a real session; feature modules may add entries as their own specs complete.
 
 - [ ] **shell-08 — Qualify the shared shell journey.**
   - Add proposed `apps/assistant/src/shared/shell/shellJourney.web.test.tsx` and `apps/assistant/e2e/shell-navigation.spec.ts` after the real entry and route bridge exist.
@@ -88,7 +88,7 @@ The browser application starts from the actual Expo/React Native Web screen stru
   - Use real route/provider implementations and representative reachable module content. Record any destination that still hands off to the existing console as migration coverage, with its path and return behavior.
   - Compare the assistant header, navigation, cards and sheets against the retained presentation after wiring live Gideon state.
   - Acceptance: the shell journey meets the preceding contracts without fake customer data, inert controls or a second main navigation tree. The gate records observed browser behavior and any remaining feature-family gaps accurately.
-  - Dependencies: shell-02 through shell-07; destination data and distribution qualification remain owned by their feature specs.
+  - Dependencies: shell-02 through shell-07 and conversation-02 for the integrated chat presentation; destination data and distribution qualification remain owned by their feature specs.
 
 ## Shared integration boundaries
 
