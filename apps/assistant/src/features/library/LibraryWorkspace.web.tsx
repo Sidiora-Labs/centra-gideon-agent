@@ -105,13 +105,14 @@ export function LibraryWorkspace({ route, scope, navigate, onReturn, returnTo }:
       .gideon-library__content { line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; }
       .gideon-library__notice { margin:0 0 18px; padding:12px 14px; border-radius:10px; background:var(--gideon-notice); color:var(--gideon-notice-text); }
       .gideon-library__actions { display:flex; gap:10px; margin-bottom:16px; }
+      .gideon-library--index { display:block; }
       .gideon-library--reader { display:block; }
       @media(max-width:700px) { .gideon-library { display:block; min-height:100dvh; } .gideon-library__rail { display:none; } .gideon-library__main { padding:18px 16px 36px; } .gideon-library__link { padding:16px; } }
     `}</style>
     {libraryStateMessage && <p className="gideon-library__notice" style={libraryPalette} role={stale ? "status" : "alert"} data-library-state={stale ? "stale" : error?.kind}>
       {libraryStateMessage}{(stale || !hasCurrentData) && <> <button type="button" onClick={retry}>{stale ? "Retry refresh" : "Retry"}</button></>}
     </p>}
-    {!record && <div className="gideon-library" style={libraryPalette}>
+    {!record && <div className="gideon-library gideon-library--index" style={libraryPalette}>
       <div className="gideon-library__main"><LibraryHome scope={scope} route={route} navigate={navigate} /></div>
     </div>}
     {record && activeItem.value && <div className="gideon-library gideon-library--reader" style={libraryPalette}><LibraryReader item={activeItem.value} /></div>}

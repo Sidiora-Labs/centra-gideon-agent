@@ -228,12 +228,26 @@ describe("Library native knowledge route", () => {
     const send = await startBrowser();
     await send("Page.enable");
     await send("Runtime.enable");
+    await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     await send("Page.navigate", { url: `${origin}/assistant/apps?v=1&view=workspace&placement=knowledge&from=chat&fromSession=conversation%2F7&fromSelection=message%2F3` });
     await waitFor(send, "document.querySelector('#gideon-password')");
     await evaluate(send, `(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username','library-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true})()`);
     await waitFor(send, "document.querySelector('[data-library-module=knowledge]') && document.body.innerText.includes('Native library record')");
     expect(await evaluate(send, "document.querySelector('[data-library-module=knowledge]')?.getAttribute('data-library-module')")).toBe("knowledge");
     expect(await evaluate(send, "document.querySelectorAll('[data-workspace-mode=full]').length")).toBe(1);
+    const indexGeometry = await evaluate(send, `(()=>{
+      const frame=document.querySelector('[data-workspace-mode=full]');
+      const scroll=frame?.querySelector('[data-workspace-scroll]');
+      const index=frame?.querySelector('.gideon-library--index');
+      const main=index?.querySelector('.gideon-library__main');
+      if(!frame||!scroll||!index||!main)return null;
+      const frameRect=frame.getBoundingClientRect(),scrollRect=scroll.getBoundingClientRect(),indexRect=index.getBoundingClientRect(),mainRect=main.getBoundingClientRect();
+      return {frames:document.querySelectorAll('[data-workspace-mode]').length,viewport:innerWidth,frameWidth:frameRect.width,scrollWidth:scroll.clientWidth,indexWidth:indexRect.width,mainWidth:mainRect.width,indexToMain:mainRect.width/indexRect.width,scrollToMain:mainRect.width/scroll.clientWidth,withinFrame:mainRect.left>=scrollRect.left&&mainRect.right<=scrollRect.right};
+    })()`);
+    expect(indexGeometry).toMatchObject({ frames: 1, viewport: 1440, withinFrame: true });
+    expect(indexGeometry.indexToMain).toBeGreaterThan(0.9);
+    expect(indexGeometry.scrollToMain).toBeGreaterThan(0.9);
+    expect(indexGeometry.mainWidth).toBeGreaterThan(900);
     expect(await evaluate(send, `(()=>{const matches=libraryModuleDefinitions[0].matches;return [
       matches({kind:'route',destination:'apps',view:'workspace',placement:{id:'knowledge'}}),
       matches({kind:'route',destination:'apps',view:'detail',placement:{id:'knowledge/item'},record:{kind:'knowledge',id:'native item?one'}}),
@@ -246,6 +260,7 @@ describe("Library native knowledge route", () => {
     expect(selectedHref).toContain("recordId=native+item%3Fone");
     await evaluate(send, "Array.from(document.querySelectorAll('.gideon-library__link[href*=recordId]')).find(link=>link.innerText.includes('Native library record'))?.click()");
     await waitFor(send, "document.querySelector('[data-library-module=knowledge]') && document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')");
+    expect(await evaluate(send, "document.querySelectorAll('[data-workspace-mode]').length")).toBe(1);
     const readerUrl = await evaluate(send, "location.href");
     expect(readerUrl).toContain("recordId=native+item%3Fone");
     expect(readerUrl).toContain("fromSession=conversation%2F7");
