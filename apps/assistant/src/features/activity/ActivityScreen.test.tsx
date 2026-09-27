@@ -174,9 +174,26 @@ window.loaded = true
     expect(await evaluate(`window.activityModule.matches(window.route)`)).toBe(true)
     expect(await evaluate(`window.activityModule.matches({ ...window.route, view: 'detail', record: { kind: 'task', id: 'task-1' } })`)).toBe(false)
 
-    await evaluate(`document.querySelector('[data-source="approval"] button').focus()`)
-    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await until(evaluate, `Array.from(document.querySelectorAll('[data-source-health]')).every(source =>
+      !['idle', 'loading'].includes(source.getAttribute('data-phase')))`)
+    await evaluate(`(() => {
+      window.activityKeyboardEvents = []
+      for (const type of ['keydown', 'click']) document.addEventListener(type, event => {
+        window.activityKeyboardEvents.push({ type, key: event.key,
+          approval: !!event.target.closest?.('[data-source="approval"] button'), trusted: event.isTrusted })
+      }, { capture: true })
+      document.querySelector('[data-source="approval"] button').focus()
+    })()`)
+    expect(await evaluate(`document.activeElement === document.querySelector('[data-source="approval"] button')`)).toBe(true)
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter',
+      text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 })
     await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    expect(await evaluate(`window.activityKeyboardEvents.some(event => event.type === 'keydown'
+      && event.key === 'Enter' && event.approval && event.trusted)`)).toBe(true)
+    expect(await evaluate(`window.activityKeyboardEvents`)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'click', approval: true, trusted: true }),
+    ]))
+    await until(evaluate, `document.querySelector('[data-source="approval"] button')?.getAttribute('aria-expanded') === 'true'`)
     expect(await evaluate(`document.querySelector('[data-source="approval"] button').getAttribute('aria-expanded')`)).toBe('true')
     expect(await evaluate(`document.querySelector('[data-source="approval"] [role="region"]').textContent.includes('inbox-1')`)).toBe(true)
 
@@ -185,6 +202,7 @@ window.loaded = true
     await until(evaluate, `document.querySelector('select')?.value === 'inbox_item'`)
     expect(await evaluate(`document.querySelectorAll('[data-source="approval"]').length`)).toBe(1)
     await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Finished').click()`)
+    await until(evaluate, `document.querySelector('[data-activity-empty="filtered"]') !== null`)
     expect(await evaluate(`document.querySelector('[data-activity-empty="filtered"]') !== null`)).toBe(true)
 
     await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 800, deviceScaleFactor: 1, mobile: true })
