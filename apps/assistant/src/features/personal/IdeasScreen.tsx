@@ -33,37 +33,45 @@ export function IdeasScreen({ route, scope, navigate, onReturn }: ModuleProps) {
     const controller = new AbortController()
     let current = true
     const requestKey = viewKey
-    let nextResult = { key: requestKey, ideas: [] as ReturnType<typeof projectIdeas>, prompts: [] as ReturnType<typeof projectSuggestionPrompts>, decisions: [] as readonly IdeaDecisionRecord[], decisionState: 'loading' as ReadState, decisionError: '', ideaState: 'loading' as ReadState, ideaError: '', promptError: '' }
+    const initialResult = { key: requestKey, ideas: [] as ReturnType<typeof projectIdeas>, prompts: [] as ReturnType<typeof projectSuggestionPrompts>, decisions: [] as readonly IdeaDecisionRecord[], decisionState: 'loading' as ReadState, decisionError: '', ideaState: 'loading' as ReadState, ideaError: '', promptError: '' }
+    const publish = (patch: Partial<typeof initialResult>) => {
+      if (!current || currentView.current !== requestKey) return
+      setResult(existing => {
+        if (currentView.current !== requestKey) return existing
+        const base = existing?.key === requestKey ? existing : initialResult
+        return { ...base, ...patch }
+      })
+    }
     void client.readIdeas(controller.signal).then(rows => {
       if (!current || currentView.current !== requestKey) return
-      nextResult = { ...nextResult, ideas: projectIdeas(rows), ideaState: 'ready' }
-      setResult(nextResult)
+      publish({ ideas: projectIdeas(rows), ideaState: 'ready' })
     }).catch((error: unknown) => {
       if (!current || currentView.current !== requestKey) return
-      nextResult = { ...nextResult, ideaState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', ideaError: error instanceof Error ? error.message : 'Ideas could not be loaded.' }
-      setResult(nextResult)
+      publish({ ideaState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', ideaError: error instanceof Error ? error.message : 'Ideas could not be loaded.' })
     })
     void gatewayJson<unknown>('/api/suggestions', { signal: controller.signal }).then(payload => {
       if (current && currentView.current === requestKey) {
-        nextResult = { ...nextResult, prompts: projectSuggestionPrompts(payload) }
-        setResult(nextResult)
+        publish({ prompts: projectSuggestionPrompts(payload) })
       }
     }).catch((error: unknown) => {
       if (current && currentView.current === requestKey && !controller.signal.aborted) {
-        nextResult = { ...nextResult, promptError: error instanceof Error ? error.message : 'Prompt suggestions could not be loaded.' }
-        setResult(nextResult)
+        publish({ promptError: error instanceof Error ? error.message : 'Prompt suggestions could not be loaded.' })
       }
     })
     void gatewayJson<unknown>('/api/assistant/ideas/decisions', { signal: controller.signal }).then(payload => {
       if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { items?: unknown }).items)) throw new TypeError('Idea decisions returned an invalid response.')
       if (current && currentView.current === requestKey) {
-        nextResult = { ...nextResult, decisions: (payload as { items: IdeaDecisionRecord[] }).items, decisionState: 'ready' }
-        setResult(nextResult)
+        const loaded = (payload as { items: IdeaDecisionRecord[] }).items
+        setResult(existing => {
+          if (currentView.current !== requestKey) return existing
+          const base = existing?.key === requestKey ? existing : initialResult
+          const savedKeys = new Set(base.decisions.map(row => `${row.source_kind}:${row.source_list_id}:${row.source_id}`))
+          return { ...base, decisions: [...loaded.filter(row => !savedKeys.has(`${row.source_kind}:${row.source_list_id}:${row.source_id}`)), ...base.decisions], decisionState: 'ready' }
+        })
       }
     }).catch((error: unknown) => {
       if (current && currentView.current === requestKey && !controller.signal.aborted) {
-        nextResult = { ...nextResult, decisionState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', decisionError: error instanceof Error ? error.message : 'Idea decisions could not be loaded.' }
-        setResult(nextResult)
+        publish({ decisionState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', decisionError: error instanceof Error ? error.message : 'Idea decisions could not be loaded.' })
       }
     })
     return () => { current = false; controller.abort() }

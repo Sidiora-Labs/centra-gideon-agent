@@ -58,17 +58,24 @@ async def main(origin):
   IdeaLists(store, home).import_list({'request_id': 'idea-list-seed-001', 'content': content, 'preview_id': idea_preview['preview_id'], 'expected_hash': ''})
   cache = SuggestionsCache(); cache.suggestions = ['Use this cached prompt in a draft']; cache.generated_at = time.time()
   state._suggestions_cache = cache
+  suggestion_release = asyncio.Event()
   proposals.enqueue(kind='skill', title='Review skill proposal', body='A proposal body backed by a real local test record.', target='learning-test', provenance='local_capture', source_excerpt='The source capture supports this proposal.', evidence_refs=['capture:learning-evidence-1'], evidence_strength='direct', confidence=0.91, occurrences=1, min_evidence=1)
   @web.middleware
   async def browser_transition_delay(request, handler):
-    if request.method == 'GET' and request.path in ('/api/capabilities/knowledge/ideas', '/api/suggestions'):
+    if request.method == 'GET' and request.path == '/api/capabilities/knowledge/ideas':
       await asyncio.sleep(0.4)
+    if request.method == 'GET' and request.path == '/api/suggestions':
+      await suggestion_release.wait()
     return await handler(request)
   app = web.Application(middlewares=[browser_transition_delay, token_auth.token_auth_middleware(port=10000)])
   app['port'] = 10000; app['allowed_origins'] = {origin}; app['state'] = state
   app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
   app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
   app.router.add_get('/api/suggestions', api_suggestions)
+  async def release_suggestions(request):
+    suggestion_release.set()
+    return web.json_response({'released': True})
+  app.router.add_post('/api/test/release-suggestions', release_suggestions)
   capabilities_knowledge_ideas.register(app); assistant_ideas.register_idea_decision_routes(app); capabilities_knowledge_capture.register(app); capabilities_knowledge_reviews.register(app)
   app.router.add_patch('/api/knowledge/items/{id}', knowledge.update_item)
   register_task_routes(app)
@@ -169,9 +176,9 @@ createRoot(document.getElementById('root')!).render(<Root />);
     const provenance = await browser.evaluate<string>("document.querySelector('.gideon-ideas__record-details')?.innerText || ''")
     expect(provenance).toContain('Source kind');expect(provenance).toContain('knowledge-idea-list');expect(provenance).toContain('Source ID')
     await browser.evaluate("document.querySelector('.gideon-ideas__record-details summary')?.click()")
-    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-ideas__chips button')).find(button=>button.innerText.includes('cached prompt'))?.click()")
-    expect(await browser.evaluate<string>("document.getElementById('gideon-ideas-draft').value")).toBe('Use this cached prompt in a draft')
-    expect(await browser.evaluate<string>("document.querySelector('.gideon-ideas__card').innerText")).not.toContain('Use this cached prompt in a draft')
+    await browser.evaluate(`(()=>{const field=document.getElementById('gideon-ideas-draft');const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;setter.call(field,'Use a source-backed prompt in a draft');field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
+    expect(await browser.evaluate<string>("document.getElementById('gideon-ideas-draft').value")).toBe('Use a source-backed prompt in a draft')
+    expect(await browser.evaluate<string>("document.querySelector('.gideon-ideas__card').innerText")).not.toContain('Use a source-backed prompt in a draft')
     await browser.waitFor("document.querySelectorAll('.gideon-idea-decision').length === 2",'native decision controls')
     await browser.evaluate(`(()=>{const field=document.querySelector('.gideon-idea-decision textarea');const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;setter.call(field,'Plan a source-linked study with explicit milestones');field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
     const firstIdeaId=await browser.evaluate<string>("document.querySelector('.gideon-idea-decision textarea')?.id.replace('idea-task-prompt-','') || ''")
@@ -187,6 +194,10 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.evaluate(`(()=>{const field=document.querySelector('.gideon-idea-decision textarea');const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;setter.call(field,'Plan a source-linked study with explicit milestones');field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-idea-decision button')).find(button=>button.innerText==='Accept as task')?.click()")
     await browser.waitFor("document.querySelector('.gideon-idea-decision [role=status]')?.innerText.includes('Accepted and linked task')",'native task created from edited Idea prompt')
+    expect(await browser.evaluate<string>("document.querySelector('.gideon-idea-decision p')?.innerText || ''")).toContain('Decision · accepted')
+    await browser.evaluate("fetch('/api/test/release-suggestions',{method:'POST'})")
+    await browser.waitFor("Array.from(document.querySelectorAll('.gideon-ideas__chips button')).some(button=>button.innerText.includes('cached prompt'))",'late cached suggestions')
+    expect(await browser.evaluate<string>("document.querySelector('.gideon-idea-decision p')?.innerText || ''")).toContain('Decision · accepted')
     const taskId=await browser.evaluate<string>("document.querySelector('.gideon-idea-decision code')?.innerText || ''")
     expect(taskId).toBeTruthy()
     const createdTasks=await browser.evaluate<{tasks:Array<{id:string;title:string;evidence:Array<{source_id:string;excerpt:string}>}>}>("fetch('/api/tasks?provider=native').then(response=>response.json())")
