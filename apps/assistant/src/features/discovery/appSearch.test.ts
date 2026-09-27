@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { GatewayError } from "../../shared/transport.web";
+import { ShellThemeProvider, shellPalettes } from "../../shared/shell/shellTheme.web";
 import { DESTINATIONS } from "./destinations";
 import AppsScreen from "./AppsScreen";
 import { discoveryModuleDefinitions } from "./moduleDefinitions.web";
@@ -82,20 +83,39 @@ describe("Apps index", () => {
     expect(module.matches({ ...appsRoute, record: { kind: "app", id: "other" } })).toBe(false);
   });
 
-  it("renders native keyboard controls, explicit pending status and screen reader feedback", () => {
+  it("renders keyboard controls, clear availability, and screen reader feedback in both themes", () => {
     const route = DESTINATIONS.find(entry => entry.id === "apps")!.route;
-    const html = renderToStaticMarkup(createElement(AppsScreen, { route,
-      scope: { runtimeOrigin: "https://gideon.test", ownerId: "owner", cacheKey: "owner" },
-      navigate: () => {}, onReturn: () => {},
-    }));
-    expect(html).toContain('role="search"');
-    expect(html).toContain('type="search"');
-    expect(html).toContain('aria-controls="apps-results"');
-    expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('aria-label="Apps search results"');
-    expect(html).toContain("214 results; installed app results are incomplete");
-    expect(html).toContain("Awaiting route verification");
-    expect(html).not.toContain("Open Account</button>");
-    expect(html).toContain("Loading installed apps. You can still browse destinations.");
+    const render = (mode: "light" | "dark") => renderToStaticMarkup(createElement(
+      ShellThemeProvider, { initialPreference: mode, children: createElement(AppsScreen, { route,
+        scope: { runtimeOrigin: "https://gideon.test", ownerId: "owner", cacheKey: "owner" },
+        navigate: () => {}, onReturn: () => {},
+      }) },
+    ));
+    const light = render("light");
+    const dark = render("dark");
+    for (const [mode, html] of [["light", light], ["dark", dark]] as const) {
+      const palette = shellPalettes[mode];
+      expect(html).toContain(`data-theme="${mode}"`);
+      expect(html).toContain(`background:${palette.card}`);
+      expect(html).toContain(`color:${palette.text}`);
+      expect(html).toContain(`color:${palette.muted}`);
+      expect(html).toContain(`border:1px solid ${palette.line}`);
+      expect(html).toContain(`background:${palette.sky}`);
+      expect(html).toContain('role="search"');
+      expect(html).toContain('type="search"');
+      expect(html).toContain('aria-controls="apps-results"');
+      expect(html).toContain('aria-live="polite"');
+      expect(html).toContain('aria-label="Apps search results"');
+      expect(html).toContain("214 results; installed app results are incomplete");
+      expect(html).toContain("Not available yet");
+      expect(html).toContain("Available");
+      expect(html).toContain("Unavailable");
+      expect(html).not.toContain("Awaiting route verification");
+      expect(html).not.toContain("Verified destinations");
+      expect(html).not.toContain("after its journey is verified");
+      expect(html).not.toContain("Open Account</button>");
+      expect(html).toContain("Loading installed apps. You can still browse destinations.");
+    }
+    expect(light).not.toBe(dark);
   });
 });
