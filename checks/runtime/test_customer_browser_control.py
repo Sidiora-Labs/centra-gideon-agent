@@ -294,6 +294,13 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         reopened = await client.post(base + "/reopen", json={"expected_version": 9}, cookies=cookie(alice))
         assert reopened.status == 200
         assert (await reopened.json())["session"]["id"] == session_id
+        restarted = await client.post(base + "/start", json={"expected_version": 10}, cookies=cookie(alice))
+        assert restarted.status == 200, await restarted.text()
+        restarted_session = (await restarted.json())["session"]
+        assert restarted_session["status"] == "active" and restarted_session["version"] == 11
+        new_preview = await client.get(base + "/preview", cookies=cookie(alice))
+        assert new_preview.status == 200
+        assert (await new_preview.read()).startswith(b"\x89PNG\r\n\x1a\n")
     token_auth.revoke_all_sessions()
     await owned_runner.cleanup()
     await blocked_runner.cleanup()
