@@ -59,12 +59,19 @@ async def main(origin: str) -> None:
             author="module-owner",
             exit_criteria=[{"description": "Keep the native detail active", "completed": False}],
         )
-        artifact = artifact_registry.get_provider("native").create(
+        artifact_provider = artifact_registry.get_provider("native")
+        artifact = artifact_provider.create(
             name="Trusted module editor",
-            content="# Trusted editor\n\nA real native artifact opened by ContentSurface.\n",
+            content="# Trusted editor version one\n\nA real native artifact opened by ContentSurface.\n",
             kind="markdown",
             source="assistant",
             slug="trusted-module-editor",
+        )
+        artifact_provider.update(
+            artifact.slug,
+            content="# Trusted editor version two\n\nThe current editable native artifact.\n",
+            snapshot=True,
+            event_type="iterated",
         )
 
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
