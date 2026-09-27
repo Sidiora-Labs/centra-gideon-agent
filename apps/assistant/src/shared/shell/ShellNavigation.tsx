@@ -2,9 +2,9 @@ import * as React from "react";
 import type { ComponentType } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SHELL_DESTINATIONS, type ShellDestination } from "./shellRoutes";
+import { useShellTheme } from "./shellTheme";
 
 export type ShellNavigationIcon = ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
-const colors = { card: "#FFFFFF", canvas: "#FCFCFC", line: "#EEEEF0", text: "#11191C", blueDark: "#1473C8" };
 
 export type ShellNavigationLabels = Partial<Record<ShellDestination, string>>;
 
@@ -23,12 +23,13 @@ export function ShellNavigation({ selected, onSelect, availableWidth, fontScale,
   labels?: ShellNavigationLabels;
   icons?: Record<ShellDestination, ShellNavigationIcon>;
 }) {
+  const { palette } = useShellTheme();
   const columns = shellNavigationColumns(availableWidth, fontScale, labels);
   return (
     <View accessibilityRole="tablist" accessibilityLabel="Assistant destinations"
-      style={{ width: "100%", maxWidth: 540, backgroundColor: colors.card, borderRadius: 24,
+      style={{ width: "100%", maxWidth: 540, backgroundColor: palette.card, borderRadius: 24,
         shadowColor: "#132631", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07,
-        shadowRadius: 18, elevation: 3, borderWidth: 1, borderColor: colors.line }}>
+        shadowRadius: 18, elevation: 3, borderWidth: 1, borderColor: palette.line }}>
       <ScrollView showsVerticalScrollIndicator={columns < 3} keyboardShouldPersistTaps="handled"
         style={{ maxHeight: 222 }}
         contentContainerStyle={{ flexDirection: "row", flexWrap: "wrap", padding: 5 }}>
@@ -40,9 +41,9 @@ export function ShellNavigation({ selected, onSelect, availableWidth, fontScale,
               accessibilityState={{ selected: active }} aria-selected={active} onPress={() => onSelect(id)}
               style={({ pressed }) => ({ width: `${100 / columns}%`, minHeight: 62, paddingHorizontal: 4,
                 paddingVertical: 7, alignItems: "center", justifyContent: "center", gap: 3,
-                borderRadius: 18, backgroundColor: active ? "#F0F1F2" : pressed ? colors.canvas : "transparent" })}>
-              {Icon && <Icon size={20} strokeWidth={1.8} color={active ? colors.blueDark : colors.text} />}
-              <Text style={{ color: active ? colors.blueDark : colors.text, fontSize: 12,
+                borderRadius: 18, backgroundColor: active ? palette.secondary : pressed ? palette.canvas : "transparent" })}>
+              {Icon && <Icon size={20} strokeWidth={1.8} color={active ? palette.blueDark : palette.text} />}
+              <Text style={{ color: active ? palette.blueDark : palette.text, fontSize: 12,
                 lineHeight: 17, fontWeight: active ? "700" : "500", textAlign: "center", flexShrink: 1 }}>
                 {labels[id] || label}
               </Text>

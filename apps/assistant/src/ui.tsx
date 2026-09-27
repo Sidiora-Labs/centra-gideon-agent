@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +15,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useShellTheme } from "./shared/shell/shellTheme";
+import { ShellOverlayRoot } from "./shared/shell/ShellOverlayRoot";
 type IconProps = { size?: number; color?: string; strokeWidth?: number };
 const CheckIcon = Check as ComponentType<IconProps>;
 const ChevronRightIcon = ChevronRight as ComponentType<IconProps>;
@@ -137,7 +140,8 @@ export function Button({
   danger?: boolean;
   style?: ViewStyle;
 }) {
-  const color = danger ? colors.danger : colors.text;
+  const { palette } = useShellTheme();
+  const color = danger ? palette.danger : palette.text;
   return (
     <Pressable
       accessibilityRole="button"
@@ -146,7 +150,7 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         s.button,
-        primary ? s.primary : s.secondary,
+        { backgroundColor: primary ? palette.blue : palette.secondary },
         small && { minHeight: 38, paddingVertical: 7, paddingHorizontal: 13 },
         (disabled || busy) && { opacity: 0.5 },
         pressed && { transform: [{ scale: 0.98 }] },
@@ -171,6 +175,7 @@ export function IconButton({
   label: string;
   onPress: () => void;
 }) {
+  const { palette } = useShellTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -183,34 +188,37 @@ export function IconButton({
           alignItems: "center",
           justifyContent: "center",
           borderRadius: 22,
-          backgroundColor: pressed ? colors.line : "#FFFFFF",
+          backgroundColor: pressed ? palette.line : palette.card,
         },
       ]}
     >
-      <Icon size={20} strokeWidth={1.8} color={colors.text} />
+      <Icon size={20} strokeWidth={1.8} color={palette.text} />
     </Pressable>
   );
 }
 export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
-  return <View style={[s.card, style]}>{children}</View>;
+  const { palette } = useShellTheme();
+  return <View style={[s.card, { backgroundColor: palette.card, borderColor: palette.line }, style]}>{children}</View>;
 }
 export function Chip({ children, tint }: { children: ReactNode; tint?: string }) {
+  const { palette } = useShellTheme();
   return (
-    <View style={[s.chip, tint ? { backgroundColor: tint } : null]}>
-      <Text style={s.chipText}>{children}</Text>
+    <View style={[s.chip, { backgroundColor: tint || palette.canvas }]}>
+      <Text style={[s.chipText, { color: palette.muted }]}>{children}</Text>
     </View>
   );
 }
 export function Field({ label, ...props }: TextInputProps & { label: string }) {
+  const { palette } = useShellTheme();
   return (
     <View style={s.field}>
-      <Text style={[s.small, { fontWeight: "600", color: colors.text }]}>{label}</Text>
+      <Text style={[s.small, { fontWeight: "600", color: palette.text }]}>{label}</Text>
       <TextInput
-        placeholderTextColor={colors.muted}
+        placeholderTextColor={palette.muted}
         accessibilityLabel={label}
         {...props}
         style={[
-          s.input,
+          s.input, { borderColor: palette.line, color: palette.text, backgroundColor: palette.card },
           props.multiline && { minHeight: 120, textAlignVertical: "top" },
           props.style,
         ]}
@@ -229,21 +237,23 @@ export function Empty({
   detail: string;
   children?: ReactNode;
 }) {
+  const { palette } = useShellTheme();
   return (
     <View style={{ alignItems: "center", padding: 40, gap: 13 }}>
-      <View style={[s.iconBox, { width: 55, height: 55, borderRadius: 18 }]}>
-        <Icon size={24} color={colors.blueDark} />
+      <View style={[s.iconBox, { width: 55, height: 55, borderRadius: 18, backgroundColor: palette.sky }]}>
+        <Icon size={24} color={palette.blueDark} />
       </View>
-      <Text style={s.heading}>{title}</Text>
-      <Text style={[s.muted, { textAlign: "center", maxWidth: 360 }]}>{detail}</Text>
+      <Text style={[s.heading, { color: palette.text }]}>{title}</Text>
+      <Text style={[s.muted, { color: palette.muted, textAlign: "center", maxWidth: 360 }]}>{detail}</Text>
       {children}
     </View>
   );
 }
 export function ErrorNotice({ error }: { error?: string }) {
+  const { palette } = useShellTheme();
   return error ? (
-    <View accessibilityRole="alert" style={s.error}>
-      <Text style={[s.text, { color: colors.danger }]}>{error}</Text>
+    <View accessibilityRole="alert" style={[s.error, { backgroundColor: palette.dangerSurface }]}>
+      <Text style={[s.text, { color: palette.danger }]}>{error}</Text>
     </View>
   ) : null;
 }
@@ -262,14 +272,15 @@ export function Sheet({
 }) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { palette } = useShellTheme();
   const compact = width < 600;
-  return (
-    <Modal transparent animationType={compact ? "slide" : "fade"} visible onRequestClose={onClose}>
-      <View style={[s.modalShade, compact && { padding: 0, justifyContent: "flex-end" }]}>
+  const content = (
+      <View style={[s.modalShade, { backgroundColor: Platform.OS === "web" ? "transparent" : palette.shade },
+        compact && { padding: 0, justifyContent: "flex-end" }]}>
         <View
           accessibilityViewIsModal
           style={[
-            s.sheet,
+            s.sheet, { backgroundColor: palette.canvas, borderColor: palette.line },
             wide && { maxWidth: 1050 },
             compact && {
               borderBottomLeftRadius: 0,
@@ -286,7 +297,7 @@ export function Sheet({
                 width: 34,
                 height: 4,
                 borderRadius: 3,
-                backgroundColor: "#D8DBDE",
+                backgroundColor: palette.muted,
                 marginTop: 10,
               }}
             />
@@ -294,12 +305,12 @@ export function Sheet({
           <View
             style={[
               s.between,
-              { padding: compact ? 20 : 24, borderBottomWidth: 1, borderBottomColor: colors.line },
+              { padding: compact ? 20 : 24, borderBottomWidth: 1, borderBottomColor: palette.line },
             ]}
           >
             <View style={{ flex: 1, gap: 4 }}>
-              <Text style={s.title}>{title}</Text>
-              {!!subtitle && <Text style={s.muted}>{subtitle}</Text>}
+              <Text style={[s.title, { color: palette.text }]}>{title}</Text>
+              {!!subtitle && <Text style={[s.muted, { color: palette.muted }]}>{subtitle}</Text>}
             </View>
             <IconButton icon={X} label="Close details" onPress={onClose} />
           </View>
@@ -311,8 +322,9 @@ export function Sheet({
           </ScrollView>
         </View>
       </View>
-    </Modal>
   );
+  if (Platform.OS === "web") return <ShellOverlayRoot onClose={onClose}>{content}</ShellOverlayRoot>;
+  return <Modal transparent animationType={compact ? "slide" : "fade"} visible onRequestClose={onClose}>{content}</Modal>;
 }
 export function CheckRow({
   label,
@@ -323,6 +335,7 @@ export function CheckRow({
   checked: boolean;
   onPress: () => void;
 }) {
+  const { palette } = useShellTheme();
   return (
     <Pressable
       accessibilityRole="checkbox"
@@ -336,15 +349,15 @@ export function CheckRow({
           height: 19,
           borderRadius: 5,
           borderWidth: 1,
-          borderColor: checked ? colors.text : colors.line,
-          backgroundColor: checked ? colors.text : "#FFF",
+          borderColor: checked ? palette.text : palette.line,
+          backgroundColor: checked ? palette.text : palette.card,
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        {checked && <CheckIcon size={13} color="#FFF" />}
+        {checked && <CheckIcon size={13} color={palette.canvas} />}
       </View>
-      <Text style={[s.text, { flex: 1 }]}>{label}</Text>
+      <Text style={[s.text, { flex: 1, color: palette.text }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -357,13 +370,14 @@ export function SectionHeading({
   action?: string;
   onPress?: () => void;
 }) {
+  const { palette } = useShellTheme();
   return (
     <View style={[s.between, { marginBottom: 19 }]}>
-      <Text style={s.heading}>{title}</Text>
+      <Text style={[s.heading, { color: palette.text }]}>{title}</Text>
       {action && onPress && (
         <Pressable accessibilityRole="button" onPress={onPress} style={[s.row, { gap: 5 }]}>
-          <Text style={[s.small, { color: colors.text }]}>{action}</Text>
-          <ArrowUpRightIcon size={13} color={colors.muted} />
+          <Text style={[s.small, { color: palette.text }]}>{action}</Text>
+          <ArrowUpRightIcon size={13} color={palette.muted} />
         </Pressable>
       )}
     </View>
@@ -382,6 +396,7 @@ export function LinkRow({
   icon: ComponentType<IconProps>;
   tint?: string;
 }) {
+  const { palette } = useShellTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -389,17 +404,17 @@ export function LinkRow({
       style={({ pressed }) => [
         s.row,
         { paddingVertical: 13, gap: 14, borderRadius: 10 },
-        pressed && { backgroundColor: colors.canvas },
+        pressed && { backgroundColor: palette.secondary },
       ]}
     >
-      <View style={[s.iconBox, { backgroundColor: tint || colors.sky }]}>
-        <Icon size={19} color={colors.text} />
+      <View style={[s.iconBox, { backgroundColor: tint || palette.sky }]}>
+        <Icon size={19} color={palette.text} />
       </View>
       <View style={{ flex: 1, gap: 3 }}>
-        <Text style={[s.text, { fontWeight: "500" }]}>{title}</Text>
-        {!!detail && <Text style={s.small}>{detail}</Text>}
+        <Text style={[s.text, { color: palette.text, fontWeight: "500" }]}>{title}</Text>
+        {!!detail && <Text style={[s.small, { color: palette.muted }]}>{detail}</Text>}
       </View>
-      <ChevronRightIcon size={15} color={colors.muted} />
+      <ChevronRightIcon size={15} color={palette.muted} />
     </Pressable>
   );
 }
@@ -407,12 +422,13 @@ export function Avatar({ size = 42, variant = "sky" }: {
   size?: number;
   variant?: "sky" | "sand" | "lilac";
 }) {
+  const { palette: theme, mode } = useShellTheme();
   const palette = { sky: "#ECF5FA", sand: "#FAF0DF", lilac: "#F1ECF9" }[variant];
   return (
     <View accessibilityLabel="Gideon" style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-      <View style={{ width: size * 0.76, height: size * 0.76, borderRadius: size, backgroundColor: palette,
+      <View style={{ width: size * 0.76, height: size * 0.76, borderRadius: size, backgroundColor: mode === "dark" ? theme.sky : palette,
         alignItems: "center", justifyContent: "center" }}>
-        <Text style={{ color: colors.blueDark, fontSize: size * 0.4, fontWeight: "700" }}>G</Text>
+        <Text style={{ color: theme.blueDark, fontSize: size * 0.4, fontWeight: "700" }}>G</Text>
       </View>
     </View>
   );
@@ -439,4 +455,3 @@ export function relativeDate(value: string) {
         ? `${Math.floor(diff / 3600_000)}h ago`
         : dateLabel(value);
 }
-
