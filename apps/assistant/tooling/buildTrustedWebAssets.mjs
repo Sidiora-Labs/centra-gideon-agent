@@ -130,6 +130,7 @@ export async function buildTrustedWebAssets({ outputDirectory, assistantDirector
   const virtualCss = path.join(assistantDirectory, "tooling", `.trusted-web-assets-${process.pid}.css`);
   const cssSource = [
     '@import "tailwindcss" source("../../console/src");',
+    '@source "../src";',
     `@import "${fontsPath.replaceAll("\\", "/")}";`,
     themeBody,
     `@import "${shellPath.replaceAll("\\", "/")}";`,

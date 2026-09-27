@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 type PendingCommand = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
@@ -43,7 +43,20 @@ export async function startViteEntryServer(options: {
         dedupe: ["react", "react-dom"],
       },
       esbuild: { jsx: "automatic" },
-      optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] } },
+      optimizeDeps: {
+        entries: [relative(root, entryFile)],
+        include: [
+          "expo-status-bar",
+          "lucide-react-native",
+          "react",
+          "react-dom",
+          "react-dom/client",
+          "react-native-safe-area-context",
+          "react-native-web",
+          "react/jsx-dev-runtime",
+        ],
+        esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] },
+      },
       plugins: [{
         name: "gideon-actual-tsx-entry",
         configureServer(viteServer) {
