@@ -128,7 +128,7 @@ describe('mail workspace contracts', () => {
 import asyncio, json, os, sys
 from pathlib import Path
 from aiohttp import web
-import gideon.core.config.loader as loader
+from gideon.core.config import config_dir
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
@@ -137,7 +137,7 @@ from gideon.workspace.capabilities.communications import PeopleStore, mirrors
 
 async def main(origin):
   home=Path(os.environ['GIDEON_HOME']); home.mkdir(parents=True,exist_ok=True)
-  loader.config_dir=lambda: home; credentials.config_dir=lambda: home
+  assert config_dir().resolve() == home.resolve(), (config_dir(), home)
   (home/'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'providers': []}),encoding='utf-8')
   credentials.set_password('communications-owner','correct-horse-battery-staple')
   token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
@@ -207,7 +207,7 @@ import asyncio, json, os, socket, socketserver, sys, threading
 from pathlib import Path
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-import gideon.core.config.loader as loader
+from gideon.core.config import config_dir
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.capabilities_communications import register
@@ -223,8 +223,7 @@ from gideon.workspace.artifacts.handlers import register_artifact_routes
 async def main(origin):
   home=Path(os.environ['GIDEON_HOME'])
   home.mkdir(parents=True,exist_ok=True)
-  loader.config_dir=lambda: home
-  credentials.config_dir=lambda: home
+  assert config_dir().resolve() == home.resolve(), (config_dir(), home)
   (home/'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'providers': []}), encoding='utf-8')
   os.environ['GIDEON_CREDENTIAL_BACKEND']='dotenv'
   save_credential('TEST_MAIL_CREDENTIAL','loopback-only-fixture-credential')
