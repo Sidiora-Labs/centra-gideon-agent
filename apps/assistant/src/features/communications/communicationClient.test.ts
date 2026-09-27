@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { createCommunicationClient } from './communicationClient'
-import { connectionReadiness, providerItemKey, type ProviderItemIdentity } from './types'
+import {
+  calendarEventItem,
+  connectionReadiness,
+  providerItemKey,
+  teamsMessageItem,
+  type CalendarEvent,
+  type CalendarSource,
+  type ProviderItemIdentity,
+  type TeamsMessage,
+  type TeamsSource,
+  unavailableChannelAdapter,
+} from './types'
 import type { OwnerScope } from '../../shared/auth.web'
 
 const scope: OwnerScope = Object.freeze({
@@ -58,5 +69,54 @@ describe('communication identity contracts', () => {
       items: [],
     })
     client.dispose()
+  })
+
+  it('invalidates captured request tokens on account switch and owner cache clear', () => {
+    const client = createCommunicationClient(scope)
+    client.selectConnection('native-account-one', 'mail-mirror')
+    const first = client.captureSelectionToken()
+    expect(client.selectionTokenIsCurrent(first)).toBe(true)
+    client.selectConnection('native-account-two', 'mail-mirror')
+    expect(client.selectionTokenIsCurrent(first)).toBe(false)
+    const second = client.captureSelectionToken()
+    client.clear()
+    expect(client.selectionTokenIsCurrent(second)).toBe(false)
+    client.dispose()
+  })
+
+  it('carries source account and native IDs into calendar and Teams item identities', () => {
+    const sync = { state: 'synced', coverage: 'available_snapshot', scope: 'provider_window' }
+    const calendarSource: CalendarSource = {
+      id: 'calendar-native-connection', name: 'Work', kind: 'google', calendar_id: 'primary',
+      credential_ref: 'calendar_token', timezone: 'UTC', revision: 4, sync,
+      review_coverage: 'available_snapshot',
+    }
+    const event: CalendarEvent = {
+      id: 'same-native-event-id', uid: 'same-native-event-id', title: 'Review', location: '',
+      start: '2026-09-27T10:00:00+00:00', end: '2026-09-27T10:30:00+00:00', all_day: false,
+      status: 'confirmed', recurrence_unexpanded: false, source_id: calendarSource.id, source_kind: 'google',
+    }
+    const calendarItem = calendarEventItem(scope.cacheKey, calendarSource, event)
+    expect(calendarItem.identity.accountId).toBe(calendarSource.id)
+    expect(calendarItem.identity.nativeId).toBe(event.id)
+
+    const teamsSource: TeamsSource = {
+      id: 'teams-native-connection', name: 'Company', owner_email: 'owner@example.com',
+      credential_ref: 'graph_token', revision: 2, sync,
+    }
+    const message: TeamsMessage = {
+      provenance_key: 'channel:thread:same-native-event-id', provider: 'microsoft_graph',
+      source_kind: 'channel', conversation_id: 'thread', team_id: 'team', channel_id: 'channel',
+      message_id: 'same-native-event-id', reply_to_id: null, sender: { id: 'user', name: 'User' },
+      person_id: null, direction: 'inbound', created_at: '2026-09-27T10:00:00+00:00',
+      modified_at: null, deleted_at: null, etag: '', body: 'Message', attachments: [],
+    }
+    const teamsItem = teamsMessageItem(scope.cacheKey, teamsSource, message)
+    expect(teamsItem.identity.accountId).toBe(teamsSource.id)
+    expect(teamsItem.identity.nativeId).toBe(message.provenance_key)
+    expect(providerItemKey(calendarItem.identity)).not.toBe(providerItemKey(teamsItem.identity))
+    expect(unavailableChannelAdapter('beeper')).toEqual({
+      kind: 'beeper', readiness: 'unavailable', reason: 'no-typed-assistant-adapter', items: [],
+    })
   })
 })
