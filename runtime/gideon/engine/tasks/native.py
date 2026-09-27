@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -227,7 +228,17 @@ class TaskAdmission:
 class TaskMutation:
     provider: NativeTaskProvider
 
+    @contextmanager
+    def _mutation_lock(self):
+        with (self.provider._ensure_dir() / ".updates.lock").open("a+") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            yield
+
     def create(self, fields):
+        with self._mutation_lock():
+            return self._create_locked(fields)
+
+    def _create_locked(self, fields):
         identifier, now = f"t-{uuid.uuid4().hex[:8]}", _now_iso()
         values = {
             name: models_coerce(name, fields.get(name, default), strict=True)
@@ -255,14 +266,18 @@ class TaskMutation:
             admission.completion()
         tasks[task.id] = task
         reconcile.classify_manual_block(task, tasks)
+        changed = reconcile.reconcile_blocked_status(tasks, task.id)
+        if any(row.id == task.id for row in changed):
+            task.updated_at = _next_updated_at(task.updated_at)
         self.provider._write_task(task)
-        for changed in reconcile.reconcile_blocked_status(tasks, task.id):
-            self.provider._write_task(changed)
+        for row in changed:
+            if row.id != task.id:
+                row.updated_at = _next_updated_at(row.updated_at)
+                self.provider._write_task(row)
         return task
 
     def update(self, identifier, fields, expected_revision=None):
-        with (self.provider._ensure_dir() / ".updates.lock").open("a+") as stream:
-            fcntl.flock(stream, fcntl.LOCK_EX)
+        with self._mutation_lock():
             return self._update_locked(identifier, fields, expected_revision)
 
     def _update_locked(self, identifier, fields, expected_revision):
@@ -320,6 +335,8 @@ class TaskMutation:
                 if row.id != task.id
             )
         for row in changed:
+            if row.id != task.id:
+                row.updated_at = _next_updated_at(row.updated_at)
             self.provider._write_task(row)
         setattr(task, "_reconciled", changed)
         setattr(
@@ -330,6 +347,10 @@ class TaskMutation:
         return task
 
     def delete(self, identifier):
+        with self._mutation_lock():
+            return self._delete_locked(identifier)
+
+    def _delete_locked(self, identifier):
         path = self.provider._task_path(identifier)
         if not path.exists():
             return False
@@ -344,9 +365,11 @@ class TaskMutation:
             ]
             if len(retained) != len(task.dependencies):
                 task.dependencies = retained
+                task.updated_at = _next_updated_at(task.updated_at)
                 self.provider._write_task(task)
         for key in list(tasks):
             for changed in reconcile.reconcile_blocked_status(tasks, key):
+                changed.updated_at = _next_updated_at(changed.updated_at)
                 self.provider._write_task(changed)
         return True
 

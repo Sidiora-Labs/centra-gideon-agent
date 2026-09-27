@@ -1,5 +1,6 @@
 """Hierarchy request policies and project/list route composition."""
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -425,14 +426,16 @@ async def api_projects_update(request: web.Request) -> web.Response:
             return refusal
     store = _store()
     try:
-        return HierarchyRequest.write(
-            lambda: store.update_project(request.match_info["project_id"],
-                                         expected_revision=expected_revision, **body),
-            lambda project: _project_payload(store, project),
+        updated = await asyncio.to_thread(
+            store.update_project, request.match_info["project_id"],
+            expected_revision=expected_revision, **body,
         )
     except ProjectRevisionConflict as exc:
         return json_error("version_conflict", message=str(exc), status=409,
                           current_revision=exc.current_revision)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return HierarchyRequest.record(updated, lambda project: _project_payload(store, project))
 
 
 def _bound_work_counts(pid: str) -> tuple[int, int]:
