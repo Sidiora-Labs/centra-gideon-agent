@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from "../../../test-support/browserHarness";
 import { DESTINATIONS } from "./destinations";
 import { MINIAPPS, miniappStateMessage } from "./miniapps";
+import { discoveryStorageKey } from "./discoveryState";
 
 const root = resolve(process.cwd(), "../..");
 const children: ChildProcessWithoutNullStreams[] = [];
@@ -187,7 +188,7 @@ import { ownerScope } from '/src/shared/auth.web.tsx';
 function Journey() {
   const [identity, setIdentity] = React.useState(null);
   const [scopeOwner, setScopeOwner] = React.useState('studio-owner');
-  const appsRoute = () => createShellRoute('apps', { view: 'workspace', placement: { id: 'apps' }, returnTo: { destination: 'chat' } });
+  const appsRoute = () => createShellRoute('apps', { view: 'workspace', placement: { id: 'apps', query: { category: 'Create', search: 'slide' } }, returnTo: { destination: 'chat' } });
   const [route, setRoute] = React.useState(appsRoute);
   const [loaded, setLoaded] = React.useState(null);
   const scope = ownerScope(location.origin, { user: scopeOwner });
@@ -209,7 +210,7 @@ function Journey() {
     }).then(result => { if (active) setLoaded(result); });
     return () => { active = false; };
   }, [identity, route]);
-  const navigate = next => { setRoute(next); };
+  const navigate = next => { window.__lastMiniappRoute = next; setRoute(next); };
   const returnToApps = () => { setRoute(appsRoute()); };
   if (!identity) return <p role="status">Signing in to the native Studio account…</p>;
   if (route.destination === 'apps' && route.placement?.id === 'apps') return <AppsScreen route={route} scope={scope}
@@ -231,8 +232,49 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
     expect(await browser.evaluate<boolean>("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].every(card => card.querySelector('[role=status]')?.textContent.includes('not been checked') || card.querySelector('button')?.disabled)"))
       .toBe(true);
 
-    await browser.evaluate("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button')?.click()");
+    await browser.evaluate("document.querySelector('[data-miniapp-pin=health]')?.click()");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'true'", "health pin committed by React");
+    expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'true'")).toBe(true);
+    const ownerStorageKey = discoveryStorageKey(JSON.stringify([origin, "studio-owner"]));
+    expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).not.toContain("Health");
+    const initialTimeOrigin = await browser.evaluate<number>("performance.timeOrigin");
+    await browser.command("Page.reload");
+    await browser.waitFor(`performance.timeOrigin !== ${initialTimeOrigin} && document.querySelector('[aria-label="Gideon miniapps"] li')`, "pinned preference after document reload");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'true'", "owner preference read after reload");
+    expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'true'")).toBe(true);
+    await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'other-owner'}))");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'false'", "other account preferences masked");
+    await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'studio-owner'}))");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=health]')?.getAttribute('aria-pressed') === 'true'", "original account preferences restored");
+
+    const controlOrigin = `http://127.0.0.1:${startup.control_port}`;
+    expect((await fetch(`${controlOrigin}/hold`, { method: "POST" })).ok).toBe(true);
+    await browser.evaluate("performance.clearResourceTimings(); document.querySelector('[data-miniapp-open=slides]')?.click()");
+    const waitForNative = async (field: "entered" | "finished") => {
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const state = await (await fetch(`${controlOrigin}/status`)).json() as { entered: boolean; finished: boolean };
+        if (state[field]) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(`Native Slides ${field} state was not observed`);
+    };
+    await waitForNative("entered");
+    await browser.evaluate("document.querySelector('[data-miniapp-open=knowledge]')?.click()");
+    await browser.waitFor("document.querySelector('[data-miniapp-open=knowledge]')?.parentElement?.querySelector('[role=status]')?.textContent.includes('could not be checked right now')", "newer native Knowledge request unavailable");
+    expect(await browser.evaluate<boolean>("performance.getEntriesByType('resource').some(entry => entry.name.includes('/api/knowledge/items?limit=100') && entry.responseEnd > 0)")).toBe(true);
+    expect((await fetch(`${controlOrigin}/release`, { method: "POST" })).ok).toBe(true);
+    await waitForNative("finished");
+    await browser.waitFor("performance.getEntriesByType('resource').some(entry => entry.name.includes('/api/artifacts?kind=pptx') && entry.responseEnd > 0)", "older native Slides response completed");
+    await browser.waitFor("document.querySelector('[data-miniapp-open=slides]')?.disabled === false", "newer Knowledge result leaves Slides action enabled");
+    expect(await browser.evaluate<string>("location.pathname")).toBe("/assistant/apps");
+    expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-open=slides]')?.disabled === false")).toBe(true);
+    expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).toContain('"recentIds":[]');
+
+    await browser.evaluate("document.querySelector('[data-miniapp-open=slides]')?.click()");
     await browser.waitFor("document.querySelector('[aria-label=\"New presentation name\"]')", "native Slides first-action workspace");
+    expect(await browser.evaluate<{ destination: string; placement: { id: string; query: Record<string, string> }; selectionId: string }>("window.__lastMiniappRoute.returnTo"))
+      .toEqual({ destination: "apps", placement: { id: "apps", query: { category: "Create", search: "slide" } }, selectionId: "slides" });
     await browser.evaluate(`(() => {
       const write = (selector, value) => {
         const field = document.querySelector(selector);
@@ -248,6 +290,9 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
 
     await browser.evaluate("[...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Back')?.click()");
     await browser.waitFor("document.querySelector('[aria-label=\"Gideon miniapps\"] li')", "return to Apps");
+    await browser.waitFor("document.activeElement?.getAttribute('data-miniapp-open') === 'slides'", "focus restored to the invoking miniapp control");
+    expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).toContain('"recentIds":["slides"]');
+    expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-open=slides]')?.parentElement?.textContent.includes('Recently opened')")).toBe(true);
     await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'stale-owner'}))");
     await browser.waitFor("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button:not(:disabled)')", "Slides control after stale owner change");
     const previousRoute = await browser.evaluate<string>("location.pathname + location.search");
@@ -259,18 +304,8 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
 
     await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'studio-owner'}))");
     await browser.waitFor("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button:not(:disabled)')", "Slides control for original owner");
-    const controlOrigin = `http://127.0.0.1:${startup.control_port}`;
     expect((await fetch(`${controlOrigin}/hold`, { method: "POST" })).ok).toBe(true);
-    await browser.evaluate("performance.clearResourceTimings(); [...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button')?.click()");
-    const waitForNative = async (field: "entered" | "finished") => {
-      const deadline = Date.now() + 10000;
-      while (Date.now() < deadline) {
-        const state = await (await fetch(`${controlOrigin}/status`)).json() as { entered: boolean; finished: boolean };
-        if (state[field]) return;
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      throw new Error(`Native Slides ${field} state was not observed`);
-    };
+    await browser.evaluate("performance.clearResourceTimings(); document.querySelector('[data-miniapp-open=slides]')?.click()");
     await waitForNative("entered");
     await browser.evaluate("document.querySelector('button[aria-label=\"Back\"]')?.click()");
     await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[aria-label=\"Gideon miniapps\"]')", "Apps unmounted during native check");
