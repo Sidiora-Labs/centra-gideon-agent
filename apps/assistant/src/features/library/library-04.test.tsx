@@ -22,7 +22,7 @@ async function availablePort(): Promise<number> {
 }
 
 async function capture(name: string): Promise<void> {
-  const directory = process.env.GIDEON_LIBRARY_EVIDENCE_DIR;
+  const directory = process.env.GIDEON_EVIDENCE_DIR;
   if (!directory || !browser) return;
   await mkdir(directory, { recursive: true });
   const screenshot = await browser.command("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
@@ -37,7 +37,7 @@ function makePdf(): Uint8Array {
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    (() => { const stream = "BT /F1 12 Tf 24 100 Td (A native reader passage.) Tj ET\n"; return `<< /Length ${new TextEncoder().encode(stream).length} >>\nstream\n${stream}endstream`; })(),
+    (() => { const stream = "BT /F1 12 Tf 24 100 Td (A native reader passage. A native reader passage.) Tj ET\n"; return `<< /Length ${new TextEncoder().encode(stream).length} >>\nstream\n${stream}endstream`; })(),
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -83,6 +83,10 @@ async def main(origin):
   register_provider(DirSourceProvider(store))
   register_provider(FeedSourceProvider(store))
   register_provider(WebSourceProvider(store))
+  annotation_write_started = asyncio.Event()
+  annotation_write_release = asyncio.Event()
+  annotation_write_enabled = False
+  annotation_write_count = 0
   files = Path(knowledge_files_dir())
   files.mkdir(parents=True, exist_ok=True)
   missing_id = store.create_typed_item(item_type="document", title="Missing original PDF", content="The saved extracted passage remains readable.", provider="native", extra={
@@ -91,7 +95,15 @@ async def main(origin):
   })
   assert missing_id
   source_write_started = asyncio.Event()
-  app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+  @web.middleware
+  async def hold_annotation_write(request, handler):
+    nonlocal annotation_write_count
+    if annotation_write_enabled and request.method == "POST" and request.path.endswith("/annotations"):
+      annotation_write_count += 1
+      annotation_write_started.set()
+      await annotation_write_release.wait()
+    return await handler(request)
+  app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000), hold_annotation_write])
   app["port"] = 10000
   app["allowed_origins"] = {origin}
   app["state"] = state
@@ -108,8 +120,26 @@ async def main(origin):
   async def replace_owner(_request):
     credentials.set_password("reader-second-owner", "correct-horse-battery-staple")
     return web.json_response({"changed": True})
+  async def hold_annotation(request):
+    nonlocal annotation_write_enabled
+    body = await request.json()
+    annotation_write_enabled = bool(body.get("enabled"))
+    if annotation_write_enabled:
+      annotation_write_started.clear()
+      annotation_write_release.clear()
+    else:
+      annotation_write_release.set()
+    return web.json_response({"enabled": annotation_write_enabled})
+  async def annotation_write_status(_request):
+    return web.json_response({"started": annotation_write_started.is_set(), "count": annotation_write_count})
+  async def read_annotations(request):
+    item_id = request.query.get("item_id", "")
+    return web.json_response({"annotations": store.list_annotations(item_id)})
   control.router.add_post("/annotation-storage", set_annotation_storage)
   control.router.add_post("/owner", replace_owner)
+  control.router.add_post("/annotation-hold", hold_annotation)
+  control.router.add_get("/annotation-write-status", annotation_write_status)
+  control.router.add_get("/annotations", read_annotations)
   runner = web.AppRunner(app)
   await runner.setup()
   site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -189,7 +219,8 @@ describe("Library source-aware reader and durable notes", () => {
     expect(importedId).toBeTruthy();
     await browser.evaluate("[...document.querySelectorAll('[data-import-item-id] button')].find(button=>button.textContent==='Open item')?.click()");
     await browser.waitFor("document.querySelector('[data-library-reader-key] h2')?.textContent==='reader-source.pdf'", "PDF reader route");
-    await browser.waitFor("(()=>{const panel=document.querySelector('[data-pdf-state=ready]');const text=document.querySelector('#library-extracted-text');return !!panel?.querySelector('a[download]')&&!!text&&getComputedStyle(text).visibility==='visible'&&text.getBoundingClientRect().height>0&&!panel.querySelector('.gideon-library-reader__original-preview[open]')&&!panel.querySelector('.gideon-library-reader__pdf-frame')})()", "visible extracted text with authorized original actions");
+    await browser.waitFor("(()=>{const panel=document.querySelector('[data-pdf-state=ready]');const text=document.querySelector('#library-extracted-text');return !!panel?.querySelector('a[download]')&&!!text&&text.textContent?.match(/A native reader passage\\./g)?.length===2&&getComputedStyle(text).visibility==='visible'&&text.getBoundingClientRect().height>0&&!panel.querySelector('.gideon-library-reader__original-preview[open]')&&!panel.querySelector('.gideon-library-reader__pdf-frame')})()", "visible extracted text with authorized original actions");
+    expect(await browser.evaluate<boolean>("document.body.innerText.includes('Manually entered passages are attached to their first occurrence in this document.')")).toBe(true);
     const reader = await browser.evaluate<{ width: number; pdfState?: string; provider?: string; source?: string }>("(()=>{const panel=document.querySelector('[data-pdf-state=ready]');const reader=document.querySelector('.gideon-library-reader');const meta=reader?.querySelector('.gideon-library-reader__metadata')?.textContent;return {width:reader?.getBoundingClientRect().width||0,pdfState:panel?.getAttribute('data-pdf-state'),provider:meta?.includes('native')?'native':'',source:meta||''}})()");
     expect(reader.width).toBeGreaterThan(900);
     expect(reader.pdfState).toBe("ready");
@@ -203,10 +234,32 @@ describe("Library source-aware reader and durable notes", () => {
     expect(original.previewOpen).toBe(false);
     expect(original.previewFrame).toBe(false);
 
-    await browser.evaluate(`(${setValue})('library-annotation-quote','A native reader passage.')`);
+    await browser.evaluate(`(()=>{const root=document.querySelector('#library-extracted-text');const text=root.textContent||'';const quote='A native reader passage.';const first=text.indexOf(quote);const start=text.indexOf(quote,first+quote.length);if(first<0||start<0)throw new Error('The native PDF must expose two identical extracted passages.');const locate=position=>{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;let consumed=0;while((node=walker.nextNode())){if(position<=consumed+node.textContent.length)return {node,offset:position-consumed};consumed+=node.textContent.length;}throw new Error('Could not anchor the selected extracted passage.');};const from=locate(start);const to=locate(start+quote.length);const range=document.createRange();range.setStart(from.node,from.offset);range.setEnd(to.node,to.offset);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);return true})()`);
+    await browser.evaluate("[...document.querySelectorAll('button')].find(button=>button.textContent==='Use selected passage')?.click()");
+    await browser.waitFor("document.querySelector('#library-annotation-quote')?.value==='A native reader passage.'", "second extracted passage selected for annotation");
     await browser.evaluate(`(${setValue})('library-annotation-note','Keep this passage for review.')`);
+    const hold = await fetch(`${native.controlOrigin}/annotation-hold`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+    expect(hold.ok).toBe(true);
     await browser.evaluate("document.querySelector('form[aria-label=\"Add passage note\"] button[type=submit]')?.click()");
+    await browser.waitFor("document.querySelector('#library-annotation-quote')?.disabled&&document.querySelector('#library-annotation-note')?.disabled&&[...document.querySelectorAll('button')].find(button=>button.textContent==='Use selected passage')?.disabled", "annotation draft controls locked during native save");
+    await browser.evaluate("document.querySelector('form[aria-label=\"Add passage note\"]')?.requestSubmit()");
+    let writeStatus: { started: boolean; count: number } | undefined;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await fetch(`${native.controlOrigin}/annotation-write-status`);
+      writeStatus = await response.json() as { started: boolean; count: number };
+      if (writeStatus.started) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    expect(writeStatus?.started).toBe(true);
+    expect(writeStatus?.count).toBe(1);
+    const release = await fetch(`${native.controlOrigin}/annotation-hold`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+    expect(release.ok).toBe(true);
     await browser.waitFor("document.querySelector('[data-annotation-id]')?.textContent.includes('Keep this passage for review.')", "saved passage note");
+    const persisted = await fetch(`${native.controlOrigin}/annotations?item_id=${encodeURIComponent(importedId)}`);
+    expect(persisted.ok).toBe(true);
+    const persistedRows = await persisted.json() as { annotations: Array<{ quote: string; occurrence: number; note: string }> };
+    expect(persistedRows.annotations).toHaveLength(1);
+    expect(persistedRows.annotations[0]).toMatchObject({ quote: "A native reader passage.", occurrence: 1, note: "Keep this passage for review." });
 
     await capture("library-04-desktop.png");
     await browser.command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
