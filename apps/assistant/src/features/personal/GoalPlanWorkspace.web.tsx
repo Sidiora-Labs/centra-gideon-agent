@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { GatewayError } from '../../shared/transport.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
@@ -17,31 +17,44 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
   const { palette } = useShellTheme()
   const client = useMemo(() => createPersonalClient(scope), [scope.cacheKey])
   const id = route.record?.id ?? ''
-  const [data, setData] = useState<GoalPlanProjection | null>(null)
-  const [goals, setGoals] = useState<readonly PersonalRecord<HumanGoal>[]>([])
-  const [sessions, setSessions] = useState<readonly PersonalRecord<GoalSession>[]>([])
-  const [sources, setSources] = useState<readonly SourceChoice[]>([])
-  const [milestones, setMilestones] = useState<GoalMilestone[]>([])
+  const recordKey = JSON.stringify([scope.cacheKey, route.record?.kind ?? '', id])
+  const recordKeyRef = useRef(recordKey)
+  recordKeyRef.current = recordKey
+  const [loadedKey, setLoadedKey] = useState('')
+  const [storedData, setData] = useState<GoalPlanProjection | null>(null)
+  const [storedGoals, setGoals] = useState<readonly PersonalRecord<HumanGoal>[]>([])
+  const [storedSessions, setSessions] = useState<readonly PersonalRecord<GoalSession>[]>([])
+  const [storedSources, setSources] = useState<readonly SourceChoice[]>([])
+  const [storedMilestones, setMilestones] = useState<GoalMilestone[]>([])
+  const data = loadedKey === recordKey ? storedData : null
+  const goals = loadedKey === recordKey ? storedGoals : []
+  const sessions = loadedKey === recordKey ? storedSessions : []
+  const sources = loadedKey === recordKey ? storedSources : []
+  const milestones = loadedKey === recordKey ? storedMilestones : []
   const [horizon, setHorizon] = useState<'short_term' | 'long_term' | 'lifetime'>('long_term')
   const [parentId, setParentId] = useState('')
   const [unit, setUnit] = useState('units')
   const [targetValue, setTargetValue] = useState('')
   const [selectedSource, setSelectedSource] = useState('')
+  const [errorState, setErrorState] = useState({ key: recordKey, value: '' })
+  const [noticeState, setNoticeState] = useState({ key: recordKey, value: '' })
   const [checkinValue, setCheckinValue] = useState('')
   const [checkinNotes, setCheckinNotes] = useState('')
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionStart, setSessionStart] = useState('')
   const [sessionEnd, setSessionEnd] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [busyKey, setBusyKey] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [newMilestone, setNewMilestone] = useState('')
+  const error = errorState.key === recordKey ? errorState.value : ''
+  const notice = noticeState.key === recordKey ? noticeState.value : ''
+  const setError = (value: string) => setErrorState({ key: recordKey, value })
+  const setNotice = (value: string) => setNoticeState({ key: recordKey, value })
 
   useEffect(() => () => client.dispose(), [client])
   useEffect(() => {
     let active = true
-    setData(null); setError('')
+    setError('')
     if (!id || !route.record || !['human-goal', 'goal-plan'].includes(route.record.kind)) {
       setError('Select a human goal to open its plan.')
       return () => { active = false }
@@ -51,26 +64,38 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
         client.readGoalPlan(id), client.readGoals(), client.readGoalSessions(id), client.readGoalSources(),
       ])
       if (plan.identity.ownerScopeKey !== scope.cacheKey || plan.identity.nativeId !== id || plan.value.goal.id !== id || plan.value.plan.goal_id !== id) throw new Error('The loaded plan belongs to a different account or goal.')
-      if (!active) return
+      if (!active || recordKeyRef.current !== recordKey) return
       setData(plan.value); setGoals(allGoals); setSessions(goalSessions)
       setSources([...sourceRows, ...goalSessions.map(item => ({ kind: 'session' as const, id: item.identity.nativeId, title: item.value.title, status: item.value.status }))])
       setMilestones(plan.value.plan.milestones.map(item => ({ ...item })))
       setHorizon(plan.value.plan.horizon); setParentId(plan.value.plan.parent_id ?? '')
       setUnit(plan.value.plan.unit); setTargetValue(plan.value.plan.target_value == null ? '' : String(plan.value.plan.target_value))
+      setNewMilestone(''); setCheckinValue(''); setCheckinNotes(''); setSessionTitle(''); setSessionStart(''); setSessionEnd('')
+      setLoadedKey(recordKey)
     }
-    void load().catch(reason => { if (active) setError(errorText(reason)) })
+    void load().catch(reason => {
+      if (!active || recordKeyRef.current !== recordKey) return
+      if (reason instanceof GatewayError && [401, 403, 404].includes(reason.status)) {
+        setData(null); setGoals([]); setSessions([]); setSources([]); setMilestones([]); setLoadedKey('')
+      }
+      setError(data && !(reason instanceof GatewayError && [401, 403, 404].includes(reason.status))
+        ? `Showing the last saved plan. ${errorText(reason)}`
+        : errorText(reason))
+    })
     return () => { active = false }
-  }, [client, id, attempt, route.record?.kind, scope.cacheKey])
+  }, [client, id, attempt, route.record?.kind, scope.cacheKey, recordKey])
 
   const source = { '--goal-text': palette.text, '--goal-muted': palette.muted, '--goal-line': palette.line, '--goal-card': palette.card, '--goal-canvas': palette.canvas, '--goal-accent': palette.blueDark, '--goal-accent-surface': palette.sky } as React.CSSProperties
   const savePlan = async () => {
-    if (!data || busy) return
-    setBusy(true); setError(''); setNotice('')
+    if (!data || busyKey === recordKey) return
+    const key = recordKey
+    setBusyKey(key); setError(''); setNotice('')
     try {
       await client.configureGoalPlan({ goal_id: id, parent_id: parentId || null, horizon, milestones, links: data.plan.links.map(link => ({ kind: link.kind, id: link.id })), unit: unit.trim(), target_value: targetValue === '' ? null : Number(targetValue), expected_revision: data.plan.revision, request_id: crypto.randomUUID() })
+      if (recordKeyRef.current !== key) return
       setNotice('Plan saved at the current revision.'); setAttempt(value => value + 1)
-    } catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
+    } catch (reason) { if (recordKeyRef.current === key) setError(errorText(reason)) }
+    finally { setBusyKey(current => current === key ? null : current) }
   }
   const toggleMilestone = (milestoneId: string) => setMilestones(current => current.map(item => item.id === milestoneId ? { ...item, done: !item.done } : item))
   const addMilestone = () => {
@@ -80,24 +105,28 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
   }
   const updateMilestone = (milestoneId: string, field: 'title' | 'target_date', value: string) => setMilestones(current => current.map(item => item.id === milestoneId ? { ...item, [field]: field === 'target_date' ? value || null : value } : item))
   const saveCheckin = async (event: React.FormEvent) => {
-    event.preventDefault(); if (!data || busy || checkinValue === '') return
-    setBusy(true); setError(''); setNotice('')
+    event.preventDefault(); if (!data || busyKey === recordKey || checkinValue === '') return
+    const key = recordKey
+    setBusyKey(key); setError(''); setNotice('')
     try {
       const result = await client.addGoalCheckin({ goal_id: id, value: Number(checkinValue), observed_at: new Date().toISOString(), notes: checkinNotes.trim(), request_id: crypto.randomUUID() })
       if (result.goal_id !== id) throw new Error('Native check-in belongs to a different goal.')
+      if (recordKeyRef.current !== key) return
       setCheckinValue(''); setCheckinNotes(''); setNotice('Measurement saved to this goal.'); setAttempt(value => value + 1)
-    } catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
+    } catch (reason) { if (recordKeyRef.current === key) setError(errorText(reason)) }
+    finally { setBusyKey(current => current === key ? null : current) }
   }
   const saveSession = async (event: React.FormEvent) => {
-    event.preventDefault(); if (!data || busy || !sessionTitle.trim() || !sessionStart || !sessionEnd) return
-    setBusy(true); setError(''); setNotice('')
+    event.preventDefault(); if (!data || busyKey === recordKey || !sessionTitle.trim() || !sessionStart || !sessionEnd) return
+    const key = recordKey
+    setBusyKey(key); setError(''); setNotice('')
     try {
       const result = await client.saveGoalSession({ goal_id: id, title: sessionTitle.trim(), start_at: new Date(sessionStart).toISOString(), end_at: new Date(sessionEnd).toISOString(), request_id: crypto.randomUUID(), status: 'scheduled' })
       if (result.identity.ownerScopeKey !== scope.cacheKey || result.value.goal_id !== id) throw new Error('Native session belongs to a different account or goal.')
+      if (recordKeyRef.current !== key) return
       setSessionTitle(''); setNotice('Session saved to this goal.'); setAttempt(value => value + 1)
-    } catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
+    } catch (reason) { if (recordKeyRef.current === key) setError(errorText(reason)) }
+    finally { setBusyKey(current => current === key ? null : current) }
   }
   const addSource = () => {
     const selected = sources.find(item => sourceKey(item) === selectedSource)
@@ -109,7 +138,7 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
 
   return <main className="gideon-goal-plan" style={source}>
     <WorkspaceFrame route={route} mode="full" title="Compass Goal" onBack={onReturn}>
-      <div className="gideon-goal-plan__header"><div><p className="gideon-goal-plan__eyebrow">Human goal and plan</p><h1>{data?.goal.title ?? 'Goal plan'}</h1><p>{data?.goal.description || 'Build a measurable plan for this commitment.'}</p></div><div className="gideon-goal-plan__identity">Canonical goal ID <code>{id || 'Unavailable'}</code></div></div>
+      <div className="gideon-goal-plan__header"><div><p className="gideon-goal-plan__eyebrow">Human goal and plan</p><h1>{data?.goal.title ?? 'Goal plan'}</h1><p>{data?.goal.description || 'Build a measurable plan for this commitment.'}</p></div><div className="gideon-goal-plan__identity">Goal ID <code>{id || 'Unavailable'}</code></div></div>
       {error && <p role="alert" className="gideon-goal-plan__error">{error} {data && <button type="button" style={buttonStyle} onClick={() => setAttempt(value => value + 1)}>Reload native state</button>}</p>}
       {notice && <p role="status" className="gideon-goal-plan__notice">{notice}</p>}
       {!data && !error && <p role="status">Loading the human goal and its plan…</p>}
@@ -134,20 +163,20 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
         </section>
         <section className="gideon-goal-plan__panel" aria-labelledby="goal-sessions"><h2 id="goal-sessions">Sessions</h2><p>Scheduled sessions remain attached to goal <code>{id}</code>.</p>
           <ul className="gideon-goal-plan__rows">{sessions.map(session => <li key={session.identity.nativeId}><strong>{session.value.title}</strong><span>{new Date(session.value.start_at).toLocaleString()} – {new Date(session.value.end_at).toLocaleTimeString()}</span><small>{session.value.status} · session {session.identity.nativeId}</small></li>)}</ul>
-          <form className="gideon-goal-plan__form" onSubmit={saveSession}><label htmlFor="goal-session-title">Plan a session</label><input id="goal-session-title" required maxLength={200} placeholder="Practice, appointment or review" value={sessionTitle} onChange={event => setSessionTitle(event.currentTarget.value)} /><div className="gideon-goal-plan__metric"><div><label htmlFor="goal-session-start">Starts</label><input id="goal-session-start" type="datetime-local" required value={sessionStart} onChange={event => setSessionStart(event.currentTarget.value)} /></div><div><label htmlFor="goal-session-end">Ends</label><input id="goal-session-end" type="datetime-local" required value={sessionEnd} onChange={event => setSessionEnd(event.currentTarget.value)} /></div></div><button type="submit" style={buttonStyle} disabled={busy || !sessionTitle.trim()}>Save session</button></form>
+          <form className="gideon-goal-plan__form" onSubmit={saveSession}><label htmlFor="goal-session-title">Plan a session</label><input id="goal-session-title" required maxLength={200} placeholder="Practice, appointment or review" value={sessionTitle} onChange={event => setSessionTitle(event.currentTarget.value)} /><div className="gideon-goal-plan__metric"><div><label htmlFor="goal-session-start">Starts</label><input id="goal-session-start" type="datetime-local" required value={sessionStart} onChange={event => setSessionStart(event.currentTarget.value)} /></div><div><label htmlFor="goal-session-end">Ends</label><input id="goal-session-end" type="datetime-local" required value={sessionEnd} onChange={event => setSessionEnd(event.currentTarget.value)} /></div></div><button type="submit" style={buttonStyle} disabled={busyKey === recordKey || !sessionTitle.trim()}>Save session</button></form>
         </section>
         <section className="gideon-goal-plan__panel" aria-labelledby="goal-checkins"><h2 id="goal-checkins">Metric check-ins</h2><p>Observations are human reported and use <strong>{data.plan.unit}</strong>.</p>
           <ul className="gideon-goal-plan__rows">{data.checkins.map(row => <li key={String(row.id)}><strong>{String(row.value)} {String(row.unit)}</strong><span>{new Date(String(row.observed_at)).toLocaleString()}</span><small>{String(row.source)}{row.notes ? ` · ${String(row.notes)}` : ''}</small></li>)}</ul>
           {!data.checkins.length && <p>No measurements recorded yet.</p>}
           {data.velocity && <p className="gideon-goal-plan__velocity">Observed rate: {String(data.velocity.value_per_day)} {String(data.velocity.unit)} per day</p>}
-          <form className="gideon-goal-plan__form" onSubmit={saveCheckin}><label htmlFor="goal-checkin-value">Record a measurement</label><input id="goal-checkin-value" required type="number" step="any" value={checkinValue} onChange={event => setCheckinValue(event.currentTarget.value)} /><label htmlFor="goal-checkin-notes">Note</label><textarea id="goal-checkin-notes" rows={2} maxLength={5000} value={checkinNotes} onChange={event => setCheckinNotes(event.currentTarget.value)} /><button type="submit" style={buttonStyle} disabled={busy || checkinValue === ''}>Save check-in</button></form>
+          <form className="gideon-goal-plan__form" onSubmit={saveCheckin}><label htmlFor="goal-checkin-value">Record a measurement</label><input id="goal-checkin-value" required type="number" step="any" value={checkinValue} onChange={event => setCheckinValue(event.currentTarget.value)} /><label htmlFor="goal-checkin-notes">Note</label><textarea id="goal-checkin-notes" rows={2} maxLength={5000} value={checkinNotes} onChange={event => setCheckinNotes(event.currentTarget.value)} /><button type="submit" style={buttonStyle} disabled={busyKey === recordKey || checkinValue === ''}>Save check-in</button></form>
         </section>
         <section className="gideon-goal-plan__panel" aria-labelledby="goal-sources"><h2 id="goal-sources">Source links</h2><p>Link real tasks, sessions or running programs while keeping their native identity.</p>
           <div className="gideon-goal-plan__add-row"><label className="sr-only" htmlFor="goal-source-select">Choose a source record</label><select id="goal-source-select" value={selectedSource} onChange={event => setSelectedSource(event.currentTarget.value)}><option value="">Choose a task, session or program</option>{sources.map(item => <option key={sourceKey(item)} value={sourceKey(item)}>{item.title} · {item.kind} · {item.status}</option>)}</select><button type="button" style={buttonStyle} onClick={addSource} disabled={!selectedSource}>Link source</button></div>
           <ul className="gideon-goal-plan__rows">{data.plan.links.map(link => <li key={sourceKey(link)}><strong>{link.title || 'Unavailable source'}</strong><span>{link.kind} · {link.status ?? link.availability ?? 'status unavailable'}</span><small>Source ID {link.id}</small><button type="button" className="gideon-goal-plan__quiet" onClick={() => removeSource(link.kind, link.id)}>Remove link</button></li>)}</ul>
           {!data.plan.links.length && <p>No source links yet.</p>}
         </section>
-        <section className="gideon-goal-plan__panel" aria-labelledby="goal-hierarchy"><h2 id="goal-hierarchy">Hierarchy and provenance</h2><p>Parent: {parentId ? goals.find(item => item.identity.nativeId === parentId)?.value.title ?? parentId : 'Top-level goal'}</p><p>Child goal IDs: {data.children.length ? data.children.join(', ') : 'None'}</p><p>Source record <code>{id}</code> · plan revision {data.plan.revision}</p><button type="button" style={buttonStyle} onClick={savePlan} disabled={busy || !unit.trim()}>{busy ? 'Saving…' : 'Save plan'}</button> <button type="button" style={buttonStyle} onClick={() => setAttempt(value => value + 1)}>Reload</button></section>
+        <section className="gideon-goal-plan__panel" aria-labelledby="goal-hierarchy"><h2 id="goal-hierarchy">Hierarchy and provenance</h2><p>Parent: {parentId ? goals.find(item => item.identity.nativeId === parentId)?.value.title ?? parentId : 'Top-level goal'}</p><p>Child goal IDs: {data.children.length ? data.children.join(', ') : 'None'}</p><p>Source record <code>{id}</code> · plan revision {data.plan.revision}</p><button type="button" style={buttonStyle} onClick={savePlan} disabled={busyKey === recordKey || !unit.trim()}>{busyKey === recordKey ? 'Saving…' : 'Save plan'}</button> <button type="button" style={buttonStyle} onClick={() => setAttempt(value => value + 1)}>Reload</button></section>
       </div>}
     </WorkspaceFrame>
     <style>{`

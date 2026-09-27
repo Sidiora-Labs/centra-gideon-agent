@@ -25,7 +25,7 @@ const nativeFixture = String.raw`
 import asyncio, json, os, sys
 from pathlib import Path
 from aiohttp import web
-import gideon.core.config.loader as loader
+from gideon.core.config import loader
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth, capabilities_identity_goals, capabilities_identity_goal_plans
 from gideon.security.auth import credentials
@@ -33,14 +33,20 @@ from gideon.workspace.capabilities.identity.goals import GoalStore
 
 async def main(origin):
     home = Path(os.environ['GIDEON_HOME'])
-    loader.config_dir = lambda: home
-    credentials.config_dir = lambda: home
+    assert loader.config_dir() == home
+    assert credentials.config_dir() == home
     (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}}), encoding='utf-8')
     credentials.set_password('goals-owner', 'native-goals-password')
     token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
     goals_path = home / 'capabilities/identity/goals.sqlite3'
     seeded = GoalStore(goals_path).save_goal(title='Parent objective', description='Existing parent for hierarchy', request_id='seed-parent-001', expected_revision=0)
-    app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+    second = GoalStore(goals_path).save_goal(title='Second record during scope transition', description='Must not inherit the first goal view', request_id='seed-second-001', expected_revision=0)
+    second_plan_path = f"/api/capabilities/identity/goal-plans/{second['id']}"
+    @web.middleware
+    async def delay_second_plan(request, handler):
+        if request.path == second_plan_path: await asyncio.sleep(0.6)
+        return await handler(request)
+    app = web.Application(middlewares=[delay_second_plan, token_auth.token_auth_middleware(port=10000)])
     app['port'] = 10000; app['allowed_origins'] = {origin}
     app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
     app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
@@ -49,7 +55,7 @@ async def main(origin):
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, '127.0.0.1', 0); await site.start()
     api_port = site._server.sockets[0].getsockname()[1]
-    print(json.dumps({'api_port': api_port, 'control_port': api_port, 'parent_id': seeded['id']}), flush=True)
+    print(json.dumps({'api_port': api_port, 'control_port': api_port, 'parent_id': seeded['id'], 'second_id': second['id']}), flush=True)
     try: await asyncio.Event().wait()
     finally: await runner.cleanup()
 
@@ -72,6 +78,7 @@ describe('Compass Goals native browser journey', () => {
     const origin = `http://127.0.0.1:${port}`
     native = await startNativeServer({ script: fixture, origin, repositoryRoot: root })
     const parentId = String(native.startup.parent_id)
+    const secondId = String(native.startup.second_id)
     const entryFile = join(entryDirectory, 'goals-entry.tsx')
     await writeFile(entryFile, `import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -112,7 +119,19 @@ createRoot(document.getElementById('root')).render(<Root/>)
     expect(identity.id).toBe(nativeGoal.id)
     expect(identity.routeId).toBe(nativeGoal.id)
     expect(identity.parentOptions).toContain(parentId)
-    expect(await browser.evaluate<boolean>(`(()=>{const select=document.getElementById('goal-parent');const input=document.getElementById('new-milestone');if(!select||!input)return false;select.value=${JSON.stringify(parentId)};select.dispatchEvent(new Event('change',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Prepare the first planting beds');input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.gideon-goal-plan__add-row button').click();Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(button=>button.innerText==='Save plan').click();return true})()`)).toBe(true)
+    const assertAction = async (present: boolean, action: string) => {
+      if (!present) {
+        const diagnostic = await browser?.evaluate<Record<string, unknown>>(`(async()=>{const [planResponse,goalsResponse]=await Promise.all([fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(nativeGoal.id)}'),fetch('/api/capabilities/identity/goals/goals')]);return {url:location.href,readyState:document.readyState,timeOrigin:performance.timeOrigin,body:(document.body?.innerText||'').slice(0,1200),planStatus:planResponse.status,goalsStatus:goalsResponse.status,goalId:${JSON.stringify(nativeGoal.id)},parentId:${JSON.stringify(parentId)}}})()`)
+        throw new Error(`${action} was absent; route diagnostic=${JSON.stringify(diagnostic)}; browser diagnostics=${JSON.stringify(browser?.diagnostics() ?? [])}`)
+      }
+    }
+    await assertAction(await browser.evaluate<boolean>(`(()=>{const select=document.getElementById('goal-parent');if(!select)return false;select.value=${JSON.stringify(parentId)};select.dispatchEvent(new Event('change',{bubbles:true}));return select.value===${JSON.stringify(parentId)}})()`), 'Parent selection')
+    await browser.waitFor(`document.getElementById('goal-parent')?.value===${JSON.stringify(parentId)}`, 'parent selection rendered before the next action')
+    await assertAction(await browser.evaluate<boolean>(`(()=>{const input=document.getElementById('new-milestone');if(!input)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Prepare the first planting beds');input.dispatchEvent(new Event('input',{bubbles:true}));return input.value==='Prepare the first planting beds'})()`), 'Milestone entry')
+    await browser.waitFor("document.getElementById('new-milestone')?.value==='Prepare the first planting beds'", 'milestone draft rendered before Add')
+    await assertAction(await browser.evaluate<boolean>("(()=>{const button=Array.from(document.querySelectorAll('.gideon-goal-plan__add-row button')).find(item=>item.innerText==='Add milestone');if(!button||button.disabled)return false;button.click();return true})()"), 'Add milestone')
+    await browser.waitFor(`Array.from(document.querySelectorAll('.gideon-goal-plan__milestones input[aria-label="Milestone title"]')).some(input=>input.value==='Prepare the first planting beds')`, 'milestone appears before Save')
+    await assertAction(await browser.evaluate<boolean>("(()=>{const button=Array.from(document.querySelectorAll('.gideon-goal-plan__panel button')).find(item=>item.innerText==='Save plan');if(!button||button.disabled)return false;button.click();return true})()"), 'Save plan')
     await browser.waitFor("document.body.innerText.includes('Plan saved at the current revision.')", 'hierarchy and milestone save')
     expect(await browser.evaluate<boolean>("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === false")).toBe(true)
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-checkin-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'4');input.dispatchEvent(new Event('input',{bubbles:true}));input.closest('form').querySelector('button[type=submit]').click();return true})()`)
@@ -139,5 +158,10 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.navigate(`${origin}/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(identity.id)}&placement=goals`)
     await browser.waitFor("document.querySelector('.gideon-goal-plan__milestones input[type=checkbox]')?.checked === true", 'persisted explicit milestone after reload')
     expect(await browser.evaluate<string>("document.querySelector('.gideon-goal-plan__identity code')?.innerText || ''")).toBe(identity.id)
+    await browser.evaluate(`(()=>{history.pushState(null,'','/assistant/goals?v=1&view=detail&recordKind=human-goal&recordId=${encodeURIComponent(secondId)}&placement=goals');dispatchEvent(new PopStateEvent('popstate'));return true})()`)
+    await browser.waitFor(`new URLSearchParams(location.search).get('recordId')===${JSON.stringify(secondId)} && !document.body.innerText.includes('Build a neighborhood garden')`, 'record transition masks the previous goal synchronously')
+    expect(await browser.evaluate<boolean>("!document.body.innerText.includes('Prepare the first planting beds') && document.querySelector('.gideon-goal-plan__milestones input[aria-label=\"Milestone title\"]')===null")).toBe(true)
+    await browser.waitFor(`new URLSearchParams(location.search).get('recordId')===${JSON.stringify(secondId)} && document.body.innerText.includes('Loading the human goal and its plan…') && !document.body.innerText.includes('Build a neighborhood garden')`, 'prior goal remains masked while the second native plan is pending')
+    await browser.waitFor(`document.querySelector('.gideon-goal-plan__header h1')?.innerText==='Second record during scope transition'`, 'new native goal content loaded after transition')
   }, 60_000)
 })

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { createShellRoute } from '../../shared/shell/shellRoutes'
@@ -10,20 +10,30 @@ const buttonStyle: React.CSSProperties = { minHeight: 42, borderRadius: 9, paddi
 export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
   const { palette } = useShellTheme()
   const client = useMemo(() => createPersonalClient(scope), [scope.cacheKey])
-  const [goals, setGoals] = useState<readonly PersonalRecord<HumanGoal>[]>([])
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [targetDate, setTargetDate] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [goalsState, setGoalsState] = useState<{ owner: string; rows: readonly PersonalRecord<HumanGoal>[] } | null>(null)
+  const [titleState, setTitleState] = useState({ owner: scope.cacheKey, value: '' })
+  const [descriptionState, setDescriptionState] = useState({ owner: scope.cacheKey, value: '' })
+  const [targetDateState, setTargetDateState] = useState({ owner: scope.cacheKey, value: '' })
+  const [busyOwner, setBusyOwner] = useState<string | null>(null)
+  const [errorState, setErrorState] = useState({ owner: scope.cacheKey, value: '' })
+  const [noticeState, setNoticeState] = useState({ owner: scope.cacheKey, value: '' })
   const [attempt, setAttempt] = useState(0)
+  const scopeRef = useRef(scope.cacheKey)
+  scopeRef.current = scope.cacheKey
+  const title = titleState.owner === scope.cacheKey ? titleState.value : ''
+  const description = descriptionState.owner === scope.cacheKey ? descriptionState.value : ''
+  const targetDate = targetDateState.owner === scope.cacheKey ? targetDateState.value : ''
+  const goals = goalsState?.owner === scope.cacheKey ? goalsState.rows : []
+  const error = errorState.owner === scope.cacheKey ? errorState.value : ''
+  const notice = noticeState.owner === scope.cacheKey ? noticeState.value : ''
+  const setError = (value: string) => setErrorState({ owner: scope.cacheKey, value })
+  const setNotice = (value: string) => setNoticeState({ owner: scope.cacheKey, value })
 
   useEffect(() => () => client.dispose(), [client])
   useEffect(() => {
     let active = true
     setError('')
-    void client.readGoals().then(rows => { if (active) setGoals(rows) }).catch(reason => {
+    void client.readGoals().then(rows => { if (active && scopeRef.current === scope.cacheKey) setGoalsState({ owner: scope.cacheKey, rows }) }).catch(reason => {
       if (active) setError(reason instanceof Error ? reason.message : 'Goals could not be loaded.')
     })
     return () => { active = false }
@@ -35,15 +45,19 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
   }))
   const create = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (busy || !title.trim()) return
-    setBusy(true); setError(''); setNotice('')
+    if (busyOwner === scope.cacheKey || !title.trim()) return
+    const owner = scope.cacheKey
+    setBusyOwner(owner); setError(''); setNotice('')
     try {
       const record = await client.saveGoal(undefined, { title: title.trim(), description: description.trim(), status: 'active', target_date: targetDate || null }, crypto.randomUUID(), 0)
       if (record.identity.ownerScopeKey !== scope.cacheKey || record.identity.nativeId !== record.value.id) throw new Error('The saved goal belongs to a different account or identity.')
-      setTitle(''); setDescription(''); setTargetDate(''); setNotice('Goal saved. Open it to shape its plan and progress.')
-      setGoals(await client.readGoals())
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Goal could not be saved. Your draft is preserved.') }
-    finally { setBusy(false) }
+      if (scopeRef.current !== owner) return
+      setTitleState({ owner, value: '' }); setDescriptionState({ owner, value: '' }); setTargetDateState({ owner, value: '' }); setNotice('Goal saved. Open it to shape its plan and progress.')
+      const rows = await client.readGoals()
+      if (scopeRef.current !== owner) return
+      setGoalsState({ owner, rows })
+    } catch (reason) { if (scopeRef.current === owner) setError(reason instanceof Error ? reason.message : 'Goal could not be saved. Your draft is preserved.') }
+    finally { setBusyOwner(current => current === owner ? null : current) }
   }
 
   return <main className="gideon-goals" style={{ '--goals-text': palette.text, '--goals-muted': palette.muted, '--goals-line': palette.line, '--goals-card': palette.card, '--goals-canvas': palette.canvas, '--goals-accent': palette.blueDark, '--goals-accent-surface': palette.sky } as React.CSSProperties}>
@@ -65,10 +79,10 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
         <section aria-labelledby="goal-create-heading" className="gideon-goals__panel">
           <h2 id="goal-create-heading">Name a goal</h2><p>Save an active human goal, then add milestones, sessions and measurements.</p>
           <form className="gideon-goals__form" onSubmit={create}>
-            <label htmlFor="goal-title">Goal title</label><input id="goal-title" required maxLength={200} value={title} onChange={event => setTitle(event.currentTarget.value)} />
-            <label htmlFor="goal-description">What does success mean?</label><textarea id="goal-description" rows={3} maxLength={10000} value={description} onChange={event => setDescription(event.currentTarget.value)} />
-            <label htmlFor="goal-target-date">Target date <span>Optional</span></label><input id="goal-target-date" type="date" value={targetDate} onChange={event => setTargetDate(event.currentTarget.value)} />
-            <button type="submit" style={buttonStyle} disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save goal'}</button>
+            <label htmlFor="goal-title">Goal title</label><input id="goal-title" required maxLength={200} value={title} onChange={event => setTitleState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
+            <label htmlFor="goal-description">What does success mean?</label><textarea id="goal-description" rows={3} maxLength={10000} value={description} onChange={event => setDescriptionState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
+            <label htmlFor="goal-target-date">Target date <span>Optional</span></label><input id="goal-target-date" type="date" value={targetDate} onChange={event => setTargetDateState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
+            <button type="submit" style={buttonStyle} disabled={busyOwner === scope.cacheKey || !title.trim()}>{busyOwner === scope.cacheKey ? 'Saving…' : 'Save goal'}</button>
           </form>
         </section>
       </div>
