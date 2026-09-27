@@ -27,38 +27,59 @@ export async function startViteEntryServer(options: {
   const root = resolve(options.root);
   const entryFile = resolve(options.entryFile);
   const route = options.route ?? "/assistant";
-  const server = await createServer({
-    configFile: false,
-    root,
-    resolve: {
-      alias: [
-        { find: /^react-native$/, replacement: "react-native-web" },
-        { find: "expo-status-bar", replacement: resolve(root, "node_modules/expo-status-bar/src/StatusBar.web.ts") },
-      ],
-      extensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"],
-      dedupe: ["react", "react-dom"],
-    },
-    esbuild: { jsx: "automatic" },
-    optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] } },
-    plugins: [{
-      name: "gideon-actual-tsx-entry",
-      configureServer(viteServer) {
-        viteServer.middlewares.use(route, (_request, response) => {
-          response.setHeader("Content-Type", "text/html; charset=utf-8");
-          response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs${entryFile}"></script></body></html>`);
-        });
+  const cacheDir = await mkdtemp(join(tmpdir(), `gideon-vite-cache-${process.pid}-`));
+  let server: ViteDevServer | undefined;
+  try {
+    server = await createServer({
+      configFile: false,
+      root,
+      cacheDir,
+      resolve: {
+        alias: [
+          { find: /^react-native$/, replacement: "react-native-web" },
+          { find: "expo-status-bar", replacement: resolve(root, "node_modules/expo-status-bar/src/StatusBar.web.ts") },
+        ],
+        extensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"],
+        dedupe: ["react", "react-dom"],
       },
-    }],
-    server: {
-      host: "127.0.0.1",
-      port: options.port,
-      strictPort: true,
-      fs: { allow: [root, dirname(entryFile)] },
-      proxy: { "/api": { target: options.apiOrigin, ws: true } },
-    },
-  });
-  await server.listen();
-  return server;
+      esbuild: { jsx: "automatic" },
+      optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".jsx", ".js", ".json"] } },
+      plugins: [{
+        name: "gideon-actual-tsx-entry",
+        configureServer(viteServer) {
+          viteServer.middlewares.use(route, (_request, response) => {
+            response.setHeader("Content-Type", "text/html; charset=utf-8");
+            response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs${entryFile}"></script></body></html>`);
+          });
+        },
+      }],
+      server: {
+        host: "127.0.0.1",
+        port: options.port,
+        strictPort: true,
+        fs: { allow: [root, dirname(entryFile)] },
+        proxy: { "/api": { target: options.apiOrigin, ws: true } },
+      },
+    });
+    const viteServer = server;
+    const closeViteServer = viteServer.close.bind(viteServer);
+    let closed = false;
+    viteServer.close = async () => {
+      if (closed) return;
+      closed = true;
+      try {
+        await closeViteServer();
+      } finally {
+        await rm(cacheDir, { recursive: true, force: true });
+      }
+    };
+    await viteServer.listen();
+    return viteServer;
+  } catch (error) {
+    await server?.close().catch(() => undefined);
+    await rm(cacheDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function availablePort(): Promise<number> {
