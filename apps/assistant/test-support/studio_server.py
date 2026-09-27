@@ -17,7 +17,25 @@ async def main(origin: str) -> None:
         from gideon.interfaces.dashboard import token_auth
         from gideon.security.auth import credentials
 
-        (home / "config.json").write_text(json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8")
+        image_key = os.environ.pop("GIDEON_TEST_IMAGE_API_KEY", "")
+        if not image_key:
+            raise RuntimeError("The isolated image journey requires a provider credential")
+        (home / "config.json").write_text(json.dumps({
+            "auth": {"login_enabled": True},
+            "providers": [{"name": "OpenAI", "type": "openai", "model": "gpt-image-1"}],
+        }), encoding="utf-8")
+        (home / "active_models.json").write_text(
+            json.dumps({"image_gen": ["OpenAI:gpt-image-1"]}), encoding="utf-8"
+        )
+        from gideon.integrations.image_gen.openai_provider import OpenAIImageProvider
+        from gideon.integrations.image_gen.registry import register_provider
+        from gideon.integrations.media_catalogs import MediaCatalog, MediaModel, register_media_catalog
+
+        register_media_catalog("image_gen", "openai", MediaCatalog(
+            models=(MediaModel("gpt-image-1", extra={"sizes": ["1024x1024"], "supports_edit": True}),),
+            default_model="gpt-image-1",
+        ))
+        register_provider(OpenAIImageProvider(provider_name="OpenAI", provider_type="openai", api_key=image_key))
         credentials.set_password("studio-owner", "correct-horse-battery-staple")
         token_auth.use_ephemeral_secret()
 
@@ -56,6 +74,15 @@ async def main(origin: str) -> None:
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
+        stop = SimpleNamespace(stopped=False, should_stop=lambda: stop.stopped)
+        worker = MediaWorker(app[JOBS_KEY])
+
+        async def run_worker():
+            while not stop.stopped:
+                await asyncio.to_thread(worker.run_once, stop)
+                await asyncio.sleep(0.2)
+
+        worker_task = asyncio.create_task(run_worker())
         sockets = site._server.sockets if site._server else []
         port = sockets[0].getsockname()[1]
         print(json.dumps({"api_port": port, "artifact_id": artifact.slug, "version": artifact.version,
@@ -63,6 +90,8 @@ async def main(origin: str) -> None:
         try:
             await asyncio.Event().wait()
         finally:
+            stop.stopped = True
+            await worker_task
             await runner.cleanup()
 
 

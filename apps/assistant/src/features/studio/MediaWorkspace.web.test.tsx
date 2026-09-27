@@ -19,9 +19,11 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
   const root = resolve(process.cwd(), '../..')
   const port = await freePort()
   const origin = `http://127.0.0.1:${port}`
+  const key = process.env.GIDEON_TEST_IMAGE_API_KEY
+  if (!key) throw new Error('The isolated image journey requires a provider credential')
   const api = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
     [join(root, 'apps/assistant/test-support/studio_server.py'), origin],
-    { env: { ...process.env, PYTHONPATH: join(root, 'runtime') } })
+    { env: { PATH: process.env.PATH || '', PYTHONPATH: join(root, 'runtime'), GIDEON_TEST_IMAGE_API_KEY: key } })
   let vite: Awaited<ReturnType<typeof createViteServer>> | undefined
   let browser: ChildProcessWithoutNullStreams | undefined
   let socket: WebSocket | undefined
@@ -114,10 +116,11 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
       if (response.result?.exceptionDetails) throw new Error(JSON.stringify(response.result.exceptionDetails))
       return response.result.result.value as T
     }
-    const waitFor = async (expression: string) => {
-      for (let attempt = 0; attempt < 120; attempt++) {
+    const waitFor = async (expression: string, timeoutMs = 12000) => {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
         if (await evaluate<boolean>(expression)) return
-        await new Promise(done => setTimeout(done, 100))
+        await new Promise(done => setTimeout(done, 200))
       }
       throw new Error(`Browser condition timed out: ${expression}; ${await evaluate<string>('document.body.textContent')}`)
     }
@@ -126,20 +129,58 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
     expect(await evaluate<number>("fetch('/api/capabilities/media/jobs').then(response => response.status)")).toBe(403)
     expect(await evaluate<number>("fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'studio-owner',password:'correct-horse-battery-staple',totp:''})}).then(response => response.status)")).toBe(200)
     await evaluate("document.getElementById('open-jobs').click()")
-    await waitFor(`document.body.textContent.includes(${JSON.stringify(seeded.completed_job_id)}) && document.body.textContent.includes('completed')`)
+    await waitFor(`Boolean([...document.querySelectorAll('article')].find(card => card.textContent.includes(${JSON.stringify(seeded.completed_job_id)}) && card.querySelector('[role="status"]')?.textContent.includes('succeeded')))`)
     expect(await evaluate<boolean>(`fetch('/api/artifacts/${encodeURIComponent(seeded.completed_artifact.artifact_id)}/raw?version=${seeded.completed_artifact.version}').then(async response => response.ok && (await response.arrayBuffer()).byteLength > 0)`)).toBe(true)
     expect(await evaluate<string>('location.hash')).toBe('')
     const documentId = await evaluate<string>('window.__mediaDocumentId')
     await send('Page.reload')
-    await waitFor(`window.__mediaDocumentId !== ${JSON.stringify(documentId)} && document.body.textContent.includes('completed')`)
+    await waitFor(`window.__mediaDocumentId && window.__mediaDocumentId !== ${JSON.stringify(documentId)} && Boolean([...document.querySelectorAll('article')].find(card => card.textContent.includes(${JSON.stringify(seeded.completed_job_id)}) && card.querySelector('[role="status"]')?.textContent.includes('succeeded')))`)
     await evaluate("document.getElementById('open-images').click()")
     await waitFor("Boolean(document.querySelector('[aria-label=\"Image generation\"]'))")
-    const imageCaps = await evaluate<{ available: boolean }>("fetch('/api/capabilities/media/images').then(response => response.json())")
-    await waitFor("document.body.textContent.includes('Selected:')")
-    expect(await evaluate<boolean>("[...document.querySelectorAll('button')].some(button => button.textContent.includes('Queue image generation') && button.disabled)")).toBe(true)
-    if (!imageCaps.available) expect(await evaluate<string>('document.body.textContent')).toContain('Provider unavailable')
+    const imageCaps = await evaluate<{ available: boolean; selection: string; models: { name: string }[] }>("fetch('/api/capabilities/media/images').then(response => response.json())")
+    expect(imageCaps.available).toBe(true)
+    expect(imageCaps.selection).toBe('OpenAI:gpt-image-1')
+    expect(imageCaps.models.map(model => model.name)).toContain('gpt-image-1')
+    await waitFor("document.body.textContent.includes('Selected: OpenAI:gpt-image-1') && Boolean(document.querySelector('textarea'))")
+    await evaluate(`(() => {
+      window.__imageRequest = null;
+      const original = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        if (String(input) === '/api/capabilities/media/images' && init?.method === 'POST') window.__imageRequest = JSON.parse(init.body);
+        return original(input, init);
+      };
+      const field = document.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, 'A single solid red square centered on a white background');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await waitFor("Boolean([...document.querySelectorAll('button')].find(button => button.textContent.includes('Queue image generation') && !button.disabled))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Queue image generation')).click()")
+    await waitFor("Boolean(window.__imageRequest) && Boolean([...document.querySelectorAll('article')].find(card => card.textContent.includes('Image generation: A single solid red square'))) ")
+    const imageRequest = await evaluate<{ operation: string; request_id: string; input: { prompt: string } }>('window.__imageRequest')
+    expect(imageRequest.operation).toBe('image_generate')
+    const originalJob = await evaluate<{ id: string }>(`fetch('/api/capabilities/media/jobs').then(response => response.json()).then(value => value.items.find(job => job.operation === 'image_generate' && job.input.prompt === ${JSON.stringify(imageRequest.input.prompt)}))`)
+    const duplicate = await evaluate<{ id: string }>(`fetch('/api/capabilities/media/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(imageRequest))} }).then(response => response.json())`)
+    expect(duplicate.id).toBe(originalJob.id)
+    await waitFor(`Boolean([...document.querySelectorAll('article')].find(card => card.textContent.includes(${JSON.stringify(duplicate.id)}) && card.querySelector('[role="status"]')?.textContent.includes('succeeded') && card.querySelector('a[href*="/raw?version="]')))` , 90000)
+    const imageJob = await evaluate<{ id: string; status: string; result: { artifact_id: string; version: number } }>(`fetch('/api/capabilities/media/jobs/${duplicate.id}').then(response => response.json())`)
+    expect(imageJob.id).toBe(duplicate.id)
+    expect(imageJob.status).toBe('succeeded')
+    expect(imageJob.result.version).toBeGreaterThan(0)
+    const raw = await evaluate<{ status: number; mime: string; size: number; signature: string }>(`fetch('/api/artifacts/${encodeURIComponent(imageJob.result.artifact_id)}/raw?version=${imageJob.result.version}').then(async response => { const bytes = new Uint8Array(await response.arrayBuffer()); return { status: response.status, mime: response.headers.get('content-type'), size: bytes.length, signature: [...bytes.slice(0, 8)].map(value => value.toString(16).padStart(2, '0')).join('') } })`)
+    expect(raw.status).toBe(200)
+    expect(raw.mime).toContain('image/png')
+    expect(raw.size).toBeGreaterThan(100)
+    expect(raw.signature).toBe('89504e470d0a1a0a')
+    const imageDocumentId = await evaluate<string>('window.__mediaDocumentId')
+    await send('Page.reload')
+    await waitFor(`window.__mediaDocumentId && window.__mediaDocumentId !== ${JSON.stringify(imageDocumentId)} && Boolean([...document.querySelectorAll('article')].find(card => card.textContent.includes(${JSON.stringify(duplicate.id)}) && card.querySelector('[role="status"]')?.textContent.includes('succeeded')))`)
     await evaluate("document.getElementById('open-videos').click()")
     await waitFor("Boolean(document.querySelector('[aria-label=\"Video generation\"]'))")
+    const videoCaps = await evaluate<{ available: boolean }>("fetch('/api/capabilities/media/videos').then(response => response.json())")
+    expect(videoCaps.available).toBe(false)
+    await waitFor("document.body.textContent.includes('Unavailable')")
+    expect(await evaluate<string>('document.body.textContent')).toContain('Unavailable')
+    expect(await evaluate<boolean>("[...document.querySelectorAll('button')].some(button => button.textContent.includes('Queue video') && button.disabled)")).toBe(true)
     expect(await evaluate<string>('location.hash')).toBe('')
   } finally {
     socket?.close()
@@ -148,4 +189,4 @@ it('keeps authenticated native media jobs, finished assets, and provider readine
     api.kill('SIGTERM')
     if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
   }
-}, 60000)
+}, 120000)
