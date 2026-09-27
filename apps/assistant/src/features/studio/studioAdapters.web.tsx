@@ -1,16 +1,16 @@
 import { lazy, Suspense } from 'react'
 import type { StudioModuleProps } from './studioContracts'
 import { studioRecordRef } from './studioContracts'
-import { createSlidesRoute, createStudioRoute, isSlidesRoute, studioDestination } from './studioRoutes'
+import { createSlidesRoute, isSlidesRoute, studioDestination } from './studioRoutes'
 
-const MediaLibrary = lazy(() => import('../../../../console/src/features/capabilities/media/LibraryPage'))
 const WriterWorkspace = lazy(() => import('./WriterWorkspace.web'))
 const SlidesWorkspace = lazy(() => import('./SlidesWorkspace.web'))
+const MediaWorkspace = lazy(() => import('./MediaWorkspace.web'))
 
 export function hasNativeStudioView(route: StudioModuleProps['route']): boolean {
   const id = studioDestination(route)?.id
   return (id === 'design' && !route.placement?.subview) || isSlidesRoute(route)
-    || id === 'capabilities/media/library' || !!id?.startsWith('capabilities/creative/')
+    || !!id?.startsWith('capabilities/media/') || !!id?.startsWith('capabilities/creative/')
 }
 
 export function StudioNativeView({ route, scope, navigate, onReturn }: StudioModuleProps) {
@@ -27,14 +27,11 @@ export function StudioNativeView({ route, scope, navigate, onReturn }: StudioMod
       onSelectArtifact={slug => navigate(createSlidesRoute(route.returnTo,
         slug ? studioRecordRef(scope, { kind: 'artifact', id: slug }) : undefined, scope))} />
   </Suspense>
+  if (studioDestination(route)?.id.startsWith('capabilities/media/')) return <Suspense fallback={<p role="status">Loading Media…</p>}>
+    <MediaWorkspace route={route} scope={scope} navigate={navigate} />
+  </Suspense>
   if (studioDestination(route)?.id.startsWith('capabilities/creative/')) return <Suspense fallback={<p role="status">Loading Writer…</p>}>
     <WriterWorkspace route={route} scope={scope} navigate={navigate} onReturn={onReturn} />
   </Suspense>
-  const artifactId = route.record?.kind === 'media.artifact' ? route.record.id : ''
-  return <Suspense fallback={<p role="status">Loading media library…</p>}>
-    <MediaLibrary artifactId={artifactId}
-      onSelectArtifact={id => navigate(createStudioRoute('capabilities/media/library', route.returnTo,
-        id ? studioRecordRef(scope, { kind: 'media.artifact', id }) : undefined, scope))}
-      onNavigate={() => navigate(createStudioRoute('capabilities/media/sketches', route.returnTo))} />
-  </Suspense>
+  return null
 }

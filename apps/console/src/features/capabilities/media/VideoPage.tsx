@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import NativeMediaPage from './NativeMediaPage'
 import { Button } from '../../../shared/ui/Button'
 
@@ -7,7 +7,7 @@ type Caps = { available: boolean; media_tools_available: boolean; selection: str
 export function videoInput(prompt: string, duration: number, aspect: string, controls: Record<string, number>, refs: Record<string, { id: string; version: number }>) {
   return { prompt, duration_seconds: duration, aspect_ratio: aspect, controls, ...Object.fromEntries(Object.entries(refs).filter(([, ref]) => ref.id.trim()).flatMap(([key, ref]) => [[key + '_artifact_id', ref.id.trim()], [key + '_version', ref.version]])) }
 }
-export default function VideoPage() {
+export default function VideoPage({ onJob }: { onJob?: (id: string) => void } = {}) {
   const [caps, setCaps] = useState<Caps | null>(null)
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(4)
@@ -17,11 +17,12 @@ export default function VideoPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [job, setJob] = useState('')
+  const pendingRequest = useRef<{ fingerprint: string; id: string } | null>(null)
   useEffect(() => { let live = true; void fetch('/api/capabilities/media/videos').then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); if (live) { setCaps(value); setDuration(value.models[0]?.durations?.[0] || Math.min(4, value.models[0]?.max_duration_s || 4)) } }).catch(e => { if (live) setError(e.message) }); return () => { live = false } }, [])
   const model = caps?.models[0]
   async function submit() {
     setBusy(true); setError(''); setJob('')
-    try { const response = await fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'video_generate', request_id: crypto.randomUUID(), input: videoInput(prompt, duration, aspect, controls, refs) }) }); const value = await response.json(); if (!response.ok) throw new Error(value.error); setJob(value.id) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    try { const input = videoInput(prompt, duration, aspect, controls, refs); const fingerprint = JSON.stringify(input); if (pendingRequest.current?.fingerprint !== fingerprint) pendingRequest.current = { fingerprint, id: crypto.randomUUID() }; const response = await fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'video_generate', request_id: pendingRequest.current.id, input }) }); const value = await response.json(); if (!response.ok || typeof value.id !== 'string') throw new Error(value.error || 'Video job was not accepted'); pendingRequest.current = null; setJob(value.id); onJob?.(value.id) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   return <NativeMediaPage title="Video generation" actions={<a href="#/capabilities/media?view=jobs">Media jobs</a>} width="content"><p>Use advertised model controls and pinned artifact versions. Continuation may use only the preceding clip’s final frame; it does not promise full temporal context.</p><p>Configuration availability does not verify inference. Originals remain unchanged; completed videos enter the media library.</p>{!caps && !error && <p>Loading video capabilities…</p>}{caps && <p>{caps.selection || 'No video provider selected'} · {caps.available ? 'Configured' : 'Unavailable'} · {caps.media_tools_available ? 'Video processing available' : 'FFmpeg and ffprobe required'}</p>}
     <label className="block">Prompt<textarea value={prompt} maxLength={4000} onChange={e => setPrompt(e.target.value)} /></label>
