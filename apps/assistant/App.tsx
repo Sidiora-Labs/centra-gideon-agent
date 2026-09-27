@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import { Bell, Lightbulb, Menu, MessageCircle, PanelsTopLeft, Shapes, SquareCheck } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AssistantBootstrapProvider, useAssistantBootstrap, type BootstrapState } from "./src/shared/bootstrap.web";
@@ -80,6 +80,11 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
 }) {
   const { palette } = useShellTheme();
   const { snapshot, navigate, refresh: refreshRoute } = useAssistantEntry(state.scope);
+  const conversationState = useSyncExternalStore(
+    conversationController.subscribe,
+    conversationController.snapshot,
+    conversationController.snapshot,
+  );
   const section: ShellDestination = snapshot.route.kind === "route" ? snapshot.route.destination : "chat";
   const [menuOpen, setMenuOpen] = useState(false);
   const { width, fontScale } = useWindowDimensions();
@@ -100,6 +105,16 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
       sessionId: returnTo.sessionId,
     }));
   };
+  useEffect(() => {
+    if (conversationState.scope?.cacheKey !== state.scope.cacheKey || !conversationState.sessionId ||
+      snapshot.phase !== "ready" || snapshot.route.kind !== "route" || snapshot.route.destination !== "chat" ||
+      targetSessionId(snapshot.route) !== null) return;
+    navigate(createShellRoute("chat", {
+      view: "detail",
+      record: { kind: "chat_session", id: conversationState.sessionId },
+      returnTo: snapshot.route.returnTo,
+    }));
+  }, [conversationState.scope?.cacheKey, conversationState.sessionId, navigate, snapshot, state.scope.cacheKey]);
   const onModuleReturn = () => {
     if (returnTo) returnToAssistant();
     else navigate(createShellRoute(section));
@@ -145,7 +160,7 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
               returnTo={snapshot.phase === "ready" && snapshot.route.destination === "chat"
                 ? snapshot.route.returnTo : undefined}
               onReturn={returnTo ? returnToAssistant : undefined}
-              scrollY={returnTo?.scrollY} />}
+              scrollY={returnTo?.scrollY} selectedMessageId={returnTo?.selectionId} />}
             </WorkspaceFrame>}
         </View>
 
