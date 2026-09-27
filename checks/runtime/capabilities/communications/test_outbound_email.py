@@ -7,7 +7,11 @@ from email import policy
 from email.parser import BytesParser
 
 import pytest
+from aiohttp import ClientSession, web
 
+from gideon.interfaces.dashboard.handlers.capabilities_communications_outbound import (
+    register,
+)
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.capabilities.communications import (
     PeopleError,
@@ -235,6 +239,106 @@ def test_request_key_is_idempotent_and_cannot_rebind_changed_content(
     assert len(outbound.list()) == 1
 
 
+def test_revision_checked_edit_reuses_identity_reloads_and_invalidates_approval(
+    environment, smtp_server
+):
+    store, account, artifacts = environment
+    outbound = service(environment, smtp_server)
+    initial_payload = payload(account)
+    original, created = outbound.draft(initial_payload)
+    assert created is True
+    approved = approve(outbound, original)
+
+    edited = outbound.edit(
+        original["id"],
+        {
+            "revision": approved["revision"],
+            "account_id": account["id"],
+            "to": ["new-contact@example.com"],
+            "subject": "Updated subject",
+            "body": "Updated exact body",
+            "source_message_id": "",
+            "attachments": [],
+        },
+    )
+    assert edited["revision"] == approved["revision"] + 1
+    assert edited["state"] == "draft"
+    assert edited["to"] == ["new-contact@example.com"]
+    assert edited["subject"] == "Updated subject"
+    assert edited["content_sha256"] != approved["content_sha256"]
+    assert edited["fingerprint"] != approved["fingerprint"]
+    assert "approved_at" not in edited
+    assert edited["id"] == original["id"]
+    assert edited["request_key"] == original["request_key"]
+
+    with pytest.raises(PeopleError, match="changed; reload"):
+        outbound.edit(
+            original["id"],
+            {
+                "revision": approved["revision"],
+                "account_id": account["id"],
+                "to": ["new-contact@example.com"],
+                "subject": "Updated subject",
+                "body": "Updated exact body",
+                "source_message_id": "",
+                "attachments": [],
+            },
+        )
+    with pytest.raises(PeopleError, match="another account"):
+        outbound.edit(
+            original["id"],
+            {
+                "revision": edited["revision"],
+                "account_id": "f" * 32,
+                "to": ["new-contact@example.com"],
+                "subject": "Updated subject",
+                "body": "Updated exact body",
+                "source_message_id": "",
+                "attachments": [],
+            },
+        )
+
+    reloaded = OutboundEmail(
+        PeopleStore(store.path.parent), artifacts=artifacts,
+        transport=outbound.transport,
+    )._get(original["id"])
+    assert reloaded == edited
+    replay, replay_created = outbound.draft(initial_payload)
+    assert replay_created is False
+    assert replay["id"] == original["id"]
+    assert replay["request_key"] == original["request_key"]
+    assert replay["body"] == "Updated exact body"
+    assert len(outbound.list()) == 1
+
+
+def test_edit_rejects_in_flight_or_sent_drafts(environment, smtp_server):
+    outbound = service(environment, smtp_server)
+    _, account, _ = environment
+    row, _ = outbound.draft(payload(account))
+    approved = approve(outbound, row)
+    sending = outbound._change(
+        row["id"], approved["revision"], lambda current: current.update(state="sending")
+    )
+    edit = {
+        "revision": sending["revision"],
+        "account_id": account["id"],
+        "to": ["new-contact@example.com"],
+        "subject": "Updated subject",
+        "body": "Updated exact body",
+        "source_message_id": "",
+        "attachments": [],
+    }
+    with pytest.raises(PeopleError, match="Only an unsent draft"):
+        outbound.edit(row["id"], edit)
+    with pytest.raises(PeopleError, match="Only an unsent draft"):
+        outbound.edit(
+            row["id"],
+            {**edit, "revision": outbound._change(
+                row["id"], sending["revision"], lambda current: current.update(state="accepted")
+            )["revision"]},
+        )
+
+
 def test_artifact_attachment_is_bounded_pinned_and_revalidated(
     environment, smtp_server
 ):
@@ -274,6 +378,49 @@ def test_artifact_attachment_is_bounded_pinned_and_revalidated(
                 attachments=[{"artifact_id": artifact.slug}] * 11,
             )
         )
+
+
+def test_http_patch_edits_draft_in_place(environment, smtp_server):
+    outbound = service(environment, smtp_server)
+    _, account, _ = environment
+
+    async def scenario():
+        app = web.Application()
+        register(app, outbound)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        base = (
+            f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+            "/api/capabilities/communications/outbound-email/drafts"
+        )
+        try:
+            async with ClientSession() as client:
+                async with client.post(base, json=payload(account)) as response:
+                    assert response.status == 201
+                    initial = (await response.json())["draft"]
+                async with client.patch(
+                    f"{base}/{initial['id']}",
+                    json={
+                        "revision": initial["revision"],
+                        "account_id": account["id"],
+                        "to": ["new-contact@example.com"],
+                        "subject": "Updated subject",
+                        "body": "Updated exact body",
+                        "source_message_id": "",
+                        "attachments": [],
+                    },
+                ) as response:
+                    assert response.status == 200
+                    edited = (await response.json())["draft"]
+                assert edited["id"] == initial["id"]
+                async with client.get(f"{base}/{initial['id']}") as response:
+                    assert (await response.json())["draft"] == edited
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(scenario())
     with pytest.raises(PeopleError, match="not found"):
         outbound.draft(
             payload(
