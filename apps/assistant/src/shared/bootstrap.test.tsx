@@ -20,7 +20,8 @@ describe('assistant owner bootstrap', () => {
 
   it('distinguishes expired identity from denied operations and explains sign-in errors', () => {
     expect(isIdentityDenied(new GatewayError('Unauthorized', 401))).toBe(true)
-    expect(isIdentityDenied(new GatewayError('Forbidden', 403))).toBe(true)
+    expect(isIdentityDenied(new GatewayError('Forbidden', 403))).toBe(false)
+    expect(isIdentityDenied(new GatewayError('Session expired', 403, '', undefined, true))).toBe(true)
     expect(isIdentityDenied(new GatewayError('Wrong origin', 403, 'auth_origin_not_allowed'))).toBe(false)
     expect(isIdentityDenied(new GatewayError('Failed', 500))).toBe(false)
     expect(identityErrorMessage(new GatewayError('code needed', 401, 'auth_totp_required')))

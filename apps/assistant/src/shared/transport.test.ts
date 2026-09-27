@@ -33,10 +33,10 @@ describe('assistant gateway transport', () => {
       const expired = new Response(JSON.stringify({ error: 'Forbidden' }), {
         status: 403, headers: { 'X-Auth-Required': 'true' },
       })
-      await expect(readGatewayJson(expired)).rejects.toMatchObject({ status: 403 })
+      await expect(readGatewayJson(expired)).rejects.toMatchObject({ status: 403, authRequired: true })
       expect(expirations).toBe(1)
       const forbidden = new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 })
-      await expect(readGatewayJson(forbidden)).rejects.toMatchObject({ status: 403 })
+      await expect(readGatewayJson(forbidden)).rejects.toMatchObject({ status: 403, authRequired: false })
       expect(expirations).toBe(1)
     } finally {
       unsubscribe()

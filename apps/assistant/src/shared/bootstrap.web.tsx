@@ -10,7 +10,7 @@ export type BootstrapState =
 
 export function isIdentityDenied(error: unknown): boolean {
   return error instanceof GatewayError && (error.status === 401 ||
-    (error.status === 403 && error.code !== 'auth_origin_not_allowed'))
+    (error.status === 403 && error.authRequired))
 }
 
 export type AssistantBootstrap = Readonly<{
@@ -122,6 +122,10 @@ export function AssistantBootstrapProvider({ children, clearOwnerCache }: {
       await signOutOwner()
       if (epoch === epochRef.current) publish({ phase: 'signed_out', status: stateRef.current.status, owner: null, error: '' })
     } catch (error) {
+      if (isIdentityDenied(error)) {
+        if (epoch === epochRef.current) publish({ phase: 'signed_out', status: stateRef.current.status, owner: null, error: '' })
+        return
+      }
       if (epoch === epochRef.current) publish({
         phase: 'unavailable', status: stateRef.current.status, owner: null,
         error: 'Could not confirm sign-out. Retry sign-out before using this browser for another owner.',
