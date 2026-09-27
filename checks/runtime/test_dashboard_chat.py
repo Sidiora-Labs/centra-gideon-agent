@@ -24,6 +24,26 @@ from gideon.interfaces.dashboard.state import (
 
 
 class TestChatSession:
+    def test_stream_cursor_sequences_turns_and_restarts_by_epoch(self):
+        session = _ChatSession("s1")
+        epoch = session._stream_epoch
+        first_turn = session.begin_stream()
+        first_chunk = session.next_stream_chunk()
+        second_chunk = session.next_stream_chunk()
+        next_turn = session.begin_stream()
+        restored = _ChatSession("s1")
+
+        assert first_turn == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 0}
+        assert first_chunk == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 1}
+        assert second_chunk == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 2}
+        assert next_turn == {"stream_epoch": epoch, "stream_turn": 2, "stream_seq": 0}
+        assert restored._stream_epoch != epoch
+        assert restored.stream_cursor() == {
+            "stream_epoch": restored._stream_epoch,
+            "stream_turn": 0,
+            "stream_seq": 0,
+        }
+
     def test_append_and_drain(self):
         session = _ChatSession("s1")
         session.append("user", "hello", "msg")
@@ -1900,14 +1920,23 @@ class TestRunChatSegmentFlush:
 
         await run_chat(state, session, "hello")
 
-        seq_values: list[int] = []
+        chunk_frames: list[dict] = []
         for call in state.broadcast_ws.call_args_list:
             if call.args[0] == "chat_chunk":
-                seq_values.append(call.args[1]["seq"])
+                chunk_frames.append(call.args[1])
 
-        assert len(seq_values) == 4
-        for i in range(1, len(seq_values)):
-            assert seq_values[i] > seq_values[i - 1], f"seq not monotonic: {seq_values}"
+        assert len(chunk_frames) == 4
+        assert [frame["seq"] for frame in chunk_frames] == [1, 2, 3, 4]
+        assert [frame["stream_seq"] for frame in chunk_frames] == [1, 2, 3, 4]
+        assert {frame["stream_epoch"] for frame in chunk_frames} == {session._stream_epoch}
+        assert {frame["stream_turn"] for frame in chunk_frames} == {1}
+        assert session.stream_cursor() == {
+            "stream_epoch": session._stream_epoch,
+            "stream_turn": 1,
+            "stream_seq": 4,
+        }
+        assistant_meta = [message["meta"] for message in session.messages if message["role"] == "assistant"]
+        assert max(meta["stream_seq"] for meta in assistant_meta) == 4
 
 
 class TestModelBackfillOnComplete:
@@ -2166,6 +2195,57 @@ class TestPrepareMessagesInterleaved:
         roles = [m["role"] for m in result]
         assert "streaming" not in roles
         assert "chunk" not in roles
+
+
+class TestSessionStreamCursor:
+    @pytest.mark.asyncio
+    async def test_detail_cursor_matches_full_paginated_and_terminal_snapshots(self, tmp_path):
+        state = _make_state(tmp_path)
+        session = _ChatSession("stream-cursor")
+        state._sessions[session.key] = session
+        cursor = session.begin_stream()
+        session.append("user", "hello", "msg msg-u")
+        first = session.next_stream_chunk()
+        session.append("chunk", "ha", "chunk", meta=first)
+        second = session.next_stream_chunk()
+        session.append("chunk", "ha", "chunk", meta=second)
+        task = asyncio.create_task(asyncio.Event().wait())
+        session.task = task
+
+        try:
+            async with TestClient(TestServer(_make_app(state))) as client:
+                response = await client.get("/api/chat/sessions/stream-cursor")
+                full = await response.json()
+                assert response.status == 200
+                assert full["running"] is True
+                assert full["stream_cursor"] == {**cursor, "stream_seq": 2}
+                active = next(message for message in full["messages"] if message["role"] == "streaming")
+                assert active["content"] == "haha"
+                assert active["meta"] == second
+
+                response = await client.get("/api/chat/sessions/stream-cursor?limit=1&before=2")
+                partial = await response.json()
+                assert partial["stream_cursor"] == {**cursor, "stream_seq": 1}
+                streamed = next(message for message in partial["messages"] if message["role"] == "streaming")
+                assert streamed["content"] == "ha"
+                assert streamed["meta"]["stream_seq"] == 1
+
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                session.task = None
+                session.messages = [
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "haha", "meta": second},
+                ]
+                response = await client.get("/api/chat/sessions/stream-cursor")
+                terminal = await response.json()
+                assert terminal["running"] is False
+                assert terminal["stream_cursor"] == {**cursor, "stream_seq": 2}
+                assert terminal["messages"][-1]["meta"] == second
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 class TestRuntimeWiring:

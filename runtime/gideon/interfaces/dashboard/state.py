@@ -206,6 +206,9 @@ class _ChatSession:
         "project_id",
         "created_at",
         "messages",
+        "_stream_epoch",
+        "_stream_turn",
+        "_stream_seq",
         "total_messages",
         "task",
         "event",
@@ -299,6 +302,12 @@ class _ChatSession:
         self._unattended: bool = False
         self.created_at: str = datetime.now(timezone.utc).isoformat()
         self.messages: list[dict[str, Any]] = []
+        # Chunk cursors are scoped to this in-memory session epoch. Rehydration creates
+        # a new epoch, so frames from a disconnected pre-restart socket can never be
+        # mistaken for the new session's stream.
+        self._stream_epoch: str = uuid.uuid4().hex
+        self._stream_turn: int = 0
+        self._stream_seq: int = 0
         self.total_messages: int = 0
         self.task: asyncio.Task | None = None  # type: ignore[type-arg]
         self.event = asyncio.Event()
@@ -475,6 +484,24 @@ class _ChatSession:
     @property
     def running(self) -> bool:
         return self.task is not None and not self.task.done()
+
+    def begin_stream(self) -> dict[str, str | int]:
+        """Start a new outer turn's chunk sequence and return its identity."""
+        self._stream_turn += 1
+        self._stream_seq = 0
+        return self.stream_cursor()
+
+    def next_stream_chunk(self) -> dict[str, str | int]:
+        """Advance the authoritative cursor before persisting/broadcasting a chunk."""
+        self._stream_seq += 1
+        return self.stream_cursor()
+
+    def stream_cursor(self) -> dict[str, str | int]:
+        return {
+            "stream_epoch": self._stream_epoch,
+            "stream_turn": self._stream_turn,
+            "stream_seq": self._stream_seq,
+        }
 
     @property
     def queue_depth(self) -> int:
