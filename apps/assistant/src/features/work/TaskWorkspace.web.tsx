@@ -85,15 +85,18 @@ function TaskWorkspaceInstance({ route, scope, navigate, onReturn }: ModuleProps
         throw new Error('This task changed since you opened it. Your draft is preserved; review the latest record before saving.')
       }
       if (epoch.current !== current) return
-      const updated = await gatewayJson<TaskItem>(path(id), { method: 'PUT', body: draft })
+      const updated = await gatewayJson<TaskItem>(path(id), { method: 'PUT',
+        body: { ...draft, ...(entry.identity.revision ? { expected_revision: entry.identity.revision } : {}) } })
       if (updated.id !== id) throw new Error('Gideon returned a different task. Your draft is preserved.')
       if (epoch.current !== current) return
       setDetail({ state: 'ready', value: { ...entry, record: updated,
         title: updated.title, status: updated.status, identity: { ...entry.identity, revision: updated.updated_at ?? null } }, checkedAt: Date.now() })
       setDraft(draftOf(updated)); setNotice('Task saved.')
     } catch (error) {
-      if (epoch.current === current) setProblem(error instanceof GatewayError && (error.status === 401 || error.status === 403)
-        ? `Access denied. Your draft for ${id} is preserved. ${error.message}` : errorText(error))
+      if (epoch.current === current) setProblem(error instanceof GatewayError && error.status === 409 && error.code === 'version_conflict'
+        ? `This task changed while saving. Your draft for ${id} is preserved; refresh the source before retrying.`
+        : error instanceof GatewayError && (error.status === 401 || error.status === 403)
+          ? `Access denied. Your draft for ${id} is preserved. ${error.message}` : errorText(error))
     } finally { if (epoch.current === current) setBusy(false) }
   }
   const addComment = async () => {
