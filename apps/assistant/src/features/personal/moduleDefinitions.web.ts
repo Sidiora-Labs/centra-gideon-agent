@@ -25,6 +25,32 @@ const PLACEMENTS = [
   'capabilities/wellbeing/organizations',
 ] as const
 
+const DESTINATIONS = new Map<string, ShellRoute['destination']>([
+  ['goals', 'goals'],
+  ['capabilities/identity/goals', 'goals'],
+  ['capabilities/identity/goal-plans', 'goals'],
+])
+
+const HOME_VIEWS = new Map<string, ShellRoute['view']>([
+  ['ideas', 'list'],
+  ['goals', 'list'],
+])
+
+const RECORD_KINDS = new Map<string, readonly string[]>([
+  ['ideas', ['idea']],
+  ['goals', ['human-goal']],
+  ['learning', ['learning-capture', 'learning-review']],
+  ['companion', ['companion-item']],
+  ['capabilities/knowledge/ideas', ['idea']],
+  ['capabilities/knowledge/journals', ['journal-entry']],
+  ['capabilities/identity/autobiography', ['identity-story']],
+  ['capabilities/identity/goals', ['human-goal']],
+  ['capabilities/identity/goal-plans', ['goal-plan']],
+  ['capabilities/wellbeing/memory', ['memory-fact']],
+  ['capabilities/wellbeing/overview', ['health-measurement']],
+  ['capabilities/wellbeing/measurements', ['health-measurement']],
+])
+
 function availability(error: unknown): RouteAvailability {
   if (error instanceof GatewayError) {
     if (error.status === 403) return 'denied'
@@ -71,10 +97,19 @@ async function resolve(scope: OwnerScope, route: ShellRoute): Promise<RouteAvail
   finally { client.dispose() }
 }
 
+function matchesPlacement(id: string, route: ShellRoute): boolean {
+  if (route.placement) {
+    if (route.placement.id !== id || route.destination !== (DESTINATIONS.get(id) ?? 'ideas')) return false
+    if (route.record) return route.view === 'detail' && (RECORD_KINDS.get(id) ?? []).includes(route.record.kind)
+    return route.view === (HOME_VIEWS.get(id) ?? 'workspace')
+  }
+  return (id === 'ideas' || id === 'goals') && route.destination === id && route.view === 'list' && !route.record
+}
+
 export const personalModuleDefinitions: readonly ModuleDefinition[] = Object.freeze(PLACEMENTS.map(id => Object.freeze({
   id,
   mode: 'full' as const,
-  matches: (route: ShellRoute) => route.placement?.id === id || (!route.placement && route.destination === id),
+  matches: (route: ShellRoute) => matchesPlacement(id, route),
   resolve,
   load: () => import('./PersonalHome').then(module => ({ default: module.PersonalHome })),
 })))

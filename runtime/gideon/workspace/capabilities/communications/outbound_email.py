@@ -361,6 +361,7 @@ class OutboundEmail:
                 raise PeopleError("Outbound email draft belongs to another account", 409)
             if row["state"] not in ("draft", "approved"):
                 raise PeopleError("Only an unsent draft can be edited", 409)
+            row.setdefault("request_fingerprint", row["fingerprint"])
             row.update(replacement)
             row["state"] = "draft"
             row["provider_acceptance"] = "not_submitted"

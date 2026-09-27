@@ -339,6 +339,47 @@ def test_edit_rejects_in_flight_or_sent_drafts(environment, smtp_server):
         )
 
 
+def test_legacy_draft_edit_preserves_original_request_fingerprint(
+    environment, smtp_server
+):
+    store, account, _ = environment
+    outbound = service(environment, smtp_server)
+    initial_payload = payload(account, request_key="legacy-edit-retry")
+    original, _ = outbound.draft(initial_payload)
+    original_fingerprint = original["fingerprint"]
+
+    with closing(store.connect()) as db, db:
+        body, = db.execute(
+            "SELECT body FROM outbound_email_drafts WHERE id=?", (original["id"],)
+        ).fetchone()
+        legacy = json.loads(body)
+        legacy.pop("request_fingerprint")
+        db.execute(
+            "UPDATE outbound_email_drafts SET body=? WHERE id=?",
+            (json.dumps(legacy), original["id"]),
+        )
+
+    edited = outbound.edit(
+        original["id"],
+        {
+            "revision": original["revision"],
+            "account_id": account["id"],
+            "to": ["new-contact@example.com"],
+            "subject": "Legacy updated subject",
+            "body": "Legacy updated exact body",
+            "source_message_id": "",
+            "attachments": [],
+        },
+    )
+    assert edited["request_fingerprint"] == original_fingerprint
+    assert edited["fingerprint"] != original_fingerprint
+    replay, created = outbound.draft(initial_payload)
+    assert created is False
+    assert replay["id"] == original["id"]
+    assert replay["request_key"] == original["request_key"]
+    assert replay["body"] == "Legacy updated exact body"
+
+
 def test_artifact_attachment_is_bounded_pinned_and_revalidated(
     environment, smtp_server
 ):

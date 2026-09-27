@@ -9,7 +9,7 @@ import { personalDetailRoute, personalSpaceRoute } from './routes'
 import { parseShellRoute, serializeShellRoute } from '../../shared/shell/shellRoutes'
 import { createShellRoute } from '../../shared/shell/shellRoutes'
 import { personalModuleDefinitions } from './moduleDefinitions.web'
-import { readIdentitySpace, summarizePersonalValue } from './PersonalHome'
+import { personalSelectionKey, readIdentitySpace, statusForSelection, summarizePersonalValue } from './PersonalHome'
 import type { OwnerScope } from '../../shared/auth.web'
 
 const scope: OwnerScope = Object.freeze({ runtimeOrigin: 'http://127.0.0.1', ownerId: 'owner-a', cacheKey: JSON.stringify(['http://127.0.0.1', 'owner-a']) })
@@ -129,9 +129,30 @@ describe('personal native contracts', () => {
     expect(ids).toContain('capabilities/knowledge/journals')
     expect(new Set(ids).size).toBe(ids.length)
     for (const module of personalModuleDefinitions) {
-      const route = createShellRoute(module.id === 'goals' ? 'goals' : 'ideas', { view: 'workspace', placement: { id: module.id } })
+      const destination = ['goals', 'capabilities/identity/goals', 'capabilities/identity/goal-plans'].includes(module.id) ? 'goals' : 'ideas'
+      const view = module.id === 'ideas' || module.id === 'goals' ? 'list' : 'workspace'
+      const route = createShellRoute(destination, { view, placement: { id: module.id } })
       expect(module.matches(route)).toBe(true)
     }
+  })
+
+  it('masks prior status on the first owner or placement render and rejects mismatched route kinds', () => {
+    const priorRoute = createShellRoute('ideas', { view: 'list', placement: { id: 'ideas' } })
+    const nextRoute = createShellRoute('ideas', { view: 'workspace', placement: { id: 'learning' } })
+    const priorKey = personalSelectionKey('owner-a', priorRoute)
+    const priorStatus = { key: priorKey, status: 'ready' as const, message: '2 idea records are available.' }
+    expect(statusForSelection(priorStatus, personalSelectionKey('owner-a', nextRoute))).toEqual({
+      key: personalSelectionKey('owner-a', nextRoute), status: 'loading', message: '',
+    })
+    expect(statusForSelection(priorStatus, personalSelectionKey('owner-b', priorRoute))).toEqual({
+      key: personalSelectionKey('owner-b', priorRoute), status: 'loading', message: '',
+    })
+
+    const idea = personalModuleDefinitions.find(module => module.id === 'ideas')!
+    expect(idea.matches(createShellRoute('goals', { view: 'workspace', placement: { id: 'ideas' } }))).toBe(false)
+    expect(idea.matches(createShellRoute('ideas', { view: 'detail', placement: { id: 'ideas' }, record: { kind: 'health-measurement', id: 'health-1' } }))).toBe(false)
+    expect(idea.matches(createShellRoute('ideas', { view: 'detail', placement: { id: 'ideas' } }))).toBe(false)
+    expect(idea.matches(createShellRoute('ideas', { view: 'workspace', placement: { id: 'ideas' } }))).toBe(false)
   })
 
   it('does not resolve unimplemented Identity and Health placements as ready', async () => {

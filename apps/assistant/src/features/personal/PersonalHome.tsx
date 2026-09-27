@@ -1,7 +1,7 @@
 import React, { useEffect, useState, type CSSProperties } from 'react'
 import { GatewayError } from '../../shared/transport.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
-import { createShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
+import { createShellRoute, serializeShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { createPersonalClient, type PersonalAvailability, type PersonalClient, type IdentityStory, type NativeValue, type PersonalRecord } from './client'
 import { PERSONAL_SPACES, personalSpaceRoute, type PersonalSpace } from './routes'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
@@ -25,20 +25,31 @@ function spaceForRoute(route: ShellRoute): PersonalSpace {
     ?? (route.destination === 'goals' ? 'goals' : 'ideas')
 }
 
-function NativeStatus({ label, load }: { label: string; load: () => Promise<PersonalAvailability<unknown>> }) {
-  const [status, setStatus] = useState<'loading' | 'ready' | 'empty' | 'stale' | 'denied' | 'unavailable' | 'error'>('loading')
-  const [message, setMessage] = useState('')
+type PersonalStatus = 'loading' | 'ready' | 'empty' | 'stale' | 'denied' | 'unavailable' | 'error'
+type KeyedPersonalStatus = Readonly<{ key: string; status: PersonalStatus; message: string }>
+
+export function statusForSelection(state: KeyedPersonalStatus, selectionKey: string): KeyedPersonalStatus {
+  return state.key === selectionKey ? state : { key: selectionKey, status: 'loading', message: '' }
+}
+
+export function personalSelectionKey(ownerKey: string, route: ShellRoute): string {
+  return JSON.stringify([ownerKey, serializeShellRoute(route)])
+}
+
+function NativeStatus({ label, load, selectionKey }: { label: string; load: () => Promise<PersonalAvailability<unknown>>; selectionKey: string }) {
+  const [storedStatus, setStoredStatus] = useState<KeyedPersonalStatus>(() => ({ key: selectionKey, status: 'loading', message: '' }))
+  const { status, message } = statusForSelection(storedStatus, selectionKey)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
-    setStatus('loading')
+    setStoredStatus({ key: selectionKey, status: 'loading', message: '' })
     void load().then(result => {
       if (!active) return
-      if (result.state === 'unavailable') { setStatus('unavailable'); setMessage(result.reason); return }
+      if (result.state === 'unavailable') { setStoredStatus({ key: selectionKey, status: 'unavailable', message: result.reason }); return }
       let value: unknown = result.value
       for (let depth = 0; depth < 2 && value && typeof value === 'object'; depth++) {
         if ('state' in value && value.state === 'unavailable' && 'reason' in value && typeof value.reason === 'string') {
-          setStatus('unavailable'); setMessage(value.reason); return
+          setStoredStatus({ key: selectionKey, status: 'unavailable', message: value.reason }); return
         }
         if ('state' in value && value.state === 'available' && 'value' in value) {
           value = value.value
@@ -47,15 +58,14 @@ function NativeStatus({ label, load }: { label: string; load: () => Promise<Pers
         break
       }
       const summary = summarizePersonalValue(label, value)
-      setStatus(summary.state)
-      setMessage(summary.message)
+      setStoredStatus({ key: selectionKey, status: summary.state, message: summary.message })
     }).catch(error => {
       if (!active) return
-      setStatus(error instanceof GatewayError && error.status === 403 ? 'denied' : 'error')
-      setMessage(error instanceof GatewayError && error.status === 403 ? `Access to ${label.toLowerCase()} was denied for this session.` : error instanceof Error ? error.message : `${label} could not be loaded.`)
+      setStoredStatus({ key: selectionKey, status: error instanceof GatewayError && error.status === 403 ? 'denied' : 'error',
+        message: error instanceof GatewayError && error.status === 403 ? `Access to ${label.toLowerCase()} was denied for this session.` : error instanceof Error ? error.message : `${label} could not be loaded.` })
     })
     return () => { active = false }
-  }, [attempt, label, load])
+  }, [attempt, label, load, selectionKey])
   return <section aria-live="polite" className="gideon-personal-status" data-state={status}>
     <p role={status === 'error' ? 'alert' : 'status'}>{status === 'loading' ? `Loading ${label.toLowerCase()}…` : message}</p>
     {(status === 'error' || status === 'denied' || status === 'stale' || status === 'unavailable') && <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry {label.toLowerCase()}</button>}
@@ -71,7 +81,7 @@ export function summarizePersonalValue(label: string, value: unknown): Readonly<
     const stale = value.some(item => item && typeof item === 'object' && 'freshness' in item && item.freshness === 'stale')
     if (stale) return { state: 'stale', message: `Showing saved ${name} records. Refresh is needed to confirm they are current.` }
     if (!value.length) return { state: 'empty', message: `No ${name} records yet.` }
-    return { state: 'ready', message: `${value.length} native ${name} record${value.length === 1 ? '' : 's'} ${value.length === 1 ? 'is' : 'are'} available.` }
+    return { state: 'ready', message: `${value.length} ${name} record${value.length === 1 ? '' : 's'} ${value.length === 1 ? 'is' : 'are'} available.` }
   }
   if (!value || typeof value !== 'object') return { state: 'empty', message: `No ${name} data is available yet.` }
   if ('kind' in value && value.kind === 'autobiography' && 'stories' in value && Array.isArray(value.stories)) {
@@ -96,7 +106,7 @@ export function summarizePersonalValue(label: string, value: unknown): Readonly<
   if ('advertising' in value && typeof value.advertising === 'boolean' && 'detail' in value && typeof value.detail === 'string') {
     return { state: 'ready', message: value.detail }
   }
-  return { state: 'ready', message: `Native ${name} data was returned.` }
+  return { state: 'ready', message: `${label} information is available.` }
 }
 
 export type IdentityWorkspaceData =
@@ -111,7 +121,7 @@ export async function readIdentitySpace(client: PersonalClient, placement: strin
   if (placement === 'capabilities/identity/twin') {
     return { state: 'available', value: { kind: 'twin', profile: await client.readIdentityProfile() } }
   }
-  return { state: 'unavailable', reason: 'This Identity view has no registered native reader.' }
+  return { state: 'unavailable', reason: 'This Identity view is unavailable.' }
 }
 
 export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: PersonalModuleProps) {
@@ -123,6 +133,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
   const space = spaceForRoute(route)
   const { palette } = useShellTheme()
   const client = React.useMemo(() => createPersonalClient(scope), [scope.cacheKey])
+  const selectionKey = personalSelectionKey(scope.cacheKey, route)
   useEffect(() => () => client.dispose(), [client])
   useEffect(() => { if (draftState.scopeKey === scope.cacheKey) drafts.set(scope.cacheKey, draftState.value) }, [scope.cacheKey, draftState])
   const updateDraft = (key: keyof Draft, value: string) => setDraftState(previous => ({
@@ -160,22 +171,22 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
 
   return <div className="gideon-personal-home" style={themeStyle}>
     <WorkspaceFrame route={route} mode="full" title={title} onBack={back}>
-      <p className="gideon-personal-intro">Keep personal decisions and progress connected to their canonical Gideon records.</p>
+      <p className="gideon-personal-intro">Keep personal decisions and progress connected to their source records.</p>
       {(ideas || goals) && <div className="gideon-personal-entry-grid">
         <section aria-labelledby="personal-ideas-title" className="gideon-personal-entry">
           <div><h2 id="personal-ideas-title">Ideas</h2><p>Review evidence-backed suggestions and keep a note for later.</p></div>
           <label htmlFor="personal-idea-draft">Quick note</label>
           <textarea id="personal-idea-draft" value={draft.idea} onChange={event => updateDraft('idea', event.currentTarget.value)} rows={3} />
-          <NativeStatus label="Ideas" load={loadIdeas} />
+          <NativeStatus label="Ideas" load={loadIdeas} selectionKey={selectionKey} />
         </section>
         <section aria-labelledby="personal-goals-title" className="gideon-personal-entry">
           <div><h2 id="personal-goals-title">Compass Goals</h2><p>Track human goals separately from tasks and automation.</p></div>
           <label htmlFor="personal-goal-draft">Goal draft</label>
           <textarea id="personal-goal-draft" value={draft.goal} onChange={event => updateDraft('goal', event.currentTarget.value)} rows={3} />
-          <NativeStatus label="Goals" load={loadGoals} />
+          <NativeStatus label="Goals" load={loadGoals} selectionKey={selectionKey} />
         </section>
       </div>}
-      {!ideas && !goals && <NativeStatus label={title} load={loadFocused} />}
+      {!ideas && !goals && <NativeStatus label={title} load={loadFocused} selectionKey={selectionKey} />}
       <nav aria-label="Personal spaces" className="gideon-personal-spaces">
         {PERSONAL_SPACES.map(item => <button key={item.id} type="button" aria-current={item.id === space ? 'page' : undefined}
           onClick={() => navigate(personalSpaceRoute(item.id, { returnTo: {
