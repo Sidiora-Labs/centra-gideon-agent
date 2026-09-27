@@ -4,8 +4,10 @@ import { getLibraryHome, type LibraryHome as LibraryHomeData, LibraryReadError }
 import { LibraryItemLink } from "./LibraryWorkspace.web";
 import { LibrarySearch } from "./LibrarySearch.web";
 import { Collections } from "./Collections.web";
+import { ImportPanel } from "./ImportPanel.web";
+import { SourcesWorkspace } from "./SourcesWorkspace.web";
 
-type Panel = "home" | "search" | "collections";
+type Panel = "home" | "search" | "collections" | "import" | "sources";
 
 export function LibraryHome({ scope, navigate, route }: {
   scope: OwnerScope;
@@ -51,7 +53,7 @@ function LibraryHomeContent({ scope, navigate, route, activeOwnerScope }: {
   return <section className="gideon-library-curation" aria-labelledby="library-home-title">
     <header><p className="gideon-library__eyebrow">Research and Knowledge</p><h2 id="library-home-title">Your Library</h2>
       <nav aria-label="Library sections" className="gideon-library-curation__tabs">
-        {([ ["home", "Overview"], ["search", "Search"], ["collections", "Collections"] ] as const).map(([id, label]) =>
+        {([ ["home", "Overview"], ["search", "Search"], ["collections", "Collections"], ["import", "Import"], ["sources", "Sources"] ] as const).map(([id, label]) =>
           <button type="button" key={id} aria-pressed={panel === id} onClick={() => setPanel(id)}>{label}</button>)}
       </nav>
       {panel === "home" && <button type="button" onClick={refresh}>Refresh overview</button>}
@@ -73,6 +75,8 @@ function LibraryHomeContent({ scope, navigate, route, activeOwnerScope }: {
     </>}
     {panel === "search" && <LibrarySearch key={scope.cacheKey} scope={scope} route={route} navigate={navigate} onChanged={refresh} activeOwnerScope={activeOwnerScope} />}
     {panel === "collections" && <Collections key={scope.cacheKey} scope={scope} route={route} navigate={navigate} onChanged={refresh} activeOwnerScope={activeOwnerScope} />}
+    {panel === "import" && <ImportPanel key={scope.cacheKey} scope={scope} route={route} navigate={navigate} activeOwnerScope={activeOwnerScope} />}
+    {panel === "sources" && <SourcesWorkspace key={scope.cacheKey} scope={scope} activeOwnerScope={activeOwnerScope} />}
   </section>;
 }
 

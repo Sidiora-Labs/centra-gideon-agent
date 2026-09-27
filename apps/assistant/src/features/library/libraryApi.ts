@@ -1,5 +1,5 @@
 import type { OwnerScope } from "../../shared/auth.web";
-import { GatewayError, gatewayJson, type GatewayMethod } from "../../shared/transport.web";
+import { GatewayError, gatewayHeaders, gatewayJson, gatewayPath, readGatewayJson, type GatewayMethod } from "../../shared/transport.web";
 import type { LibraryRecordRef } from "./libraryRoutes";
 
 export type KnowledgeItem = Readonly<{
@@ -17,6 +17,9 @@ export type KnowledgeItem = Readonly<{
   favorited?: boolean | number;
   read_state?: "unread" | "reading" | "read";
   status?: string;
+  processing_status?: string;
+  processing_error?: string;
+  file_metadata?: { original_filename?: string; [key: string]: unknown };
 }>;
 
 export type KnowledgeList = Readonly<{
@@ -43,6 +46,55 @@ export type LibraryHome = Readonly<{
 export type CollectionResult = Readonly<{
   collection: LibraryCollection;
   items: readonly KnowledgeItem[];
+}>;
+
+export type KnowledgeIngestResult = Readonly<{
+  itemId: string;
+  itemType: string;
+  status: string;
+  deduped: boolean;
+}>;
+
+export type WatchedSourceKind = Readonly<{
+  provider: string;
+  display_name: string;
+  kind: string;
+  form: string;
+  default_item_type: string;
+  previewable: boolean;
+  formats?: readonly string[];
+  presets?: readonly string[];
+}>;
+
+export type WatchedSource = Readonly<{
+  id: string;
+  name: string;
+  provider: string;
+  kind: string;
+  spec: Record<string, unknown>;
+  enabled: boolean;
+  enrolled: boolean;
+  event_driven: boolean;
+  budget?: Record<string, unknown>;
+  health_status?: string;
+  last_error_summary?: string;
+  last_poll_at?: string;
+  remediation?: { kind?: string; guidance?: string; detail?: string; action?: string };
+}>;
+
+export type WatchedSourceCatalog = Readonly<{
+  sources: readonly WatchedSource[];
+  kinds: readonly WatchedSourceKind[];
+}>;
+
+export type SourceRecipeMatch = Readonly<{
+  id: string;
+  displayName: string;
+  description: string;
+  provider: string;
+  kind: string;
+  itemType: string;
+  spec: Record<string, unknown>;
 }>;
 
 export type LibraryReadErrorKind = "forbidden" | "unavailable" | "failed" | "missing";
@@ -222,6 +274,81 @@ export async function getKnowledgeItem(scope: OwnerScope, id: string, signal?: A
   } catch (error) {
     throw readError(error, true);
   }
+}
+
+export async function ingestKnowledgeFile(scope: OwnerScope, file: File, signal?: AbortSignal): Promise<KnowledgeIngestResult> {
+  assertScope(scope);
+  const form = new FormData();
+  form.set("file", file, file.name);
+  let response: Response;
+  try {
+    response = await fetch(gatewayPath("/api/knowledge/ingest"), {
+      method: "POST", credentials: "same-origin", cache: "no-store", headers: gatewayHeaders(), body: form, signal,
+    });
+  } catch (error) {
+    throw readError(error, false);
+  }
+  let payload: unknown;
+  try { payload = await readGatewayJson<unknown>(response); }
+  catch (error) { throw readError(error, false); }
+  if (!isObject(payload) || typeof payload.item_id !== "string" || !payload.item_id ||
+      typeof payload.type !== "string" || typeof payload.status !== "string" || !payload.status ||
+      typeof payload.deduped !== "boolean") {
+    throw new LibraryReadError("failed", "Gideon returned an invalid ingestion result.");
+  }
+  return { itemId: payload.item_id, itemType: payload.type, status: payload.status, deduped: payload.deduped };
+}
+
+function parseWatchedSource(value: unknown): WatchedSource {
+  if (!isObject(value) || typeof value.id !== "string" || typeof value.name !== "string" ||
+      typeof value.provider !== "string" || typeof value.enabled !== "boolean" ||
+      typeof value.enrolled !== "boolean" || typeof value.event_driven !== "boolean") {
+    throw new LibraryReadError("failed", "Gideon returned an invalid watched source.");
+  }
+  return value as WatchedSource;
+}
+
+export async function listWatchedSources(scope: OwnerScope, signal?: AbortSignal): Promise<WatchedSourceCatalog> {
+  const payload = requireObject(await requestJson(scope, "/api/knowledge/sources", { signal }), "Gideon returned an invalid source catalog.");
+  if (!Array.isArray(payload.sources) || !Array.isArray(payload.kinds)) {
+    throw new LibraryReadError("failed", "Gideon returned an invalid source catalog.");
+  }
+  const kinds = payload.kinds.map((kind): WatchedSourceKind => {
+    if (!isObject(kind) || typeof kind.provider !== "string" || typeof kind.display_name !== "string" ||
+        typeof kind.kind !== "string" || typeof kind.form !== "string" || typeof kind.default_item_type !== "string") {
+      throw new LibraryReadError("failed", "Gideon returned an invalid source provider.");
+    }
+    return { ...kind, previewable: kind.previewable === true } as WatchedSourceKind;
+  });
+  return { sources: payload.sources.map(parseWatchedSource), kinds };
+}
+
+export async function matchSourceRecipes(scope: OwnerScope, url: string, signal?: AbortSignal): Promise<readonly SourceRecipeMatch[]> {
+  const payload = requireObject(await requestJson(scope, `/api/knowledge/source-recipes?url=${encodeURIComponent(url)}`, { signal }), "Gideon returned an invalid source recipe list.");
+  if (!Array.isArray(payload.matches)) throw new LibraryReadError("failed", "Gideon returned an invalid source recipe list.");
+  return payload.matches.map((value): SourceRecipeMatch => {
+    if (!isObject(value) || typeof value.id !== "string" || typeof value.displayName !== "string" ||
+        typeof value.provider !== "string" || typeof value.kind !== "string" || typeof value.itemType !== "string" ||
+        !isObject(value.spec)) throw new LibraryReadError("failed", "Gideon returned an invalid source recipe.");
+    return { id: value.id, displayName: value.displayName, description: typeof value.description === "string" ? value.description : "",
+      provider: value.provider, kind: value.kind, itemType: value.itemType, spec: value.spec };
+  });
+}
+
+export async function createWatchedSource(scope: OwnerScope, input: {
+  name: string; provider: string; kind: string; spec: Record<string, unknown>;
+}, signal?: AbortSignal): Promise<WatchedSource> {
+  const payload = requireObject(await requestJson(scope, "/api/knowledge/sources", { method: "POST", body: input, signal }), "Gideon could not create that watched source.");
+  return parseWatchedSource(payload.source);
+}
+
+export async function updateWatchedSource(scope: OwnerScope, sourceId: string, input: {
+  enabled?: boolean; spec?: Record<string, unknown>; budget?: Record<string, unknown>;
+}, signal?: AbortSignal): Promise<WatchedSource> {
+  const payload = requireObject(await requestJson(scope, `/api/knowledge/sources/${encodeURIComponent(sourceId)}`, {
+    method: "PATCH", body: input, signal,
+  }), "Gideon could not update this watched source.");
+  return parseWatchedSource(payload.source);
 }
 
 export async function getLibraryRecord(scope: OwnerScope, record: LibraryRecordRef, signal?: AbortSignal): Promise<KnowledgeItem> {
