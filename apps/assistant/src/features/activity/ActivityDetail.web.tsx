@@ -76,7 +76,8 @@ export default function ActivityDetail(props: ModuleProps) {
     : { state: 'unavailable' as const, message: 'Loading native detail.' }
 
   const back = () => {
-    if (returnContext) navigate(createShellRoute(returnContext.destination, {
+    if (returnContext?.destination === 'chat') onReturn()
+    else if (returnContext) navigate(createShellRoute(returnContext.destination, {
       view: returnContext.record ? 'detail' : 'list',
       record: returnContext.record, placement: returnContext.placement, sessionId: returnContext.sessionId,
     }))

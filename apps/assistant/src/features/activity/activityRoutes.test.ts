@@ -125,6 +125,16 @@ window.beginJourney = async () => {
   const scope = ownerScope(location.origin, owner)
   const route = createShellRoute('activity', { sessionId: 'origin-chat', placement: { id: 'activity', query: { source: 'notification' } } })
   window.scope = scope; window.route = route
+window.centralReturn = () => {
+    const target = window.route.returnTo
+    window.chatReturnCalls = (window.chatReturnCalls || 0) + 1
+    window.chatReturnTarget = target
+    window.route = createShellRoute(target.destination, {
+      view: target.placement ? 'workspace' : target.record ? 'detail' : target.sessionId ? 'workspace' : 'list',
+      record: target.record, placement: target.placement, sessionId: target.sessionId,
+      returnTo: target.destination === 'chat' ? target : undefined,
+    })
+  }
 window.navigateShell = async next => {
     const url = serializeShellRoute(next)
     const parsed = parseShellRoute(url, location.origin)
@@ -141,7 +151,7 @@ window.navigateShell = async next => {
     } else {
       flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
         React.createElement(ActivityDetail, { route: parsed, scope: activeScope,
-          navigate: window.navigateShell, onReturn: () => {} }))))
+          navigate: window.navigateShell, onReturn: window.centralReturn }))))
     }
   }
   window.currentScope = scope
@@ -153,6 +163,16 @@ window.navigateShell = async next => {
     flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
       React.createElement(ActivityDetail, { route: detailRoute, scope,
         navigate: window.navigateShell, onReturn: () => {} }))))
+  }
+  window.mountChatReturn = () => {
+    const detailRoute = createShellRoute('activity', { view: 'detail',
+      record: { kind: 'notification', id: 'notification-1' }, returnTo: { destination: 'chat',
+        sessionId: 'conversation-42', selectionId: 'message-9', scrollY: 360 } })
+    window.route = detailRoute
+    window.chatReturnCalls = 0
+    flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
+      React.createElement(ActivityDetail, { route: detailRoute, scope,
+        navigate: window.navigateShell, onReturn: window.centralReturn }))))
   }
   window.switchOwner = async () => {
     window.currentScope = ownerScope(location.origin, { user: 'owner-b' })
@@ -167,7 +187,7 @@ window.loaded = true
 ` },
         configureServer(server) { server.middlewares.use('/integration', (_request, response) => {
           response.setHeader('Content-Type', 'text/html; charset=utf-8')
-          response.end('<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;min-height:1800px;display:flex}</style></head><body><div id="root"></div><script type="module" src="/activity-detail-entry.tsx"></script></body></html>')
+          response.end('<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;height:100%;display:flex;overflow:hidden}main[aria-label="Activity"] [data-workspace-scroll]>div{min-height:1100px}</style></head><body><div id="root"></div><script type="module" src="/activity-detail-entry.tsx"></script></body></html>')
         }) },
       }],
       server: { host: '127.0.0.1', port: webPort, strictPort: true,
@@ -179,7 +199,12 @@ window.loaded = true
     await fetch(`http://127.0.0.1:${api.control_port}/trigger-pages`, { method: 'POST' })
     await evaluate('window.beginJourney()')
     await until(evaluate, `!!document.querySelector('[data-source="notification"] [data-open-activity-id="notification-1"]')`)
-    await evaluate('window.scrollTo(0, 240)')
+    expect(await evaluate(`(() => { const frame = document.querySelector('[data-workspace-scroll]');
+      return frame.scrollHeight > frame.clientHeight })()`)).toBe(true)
+    await evaluate(`(() => { const frame = document.querySelector('[data-workspace-scroll]');
+      frame.scrollTop = 240; frame.dispatchEvent(new Event('scroll', { bubbles: true })); return true })()`)
+    expect(await evaluate(`Math.abs(document.querySelector('[data-workspace-scroll]').scrollTop - 240) < 2`)).toBe(true)
+    expect(await evaluate(`window.scrollY`)).toBe(0)
     await evaluate(`document.querySelector('[data-source="notification"] [data-open-activity-id="notification-1"]').click()`)
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
     expect(await evaluate(`window.resolved`)).toBe('available')
@@ -188,14 +213,15 @@ window.loaded = true
     expect(await evaluate(`window.route.returnTo.sessionId`)).toBe('origin-chat')
     expect(await evaluate(`window.route.returnTo.placement.query.source`)).toBe('notification')
     expect(await evaluate(`window.route.returnTo.placement.query.selected`)).toBe('notification-1')
-    expect(await evaluate(`window.route.returnTo.placement.query.scroll`)).toMatch(/^\d+$/)
+    expect(await evaluate(`window.route.returnTo.placement.query.scroll`)).toBe('240')
     expect(await evaluate(`window.activityModuleDefinitions[1].matches(window.route)`)).toBe(true)
 
     await evaluate(`document.querySelector('[aria-label="Back"]')?.click()`)
     await until(evaluate, `window.route.view === 'list' && !!document.querySelector('[data-activity-id="notification-1"]')`)
     expect(await evaluate(`window.resolved`)).toBe('available')
     expect(await evaluate(`document.querySelector('[data-activity-id="notification-1"]')?.getAttribute('data-selected')`)).toBe('true')
-    expect(await evaluate(`Math.abs(window.scrollY - 240) < 2`)).toBe(true)
+    expect(await evaluate(`Math.abs(document.querySelector('[data-workspace-scroll]').scrollTop - 240) < 2`)).toBe(true)
+    expect(await evaluate(`window.scrollY`)).toBe(0)
 
     await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail',
       record: { kind: 'trigger_run', id: 'trigger-page-119' }, returnTo: { destination: 'activity',
@@ -235,6 +261,7 @@ window.loaded = true
     expect(delayState.entered).toBe(1)
     expect(delayState.completed).toBe(0)
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
+
     await evaluate('window.switchOwner()')
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'denied'`)
@@ -251,5 +278,15 @@ window.loaded = true
     await new Promise(done => setTimeout(done, 100))
     expect(await evaluate(`document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state')`)).toBe('denied')
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
+
+    await evaluate('window.mountChatReturn()')
+    await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
+    await evaluate(`document.querySelector('[aria-label="Back"]')?.click()`)
+    expect(await evaluate(`window.chatReturnCalls`)).toBe(1)
+    expect(await evaluate(`window.chatReturnTarget`)).toEqual({ destination: 'chat', sessionId: 'conversation-42',
+      selectionId: 'message-9', scrollY: 360 })
+    expect(await evaluate(`window.route.destination`)).toBe('chat')
+    expect(await evaluate(`window.route.returnTo`)).toEqual({ destination: 'chat', sessionId: 'conversation-42',
+      selectionId: 'message-9', scrollY: 360 })
   }, 30_000)
 })

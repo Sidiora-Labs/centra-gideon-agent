@@ -112,6 +112,7 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
   const selectedId = query?.selected
   const savedScroll = Number(query?.scroll ?? route.returnTo?.scrollY ?? returnTo?.scrollY ?? 0)
   const restoredSelection = useRef<string | undefined>(undefined)
+  const contentRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<ActivityView>(savedView && ['all', 'attention', 'working', 'finished', 'updates'].includes(savedView) ? savedView : 'all')
   const [source, setSource] = useState<ActivityReadSource | 'all'>(savedSource && ['all', ...ACTIVITY_SOURCES].includes(savedSource) ? savedSource : 'all')
   useEffect(() => { void refresh() }, [scope.cacheKey])
@@ -126,11 +127,15 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
   useEffect(() => {
     if (!selectedId || !Number.isSafeInteger(savedScroll) || savedScroll < 0
       || restoredSelection.current === `${selectedId}:${savedScroll}`) return
-    const selectedCard = Array.from(document.querySelectorAll<HTMLElement>('[data-activity-id]'))
+    const selectedCard = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[data-activity-id]') ?? [])
       .find(card => card.dataset.activityId === selectedId)
     if (!selectedCard) return
     restoredSelection.current = `${selectedId}:${savedScroll}`
-    window.requestAnimationFrame(() => window.scrollTo(0, savedScroll))
+    window.requestAnimationFrame(() => {
+      const frame = contentRef.current?.closest<HTMLElement>('.gideon-workspace-frame')
+        ?.querySelector<HTMLElement>('[data-workspace-scroll]')
+      if (frame) frame.scrollTop = savedScroll
+    })
   }, [selectedId, savedScroll, visible])
 
   return <WorkspaceFrame route={route} mode="full" title="Activity"
@@ -138,7 +143,7 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
     actions={<button type="button" onClick={() => void refresh()} style={{ minHeight: 44,
       border: `1px solid ${palette.line}`, borderRadius: 10, padding: '8px 14px',
       background: palette.card, color: palette.text, font: 'inherit', cursor: 'pointer' }}>Refresh</button>}>
-    <div style={{ maxWidth: 1080, margin: '0 auto', padding: '14px clamp(4px, 2vw, 16px) 40px' }}>
+    <div ref={contentRef} style={{ maxWidth: 1080, margin: '0 auto', padding: '14px clamp(4px, 2vw, 16px) 40px' }}>
       <p style={{ color: palette.muted, margin: '0 0 18px', lineHeight: 1.5 }}>
         Gideon work, reviews, and results from their native records.
       </p>
@@ -167,9 +172,11 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
             {items.map(item => <ActivityCard key={item.entry.identity.key} item={item} palette={palette}
               selected={item.entry.identity.sourceId === selectedId}
               onOpen={() => {
+                const frame = contentRef.current?.closest<HTMLElement>('.gideon-workspace-frame')
+                  ?.querySelector<HTMLElement>('[data-workspace-scroll]')
                 const context = { destination: 'activity' as const, sessionId: route.sessionId ?? route.returnTo?.sessionId ?? returnTo?.sessionId,
                   placement: { id: 'activity', query: { view, source, selected: item.entry.identity.sourceId,
-                    scroll: String(Math.max(0, Math.round(window.scrollY))) } } }
+                    scroll: String(Math.max(0, Math.round(frame?.scrollTop ?? 0))) } } }
                 navigate({ ...item.entry.destination.route, returnTo: context })
               }} />)}
           </div>
