@@ -227,6 +227,35 @@ def test_maildir_original_upload_dedup_and_sync(tmp_path):
     assert provider.get(attachment["artifact_id"]).version == 1
 
 
+def test_local_read_state_is_account_scoped_and_survives_mail_sync(tmp_path):
+    store = PeopleStore(tmp_path)
+    first = account(store)
+    second = account(store)
+    raw = mail(identifier="shared-id")
+    put(store, first, raw)
+    put(store, second, raw)
+    mirrors.sync(store, first["id"])
+    mirrors.sync(store, second["id"])
+
+    external_id = "<shared-id@example.com>"
+    changed = mirrors.set_message_read_state(
+        store, first["id"], external_id, {"is_read": True}
+    )
+    assert changed["read_state"] == "local_only"
+    assert changed["is_read"] is True
+    assert mirrors.messages(store, first["id"])[0]["is_read"] is True
+    assert mirrors.messages(store, second["id"])[0]["is_read"] is False
+
+    restarted = PeopleStore(tmp_path)
+    mirrors.sync(restarted, first["id"])
+    assert mirrors.messages(restarted, first["id"])[0]["is_read"] is True
+    with pytest.raises(PeopleError) as error:
+        mirrors.set_message_read_state(
+            restarted, second["id"], "<missing@example.com>", {"is_read": True}
+        )
+    assert error.value.status == 404
+
+
 def test_remote_attachment_real_guarded_protocol_and_restart_idempotence(tmp_path):
     remote = AttachmentServer()
     try:
@@ -597,6 +626,22 @@ def test_actual_http_routes_and_failure_statuses(tmp_path):
                     data = await response.json()
                     assert len(data["messages"]) == 1
                     assert data["account"]["sync"]["state"] == "synced"
+                    external_id = data["messages"][0]["external_id"]
+                async with client.patch(
+                    path + "/messages/" + external_id + "/read-state",
+                    json={"is_read": True},
+                ) as response:
+                    assert response.status == 200
+                    state = (await response.json())["message"]
+                    assert state["is_read"] is True
+                    assert state["read_state"] == "local_only"
+                async with client.get(path + "/messages") as response:
+                    assert (await response.json())["messages"][0]["is_read"] is True
+                async with client.patch(
+                    path + "/messages/%3Cmissing%40example.com%3E/read-state",
+                    json={"is_read": True},
+                ) as response:
+                    assert response.status == 404
                 async with client.post(
                     path + "/sync", json={"home": "/outside"}
                 ) as response:

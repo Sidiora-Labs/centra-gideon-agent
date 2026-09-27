@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import fcntl
 import logging
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from gideon.core.config import loader as config_loader
+from gideon.core.atomic_write import atomic_write
 from gideon.core.record_ids import is_safe_record_id, record_path
 from gideon.engine.tasks.models import BUILTIN_PROJECTS, Project, TaskList
 
@@ -29,6 +32,23 @@ def config_dir() -> Path:
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _next_updated_at(previous: str) -> str:
+    now = datetime.now(timezone.utc)
+    try:
+        prior = datetime.fromisoformat(previous.replace("Z", "+00:00"))
+        if prior.tzinfo is not None and now <= prior:
+            now = prior + timedelta(microseconds=1)
+    except ValueError:
+        pass
+    return now.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+class ProjectRevisionConflict(Exception):
+    def __init__(self, current_revision: str):
+        self.current_revision = current_revision
+        super().__init__("Project changed since the supplied revision")
 
 
 def _current_origin_harness() -> str:
@@ -53,7 +73,7 @@ def _read_entity(path, entity):
 
 
 def _write_entity(path, entity):
-    path.write_text(json.dumps(entity.to_dict(), indent=2), encoding="utf-8")
+    atomic_write(path, json.dumps(entity.to_dict(), indent=2))
 
 
 def _entity_identity(prefix):
@@ -167,7 +187,7 @@ class ProjectPatch:
         for name, normalize in setters.items():
             if name in fields:
                 setattr(row, name, normalize(fields[name]))
-        row.updated_at = _now_iso()
+        row.updated_at = _next_updated_at(row.updated_at)
         return row
 
     @staticmethod
@@ -360,13 +380,19 @@ class HierarchyStore:
         self._write_project(project)
         return project
 
-    def update_project(self, project_id: str, **fields) -> Project | None:
-        project = self.get_project(project_id)
-        if project is None:
-            return None
-        updated = ProjectPatch(self, project, fields).apply()
-        self._write_project(updated)
-        return updated
+    def update_project(
+        self, project_id: str, *, expected_revision: str | None = None, **fields
+    ) -> Project | None:
+        with (self._projects_dir() / ".updates.lock").open("a+") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            project = self.get_project(project_id)
+            if project is None:
+                return None
+            if expected_revision is not None and project.updated_at != expected_revision:
+                raise ProjectRevisionConflict(project.updated_at)
+            updated = ProjectPatch(self, project, fields).apply()
+            self._write_project(updated)
+            return updated
 
     def delete_project(self, project_id: str) -> bool:
         import shutil
