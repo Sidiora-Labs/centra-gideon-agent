@@ -26,7 +26,7 @@ async function request(path: string, method = 'GET', body?: unknown) {
   return value
 }
 
-function SketchPage() {
+function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; onSelectSketch?: (id: string) => void; onJob?: (id: string) => void } = {}) {
   const [items, setItems] = useState<Sketch[]>([])
   const [sketch, setSketch] = useState<Sketch | null>(null)
   const [strokes, setStrokes] = useState<Stroke[]>([])
@@ -52,13 +52,13 @@ function SketchPage() {
       try {
         const result = await request('')
         if (live) setItems(result.items)
-        const id = new URLSearchParams(location.hash.split('?')[1] || '').get('sketch')
+        const id = sketchId ?? new URLSearchParams(location.hash.split('?')[1] || '').get('sketch')
         if (id) { const value = await request('/' + encodeURIComponent(id)); if (live) select(value) }
       } catch (e) { if (live) setError(String((e as Error).message)) }
     }
-    void load(); window.addEventListener('hashchange', load)
-    return () => { live = false; window.removeEventListener('hashchange', load) }
-  }, [])
+    void load(); if (!onSelectSketch) window.addEventListener('hashchange', load)
+    return () => { live = false; if (!onSelectSketch) window.removeEventListener('hashchange', load) }
+  }, [sketchId, onSelectSketch])
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d')
     if (!ctx || !sketch) return
@@ -83,10 +83,10 @@ function SketchPage() {
       {['Width', 'Height'].map((label, i) => <label key={label}>{label}<input aria-label={label} type="number" min="1" max="4096" value={size[i]} onChange={e => setSize(size.map((v, j) => j === i ? Number(e.target.value) : v))} /></label>)}
       <Button disabled={busy || !!dirty} onClick={() => void action(async () => {
         const value = await request('', 'POST', { width: size[0], height: size[1], request_id: crypto.randomUUID(), ...(source ? { source_artifact_id: source, source_version: version } : {}) })
-        select(value); setItems(old => [value, ...old]); location.hash = '/capabilities/media?sketch=' + value.id
+        select(value); setItems(old => [value, ...old]); if (onSelectSketch) onSelectSketch(value.id); else location.hash = '/capabilities/media?sketch=' + value.id
       })}>New sketch</Button>
     </div>
-    <label>Saved sketches<select aria-label="Saved sketches" disabled={busy || !!dirty} value={sketch?.id || ''} onChange={e => { if (e.target.value) location.hash = '/capabilities/media?sketch=' + e.target.value }}>
+    <label>Saved sketches<select aria-label="Saved sketches" disabled={busy || !!dirty} value={sketch?.id || ''} onChange={e => { if (e.target.value) { if (onSelectSketch) onSelectSketch(e.target.value); else location.hash = '/capabilities/media?sketch=' + e.target.value } }}>
       <option value="">Choose a sketch</option>{items.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
     </select></label>
     {!sketch && <p>Create a blank canvas or open an image artifact at its original dimensions.</p>}
@@ -101,7 +101,7 @@ function SketchPage() {
         <Button disabled={!!dirty || busy} onClick={() => void action(async () => { const result = await request('/' + sketch.id + '/export', 'POST', { revision: sketch.revision }); setDownload('/api/artifacts/' + result.artifact_id + '/raw?version=' + result.version) })}>Export PNG</Button>
         {download && <a href={download} download="sketch.png">Download PNG</a>}
       </div>
-      <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
+      <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); if (onJob) onJob(value.id); else location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
       <p role="status">Revision {sketch.revision}{dirty ? ' · Unsaved changes' : ' · Saved'}. Erase removes drawing only; the original image stays intact.</p>
       <div className="relative max-w-full overflow-hidden rounded-lg ring-1 ring-outline-variant/30" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
         {sketch.source_artifact_id && <img alt="Original image" src={base + '/' + sketch.id + '/source'} className="absolute inset-0 w-full h-full" onError={() => setError('Original image is unavailable')} />}
@@ -114,10 +114,12 @@ function SketchPage() {
   </NativeMediaPage>
 }
 
-export default function Page() {
-  const [view, setView] = useState(() => typeof location === 'undefined' ? 'sketches' : new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches')
-  useEffect(() => { const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches'); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [])
-  const content = view === 'downloads' ? <DownloadPage /> : view === 'animation' ? <AnimationPage /> : view === 'sprites' ? <SpritePage /> : view === 'episodes' ? <EpisodePage /> : view === 'timelines' ? <TimelinePage /> : view === 'videos' ? <VideoPage /> : view === 'cleanup' ? <CleanupPage /> : view === 'datasets' ? <DatasetsPage /> : view === 'images' ? <ImagePage /> : view === 'readiness' ? <Readiness /> : view === 'jobs' ? <JobsPage /> : view === 'library' ? <LibraryPage /> : <SketchPage />
+export default function Page({ view: selectedView, recordId, onNavigate }: { view?: string; recordId?: string; onNavigate?: (view: string, recordId?: string) => void } = {}) {
+  const [consoleView, setView] = useState(() => typeof location === 'undefined' ? 'sketches' : new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches')
+  useEffect(() => { if (selectedView !== undefined) return; const update = () => setView(new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'sketches'); window.addEventListener('hashchange', update); return () => window.removeEventListener('hashchange', update) }, [selectedView])
+  const view = selectedView ?? consoleView
+  const go = (nextView: string, id?: string) => { if (onNavigate) onNavigate(nextView, id); else location.hash = nextView === 'sketches' ? '/capabilities/media' : `/capabilities/media?view=${nextView}${id ? '&' + ({ library: 'artifact', jobs: 'job', timelines: 'timeline', episodes: 'episode' } as Record<string, string>)[nextView] + '=' + encodeURIComponent(id) : ''}` }
+  const content = view === 'downloads' ? <DownloadPage jobId={recordId} /> : view === 'animation' ? <AnimationPage jobId={recordId} /> : view === 'sprites' ? <SpritePage jobId={recordId} /> : view === 'episodes' ? <EpisodePage episodeId={recordId} /> : view === 'timelines' ? <TimelinePage timelineId={recordId} /> : view === 'videos' ? <VideoPage onJob={onNavigate ? id => go('jobs', id) : undefined} /> : view === 'cleanup' ? <CleanupPage onJob={onNavigate ? id => go('jobs', id) : undefined} /> : view === 'datasets' ? <DatasetsPage onJob={onNavigate ? id => go('jobs', id) : undefined} /> : view === 'images' ? <ImagePage onJob={onNavigate ? id => go('jobs', id) : undefined} /> : view === 'readiness' ? <Readiness showSettingsLinks={!onNavigate} /> : view === 'jobs' ? <JobsPage selectedJobId={recordId} /> : view === 'library' ? onNavigate ? <LibraryPage artifactId={recordId || ''} onSelectArtifact={id => go('library', id || undefined)} onNavigate={() => go('sketches')} /> : <LibraryPage /> : <SketchPage sketchId={recordId} onSelectSketch={onNavigate ? id => go('sketches', id) : undefined} onJob={onNavigate ? id => go('jobs', id) : undefined} />
   const destinations = [
     { id: 'sketches', label: 'Image sketches', icon: Paintbrush, group: 'Create' },
     { id: 'images', label: 'Generate image', icon: ImagePlus, group: 'Create' },
@@ -133,5 +135,14 @@ export default function Page() {
     { id: 'datasets', label: 'Training datasets', icon: Database, group: 'Manage' },
     { id: 'readiness', label: 'Media readiness', icon: Gauge, group: 'Manage' },
   ]
-  return <AreaNavigation label="Media workspaces" items={destinations} active={view} onChange={id => { location.hash = id === 'sketches' ? '/capabilities/media' : `/capabilities/media?view=${id}` }}>{content}</AreaNavigation>
+  return <div className="h-full" onClickCapture={event => {
+    if (!onNavigate) return
+    const link = (event.target as HTMLElement).closest('a[href^="#/capabilities/media"]')
+    if (!link) return
+    const url = new URL(link.getAttribute('href') || '', location.href)
+    const query = new URLSearchParams(url.hash.split('?')[1] || '')
+    const target = query.get('view') || 'sketches'
+    event.preventDefault()
+    go(target, query.get(({ sketches: 'sketch', library: 'artifact', jobs: 'job', timelines: 'timeline', episodes: 'episode', sprites: 'job', animation: 'job', downloads: 'job' } as Record<string, string>)[target]) || undefined)
+  }}><AreaNavigation label="Media workspaces" items={destinations} active={view} onChange={id => go(id)}>{content}</AreaNavigation></div>
 }

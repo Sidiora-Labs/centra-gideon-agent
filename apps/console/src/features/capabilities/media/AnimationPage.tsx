@@ -10,11 +10,11 @@ async function api(path: string, body?: unknown) { const response = await fetch(
 export function previewUrl(job: Job) { return job.result ? `${base}/${encodeURIComponent(job.id)}/animation` : '' }
 export function downloadUrl(job: Job) { return job.result ? `/api/artifacts/${encodeURIComponent(job.result.artifact_id)}/raw?version=${job.result.version}` : '' }
 
-export default function AnimationPage() {
+export default function AnimationPage({ jobId: selectedJobId }: { jobId?: string } = {}) {
   const [draft, setDraft] = useState(initialAnimation), [job, setJob] = useState<Job | null>(null), [jobId, setJobId] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   async function action(work: () => Promise<void>) { setBusy(true); setError(''); try { await work() } catch (reason) { setError(String((reason as Error).message)) } finally { setBusy(false) } }
   async function load(id: string) { const value = await api('/' + encodeURIComponent(id)); setJob(value); setJobId(value.id); if (value.input) setDraft(value.input) }
-  useEffect(() => { const id = new URLSearchParams(location.hash.split('?')[1] || '').get('job'); if (id) void action(() => load(id)) }, [])
+  useEffect(() => { const id = selectedJobId ?? new URLSearchParams(location.hash.split('?')[1] || '').get('job'); if (id) void action(() => load(id)) }, [selectedJobId])
   const url = job ? previewUrl(job) : ''
   return <NativeMediaPage title="Code animation" actions={<a href="#/capabilities/media?view=jobs">Animation jobs</a>}><p>Generate an original, self-contained HTML animation with the selected reasoning model. A successful job stores the exact validated model response as a canonical artifact. External network access and assets are rejected; local success does not claim external model availability.</p>
     <fieldset disabled={busy}><label>Title<input maxLength={120} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label><label>Concept<textarea maxLength={4000} value={draft.concept} onChange={event => setDraft({ ...draft, concept: event.target.value })} /></label><label>Renderer<select value={draft.renderer} onChange={event => setDraft({ ...draft, renderer: event.target.value })}>{['canvas2d', 'svg', 'css'].map(value => <option key={value}>{value}</option>)}</select></label>
