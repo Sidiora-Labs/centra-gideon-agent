@@ -89,6 +89,15 @@ export type MirrorMessage = Readonly<{
   recipients: readonly string[]
   attachments: readonly MirrorMessageAttachment[]
   source_digest: string
+  is_read: boolean
+  read_state: 'local_only'
+}>
+export type MirrorMessageReadState = Readonly<{
+  account_id: string
+  external_id: string
+  is_read: boolean
+  read_state: 'local_only'
+  updated_at: string
 }>
 export type MirrorSyncResult = Readonly<{
   state: 'synced'
@@ -299,6 +308,15 @@ export type OutboundDraftInput = Readonly<{
   body: string
   source_message_id?: string
   attachments?: readonly Readonly<{ artifact_id: string; version?: number }>[]
+}>
+export type OutboundDraftEditInput = Readonly<{
+  account_id: string
+  revision: number
+  to: readonly string[]
+  subject: string
+  body: string
+  source_message_id: string
+  attachments: readonly Readonly<{ artifact_id: string; version?: number }>[]
 }>
 export type OutboundDraftItem = CommunicationItem<OutboundEmailDraft>
 
