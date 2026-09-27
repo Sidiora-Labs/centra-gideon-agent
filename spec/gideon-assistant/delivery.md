@@ -30,7 +30,7 @@ proposed. Native phone releases are a separate platform effort.
     launch. Keep the old console available during the staged route migration and label any
     temporary handoff accurately. A direct link opens the requested record or a clear
     unavailable/permission state; browser Back returns to the previous context. Depend on
-    `shell` and delivery task 1. Acceptance: chat, one workspace, and a direct deep link share
+    `shell-04` routing and delivery task 1. Acceptance: chat, one workspace, and a direct deep link share
     identity and route state without creating a second conversation owner. Test
     `apps/assistant/src/features/delivery/entry.test.tsx` with real route parsing.
 

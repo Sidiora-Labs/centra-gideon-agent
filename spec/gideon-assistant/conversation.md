@@ -6,7 +6,7 @@ The implementation starts in the open source application. The hosted edition rec
 
 ## Dependencies and shared contract
 
-- `shell-01` supplies the assistant application frame, destination IDs, return context, route handoff, and web module boundary.
+- `shell-01` defines destination IDs and frame/return contracts. The connected presentation in conversation-02 also requires the working web module host from `shell-07`.
 - `delivery-01` supplies the authenticated same-origin bootstrap and session-safe request contract.
 - Conversation owns its screen, controller, adapters, and chat-specific tests. It consumes the shell and delivery contracts without defining their authentication or navigation policy.
 - `activity`, `work`, `communications`, `code`, `browser`, `library`, and `studio` may open a conversation or return a result through stable record and session IDs; their workspaces remain owned by those features.
