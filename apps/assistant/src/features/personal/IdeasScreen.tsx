@@ -6,6 +6,7 @@ import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
 import { createPersonalClient } from './client'
 import { projectIdeas, projectSuggestionPrompts } from './ideaProjection'
+import { IdeaDecision, type IdeaDecisionRecord, type PendingIdeaDecisionRecord } from './IdeaDecision'
 
 type ReadState = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
 
@@ -15,13 +16,17 @@ export function IdeasScreen({ route, scope, navigate, onReturn }: ModuleProps) {
   const viewKey = `${scope.cacheKey}:${route.destination}:${route.placement?.id ?? ''}`
   const currentView = useRef(viewKey)
   currentView.current = viewKey
-  const [result, setResult] = useState<{ key: string; ideas: ReturnType<typeof projectIdeas>; prompts: ReturnType<typeof projectSuggestionPrompts>; ideaState: ReadState; ideaError: string; promptError: string } | null>(null)
+  const [result, setResult] = useState<{ key: string; ideas: ReturnType<typeof projectIdeas>; prompts: ReturnType<typeof projectSuggestionPrompts>; decisions: readonly IdeaDecisionRecord[]; pendingDecisions: readonly PendingIdeaDecisionRecord[]; decisionState: ReadState; decisionError: string; ideaState: ReadState; ideaError: string; promptError: string } | null>(null)
   const [draftValue, setDraftValue] = useState<{ key: string; value: string } | null>(null)
   const ideas = result?.key === viewKey ? result.ideas : []
   const prompts = result?.key === viewKey ? result.prompts : []
   const ideaState = result?.key === viewKey ? result.ideaState : 'loading'
   const ideaError = result?.key === viewKey ? result.ideaError : ''
   const promptError = result?.key === viewKey ? result.promptError : ''
+  const decisions = result?.key === viewKey ? result.decisions : []
+  const pendingDecisions = result?.key === viewKey ? result.pendingDecisions : []
+  const decisionState = result?.key === viewKey ? result.decisionState : 'loading'
+  const decisionError = result?.key === viewKey ? result.decisionError : ''
   const draft = draftValue?.key === viewKey ? draftValue.value : ''
   const [attempt, setAttempt] = useState(0)
 
@@ -29,25 +34,51 @@ export function IdeasScreen({ route, scope, navigate, onReturn }: ModuleProps) {
     const controller = new AbortController()
     let current = true
     const requestKey = viewKey
-    let nextResult = { key: requestKey, ideas: [] as ReturnType<typeof projectIdeas>, prompts: [] as ReturnType<typeof projectSuggestionPrompts>, ideaState: 'loading' as ReadState, ideaError: '', promptError: '' }
+    const initialResult = { key: requestKey, ideas: [] as ReturnType<typeof projectIdeas>, prompts: [] as ReturnType<typeof projectSuggestionPrompts>, decisions: [] as readonly IdeaDecisionRecord[], pendingDecisions: [] as readonly PendingIdeaDecisionRecord[], decisionState: 'loading' as ReadState, decisionError: '', ideaState: 'loading' as ReadState, ideaError: '', promptError: '' }
+    const publish = (patch: Partial<typeof initialResult>) => {
+      if (!current || currentView.current !== requestKey) return
+      setResult(existing => {
+        if (currentView.current !== requestKey) return existing
+        const base = existing?.key === requestKey ? existing : initialResult
+        return { ...base, ...patch }
+      })
+    }
     void client.readIdeas(controller.signal).then(rows => {
       if (!current || currentView.current !== requestKey) return
-      nextResult = { ...nextResult, ideas: projectIdeas(rows), ideaState: 'ready' }
-      setResult(nextResult)
+      publish({ ideas: projectIdeas(rows), ideaState: 'ready' })
     }).catch((error: unknown) => {
       if (!current || currentView.current !== requestKey) return
-      nextResult = { ...nextResult, ideaState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', ideaError: error instanceof Error ? error.message : 'Ideas could not be loaded.' }
-      setResult(nextResult)
+      publish({ ideaState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', ideaError: error instanceof Error ? error.message : 'Ideas could not be loaded.' })
     })
     void gatewayJson<unknown>('/api/suggestions', { signal: controller.signal }).then(payload => {
       if (current && currentView.current === requestKey) {
-        nextResult = { ...nextResult, prompts: projectSuggestionPrompts(payload) }
-        setResult(nextResult)
+        publish({ prompts: projectSuggestionPrompts(payload) })
       }
     }).catch((error: unknown) => {
       if (current && currentView.current === requestKey && !controller.signal.aborted) {
-        nextResult = { ...nextResult, promptError: error instanceof Error ? error.message : 'Prompt suggestions could not be loaded.' }
-        setResult(nextResult)
+        publish({ promptError: error instanceof Error ? error.message : 'Prompt suggestions could not be loaded.' })
+      }
+    })
+    void gatewayJson<unknown>('/api/assistant/ideas/decisions', { signal: controller.signal }).then(payload => {
+      if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { items?: unknown }).items) || !Array.isArray((payload as { pending?: unknown }).pending)) throw new TypeError('Idea decisions returned an invalid response.')
+      if (current && currentView.current === requestKey) {
+        const loaded = (payload as { items: IdeaDecisionRecord[]; pending: PendingIdeaDecisionRecord[] })
+        setResult(existing => {
+          if (currentView.current !== requestKey) return existing
+          const base = existing?.key === requestKey ? existing : initialResult
+          const savedKeys = new Set(base.decisions.map(row => `${row.source_kind}:${row.source_list_id}:${row.source_id}`))
+          const savedPendingKeys = new Set(base.pendingDecisions.map(row => `${row.source_kind}:${row.source_list_id}:${row.source_id}`))
+          return {
+            ...base,
+            decisions: [...loaded.items.filter(row => !savedKeys.has(`${row.source_kind}:${row.source_list_id}:${row.source_id}`)), ...base.decisions],
+            pendingDecisions: [...loaded.pending.filter(row => !savedPendingKeys.has(`${row.source_kind}:${row.source_list_id}:${row.source_id}`)), ...base.pendingDecisions],
+            decisionState: 'ready',
+          }
+        })
+      }
+    }).catch((error: unknown) => {
+      if (current && currentView.current === requestKey && !controller.signal.aborted) {
+        publish({ decisionState: error instanceof GatewayError && error.status === 403 ? 'denied' : error instanceof GatewayError && [404, 501].includes(error.status) ? 'unavailable' : 'error', decisionError: error instanceof Error ? error.message : 'Idea decisions could not be loaded.' })
       }
     })
     return () => { current = false; controller.abort() }
@@ -87,8 +118,7 @@ export function IdeasScreen({ route, scope, navigate, onReturn }: ModuleProps) {
             <span className="gideon-ideas__status">{idea.sourceStatus}</span></header>
           <p><strong>Reason</strong> · {idea.reason}</p>
           <blockquote>{idea.evidence}</blockquote>
-          <dl><div><dt>Decision</dt><dd>No accept or dismiss decision is recorded.</dd></div>
-            <div><dt>Revision</dt><dd>{idea.revision !== undefined ? `Revision ${idea.revision}` : idea.revisionHash ? 'Content revision recorded' : 'Revision not supplied'}</dd></div></dl>
+          <dl><div><dt>Revision</dt><dd>{idea.revision !== undefined ? `Revision ${idea.revision}` : idea.revisionHash ? 'Content revision recorded' : 'Revision not supplied'}</dd></div></dl>
           <details className="gideon-ideas__record-details">
             <summary>Source and record details</summary>
             <dl>
@@ -99,6 +129,8 @@ export function IdeasScreen({ route, scope, navigate, onReturn }: ModuleProps) {
               <div><dt>Content revision reference</dt><dd>{idea.revisionHash ? <code>{idea.revisionHash}</code> : 'Not supplied'}</dd></div>
             </dl>
           </details>
+          {decisionState === 'ready' ? <IdeaDecision idea={idea} decision={decisions.find(row => row.source_kind === idea.sourceKind && row.source_list_id === idea.listId && row.source_id === idea.memberId)} pendingIntent={pendingDecisions.find(row => row.source_kind === idea.sourceKind && row.source_list_id === idea.listId && row.source_id === idea.memberId)} onDecision={saved => setResult(current => current?.key === viewKey ? { ...current, decisions: [...current.decisions.filter(row => row.source_kind !== saved.source_kind || row.source_list_id !== saved.source_list_id || row.source_id !== saved.source_id), saved], pendingDecisions: current.pendingDecisions.filter(row => row.source_kind !== saved.source_kind || row.source_list_id !== saved.source_list_id || row.source_id !== saved.source_id) } : current)} />
+            : <p role="status">{decisionState === 'loading' ? 'Loading saved decisions…' : decisionState === 'denied' ? 'Decision access was denied for this session.' : decisionError || 'Saved decision service is unavailable; controls are disabled.'}</p>}
           <button type="button" onClick={() => navigate(createShellRoute('apps', { view: 'detail', record: { kind: 'knowledge', id: idea.sourceId }, placement: { id: 'knowledge/item' }, returnTo: { destination: route.destination, record: route.record, placement: route.placement, sessionId: route.sessionId } }))}>Open source</button>
         </article>)}
       </section>

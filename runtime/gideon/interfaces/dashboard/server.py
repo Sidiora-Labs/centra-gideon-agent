@@ -468,6 +468,11 @@ async def start_dashboard(
     )
 
     register_capabilities(app)
+    from gideon.interfaces.dashboard.handlers.assistant_ideas import (
+        register_idea_decision_routes,
+    )
+
+    register_idea_decision_routes(app)
     _register_mcp_routes(app)
 
     ring_handler = handlers.install_log_ring_handler()
