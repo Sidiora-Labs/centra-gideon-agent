@@ -20,7 +20,8 @@ RUN printf '%s\n' \
     '        try_files $uri $uri/ @assistant_spa;' \
     '    }' \
     '    location @assistant_spa {' \
-    '        if ($uri ~* \.(js|mjs|css|json|webmanifest|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|otf|wasm)$) { return 404; }' \
+    '        default_type text/plain;' \
+    '        if ($uri ~* \.(js|mjs|css|json|webmanifest|png|jpg|jpeg|gif|ico|svg|webp|woff2?|ttf|otf|wasm)$) { return 404 "Assistant asset not found"; }' \
     '        rewrite ^ /assistant/index.html last;' \
     '    }' \
     > /tmp/assistant-routing.conf \

@@ -1,6 +1,12 @@
 import os
+import shutil
+import ssl
 import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -146,3 +152,156 @@ def test_runtime_build_includes_the_complete_assistant_web_artifact(tmp_path):
         assert (packaged / relative_path).read_bytes() == (
             _ARTIFACT / relative_path
         ).read_bytes()
+
+
+def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
+    nginx = shutil.which("nginx")
+    openssl = shutil.which("openssl")
+    if not nginx or not openssl:
+        pytest.skip("nginx and openssl are required for the Docker routing proof")
+
+    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    dockerfile = (_REPOSITORY / "infrastructure/docker/Dockerfile.web").read_text()
+    lines = dockerfile.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("RUN printf '%s\\n'"))
+    end = next(
+        i
+        for i in range(start, len(lines))
+        if "&& rm /tmp/assistant-routing.conf" in lines[i]
+    )
+    insertion = "\n".join(lines[start : end + 1]).removeprefix("RUN ")
+
+    temp_root = Path(tempfile.mkdtemp(prefix="gideon-assistant-nginx-"))
+    process_started = False
+    try:
+        site = temp_root / "html"
+        assistant_site = site / "assistant"
+        shutil.copytree(_ARTIFACT, assistant_site)
+        for directory in (temp_root, site, assistant_site):
+            directory.chmod(0o755)
+        for path in assistant_site.rglob("*"):
+            path.chmod(0o755 if path.is_dir() else 0o644)
+
+        template = temp_root / "default.conf.template"
+        shutil.copyfile(
+            _REPOSITORY / "infrastructure/docker/nginx.conf.template", template
+        )
+        routing_fragment = temp_root / "assistant-routing.conf"
+        insertion = insertion.replace(
+            "/tmp/assistant-routing.conf", str(routing_fragment)
+        ).replace(
+            "/etc/nginx/templates/default.conf.template", str(template)
+        )
+        subprocess.run(["/bin/sh", "-eu", "-c", insertion], check=True, cwd=_REPOSITORY)
+
+        cert = temp_root / "server.crt"
+        key = temp_root / "server.key"
+        subprocess.run(
+            [
+                openssl,
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-days",
+                "1",
+                "-subj",
+                "/CN=localhost",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        cert.chmod(0o644)
+        key.chmod(0o644)
+
+        import socket
+
+        def available_port():
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                return sock.getsockname()[1]
+
+        http_port, https_port = available_port(), available_port()
+        while https_port == http_port:
+            https_port = available_port()
+        config_template = template.read_text()
+        config_template = (
+            config_template.replace("listen 80;", f"listen {http_port};")
+            .replace("listen 443 ssl;", f"listen {https_port} ssl;")
+            .replace("/etc/nginx/certs/gideon.crt", str(cert))
+            .replace("/etc/nginx/certs/gideon.key", str(key))
+            .replace("/usr/share/nginx/html", str(site))
+            .replace("${NGINX_LOCAL_RESOLVERS}", "127.0.0.1")
+            .replace("    http2 on;\n", "")
+        )
+        template.write_text(config_template)
+        config = temp_root / "nginx.conf"
+        config.write_text(
+            "\n".join(
+                (
+                    "worker_processes 1;",
+                    f"pid {temp_root / 'nginx.pid'};",
+                    f"error_log {temp_root / 'error.log'};",
+                    "events { worker_connections 64; }",
+                    "http {",
+                    "    include /etc/nginx/mime.types;",
+                    f"    include {template};",
+                    "}",
+                    "",
+                )
+            )
+        )
+        prefix = [nginx, "-p", f"{temp_root}/", "-c", str(config)]
+        subprocess.run([*prefix, "-t"], check=True, capture_output=True, text=True)
+        subprocess.run(prefix, check=True, capture_output=True, text=True)
+        process_started = True
+
+        context = ssl._create_unverified_context()
+
+        def fetch(path):
+            request = urllib.request.Request(
+                f"https://127.0.0.1:{https_port}{path}",
+                headers={"Host": "localhost", "Accept": "text/html"},
+            )
+            try:
+                response = urllib.request.urlopen(request, context=context, timeout=3)
+            except urllib.error.HTTPError as error:
+                return error.code, error.headers.get_content_type(), error.read()
+            with response:
+                return response.status, response.headers.get_content_type(), response.read()
+
+        entry = fetch("/assistant/chat")
+        assert entry == (200, "text/html", (_ARTIFACT / "index.html").read_bytes())
+
+        for suffix, content_type in ((".js", "application/javascript"), (".css", "text/css")):
+            asset = _artifact_file(suffix)
+            route = "/assistant/" + asset.relative_to(_ARTIFACT).as_posix()
+            status, actual_type, body = fetch(route)
+            assert (status, actual_type, body) == (200, content_type, asset.read_bytes())
+
+        for missing in ("missing.js", "missing.webp"):
+            status, actual_type, body = fetch(f"/assistant/_expo/static/{missing}")
+            assert status == 404
+            assert body == b"Assistant asset not found"
+            assert actual_type != "text/html"
+            assert body != (_ARTIFACT / "index.html").read_bytes()
+    finally:
+        if process_started:
+            subprocess.run(
+                [nginx, "-p", f"{temp_root}/", "-c", str(temp_root / "nginx.conf"), "-s", "quit"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            pid_file = temp_root / "nginx.pid"
+            for _ in range(30):
+                if not pid_file.exists():
+                    break
+                time.sleep(0.1)
+        shutil.rmtree(temp_root, ignore_errors=True)
