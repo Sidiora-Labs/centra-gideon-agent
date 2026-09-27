@@ -22,7 +22,8 @@ const checkingRoute: AssistantRouteSnapshot = { phase: "checking", route: {
 export function targetSessionId(route: ShellRoute): string | null | undefined {
   if (route.placement) return undefined;
   if (route.record && (route.destination !== "chat" ||
-    (route.record.kind !== "session" && route.record.kind !== "chat-session"))) return undefined;
+    (route.record.kind !== "session" && route.record.kind !== "chat-session" &&
+      route.record.kind !== "chat_session"))) return undefined;
   if (route.sessionId && route.destination !== "chat") return undefined;
   if (route.record && route.sessionId && route.record.id !== route.sessionId) return undefined;
   return route.sessionId ?? route.record?.id ?? null;
