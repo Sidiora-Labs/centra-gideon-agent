@@ -80,14 +80,17 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
       const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
       set('gideon-username','module-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true
     })()`);
-    await browser.waitFor("document.body.innerText.includes('0 messages in this conversation.')", "owned session detail");
+    const ownedConversation = `location.href === ${JSON.stringify(sessionUrl)} && document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner') && document.querySelector('[aria-label="Gideon conversation"]') && document.querySelector('[aria-label="Message Gideon"]')`;
+    await browser.waitFor(ownedConversation, "owned session conversation");
     expect(await browser.evaluate<string>("location.href")).toBe(sessionUrl);
-    await browser.command("Page.reload", { ignoreCache: true });
-    await browser.waitFor("performance.getEntriesByType('navigation')[0]?.type === 'reload' && document.body.innerText.includes('0 messages in this conversation.')", "session after reload");
+    await browser.command("Page.reload", { ignoreCache: true }).catch((error: unknown) => {
+      if (!(error instanceof Error) || !error.message.includes("Inspected target navigated or closed")) throw error;
+    });
+    await browser.waitFor(`performance.getEntriesByType('navigation')[0]?.type === 'reload' && ${ownedConversation}`, "session after reload");
     await browser.evaluate(`document.querySelector('[aria-label="Ideas"]')?.click()`);
     await browser.waitFor("location.pathname === '/assistant/ideas' && document.querySelector('#personal-ideas-title')?.textContent === 'Ideas' && document.querySelector('#personal-idea-draft')", "native Ideas workspace");
     await browser.evaluate("history.back()");
-    await browser.waitFor(`location.href === ${JSON.stringify(sessionUrl)} && document.body.innerText.includes('0 messages in this conversation.')`, "Back to the owned session");
+    await browser.waitFor(ownedConversation, "Back to the owned session");
     await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Return to previous workspace')?.click()`);
     await browser.waitFor("location.hash === '#/apps?tab=details'", "console return location");
     await browser.navigate(`${origin}/assistant/chat?v=1&view=detail&recordKind=session&recordId=absent-session`);
