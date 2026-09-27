@@ -237,6 +237,18 @@ async def main(origin: str) -> None:
         async def control_failures(request: web.Request) -> web.Response:
             return web.json_response({"workflow": settings["workflow_failures"]})
 
+        async def control_task_ownership(request: web.Request) -> web.Response:
+            owner = request.query.get("owner", "owner-a")
+            rows, total = await task_registry.list_all_tasks(limit=500, offset=0)
+            owned, owned_total = await task_registry.list_all_tasks(owner=owner, limit=500, offset=0)
+            return web.json_response({"total": total, "owner": owner,
+                "owned_total": owned_total, "owned_ids": [row.id for row in owned],
+                "registry_file": str(Path(task_registry.__file__).resolve()), "tasks": [
+                {"id": row.id, "title": row.title, "author": row.author,
+                 "assignee": row.assignee, "belongs_to": row.belongs_to(owner)}
+                for row in rows
+            ]})
+
         async def control_add_task(request: web.Request) -> web.Response:
             body = await request.json()
             task = await task_registry.create_task(
@@ -261,6 +273,9 @@ async def main(origin: str) -> None:
             if settings["ws_offline"]:
                 await state.close_all_ws()
             return web.json_response({"offline": settings["ws_offline"]})
+
+        async def control_websocket_state(request: web.Request) -> web.Response:
+            return web.json_response({"open": sum(not ws.closed for ws in state._ws_clients)})
 
         async def control_trigger_pages(request: web.Request) -> web.Response:
             started_at = time.time()
@@ -305,9 +320,11 @@ async def main(origin: str) -> None:
         control.router.add_post("/replace-on-success", control_replace_on_success)
         control.router.add_get("/approval-state", control_approval_state)
         control.router.add_get("/failures", control_failures)
+        control.router.add_get("/task-ownership", control_task_ownership)
         control.router.add_post("/task", control_add_task)
         control.router.add_post("/out-of-order-notes", control_out_of_order_notes)
         control.router.add_post("/websocket-offline", control_websocket_offline)
+        control.router.add_get("/websocket-state", control_websocket_state)
         control.router.add_post("/trigger-pages", control_trigger_pages)
         control.router.add_post("/workflow-store", control_workflow_store)
         api_runner = web.AppRunner(app)

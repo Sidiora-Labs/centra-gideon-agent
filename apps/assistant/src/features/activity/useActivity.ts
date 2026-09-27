@@ -16,7 +16,7 @@ export class ActivityController {
   private refreshTask: Promise<void> | null = null
   private refreshTaskScopeKey: string | null = null
   private refreshQueued = false
-  private liveConnection: 'connecting' | 'connected' | 'disconnected' = 'connecting'
+  private liveConnection: 'connecting' | 'connected' | 'disconnected' = 'connected'
   private snapshot = emptyActivitySnapshot(null)
   private listeners = new Set<() => void>()
 
@@ -38,7 +38,9 @@ export class ActivityController {
     if (this.scope?.cacheKey === scope?.cacheKey) return
     this.generation++
     this.scope = scope
-    this.liveConnection = 'connecting'
+    // A bare controller is a REST-only reader. The mounted hook explicitly
+    // marks the scope as connecting before attaching its live socket.
+    this.liveConnection = 'connected'
     this.refreshQueued = false
     this.refreshTask = null
     this.refreshTaskScopeKey = null
