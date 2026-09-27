@@ -1,0 +1,28 @@
+{
+  "name": "@gideon/assistant",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "expo start --dev-client",
+    "web": "expo start --web --port 8081",
+    "build:web": "expo export --platform web --output-dir dist/web",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "6.1.2",
+    "expo": "54.0.0",
+    "expo-status-bar": "3.0.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "5.6.0",
+    "react-native-svg": "15.12.1",
+    "react-native-web": "0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
