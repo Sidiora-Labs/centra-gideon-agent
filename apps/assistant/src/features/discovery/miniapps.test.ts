@@ -271,6 +271,18 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
     expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-open=slides]')?.disabled === false")).toBe(true);
     expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).toContain('"recentIds":[]');
 
+    expect((await fetch(`${controlOrigin}/hold`, { method: "POST" })).ok).toBe(true);
+    await browser.evaluate("performance.clearResourceTimings(); document.querySelector('[data-miniapp-open=slides]')?.click()");
+    await waitForNative("entered");
+    await browser.evaluate("document.querySelector('[data-miniapp-pin=research]')?.click()");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=research]')?.getAttribute('aria-pressed') === 'true'", "Research pin committed while Slides readiness is held");
+    expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).toContain('"research"');
+    expect((await fetch(`${controlOrigin}/release`, { method: "POST" })).ok).toBe(true);
+    await waitForNative("finished");
+    await browser.waitFor("document.querySelector('[aria-label=\"New presentation name\"]')", "held Slides launch opens after pin update");
+    expect(await browser.evaluate<{ pinnedIds: string[]; recentIds: string[] }>(`JSON.parse(localStorage.getItem(${JSON.stringify(ownerStorageKey)}))`))
+      .toMatchObject({ pinnedIds: ["health", "research"], recentIds: ["slides"] });
+
     await browser.evaluate("document.querySelector('[data-miniapp-open=slides]')?.click()");
     await browser.waitFor("document.querySelector('[aria-label=\"New presentation name\"]')", "native Slides first-action workspace");
     expect(await browser.evaluate<{ destination: string; placement: { id: string; query: Record<string, string> }; selectionId: string }>("window.__lastMiniappRoute.returnTo"))
@@ -293,6 +305,12 @@ createRoot(document.getElementById('root')).render(<ShellThemeProvider initialPr
     await browser.waitFor("document.activeElement?.getAttribute('data-miniapp-open') === 'slides'", "focus restored to the invoking miniapp control");
     expect(await browser.evaluate<string>(`localStorage.getItem(${JSON.stringify(ownerStorageKey)})`)).toContain('"recentIds":["slides"]');
     expect(await browser.evaluate<boolean>("document.querySelector('[data-miniapp-open=slides]')?.parentElement?.textContent.includes('Recently opened')")).toBe(true);
+    const returnTimeOrigin = await browser.evaluate<number>("performance.timeOrigin");
+    await browser.command("Page.reload");
+    await browser.waitFor(`performance.timeOrigin !== ${returnTimeOrigin} && document.querySelector('[aria-label="Gideon miniapps"] li')`, "persisted launch and pin after document reload");
+    await browser.waitFor("document.querySelector('[data-miniapp-pin=research]')?.getAttribute('aria-pressed') === 'true' && document.querySelector('[data-miniapp-open=slides]')?.parentElement?.textContent.includes('Recently opened')", "both pin and successful recent restored");
+    expect(await browser.evaluate<{ pinnedIds: string[]; recentIds: string[] }>(`JSON.parse(localStorage.getItem(${JSON.stringify(ownerStorageKey)}))`))
+      .toMatchObject({ pinnedIds: ["health", "research"], recentIds: ["slides"] });
     await browser.evaluate("document.querySelector('#root').dispatchEvent(new CustomEvent('miniapp-owner', {detail:'stale-owner'}))");
     await browser.waitFor("[...document.querySelectorAll('[aria-label=\"Gideon miniapps\"] li')].find(card=>card.querySelector('strong')?.textContent==='Slides')?.querySelector('button:not(:disabled)')", "Slides control after stale owner change");
     const previousRoute = await browser.evaluate<string>("location.pathname + location.search");
