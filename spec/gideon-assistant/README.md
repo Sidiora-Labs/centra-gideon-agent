@@ -17,6 +17,8 @@ The following implementation lists describe planned work. Unchecked items are no
 - [ ] [Creative workspaces](studio.md)
 - [ ] [Application delivery and compatibility](delivery.md)
 
+[Destination implementation checklist](destinations.md) covers the complete route inventory.
+
 ## Implementation order
 
 1. Establish the application entry, authentication contract, visual shell and route boundaries.
