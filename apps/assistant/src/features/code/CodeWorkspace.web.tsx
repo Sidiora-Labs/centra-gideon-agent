@@ -5,6 +5,7 @@ import type { ShellReturnContext, ShellRoute } from '../../shared/shell/shellRou
 import { useShellTheme, type ShellPalette } from '../../shared/shell/shellTheme'
 import { WorkspaceFrame, type WorkspaceFrameState } from '../../shared/shell/WorkspaceFrame.web'
 import { GatewayError } from '../../shared/transport.web'
+import CodeFiles from './CodeFiles.web'
 import { captureSavedContext, codeIndexRoute, codeRecord, codeRoute, deleteSavedContext,
   readCodeSelection, readLiveTerminals, readProjectTasks, readSavedContexts, readWorkspaceProjects, reconcileSavedContext,
   type CodeSelection, type LiveComparison, type LiveTask, type LiveTerminal, type SavedContext, type WorkspaceProject } from './codeRoute'
@@ -21,6 +22,7 @@ const panel = (palette: ShellPalette): CSSProperties => ({ border: `1px solid ${
   padding: 18, minWidth: 0, background: palette.card, color: palette.text })
 const controls: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }
 const stack: CSSProperties = { display: 'grid', gap: 16, padding: 'clamp(12px, 3vw, 32px)', maxWidth: 1280, margin: '0 auto' }
+const ProjectPlanning = React.lazy(() => import('../work/ProjectWorkspace.web'))
 
 function errorMessage(error: unknown): string {
   if (error instanceof GatewayError) {
@@ -56,6 +58,16 @@ export function SavedContextDetails({ context, comparison, busy, onCompare, onDe
 }
 
 export default function CodeWorkspace({ route, scope, navigate, returnTo, onReturn }: CodeWorkspaceProps) {
+  if (route.placement?.id === 'projects/detail' && route.placement.subview === '/planning' &&
+    codeRecord(route)?.kind === 'project') {
+    return <React.Suspense fallback={<p role="status">Loading project planning…</p>}>
+      <ProjectPlanning route={route} scope={scope} navigate={navigate} returnTo={returnTo} onReturn={onReturn} />
+    </React.Suspense>
+  }
+  return <CodeWorkspaceBody route={route} scope={scope} navigate={navigate} returnTo={returnTo} onReturn={onReturn} />
+}
+
+function CodeWorkspaceBody({ route, scope, navigate, returnTo, onReturn }: CodeWorkspaceProps) {
   const { palette } = useShellTheme()
   const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [contexts, setContexts] = useState<SavedContext[]>([])
@@ -148,6 +160,8 @@ export default function CodeWorkspace({ route, scope, navigate, returnTo, onRetu
     ?? (visibleSelection?.context ? visibleProjects.find(item => item.project.id === visibleSelection.context?.project_id) : undefined)
   const currentProject = selectedProject?.project.id
   const source = route.returnTo ?? returnTo
+  const openPlanning = () => currentProject && navigate({ ...codeRoute({ kind: 'project', id: currentProject }, source),
+    placement: { id: 'projects/detail', subview: '/planning' } })
   const selectProject = (id: string) => navigate(id
     ? codeRoute({ kind: 'project', id }, source)
     : codeIndexRoute(source))
@@ -206,6 +220,11 @@ export default function CodeWorkspace({ route, scope, navigate, returnTo, onRetu
       {selectedProject && !selectedProject.project.workspace_dir && <section style={panel(palette)} role="status">
         This project has no accessible workspace path. Attach a workspace to save its context.
       </section>}
+      {record?.kind === 'project' && selectedProject && <div style={controls}>
+        <button type="button" onClick={openPlanning}>Open project planning</button>
+      </div>}
+      {record?.kind === 'project' && selectedProject?.project.workspace_dir &&
+        <CodeFiles project={selectedProject} scope={scope} />}
       {selectedProject?.project.workspace_dir && <section aria-label="Capture context" style={panel(palette)}>
         <h2>Save workspace context</h2><p>Capture the current branch and selected live terminal and task references.</p>
         <div style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
