@@ -28,8 +28,6 @@ def _owner(request: web.Request) -> str:
         not isinstance(owner, str)
         or not owner.strip()
         or request.get("app")
-        or owner in {"dev-local", "api_key"}
-        or owner.startswith("local-net:")
     ):
         raise web.HTTPUnauthorized(text="Authenticated customer required")
     return owner
