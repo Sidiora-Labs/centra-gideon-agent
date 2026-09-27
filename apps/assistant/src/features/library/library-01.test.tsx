@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, describe, expect, it } from "vitest";
 import { libraryRecordHref } from "./libraryRoutes";
@@ -31,23 +31,19 @@ async function availablePort(): Promise<number> {
 }
 
 const knowledgeServer = String.raw`
-import asyncio, json, os, sys, tempfile
+import asyncio, json, os, sys
 from pathlib import Path
 from types import SimpleNamespace
 from aiohttp import web
-import gideon.core.config.loader as loader
 from gideon.cognition.knowledge.store import KnowledgeStore
-from gideon.interfaces.dashboard import session_store, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
-from gideon.interfaces.dashboard.handlers.knowledge import list_items, get_item
+from gideon.interfaces.dashboard.handlers.knowledge import list_items, get_item, library_home
 from gideon.security.auth import credentials
 
 async def main(origin):
-  with tempfile.TemporaryDirectory(prefix="gideon-library-native-") as directory:
-    home = Path(directory)
-    loader.config_dir = lambda: home
-    credentials.config_dir = lambda: home
-    session_store.config_dir = lambda: home
+    home = Path(os.environ["GIDEON_HOME"])
+    home.mkdir(parents=True, exist_ok=True)
     (home / "config.json").write_text(json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8")
     credentials.set_password("library-owner", "correct-horse-battery-staple")
     token_auth.use_persistent_secret()
@@ -72,6 +68,7 @@ async def main(origin):
     app.router.add_post("/api/auth/logout", auth.api_auth_logout)
     app.router.add_get("/api/knowledge/items", list_items)
     app.router.add_get("/api/knowledge/items/{id}", delayed_get_item)
+    app.router.add_get("/api/knowledge/library-home", library_home)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -108,37 +105,52 @@ async function startApi(origin: string): Promise<{ url: string; recordId: string
 }
 
 async function startVite(port: number, api: string): Promise<void> {
+  const entryDirectory = await mkdtemp(join(root, "apps/assistant/.library-browser-"));
+  directories.push(entryDirectory);
+  const entryFile = join(entryDirectory, "entry.tsx");
+  await writeFile(entryFile, String.raw`
+    import React from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { libraryModuleDefinitions } from '/src/features/library/moduleDefinitions.web.ts';
+    import { ownerScope, readOwnerSession, readLoginStatus, signInOwner, OwnerSignIn } from '/src/shared/auth.web.tsx';
+    import { createShellRoute, parseShellRoute, serializeShellRoute } from '/src/shared/shell/shellRoutes.ts';
+    window.libraryModuleDefinitions=libraryModuleDefinitions;
+    function Root(){
+      const [identity,setIdentity]=React.useState(null); const [status,setStatus]=React.useState(null); const [error,setError]=React.useState(''); const [route,setRoute]=React.useState(()=>parseShellRoute(location.href,location.origin));
+      React.useEffect(()=>{readLoginStatus().then(setStatus);readOwnerSession().then(setIdentity).catch(()=>{});const pop=()=>setRoute(parseShellRoute(location.href,location.origin));addEventListener('popstate',pop);return()=>removeEventListener('popstate',pop)},[]);
+      const navigate=next=>{history.pushState(null,'',serializeShellRoute(next));setRoute(parseShellRoute(location.href,location.origin))};
+      if(!identity)return React.createElement(OwnerSignIn,{status,error,onRetry:()=>readOwnerSession().then(setIdentity).catch(()=>{}),onSignIn:async(u,p,t)=>{try{await signInOwner(u,p,t);setIdentity(await readOwnerSession());}catch(e){setError(String(e))}}});
+      return React.createElement(RegisteredLibraryRoute,{route,scope:ownerScope(location.origin,identity),navigate});
+    }
+    function RegisteredLibraryRoute({route,scope,navigate}){
+      const [loaded,setLoaded]=React.useState(null); const [availability,setAvailability]=React.useState('checking');
+      const module=libraryModuleDefinitions.find(candidate=>candidate.matches(route));
+      React.useEffect(()=>{let current=true;setLoaded(null);setAvailability('checking');
+        if(!module){setAvailability('missing');return()=>{current=false}}
+        module.resolve(scope,route).then(async result=>{if(!current)return;setAvailability(result);if(result==='available')setLoaded(await module.load())}).catch(()=>{if(current)setAvailability('unavailable')});
+        return()=>{current=false}
+      },[module,route,scope.cacheKey]);
+      if(!module||availability!=='available'||!loaded)return React.createElement('p',{role:'status','data-module-state':availability},'Opening Library…');
+      const Module=loaded.default; const target=route.returnTo;
+      const onReturn=()=>{if(target){const back=createShellRoute(target.destination,{view:target.record?'detail':target.placement?'workspace':'list',record:target.record,placement:target.placement,sessionId:target.sessionId,...(target.selectionId&&route.record?{returnTo:{destination:'apps',record:route.record,placement:{id:'knowledge/item'}}}:{})});navigate(back)}else navigate(createShellRoute('apps',{view:'workspace',placement:{id:'knowledge'}}))};
+      return React.createElement('div',{'data-library-module':module.id},React.createElement(Module,{route,scope,navigate,onReturn}));
+    }
+    createRoot(document.getElementById('root')).render(React.createElement(Root));
+  `, "utf8");
+  const entryUrl = `/${relative(join(root, "apps/assistant"), entryFile)}`;
   vite = await createServer({
     configFile: false,
     root: join(root, "apps/assistant"),
-    resolve: { alias: [{ find: /^react-native$/, replacement: "react-native-web" }],
+    resolve: { dedupe: ["react", "react-dom"], alias: [{ find: /^react-native$/, replacement: "react-native-web" }],
       extensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".js", ".jsx", ".json"] },
     esbuild: { jsx: "automatic" },
     optimizeDeps: { esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".web.js", ".tsx", ".ts", ".js", ".jsx", ".json"] } },
     plugins: [{
       name: "assistant-library-browser",
-      resolveId(id) { if (id === "/library-browser.tsx") return "\0library-browser"; },
-      load(id) { if (id === "\0library-browser") return `
-        import React from 'react';
-        import { createRoot } from 'react-dom/client';
-        import { LibraryWorkspace } from '/src/features/library/LibraryWorkspace.web.tsx';
-        import { ownerScope, readOwnerSession, readLoginStatus, signInOwner, OwnerSignIn } from '/src/shared/auth.web.tsx';
-        import { parseShellRoute } from '/src/shared/shell/shellRoutes.ts';
-        function Root(){
-          const [identity,setIdentity]=React.useState(null); const [status,setStatus]=React.useState(null); const [error,setError]=React.useState(''); const [route,setRoute]=React.useState(()=>parseShellRoute(location.href,location.origin));
-          React.useEffect(()=>{readLoginStatus().then(setStatus);readOwnerSession().then(setIdentity).catch(()=>{});const pop=()=>setRoute(parseShellRoute(location.href,location.origin));addEventListener('popstate',pop);return()=>removeEventListener('popstate',pop)},[]);
-          const navigate=next=>{const {serializeShellRoute}=requireShellRoutes;history.pushState(null,'',serializeShellRoute(next));setRoute(parseShellRoute(location.href,location.origin))};
-          if(!identity)return React.createElement(OwnerSignIn,{status,error,onRetry:()=>readOwnerSession().then(setIdentity).catch(()=>{}),onSignIn:async(u,p,t)=>{try{await signInOwner(u,p,t);setIdentity(await readOwnerSession());}catch(e){setError(String(e))}}});
-          return React.createElement(LibraryWorkspace,{route,scope:ownerScope(location.origin,identity),navigate});
-        }
-        import { serializeShellRoute as _serializeShellRoute } from '/src/shared/shell/shellRoutes.ts';
-        const requireShellRoutes={serializeShellRoute:_serializeShellRoute};
-        createRoot(document.getElementById('root')).render(React.createElement(Root));
-      `; },
       configureServer(server) {
         server.middlewares.use("/assistant", (_request, response) => {
           response.setHeader("Content-Type", "text/html; charset=utf-8");
-          response.end('<!doctype html><html><body style="margin:0"><div id="root"></div><script type="module" src="/library-browser.tsx"></script></body></html>');
+          response.end(`<!doctype html><html><body style="margin:0"><div id="root"></div><script type="module" src="${entryUrl}"></script></body></html>`);
         });
       },
     }],
@@ -219,11 +231,21 @@ describe("Library native knowledge route", () => {
     await send("Page.navigate", { url: `${origin}/assistant/apps?v=1&view=workspace&placement=knowledge&from=chat&fromSession=conversation%2F7&fromSelection=message%2F3` });
     await waitFor(send, "document.querySelector('#gideon-password')");
     await evaluate(send, `(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username','library-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true})()`);
-    await waitFor(send, "document.body.innerText.includes('Native library record')");
+    await waitFor(send, "document.querySelector('[data-library-module=knowledge]') && document.body.innerText.includes('Native library record')");
+    expect(await evaluate(send, "document.querySelector('[data-library-module=knowledge]')?.getAttribute('data-library-module')")).toBe("knowledge");
+    expect(await evaluate(send, "document.querySelectorAll('[data-workspace-mode=full]').length")).toBe(1);
+    expect(await evaluate(send, `(()=>{const matches=libraryModuleDefinitions[0].matches;return [
+      matches({kind:'route',destination:'apps',view:'workspace',placement:{id:'knowledge'}}),
+      matches({kind:'route',destination:'apps',view:'detail',placement:{id:'knowledge/item'},record:{kind:'knowledge',id:'native item?one'}}),
+      matches({kind:'route',destination:'apps',view:'detail',placement:{id:'knowledge/item'},record:{kind:'collection',id:'collection-1'}}),
+      matches({kind:'route',destination:'apps',view:'workspace',placement:{id:'knowledge/item'}}),
+      matches({kind:'route',destination:'apps',view:'workspace',placement:{id:'knowledge',subview:'/other'}})
+    ]})()`)).toEqual([true, true, false, false, false]);
+    expect(await evaluate(send, "document.body.innerText.includes('Recently added')")).toBe(true);
     const selectedHref = await evaluate(send, "Array.from(document.querySelectorAll('.gideon-library__link[href*=recordId]')).find(link=>link.innerText.includes('Native library record'))?.getAttribute('href')");
     expect(selectedHref).toContain("recordId=native+item%3Fone");
     await evaluate(send, "Array.from(document.querySelectorAll('.gideon-library__link[href*=recordId]')).find(link=>link.innerText.includes('Native library record'))?.click()");
-    await waitFor(send, "document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')");
+    await waitFor(send, "document.querySelector('[data-library-module=knowledge]') && document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')");
     const readerUrl = await evaluate(send, "location.href");
     expect(readerUrl).toContain("recordId=native+item%3Fone");
     expect(readerUrl).toContain("fromSession=conversation%2F7");
