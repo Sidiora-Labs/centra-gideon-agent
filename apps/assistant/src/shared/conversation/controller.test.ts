@@ -146,11 +146,14 @@ window.loaded = true
     if (process.env.GIDEON_TEST_MODEL) {
       await command('Fetch.enable', { patterns: [{ urlPattern: `${origin}/api/chat/sessions/*`, requestStage: 'Request' }] })
       let holdRequest: (requestId: string) => void = () => {}
-      const heldDetail = new Promise<string>(done => { holdRequest = done })
+      const heldDetail = new Promise<string>((done, reject) => {
+        const timeout = setTimeout(() => reject(new Error('No native detail request was held after capture was armed')), 30000)
+        holdRequest = requestId => { clearTimeout(timeout); done(requestId) }
+      })
       let held = false
       debuggerSocket!.addEventListener('message', event => {
         const frame = JSON.parse(String(event.data)) as { method?: string; params?: { requestId: string; request: { method: string; url: string } } }
-        if (frame.method !== 'Fetch.requestPaused' || !frame.params || held) return
+        if (frame.method !== 'Fetch.requestPaused' || !frame.params) return
         const { requestId, request } = frame.params
         if (request.method !== 'GET' || !request.url.includes('/api/chat/sessions/')) {
           void command('Fetch.continueRequest', { requestId })
@@ -164,8 +167,8 @@ window.loaded = true
       terminalReadGate = (async () => {
         const requestId = await heldDetail
         await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
-          if (window.frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done(true) }
-          else if (++n > 2400) { clearInterval(timer); reject(Error('native run did not finish while history read was held')) }
+          if (window.conversationFrames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done(true) }
+          else if (++n > 1200) { clearInterval(timer); reject(Error('native run did not finish while history read was held: ' + JSON.stringify(window.conversationFrames))) }
         }, 50) })`)
         await evaluate('window.captureTerminalRead = false')
         await command('Fetch.continueRequest', { requestId })
@@ -189,6 +192,7 @@ window.loaded = true
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
       const socket = window.controller.socket
       const frames = []
+      window.conversationFrames = frames
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
         if (frame.data?.session === session || frame.type === 'approval_resolved') {

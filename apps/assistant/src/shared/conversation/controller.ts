@@ -24,6 +24,23 @@ export function receivedPrompt(detail: ChatDetail, clientTs: string): boolean {
   return detail.messages.some(message => message.role === 'user' && message.ts === clientTs)
 }
 
+function queuedStreamOverlap(snapshot: string, queued: string): number {
+  if (!snapshot || !queued) return 0
+  const prefix = new Array<number>(queued.length).fill(0)
+  for (let index = 1, matched = 0; index < queued.length; index++) {
+    while (matched > 0 && queued[index] !== queued[matched]) matched = prefix[matched - 1]
+    if (queued[index] === queued[matched]) matched++
+    prefix[index] = matched
+  }
+  let matched = 0
+  for (let index = Math.max(0, snapshot.length - queued.length); index < snapshot.length; index++) {
+    while (matched > 0 && snapshot[index] !== queued[matched]) matched = prefix[matched - 1]
+    if (snapshot[index] === queued[matched]) matched++
+    if (matched === queued.length && index < snapshot.length - 1) matched = prefix[matched - 1]
+  }
+  return matched
+}
+
 const EMPTY: ConversationState = {
   scope: null, sessionId: null, title: '', messages: [], draft: '', phase: 'signed-out',
   connected: false, running: false, error: '',
@@ -152,7 +169,28 @@ export class ConversationController {
     const queued = this.queuedLiveEvents
     this.queuedLiveEvents = []
     const terminalSnapshot = this.state.phase === 'ready' && !this.state.running
-    for (const event of queued) this.applyEvent(event, terminalSnapshot)
+    const streaming = [...this.state.messages].reverse().find(message => message.streaming)?.content ?? ''
+    const chunks = queued.filter(event => event.type === 'chat_chunk' && typeof event.data.content === 'string')
+    const queuedContent = chunks.map(event => event.data.content as string).join('')
+    const overlap = terminalSnapshot ? queuedContent.length : queuedStreamOverlap(streaming, queuedContent)
+    let contentOffset = 0
+    for (const event of queued) {
+      if (event.type !== 'chat_chunk' || typeof event.data.content !== 'string') {
+        this.applyEvent(event, terminalSnapshot)
+        continue
+      }
+      const content = event.data.content
+      const start = contentOffset
+      contentOffset += content.length
+      if (terminalSnapshot || contentOffset <= overlap) continue
+      this.applyEvent(start < overlap
+        ? { ...event, data: { ...event.data, content: content.slice(overlap - start) } }
+        : event, terminalSnapshot)
+    }
+    for (const event of chunks) {
+      const sequence = event.data.seq
+      if (typeof sequence === 'number') this.lastChunkSeq = Math.max(this.lastChunkSeq, sequence)
+    }
   }
 
   async send(): Promise<void> {
