@@ -227,6 +227,8 @@ window.setField = (label, value) => { const field = document.getElementById('bro
 window.submit = label => { const field = document.getElementById('browser-' + label + '-' + window.session.id); field.form.requestSubmit() }
 window.fixturePost = async (path, body) => { const response = await fetch('/test/browser/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: response.status, body: response.ok ? await response.json() : await response.text() } }
 window.fixtureState = async () => await (await fetch('/test/browser/state')).json()
+window.authSession = async () => { const response = await fetch('/api/auth/session'); return { status: response.status, user: response.ok ? (await response.json()).user : null } }
+window.browserSessionStatus = async id => (await fetch('/api/browser/sessions/' + encodeURIComponent(id))).status
 window.loaded = true
 ` },
       configureServer(server) {
@@ -328,6 +330,7 @@ describe('owned browser controls', () => {
     const evaluate = await evaluator(`${origin}/integration`)
     await until(evaluate, 'window.loaded === true', true)
     expect(await evaluate('window.signIn()')).toBe('browser-owner')
+    expect(await evaluate('window.authSession()')).toEqual({ status: 200, user: 'browser-owner' })
     const original = await evaluate('window.mount("channel-thread")')
     await until(evaluate, '!!document.querySelector("[aria-label=\\"Browser controls\\"]")', true)
     await evaluate('window.click("Connect browser")')
@@ -344,7 +347,9 @@ describe('owned browser controls', () => {
     await rotateOwner('browser-other')
     const switched = await evaluate('window.switchOwner()')
     expect(switched.owner).toBe('browser-other')
+    expect(await evaluate('window.authSession()')).toEqual({ status: 200, user: 'browser-other' })
     expect(switched.foreign).toMatchObject({ state: 'missing' })
+    expect(await evaluate('window.browserSessionStatus(window.oldSessionId)')).toBe(404)
     const next = switched.session
     expect(next.id).not.toBe(original.id)
     expect(next.id).not.toBe(oldOwnerState.id)
@@ -360,5 +365,11 @@ describe('owned browser controls', () => {
       .toContain(`version ${next.version}`)
     expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"] [role=alert]")?.textContent')).toBeUndefined()
     expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"]")?.textContent')).not.toContain('old-owner draft')
+    await evaluate('window.click("Connect browser")')
+    await until(evaluate, 'window.session.status', 'active')
+    await evaluate('window.click("Take control")')
+    await until(evaluate, 'window.session.controlHolder', 'customer')
+    expect(await evaluate('document.getElementById("browser-url-" + window.session.id)?.value')).toBe('')
+    expect(await evaluate('document.getElementById("browser-text-" + window.session.id)?.value')).toBe('')
   }, 90000)
 })
