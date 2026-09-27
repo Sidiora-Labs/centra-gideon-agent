@@ -61,7 +61,6 @@ export function WorkspaceFrame({
   useLayoutEffect(() => {
     const previousKey = previousRouteKey.current;
     const body = bodyRef.current;
-    if (previousKey && body) scrollPositions.current.set(previousKey, body.scrollTop);
     if (previousKey !== routeKey && body) body.scrollTop = scrollPositions.current.get(routeKey) ?? 0;
     if (previousKey !== routeKey) headingRef.current?.focus({ preventScroll: true });
     previousRouteKey.current = routeKey;
@@ -84,7 +83,8 @@ export function WorkspaceFrame({
         </div>
         {actions && <div className="gideon-workspace-actions">{actions}</div>}
       </header>
-      <div ref={bodyRef} className="gideon-workspace-scroll" data-workspace-scroll>
+      <div ref={bodyRef} className="gideon-workspace-scroll" data-workspace-scroll
+        onScroll={event => scrollPositions.current.set(routeKey, event.currentTarget.scrollTop)}>
         {message && <p className="gideon-workspace-message" role={stateKind === "error" || stateKind === "recovery" || stateKind === "denied" ? "alert" : "status"}>{message}</p>}
         {!recovery && state.kind === "loading" && <div className="gideon-workspace-loading" aria-hidden="true" />}
         {recovery && onGoToChat && <button className="gideon-workspace-recovery" type="button" onClick={onGoToChat}>{route.action.label}</button>}
