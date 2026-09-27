@@ -29,7 +29,7 @@ function Colors({ label, colors, onChange }: { label: string; colors: string[]; 
   }} /></label>
 }
 
-export default function Moodboards({ apiRoot = '/api/capabilities/creative/boards' }: { apiRoot?: string }) {
+export default function Moodboards({ apiRoot = '/api/capabilities/creative/boards', boardId, onSelectBoard }: { apiRoot?: string; boardId?: string; onSelectBoard?: (id: string) => void }) {
   const t = (value: string) => value
   const [boards, setBoards] = useState<Board[]>([])
   const [sources, setSources] = useState<Source[]>([])
@@ -37,7 +37,7 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
   const [selected, setSelected] = useState<Board | null>(null)
   const [draft, setDraft] = useState(blank)
   const [history, setHistory] = useState<Board[]>([])
-  const [id, setId] = useState(readId)
+  const [id, setId] = useState(() => boardId ?? readId())
   const [query, setQuery] = useState('')
   const [sourceQuery, setSourceQuery] = useState('')
   const [ingredientQuery, setIngredientQuery] = useState('')
@@ -53,12 +53,14 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
   const [creating, setCreating] = useState(true)
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load moodboards'))
   function choose(next: string) {
-    location.hash = `/capabilities/creative?view=boards${next ? `&board=${next}` : ''}`
+    if (onSelectBoard) onSelectBoard(next)
+    else location.hash = `/capabilities/creative?view=boards${next ? `&board=${encodeURIComponent(next)}` : ''}`
     setId(next); setCreating(true); setError(''); setExported('')
     if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setRequestId(crypto.randomUUID()) }
   }
   function startNew() { choose(''); setCreating(true) }
-  useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  useEffect(() => { if (boardId !== undefined) setId(boardId) }, [boardId])
+  useEffect(() => { if (onSelectBoard) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectBoard])
   useEffect(() => {
     let alive = true
     setLoading(true)

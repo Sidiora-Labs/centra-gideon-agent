@@ -16,9 +16,9 @@ const blank = (): Values => ({ title: '', biography: '', voice: { perspective: '
 const readId = () => new URLSearchParams(location.hash.split('?')[1]).get('author') || ''
 const values = (a: Author): Values => ({ title: a.title, biography: a.biography, voice: a.voice, sample_refs: a.sample_refs })
 
-export default function Authors({ apiRoot = '/api/capabilities/creative/authors' }: { apiRoot?: string }) {
+export default function Authors({ apiRoot = '/api/capabilities/creative/authors', authorId, onSelectAuthor }: { apiRoot?: string; authorId?: string; onSelectAuthor?: (id: string) => void }) {
   const t = (value: string) => value
-  const [id, setId] = useState(readId)
+  const [id, setId] = useState(() => authorId ?? readId())
   const [selected, setSelected] = useState<Author | null>(null)
   const [draft, setDraft] = useState<Values>(blank)
   const [items, setItems] = useState<Author[]>([])
@@ -39,14 +39,16 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load authors'))
   function choose(next: string) {
-    location.hash = `/capabilities/creative?view=authors${next ? `&author=${next}` : ''}`
+    if (onSelectAuthor) onSelectAuthor(next)
+    else location.hash = `/capabilities/creative?view=authors${next ? `&author=${encodeURIComponent(next)}` : ''}`
     setId(next); setCreating(true); setError(''); setBrief(null); setExported('')
     if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setRequestId(crypto.randomUUID()) }
   }
   function startNew() {
     choose(''); setCreating(true)
   }
-  useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  useEffect(() => { if (authorId !== undefined) setId(authorId) }, [authorId])
+  useEffect(() => { if (onSelectAuthor) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectAuthor])
   useEffect(() => {
     let alive = true; setLoading(true)
     Promise.all([requestJson<{ items: Author[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`), requestJson<{ items: { id: string; title: string; version: number }[] }>(`${apiRoot}/sources?q=${encodeURIComponent(sampleQuery)}`)])
