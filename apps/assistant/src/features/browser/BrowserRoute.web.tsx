@@ -4,6 +4,7 @@ import { WorkspaceFrame, type WorkspaceFrameState } from '../../shared/shell/Wor
 import { createShellRoute, type ShellReturnContext, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
 import { BrowserClient } from './browserClient'
+import BrowserWorkspace from './BrowserWorkspace.web'
 import type { BrowserResult, BrowserSession } from './browserTypes'
 
 export const BROWSER_PLACEMENT = 'browser/session'
@@ -44,6 +45,8 @@ export default function BrowserRoute({ route, scope, navigate, onReturn }: Props
   const generation = useRef(0)
   const conversationId = isBrowserRoute(route) ? route.sessionId! : ''
   const key = JSON.stringify([scope.cacheKey, conversationId])
+  const liveKey = useRef(key)
+  if (liveKey.current !== key) { liveKey.current = key; generation.current++ }
   const busy = busyState?.key === key && busyState.revision === generation.current
   const visible = loadedKey === key ? result : null
   const current = visible?.state === 'ready' ? visible.value : visible?.current
@@ -53,7 +56,7 @@ export default function BrowserRoute({ route, scope, navigate, onReturn }: Props
     setLoadedKey(key)
     setResult(null)
     const next = await client.open(conversationId)
-    if (generation.current === revision) setResult(next)
+    if (generation.current === revision && liveKey.current === key) setResult(next)
   }
 
   useEffect(() => { void load(); return () => { generation.current++ } }, [client, key])
@@ -63,11 +66,20 @@ export default function BrowserRoute({ route, scope, navigate, onReturn }: Props
     const revision = generation.current
     setBusyState({ key, revision })
     const next = await client.mutate(current, action)
-    if (generation.current === revision) setResult(next)
+    if (generation.current === revision && liveKey.current === key) setResult(next)
     setBusyState(previous => previous?.key === key && previous.revision === revision ? null : previous)
   }
 
   const back = () => onReturn ? onReturn() : navigate(browserConversationRoute(route))
+  const acceptSession = (next: BrowserSession) => {
+    if (!current || liveKey.current !== key || next.id !== current.id ||
+        next.conversationId !== current.conversationId) return
+    setResult(previous => {
+      const existing = previous?.state === 'ready' ? previous.value : previous?.current
+      return existing?.id === next.id && existing.version <= next.version
+        ? { state: 'ready', value: next } : previous
+    })
+  }
   let state: WorkspaceFrameState = { kind: 'loading', message: 'Opening conversation browser…' }
   if (!conversationId) state = { kind: 'empty', message: 'Open a saved conversation to use its browser.' }
   else if (visible?.state === 'ready') state = { kind: 'ready' }
@@ -95,12 +107,14 @@ export default function BrowserRoute({ route, scope, navigate, onReturn }: Props
             onClick={() => void act('start')}>Connect browser</button>}
           {(current.status === 'closed' || current.status === 'error') && <button type="button"
             disabled={busy || visible?.state !== 'ready'} onClick={() => void act('reopen')}>Reopen browser</button>}
-          {current.status !== 'closed' && <button type="button" disabled={busy || visible?.state !== 'ready'}
+          {current.status === 'reserved' && <button type="button" disabled={busy || visible?.state !== 'ready'}
             onClick={() => void act('close')}>Close browser</button>}
-          <button type="button" disabled={busy} onClick={() => void load()}>Refresh state</button>
+          {current.status !== 'active' && <button type="button" disabled={busy} onClick={() => void load()}>Refresh state</button>}
         </div>
         {visible?.state !== 'ready' && <p role="alert">The last operation needs a fresh state check before another action.</p>}
       </section>
+      {visible?.state === 'ready' && current.status === 'active' &&
+        <BrowserWorkspace client={client} session={current} onSessionChange={acceptSession} />}
     </div>}
   </WorkspaceFrame>
 }
