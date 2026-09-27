@@ -29,31 +29,65 @@ async function port(): Promise<number> {
   return value;
 }
 
-async function startConversationServer(origin: string): Promise<string> {
+async function startConversationServer(origin: string): Promise<{ api: string; rotateOwner(username: string): Promise<void> }> {
   const child = spawn(process.env.GIDEON_TEST_PYTHON || "python3", [
     join(root, "apps/assistant/test-support/conversation_server.py"), origin,
   ], { env: { ...process.env, PYTHONPATH: join(root, "runtime") } });
   children.push(child);
   let output = "";
   let errors = "";
-  return new Promise<string>((resolveAddress, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Conversation server timed out: ${errors}`)), 15000);
-    child.stdout.on("data", chunk => {
-      output += String(chunk);
-      if (!output.includes("\n")) return;
-      clearTimeout(timeout);
-      const line = output.split("\n")[0];
+  let pendingRotation: { username: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined;
+  let resolveAddress!: (address: string) => void;
+  let rejectAddress!: (error: Error) => void;
+  const addressReady = new Promise<string>((resolve, reject) => { resolveAddress = resolve; rejectAddress = reject; });
+  child.stdout.on("data", chunk => {
+    output += String(chunk);
+    const lines = output.split("\n");
+    output = lines.pop() || "";
+    for (const line of lines) {
+      if (!line) continue;
       try {
-        const address = JSON.parse(line) as { api_port: number };
-        resolveAddress(`http://127.0.0.1:${address.api_port}`);
-      } catch (error) { reject(error); }
-    });
-    child.stderr.on("data", chunk => { errors += String(chunk); });
-    child.once("exit", code => {
-      clearTimeout(timeout);
-      reject(new Error(`Conversation server exited ${code}: ${errors}`));
-    });
+        const message = JSON.parse(line) as { api_port?: number; owner_rotated?: string; control_error?: string };
+        if (message.api_port) resolveAddress(`http://127.0.0.1:${message.api_port}`);
+        else if (pendingRotation && message.owner_rotated === pendingRotation.username) {
+          clearTimeout(pendingRotation.timer);
+          pendingRotation.resolve();
+          pendingRotation = undefined;
+        } else if (pendingRotation && message.control_error) {
+          clearTimeout(pendingRotation.timer);
+          pendingRotation.reject(new Error(message.control_error));
+          pendingRotation = undefined;
+        }
+      } catch { /* Ignore non-JSON server diagnostics. */ }
+    }
   });
+  child.stderr.on("data", chunk => { errors += String(chunk); });
+  child.once("exit", code => {
+    rejectAddress(new Error(`Conversation server exited ${code}: ${errors}`));
+    if (pendingRotation) {
+      clearTimeout(pendingRotation.timer);
+      pendingRotation.reject(new Error(`Conversation server exited ${code}: ${errors}`));
+      pendingRotation = undefined;
+    }
+  });
+  const api = await new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Conversation server timed out: ${errors}`)), 15000);
+    void addressReady.then(address => { clearTimeout(timeout); resolve(address); }, error => { clearTimeout(timeout); reject(error); });
+  });
+  return {
+    api,
+    rotateOwner(username) {
+      if (pendingRotation) return Promise.reject(new Error("An owner rotation is already pending"));
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingRotation = undefined;
+          reject(new Error(`Credential rotation timed out for ${username}`));
+        }, 15000);
+        pendingRotation = { username, resolve, reject, timer };
+        child.stdin.write(`${JSON.stringify({ rotate_owner: username })}\n`);
+      });
+    },
+  };
 }
 
 async function launchBrowser(address: string) {
@@ -134,7 +168,7 @@ describe("Gideon conversation presentation", () => {
   it("sends through the canonical controller and retains draft, session and return context across remount", async () => {
     const webPort = await port();
     const origin = `http://127.0.0.1:${webPort}`;
-    const api = await startConversationServer(origin);
+    const conversationServer = await startConversationServer(origin);
     const entry = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -145,19 +179,71 @@ import { ShellThemeProvider } from '/src/shared/shell/shellTheme.web.ts';
 const controller = new ConversationController();
 const root = createRoot(document.getElementById('root'));
 let scope;
+let commitSequence = 0;
+function CommitProbe({ sequence }) {
+  React.useLayoutEffect(() => {
+    if (!window.captureFirstCommit) return;
+    window.captureFirstCommit = false;
+    const input = document.getElementById('gideon-message-composer');
+    const send = document.querySelector('[aria-label="Send message"]');
+    const returned = document.querySelector('[aria-label="Return to previous workspace"]');
+    const firstCommit = {
+      targetOwner: scope.ownerId,
+      controllerOwner: controller.snapshot().scope?.ownerId || null,
+      targetSession: window.targetSession || null,
+      controllerSession: controller.snapshot().sessionId,
+      inputValue: input?.value ?? null,
+      inputDisabled: input?.disabled ?? null,
+      inputReadOnly: input?.readOnly ?? null,
+      sendDisabled: send?.getAttribute('aria-disabled') === 'true' || send?.disabled === true,
+      returnDisabled: returned?.getAttribute('aria-disabled') === 'true' || returned?.disabled === true,
+      body: document.body.innerText,
+    };
+    if (window.exerciseMismatchEvents && input) {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value').set;
+      setter.call(input, 'This event must not replace the prior owner draft.');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      send?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+    firstCommit.afterEvents = {
+      draft: controller.snapshot().draft,
+      phase: controller.snapshot().phase,
+      messageCount: controller.snapshot().messages.length,
+    };
+    window.firstCommit = firstCommit;
+  }, [sequence]);
+  return null;
+}
+window.captureNextCommit = (exerciseMismatchEvents = false) => {
+  window.firstCommit = undefined;
+  window.exerciseMismatchEvents = exerciseMismatchEvents;
+  window.captureFirstCommit = true;
+};
+window.targetSession = null;
+window.renderChat = (nextSessionId, scrollY) => {
+  window.targetSession = nextSessionId || null;
+  return root.render(React.createElement(React.Fragment, null,
+    React.createElement(CommitProbe, { sequence: ++commitSequence }),
+    React.createElement(ShellThemeProvider, { initialPreference: 'light' },
+      React.createElement(ChatScreen, { controller, scope, sessionId: nextSessionId, scrollY,
+        returnTo: { destination: 'apps', selectionId: 'application-1' },
+        onScrollChange: value => { window.savedScroll = value; },
+        onReturn: () => { window.returned = (window.returned || 0) + 1; } }))));
+};
 window.begin = async () => {
   const owner = await signInOwner('conversation-owner', 'correct-horse-battery-staple');
   scope = ownerScope(location.origin, owner);
-  window.mountChat();
+  window.renderChat(undefined);
   return true;
 };
-window.mountChat = (sessionId, scrollY) => root.render(React.createElement(
-  ShellThemeProvider, { initialPreference: 'light' },
-  React.createElement(ChatScreen, { controller, scope, sessionId, scrollY,
-    returnTo: { destination: 'apps', selectionId: 'application-1' },
-    onScrollChange: value => { window.savedScroll = value; },
-    onReturn: () => { window.returned = (window.returned || 0) + 1; } })
-));
+window.switchToSecondOwner = async () => {
+  const owner = await signInOwner('conversation-owner-two', 'correct-horse-battery-staple');
+  scope = ownerScope(location.origin, owner);
+  window.expectedOwnerCacheKey = scope.cacheKey;
+  window.renderChat(undefined);
+  return owner.user;
+};
+window.mountChat = window.renderChat;
 window.unmountChat = () => root.render(null);
 window.snapshot = () => controller.snapshot();
 window.disposeController = () => controller.dispose();
@@ -171,6 +257,10 @@ window.ready = true;
         extensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
       },
       esbuild: { jsx: "automatic" },
+      optimizeDeps: {
+        include: ["react", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "react-native-web"],
+        esbuildOptions: { resolveExtensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"] },
+      },
       plugins: [{
         name: "gideon-chat-screen-entry",
         resolveId(id) { if (id === "/chat-screen-entry.ts") return "\0chat-screen-entry"; },
@@ -182,7 +272,7 @@ window.ready = true;
           });
         },
       }],
-      server: { host: "127.0.0.1", port: webPort, strictPort: true, proxy: { "/api": { target: api, ws: true } } },
+      server: { host: "127.0.0.1", port: webPort, strictPort: true, proxy: { "/api": { target: conversationServer.api, ws: true } } },
     });
     await vite.listen();
     const { evaluate, command } = await launchBrowser(`${origin}/chat-screen`);
@@ -241,6 +331,63 @@ window.ready = true;
     expect(returned.scroll).toBe(0);
     await evaluate("document.querySelector('[aria-label=\\\"Return to previous workspace\\\"]')?.click()");
     expect(await evaluate("window.returned")).toBe(1);
+
+    const nextSession = await evaluate(`fetch('/api/chat/sessions',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:'{}'}).then(response=>response.json())`);
+    expect(typeof nextSession.key).toBe("string");
+    await evaluate("window.captureNextCommit(true)");
+    await evaluate(`window.renderChat(${JSON.stringify(nextSession.key)}, 0)`);
+    const sessionCommit = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      if (window.firstCommit) { clearInterval(timer); done(window.firstCommit); }
+      else if (++n > 100) { clearInterval(timer); reject(Error('Session switch did not capture its first commit')); }
+    }, 25) })`);
+    expect(sessionCommit.targetSession).toBe(nextSession.key);
+    expect(sessionCommit.controllerSession).toBe(submitted.sessionId);
+    expect(sessionCommit.inputValue).toBe("");
+    expect(sessionCommit.inputDisabled || sessionCommit.inputReadOnly).toBe(true);
+    expect(sessionCommit.sendDisabled).toBe(true);
+    expect(sessionCommit.returnDisabled).toBe(true);
+    expect(sessionCommit.body).not.toContain(prompt);
+    expect(sessionCommit.body).not.toContain(retainedDraft);
+    expect(sessionCommit.afterEvents.draft).toBe(retainedDraft);
+    expect(sessionCommit.afterEvents.phase).toBe("ready");
+    await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      const state = window.snapshot();
+      if (state.sessionId === ${JSON.stringify(nextSession.key)} && state.phase === 'ready') { clearInterval(timer); done(true); }
+      else if (++n > 200) { clearInterval(timer); reject(Error('The selected owned session did not become ready: ' + JSON.stringify(state))); }
+    }, 50) })`);
+
+    const ownerDraft = "This draft belongs to the first owner.";
+    await evaluate(`(() => {
+      const input = document.getElementById('gideon-message-composer');
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value').set;
+      setter.call(input, ${JSON.stringify(ownerDraft)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    expect(await evaluate("window.snapshot().draft")).toBe(ownerDraft);
+    await conversationServer.rotateOwner("conversation-owner-two");
+    await evaluate("window.captureNextCommit(true)");
+    await evaluate("window.switchToSecondOwner()");
+    const ownerCommit = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      if (window.firstCommit) { clearInterval(timer); done(window.firstCommit); }
+      else if (++n > 200) { clearInterval(timer); reject(Error('Owner switch did not capture its first commit')); }
+    }, 25) })`);
+    expect(ownerCommit.targetOwner).toBe("conversation-owner-two");
+    expect(ownerCommit.controllerOwner).toBe("conversation-owner");
+    expect(ownerCommit.inputValue).toBe("");
+    expect(ownerCommit.inputDisabled || ownerCommit.inputReadOnly).toBe(true);
+    expect(ownerCommit.sendDisabled).toBe(true);
+    expect(ownerCommit.returnDisabled).toBe(true);
+    expect(ownerCommit.body).not.toContain(ownerDraft);
+    expect(ownerCommit.body).not.toContain(prompt);
+    expect(ownerCommit.afterEvents.draft).toBe(ownerDraft);
+    expect(ownerCommit.afterEvents.phase).toBe("ready");
+    await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      const state = window.snapshot();
+      const input = document.getElementById('gideon-message-composer');
+      if (state.scope?.cacheKey === window.expectedOwnerCacheKey
+        && state.sessionId === null && input && !input.disabled) { clearInterval(timer); done(true); }
+      else if (++n > 200) { clearInterval(timer); reject(Error('The new owner context did not become ready: ' + JSON.stringify(state))); }
+    }, 50) })`);
     await evaluate("window.disposeController()");
   }, 60000);
 });

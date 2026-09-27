@@ -115,9 +115,24 @@ async def main(origin: str) -> None:
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
         print(json.dumps({"api_port": port}), flush=True)
+
+        async def test_control() -> None:
+            while line := await asyncio.to_thread(sys.stdin.readline):
+                try:
+                    command = json.loads(line)
+                    username = str(command.get("rotate_owner", "")).strip()
+                    if username == "conversation-owner-two":
+                        credentials.set_password(username, "correct-horse-battery-staple")
+                        token_auth.revoke_all_sessions()
+                        print(json.dumps({"owner_rotated": username}), flush=True)
+                except Exception as error:
+                    print(json.dumps({"control_error": str(error)}), flush=True)
+
+        control_task = asyncio.create_task(test_control())
         try:
             await asyncio.Event().wait()
         finally:
+            control_task.cancel()
             await runner.cleanup()
 
 
