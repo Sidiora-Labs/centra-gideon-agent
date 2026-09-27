@@ -78,7 +78,7 @@ export function nativeStatus(kind: ActivitySourceKind, native: unknown,
 function fromRefs(refs: unknown): ActivityRelatedIds {
   if (!refs || typeof refs !== 'object') return {}
   const values = refs as Record<string, unknown>
-  return {
+  const nativeRefs: ActivityRelatedIds = {
     taskId: nativeId('task', values.task ?? values.task_id) ?? undefined,
     workflowRunId: nativeId('workflow_run', values.workflow_run ?? values.run_id) ?? undefined,
     triggerRunId: nativeId('trigger_run', values.trigger_run) ?? undefined,
@@ -88,6 +88,7 @@ function fromRefs(refs: unknown): ActivityRelatedIds {
     chatSessionId: nativeId('chat_session', values.session ?? values.session_id) ?? undefined,
     notificationId: nativeId('notification', values.notification) ?? undefined,
   }
+  return Object.fromEntries(Object.entries(nativeRefs).filter(([, id]) => id !== undefined)) as ActivityRelatedIds
 }
 
 type MapOptions = Readonly<{
@@ -157,7 +158,7 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       title = inbox.message
       summary = inbox.context_summary ?? null
       const refs = fromRefs(inbox.refs)
-      related = { ...refs, ...related, inboxItemId: nativeId('inbox_item', inbox.id) ?? undefined }
+      related = { ...related, ...refs, inboxItemId: nativeId('inbox_item', inbox.id) ?? undefined }
       status = nativeStatus(kind, inbox.status,
         { itemKind: inbox.item_kind, approvalId: related.approvalId })
       actionability = status.outcome === 'waiting_approval' ? 'review'
@@ -172,8 +173,9 @@ export function mapActivitySource<K extends ActivitySourceKind>(scope: OwnerScop
       summary = approval.tool_purpose ?? null
       status = nativeStatus(kind, 'pending')
       actionability = 'review'
-      related = { chatSessionId: nativeId('chat_session', approval.session) ?? undefined,
-        ...related, approvalId: nativeId('approval', approval.id) ?? undefined }
+      related = { ...related,
+        chatSessionId: nativeId('chat_session', approval.session) ?? related.chatSessionId,
+        approvalId: nativeId('approval', approval.id) ?? undefined }
       break
     }
     case 'notification': {

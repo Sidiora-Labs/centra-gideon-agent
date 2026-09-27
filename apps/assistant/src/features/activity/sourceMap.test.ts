@@ -76,7 +76,8 @@ describe('Activity source identity', () => {
     const inbox: InboxItem = {
       id: 'inbox-1', channel: 'assistant', channel_name: 'Assistant', message: 'Review send',
       sender_id: 'system', sender_name: 'Gideon', classification: 'needs_reply', confidence: 'high',
-      status: 'pending', item_kind: 'agent_request', refs: { task_id: 'referenced-task' },
+      status: 'pending', item_kind: 'agent_request',
+      refs: { task_id: 'referenced-task', approval: 'native-approval', session: 'native-chat' },
     }
     const artifact: Artifact = {
       slug: 'artifact-1', name: 'Result', kind: 'markdown', source: 'chat', description: 'Output',
@@ -114,8 +115,24 @@ describe('Activity source identity', () => {
       expect(mapped.related[field]).not.toBe(related[field])
     }
     expect(cases[0].mapped.related.workflowRunId).toBe('wrong-workflow')
+    expect(cases[4].mapped.related).toMatchObject({
+      taskId: 'referenced-task', approvalId: 'native-approval', chatSessionId: 'native-chat',
+      workflowRunId: 'wrong-workflow',
+    })
+    expect(cases[4].mapped.status.outcome).toBe('waiting_approval')
+    expect(cases[4].mapped.actionability).toBe('review')
+    expect(cases[5].mapped.related.chatSessionId).toBe('chat-1')
     expect(cases[5].mapped.related.taskId).toBe('wrong-task')
     expect(cases[7].mapped.related.taskId).toBe('wrong-task')
+
+    const inboxWithoutNativeApproval = entry(mapActivitySource(ownerA, 'inbox_item', {
+      ...inbox, refs: { task_id: 'referenced-task' },
+    }, { related }))
+    expect(inboxWithoutNativeApproval.related).toMatchObject({
+      taskId: 'referenced-task', approvalId: 'wrong-approval', chatSessionId: 'wrong-chat',
+    })
+    expect(inboxWithoutNativeApproval.status.outcome).toBe('waiting_approval')
+    expect(inboxWithoutNativeApproval.actionability).toBe('review')
   })
 
   it('retains distinct native task and workflow outcomes, including unknown task status', () => {
