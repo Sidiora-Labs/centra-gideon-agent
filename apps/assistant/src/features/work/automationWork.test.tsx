@@ -171,9 +171,14 @@ describe('native triggers and loops in WorkRoutes', () => {
     expect(await evaluate(`document.querySelector('[aria-label="Loop report"]')?.textContent`)).toContain('Native fixture report')
     const connectedStream = await fetch(`${api}/__test/loop-stream-count`).then(response => response.json()) as { active: number }
     expect(connectedStream.active).toBeGreaterThan(0)
-    const disconnect = await fetch(`${api}/__test/disconnect-loop-stream`, { method: 'POST' }).then(response => response.json()) as { disconnected: number }
-    expect(disconnect.disconnected).toBeGreaterThan(0)
-    await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates disconnected')`)
+    const streamPattern = `*api/loops/${loopId}/stream*`
+    await browser!.command('Network.setBlockedURLs', { urls: [streamPattern] })
+    try {
+      await click('Refresh native state')
+      await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates disconnected')`)
+    } finally {
+      await browser!.command('Network.setBlockedURLs', { urls: [] })
+    }
     await click('Reconnect live updates')
     await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates connected.')`)
     const recoveredStream = await fetch(`${api}/__test/loop-stream-count`).then(response => response.json()) as { active: number }

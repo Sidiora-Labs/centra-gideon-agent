@@ -91,7 +91,6 @@ async def main() -> None:
         loop_preflight_started = asyncio.Event()
         release_loop_preflight = asyncio.Event()
         loop_create_attempts = 0
-        loop_stream_transports = []
 
         async def controls(request: web.Request) -> web.Response:
             nonlocal held_detail, save_writes, drop_next_triage_response, hold_next_native_write, hold_trigger_reads, hold_loop_preflight
@@ -139,18 +138,9 @@ async def main() -> None:
                 hold_loop_preflight = False
                 release_loop_preflight.set()
                 return web.json_response({"released": True})
-            if request.path == "/__test/disconnect-loop-stream" and request.method == "POST":
-                transports = list(loop_stream_transports)
-                loop_stream_transports.clear()
-                for transport in transports:
-                    transport.close()
-                state = app["state"]
-                view = loop_store.get_redacted(loop.id)
-                if view is not None:
-                    state.loop_sse().publish(registry_key(loop.id), "snapshot", view)
-                return web.json_response({"disconnected": len(transports)})
             if request.path == "/__test/loop-stream-count" and request.method == "GET":
-                return web.json_response({"active": len(loop_stream_transports)})
+                hub = app["state"].loop_sse().peek(registry_key(loop.id))
+                return web.json_response({"active": hub.subscriber_count if hub else 0})
             if request.path == "/__test/arm" and request.method == "POST":
                 held_detail = True
                 save_writes = 0
@@ -184,15 +174,6 @@ async def main() -> None:
             if hold_trigger_reads and request.method == "GET" and request.path == "/api/triggers":
                 trigger_read_started.set()
                 await release_trigger_reads.wait()
-            if request.method == "GET" and request.path.startswith("/api/loops/") and request.path.endswith("/stream"):
-                transport = request.transport
-                if transport is not None:
-                    loop_stream_transports.append(transport)
-                try:
-                    return await handler(request)
-                finally:
-                    if transport in loop_stream_transports:
-                        loop_stream_transports.remove(transport)
             if request.method == "POST" and request.path == "/api/loops":
                 loop_create_attempts += 1
             if hold_loop_preflight and request.method == "POST" and request.path == "/api/loops/validate":
