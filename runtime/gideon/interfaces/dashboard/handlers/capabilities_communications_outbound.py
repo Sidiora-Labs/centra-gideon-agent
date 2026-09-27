@@ -27,6 +27,8 @@ def register(app, service=None):
                 )
             if action == "approve":
                 row = outbound.approve(draft_id, data)
+            elif request.method == "PATCH" and action is None:
+                row = outbound.edit(draft_id, data)
             elif action == "send":
                 row = await asyncio.to_thread(outbound.send, draft_id, data)
             elif action == "correlate":
@@ -41,4 +43,5 @@ def register(app, service=None):
     app.router.add_get(base, handle)
     app.router.add_post(base, handle)
     app.router.add_get(base + "/{draft_id}", handle)
+    app.router.add_patch(base + "/{draft_id}", handle)
     app.router.add_post(base + "/{draft_id}/{action}", handle)

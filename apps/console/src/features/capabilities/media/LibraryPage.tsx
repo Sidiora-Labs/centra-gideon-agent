@@ -15,9 +15,15 @@ export function MediaCard({ item, onSelect }: { item: MediaItem; onSelect: () =>
   </article>
 }
 
-export default function LibraryPage() {
+export type LibraryPageProps =
+  | { artifactId: string; onSelectArtifact: (id: string | null) => void; onNavigate?: (view: 'sketches') => void }
+  | { artifactId?: undefined; onSelectArtifact?: never; onNavigate?: (view: 'sketches') => void }
+
+export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }: LibraryPageProps = {}) {
+  const controlled = artifactId !== undefined
   const [result, setResult] = useState<Result | null>(null)
-  const [selected, setSelected] = useState<MediaItem | null>(null)
+  const [selection, setSelection] = useState<{ artifactId: string; item: MediaItem } | null>(null)
+  const selected = controlled && selection?.artifactId !== artifactId ? null : selection?.item ?? null
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('')
   const [tag, setTag] = useState('')
@@ -31,7 +37,7 @@ export default function LibraryPage() {
   const [membership, setMembership] = useState('')
   const file = useRef<HTMLInputElement>(null)
   async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'Request failed'); return value }
-  function choose(item: MediaItem) { setSelected(item); setName(item.name); setTags(item.tags.join(', ')); setMembership(item.collection) }
+  function choose(item: MediaItem) { setSelection({ artifactId: item.id, item }); setName(item.name); setTags(item.tags.join(', ')); setMembership(item.collection) }
   async function action(work: () => Promise<void>) { setBusy(true); setError(''); try { await work() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
   useEffect(() => {
     let active = true
@@ -42,15 +48,23 @@ export default function LibraryPage() {
   useEffect(() => {
     let active = true
     const load = () => {
-      const id = new URLSearchParams(location.hash.split('?')[1] || '').get('artifact')
-      if (!id) { setSelected(null); return }
+      const id = controlled ? artifactId : new URLSearchParams(location.hash.split('?')[1] || '').get('artifact')
+      setSelection(null)
+      if (!id) return
       fetch(base + '/' + encodeURIComponent(id)).then(json).then(value => { if (active) choose(value) }).catch(e => { if (active) setError(e.message) })
     }
-    load(); window.addEventListener('hashchange', load)
-    return () => { active = false; window.removeEventListener('hashchange', load) }
-  }, [])
+    load()
+    if (!controlled) window.addEventListener('hashchange', load)
+    return () => { active = false; if (!controlled) window.removeEventListener('hashchange', load) }
+  }, [controlled, artifactId])
+  const selectArtifact = (id: string) => {
+    if (controlled) onSelectArtifact?.(id)
+    else location.hash = '/capabilities/media?view=library&artifact=' + encodeURIComponent(id)
+  }
   const dirty = selected && (selected.name !== name || selected.tags.join(', ') !== tags || selected.collection !== membership)
-  return <NativeMediaPage title="Media library" actions={<a href="#/capabilities/media">Image sketches</a>}>
+  return <NativeMediaPage title="Media library" actions={onNavigate
+    ? <button type="button" onClick={() => onNavigate('sketches')}>Image sketches</button>
+    : <a href="#/capabilities/media">Image sketches</a>}>
     {error && <p role="alert">{error}</p>}
     <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">
       <label>Search<input aria-label="Search media" type="search" value={q} onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
@@ -62,14 +76,14 @@ export default function LibraryPage() {
       <label>Import image<input aria-label="Import image" ref={file} type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={() => void action(async () => {
         const image = file.current?.files?.[0]; if (!image) return
         const item = await fetch(base + '/import', { method: 'POST', headers: { 'Content-Type': image.type, 'X-File-Name': encodeURIComponent(image.name), 'X-Request-ID': crypto.randomUUID() }, body: image }).then(json)
-        choose(item); setRefresh(value => value + 1); location.hash = '/capabilities/media?view=library&artifact=' + item.id
+        choose(item); setRefresh(value => value + 1); selectArtifact(item.id)
         if (file.current) file.current.value = ''
       })} /></label>
     </div>
     {!result && !error && <p role="status">Loading media…</p>}
     {result && <><p role="status">{result.total} matching artifacts</p>
       {!result.items.length && <p>No matching media. Import an image or generate media in a conversation.</p>}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{result.items.map(item => <MediaCard key={item.id} item={item} onSelect={() => { if (!dirty) location.hash = '/capabilities/media?view=library&artifact=' + item.id }} />)}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{result.items.map(item => <MediaCard key={item.id} item={item} onSelect={() => { if (!dirty) selectArtifact(item.id) }} />)}</div>
       <div className="flex gap-3"><Button disabled={!offset || busy} onClick={() => setOffset(Math.max(0, offset - 24))}>Previous</Button><Button disabled={offset + 24 >= result.total || busy} onClick={() => setOffset(offset + 24)}>Next</Button></div>
     </>}
     {selected && <section aria-label="Media details" className="rounded-lg bg-surface-high p-l space-y-m">
