@@ -208,7 +208,38 @@ describe("trusted modules in the Expo web export", () => {
     await browser.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft" });
     await browser.command("Input.insertText", { text: "Keyboard editor verification" });
     await browser.waitFor("document.querySelector('.monaco-editor .view-lines')?.innerText.replaceAll(String.fromCharCode(160),' ').includes('Keyboard editor verification')", "keyboard edits reflected in Monaco model");
+
+    const versions = await browser.evaluate<Array<{ version: number; content: string; slug: string }>>(`(async()=>{
+      const slug=${JSON.stringify(artifactSlug)};
+      return Promise.all([1,2].map(async version=>{
+        const response=await fetch('/api/artifacts/'+encodeURIComponent(slug)+'/versions/'+version);
+        if (!response.ok) throw new Error('Native artifact version '+version+' returned '+response.status);
+        return response.json();
+      }));
+    })()`);
+    expect(versions.map(record => [record.slug, record.version, record.content])).toEqual([
+      [artifactSlug, 1, "# Trusted editor version one\n\nA real native artifact opened by ContentSurface.\n"],
+      [artifactSlug, 2, "# Trusted editor version two\n\nThe current editable native artifact.\n"],
+    ]);
+    await browser.navigate(`${served.origin}/assistant/apps?v=1&view=workspace&placement=artifacts%2Feditor&q.version=1&recordKind=artifact&recordId=${encodeURIComponent(artifactSlug)}&from=chat`);
+    await browser.waitFor("document.querySelector('[data-gideon-module=\"artifacts/editor\"]')?.textContent.includes('Version 1 (read only)')", "native pinned artifact version one");
+    await browser.waitFor("document.querySelector('[data-gideon-module=\"artifacts/editor\"] .monaco-editor .view-lines')?.innerText.replaceAll(String.fromCharCode(160),' ').includes('Trusted editor version one')", "historical Monaco content", 60000);
+    const historical = await browser.evaluate<{ hasSave: boolean; before: string }>(`(()=>{
+      const module=document.querySelector('[data-gideon-module="artifacts/editor"]');
+      const editor=module?.querySelector('.monaco-editor .view-lines');
+      const input=module?.querySelector('.monaco-editor .native-edit-context[role="textbox"]');
+      input?.focus();
+      return {hasSave:Array.from(module?.querySelectorAll('button')??[]).some(button=>button.textContent?.trim()==='Save'),before:editor?.innerText??''};
+    })()`);
+    expect(historical.hasSave).toBe(false);
+    await browser.command("Input.insertText", { text: "Must not change historical artifact" });
+    const historicalAfter = await browser.evaluate<string>(`document.querySelector('[data-gideon-module="artifacts/editor"] .monaco-editor .view-lines')?.innerText??''`);
+    expect(historicalAfter).toBe(historical.before);
     await browser.evaluate(`document.querySelector('[aria-label="Return to previous workspace"]')?.click()`);
+    await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[data-gideon-module]')", "typed historical artifact return to assistant chat");
+    await browser.navigate(`${served.origin}/assistant/apps?v=1&view=workspace&placement=artifacts%2Feditor&q.version=3&recordKind=artifact&recordId=${encodeURIComponent(artifactSlug)}&from=chat`);
+    await browser.waitFor("document.body.innerText.includes('requested item may have been removed') && !document.querySelector('[data-gideon-module=\"artifacts/editor\"]')", "missing historical version without latest fallback");
+    await browser.evaluate(`([...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Go to Chat'))?.click()`);
     await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[data-gideon-module]')", "typed return to assistant chat");
     } catch (error) {
       if (browser) {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Hash, FileCode } from "lucide-react";
 import type { TaskItem } from "../../../../console/src/shared/data/api";
 import { TaskDetail } from "../../../../console/src/features/tasks/TaskDetail";
@@ -10,7 +10,7 @@ import { Toaster } from "../../../../console/src/shared/ui/Toaster";
 import { GatewayError, gatewayJson } from "../transport.web";
 import { createShellRoute } from "./shellRoutes";
 import { WorkspaceFrame } from "./WorkspaceFrame";
-import type { ModuleProps } from "./webModules";
+import { artifactRequest, type ModuleProps } from "./webModules";
 
 function ConsoleModuleProviders({ children }: { children: ReactNode }) {
   return <>{children}<DialogHost /><Toaster /></>;
@@ -120,65 +120,91 @@ function artifactUnavailable(error: unknown): string {
 }
 
 export function ArtifactModule(props: ModuleProps) {
-  const slug = props.route.record?.kind === "artifact" ? props.route.record.id : "";
-  const [artifact, setArtifact] = useState<NativeArtifact | null>(null);
-  const [failure, setFailure] = useState("");
-  const [saveFailure, setSaveFailure] = useState("");
+  const request = artifactRequest(props.route);
+  const requestKey = `${props.scope.cacheKey}:${request?.path ?? "invalid"}`;
+  const currentRequest = useRef({ key: requestKey, generation: 0 });
+  if (currentRequest.current.key !== requestKey) {
+    currentRequest.current = { key: requestKey, generation: currentRequest.current.generation + 1 };
+  }
+  const pendingSaves = useRef(new Set<AbortController>());
+  const [loaded, setLoaded] = useState<{ key: string; artifact: NativeArtifact } | null>(null);
+  const artifact = loaded?.key === requestKey ? loaded.artifact : null;
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const [saveFailure, setSaveFailure] = useState<{ key: string; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = currentRequest.current.generation;
     let active = true;
-    setArtifact(null);
-    setFailure("");
-    if (!slug || typeof window === "undefined" || props.scope.runtimeOrigin !== window.location.origin || !props.scope.ownerId) {
-      setFailure("This artifact cannot be checked for the current Gideon account.");
+    setLoaded(null);
+    setFailure(null);
+    setSaveFailure(null);
+    if (!request || typeof window === "undefined" || props.scope.runtimeOrigin !== window.location.origin || !props.scope.ownerId) {
+      setFailure({ key: requestKey, message: "This artifact cannot be checked for the current Gideon account." });
       return () => { active = false; controller.abort(); };
     }
-    void gatewayJson<NativeArtifact>(`/api/artifacts/${encodeURIComponent(slug)}`, { signal: controller.signal }).then((record) => {
-      if (!active) return;
-      if (record?.slug !== slug || typeof record.name !== "string" || typeof record.kind !== "string" ||
+    void gatewayJson<NativeArtifact>(request.path, { signal: controller.signal }).then((record) => {
+      if (!active || currentRequest.current.generation !== generation) return;
+      if (record?.slug !== request.slug || typeof record.name !== "string" || typeof record.kind !== "string" ||
+        (request.version !== undefined && record.version !== request.version) ||
         (record.content !== null && typeof record.content !== "string")) {
-        setFailure("Gideon returned an invalid artifact record.");
+        setFailure({ key: requestKey, message: "Gideon returned an invalid artifact record." });
         return;
       }
-      setArtifact(record);
+      setLoaded({ key: requestKey, artifact: record });
     }).catch((error: unknown) => {
-      if (active && !(error instanceof DOMException && error.name === "AbortError")) setFailure(artifactUnavailable(error));
+      if (active && currentRequest.current.generation === generation &&
+        !(error instanceof DOMException && error.name === "AbortError"))
+        setFailure({ key: requestKey, message: artifactUnavailable(error) });
     });
-    return () => { active = false; controller.abort(); };
-  }, [slug, props.scope.cacheKey, attempt]);
+    return () => {
+      active = false;
+      controller.abort();
+      for (const save of pendingSaves.current) save.abort();
+      pendingSaves.current.clear();
+    };
+  }, [requestKey, props.scope.ownerId, props.scope.runtimeOrigin, attempt]);
 
   const save = async (content: string) => {
-    if (!artifact || artifact.readonly) return;
-    setSaveFailure("");
+    if (!artifact || !request || request.version !== undefined || artifact.readonly) return;
+    const generation = currentRequest.current.generation;
+    const controller = new AbortController();
+    pendingSaves.current.add(controller);
+    setSaveFailure(null);
     try {
-      const updated = await gatewayJson<NativeArtifact>(`/api/artifacts/${encodeURIComponent(slug)}`, {
+      const updated = await gatewayJson<NativeArtifact>(request.path, {
         method: "PATCH", body: { content, snapshot: false, event_type: "edited" },
+        signal: controller.signal,
       });
-      if (updated?.slug !== slug || typeof updated.name !== "string" || typeof updated.kind !== "string") {
+      if (currentRequest.current.generation !== generation) return;
+      if (updated?.slug !== request.slug || typeof updated.name !== "string" || typeof updated.kind !== "string") {
         throw new Error("Gideon returned an invalid saved artifact.");
       }
-      setArtifact(updated);
+      setLoaded({ key: requestKey, artifact: updated });
     } catch (error) {
+      if (currentRequest.current.generation !== generation) return;
       const message = error instanceof Error ? error.message : "Gideon could not save this artifact.";
-      setSaveFailure(message);
+      setSaveFailure({ key: requestKey, message });
       throw error instanceof Error ? error : new Error(message);
+    } finally {
+      pendingSaves.current.delete(controller);
     }
   };
 
-  const content = failure ? <ModuleRequestState message={failure} retry={() => setAttempt((value) => value + 1)} onReturn={props.onReturn} />
+  const content = failure?.key === requestKey ? <ModuleRequestState message={failure.message} retry={() => setAttempt((value) => value + 1)} onReturn={props.onReturn} />
     : artifact ? <ConsoleModuleProviders><div className="flex min-h-0 h-full flex-col">
       <header className="flex min-w-0 items-center gap-s border-b border-outline/40 px-m py-2">
         <div className="min-w-0 flex-1"><h2 className="truncate text-on-surface">{artifact.name}</h2>
-          <p className="truncate text-on-surface-low text-[0.75rem]">{artifact.slug} · {artifact.kind}</p></div>
+          <p className="truncate text-on-surface-low text-[0.75rem]">{artifact.slug} · {artifact.kind}{request?.version !== undefined ? ` · Version ${request.version} (read only)` : ""}</p></div>
         <button type="button" className="gideon-workspace-back" aria-label="Return to previous workspace" onClick={props.onReturn}>Return</button>
       </header>
-      {saveFailure && <p role="alert" className="border-b border-outline/40 px-m py-2 text-[0.8125rem] text-on-surface">{saveFailure}</p>}
+      {saveFailure?.key === requestKey && <p role="alert" className="border-b border-outline/40 px-m py-2 text-[0.8125rem] text-on-surface">{saveFailure.message}</p>}
       <div className="min-h-0 flex-1">
         <ContentSurface type={artifactType(artifact.kind)} content={artifact.content ?? ""}
-          title={artifact.name} docId={artifact.slug} language={artifactType(artifact.kind).edit?.language}
-          readOnly={artifact.readonly} initialView="edit" onSave={artifact.readonly ? undefined : save} />
+          title={artifact.name} docId={`${artifact.slug}:${request?.version ?? "latest"}`} language={artifactType(artifact.kind).edit?.language}
+          readOnly={request?.version !== undefined || artifact.readonly} initialView="edit"
+          onSave={request?.version !== undefined || artifact.readonly ? undefined : save} />
       </div>
     </div></ConsoleModuleProviders>
       : <p role="status" aria-live="polite" className="p-l">Loading artifact…</p>;

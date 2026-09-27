@@ -60,10 +60,16 @@ function taskId(route: ShellRoute): string | undefined {
   return route.record.id;
 }
 
-function artifactSlug(route: ShellRoute): string | undefined {
+export function artifactRequest(route: ShellRoute): { slug: string; path: string; version?: number } | undefined {
   if (route.destination !== "apps" || route.view !== "workspace" ||
     route.placement?.id !== "artifacts/editor" || route.record?.kind !== "artifact") return undefined;
-  return route.record.id;
+  const slug = route.record.id;
+  const rawVersion = route.placement.query?.version;
+  if (rawVersion === undefined) return { slug, path: `/api/artifacts/${encodeURIComponent(slug)}` };
+  if (!/^[1-9]\d*$/.test(rawVersion)) return undefined;
+  const version = Number(rawVersion);
+  if (!Number.isSafeInteger(version)) return undefined;
+  return { slug, version, path: `/api/artifacts/${encodeURIComponent(slug)}/versions/${version}` };
 }
 
 async function loadTaskModule(): Promise<{ default: ComponentType<ModuleProps> }> {
@@ -97,10 +103,11 @@ const artifactModuleDefinition: ModuleDefinition = Object.freeze({
   matches: (route) => route.destination === "apps" && route.view === "workspace" &&
     route.placement?.id === "artifacts/editor" && route.record?.kind === "artifact",
   resolve: (scope, route) => {
-    const slug = artifactSlug(route);
-    return slug ? resolveNativeRecord(scope, `/api/artifacts/${encodeURIComponent(slug)}`,
-      (artifact: { slug: string; name: string; kind: string }) => artifact.slug === slug &&
-        typeof artifact.name === "string" && typeof artifact.kind === "string") : Promise.resolve("unavailable");
+    const request = artifactRequest(route);
+    return request ? resolveNativeRecord(scope, request.path,
+      (artifact: { slug: string; name: string; kind: string; version?: number }) => artifact.slug === request.slug &&
+        typeof artifact.name === "string" && typeof artifact.kind === "string" &&
+        (request.version === undefined || artifact.version === request.version)) : Promise.resolve("unavailable");
   },
   load: loadArtifactModule,
 });
