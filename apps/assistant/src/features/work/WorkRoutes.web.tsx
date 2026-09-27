@@ -6,6 +6,8 @@ import { WorkClient, type WorkEntry, type WorkRead } from './workClient'
 import { createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
 import WorkflowEditor from './WorkflowEditor.web'
 import WorkflowRunWorkspace from './WorkflowRunWorkspace.web'
+import TriggerWorkspace from './TriggerWorkspace.web'
+import LoopWorkspace from './LoopWorkspace.web'
 export { WORK_DESTINATIONS, createWorkRoute, findWorkDestination, workReturnRoute } from './workRouteModel'
 
 type WorkView = WorkRead<WorkEntry[]> | WorkRead<WorkEntry>
@@ -187,6 +189,14 @@ function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps
 
   if (page.id === 'workflows/run') {
     return <WorkflowRunWorkspace route={route} scope={scope} runId={id} onBack={goBack} navigate={navigate} />
+  }
+
+  if (page.id === 'triggers' || page.id === 'triggers/new') {
+    return <TriggerWorkspace route={route} scope={scope} triggerId={id} creating={page.id === 'triggers/new'} onBack={goBack} navigate={navigate} />
+  }
+
+  if (page.id === 'loops' || page.id === 'loops/new' || page.id === 'loops/run') {
+    return <LoopWorkspace route={route} scope={scope} loopId={id} creating={page.id === 'loops/new'} onBack={goBack} navigate={navigate} />
   }
 
   return <WorkspaceFrame route={route} mode={page.kind === 'room' ? 'compact' : 'full'} title={page.label} actions={actions}
