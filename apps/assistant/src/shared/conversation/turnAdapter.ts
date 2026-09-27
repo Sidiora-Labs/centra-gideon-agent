@@ -139,14 +139,14 @@ export function adaptConversationMessage(message: ConversationMessage): AdaptedT
   }
   const detail = string(meta?.detail)
   const tool = string(meta?.tool) ?? (message.role === 'tool' ? message.content : undefined)
-  if (tool || message.role === 'tool_call' || message.role === 'tool_result') {
+  if (tool) {
     const toolMeta = meta ?? {}
     segments.push({ ...base(toolMeta, string(meta?.tool_call_id) ?? string(meta?.id) ?? idFor(message, 'tool')),
       kind: 'tool', tool: tool ?? 'Unknown tool', detail,
       input: string(meta?.input_preview) ?? string(meta?.input) ?? string(meta?.tool_input),
       output: string(meta?.output), lifecycle: toolLifecycle(toolMeta) })
   }
-  if (message.role === 'permission' || message.role === 'approval') {
+  if (message.role === 'permission') {
     const approvalId = string(meta?.approval_id) ?? string(meta?.id) ?? string(meta?.tool_call_id) ?? idFor(message, 'approval')
     segments.push({ ...base(meta, approvalId), kind: 'approval', tool: tool ?? 'Approval request',
       input: string(meta?.input) ?? string(meta?.tool_input), purpose: string(meta?.purpose) ?? string(meta?.tool_purpose),
@@ -155,7 +155,7 @@ export function adaptConversationMessage(message: ConversationMessage): AdaptedT
   if (message.role === 'error' || meta?.kind === 'error') {
     segments.push({ ...base(meta, string(meta?.id) ?? idFor(message, 'error')), kind: 'error', text: message.content })
   }
-  if (message.role === 'activity' || message.role === 'activity_event') {
+  if (message.role === 'activity') {
     segments.push({ ...base(meta, string(meta?.id) ?? idFor(message, 'activity')), kind: 'activity',
       text: string(meta?.text) ?? message.content, activityKind: string(meta?.kind) })
   }

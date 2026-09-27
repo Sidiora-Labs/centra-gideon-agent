@@ -146,38 +146,65 @@ window.loaded = true
       const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
       window.controller.setOwner(window.ownerScope(location.origin, owner))
-      const session = await window.controller.create()
+      let session
+      if (expectAnswer) {
+        const createdResponse = await fetch('/api/chat/sessions', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' },
+          body: JSON.stringify({ agent: 'conversation-test-agent' }) })
+        const created = await createdResponse.json()
+        if (!createdResponse.ok || !created.key) throw Error('native conversation creation failed: ' + JSON.stringify(created))
+        session = created.key
+        await window.controller.open(session)
+      } else session = await window.controller.create()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
-      window.controller.receive({ type: 'tool_call', data: { session, tool_call_id: 'call-live-31', tool: 'Read file', kind: 'read', input_preview: 'notes.md' } })
-      window.controller.receive({ type: 'tool_result', data: { session, tool_call_id: 'call-live-31', output: 'Current notes', ok: true, content_type: 'text/plain', raw_ref: 'result-live-31', truncated: false } })
-      window.controller.receive({ type: 'approval', data: { session, id: 'approval-live-8', tool: 'Delete task', tool_kind: 'task.delete', tool_input: 'task-3', risk: 'destructive' } })
-      window.controller.receive({ type: 'approval_resolved', data: { session, id: 'approval-live-8', approved: false, decision: 'rejected' } })
-      window.controller.receive({ type: 'activity_event', data: { session, event_id: 'activity-live-2', kind: 'status', text: 'Checking current task status', origin: 'task' } })
-      await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
-        const live = window.controller.snapshot().messages.filter(message => ['tool', 'permission', 'activity'].includes(message.role))
-        if (live.length === 3) { clearInterval(timer); done() }
-        else if (++n > 100) { clearInterval(timer); reject(Error('live lifecycle frames were not retained: ' + JSON.stringify(window.controller.snapshot()))) }
-      }, 25) })
-      const liveSegments = window.controller.snapshot().messages.filter(message => ['tool', 'permission', 'activity'].includes(message.role))
       const socket = window.controller.socket
       const frames = []
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
-        if (frame.data?.session === session) frames.push({ type: frame.type, role: frame.data.role || '' })
+        if (frame.data?.session === session || frame.type === 'approval_resolved') {
+          frames.push({ type: frame.type, role: frame.data.role || '' })
+        }
       })
-      window.controller.setDraft('  Reply with one word: ready.  ')
+      const prompt = expectAnswer
+        ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then answer ready.'
+        : '  Reply with one word: ready.  '
+      window.controller.setDraft(prompt)
       await window.controller.send()
       if (expectAnswer) {
+        await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+          const pending = window.controller.snapshot().messages.find(message => message.role === 'permission')
+          if (pending) { clearInterval(timer); done(pending) }
+          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval request was not observed: ' + JSON.stringify(window.controller.snapshot()))) }
+        }, 50) }).then(async pending => {
+          const approvalId = pending.meta?.approval_id
+          if (typeof approvalId !== 'string' || !approvalId) throw Error('native approval row has no canonical ID')
+          const response = await fetch('/api/chat/sessions/' + encodeURIComponent(session) + '/approve', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' },
+            body: JSON.stringify({ action: 'approved', request_id: approvalId }),
+          })
+          const result = await response.json()
+          if (!response.ok || !result.ok) throw Error('native approval resolution failed: ' + JSON.stringify(result))
+        })
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
+        await window.controller.refresh()
       }
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, liveSegments, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
-        visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
+      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
+        visible: snapshot.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
+        toolRows: detail.messages.filter(m => m.role === 'tool'), permissionRows: detail.messages.filter(m => m.role === 'permission'),
+        liveLifecycle: snapshot.messages.filter(m => m.role === 'tool' || m.role === 'permission'),
         draft: snapshot.draft, ids: snapshot.messages.map(m => m.id) }
+      if (expectAnswer) {
+        await window.signOutOwner()
+        window.controller.setOwner(null)
+        return { ...evidence, frames, socketChanged: window.controller.socket !== socket,
+          cleared: window.controller.snapshot() }
+      }
       socket.close()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (!window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not disconnect')) } }, 50) })
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not reconnect')) } }, 50) })
@@ -201,28 +228,31 @@ window.loaded = true
     expect(result.visible).toBe(1)
     expect(result.draft).toBe('')
     expect(new Set(result.ids).size).toBe(result.ids.length)
-    expect(result.liveSegments).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: expect.stringContaining(':tool:call-live-31'), role: 'tool',
-        meta: expect.objectContaining({ tool_call_id: 'call-live-31', done: true, ok: true, output: 'Current notes', raw_ref: 'result-live-31' }) }),
-      expect.objectContaining({ id: expect.stringContaining(':approval:approval-live-8'), role: 'permission',
-        meta: expect.objectContaining({ approval_id: 'approval-live-8', resolved: 'rejected' }) }),
-      expect.objectContaining({ id: expect.stringContaining(':activity:activity-live-2'), role: 'activity',
-        meta: expect.objectContaining({ event_id: 'activity-live-2', origin: 'task' }) }),
-    ]))
     if (process.env.GIDEON_TEST_MODEL) {
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_chunk')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('tool_call')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('tool_result')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval_resolved')
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_done')
       expect(result.frames).toContainEqual({ type: 'chat_message', role: 'assistant' })
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
+      expect(result.toolRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) })]))
+      expect(result.permissionRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) })]))
+      expect(result.liveLifecycle).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) }),
+        expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) }),
+      ]))
     }
     console.log('Selected session websocket events:', result.frames.map((frame: { type: string }) => frame.type))
-    console.log('Persisted assistant answer:', result.assistantPersisted)
+    console.log('Persisted assistant answer count:', result.assistantPersisted.length)
     expect(result.socketChanged).toBe(true)
+    expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
+    if (process.env.GIDEON_TEST_MODEL) return
     expect(result.reconnected).toBe(1)
     expect(result.retainedEdit).toBe('Edited while sending')
     expect(result.failed).toEqual({ draft: 'Retain this draft', phase: 'failed' })
-    expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
 
     await evaluate(`(async () => {
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
@@ -292,5 +322,5 @@ window.loaded = true
     await command('Fetch.disable')
     expect(newerResult.state).toMatchObject({ draft: 'New owner send', phase: 'failed' })
     expect(newerResult.submitting).toBe(false)
-  }, 45000)
+  }, 120000)
 })

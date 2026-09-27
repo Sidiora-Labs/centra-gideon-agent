@@ -203,7 +203,9 @@ export class ConversationController {
 
   receive(event: ChatSocketEvent): void {
     const { sessionId, scope } = this.state
-    if (!scope || !sessionId || event.data.session !== sessionId) return
+    const sessionlessApprovalResolution = event.type === 'approval_resolved'
+      && event.data.session === undefined
+    if (!scope || !sessionId || (event.data.session !== sessionId && !sessionlessApprovalResolution)) return
     if (this.loading) {
       this.dirtyDuringLoad = true
       if (event.type === 'chat_chunk' || event.type === 'tool_call' || event.type === 'tool_result'
@@ -252,6 +254,7 @@ export class ConversationController {
       const messages = [...this.state.messages]
       const found = approvalId ? messages.findIndex(message => message.role === 'permission'
         && (message.meta?.approval_id === approvalId || message.meta?.id === approvalId)) : -1
+      if (event.type === 'approval_resolved' && found < 0) return
       const previous = found >= 0 ? messages[found] : undefined
       const resolved = event.type === 'approval_resolved'
         ? (event.data.approved === true ? String(event.data.decision ?? 'approved') : 'rejected')
