@@ -239,8 +239,6 @@ async def api_artifact_deck_create(request: web.Request) -> web.Response:
         return json_error("invalid_name", message="name must be 1 to 200 characters", status=400)
     if slug is not None and (not isinstance(slug, str) or not is_valid_slug(slug)):
         return json_error("invalid_slug", message="slug is invalid", status=400)
-    if slug and prov.get(slug) is not None:
-        return json_error("slug_conflict", message="artifact slug already exists", status=409)
     codec = get_codec("pptx")
     writer = get_writer("pptx")
     if codec is None or writer is None:
@@ -262,12 +260,26 @@ async def api_artifact_deck_create(request: web.Request) -> web.Response:
     if len(data) > MAX_BINARY_CONTENT_BYTES:
         return json_error("request_too_large", message="rendered PPTX exceeds the binary artifact limit", status=413)
     try:
-        art = prov.create_binary(
-            name=name.strip(), data=data,
-            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            kind="pptx", source="manual", slug=slug,
-            actor="user", session_id=_session_key(request),
-        )
+        if slug:
+            lock = getattr(prov, "mutation_lock", None)
+            if lock is None:
+                return json_error("create_unavailable", message="this provider cannot reserve a presentation slug", status=503)
+            with lock:
+                if prov.get(slug) is not None:
+                    return json_error("slug_conflict", message="artifact slug already exists", status=409)
+                art = prov.create_binary(
+                    name=name.strip(), data=data,
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    kind="pptx", source="manual", slug=slug,
+                    actor="user", session_id=_session_key(request),
+                )
+        else:
+            art = prov.create_binary(
+                name=name.strip(), data=data,
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                kind="pptx", source="manual",
+                actor="user", session_id=_session_key(request),
+            )
     except (ValueError, PermissionError, NotImplementedError) as exc:
         _audit(request, "artifact.deck_create", "error", str(exc))
         return json_error("artifact_create_failed", message=str(exc), status=400)
