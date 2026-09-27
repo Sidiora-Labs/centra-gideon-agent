@@ -117,6 +117,9 @@ async function signIn(browser: BrowserHarness, username: string) {
   await browser.waitFor("document.querySelector('#gideon-password')", "sign-in form");
   await browser.evaluate(`(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username',${JSON.stringify(username)});set('gideon-password',${JSON.stringify(password)});document.querySelector('form').requestSubmit();return true})()`);
   await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes(${JSON.stringify(`Signed in as ${username}`)})`, `signed-in identity ${username}`);
+  const typography = await browser.evaluate<{ heading: string; identity: string }>(`(()=>{const root=document.querySelector('[data-gideon-assistant]');const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let identity=root;while(walker.nextNode()){if(walker.currentNode.textContent?.includes('Signed in as')){identity=walker.currentNode.parentElement??root;break}}return {heading:getComputedStyle(root.querySelector('h1')).fontFamily,identity:getComputedStyle(identity).fontFamily}})()`);
+  assert.match(typography.heading, /system-ui/i);
+  assert.match(typography.identity, /system-ui/i);
 }
 
 function routeHref(origin: string, destination: string, options: {
