@@ -12,9 +12,9 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
   const { palette } = useShellTheme()
   const client = useMemo(() => createPersonalClient(scope), [scope.cacheKey])
   const [goalsState, setGoalsState] = useState<{ owner: string; rows: readonly PersonalRecord<HumanGoal>[] } | null>(null)
-  const [titleState, setTitleState] = useState({ owner: scope.cacheKey, value: '' })
-  const [descriptionState, setDescriptionState] = useState({ owner: scope.cacheKey, value: '' })
-  const [targetDateState, setTargetDateState] = useState({ owner: scope.cacheKey, value: '' })
+  const [titleState, setTitleState] = useState({ owner: scope.cacheKey, value: '', edited: false })
+  const [descriptionState, setDescriptionState] = useState({ owner: scope.cacheKey, value: '', edited: false })
+  const [targetDateState, setTargetDateState] = useState({ owner: scope.cacheKey, value: '', edited: false })
   const [busyOwner, setBusyOwner] = useState<string | null>(null)
   const [errorState, setErrorState] = useState({ owner: scope.cacheKey, value: '' })
   const [noticeState, setNoticeState] = useState({ owner: scope.cacheKey, value: '' })
@@ -24,6 +24,9 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
   const title = titleState.owner === scope.cacheKey ? titleState.value : ''
   const description = descriptionState.owner === scope.cacheKey ? descriptionState.value : ''
   const targetDate = targetDateState.owner === scope.cacheKey ? targetDateState.value : ''
+  const titleEdited = titleState.owner === scope.cacheKey && titleState.edited
+  const descriptionEdited = descriptionState.owner === scope.cacheKey && descriptionState.edited
+  const targetDateEdited = targetDateState.owner === scope.cacheKey && targetDateState.edited
   const goals = goalsState?.owner === scope.cacheKey ? goalsState.rows : []
   const error = errorState.owner === scope.cacheKey ? errorState.value : ''
   const notice = noticeState.owner === scope.cacheKey ? noticeState.value : ''
@@ -55,12 +58,12 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
     const owner = scope.cacheKey
     setBusyOwner(owner); setError(''); setNotice('')
     try {
-      const operation = preparePendingGoalWrite(createKey, { title: title.trim() || pendingTitle, description: description.trim() || pendingDescription, status: 'active', target_date: (targetDate || pendingTargetDate) || null, expected_revision: 0 })
+      const operation = preparePendingGoalWrite(createKey, { title: title.trim() || pendingTitle, description: descriptionEdited ? description.trim() : description.trim() || pendingDescription, status: 'active', target_date: (targetDateEdited ? targetDate : targetDate || pendingTargetDate) || null, expected_revision: 0 })
       const record = await client.saveGoal(undefined, operation.body as { title: string; description: string; status: 'active'; target_date: string | null }, operation.request_id, Number(operation.body.expected_revision ?? 0))
       if (record.identity.ownerScopeKey !== scope.cacheKey || record.identity.nativeId !== record.value.id) throw new Error('The saved goal belongs to a different account or identity.')
       if (scopeRef.current !== owner) return
       clearPendingGoalWrite(createKey)
-      setTitleState({ owner, value: '' }); setDescriptionState({ owner, value: '' }); setTargetDateState({ owner, value: '' }); setNotice('Goal saved. Open it to shape its plan and progress.')
+      setTitleState({ owner, value: '', edited: false }); setDescriptionState({ owner, value: '', edited: false }); setTargetDateState({ owner, value: '', edited: false }); setNotice('Goal saved. Open it to shape its plan and progress.')
       const rows = await client.readGoals()
       if (scopeRef.current !== owner) return
       setGoalsState({ owner, rows })
@@ -90,9 +93,9 @@ export function GoalsScreen({ route, scope, navigate, onReturn }: ModuleProps) {
           <h2 id="goal-create-heading">Name a goal</h2><p>Save an active human goal, then add milestones, sessions and measurements.</p>
           {pendingCreate && <p role="status">{pendingCreate.rejected ? 'The native service rejected this goal save. Review the fields and submit again.' : 'A goal save needs confirmation. Retrying sends the same saved change.'}</p>}
           <form className="gideon-goals__form" onSubmit={create}>
-            <label htmlFor="goal-title">Goal title</label><input id="goal-title" required maxLength={200} disabled={!!pendingCreate && !pendingCreate.rejected} value={title || pendingTitle} onChange={event => setTitleState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
-            <label htmlFor="goal-description">What does success mean?</label><textarea id="goal-description" rows={3} maxLength={10000} disabled={!!pendingCreate && !pendingCreate.rejected} value={description || pendingDescription} onChange={event => setDescriptionState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
-            <label htmlFor="goal-target-date">Target date <span>Optional</span></label><input id="goal-target-date" type="date" disabled={!!pendingCreate && !pendingCreate.rejected} value={targetDate || pendingTargetDate} onChange={event => setTargetDateState({ owner: scope.cacheKey, value: event.currentTarget.value })} />
+            <label htmlFor="goal-title">Goal title</label><input id="goal-title" required maxLength={200} disabled={!!pendingCreate && !pendingCreate.rejected} value={titleEdited ? title : title || pendingTitle} onChange={event => setTitleState({ owner: scope.cacheKey, value: event.currentTarget.value, edited: true })} />
+            <label htmlFor="goal-description">What does success mean?</label><textarea id="goal-description" rows={3} maxLength={10000} disabled={!!pendingCreate && !pendingCreate.rejected} value={descriptionEdited ? description : description || pendingDescription} onChange={event => setDescriptionState({ owner: scope.cacheKey, value: event.currentTarget.value, edited: true })} />
+            <label htmlFor="goal-target-date">Target date <span>Optional</span></label><input id="goal-target-date" type="date" disabled={!!pendingCreate && !pendingCreate.rejected} value={targetDateEdited ? targetDate : targetDate || pendingTargetDate} onChange={event => setTargetDateState({ owner: scope.cacheKey, value: event.currentTarget.value, edited: true })} />
             <button type="submit" style={buttonStyle} disabled={busyOwner === scope.cacheKey || (!title.trim() && !pendingCreate)}>{busyOwner === scope.cacheKey ? 'Saving…' : pendingCreate ? pendingCreate.rejected ? 'Save updated goal' : 'Retry goal save' : 'Save goal'}</button>
           </form>
         </section>

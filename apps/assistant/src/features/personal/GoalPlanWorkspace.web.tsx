@@ -45,6 +45,7 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
   const [noticeState, setNoticeState] = useState({ key: recordKey, value: '' })
   const [checkinValue, setCheckinValue] = useState('')
   const [checkinNotes, setCheckinNotes] = useState('')
+  const [checkinNotesEdited, setCheckinNotesEdited] = useState(false)
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionStart, setSessionStart] = useState('')
   const [sessionEnd, setSessionEnd] = useState('')
@@ -93,7 +94,7 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
       setParentId(typeof draft?.parent_id === 'string' ? draft.parent_id : plan.value.plan.parent_id ?? '')
       setUnit(typeof draft?.unit === 'string' ? draft.unit : plan.value.plan.unit)
       setTargetValue(draft?.target_value == null ? '' : String(draft.target_value))
-      setNewMilestone(''); setCheckinValue(''); setCheckinNotes(''); setSessionTitle(''); setSessionStart(''); setSessionEnd('')
+      setNewMilestone(''); setCheckinValue(''); setCheckinNotes(''); setCheckinNotesEdited(false); setSessionTitle(''); setSessionStart(''); setSessionEnd('')
       setLoadedKey(recordKey)
       setLoadingKey(current => current === recordKey ? null : current)
     }
@@ -140,12 +141,12 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
     const key = recordKey
     setBusyKey(key); setError(''); setNotice('')
     try {
-      const operation = pendingCheckin && !pendingCheckin.rejected ? pendingCheckin : preparePendingGoalWrite(checkinWriteKey, { goal_id: id, value: Number(checkinValue), observed_at: new Date().toISOString(), notes: checkinNotes.trim() })
+      const operation = pendingCheckin && !pendingCheckin.rejected ? pendingCheckin : preparePendingGoalWrite(checkinWriteKey, { goal_id: id, value: Number(checkinValue), observed_at: new Date().toISOString(), notes: checkinNotesEdited ? checkinNotes.trim() : checkinNotes.trim() || String(pendingCheckin?.body.notes ?? '') })
       const result = await client.addGoalCheckin(operation.body)
       if (result.goal_id !== id) throw new Error('Native check-in belongs to a different goal.')
       if (recordKeyRef.current !== key) return
       clearPendingGoalWrite(checkinWriteKey)
-      setCheckinValue(''); setCheckinNotes(''); setNotice('Measurement saved to this goal.'); refresh()
+      setCheckinValue(''); setCheckinNotes(''); setCheckinNotesEdited(false); setNotice('Measurement saved to this goal.'); refresh()
     } catch (reason) {
       if (reason instanceof GatewayError && [400, 409].includes(reason.status)) rejectPendingGoalWrite(checkinWriteKey)
       if (recordKeyRef.current === key) setError(errorText(reason))
@@ -213,7 +214,7 @@ export function GoalPlanWorkspace({ route, scope, navigate, onReturn }: ModulePr
           {!data.checkins.length && <p>No measurements recorded yet.</p>}
           {data.velocity && <p className="gideon-goal-plan__velocity">Observed rate: {String(data.velocity.value_per_day)} {String(data.velocity.unit)} per day</p>}
           {pendingCheckin && <p role="status">{pendingCheckin.rejected ? 'The measurement was rejected. Review the value and try again.' : 'A measurement save needs confirmation. Retry repeats the same value and observation time.'}</p>}
-          <form className="gideon-goal-plan__form" onSubmit={saveCheckin}><label htmlFor="goal-checkin-value">Record a measurement</label><input id="goal-checkin-value" disabled={locked || (!!pendingCheckin && !pendingCheckin.rejected)} required type="number" step="any" value={checkinValue || (pendingCheckin ? String(pendingCheckin.body.value ?? '') : '')} onChange={event => setCheckinValue(event.currentTarget.value)} /><label htmlFor="goal-checkin-notes">Note</label><textarea id="goal-checkin-notes" disabled={locked || (!!pendingCheckin && !pendingCheckin.rejected)} rows={2} maxLength={5000} value={checkinNotes || String(pendingCheckin?.body.notes ?? '')} onChange={event => setCheckinNotes(event.currentTarget.value)} /><button type="submit" style={buttonStyle} disabled={locked || (checkinValue === '' && (!pendingCheckin || pendingCheckin.rejected))}>{busyKey === recordKey ? 'Saving…' : pendingCheckin ? pendingCheckin.rejected ? 'Save updated check-in' : 'Retry check-in' : 'Save check-in'}</button></form>
+          <form className="gideon-goal-plan__form" onSubmit={saveCheckin}><label htmlFor="goal-checkin-value">Record a measurement</label><input id="goal-checkin-value" disabled={locked || (!!pendingCheckin && !pendingCheckin.rejected)} required type="number" step="any" value={checkinValue || (pendingCheckin ? String(pendingCheckin.body.value ?? '') : '')} onChange={event => setCheckinValue(event.currentTarget.value)} /><label htmlFor="goal-checkin-notes">Note</label><textarea id="goal-checkin-notes" disabled={locked || (!!pendingCheckin && !pendingCheckin.rejected)} rows={2} maxLength={5000} value={checkinNotesEdited ? checkinNotes : checkinNotes || String(pendingCheckin?.body.notes ?? '')} onChange={event => { setCheckinNotes(event.currentTarget.value); setCheckinNotesEdited(true) }} /><button type="submit" style={buttonStyle} disabled={locked || (checkinValue === '' && (!pendingCheckin || pendingCheckin.rejected))}>{busyKey === recordKey ? 'Saving…' : pendingCheckin ? pendingCheckin.rejected ? 'Save updated check-in' : 'Retry check-in' : 'Save check-in'}</button></form>
         </section>
         <section className="gideon-goal-plan__panel" aria-labelledby="goal-sources"><h2 id="goal-sources">Source links</h2><p>Link real tasks, sessions or running programs while keeping their native identity.</p>
           <div className="gideon-goal-plan__add-row"><label className="sr-only" htmlFor="goal-source-select">Choose a source record</label><select id="goal-source-select" disabled={locked || (!!pendingPlan && !pendingPlan.rejected)} value={selectedSource} onChange={event => setSelectedSource(event.currentTarget.value)}><option value="">Choose a task, session or program</option>{sources.map(item => <option key={sourceKey(item)} value={sourceKey(item)}>{item.title} · {item.kind} · {item.status}</option>)}</select><button type="button" style={buttonStyle} onClick={addSource} disabled={locked || (!!pendingPlan && !pendingPlan.rejected) || !selectedSource}>Link source</button></div>

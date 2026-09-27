@@ -58,7 +58,17 @@ async def main(origin):
         if len(attempts) == 1:
             request.transport.close()
         return response
-    app = web.Application(middlewares=[delay_second_plan, lose_committed_checkin_reply, token_auth.token_auth_middleware(port=10000)])
+    goal_conflict_injected = False
+    @web.middleware
+    async def native_goal_request_conflict(request, handler):
+        nonlocal goal_conflict_injected
+        if request.method == 'POST' and request.path == '/api/capabilities/identity/goals/goals' and not goal_conflict_injected:
+            body = await request.json()
+            if body.get('title') == 'Build a neighborhood garden':
+                GoalStore(goals_path).save_goal(title='Competing native request', description='A distinct write holding the submitted request ID', request_id=body['request_id'])
+                goal_conflict_injected = True
+        return await handler(request)
+    app = web.Application(middlewares=[delay_second_plan, lose_committed_checkin_reply, native_goal_request_conflict, token_auth.token_auth_middleware(port=10000)])
     app['port'] = 10000; app['allowed_origins'] = {origin}
     app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
     app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
@@ -124,10 +134,18 @@ createRoot(document.getElementById('root')).render(<Root/>)
     await browser.waitFor("document.getElementById('goal-title')?.closest('form').querySelector('button[type=submit]').disabled===false", 'goal title state rendered before description entry')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-description');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Make a shared growing space');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-description')?.value==='Make a shared growing space'", 'goal description rendered before save')
+    await browser.evaluate(`(()=>{const input=document.getElementById('goal-target-date');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'2030-03-01');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-target-date')?.value==='2030-03-01'", 'optional goal date rendered before save')
+    await browser.evaluate("document.querySelector('.gideon-goals__form button[type=submit]').click()")
+    await browser.waitFor("document.body.innerText.includes('The native service rejected this goal save.') && document.getElementById('goal-description')?.value==='Make a shared growing space' && document.getElementById('goal-target-date')?.value==='2030-03-01'", 'real native request conflict preserves rejected optional fields')
+    await browser.evaluate(`(()=>{const description=document.getElementById('goal-description');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(description,'');description.dispatchEvent(new Event('input',{bubbles:true}));description.dispatchEvent(new Event('change',{bubbles:true}));const target=document.getElementById('goal-target-date');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(target,'');target.dispatchEvent(new Event('input',{bubbles:true}));target.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-description')?.value==='' && document.getElementById('goal-target-date')?.value===''", 'cleared optional goal fields remain empty after editing')
     await browser.evaluate("document.querySelector('.gideon-goals__form button[type=submit]').click()")
     await browser.waitFor("Array.from(document.querySelectorAll('.gideon-goals__goal')).some(button=>button.innerText.includes('Build a neighborhood garden'))", 'new human goal saved')
     const nativeGoal = await browser.evaluate<{ id: string; revision: number; status: string }>("fetch('/api/capabilities/identity/goals/goals').then(response=>response.json()).then(rows=>rows.find(row=>row.title==='Build a neighborhood garden'))")
     expect(nativeGoal).toMatchObject({ status: 'active', revision: 1 })
+    const optionalFields = await browser.evaluate<{ description: string; target_date: string | null }>(`fetch('/api/capabilities/identity/goals/goals/${encodeURIComponent(nativeGoal.id)}').then(response=>response.json()).then(goal=>({description:goal.description,target_date:goal.target_date}))`)
+    expect(optionalFields).toEqual({ description: '', target_date: null })
     await browser.evaluate(`(()=>{const key='gideon-goals-route-trace';const trace=JSON.parse(sessionStorage.getItem(key)||'[]');const record=event=>{trace.push({event,href:location.href,readyState:document.readyState,timeOrigin:performance.timeOrigin,hasParent:!!document.getElementById('goal-parent'),hasMilestone:!!document.getElementById('new-milestone'),body:(document.body?.innerText||'').slice(0,700)});sessionStorage.setItem(key,JSON.stringify(trace.slice(-30)))};let present=false;record('trace-armed');addEventListener('beforeunload',()=>record('beforeunload'));addEventListener('pageshow',()=>record('pageshow'));addEventListener('load',()=>record('load'));const observe=()=>{const next=!!document.getElementById('goal-parent')&&!!document.getElementById('new-milestone');if(next!==present){present=next;record(next?'plan-controls-visible':'plan-controls-missing')}};new MutationObserver(observe).observe(document.documentElement,{childList:true,subtree:true});setInterval(observe,50);return true})()`)
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-goals__goal')).find(button=>button.innerText.includes('Build a neighborhood garden')).click()")
     const readyExpression = `document.querySelector('#goal-parent option[value=${JSON.stringify(parentId)}]') && document.getElementById('new-milestone') && document.querySelector('.gideon-goal-plan__identity code')?.textContent?.trim()===${JSON.stringify(nativeGoal.id)} && new URLSearchParams(location.search).get('recordId')===${JSON.stringify(nativeGoal.id)}`
@@ -174,6 +192,21 @@ createRoot(document.getElementById('root')).render(<Root/>)
     const afterRetry = await browser.evaluate<{ checkins: Array<{ id: string; value: number }> }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
     expect(afterRetry.checkins).toHaveLength(1)
     expect(afterRetry.checkins[0]).toMatchObject({ value: 4 })
+    const duplicateObservedAt = Date.parse(String(firstAttempt[0].observed_at))
+    await browser.evaluate(`(()=>{const epoch=${duplicateObservedAt};const NativeDate=Date;class FixedDate extends NativeDate{constructor(...values){super(...(values.length?values:[epoch]))}static now(){return epoch}};Object.defineProperty(window,'Date',{value:FixedDate,configurable:true});return true})()`)
+    await browser.evaluate(`(()=>{const value=document.getElementById('goal-checkin-value');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(value,'5');value.dispatchEvent(new Event('input',{bubbles:true}));const notes=document.getElementById('goal-checkin-notes');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(notes,'Clear this rejected note');notes.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-checkin-value')?.value==='5' && document.getElementById('goal-checkin-notes')?.value==='Clear this rejected note'", 'check-in edit rendered before a real duplicate-time conflict')
+    await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
+    await browser.waitFor("document.body.innerText.includes('The measurement was rejected. Review the value and try again.') && document.getElementById('goal-checkin-notes')?.value==='Clear this rejected note'", 'native duplicate observation returns a real rejected check-in')
+    await browser.evaluate(`(()=>{const notes=document.getElementById('goal-checkin-notes');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(notes,'');notes.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
+    await browser.waitFor("document.getElementById('goal-checkin-notes')?.value===''", 'cleared check-in note remains empty after editing')
+    await browser.evaluate(`(()=>{const epoch=${duplicateObservedAt + 1000};const NativeDate=Date;class FixedDate extends NativeDate{constructor(...values){super(...(values.length?values:[epoch]))}static now(){return epoch}};Object.defineProperty(window,'Date',{value:FixedDate,configurable:true});return true})()`)
+    await browser.evaluate("document.getElementById('goal-checkin-value').closest('form').querySelector('button[type=submit]').click()")
+    await browser.waitFor("document.body.innerText.includes('Measurement saved to this goal.')", 'edited rejected check-in saves through the native endpoint')
+    const clearedNote = await browser.evaluate<{ checkins: Array<{ value: number; notes: string }> }>(`fetch('/api/capabilities/identity/goal-plans/${encodeURIComponent(identity.id)}').then(response=>response.json())`)
+    expect(clearedNote.checkins).toHaveLength(2)
+    expect(clearedNote.checkins.find(item=>item.value===5)?.notes).toBe('')
+    await browser.waitFor("document.querySelector('#goal-checkins')?.parentElement?.innerText.includes('5 units')", 'cleared-note check-in refresh completes before the next action')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-title');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Planting bed workshop');input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`)
     await browser.waitFor("document.getElementById('goal-session-title')?.value==='Planting bed workshop'", 'session title state rendered before start entry')
     await browser.evaluate(`(()=>{const input=document.getElementById('goal-session-start');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'2030-01-01T10:00');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
