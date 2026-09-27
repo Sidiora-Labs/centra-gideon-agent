@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, type CSSProperties } from 'react'
 import { GatewayError } from '../../shared/transport.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { createShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { createPersonalClient, type PersonalAvailability } from './client'
 import { PERSONAL_SPACES, personalSpaceRoute, type PersonalSpace } from './routes'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
+import { useShellTheme } from '../../shared/shell/shellTheme.web'
 
 export type PersonalModuleProps = ModuleProps
 
@@ -60,6 +61,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
   const [draftState, setDraftState] = useState(() => ({ scopeKey: scope.cacheKey, value: { ...(drafts.get(scope.cacheKey) ?? emptyDraft()) } }))
   const draft = draftState.scopeKey === scope.cacheKey ? draftState.value : drafts.get(scope.cacheKey) ?? emptyDraft()
   const space = spaceForRoute(route)
+  const { palette } = useShellTheme()
   const client = React.useMemo(() => createPersonalClient(scope), [scope.cacheKey])
   useEffect(() => () => client.dispose(), [client])
   useEffect(() => { if (draftState.scopeKey === scope.cacheKey) drafts.set(scope.cacheKey, draftState.value) }, [scope.cacheKey, draftState])
@@ -75,8 +77,28 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
   })) : onReturn
   const loadIdeas = React.useCallback(() => client.readIdeas().then(value => ({ state: 'available' as const, value })), [client])
   const loadGoals = React.useCallback(() => client.readGoals().then(value => ({ state: 'available' as const, value })), [client])
+  const loadFocused = React.useCallback(() => {
+    switch (space) {
+      case 'identity': return client.readIdentityProfile().then(value => ({ state: 'available' as const, value }))
+      case 'learning': return client.readLearningCaptures()
+      case 'companion': return client.readCompanion()
+      case 'memory': return client.readMemory().then(value => ({ state: 'available' as const, value }))
+      case 'health': return client.readHealthMeasurements().then(value => ({ state: 'available' as const, value }))
+      case 'journal': return client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+      default: return Promise.resolve({ state: 'unavailable' as const, reason: 'This personal space is unavailable.' })
+    }
+  }, [client, space])
+  const themeStyle = {
+    '--personal-text': palette.text,
+    '--personal-muted': palette.muted,
+    '--personal-border': palette.line,
+    '--personal-card': palette.card,
+    '--personal-canvas': palette.canvas,
+    '--personal-accent': palette.blueDark,
+    '--personal-accent-surface': palette.sky,
+  } as CSSProperties
 
-  return <div className="gideon-personal-home">
+  return <div className="gideon-personal-home" style={themeStyle}>
     <WorkspaceFrame route={route} mode="full" title={title} onBack={back}>
       <p className="gideon-personal-intro">Keep personal decisions and progress connected to their canonical Gideon records.</p>
       {(ideas || goals) && <div className="gideon-personal-entry-grid">
@@ -93,17 +115,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
           <NativeStatus label="Goals" load={loadGoals} />
         </section>
       </div>}
-      {!ideas && !goals && <NativeStatus label={title} load={() => {
-        switch (space) {
-          case 'identity': return client.readIdentityProfile().then(value => ({ state: 'available' as const, value })).catch(error => Promise.reject(error))
-          case 'learning': return client.readLearningCaptures()
-          case 'companion': return client.readCompanion()
-          case 'memory': return client.readMemory().then(value => ({ state: 'available' as const, value }))
-          case 'health': return client.readHealthMeasurements().then(value => ({ state: 'available' as const, value }))
-          case 'journal': return client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
-          default: return Promise.resolve({ state: 'unavailable' as const, reason: 'This personal space is unavailable.' })
-        }
-      }} />}
+      {!ideas && !goals && <NativeStatus label={title} load={loadFocused} />}
       <nav aria-label="Personal spaces" className="gideon-personal-spaces">
         {PERSONAL_SPACES.map(item => <button key={item.id} type="button" aria-current={item.id === space ? 'page' : undefined}
           onClick={() => navigate(personalSpaceRoute(item.id, { returnTo: {
@@ -113,17 +125,17 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
       </nav>
     </WorkspaceFrame>
     <style>{`
-      .gideon-personal-home{box-sizing:border-box;width:100%;min-width:0;height:100%;color:var(--shell-text,#f5f2f0)}
-      .gideon-personal-intro{margin:0;padding:20px 24px 4px;color:var(--shell-text-muted,#aaa5a2);max-width:70ch}
+      .gideon-personal-home{box-sizing:border-box;width:100%;min-width:0;height:100%;color:var(--personal-text)}
+      .gideon-personal-intro{margin:0;padding:20px 24px 4px;color:var(--personal-muted);max-width:70ch}
       .gideon-personal-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px 24px}
-      .gideon-personal-entry{display:flex;min-width:0;flex-direction:column;gap:10px;padding:18px;border:1px solid var(--shell-border,#383432);border-radius:14px;background:var(--shell-surface,#201e1d)}
-      .gideon-personal-entry h2{margin:0 0 4px;font-size:1.15rem}.gideon-personal-entry p{margin:0;color:var(--shell-text-muted,#aaa5a2)}
-      .gideon-personal-entry textarea{box-sizing:border-box;width:100%;resize:vertical;border:1px solid var(--shell-border,#514b48);border-radius:8px;padding:10px;background:var(--shell-canvas,#171615);color:inherit;font:inherit}
+      .gideon-personal-entry{display:flex;min-width:0;flex-direction:column;gap:10px;padding:18px;border:1px solid var(--personal-border);border-radius:14px;background:var(--personal-card)}
+      .gideon-personal-entry h2{margin:0 0 4px;font-size:1.15rem}.gideon-personal-entry p{margin:0;color:var(--personal-muted)}
+      .gideon-personal-entry textarea{box-sizing:border-box;width:100%;resize:vertical;border:1px solid var(--personal-border);border-radius:8px;padding:10px;background:var(--personal-canvas);color:inherit;font:inherit}
       .gideon-personal-status{padding:4px 0}.gideon-personal-status p{margin:0}.gideon-personal-status button{margin-top:8px}
       .gideon-personal-spaces{display:flex;flex-wrap:wrap;gap:8px;padding:8px 24px 20px}
-      .gideon-personal-spaces button{border:1px solid var(--shell-border,#514b48);border-radius:999px;padding:8px 12px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-      .gideon-personal-spaces button[aria-current="page"]{border-color:var(--shell-accent,#ff806e);background:color-mix(in srgb,var(--shell-accent,#ff806e) 14%,transparent)}
-      .gideon-personal-spaces button:focus-visible,.gideon-personal-entry textarea:focus-visible{outline:2px solid var(--shell-accent,#ff806e);outline-offset:2px}
+      .gideon-personal-spaces button{border:1px solid var(--personal-border);border-radius:999px;padding:8px 12px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+      .gideon-personal-spaces button[aria-current="page"]{border-color:var(--personal-accent);background:var(--personal-accent-surface)}
+      .gideon-personal-spaces button:focus-visible,.gideon-personal-entry textarea:focus-visible{outline:2px solid var(--personal-accent);outline-offset:2px}
       @media(max-width:650px){.gideon-personal-entry-grid{grid-template-columns:minmax(0,1fr);padding:14px 16px}.gideon-personal-intro{padding:16px 16px 4px}.gideon-personal-spaces{padding-inline:16px}}
     `}</style>
   </div>

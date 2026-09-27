@@ -61,8 +61,10 @@ async function resolve(scope: OwnerScope, route: ShellRoute): Promise<RouteAvail
       const result = await client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
       if (result.state === 'unavailable') return 'unavailable'
     } else if (placement === 'capabilities/wellbeing/memory') await client.readMemory()
-    else if (placement.startsWith('capabilities/identity/')) await client.readIdentityProfile()
-    else if (placement.startsWith('capabilities/wellbeing/')) await client.readHealthMeasurements()
+    else if (placement === 'capabilities/identity/autobiography') await client.readIdentityStories()
+    else if (placement === 'capabilities/identity/twin') await client.readIdentityProfile()
+    else if (placement === 'capabilities/wellbeing/overview' || placement === 'capabilities/wellbeing/measurements') await client.readHealthMeasurements()
+    else if (placement.startsWith('capabilities/identity/') || placement.startsWith('capabilities/wellbeing/')) return 'unavailable'
     else return 'missing'
     return 'available'
   } catch (error) { return availability(error) }

@@ -34,7 +34,7 @@ beforeAll(async () => {
   const python = `import asyncio, sys\nfrom pathlib import Path\nfrom aiohttp import web\nfrom gideon.interfaces.dashboard.handlers import capabilities_identity_goals\nasync def main():\n app=web.Application()\n capabilities_identity_goals.register(app, store_path=Path(sys.argv[2])/'goals.sqlite3')\n runner=web.AppRunner(app); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',int(sys.argv[1])); await site.start()\n print('ready',flush=True)\n await asyncio.Event().wait()\nasyncio.run(main())`
   const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-c', python, String(port), directory], {
     cwd: appRoot,
-    env: { ...process.env, PYTHONPATH: join(appRoot, 'runtime') },
+    env: { ...process.env, GIDEON_HOME: directory, PYTHONPATH: join(appRoot, 'runtime') },
   })
   processes.push(child)
   await new Promise<void>((ready, fail) => {
@@ -102,6 +102,15 @@ describe('personal native contracts', () => {
     for (const module of personalModuleDefinitions) {
       const route = createShellRoute(module.id === 'goals' ? 'goals' : 'ideas', { view: 'workspace', placement: { id: module.id } })
       expect(module.matches(route)).toBe(true)
+    }
+  })
+
+  it('does not resolve unimplemented Identity and Health placements as ready', async () => {
+    for (const id of ['capabilities/identity/fidelity', 'capabilities/wellbeing/labs']) {
+      const module = personalModuleDefinitions.find(item => item.id === id)
+      expect(module).toBeDefined()
+      const route = createShellRoute('ideas', { view: 'workspace', placement: { id } })
+      await expect(module!.resolve(scope, route)).resolves.toBe('unavailable')
     }
   })
 })
