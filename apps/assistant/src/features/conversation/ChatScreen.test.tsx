@@ -220,13 +220,13 @@ window.captureNextCommit = (exerciseMismatchEvents = false) => {
   window.captureFirstCommit = true;
 };
 window.targetSession = null;
-window.renderChat = (nextSessionId, scrollY) => {
+window.renderChat = (nextSessionId, scrollY, selectedMessageId) => {
   window.targetSession = nextSessionId || null;
   return root.render(React.createElement(React.Fragment, null,
     React.createElement(CommitProbe, { sequence: ++commitSequence }),
     React.createElement(ShellThemeProvider, { initialPreference: 'light' },
-      React.createElement(ChatScreen, { controller, scope, sessionId: nextSessionId, scrollY,
-        returnTo: { destination: 'apps', selectionId: 'application-1' },
+      React.createElement(ChatScreen, { controller, scope, sessionId: nextSessionId, scrollY, selectedMessageId,
+        returnTo: { destination: 'apps', sessionId: nextSessionId, selectionId: selectedMessageId, scrollY },
         onScrollChange: value => { window.savedScroll = value; },
         onReturn: () => { window.returned = (window.returned || 0) + 1; } }))));
 };
@@ -318,7 +318,8 @@ window.ready = true;
     })()`);
     await evaluate("window.unmountChat()");
     await evaluate("new Promise(done => setTimeout(done, 50))");
-    await evaluate(`window.mountChat(${JSON.stringify(submitted.sessionId)}, 0)`);
+    const selectedMessageId = await evaluate(`window.snapshot().messages.find(message => message.role === 'user' && message.content === ${JSON.stringify(prompt)}).id`);
+    await evaluate(`window.mountChat(${JSON.stringify(submitted.sessionId)}, 0, ${JSON.stringify(selectedMessageId)})`);
     const returned = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
       const state = window.snapshot();
       const input = document.getElementById('gideon-message-composer');
@@ -329,6 +330,7 @@ window.ready = true;
     }, 50) })`);
     expect(returned.draft).toBe(retainedDraft);
     expect(returned.scroll).toBe(0);
+    expect(await evaluate(`document.getElementById(${JSON.stringify(`gideon-message-${selectedMessageId}`)})?.style.borderWidth`)).toBe("2px");
     await evaluate("document.querySelector('[aria-label=\\\"Return to previous workspace\\\"]')?.click()");
     expect(await evaluate("window.returned")).toBe(1);
 
