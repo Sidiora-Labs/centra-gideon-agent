@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { createServer, type ViteDevServer } from "vite";
 
 type PendingCommand = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
@@ -23,10 +24,12 @@ export async function startViteEntryServer(options: {
   entryFile: string;
   apiOrigin: string;
   route?: string;
+  staticAssetsDirectory?: string;
 }): Promise<ViteDevServer> {
   const root = resolve(options.root);
   const entryFile = resolve(options.entryFile);
   const route = options.route ?? "/assistant";
+  const staticAssetsDirectory = options.staticAssetsDirectory && resolve(options.staticAssetsDirectory);
   const cacheDir = await mkdtemp(join(tmpdir(), `gideon-vite-cache-${process.pid}-`));
   let server: ViteDevServer | undefined;
   try {
@@ -60,7 +63,60 @@ export async function startViteEntryServer(options: {
       plugins: [{
         name: "gideon-actual-tsx-entry",
         configureServer(viteServer) {
-          viteServer.middlewares.use(route, (_request, response) => {
+          if (staticAssetsDirectory) viteServer.middlewares.use(async (request, response, next) => {
+            const assetPrefix = `${route}/assets/`;
+            let pathname: string;
+            try { pathname = new URL(request.url ?? "/", "http://gideon.test").pathname; }
+            catch { next(); return; }
+            if (!pathname.startsWith(assetPrefix)) { next(); return; }
+            if (request.method !== "GET" && request.method !== "HEAD") {
+              response.statusCode = 405;
+              response.setHeader("Allow", "GET, HEAD");
+              response.end("Method not allowed");
+              return;
+            }
+            let assetPath: string;
+            try { assetPath = decodeURIComponent(pathname.slice(assetPrefix.length)); }
+            catch {
+              response.statusCode = 400;
+              response.end("Invalid asset path");
+              return;
+            }
+            const filePath = resolve(staticAssetsDirectory, assetPath);
+            if (!assetPath || (filePath !== staticAssetsDirectory && !filePath.startsWith(`${staticAssetsDirectory}${sep}`))) {
+              response.statusCode = 403;
+              response.end("Forbidden");
+              return;
+            }
+            try {
+              const info = await stat(filePath);
+              if (!info.isFile()) throw new Error("not a file");
+              const contentType = ({
+                ".css": "text/css; charset=utf-8",
+                ".js": "text/javascript; charset=utf-8",
+                ".json": "application/json; charset=utf-8",
+                ".svg": "image/svg+xml",
+                ".ttf": "font/ttf",
+                ".woff": "font/woff",
+                ".woff2": "font/woff2",
+              } as Record<string, string>)[extname(filePath)] ?? "application/octet-stream";
+              response.statusCode = 200;
+              response.setHeader("Content-Type", contentType);
+              response.setHeader("Content-Length", info.size);
+              response.setHeader("Cache-Control", "no-store");
+              if (request.method === "HEAD") response.end();
+              else createReadStream(filePath).pipe(response);
+            } catch {
+              response.statusCode = 404;
+              response.setHeader("Content-Type", "text/plain; charset=utf-8");
+              response.end("Not found");
+            }
+          });
+          viteServer.middlewares.use(route, (request, response, next) => {
+            if (request.method !== "GET" || !request.headers.accept?.includes("text/html")) {
+              next();
+              return;
+            }
             response.setHeader("Content-Type", "text/html; charset=utf-8");
             response.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/@fs${entryFile}"></script></body></html>`);
           });
@@ -223,7 +279,7 @@ export async function startBrowserHarness(options: {
   const waitFor = async (expression: string, label = expression, timeoutMs = 20000) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (await evaluate<boolean>(`Boolean(${expression})`)) return;
+      if (await evaluate<boolean>(`(async () => Boolean(await (${expression})))()`)) return;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     const details = await evaluate<string>("document.body?.innerText || ''").catch(error => String(error));
