@@ -4,12 +4,13 @@ import { useState } from "react";
 import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AssistantBootstrapProvider, useAssistantBootstrap, type BootstrapState } from "./src/shared/bootstrap.web";
-import { consoleReturnHref, targetSessionId, useAssistantEntry } from "./src/features/delivery/entry.web";
+import { targetSessionId, useAssistantEntry } from "./src/features/delivery/entry.web";
 import { CONSOLE_HANDOFFS, ShellIdentity } from "./src/shared/shell/ShellIdentity";
 import { ShellNavigation, type ShellNavigationIcon } from "./src/shared/shell/ShellNavigation";
 import { ShellThemeControls, ShellThemeProvider, useShellTheme } from "./src/shared/shell/shellTheme";
 import { createShellRoute, SHELL_DESTINATIONS, type ShellDestination } from "./src/shared/shell/shellRoutes";
 import { WorkspaceFrame } from "./src/shared/shell/WorkspaceFrame";
+import { moduleForRoute, TrustedModuleContent } from "./src/shared/shell/webModules";
 import { Avatar, Button, Card, IconButton, LinkRow, s, Sheet } from "./src/ui";
 
 const icons: Record<ShellDestination, ShellNavigationIcon> = {
@@ -79,6 +80,24 @@ function ReadyWorkspace({ state, refresh, signOut }: {
   const title = titles[section];
   const routeForLinks = snapshot.route.kind === "route" ? snapshot.route : snapshot.route.action.route;
   const returnTo = snapshot.route.kind === "route" ? snapshot.route.returnTo : undefined;
+  const trustedModule = snapshot.phase === "ready" && snapshot.route.kind === "route"
+    ? moduleForRoute(snapshot.route) : undefined;
+  const moduleRoute = snapshot.phase === "ready" && snapshot.route.kind === "route" ? snapshot.route : undefined;
+  const workspaceTitle = trustedModule?.id === "tasks" ? "Task details"
+    : trustedModule?.id === "artifacts/editor" ? "Artifact editor" : title.title;
+  const returnToAssistant = () => {
+    if (!returnTo) return;
+    navigate(createShellRoute(returnTo.destination, {
+      view: returnTo.placement ? "workspace" : returnTo.record ? "detail" : returnTo.sessionId ? "workspace" : "list",
+      record: returnTo.record,
+      placement: returnTo.placement,
+      sessionId: returnTo.sessionId,
+    }));
+  };
+  const onModuleReturn = () => {
+    if (returnTo) returnToAssistant();
+    else navigate(createShellRoute(section));
+  };
   const frameState = snapshot.phase === "checking" ? { kind: "loading" as const, message: "Opening Gideon destination…" }
     : snapshot.phase === "unavailable" ? { kind: "error" as const, message: snapshot.message, onRetry: refreshRoute }
       : { kind: "ready" as const };
@@ -100,13 +119,15 @@ function ReadyWorkspace({ state, refresh, signOut }: {
         </View>
 
         <View style={{ flex: 1, minHeight: 0 }}>
-          <WorkspaceFrame route={snapshot.route} mode={section === "chat" ? "compact" : "full"}
-            title={title.title} state={frameState}
-            onGoToChat={() => navigate(snapshot.route.kind === "recovery" ? snapshot.route.action.route : createShellRoute("chat"))}
-            actions={returnTo && <Button onPress={() => window.location.assign(consoleReturnHref(returnTo))}>
-              Return to previous workspace
-            </Button>}>
-            {section !== "chat" ? <Card>
+          {trustedModule && moduleRoute ? <TrustedModuleContent definition={trustedModule}
+              route={moduleRoute} scope={state.scope} navigate={navigate} returnTo={returnTo} onReturn={onModuleReturn} />
+            : <WorkspaceFrame route={snapshot.route} mode={section === "chat" ? "compact" : "full"}
+              title={workspaceTitle} state={frameState}
+              onGoToChat={() => navigate(snapshot.route.kind === "recovery" ? snapshot.route.action.route : createShellRoute("chat"))}
+              actions={returnTo && <Button onPress={returnToAssistant}>
+                Return to previous workspace
+              </Button>}>
+              {section !== "chat" ? <Card>
               <Text style={[s.heading, { color: palette.text }]}>{title.title}</Text>
               <Text style={[s.muted, { color: palette.muted, marginTop: 8, marginBottom: 18 }]}>{title.subtitle}</Text>
               <Button primary onPress={() => openConsole(title.console)}>
@@ -131,7 +152,7 @@ function ReadyWorkspace({ state, refresh, signOut }: {
               </Button>
             </Card>
           </View>}
-          </WorkspaceFrame>
+            </WorkspaceFrame>}
         </View>
 
         {snapshot.phase !== "recovery" && snapshot.phase !== "checking" && <View style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: desktop ? 22 : 7, alignItems: "center" }}>
