@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { createShellRoute, type ShellReturnContext } from '../../shared/shell/shellRoutes'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
@@ -12,11 +12,20 @@ const labels: Record<ActivityDetailKind, string> = {
 
 function rows(detail: ActivityDetailRecord): Array<[string, string]> {
   const record = detail.record as unknown as Record<string, unknown>
-  if (detail.kind === 'trigger_run') return [
-    ['Run ID', detail.id], ['Trigger', String(record.job_name ?? record.job_id ?? 'Unknown trigger')],
-    ['Status', String(record.status ?? record.outcome ?? 'Unknown')], ['Started', String(record.started_at ?? 'Unknown')],
-    ['Finished', String(record.finished_at ?? 'Unknown')], ['Summary', String(record.summary ?? record.error ?? 'No summary available.')],
-  ]
+  if (detail.kind === 'trigger_run') {
+    const trigger = record.trigger_source as Record<string, unknown> | undefined
+    const counters = record.counters as Record<string, unknown> | undefined
+    return [
+      ['Run ID', String(record.run_id ?? record.id ?? detail.id)],
+      ['Source', record.source === 'hook_summary' ? 'Lifecycle hook summary'
+        : record.source === 'event_summary' ? 'Event trigger summary' : 'Native trigger run'],
+      ['Trigger', String(trigger?.name ?? record.job_name ?? record.trigger_id ?? record.job_id ?? 'Unknown trigger')],
+      ['Status', String(record.status ?? record.outcome ?? 'Unknown')],
+      ['Started', String(record.started_at ?? 'Unknown')], ['Finished', String(record.finished_at ?? 'Unknown')],
+      ['Summary', String(record.summary ?? record.error ?? record.reason ?? 'No summary available.')],
+      ...(counters ? Object.entries(counters).map(([name, value]) => [name === 'run_count' ? 'Recorded runs' : 'Recorded fires', String(value)] as [string, string]) : []),
+    ]
+  }
   if (detail.kind === 'inbox_item') return [
     ['Inbox ID', detail.id], ['From', String(record.sender_name ?? 'Unknown sender')],
     ['Channel', String(record.channel_name ?? record.channel ?? 'Unknown')], ['Status', String(record.status ?? 'Unknown')],
@@ -45,21 +54,30 @@ export default function ActivityDetail(props: ModuleProps) {
   const kind = route.record?.kind as ActivityDetailKind | undefined
   const id = route.record?.id ?? ''
   const [attempt, setAttempt] = useState(0)
-  const [result, setResult] = useState<ActivityDetailRead>({ state: 'unavailable', message: 'Loading native detail.' })
+  const [loaded, setLoaded] = useState<{ key: string; result: ActivityDetailRead }>()
+  const requestGeneration = useRef(0)
+  const requestKey = `${scope.cacheKey}:${kind ?? ''}:${id}:${attempt}`
   const returnContext: ShellReturnContext | undefined = route.returnTo ?? props.returnTo
   useEffect(() => {
-    if (!kind || !id) return
+    const generation = ++requestGeneration.current
     const abort = new AbortController()
-    setResult({ state: 'unavailable', message: 'Loading native detail.' })
+    setLoaded({ key: requestKey, result: { state: 'unavailable', message: 'Loading native detail.' } })
+    if (!kind || !id) return () => abort.abort()
     void readActivityDetail(scope, kind, id, abort.signal).then(value => {
-      if (!abort.signal.aborted) setResult(value)
+      if (!abort.signal.aborted && requestGeneration.current === generation) setLoaded({ key: requestKey, result: value })
+    }, error => {
+      if (!abort.signal.aborted && requestGeneration.current === generation) setLoaded({ key: requestKey,
+        result: { state: 'unavailable', message: error instanceof Error ? error.message : 'Gideon could not load this record.' } })
     })
-    return () => abort.abort()
-  }, [scope.cacheKey, kind, id, attempt])
+    return () => { requestGeneration.current++; abort.abort() }
+  }, [scope, requestKey, kind, id])
+
+  const result = loaded?.key === requestKey ? loaded.result
+    : { state: 'unavailable' as const, message: 'Loading native detail.' }
 
   const back = () => {
     if (returnContext) navigate(createShellRoute(returnContext.destination, {
-      view: returnContext.record ? 'detail' : returnContext.placement ? 'workspace' : 'list',
+      view: returnContext.record ? 'detail' : 'list',
       record: returnContext.record, placement: returnContext.placement, sessionId: returnContext.sessionId,
     }))
     else onReturn()
@@ -76,7 +94,7 @@ export default function ActivityDetail(props: ModuleProps) {
         <h2 style={{ margin: '0 0 20px', color: palette.text, overflowWrap: 'anywhere' }}>
           {record.kind === 'artifact' ? record.record.name : record.kind === 'inbox_item' ? record.record.message
             : record.kind === 'approval' ? record.record.tool : record.kind === 'notification'
-              ? record.record.title : record.record.job_name ?? 'Scheduled run'}
+              ? record.record.title : record.record.trigger_source?.name ?? record.record.job_name ?? 'Trigger activity'}
         </h2>
         <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, margin: 0 }}>
           {rows(record).map(([label, value]) => <div key={label} style={{ minWidth: 0, border: `1px solid ${palette.line}`,

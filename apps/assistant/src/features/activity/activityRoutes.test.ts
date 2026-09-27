@@ -79,6 +79,8 @@ describe('Gideon Activity detail routes', () => {
   it('opens a native card, serializes return state, and resolves a fresh detail after direct route load', async () => {
     const webPort = await port()
     const origin = `http://127.0.0.1:${webPort}`
+    const viteCache = await mkdtemp(join(tmpdir(), 'gideon-activity-vite-'))
+    directories.push(viteCache)
     const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
       [join(root, 'apps/assistant/test-support/activity_server.py'), origin],
       { env: { ...process.env, PYTHONPATH: join(root, 'runtime') } })
@@ -90,9 +92,10 @@ describe('Gideon Activity detail routes', () => {
       child.stderr.on('data', chunk => { errors += String(chunk) })
       child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Activity API exited ${code}: ${errors}`)) })
     })
-    const api = JSON.parse(line) as { api_port: number }
+    const api = JSON.parse(line) as { api_port: number; control_port: number }
     vite = await createServer({
       configFile: false, root: join(root, 'apps/assistant'),
+      cacheDir: viteCache,
       resolve: { alias: { 'react-native': 'react-native-web' } },
       optimizeDeps: { include: ['react', 'react-dom', 'react-dom/client', 'react-native-web'] },
       plugins: [{
@@ -115,24 +118,41 @@ window.beginJourney = async () => {
   const scope = ownerScope(location.origin, owner)
   const route = createShellRoute('activity', { sessionId: 'origin-chat', placement: { id: 'activity', query: { source: 'notification' } } })
   window.scope = scope; window.route = route
-  window.openNativeDetail = async next => {
+window.navigateShell = async next => {
     const url = serializeShellRoute(next)
     const parsed = parseShellRoute(url, location.origin)
     if (parsed.kind !== 'route') throw new Error('Serialized detail route did not parse')
     history.pushState(null, '', url)
     window.route = parsed
-    window.resolved = await activityModuleDefinitions[1].resolve(scope, parsed)
+    const activeScope = window.currentScope || scope
+    const module = activityModuleDefinitions.find(item => item.matches(parsed))
+    window.resolved = module ? await module.resolve(activeScope, parsed) : 'unavailable'
+    if (parsed.destination === 'activity' && parsed.view === 'list') {
+      flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
+        React.createElement(ActivityScreen, { route: parsed, scope: activeScope,
+          navigate: window.navigateShell, onReturn: () => {} }))))
+    } else {
+      flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
+        React.createElement(ActivityDetail, { route: parsed, scope: activeScope,
+          navigate: window.navigateShell, onReturn: () => {} }))))
+    }
+  }
+  window.currentScope = scope
+  window.openNativeDetail = window.navigateShell
+  window.switchOwner = async () => {
+    window.currentScope = ownerScope(location.origin, { user: 'owner-b' })
     flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
-      React.createElement(ActivityDetail, { route: parsed, scope, navigate: () => {}, onReturn: () => {} }))))
+      React.createElement(ActivityDetail, { route: window.route, scope: window.currentScope,
+        navigate: window.navigateShell, onReturn: () => {} }))))
   }
   flushSync(() => root.render(React.createElement(ShellThemeProvider, null,
-    React.createElement(ActivityScreen, { route, scope, navigate: window.openNativeDetail, onReturn: () => {} }))))
+    React.createElement(ActivityScreen, { route, scope, navigate: window.navigateShell, onReturn: () => {} }))))
 }
 window.loaded = true
 ` },
         configureServer(server) { server.middlewares.use('/integration', (_request, response) => {
           response.setHeader('Content-Type', 'text/html; charset=utf-8')
-          response.end('<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;height:100%;display:flex}</style></head><body><div id="root"></div><script type="module" src="/activity-detail-entry.tsx"></script></body></html>')
+          response.end('<!doctype html><html><head><style>html,body,#root{margin:0;width:100%;min-height:1800px;display:flex}</style></head><body><div id="root"></div><script type="module" src="/activity-detail-entry.tsx"></script></body></html>')
         }) },
       }],
       server: { host: '127.0.0.1', port: webPort, strictPort: true,
@@ -141,8 +161,10 @@ window.loaded = true
     await vite.listen()
     const { evaluate } = await chromium(`${origin}/integration`)
     await until(evaluate, 'window.loaded === true')
+    await fetch(`http://127.0.0.1:${api.control_port}/trigger-pages`, { method: 'POST' })
     await evaluate('window.beginJourney()')
     await until(evaluate, `!!document.querySelector('[data-source="notification"] [data-open-activity-id="notification-1"]')`)
+    await evaluate('window.scrollTo(0, 240)')
     await evaluate(`document.querySelector('[data-source="notification"] [data-open-activity-id="notification-1"]').click()`)
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
     expect(await evaluate(`window.resolved`)).toBe('available')
@@ -153,5 +175,43 @@ window.loaded = true
     expect(await evaluate(`window.route.returnTo.placement.query.selected`)).toBe('notification-1')
     expect(await evaluate(`window.route.returnTo.placement.query.scroll`)).toMatch(/^\d+$/)
     expect(await evaluate(`window.activityModuleDefinitions[1].matches(window.route)`)).toBe(true)
+
+    await evaluate(`document.querySelector('[aria-label="Back"]')?.click()`)
+    await until(evaluate, `window.route.view === 'list' && !!document.querySelector('[data-activity-id="notification-1"]')`)
+    expect(await evaluate(`window.resolved`)).toBe('available')
+    expect(await evaluate(`document.querySelector('[data-activity-id="notification-1"]')?.getAttribute('data-selected')`)).toBe('true')
+    expect(await evaluate(`Math.abs(window.scrollY - 240) < 2`)).toBe(true)
+
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail',
+      record: { kind: 'trigger_run', id: 'trigger-page-119' }, returnTo: { destination: 'activity',
+        sessionId: 'origin-chat', placement: { id: 'activity' } } })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="trigger_run"]')?.getAttribute('data-read-state') === 'ready'`)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('trigger-page-119')`)).toBe(true)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Native trigger run')`)).toBe(true)
+
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail',
+      record: { kind: 'trigger_run', id: 'event:event-1:summary' }, returnTo: { destination: 'activity' } })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="trigger_run"]')?.getAttribute('data-read-state') === 'ready'`)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Event trigger summary')`)).toBe(true)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('event-1')`)).toBe(true)
+
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail',
+      record: { kind: 'artifact', id: 'native-result' }, returnTo: { destination: 'activity' } })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="artifact"]')?.getAttribute('data-read-state') === 'ready'`)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Native result')`)).toBe(true)
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail',
+      record: { kind: 'artifact', id: 'different-native-id' }, returnTo: { destination: 'activity' } })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="artifact"]')?.getAttribute('data-read-state') === 'missing'`)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Record unavailable')`)).toBe(true)
+
+    await fetch(`http://127.0.0.1:${api.control_port}/delay`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seconds: 1, path: '/api/notifications' }) })
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail', record: { kind: 'notification', id: 'notification-1' } })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
+    await fetch(`http://127.0.0.1:${api.control_port}/delay`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seconds: 1, path: '/api/notifications' }) })
+    await evaluate('window.switchOwner()')
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
+    await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
   }, 30_000)
 })

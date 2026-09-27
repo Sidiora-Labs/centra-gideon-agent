@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { OwnerScope } from '../../shared/auth.web'
 import type { ShellReturnContext, ShellRoute } from '../../shared/shell/shellRoutes'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
@@ -111,11 +111,10 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
   const savedSource = query?.source as ActivityReadSource | 'all' | undefined
   const selectedId = query?.selected
   const savedScroll = Number(query?.scroll ?? route.returnTo?.scrollY ?? returnTo?.scrollY ?? 0)
+  const restoredSelection = useRef<string | undefined>(undefined)
   const [view, setView] = useState<ActivityView>(savedView && ['all', 'attention', 'working', 'finished', 'updates'].includes(savedView) ? savedView : 'all')
   const [source, setSource] = useState<ActivityReadSource | 'all'>(savedSource && ['all', ...ACTIVITY_SOURCES].includes(savedSource) ? savedSource : 'all')
   useEffect(() => { void refresh() }, [scope.cacheKey])
-  useEffect(() => { if (Number.isSafeInteger(savedScroll) && savedScroll >= 0) window.requestAnimationFrame(() => window.scrollTo(0, savedScroll)) }, [])
-
   const cards = useMemo(() => collapseActivityCards(snapshot.entries), [snapshot.entries])
   const sourceCards = cards.filter(item => source === 'all' || item.entry.identity.sourceKind === source
     || item.mirrorSource === source)
@@ -124,6 +123,15 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
     || snapshot.sources[kind].phase === 'idle')
   const anyProblem = ACTIVITY_SOURCES.some(kind => ['failed', 'denied', 'unavailable'].includes(snapshot.sources[kind].phase))
   const filtered = view !== 'all' || source !== 'all'
+  useEffect(() => {
+    if (!selectedId || !Number.isSafeInteger(savedScroll) || savedScroll < 0
+      || restoredSelection.current === `${selectedId}:${savedScroll}`) return
+    const selectedCard = Array.from(document.querySelectorAll<HTMLElement>('[data-activity-id]'))
+      .find(card => card.dataset.activityId === selectedId)
+    if (!selectedCard) return
+    restoredSelection.current = `${selectedId}:${savedScroll}`
+    window.requestAnimationFrame(() => window.scrollTo(0, savedScroll))
+  }, [selectedId, savedScroll, visible])
 
   return <WorkspaceFrame route={route} mode="full" title="Activity"
     onBack={returnTo || route.returnTo ? onReturn : undefined}
@@ -157,6 +165,7 @@ function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: Acti
           <div style={{ display: 'grid', gap: 12,
             gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))' }}>
             {items.map(item => <ActivityCard key={item.entry.identity.key} item={item} palette={palette}
+              selected={item.entry.identity.sourceId === selectedId}
               onOpen={() => {
                 const context = { destination: 'activity' as const, sessionId: route.sessionId ?? route.returnTo?.sessionId ?? returnTo?.sessionId,
                   placement: { id: 'activity', query: { view, source, selected: item.entry.identity.sourceId,

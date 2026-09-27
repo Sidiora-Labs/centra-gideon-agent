@@ -24,12 +24,16 @@ from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.messaging import api_notifications
 from gideon.interfaces.dashboard.handlers.sessions import api_approvals
-from gideon.interfaces.dashboard.handlers.triggers import api_trigger_history_all, api_trigger_history_detail
+from gideon.interfaces.dashboard.handlers.triggers import (
+    api_trigger_history_all,
+    api_trigger_history_detail,
+    api_triggers,
+)
 from gideon.interfaces.dashboard.handlers_inbox import api_inbox_list, api_inbox_open_items
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.auth import credentials
 from gideon.workspace.artifacts import registry as artifact_registry
-from gideon.workspace.artifacts.handlers import api_artifacts_list
+from gideon.workspace.artifacts.handlers import api_artifact_detail, api_artifacts_list
 
 
 PASSWORD = "correct-horse-battery-staple"
@@ -126,12 +130,12 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/workflows/runs/{run_id}", api_run_status)
         app.router.add_get("/api/triggers/history", api_trigger_history_all)
         app.router.add_get("/api/triggers/{id}/history/{run_id}", api_trigger_history_detail)
+        app.router.add_get("/api/triggers", api_triggers)
         app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
         app.router.add_get("/api/approvals", api_approvals)
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
-        from gideon.workspace.artifacts.handlers import api_artifact_detail
         app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
 
         async def control_delay(request: web.Request) -> web.Response:
@@ -158,11 +162,11 @@ async def main(origin: str) -> None:
         async def control_trigger_pages(request: web.Request) -> web.Response:
             started_at = time.time()
             journal = ExecutionJournal(home)
-            for index in range(20):
+            for index in range(120):
                 await journal.append(ExecutionRecord(
                     run_id="" if index == 19 else f"trigger-page-{index}",
-                    job_id="schedule-1", started_at=started_at + index / 1000,
-                    finished_at=started_at + index / 1000, status="success",
+                    job_id="schedule-1", started_at=started_at + (120 - index) / 1000,
+                    finished_at=started_at + (120 - index) / 1000, status="success",
                     summary="Scheduled work ran",
                 ))
             hooks = ScriptHookStore(home)
