@@ -29,6 +29,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import unquote
 
 from aiohttp import web
 
@@ -303,6 +304,58 @@ _BYPASS_EXACT.update({"/login", "/api/auth/login", "/api/auth/status"})
 _BYPASS_EXACT.add("/api/auth/enroll/complete")
 _BYPASS_EXACT.add("/api/devices/pair/complete")
 _BYPASS_EXACT.add("/pair")
+
+
+def _is_assistant_static_request(request: web.Request) -> bool:
+    """Allow only safe document and asset reads for the staged assistant export."""
+    if request.method not in {"GET", "HEAD"}:
+        return False
+    raw_path = request.raw_path.partition("?")[0]
+    decoded_path = unquote(raw_path)
+    if "\\" in decoded_path or any(
+        segment in {".", ".."} for segment in decoded_path.split("/")
+    ):
+        return False
+    path = request.path
+    if path != "/assistant" and not path.startswith("/assistant/"):
+        return False
+    relative = path[len("/assistant") :].lstrip("/")
+    if not relative:
+        return "text/html" in request.headers.get("Accept", "")
+    first_segment = relative.split("/", 1)[0].lower()
+    if first_segment == "api":
+        return False
+    if relative.startswith("_expo/") or relative in {
+        "assistant-source-notices.txt",
+        "metadata.json",
+    }:
+        return True
+    if any(
+        relative.lower().endswith(suffix)
+        for suffix in (
+            ".css",
+            ".gif",
+            ".ico",
+            ".jpeg",
+            ".jpg",
+            ".js",
+            ".json",
+            ".mjs",
+            ".otf",
+            ".png",
+            ".svg",
+            ".ttf",
+            ".wasm",
+            ".webmanifest",
+            ".webp",
+            ".woff",
+            ".woff2",
+        )
+    ):
+        return True
+    return "text/html" in request.headers.get("Accept", "") and "." not in relative.rsplit(
+        "/", 1
+    )[-1]
 
 _HANDLER_AUTH_ROUTES = frozenset(
     {
@@ -1041,7 +1094,9 @@ def token_auth_middleware(
                 _log_auth(request, "internal", "denied", "non-loopback source")
                 return _deny(request, "Forbidden")
 
-        if any(path.startswith(p) for p in _BYPASS_PREFIXES):
+        if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
+            request
+        ):
             return await handler(request)  # type: ignore[operator]
         if path in _BYPASS_EXACT:
             return await handler(request)  # type: ignore[operator]
@@ -1182,7 +1237,9 @@ def auth_middleware(
             request: web.Request, handler: object
         ) -> web.StreamResponse:
             path = request.path
-            if any(path.startswith(p) for p in _BYPASS_PREFIXES):
+            if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
+                request
+            ):
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
@@ -1228,7 +1285,9 @@ def auth_middleware(
             request: web.Request, handler: object
         ) -> web.StreamResponse:
             path = request.path
-            if any(path.startswith(p) for p in _BYPASS_PREFIXES):
+            if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
+                request
+            ):
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
