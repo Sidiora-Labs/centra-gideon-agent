@@ -16,9 +16,30 @@ export type IdeaDecisionRecord = Readonly<{
   updated_at: string
 }>
 
+export type PendingIdeaDecisionRecord = Readonly<{
+  source_kind: 'knowledge-idea-list'
+  source_id: string
+  source_list_id: string
+  source_revision: string
+  source_title: string
+  source_evidence: string
+  decision: 'accepted'
+  edited_prompt: string
+  task_id: ''
+  request_id: string
+  created_at: string
+}>
+
+type FrozenIntent = Readonly<{
+  key: string
+  action: 'accept' | 'dismiss'
+  body: { source_kind: string; source_list_id: string; expected_revision: string; decision: 'accept' | 'dismiss'; edited_prompt: string; request_id: string }
+}>
+
 type Props = Readonly<{
   idea: ProjectedIdea
   decision?: IdeaDecisionRecord
+  pendingIntent?: PendingIdeaDecisionRecord
   onDecision: (record: IdeaDecisionRecord) => void
 }>
 
@@ -26,24 +47,39 @@ function newRequestId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-export function IdeaDecision({ idea, decision, onDecision }: Props) {
+export function IdeaDecision({ idea, decision, pendingIntent, onDecision }: Props) {
   const [promptValue, setPromptValue] = useState<{ key: string; value: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const [frozen, setFrozen] = useState<{ key: string; action: 'accept' | 'dismiss'; body: { source_kind: string; source_list_id: string; expected_revision: string; decision: 'accept' | 'dismiss'; edited_prompt: string; request_id: string } } | null>(null)
+  const [frozen, setFrozen] = useState<FrozenIntent | null>(null)
   const frozenRef = useRef(frozen)
   const ideaKey = `${idea.listId}:${idea.memberId}`
-  const prompt = promptValue?.key === ideaKey ? promptValue.value : decision?.edited_prompt ?? idea.title
+  const prompt = promptValue?.key === ideaKey ? promptValue.value : decision?.edited_prompt ?? pendingIntent?.edited_prompt ?? idea.title
   const pending = frozen?.key === ideaKey ? frozen : null
 
   useEffect(() => {
     setPromptValue(current => current?.key === ideaKey ? current : null)
     setMessage('')
-    if (frozenRef.current?.key !== ideaKey) {
+    if (pendingIntent?.source_list_id === idea.listId && pendingIntent.source_id === idea.memberId) {
+      const restored: FrozenIntent = {
+        key: ideaKey,
+        action: pendingIntent.decision === 'accepted' ? 'accept' : 'dismiss',
+        body: {
+          source_kind: pendingIntent.source_kind,
+          source_list_id: pendingIntent.source_list_id,
+          expected_revision: pendingIntent.source_revision,
+          decision: pendingIntent.decision === 'accepted' ? 'accept' : 'dismiss',
+          edited_prompt: pendingIntent.edited_prompt,
+          request_id: pendingIntent.request_id,
+        },
+      }
+      frozenRef.current = restored
+      setFrozen(restored)
+    } else if (frozenRef.current?.key !== ideaKey) {
       frozenRef.current = null
       setFrozen(null)
     }
-  }, [ideaKey])
+  }, [ideaKey, idea.listId, idea.memberId, pendingIntent])
 
   async function decide(action: 'accept' | 'dismiss') {
     if (busy || decision || !idea.revisionHash) return

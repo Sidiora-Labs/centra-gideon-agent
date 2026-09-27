@@ -156,6 +156,15 @@ class RecommendationRecords:
         ]
 
     @classmethod
+    def list_pending(cls, db):
+        return [
+            cls.decode(row)
+            for row in db.execute(
+                "SELECT * FROM pending_recommendation_decisions ORDER BY created_at, source_id"
+            ).fetchall()
+        ]
+
+    @classmethod
     def pending(cls, db, source_kind: str, source_list_id: str, source_id: str):
         row = db.execute(
             "SELECT * FROM pending_recommendation_decisions WHERE source_kind=? AND source_list_id=? AND source_id=?",

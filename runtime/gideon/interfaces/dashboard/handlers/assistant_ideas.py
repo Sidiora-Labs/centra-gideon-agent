@@ -42,6 +42,22 @@ def _public(record: dict) -> dict:
     }
 
 
+def _pending_public(record: dict) -> dict:
+    return {
+        "source_kind": record["source_kind"],
+        "source_id": record["source_id"],
+        "source_list_id": record["source_list_id"],
+        "source_revision": record["source_revision"],
+        "source_title": record["source_title"],
+        "source_evidence": record["source_evidence"],
+        "decision": "accepted",
+        "edited_prompt": record["edited_prompt"],
+        "task_id": "",
+        "request_id": record["request_id"],
+        "created_at": record["created_at"],
+    }
+
+
 def _current_idea(request: web.Request, list_id: str, idea_id: str):
     lists = request.app["capability_idea_lists"]
     detail = lists.get(list_id)
@@ -62,7 +78,11 @@ async def list_decisions(request: web.Request) -> web.Response:
     async with rows.exclusive():
         with rows.transaction() as db:
             records = rows.list(db)
-    return web.json_response({"items": [_public(row) for row in records]})
+            pending = rows.list_pending(db)
+    return web.json_response({
+        "items": [_public(row) for row in records],
+        "pending": [_pending_public(row) for row in pending],
+    })
 
 
 async def decide(request: web.Request) -> web.Response:
@@ -167,9 +187,21 @@ async def decide(request: web.Request) -> web.Response:
                 if conflict:
                     return json_error("decision_pending", message="A native task with this Idea marker has different saved intent", status=409)
                 if not task_id:
-                    detail, _ = _current_idea(request, list_id, source_id)
-                    if str(detail.get("hash") or "") != pending["source_revision"]:
-                        return json_error("decision_pending", message="The Idea source changed while its decision was pending. Review the current evidence before retrying.", status=409)
+                    try:
+                        detail, _ = _current_idea(request, list_id, source_id)
+                        current_revision = str(detail.get("hash") or "")
+                    except (LookupError, ValueError, KeyError):
+                        current_revision = ""
+                    if current_revision != pending["source_revision"]:
+                        with records.transaction() as db:
+                            current_pending = records.pending(db, source_kind, list_id, source_id)
+                            if current_pending is not None and _same_intent(
+                                current_pending, source_kind, source_id, list_id,
+                                pending["source_revision"], "accept", prompt,
+                                request_id=pending["request_id"],
+                            ):
+                                records.clear_pending(db, source_kind, list_id, source_id)
+                        return json_error("conflict", message="The Idea source changed before a native task was created. Review the current evidence and start a new decision.", status=409, current_revision=current_revision)
                     creation = asyncio.create_task(registry.create_task(
                         provider_name="native",
                         title=prompt,

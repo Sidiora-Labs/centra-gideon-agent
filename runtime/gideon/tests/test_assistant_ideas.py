@@ -71,7 +71,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         )
         listed = await client.get("/api/assistant/ideas/decisions")
         assert listed.status == 200
-        assert (await listed.json()) == {"items": []}
+        assert (await listed.json()) == {"items": [], "pending": []}
 
         stale_body = {
             "source_kind": "knowledge-idea-list",
@@ -201,6 +201,43 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
                 edited_prompt=recovery_body["edited_prompt"],
                 request_id=recovery_body["request_id"],
             )
+        app["assistant_idea_records"] = assistant_ideas.RecommendationRecords(tmp_path)
+        staged = await (await client.get("/api/assistant/ideas/decisions")).json()
+        assert staged["pending"] == [{
+            "source_kind": "knowledge-idea-list",
+            "source_id": third_id,
+            "source_list_id": imported["id"],
+            "source_revision": recovery_revision,
+            "source_title": "Recover a saved task",
+            "source_evidence": "Recover a saved task",
+            "decision": "accepted",
+            "edited_prompt": recovery_body["edited_prompt"],
+            "task_id": "",
+            "request_id": recovery_body["request_id"],
+            "created_at": staged["pending"][0]["created_at"],
+        }]
+        store.update_item(third_id, content="The saved task source changed before task creation")
+        stale_recovery = await client.post(
+            f"/api/assistant/ideas/{third_id}/decision", json=recovery_body
+        )
+        assert stale_recovery.status == 409
+        assert "source changed before a native task was created" in (await stale_recovery.json())["error"]["message"]
+        assert (await (await client.get("/api/assistant/ideas/decisions")).json())["pending"] == []
+        recovery_revision = ideas.get(imported["id"])["hash"]
+        recovery_body["expected_revision"] = recovery_revision
+        with records.transaction() as db:
+            records.stage(
+                db,
+                source_kind="knowledge-idea-list",
+                source_id=third_id,
+                source_list_id=imported["id"],
+                source_revision=recovery_revision,
+                source_title="Recover a saved task",
+                source_evidence="The saved task source changed before task creation",
+                decision="accepted",
+                edited_prompt=recovery_body["edited_prompt"],
+                request_id=recovery_body["request_id"],
+            )
         recovery_db = sqlite_connection(records.path)
         try:
             pending = records.pending(
@@ -230,6 +267,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         assert sum(assistant_ideas._intent_label(pending) in task.labels for task in tasks) == 1
         saved = await (await client.get("/api/assistant/ideas/decisions")).json()
         assert {row["decision"] for row in saved["items"]} == {"accepted", "dismissed"}
+        assert saved["pending"] == []
 
     token_auth.revoke_all_sessions()
     token_auth.use_persistent_secret()
