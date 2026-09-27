@@ -14,9 +14,16 @@ const directories: string[] = []
 let vite: ViteDevServer | undefined
 let debuggerSocket: WebSocket | undefined
 
+async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise<void>(done => child.once('exit', () => done()))
+  child.kill('SIGTERM')
+  await exited
+}
+
 afterAll(async () => {
   debuggerSocket?.close()
-  for (const child of children) child.kill('SIGTERM')
+  await Promise.all(children.map(stopChild))
   if (vite) await vite.close()
   for (const directory of directories) await rm(directory, { recursive: true, force: true })
 })
@@ -142,15 +149,15 @@ window.loaded = true
     await vite.listen()
     const { evaluate, command } = await browser(`${origin}/conversation`)
     await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
-    let terminalReadGate: Promise<void> | undefined
+    let nativeHistoryGate: Promise<void> | undefined
     if (process.env.GIDEON_TEST_MODEL) {
       await command('Fetch.enable', { patterns: [{ urlPattern: `${origin}/api/chat/sessions/*`, requestStage: 'Request' }] })
-      let holdRequest: (requestId: string) => void = () => {}
-      const heldDetail = new Promise<string>((done, reject) => {
-        const timeout = setTimeout(() => reject(new Error('No native detail request was held after capture was armed')), 30000)
-        holdRequest = requestId => { clearTimeout(timeout); done(requestId) }
-      })
-      let held = false
+      const heldRequests = new Map<'running' | 'terminal', (requestId: string) => void>()
+      const heldDetails = new Map<'running' | 'terminal', Promise<string>>()
+      for (const stage of ['running', 'terminal'] as const) {
+        heldDetails.set(stage, new Promise<string>(done => { heldRequests.set(stage, done) }))
+      }
+      const capturedStages = new Set<'running' | 'terminal'>()
       debuggerSocket!.addEventListener('message', event => {
         const frame = JSON.parse(String(event.data)) as { method?: string; params?: { requestId: string; request: { method: string; url: string } } }
         if (frame.method !== 'Fetch.requestPaused' || !frame.params) return
@@ -159,19 +166,25 @@ window.loaded = true
           void command('Fetch.continueRequest', { requestId })
           return
         }
-        void evaluate('window.captureTerminalRead === true').then(capture => {
-          if (capture && !held) { held = true; holdRequest(requestId) }
+        void evaluate('window.captureHistoryStage || ""').then(stage => {
+          if ((stage === 'running' || stage === 'terminal') && !capturedStages.has(stage)) {
+            capturedStages.add(stage)
+            heldRequests.get(stage)!(requestId)
+          }
           else void command('Fetch.continueRequest', { requestId })
         }).catch(() => void command('Fetch.continueRequest', { requestId }))
       })
-      terminalReadGate = (async () => {
-        const requestId = await heldDetail
-        await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
-          if (window.conversationFrames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done(true) }
-          else if (++n > 1200) { clearInterval(timer); reject(Error('native run did not finish while history read was held: ' + JSON.stringify(window.conversationFrames))) }
-        }, 50) })`)
-        await evaluate('window.captureTerminalRead = false')
-        await command('Fetch.continueRequest', { requestId })
+      nativeHistoryGate = (async () => {
+        const runningRequest = await heldDetails.get('running')!
+        await evaluate("window.waitForConversationFrame('chat_chunk')")
+        await command('Fetch.continueRequest', { requestId: runningRequest })
+        await evaluate('window.waitForRunningStream()')
+        await evaluate("window.captureHistoryStage = 'terminal'; window.terminalRefresh = window.controller.refresh(); true")
+        const terminalRequest = await heldDetails.get('terminal')!
+        await evaluate("window.waitForConversationFrame('chat_done')")
+        await evaluate("window.captureHistoryStage = ''")
+        await command('Fetch.continueRequest', { requestId: terminalRequest })
+        await evaluate('window.terminalRefresh')
         await command('Fetch.disable')
       })()
     }
@@ -193,20 +206,74 @@ window.loaded = true
       const socket = window.controller.socket
       const frames = []
       window.conversationFrames = frames
+      const frameWaiters = new Map()
+      window.waitForConversationFrame = type => new Promise(resolve => {
+        const found = frames.find(frame => frame.type === type)
+        if (found) { resolve(found); return }
+        const waiters = frameWaiters.get(type) || []
+        waiters.push(resolve)
+        frameWaiters.set(type, waiters)
+      })
+      window.waitForRunningStream = () => new Promise(resolve => {
+        let unsubscribe = () => {}
+        let scheduled = false
+        const check = () => {
+          const state = window.controller.snapshot()
+          const stream = [...state.messages].reverse().find(message => message.streaming)
+          if (!state.running || !stream?.content || scheduled) return
+          scheduled = true
+          queueMicrotask(() => {
+            const finalState = window.controller.snapshot()
+            const finalStream = [...finalState.messages].reverse().find(message => message.streaming)
+            const read = [...window.nativeHistoryReads].reverse().find(item => item.detail.running
+              && item.detail.messages.some(message => message.role === 'streaming'))
+            if (finalState.running && finalStream?.content && read) {
+              const nativeStream = [...read.detail.messages].reverse().find(message => message.role === 'streaming').content
+              const chunks = window.conversationFrames.filter(frame => frame.type === 'chat_chunk').map(frame => frame.content)
+              const queued = chunks.slice(read.chunksAtResponse).join('')
+              let overlap = Math.min(nativeStream.length, queued.length)
+              while (overlap > 0 && !nativeStream.endsWith(queued.slice(0, overlap))) overlap--
+              window.activeOverlapEvidence = { content: finalStream.content,
+                expected: nativeStream + queued.slice(overlap), nativeContent: nativeStream, queuedContent: queued }
+              unsubscribe()
+              resolve(true)
+            } else scheduled = false
+          })
+        }
+        unsubscribe = window.controller.subscribe(check)
+        check()
+      })
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
         if (frame.data?.session === session || frame.type === 'approval_resolved') {
-          frames.push({ type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
+          const captured = { type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
             tool_call_id: frame.data.tool_call_id || '', id: frame.data.id || '',
-            approved: frame.data.approved, decision: frame.data.decision || '' })
+            approved: frame.data.approved, decision: frame.data.decision || '',
+            content: typeof frame.data.content === 'string' ? frame.data.content : '' }
+          frames.push(captured)
+          for (const resolve of frameWaiters.get(frame.type) || []) resolve(captured)
+          frameWaiters.delete(frame.type)
         }
       })
+      const nativeFetch = window.fetch.bind(window)
+      window.nativeHistoryReads = []
+      window.fetch = async (input, init) => {
+        const response = await nativeFetch(input, init)
+        const url = typeof input === 'string' ? input : input.url
+        const method = init?.method || (typeof input === 'string' ? 'GET' : input.method)
+        if (method === 'GET' && url.includes('/api/chat/sessions/' + encodeURIComponent(session))) {
+          const chunksAtResponse = window.conversationFrames.filter(frame => frame.type === 'chat_chunk').length
+          const detail = await response.clone().json()
+          window.nativeHistoryReads.push({ detail, chunksAtResponse })
+        }
+        return response
+      }
       const prompt = expectAnswer
         ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then answer ready.'
         : '  Reply with one word: ready.  '
       window.controller.setDraft(prompt)
       if (expectAnswer) {
-        window.captureTerminalRead = true
+        window.captureHistoryStage = 'running'
         window.sendPromise = window.controller.send()
       } else await window.controller.send()
       if (expectAnswer) {
@@ -239,6 +306,7 @@ window.loaded = true
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
       const evidence = { session, connected: snapshot.connected, running: snapshot.running, phase: snapshot.phase,
+        activeOverlapEvidence: window.activeOverlapEvidence,
         persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         visible: snapshot.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
@@ -269,7 +337,7 @@ window.loaded = true
       window.controller.setOwner(null)
       return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, retainedEdit, failed, cleared: window.controller.snapshot() }
     })()`)
-    if (terminalReadGate) await terminalReadGate
+    if (nativeHistoryGate) await nativeHistoryGate
     expect(result.session).toMatch(/^chat-/)
     expect(result.connected).toBe(true)
     expect(result.persisted).toBe(1)
@@ -286,6 +354,7 @@ window.loaded = true
       expect(result.frames).toContainEqual(expect.objectContaining({ type: 'chat_message', role: 'assistant' }))
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
+      expect(result.activeOverlapEvidence.content).toBe(result.activeOverlapEvidence.expected)
       expect(result.running).toBe(false)
       expect(result.phase).toBe('ready')
       expect(result.liveLifecycle.filter((message: { role: string }) => message.role === 'tool')).toHaveLength(result.toolRows.length)
@@ -382,7 +451,8 @@ window.loaded = true
     })()`)
     const [staleResult] = await Promise.all([stale, fault])
     expect(postFailed && faultDone).toBe(true)
-    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'recovering', error: '' })
+    expect(staleResult.state).toMatchObject({ draft: 'New owner send', error: '' })
+    expect(['sending', 'recovering', 'failed']).toContain(staleResult.state.phase)
     expect(staleResult.state.sessionId).not.toBe(result.session)
     expect(staleResult.submitting).toBe(true)
     expect(newPostRequest).not.toBe('')

@@ -246,7 +246,8 @@ export class ConversationController {
       && event.data.session === undefined
     if (!scope || !sessionId || (event.data.session !== sessionId && !sessionlessApprovalResolution)) return
     if (this.loading) {
-      this.dirtyDuringLoad = true
+      if (event.type === 'chat_user_message' || event.type === 'chat_done'
+        || (event.type === 'chat_message' && event.data.role === 'error')) this.dirtyDuringLoad = true
       if (event.type === 'chat_chunk' || event.type === 'tool_call' || event.type === 'tool_result'
         || event.type === 'approval' || event.type === 'approval_resolved'
         || event.type === 'activity_event' || event.type === 'chat_thinking'
@@ -268,8 +269,14 @@ export class ConversationController {
       if (typeof content !== 'string' || typeof seq !== 'number' || seq <= this.lastChunkSeq) return
       this.lastChunkSeq = seq
       const messages = [...this.state.messages]
-      const last = messages[messages.length - 1]
-      if (last?.streaming) messages[messages.length - 1] = { ...last, content: last.content + content }
+      let streamingIndex = -1
+      for (let index = messages.length - 1; index >= 0; index--) {
+        if (messages[index].streaming) { streamingIndex = index; break }
+      }
+      if (streamingIndex >= 0) {
+        const streaming = messages[streamingIndex]
+        messages[streamingIndex] = { ...streaming, content: streaming.content + content }
+      }
       else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
       this.update({ messages, running: true, phase: 'sending' })
     } else if (event.type === 'tool_call' || event.type === 'tool_result') {
