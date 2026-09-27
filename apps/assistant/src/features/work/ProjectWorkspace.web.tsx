@@ -60,10 +60,11 @@ function ProjectWorkspaceInstance({ route, scope, navigate, onReturn }: ModulePr
         gatewayJson<Linked>(`${path}/linked`, { signal: abort.signal }),
         gatewayJson<WorkBoard>(`${path}/work`, { signal: abort.signal }),
         gatewayJson<{ task_lists: TaskListItem[] }>(`/api/task-lists?project_id=${encodeURIComponent(id)}`, { signal: abort.signal }),
-        gatewayJson<{ tasks: TaskItem[] }>(`/api/tasks?project=${encodeURIComponent(id)}`, { signal: abort.signal }),
-      ]).then(([links, work, membership, taskRows]) => {
+      ]).then(async ([links, work, membership]) => {
+        const taskPages = await Promise.all(membership.task_lists.map(list =>
+          gatewayJson<{ tasks: TaskItem[] }>(`/api/tasks?task_list_id=${encodeURIComponent(list.id)}`, { signal: abort.signal })))
         if (current !== epoch.current) return
-        setLinked(links); setBoard(work); setLists(membership.task_lists); setTasks(taskRows.tasks)
+        setLinked(links); setBoard(work); setLists(membership.task_lists); setTasks(taskPages.flatMap(page => page.tasks))
       }).catch(error => { if (current === epoch.current && !abort.signal.aborted) setProblem(`Linked work: ${errorText(error)}`) })
     }
     return () => { abort.abort(); epoch.current++ }

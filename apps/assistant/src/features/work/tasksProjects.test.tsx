@@ -228,9 +228,20 @@ describe('native task and project workspaces', () => {
     await waitFor('document.querySelector("[aria-label=\\"Project task planning\\"]")?.textContent.includes("Create task")')
     await evaluate("window.setField('New task title', 'Planned native task')")
     await evaluate("window.clickNamed('Create task')")
-    await waitFor('document.body.textContent.includes("Planned native task")')
-    const response = await (await fetch(`${api}/api/tasks?project=${encodeURIComponent(projectId)}`)).json() as
-      { tasks: Array<{ id: string; title: string }> }
-    expect(response.tasks.some(row => row.title === 'Planned native task' && !!row.id)).toBe(true)
+    try {
+      await waitFor('document.body.textContent.includes("Planned native task")')
+    } catch (error) {
+      const body = await evaluate('document.body.textContent')
+      const nativeResponse = await (await fetch(`${api}/api/tasks`)).text()
+      throw new Error(`${String(error)}\nBrowser: ${body}\nNative: ${nativeResponse}`)
+    }
+    const membership = await (await fetch(`${api}/api/task-lists?project_id=${encodeURIComponent(projectId)}`)).json() as
+      { task_lists: Array<{ id: string }> }
+    const pages = await Promise.all(membership.task_lists.map(list =>
+      fetch(`${api}/api/tasks?task_list_id=${encodeURIComponent(list.id)}`).then(response => response.json() as Promise<{
+        tasks: Array<{ id: string; title: string; task_list_id: string }>
+      }>)))
+    expect(pages.flatMap(page => page.tasks).some(row => row.title === 'Planned native task' &&
+      !!row.id && membership.task_lists.some(list => list.id === row.task_list_id))).toBe(true)
   }, 30000)
 })
