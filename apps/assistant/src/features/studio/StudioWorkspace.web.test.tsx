@@ -13,11 +13,26 @@ import { DESTINATIONS } from '../discovery/destinations'
 import StudioWorkspace from './StudioWorkspace.web'
 import { studioModules } from './moduleDefinitions.web'
 import { sameStudioOwner, studioRecordRef } from './studioContracts'
-import { createStudioRoute, resolveStudioRoute, studioDestination, studioRouteRecord, studioTarget } from './studioRoutes'
+import { createSlidesRoute, createStudioRoute, isSlidesRoute, resolveStudioRoute, studioDestination, studioRouteRecord, studioTarget } from './studioRoutes'
 
 const scope = ownerScope('https://gideon.example', { user: 'owner-1' })
 
 describe('Studio workspace routes', () => {
+  it('registers Slides under design and round trips its artifact and return context', () => {
+    const back = { destination: 'chat' as const, sessionId: 'conversation-3', selectionId: 'message-5', scrollY: 280 }
+    const ref = studioRecordRef(scope, { kind: 'artifact', id: 'deck-42' })
+    const route = createSlidesRoute(back, ref, scope)
+    const parsed = parseShellRoute(serializeShellRoute(route), scope.runtimeOrigin)
+    expect(parsed.kind).toBe('route')
+    if (parsed.kind !== 'route') return
+    expect(studioModules[0].matches(parsed)).toBe(true)
+    expect(isSlidesRoute(parsed)).toBe(true)
+    expect(parsed.placement?.subview).toBe('/slides')
+    expect(parsed.record).toEqual({ kind: 'artifact', id: 'deck-42' })
+    expect(parsed.returnTo).toMatchObject(back)
+    expect(studioRouteRecord(parsed, scope)).toEqual(ref)
+    expect(() => createStudioRoute('design', back, ref, scope)).toThrow()
+  })
   it('covers every labelled Studio and Create destination with a full-size route and an honest target state', () => {
     const labelled = DESTINATIONS.filter(entry => entry.owner === 'studio')
     expect(labelled.length).toBeGreaterThan(35)
@@ -282,3 +297,194 @@ it('opens a seeded native artifact in one React root, returns to its conversatio
     if (directory) await rm(directory, { recursive: true, force: true })
   }
 }, 45000)
+
+const slidesNativeServer = String.raw`
+import asyncio, json, os, sys, tempfile, time
+from pathlib import Path
+from aiohttp import web
+
+async def main(origin):
+    with tempfile.TemporaryDirectory(prefix='gideon-studio-slides-') as directory:
+        home = Path(directory)
+        os.environ['GIDEON_HOME'] = str(home)
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
+        from gideon.interfaces.dashboard import token_auth
+        from gideon.interfaces.dashboard.state import ConsoleState
+        from gideon.interfaces.dashboard.handlers import auth
+        from gideon.security.auth import credentials
+        from gideon.workspace.artifacts import registry
+        from gideon.workspace.artifacts.native import NativeArtifactProvider
+        from gideon.workspace.artifacts.handlers import register_artifact_routes
+        (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'dashboard': {'document_editing': True}}), encoding='utf-8')
+        credentials.set_password('slides-owner', 'correct-horse-battery-staple')
+        token_auth.use_ephemeral_secret()
+        registry.register_provider(NativeArtifactProvider(home / 'artifacts'))
+        app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
+        app['port'] = 10000
+        app['allowed_origins'] = {origin}
+        app['state'] = ConsoleState(sessions=ConversationDirectory(AppConfig.load()), start_time=time.time(), owner_id='slides-owner')
+        app.router.add_post('/api/auth/login', auth.api_auth_login)
+        app.router.add_get('/api/auth/session', auth.api_auth_session)
+        register_artifact_routes(app)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        print(json.dumps({'api_port': site._server.sockets[0].getsockname()[1]}), flush=True)
+        try: await asyncio.Event().wait()
+        finally: await runner.cleanup()
+
+asyncio.run(main(sys.argv[1]))
+`
+
+it('opens Slides through the registered Studio module, reloads its native artifact route, and returns to chat', async () => {
+  const root = resolve(process.cwd(), '../..')
+  const port = await freePort()
+  const origin = `http://127.0.0.1:${port}`
+  const api = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-u', '-c', slidesNativeServer, origin],
+    { env: { ...process.env, PYTHONPATH: join(root, 'runtime') } })
+  let vite: Awaited<ReturnType<typeof createViteServer>> | undefined
+  let browser: ChildProcessWithoutNullStreams | undefined
+  let socket: WebSocket | undefined
+  let directory: string | undefined
+  try {
+    const started = await new Promise<{ api_port: number }>((done, fail) => {
+      let stdout = '', stderr = ''
+      const timer = setTimeout(() => fail(new Error(`Slides API start timed out: ${stderr}`)), 15000)
+      api.stdout.on('data', chunk => {
+        stdout += String(chunk)
+        if (stdout.includes('\n')) { clearTimeout(timer); done(JSON.parse(stdout.split('\n')[0])) }
+      })
+      api.stderr.on('data', chunk => { stderr += String(chunk) })
+      api.once('exit', code => { clearTimeout(timer); fail(new Error(`Slides API exited ${code}: ${stderr}`)) })
+    })
+    const entry = `
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { ownerScope } from '/src/shared/auth.web';
+      import { createShellRoute, parseShellRoute, serializeShellRoute } from '/src/shared/shell/shellRoutes';
+      import { studioModules } from '/src/features/studio/moduleDefinitions.web';
+      import { createSlidesRoute, createStudioRoute } from '/src/features/studio/studioRoutes';
+      const back = { destination: 'chat', sessionId: 'conversation-slides', selectionId: 'message-4', scrollY: 360 };
+      const Studio = React.lazy(studioModules[0].load);
+      function App() {
+        const scope = React.useMemo(() => ownerScope(location.origin, { user: 'slides-owner' }), []);
+        const [route, setRoute] = React.useState(() => {
+          const parsed = parseShellRoute(location.href, location.origin);
+          return parsed.kind === 'route' && studioModules[0].matches(parsed) ? parsed : createShellRoute('chat');
+        });
+        const [returned, setReturned] = React.useState(null);
+        const navigate = next => { history.pushState(null, '', serializeShellRoute(next)); setRoute(next); };
+        return <><button id="open-design" onClick={() => navigate(createStudioRoute('design', back))}>Open Design</button>
+          {route.destination === 'apps' ? <div style={{height:'100vh'}}><React.Suspense fallback={<p>Loading Studio</p>}>
+            <Studio route={route} scope={scope} navigate={navigate} returnTo={route.returnTo}
+              onReturn={() => { setReturned(route.returnTo); navigate(createShellRoute('chat', {sessionId:route.returnTo?.sessionId})); }} />
+          </React.Suspense></div> : <output id="return-context">{JSON.stringify(returned)}</output>}
+        </>;
+      }
+      createRoot(document.getElementById('root')).render(<App />);
+    `
+    const modules = join(root, 'apps/assistant/node_modules')
+    vite = await createViteServer({ configFile: false, root: join(root, 'apps/assistant'),
+      resolve: { alias: [
+        { find: 'react', replacement: join(modules, 'react') },
+        { find: 'react-dom', replacement: join(modules, 'react-dom') },
+        { find: 'framer-motion', replacement: join(modules, 'framer-motion') },
+        { find: 'lucide-react', replacement: join(modules, 'lucide-react') },
+        { find: /^react-native$/, replacement: 'react-native-web' },
+      ], dedupe: ['react', 'react-dom'], extensions: ['.web.tsx', '.web.ts', '.tsx', '.ts', '.jsx', '.js'] },
+      esbuild: { jsx: 'automatic' },
+      optimizeDeps: { include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'framer-motion', 'lucide-react'] },
+      plugins: [{ name: 'studio-slides-entry',
+        resolveId(id) { if (id === '/studio-slides.tsx') return '\0studio-slides' },
+        async load(id) { if (id === '\0studio-slides') return (await transformWithEsbuild(entry, 'studio-slides.tsx', { loader: 'tsx', jsx: 'automatic' })).code },
+        configureServer(server) { server.middlewares.use('/assistant', (_request, response) => {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root"></div><script type="module" src="/studio-slides.tsx"></script></body></html>')
+        }) },
+      }],
+      server: { host: '127.0.0.1', port, strictPort: true, fs: { allow: [root] },
+        proxy: { '/api': `http://127.0.0.1:${started.api_port}` } },
+    })
+    await vite.listen()
+    directory = await mkdtemp(join(tmpdir(), 'gideon-studio-slides-browser-'))
+    const debugPort = await freePort()
+    browser = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu',
+      '--disable-background-networking', `--remote-debugging-port=${debugPort}`,
+      `--user-data-dir=${directory}`, 'about:blank'])
+    let target: { webSocketDebuggerUrl: string } | undefined
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        const pages = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>
+        target = pages.find(page => page.type === 'page')
+        if (target) break
+      } catch { await new Promise(done => setTimeout(done, 100)) }
+    }
+    if (!target) throw new Error('Chromium page did not start')
+    socket = new WebSocket(target.webSocketDebuggerUrl)
+    await new Promise<void>((done, fail) => { socket!.addEventListener('open', () => done(), { once: true }); socket!.addEventListener('error', () => fail(new Error('Chromium socket failed')), { once: true }) })
+    let sequence = 0
+    const pending = new Map<number, (value: any) => void>()
+    socket.addEventListener('message', event => {
+      const message = JSON.parse(String(event.data))
+      if (message.id && pending.has(message.id)) { pending.get(message.id)!(message); pending.delete(message.id) }
+    })
+    const send = (method: string, params: Record<string, unknown> = {}) => new Promise<any>(done => {
+      const id = ++sequence
+      pending.set(id, done)
+      socket!.send(JSON.stringify({ id, method, params }))
+    })
+    const evaluate = async <T,>(expression: string): Promise<T> => {
+      const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+      if (response.result?.exceptionDetails) throw new Error(JSON.stringify(response.result.exceptionDetails))
+      if (!response.result?.result) throw new Error(`Browser evaluation did not complete: ${JSON.stringify(response)}`)
+      return response.result.result.value as T
+    }
+    const waitFor = async (expression: string) => {
+      for (let attempt = 0; attempt < 120; attempt++) {
+        if (await evaluate<boolean>(expression)) return
+        await new Promise(done => setTimeout(done, 100))
+      }
+      throw new Error(`Browser condition timed out: ${expression}`)
+    }
+    await send('Page.navigate', { url: `${origin}/assistant` })
+    await waitFor("Boolean(document.getElementById('open-design'))")
+    expect(await evaluate<number>("fetch('/api/artifacts?kind=pptx').then(response => response.status)")).toBe(403)
+    expect(await evaluate<number>(`fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'slides-owner',password:'correct-horse-battery-staple',totp:''})}).then(response => response.status)`)).toBe(200)
+    await evaluate("document.getElementById('open-design').click()")
+    await waitFor("Boolean([...document.querySelectorAll('button')].find(button => button.textContent === 'Open Slides'))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent === 'Open Slides').click()")
+    await waitFor("Boolean(document.querySelector('[aria-label=\"New presentation outline\"]'))")
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="New presentation name"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Quarterly review');
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      const outline = document.querySelector('[aria-label="New presentation outline"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(outline, '## Results\\n- Verified');
+      outline.dispatchEvent(new Event('input', {bubbles:true})); })()`)
+    await waitFor("Boolean([...document.querySelectorAll('button')].find(button => button.textContent.includes('Create presentation') && !button.disabled))")
+    await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.includes('Create presentation')).click()")
+    await waitFor("Boolean(document.querySelector('[aria-label=\"Slide title\"]'))")
+    const routeUrl = await evaluate<string>('location.href')
+    const routeQuery = new URL(routeUrl).searchParams
+    expect(routeQuery.get('placement')).toBe('design')
+    expect(routeQuery.get('subview')).toBe('/slides')
+    expect(routeQuery.get('recordKind')).toBe('artifact')
+    expect(routeQuery.get('recordId')).toBe('quarterly-review')
+    expect(routeQuery.get('from')).toBe('chat')
+    expect(await evaluate<string>('location.hash')).toBe('')
+    await send('Page.reload', { ignoreCache: true })
+    await waitFor("Boolean(document.querySelector('[aria-label=\"Slide title\"]'))")
+    expect(await evaluate<string>("document.querySelector('[aria-label=\"Slide title\"]').value")).toBe('Results')
+    await evaluate("document.querySelector('.gideon-workspace-back').click()")
+    await waitFor("Boolean(document.getElementById('return-context'))")
+    expect(await evaluate<string>("document.getElementById('return-context').textContent")).toContain('"selectionId":"message-4","scrollY":360')
+    expect(await evaluate<string>('location.pathname')).toBe('/assistant/chat')
+  } finally {
+    socket?.close()
+    browser?.kill('SIGTERM')
+    await vite?.close()
+    api.kill('SIGTERM')
+    if (directory) await rm(directory, { recursive: true, force: true })
+  }
+}, 60000)
