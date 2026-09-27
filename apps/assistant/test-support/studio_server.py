@@ -1,5 +1,5 @@
 import asyncio
-import base64
+import io
 import json
 import os
 import sys
@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from aiohttp import web
+from PIL import Image
 
 
 async def main(origin: str) -> None:
@@ -54,11 +55,10 @@ async def main(origin: str) -> None:
 
         artifacts = NativeArtifactProvider(home / "artifacts")
         registry.register_provider(artifacts)
-        image = base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="
-        )
+        image_file = io.BytesIO()
+        Image.new("RGBA", (16, 16), (20, 80, 150, 255)).save(image_file, format="PNG")
         artifact = artifacts.create_binary(
-            name="Studio harbor image", data=image, mime="image/png", kind="image",
+            name="Studio harbor image", data=image_file.getvalue(), mime="image/png", kind="image",
             source="manual", slug="studio-harbor-image",
         )
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
