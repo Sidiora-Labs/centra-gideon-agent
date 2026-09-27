@@ -151,7 +151,8 @@ export class ConversationController {
     if (this.loading || !this.queuedLiveEvents.length) return
     const queued = this.queuedLiveEvents
     this.queuedLiveEvents = []
-    for (const event of queued) this.receive(event)
+    const terminalSnapshot = this.state.phase === 'ready' && !this.state.running
+    for (const event of queued) this.applyEvent(event, terminalSnapshot)
   }
 
   async send(): Promise<void> {
@@ -216,7 +217,14 @@ export class ConversationController {
       }
       return
     }
+    this.applyEvent(event)
+  }
+
+  private applyEvent(event: ChatSocketEvent, terminalSnapshot = false): void {
+    const { sessionId } = this.state
+    if (!sessionId) return
     if (event.type === 'chat_chunk') {
+      if (terminalSnapshot) return
       const content = event.data.content
       const seq = event.data.seq
       if (typeof content !== 'string' || typeof seq !== 'number' || seq <= this.lastChunkSeq) return
@@ -232,6 +240,7 @@ export class ConversationController {
       const found = toolCallId ? messages.findIndex(message => message.role === 'tool'
         && message.meta?.tool_call_id === toolCallId) : -1
       const previous = found >= 0 ? messages[found] : undefined
+      if (previous?.meta?.done === true) return
       const incoming = event.type === 'tool_call' ? {
         ...(previous?.meta ?? {}), ...event.data,
         tool_call_id: toolCallId || undefined,
@@ -248,7 +257,7 @@ export class ConversationController {
       }
       if (found >= 0) messages[found] = message
       else messages.push(message)
-      this.update({ messages, running: true, phase: 'sending' })
+      this.update(terminalSnapshot ? { messages } : { messages, running: true, phase: 'sending' })
     } else if (event.type === 'approval' || event.type === 'approval_resolved') {
       const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
       const messages = [...this.state.messages]
@@ -284,7 +293,7 @@ export class ConversationController {
       } else if (content || event.type === 'activity_event') {
         messages.push({ id: messageId, role, content, meta: event.data })
       }
-      this.update({ messages, ...(event.type === 'activity_event' ? {} : { running: true, phase: 'sending' as const }) })
+      this.update({ messages, ...(event.type === 'activity_event' || terminalSnapshot ? {} : { running: true, phase: 'sending' as const }) })
     } else if (event.type === 'chat_user_message' || event.type === 'chat_done') {
       void this.refresh()
     } else if (event.type === 'chat_message' && event.data.role === 'error') {

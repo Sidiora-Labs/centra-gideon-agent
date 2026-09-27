@@ -142,6 +142,36 @@ window.loaded = true
     await vite.listen()
     const { evaluate, command } = await browser(`${origin}/conversation`)
     await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
+    let terminalReadGate: Promise<void> | undefined
+    if (process.env.GIDEON_TEST_MODEL) {
+      await command('Fetch.enable', { patterns: [{ urlPattern: `${origin}/api/chat/sessions/*`, requestStage: 'Request' }] })
+      let holdRequest: (requestId: string) => void = () => {}
+      const heldDetail = new Promise<string>(done => { holdRequest = done })
+      let held = false
+      debuggerSocket!.addEventListener('message', event => {
+        const frame = JSON.parse(String(event.data)) as { method?: string; params?: { requestId: string; request: { method: string; url: string } } }
+        if (frame.method !== 'Fetch.requestPaused' || !frame.params || held) return
+        const { requestId, request } = frame.params
+        if (request.method !== 'GET' || !request.url.includes('/api/chat/sessions/')) {
+          void command('Fetch.continueRequest', { requestId })
+          return
+        }
+        void evaluate('window.captureTerminalRead === true').then(capture => {
+          if (capture && !held) { held = true; holdRequest(requestId) }
+          else void command('Fetch.continueRequest', { requestId })
+        }).catch(() => void command('Fetch.continueRequest', { requestId }))
+      })
+      terminalReadGate = (async () => {
+        const requestId = await heldDetail
+        await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+          if (window.frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done(true) }
+          else if (++n > 2400) { clearInterval(timer); reject(Error('native run did not finish while history read was held')) }
+        }, 50) })`)
+        await evaluate('window.captureTerminalRead = false')
+        await command('Fetch.continueRequest', { requestId })
+        await command('Fetch.disable')
+      })()
+    }
     const result = await evaluate(`(async () => {
       const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
@@ -171,14 +201,17 @@ window.loaded = true
         ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then answer ready.'
         : '  Reply with one word: ready.  '
       window.controller.setDraft(prompt)
-      await window.controller.send()
+      if (expectAnswer) {
+        window.captureTerminalRead = true
+        window.sendPromise = window.controller.send()
+      } else await window.controller.send()
       if (expectAnswer) {
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
-          const pending = window.controller.snapshot().messages.find(message => message.role === 'permission')
+          const pending = frames.find(frame => frame.type === 'approval')
           if (pending) { clearInterval(timer); done(pending) }
-          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval request was not observed: ' + JSON.stringify(window.controller.snapshot()))) }
+          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval frame was not observed: ' + JSON.stringify(frames))) }
         }, 50) }).then(async pending => {
-          const approvalId = pending.meta?.approval_id
+          const approvalId = pending.id
           if (typeof approvalId !== 'string' || !approvalId) throw Error('native approval row has no canonical ID')
           const response = await fetch('/api/chat/sessions/' + encodeURIComponent(session) + '/approve', {
             method: 'POST', credentials: 'same-origin',
@@ -189,12 +222,20 @@ window.loaded = true
           if (!response.ok || !result.ok) throw Error('native approval resolution failed: ' + JSON.stringify(result))
         })
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
+        await window.sendPromise
         await window.controller.refresh()
+        await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+          const state = window.controller.snapshot()
+          const completedTool = state.messages.some(message => message.role === 'tool' && message.meta?.done === true)
+          if (!state.running && state.phase === 'ready' && completedTool) { clearInterval(timer); done() }
+          else if (++n > 300) { clearInterval(timer); reject(Error('terminal native history was not reconciled: ' + JSON.stringify(state))) }
+        }, 50) })
       }
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
+      const evidence = { session, connected: snapshot.connected, running: snapshot.running, phase: snapshot.phase,
+        persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         visible: snapshot.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
@@ -224,6 +265,7 @@ window.loaded = true
       window.controller.setOwner(null)
       return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, retainedEdit, failed, cleared: window.controller.snapshot() }
     })()`)
+    if (terminalReadGate) await terminalReadGate
     expect(result.session).toMatch(/^chat-/)
     expect(result.connected).toBe(true)
     expect(result.persisted).toBe(1)
@@ -240,6 +282,9 @@ window.loaded = true
       expect(result.frames).toContainEqual(expect.objectContaining({ type: 'chat_message', role: 'assistant' }))
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
+      expect(result.running).toBe(false)
+      expect(result.phase).toBe('ready')
+      expect(result.liveLifecycle.filter((message: { role: string }) => message.role === 'tool')).toHaveLength(result.toolRows.length)
       expect(result.toolRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) })]))
       expect(result.permissionRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) })]))
       expect(result.liveLifecycle).toEqual(expect.arrayContaining([
