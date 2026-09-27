@@ -1,4 +1,6 @@
 import type { ModuleDefinition } from '../../shared/shell/webModules.web'
+import type { ModuleProps } from '../../shared/shell/webModules.web'
+import React from 'react'
 import type { OwnerScope } from '../../shared/auth.web'
 import { GatewayError } from '../../shared/transport.web'
 import type { RouteAvailability } from '../../shared/shell/routeState.web'
@@ -31,9 +33,9 @@ const DESTINATIONS = new Map<string, ShellRoute['destination']>([
   ['capabilities/identity/goal-plans', 'goals'],
 ])
 
-const HOME_VIEWS = new Map<string, ShellRoute['view']>([
-  ['ideas', 'list'],
-  ['goals', 'list'],
+const HOME_VIEWS = new Map<string, readonly ShellRoute['view'][]>([
+  ['ideas', ['list', 'workspace']],
+  ['goals', ['list']],
 ])
 
 const RECORD_KINDS = new Map<string, readonly string[]>([
@@ -42,7 +44,6 @@ const RECORD_KINDS = new Map<string, readonly string[]>([
   ['learning', ['learning-capture', 'learning-review']],
   ['companion', ['companion-item']],
   ['capabilities/knowledge/ideas', ['idea']],
-  ['capabilities/knowledge/journals', ['journal-entry']],
   ['capabilities/identity/autobiography', ['identity-story']],
   ['capabilities/identity/goals', ['human-goal']],
   ['capabilities/identity/goal-plans', ['goal-plan']],
@@ -71,7 +72,11 @@ async function resolve(scope: OwnerScope, route: ShellRoute): Promise<RouteAvail
       else if (kind === 'identity-story') await client.readIdentityStory(id)
       else if (kind === 'health-measurement') await client.readHealthMeasurement(id)
       else if (kind === 'memory-fact') await client.readMemoryFact(id)
-      else return 'unavailable'
+      else if (kind === 'learning-capture' || kind === 'learning-review') {
+        const rows = kind === 'learning-capture' ? await client.readLearningCaptures() : await client.readLearningReviews()
+        if (rows.state === 'unavailable') return 'unavailable'
+        if (!rows.value.some(row => row.identity.nativeId === id)) return 'missing'
+      } else return 'unavailable'
       return 'available'
     }
     if (placement === 'goals' || placement === 'capabilities/identity/goals') await client.readGoals()
@@ -101,9 +106,24 @@ function matchesPlacement(id: string, route: ShellRoute): boolean {
   if (route.placement) {
     if (route.placement.id !== id || route.destination !== (DESTINATIONS.get(id) ?? 'ideas')) return false
     if (route.record) return route.view === 'detail' && (RECORD_KINDS.get(id) ?? []).includes(route.record.kind)
-    return route.view === (HOME_VIEWS.get(id) ?? 'workspace')
+    if ((id === 'ideas' || id === 'capabilities/knowledge/ideas') && (route.view === 'list' || route.view === 'workspace')) return true
+    return (HOME_VIEWS.get(id) ?? ['workspace']).includes(route.view)
   }
   return (id === 'ideas' || id === 'goals') && route.destination === id && route.view === 'list' && !route.record
+}
+
+async function loadRouteComponent(id: string): Promise<{ default: React.ComponentType<ModuleProps> }> {
+  const [{ PersonalHome }, { IdeasScreen }, { LearningWorkspace }] = await Promise.all([
+    import('./PersonalHome'), import('./IdeasScreen'), import('./LearningWorkspace.web'),
+  ])
+  const RouteView = (props: ModuleProps) => {
+    const placement = props.route.placement?.id ?? id
+    if (!props.route.record && (placement === 'ideas' || placement === 'capabilities/knowledge/ideas')
+      && (props.route.view === 'list' || props.route.view === 'workspace')) return React.createElement(IdeasScreen, props)
+    if (!props.route.record && placement === 'learning' && props.route.view === 'workspace') return React.createElement(LearningWorkspace, props)
+    return React.createElement(PersonalHome, props)
+  }
+  return { default: RouteView }
 }
 
 export const personalModuleDefinitions: readonly ModuleDefinition[] = Object.freeze(PLACEMENTS.map(id => Object.freeze({
@@ -111,5 +131,5 @@ export const personalModuleDefinitions: readonly ModuleDefinition[] = Object.fre
   mode: 'full' as const,
   matches: (route: ShellRoute) => matchesPlacement(id, route),
   resolve,
-  load: () => import('./PersonalHome').then(module => ({ default: module.PersonalHome })),
+  load: () => loadRouteComponent(id),
 })))

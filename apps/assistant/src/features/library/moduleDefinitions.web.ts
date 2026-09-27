@@ -3,10 +3,11 @@ import { LibraryReadError, getLibraryRecord, listKnowledgeItems } from "./librar
 import { parseLibraryRecord } from "./libraryRoutes";
 
 function matchesLibraryRoute(route: ModuleProps["route"]): boolean {
-  return route.destination === "apps" && (
-    (route.placement?.id === "knowledge" && route.view === "workspace" && !route.record)
-    || (route.placement?.id === "knowledge/item" && route.view === "detail" && parseLibraryRecord(route)?.kind === "knowledge")
-  );
+  if (route.destination !== "apps" || !route.placement || route.placement.subview !== undefined || route.placement.query !== undefined) return false;
+  if (route.placement.id === "knowledge") return route.view === "workspace" && route.record === undefined;
+  if (route.placement.id !== "knowledge/item" || route.view !== "detail" || route.record?.kind !== "knowledge") return false;
+  return typeof route.record.id === "string" && route.record.id.trim().length > 0
+    && !/[\u0000-\u001f\u007f]/.test(route.record.id);
 }
 
 async function resolveLibraryRoute(scope: ModuleProps["scope"], route: ModuleProps["route"]): Promise<"available" | "missing" | "denied" | "unavailable"> {
