@@ -100,15 +100,21 @@ export type ActivityScreenProps = Readonly<{
 }>
 
 export default function ActivityScreen(props: ActivityScreenProps) {
-  return <ActivityScreenBody key={props.scope.cacheKey} {...props} />
+  return <ActivityScreenBody key={`${props.scope.cacheKey}:${props.route.placement?.query?.view ?? ''}:${props.route.placement?.query?.source ?? ''}:${props.route.placement?.query?.selected ?? ''}`} {...props} />
 }
 
-function ActivityScreenBody({ route, scope, returnTo, onReturn }: ActivityScreenProps) {
+function ActivityScreenBody({ route, scope, navigate, returnTo, onReturn }: ActivityScreenProps) {
   const { palette } = useShellTheme()
   const { snapshot, refresh, loadMore } = useActivity(scope)
-  const [view, setView] = useState<ActivityView>('all')
-  const [source, setSource] = useState<ActivityReadSource | 'all'>('all')
+  const query = route.placement?.query
+  const savedView = query?.view as ActivityView | undefined
+  const savedSource = query?.source as ActivityReadSource | 'all' | undefined
+  const selectedId = query?.selected
+  const savedScroll = Number(query?.scroll ?? route.returnTo?.scrollY ?? returnTo?.scrollY ?? 0)
+  const [view, setView] = useState<ActivityView>(savedView && ['all', 'attention', 'working', 'finished', 'updates'].includes(savedView) ? savedView : 'all')
+  const [source, setSource] = useState<ActivityReadSource | 'all'>(savedSource && ['all', ...ACTIVITY_SOURCES].includes(savedSource) ? savedSource : 'all')
   useEffect(() => { void refresh() }, [scope.cacheKey])
+  useEffect(() => { if (Number.isSafeInteger(savedScroll) && savedScroll >= 0) window.requestAnimationFrame(() => window.scrollTo(0, savedScroll)) }, [])
 
   const cards = useMemo(() => collapseActivityCards(snapshot.entries), [snapshot.entries])
   const sourceCards = cards.filter(item => source === 'all' || item.entry.identity.sourceKind === source
@@ -150,7 +156,13 @@ function ActivityScreenBody({ route, scope, returnTo, onReturn }: ActivityScreen
           </h2>
           <div style={{ display: 'grid', gap: 12,
             gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))' }}>
-            {items.map(item => <ActivityCard key={item.entry.identity.key} item={item} palette={palette} />)}
+            {items.map(item => <ActivityCard key={item.entry.identity.key} item={item} palette={palette}
+              onOpen={() => {
+                const context = { destination: 'activity' as const, sessionId: route.sessionId ?? route.returnTo?.sessionId ?? returnTo?.sessionId,
+                  placement: { id: 'activity', query: { view, source, selected: item.entry.identity.sourceId,
+                    scroll: String(Math.max(0, Math.round(window.scrollY))) } } }
+                navigate({ ...item.entry.destination.route, returnTo: context })
+              }} />)}
           </div>
         </section>
       })}

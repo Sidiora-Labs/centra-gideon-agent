@@ -8,25 +8,24 @@ from pathlib import Path
 
 from aiohttp import web
 
-import gideon.core.config.loader as loader
 from gideon.automation.event_triggers import EventTrigger, EventTriggerStore
 from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 from gideon.automation.workflows import store as workflow_store
-from gideon.automation.workflows.handlers import api_runs_list
+from gideon.automation.workflows.handlers import api_run_status, api_runs_list
 from gideon.automation.workflows.models import RunStatus, WorkflowRun
 from gideon.cognition.history import ConversationLog
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.engine.hooks import ScriptHookStore
 from gideon.engine.tasks import registry as task_registry
-from gideon.engine.tasks.handlers import api_tasks_list
+from gideon.engine.tasks.handlers import api_tasks_get, api_tasks_list
 from gideon.integrations.inbox import InboxItem, InboxStore
-from gideon.interfaces.dashboard import session_store, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.messaging import api_notifications
 from gideon.interfaces.dashboard.handlers.sessions import api_approvals
-from gideon.interfaces.dashboard.handlers.triggers import api_trigger_history_all
-from gideon.interfaces.dashboard.handlers_inbox import api_inbox_open_items
+from gideon.interfaces.dashboard.handlers.triggers import api_trigger_history_all, api_trigger_history_detail
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_list, api_inbox_open_items
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.auth import credentials
 from gideon.workspace.artifacts import registry as artifact_registry
@@ -39,9 +38,7 @@ PASSWORD = "correct-horse-battery-staple"
 async def main(origin: str) -> None:
     with tempfile.TemporaryDirectory(prefix="gideon-activity-") as temporary_home:
         home = Path(temporary_home)
-        loader.config_dir = lambda: home
-        credentials.config_dir = lambda: home
-        session_store.config_dir = lambda: home
+        os.environ["GIDEON_HOME"] = str(home)
         (home / "config.json").write_text(json.dumps({
             "auth": {"login_enabled": True}, "dashboard": {"username": "owner-a"},
         }), encoding="utf-8")
@@ -124,12 +121,18 @@ async def main(origin: str) -> None:
         app.router.add_post("/api/auth/login", auth.api_auth_login)
         app.router.add_post("/api/auth/logout", auth.api_auth_logout)
         app.router.add_get("/api/tasks", api_tasks_list)
+        app.router.add_get("/api/tasks/{task_id}", api_tasks_get)
         app.router.add_get("/api/workflows/runs", api_runs_list)
+        app.router.add_get("/api/workflows/runs/{run_id}", api_run_status)
         app.router.add_get("/api/triggers/history", api_trigger_history_all)
+        app.router.add_get("/api/triggers/{id}/history/{run_id}", api_trigger_history_detail)
+        app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
         app.router.add_get("/api/approvals", api_approvals)
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
+        from gideon.workspace.artifacts.handlers import api_artifact_detail
+        app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
 
         async def control_delay(request: web.Request) -> web.Response:
             body = await request.json()
