@@ -4,6 +4,7 @@ import { createShellRoute, serializeShellRoute, type ShellReturnContext } from '
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { readActivityDetail, type ActivityDetailKind, type ActivityDetailRead, type ActivityDetailRecord } from './activityRoutes'
+import { ActivityAttention, activityChatContinuationRoute, approvalChatRoute } from './ActivityAttention'
 
 const labels: Record<ActivityDetailKind, string> = {
   trigger_run: 'Trigger run', inbox_item: 'Inbox item', approval: 'Approval',
@@ -55,6 +56,7 @@ export default function ActivityDetail(props: ModuleProps) {
   const id = route.record?.id ?? ''
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<{ key: string; result: ActivityDetailRead }>()
+  const [actionError, setActionError] = useState('')
   const requestGeneration = useRef(0)
   const requestKey = `${scope.cacheKey}:${serializeShellRoute(route)}:${kind ?? ''}:${id}:${attempt}`
   const returnContext: ShellReturnContext | undefined = route.returnTo ?? props.returnTo
@@ -85,12 +87,16 @@ export default function ActivityDetail(props: ModuleProps) {
   }
   const record = result.state === 'ready' ? result.value : null
   const isArtifact = record?.kind === 'artifact'
+  const approval = record?.kind === 'approval' ? record.record : undefined
+  const inboxSession = record?.kind === 'inbox_item' && typeof record.record.refs?.session === 'string'
+    ? record.record.refs.session.trim() : ''
   return <WorkspaceFrame route={route} mode="full" title={kind ? labels[kind] : 'Activity detail'} onBack={back}
     actions={<button type="button" onClick={() => setAttempt(value => value + 1)} style={{ minHeight: 44,
       border: `1px solid ${palette.line}`, borderRadius: 10, padding: '8px 14px',
       background: palette.card, color: palette.text, font: 'inherit', cursor: 'pointer' }}>Reload record</button>}>
     <main data-activity-detail={kind} data-read-state={result.state}
       style={{ maxWidth: 860, margin: '0 auto', padding: '20px clamp(12px, 3vw, 28px) 48px' }}>
+      {actionError && <p role="alert" style={{ color: palette.danger }}>{actionError}</p>}
       {record ? <>
         <h2 style={{ margin: '0 0 20px', color: palette.text, overflowWrap: 'anywhere' }}>
           {record.kind === 'artifact' ? record.record.name : record.kind === 'inbox_item' ? record.record.message
@@ -104,6 +110,23 @@ export default function ActivityDetail(props: ModuleProps) {
             <dd style={{ margin: 0, color: palette.text, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</dd>
           </div>)}
         </dl>
+        {approval && <ActivityAttention approval={approval} scope={scope} palette={palette}
+          onRefresh={() => setAttempt(value => value + 1)}
+          onActionError={setActionError}
+          onContinue={() => {
+            const next = approvalChatRoute(approval, route)
+            if (next) navigate(next)
+          }} />}
+        {record.kind === 'inbox_item' && inboxSession && <section aria-label="Continue inbox request in Chat"
+          style={{ marginTop: 20, border: `1px solid ${palette.line}`, borderRadius: 14,
+            padding: 16, background: palette.secondary }}>
+          <p style={{ margin: '0 0 12px', color: palette.text }}>This inbox record links to Chat session <code>{inboxSession}</code>.</p>
+          <button type="button" onClick={() => {
+            const next = activityChatContinuationRoute(inboxSession, route)
+            if (next) navigate(next)
+          }} style={{ minHeight: 44, border: 0, borderRadius: 10, padding: '8px 14px',
+            background: palette.blueDark, color: '#fff', font: 'inherit', cursor: 'pointer' }}>Continue in Chat</button>
+        </section>}
         {record.kind === 'inbox_item' && record.record.thread_context?.length ? <section aria-label="Conversation context">
           <h3>Conversation context</h3>
           {record.record.thread_context.map((message, index) => <p key={`${message.ts ?? ''}-${index}`}>
