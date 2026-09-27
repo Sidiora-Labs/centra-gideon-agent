@@ -10,8 +10,9 @@ export type ShellNavigationLabels = Partial<Record<ShellDestination, string>>;
 
 export function shellNavigationColumns(width: number, fontScale: number, labels: ShellNavigationLabels = {}): number {
   const longest = Math.max(...SHELL_DESTINATIONS.map(({ id, label }) => (labels[id] || label).length));
-  const labelWidth = Math.max(64, Math.ceil(longest * 7.5 * Math.max(fontScale, 1) + 24));
-  const fitting = Math.max(1, Math.min(5, Math.floor(Math.max(width, 1) / labelWidth)));
+  const labelWidth = Math.max(44, Math.ceil(longest * 6.25 * Math.max(fontScale, 1) + 6));
+  const contentWidth = Math.max(1, width - 12);
+  const fitting = Math.max(1, Math.min(5, Math.floor(contentWidth / labelWidth)));
   return fitting === 5 ? 5 : Math.min(3, fitting);
 }
 
