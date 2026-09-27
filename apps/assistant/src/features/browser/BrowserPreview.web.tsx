@@ -4,11 +4,12 @@ import type { BrowserClient } from './browserClient'
 import type { BrowserPreview as PreviewFrame, BrowserSession } from './browserTypes'
 
 type Snapshot = { key: string; frame: PreviewFrame; imageUrl: string }
+type PreviewError = { key: string; message: string }
 
 export default function BrowserPreview({ client, session }: { client: BrowserClient; session: BrowserSession }) {
   const { palette } = useShellTheme()
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<PreviewError | null>(null)
   const [refresh, setRefresh] = useState(0)
   const imageUrl = useRef<string | null>(null)
   const key = `${client.scope.cacheKey}:${session.id}:${session.version}:${session.controlHolder}`
@@ -20,7 +21,7 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
   useEffect(() => {
     let current = true
     let fetching = false
-    setError('')
+    setError(null)
     setSnapshot(null)
     if (imageUrl.current) URL.revokeObjectURL(imageUrl.current)
     imageUrl.current = null
@@ -32,12 +33,18 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
       const result = await client.preview(session)
       fetching = false
       if (!current || activePreview.current.key !== key || activePreview.current.client !== client) return
-      if (result.state !== 'ready') { setError(result.message); return }
+      if (result.state !== 'ready') {
+        if (imageUrl.current) URL.revokeObjectURL(imageUrl.current)
+        imageUrl.current = null
+        setSnapshot(null)
+        setError({ key, message: result.message })
+        return
+      }
       const nextUrl = URL.createObjectURL(result.value.image)
       if (imageUrl.current) URL.revokeObjectURL(imageUrl.current)
       imageUrl.current = nextUrl
       setSnapshot({ key, frame: result.value, imageUrl: nextUrl })
-      setError('')
+      setError(null)
     }
 
     void load()
@@ -68,7 +75,7 @@ export default function BrowserPreview({ client, session }: { client: BrowserCli
       <span>{frame.controlHolder === 'customer' ? 'You have control' : 'Gideon has control'}</span>
       <span>{stamp?.toLocaleTimeString()}</span>
     </div>}
-    {error && <p role="alert" style={{ color: palette.danger, margin: 0 }}>{error}</p>}
+    {error?.key === key && <p role="alert" style={{ color: palette.danger, margin: 0 }}>{error.message}</p>}
     {!fresh && session.status === 'active' && <p role="status" style={{ margin: 0 }}>Waiting for a current preview. Refresh before using this image.</p>}
     {frame && snapshot && <div style={{ borderRadius: 10, border: `1px solid ${palette.line}`, overflow: 'hidden',
       background: palette.canvas, minHeight: 180 }}>
