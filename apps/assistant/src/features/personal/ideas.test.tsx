@@ -31,33 +31,31 @@ async function availablePort(): Promise<number> {
 const nativeServer = String.raw`
 import asyncio, json, os, sys, time
 from pathlib import Path
-from types import SimpleNamespace
 from aiohttp import web
-import gideon.core.config.loader as loader
-from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.core.config import AppConfig
+from gideon.engine.session import ConversationDirectory
+from gideon.engine.tasks.handlers import register_task_routes
 from gideon.cognition.learning import proposals
 from gideon.cognition.suggestions import SuggestionsCache, api_suggestions
-from gideon.interfaces.dashboard import session_store, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
-from gideon.interfaces.dashboard.handlers import capabilities_knowledge_ideas, capabilities_knowledge_capture, capabilities_knowledge_reviews, learning
+from gideon.interfaces.dashboard.handlers import assistant_ideas, capabilities_knowledge_ideas, capabilities_knowledge_capture, capabilities_knowledge_reviews, knowledge, learning
 from gideon.security.auth import credentials
+from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace.capabilities.knowledge.ideas import IdeaLists
 from gideon.workspace.capabilities.knowledge.idea_format import preview
 
 async def main(origin):
   home = Path(os.environ['GIDEON_HOME'])
-  loader.config_dir = lambda: home
-  credentials.config_dir = lambda: home
-  session_store.config_dir = lambda: home
   (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'learning': {'enabled': True}, 'evals': {'enabled': False}}), encoding='utf-8')
   credentials.set_password('personal-owner', 'native-owner-password')
   token_auth.use_persistent_secret(); token_auth.revoke_all_sessions()
-  store = KnowledgeStore(str(home / 'knowledge.db'))
+  state = ConsoleState(ConversationDirectory(AppConfig.load()), time.time())
+  store = state.knowledge_store
   now = '2026-09-27T10:00:00+00:00'
-  content = f'''---\nid: 50d3e623-0be4-4e04-8ca9-68109c5c1267\ntitle: Native saved ideas\ncategory: personal\nstatus: draft\ncreated: {now}\nmodified: {now}\ntags:\n  - idea-loom\n---\n# Prompt\nExplore a grounded next step from captured notes.\n## Ideas\n1. Build a source-linked learning plan\n'''
+  content = f'''---\nid: 50d3e623-0be4-4e04-8ca9-68109c5c1267\ntitle: Native saved ideas\ncategory: personal\nstatus: draft\ncreated: {now}\nmodified: {now}\ntags:\n  - idea-loom\n---\n# Prompt\nExplore a grounded next step from captured notes.\n\n## Help\nConsider a grounded action from the source.\n## Ideas\n1. Build a source-linked learning plan\n2. Preserve the source evidence with the next task\n'''
   idea_preview = preview(content)
   IdeaLists(store, home).import_list({'request_id': 'idea-list-seed-001', 'content': content, 'preview_id': idea_preview['preview_id'], 'expected_hash': ''})
-  state = SimpleNamespace(knowledge_store=store, context_builder=None, _background_tasks=set())
   cache = SuggestionsCache(); cache.suggestions = ['Use this cached prompt in a draft']; cache.generated_at = time.time()
   state._suggestions_cache = cache
   proposals.enqueue(kind='skill', title='Review skill proposal', body='A proposal body backed by a real local test record.', target='learning-test', provenance='local_capture', source_excerpt='The source capture supports this proposal.', evidence_refs=['capture:learning-evidence-1'], evidence_strength='direct', confidence=0.91, occurrences=1, min_evidence=1)
@@ -71,7 +69,9 @@ async def main(origin):
   app.router.add_get('/api/auth/status', auth.api_login_status); app.router.add_get('/api/auth/session', auth.api_auth_session)
   app.router.add_post('/api/auth/login', auth.api_auth_login); app.router.add_post('/api/auth/logout', auth.api_auth_logout)
   app.router.add_get('/api/suggestions', api_suggestions)
-  capabilities_knowledge_ideas.register(app); capabilities_knowledge_capture.register(app); capabilities_knowledge_reviews.register(app)
+  capabilities_knowledge_ideas.register(app); assistant_ideas.register_idea_decision_routes(app); capabilities_knowledge_capture.register(app); capabilities_knowledge_reviews.register(app)
+  app.router.add_patch('/api/knowledge/items/{id}', knowledge.update_item)
+  register_task_routes(app)
   learning.register_learning_routes(app)
   app['capability_capture_inbox'].create('capture-learning-001', 'Original learning capture retained in the source history.')
   runner = web.AppRunner(app); await runner.setup()
@@ -163,7 +163,7 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.evaluate(`(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username','personal-owner');set('gideon-password','native-owner-password');document.querySelector('form').requestSubmit();return true})()`)
     await browser.waitFor("document.body.innerText.includes('Build a source-linked learning plan')",'saved Idea')
     const nativeIdea = await browser.evaluate<string>("document.querySelector('.gideon-ideas__card')?.innerText || ''")
-    expect(nativeIdea).toContain('No accept or dismiss decision is recorded');expect(nativeIdea).toContain('Explore a grounded next step')
+    expect(nativeIdea).toContain('Decision · New');expect(nativeIdea).toContain('Explore a grounded next step')
     expect(await browser.evaluate<boolean>("document.querySelector('.gideon-ideas__record-details')?.open === false")).toBe(true)
     await browser.evaluate("document.querySelector('.gideon-ideas__record-details summary')?.click()")
     const provenance = await browser.evaluate<string>("document.querySelector('.gideon-ideas__record-details')?.innerText || ''")
@@ -172,6 +172,29 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-ideas__chips button')).find(button=>button.innerText.includes('cached prompt'))?.click()")
     expect(await browser.evaluate<string>("document.getElementById('gideon-ideas-draft').value")).toBe('Use this cached prompt in a draft')
     expect(await browser.evaluate<string>("document.querySelector('.gideon-ideas__card').innerText")).not.toContain('Use this cached prompt in a draft')
+    await browser.waitFor("document.querySelectorAll('.gideon-idea-decision').length === 2",'native decision controls')
+    await browser.evaluate(`(()=>{const field=document.querySelector('.gideon-idea-decision textarea');const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;setter.call(field,'Plan a source-linked study with explicit milestones');field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
+    const firstIdeaId=await browser.evaluate<string>("document.querySelector('.gideon-idea-decision textarea')?.id.replace('idea-task-prompt-','') || ''")
+    const changedSource=await browser.evaluate<number>(`fetch('/api/knowledge/items/${encodeURIComponent(firstIdeaId)}',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'Build a revised source-linked plan'})}).then(response=>response.status)`)
+    expect(changedSource).toBe(200)
+    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-idea-decision button')).find(button=>button.innerText==='Accept as task')?.click()")
+    await browser.waitFor("document.querySelector('.gideon-idea-decision [role=status]')?.innerText.toLowerCase().includes('source changed')",'stale decision retains draft and evidence')
+    const retainedDraft=await browser.evaluate<string>("document.querySelector('.gideon-idea-decision textarea')?.value || ''")
+    expect(retainedDraft).toBe('Plan a source-linked study with explicit milestones')
+    expect(await browser.evaluate<string>("document.querySelector('.gideon-ideas__card blockquote')?.innerText || ''")).toContain('Build a source-linked learning plan')
+    await browser.evaluate("Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Refresh')?.click()")
+    await browser.waitFor("document.querySelector('.gideon-ideas__card h3')?.innerText === 'Build a revised source-linked plan'",'refreshed source evidence')
+    await browser.evaluate(`(()=>{const field=document.querySelector('.gideon-idea-decision textarea');const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;setter.call(field,'Plan a source-linked study with explicit milestones');field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));return true})()`)
+    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-idea-decision button')).find(button=>button.innerText==='Accept as task')?.click()")
+    await browser.waitFor("document.querySelector('.gideon-idea-decision [role=status]')?.innerText.includes('Accepted and linked task')",'native task created from edited Idea prompt')
+    const taskId=await browser.evaluate<string>("document.querySelector('.gideon-idea-decision code')?.innerText || ''")
+    expect(taskId).toBeTruthy()
+    const createdTasks=await browser.evaluate<{tasks:Array<{id:string;title:string;evidence:Array<{source_id:string;excerpt:string}>}>}>("fetch('/api/tasks?provider=native').then(response=>response.json())")
+    expect(createdTasks.tasks.filter(task=>task.id===taskId)).toHaveLength(1)
+    expect(createdTasks.tasks.find(task=>task.id===taskId)?.title).toBe('Plan a source-linked study with explicit milestones')
+    expect(createdTasks.tasks.find(task=>task.id===taskId)?.evidence[0].excerpt).toContain('Build a source-linked learning plan')
+    await browser.evaluate("Array.from(document.querySelectorAll('.gideon-idea-decision button')).find(button=>button.innerText==='Dismiss')?.click()")
+    await browser.waitFor("Array.from(document.querySelectorAll('.gideon-idea-decision [role=status]')).some(item=>item.innerText==='Idea dismissed and saved.')",'durable native dismissal')
 
     await browser.evaluate("history.pushState(null,'',location.pathname+'?v=1&view=workspace&placement=capabilities%2Fknowledge%2Fideas');dispatchEvent(new PopStateEvent('popstate'))")
     await browser.waitFor("document.body.innerText.includes('Loading saved Ideas')",'changed Ideas placement loading state')
@@ -180,6 +203,12 @@ createRoot(document.getElementById('root')!).render(<Root />);
     await browser.waitFor("document.querySelector('.gideon-ideas__card')",'Ideas refresh after placement change')
     await browser.evaluate("history.pushState(null,'',location.pathname+'?v=1&view=workspace&placement=ideas');dispatchEvent(new PopStateEvent('popstate'))")
     await browser.waitFor("document.querySelector('.gideon-ideas__card')",'saved Ideas after return')
+    await browser.navigate(`${origin}/assistant/ideas?v=1&view=workspace&placement=ideas`)
+    await browser.waitFor("document.querySelectorAll('.gideon-idea-decision').length === 2",'saved Idea decisions after reload')
+    const durableIdeas=await browser.evaluate<string>("document.querySelector('.gideon-ideas__saved')?.innerText || ''")
+    expect(durableIdeas).toContain('Decision · accepted')
+    expect(durableIdeas).toContain('Decision · dismissed')
+    expect(durableIdeas).toContain(taskId)
     await browser.evaluate("history.pushState(null,'',location.pathname+'?v=1&view=detail&recordKind=idea&recordId=50d3e623-0be4-4e04-8ca9-68109c5c1267&placement=ideas&from=ideas&fromPlacement=ideas');dispatchEvent(new PopStateEvent('popstate'))")
     await browser.waitFor("document.querySelector('.gideon-personal-record h2')?.innerText === 'Native saved ideas'",'record-aware Idea detail')
     await browser.evaluate("document.querySelector('.gideon-personal-record summary')?.click()")
