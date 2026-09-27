@@ -61,6 +61,8 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
   const latestLaunch = useRef(0);
   const cardAttempts = useRef(new Map<string, number>());
   const visiblePreferences = preferences.scopeKey === scope.cacheKey ? preferences.value : EMPTY_DISCOVERY_PREFERENCES;
+  const preferencesRef = useRef({ scopeKey: scope.cacheKey, value: visiblePreferences });
+  preferencesRef.current = { scopeKey: scope.cacheKey, value: visiblePreferences };
   useEffect(() => {
     active.current = true;
     setPreferences({ scopeKey: scope.cacheKey, value: readDiscoveryPreferences(browserStorage(), scope.cacheKey) });
@@ -72,7 +74,12 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
     scopeKey: scope.cacheKey,
     states: { ...(previous.scopeKey === scope.cacheKey ? previous.states : {}), [id]: state },
   }));
-  const savePreferences = (next: DiscoveryPreferences) => {
+  const savePreferences = (update: (current: DiscoveryPreferences) => DiscoveryPreferences) => {
+    const current = preferencesRef.current.scopeKey === scope.cacheKey
+      ? preferencesRef.current.value
+      : readDiscoveryPreferences(browserStorage(), scope.cacheKey);
+    const next = update(current);
+    preferencesRef.current = { scopeKey: scope.cacheKey, value: next };
     writeDiscoveryPreferences(browserStorage(), scope.cacheKey, next);
     setPreferences({ scopeKey: scope.cacheKey, value: next });
   };
@@ -94,7 +101,7 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
     if (request !== latestLaunch.current || result !== "ready") return;
     const invocationContext: ShellReturnContext = miniappReturnContext(returnTo, miniapp.id);
     navigate({ ...miniapp.route, returnTo: invocationContext });
-    savePreferences(recordSuccessfulLaunch(visiblePreferences, miniapp.id));
+    savePreferences(current => recordSuccessfulLaunch(current, miniapp.id));
   }
 
   const orderedMiniapps = [...MINIAPPS].sort((left, right) => {
@@ -145,7 +152,7 @@ export function MiniappCollection({ scope, navigate, returnTo }: MiniappCollecti
             {label}
           </button>
           <button type="button" data-miniapp-pin={miniapp.id} aria-pressed={pinned}
-            onClick={() => savePreferences(togglePinned(visiblePreferences, miniapp.id))}
+            onClick={() => savePreferences(current => togglePinned(current, miniapp.id))}
             style={{ border: `1px solid ${palette.line}`, borderRadius: 10, background: palette.card,
               color: palette.muted, font: "inherit", minHeight: 36, padding: "6px 10px" }}>
             {pinned ? `Unpin ${miniapp.name}` : `Pin ${miniapp.name}`}
