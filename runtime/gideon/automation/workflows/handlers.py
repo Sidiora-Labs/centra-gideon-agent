@@ -653,18 +653,15 @@ async def api_runs_list(request: web.Request) -> web.Response:
             },
             status=400,
         )
+    mine = str(request.query.get("mine", "")).strip().lower() in ("1", "true", "yes")
     runs, total = store.list_runs(
         workflow_name=request.query.get("workflow", ""),
         status=request.query.get("status", ""),
         root_run_id=request.query.get("root_run_id", ""),
+        owner_username=_owner_username() if mine else "",
         limit=limit,
         offset=offset,
     )
-    if str(request.query.get("mine", "")).strip().lower() in ("1", "true", "yes"):
-        owner = _owner_username()
-        if owner:
-            runs = [r for r in runs if r.belongs_to(owner)]
-            total = len(runs)
     return web.json_response(
         {
             "runs": [r.to_dict() for r in runs],
