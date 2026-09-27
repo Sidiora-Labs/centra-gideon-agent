@@ -95,9 +95,11 @@ it('creates, edits, reorders, reloads, previews and downloads an owner-scoped PP
       import SlidesWorkspace from '/src/features/studio/SlidesWorkspace.web';
       function App() {
         const [owner, setOwner] = React.useState('slides-owner');
+        const [artifactId, setArtifactId] = React.useState('');
         const scope = React.useMemo(() => ownerScope(location.origin, { user: owner }), [owner]);
         return <><button id="other-owner" onClick={() => setOwner('other-owner')}>Other owner</button>
-          <SlidesWorkspace scope={scope} /></>;
+          <button id="other-record" onClick={() => setArtifactId('second-review')}>Other record</button>
+          <SlidesWorkspace scope={scope} artifactId={artifactId} /></>;
       }
       createRoot(document.getElementById('root')).render(<App />);
     `
@@ -169,6 +171,19 @@ it('creates, edits, reorders, reloads, previews and downloads an owner-scoped PP
       setter.call(node, ${JSON.stringify(value)}); node.dispatchEvent(new Event('input', {bubbles:true}));
     })()`)
     const click = (label: string) => evaluate(`(() => { const node = [...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)}); if (!node) throw new Error('Missing button: ' + ${JSON.stringify(label)}); node.click(); })()`)
+    const holdNativeSaveResponse = () => evaluate(`(() => {
+      const original = window.fetch;
+      window.__slidesRelease = undefined;
+      window.fetch = (input, options) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if ((options?.method || input?.method) !== 'PUT' || !new URL(url, location.origin).pathname.endsWith('/model')) return original(input, options);
+        window.fetch = original;
+        return original(input, options).then(response => new Promise(resolve => {
+          window.__slidesHeldStatus = response.status;
+          window.__slidesRelease = () => resolve(response);
+        }));
+      };
+    })()`)
 
     await send('Page.navigate', { url: `${origin}/assistant` })
     await waitFor("Boolean(document.querySelector('[aria-label=\"New presentation name\"]'))")
@@ -195,8 +210,35 @@ it('creates, edits, reorders, reloads, previews and downloads an owner-scoped PP
     await waitFor("document.body.textContent.includes('saved version 2')")
     expect(await evaluate<string>("document.querySelector('[aria-label=\"Slides\"] button').textContent")).toContain('Decision')
     expect(await evaluate<string>("document.querySelector('[aria-label=\"Speaker notes\"]').value")).toBe('Updated first notes')
+
+    expect(await evaluate<number>(`(async () => {
+      const source = await (await fetch('/api/artifacts/quarterly-review/model')).json();
+      const model = { ...source.model, title: 'Second review', slides: [{ ...source.model.slides[0], title: 'Secondary decision' }] };
+      return (await fetch('/api/artifacts/deck', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ name:'Second review', slug:'second-review', model }) })).status;
+    })()`)).toBe(201)
+    await setValue('[aria-label="Speaker notes"]', 'Pending old record')
+    await holdNativeSaveResponse()
+    await click('Save and export PPTX')
+    await waitFor("window.__slidesHeldStatus === 200 && typeof window.__slidesRelease === 'function'")
+    await evaluate("document.getElementById('other-record').click()")
+    expect(await evaluate<boolean>("document.body.textContent.includes('Pending old record') || Boolean(document.querySelector('a[download]'))")).toBe(false)
+    await waitFor("document.body.textContent.includes('Secondary decision') && document.body.textContent.includes('saved version 1')")
+    await evaluate("window.__slidesRelease()")
+    await new Promise(done => setTimeout(done, 200))
+    expect(await evaluate<boolean>("document.body.textContent.includes('Pending old record') || document.body.textContent.includes('Download PPTX version 3') || Boolean(document.querySelector('[role=alert]'))")).toBe(false)
+    expect(await evaluate<string>("document.querySelector('[aria-label=\"Slide title\"]').value")).toBe('Secondary decision')
+
+    await setValue('[aria-label="Speaker notes"]', 'Pending old owner')
+    await holdNativeSaveResponse()
+    await click('Save and export PPTX')
+    await waitFor("window.__slidesHeldStatus === 200 && typeof window.__slidesRelease === 'function'")
     await evaluate("document.getElementById('other-owner').click()")
+    expect(await evaluate<boolean>("document.body.textContent.includes('Pending old owner') || Boolean(document.querySelector('a[download]'))")).toBe(false)
     await waitFor("document.body.textContent.includes('signed-in Studio account changed')")
+    await evaluate("window.__slidesRelease()")
+    await new Promise(done => setTimeout(done, 200))
+    expect(await evaluate<boolean>("document.body.textContent.includes('Pending old owner') || document.body.textContent.includes('saved version 2') || Boolean(document.querySelector('a[download]'))")).toBe(false)
   } finally {
     socket?.close()
     browser?.kill('SIGTERM')

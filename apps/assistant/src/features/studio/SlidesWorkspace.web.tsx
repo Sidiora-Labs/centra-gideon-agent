@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DeckModelJson, DeckPreviewResponse, DeckSlideJson } from '../../../../console/src/shared/data/api'
 import { emptySlide, slideLabel } from '../../../../console/src/shared/ui/content/deckModelEdit'
 import { readOwnerSession, type OwnerScope } from '../../shared/auth.web'
@@ -79,17 +79,39 @@ async function renderPreview(slug: string, version: number): Promise<DeckPreview
 }
 
 export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: OwnerScope; artifactId?: string }) {
-  const [decks, setDecks] = useState<DeckRecord[]>([])
-  const [open, setOpen] = useState<OpenDeck | null>(null)
-  const [entries, setEntries] = useState<SlideEntry[]>([])
-  const [selectedId, setSelectedId] = useState('')
-  const [outline, setOutline] = useState('')
-  const [newName, setNewName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [preview, setPreview] = useState<DeckPreviewResponse | null>(null)
-  const [exportState, setExportState] = useState<ExportState | null>(null)
-  const [acceptLoss, setAcceptLoss] = useState(false)
+  const viewKey = JSON.stringify([scope.cacheKey, scope.runtimeOrigin, scope.ownerId, artifactId])
+  const viewRef = useRef({ key: viewKey, generation: 0 })
+  const requestRef = useRef(0)
+  if (viewRef.current.key !== viewKey) {
+    viewRef.current = { key: viewKey, generation: viewRef.current.generation + 1 }
+    requestRef.current++
+  }
+  const ticket = () => ({ generation: viewRef.current.generation, request: ++requestRef.current })
+  const current = (value: ReturnType<typeof ticket>) => viewRef.current.generation === value.generation && requestRef.current === value.request
+  const [readyKey, setReadyKey] = useState(viewKey)
+  const viewReady = readyKey === viewKey
+  const [storedDecks, setDecks] = useState<DeckRecord[]>([])
+  const [storedOpen, setOpen] = useState<OpenDeck | null>(null)
+  const [storedEntries, setEntries] = useState<SlideEntry[]>([])
+  const [storedSelectedId, setSelectedId] = useState('')
+  const [storedOutline, setOutline] = useState('')
+  const [storedNewName, setNewName] = useState('')
+  const [storedBusy, setBusy] = useState(false)
+  const [storedError, setError] = useState('')
+  const [storedPreview, setPreview] = useState<DeckPreviewResponse | null>(null)
+  const [storedExportState, setExportState] = useState<ExportState | null>(null)
+  const [storedAcceptLoss, setAcceptLoss] = useState(false)
+  const decks = viewReady ? storedDecks : []
+  const open = viewReady ? storedOpen : null
+  const entries = viewReady ? storedEntries : []
+  const selectedId = viewReady ? storedSelectedId : ''
+  const outline = viewReady ? storedOutline : ''
+  const newName = viewReady ? storedNewName : ''
+  const busy = viewReady ? storedBusy : false
+  const error = viewReady ? storedError : ''
+  const preview = viewReady ? storedPreview : null
+  const exportState = viewReady ? storedExportState : null
+  const acceptLoss = viewReady ? storedAcceptLoss : false
   const selectedIndex = entries.findIndex(entry => entry.id === selectedId)
   const selected = entries[selectedIndex]
   const dirty = !!open && JSON.stringify(entries) !== JSON.stringify(open.entries)
@@ -98,36 +120,41 @@ export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: Own
     ? gatewayPath(`/api/artifacts/${encodeURIComponent(exportState.slug)}/raw?version=${exportState.version}`) : ''
 
   useEffect(() => {
-    let alive = true
-    setOpen(null); setEntries([]); setSelectedId(''); setError(''); setPreview(null); setExportState(null)
+    const request = ticket()
+    setReadyKey(viewKey)
+    setDecks([]); setOpen(null); setEntries([]); setSelectedId(''); setOutline(''); setNewName('')
+    setBusy(false); setError(''); setPreview(null); setExportState(null); setAcceptLoss(false)
     void (async () => {
       try {
         await checkOwner(scope)
+        if (!current(request)) return
         const listing = await gatewayJson<{ artifacts: DeckRecord[] }>('/api/artifacts?kind=pptx')
-        if (!alive) return
+        if (!current(request)) return
         setDecks(listing.artifacts.filter(item => item.kind === 'pptx'))
-        if (artifactId) await loadDeck(artifactId, alive)
-      } catch (reason) { if (alive) setError(failure(reason)) }
+        if (artifactId) await loadDeck(artifactId, request)
+      } catch (reason) { if (current(request)) setError(failure(reason)) }
     })()
-    return () => { alive = false }
-  }, [scope.cacheKey, scope.runtimeOrigin, scope.ownerId, artifactId])
+    return () => { if (current(request)) requestRef.current++ }
+  }, [viewKey])
 
-  async function loadDeck(slug: string, alive = true) {
+  async function loadDeck(slug: string, request = ticket()) {
+    if (!current(request)) return
     setBusy(true); setError('')
     try {
       await checkOwner(scope)
+      if (!current(request)) return
       const response = await gatewayJson<DeckResponse>(`/api/artifacts/${encodeURIComponent(slug)}/model`)
       if (response.slug !== slug || response.kind !== 'pptx' || !Number.isSafeInteger(response.version) || !Array.isArray(response.model.slides)) {
         throw new Error('Gideon returned a different or invalid presentation.')
       }
-      if (!alive) return
+      if (!current(request)) return
       const decoded = unpackSlides(response.model)
       const record = decks.find(item => item.slug === slug) ?? { slug, name: slug, kind: 'pptx', version: response.version }
       setOpen({ record, version: response.version, model: response.model, entries: decoded,
         lossless: response.loss.lossless, warnings: response.loss.warnings ?? [] })
       setEntries(decoded); setSelectedId(decoded[0]?.id ?? ''); setAcceptLoss(false); setPreview(null); setExportState(null)
-    } catch (reason) { if (alive) setError(failure(reason)) }
-    finally { if (alive) setBusy(false) }
+    } catch (reason) { if (current(request)) setError(failure(reason)) }
+    finally { if (current(request)) setBusy(false) }
   }
 
   function editSlide(transform: (slide: DeckSlideJson) => DeckSlideJson) {
@@ -146,14 +173,18 @@ export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: Own
 
   async function save() {
     if (!open || !dirty || busy || (!open.lossless && !acceptLoss)) return
+    const request = ticket()
     setBusy(true); setError(''); setExportState(null)
     try {
       await checkOwner(scope)
+      if (!current(request)) return
       const result = await saveModel(open.record.slug, open.version, packSlides(open.model, entries))
+      if (!current(request)) return
       if (result.slug !== open.record.slug || !Number.isSafeInteger(result.version) || result.version <= open.version) {
         throw new Error('Gideon did not confirm the new presentation version. Reload before exporting.')
       }
       const reread = await gatewayJson<DeckResponse>(`/api/artifacts/${encodeURIComponent(result.slug)}/model`)
+      if (!current(request)) return
       if (reread.slug !== result.slug || reread.version !== result.version || reread.kind !== 'pptx') {
         throw new Error('The saved presentation could not be verified. Reload before exporting.')
       }
@@ -162,40 +193,46 @@ export default function SlidesWorkspace({ scope, artifactId = '' }: { scope: Own
         lossless: reread.loss.lossless, warnings: reread.loss.warnings ?? [] })
       setEntries(decoded)
       setExportState({ kind: 'ready', slug: result.slug, version: result.version })
-    } catch (reason) { setError(failure(reason)); setExportState({ kind: 'failed', message: failure(reason) }) }
-    finally { setBusy(false) }
+    } catch (reason) { if (current(request)) { setError(failure(reason)); setExportState({ kind: 'failed', message: failure(reason) }) } }
+    finally { if (current(request)) setBusy(false) }
   }
 
   async function createFromOutline() {
     const parsed = slidesFromOutline(outline)
     if (!newName.trim() || !parsed.length || busy) return
+    const request = ticket()
     setBusy(true); setError(''); setExportState(null)
     try {
       await checkOwner(scope)
+      if (!current(request)) return
       const model = packSlides({ title: newName.trim(), slides: [], width_in: 0, height_in: 0 }, parsed)
       const created = await gatewayJson<DeckRecord>('/api/artifacts/deck', {
         method: 'POST', body: { name: newName.trim(), model },
       })
+      if (!current(request)) return
       if (created.kind !== 'pptx' || !created.slug || created.version !== 1) {
         throw new Error('Gideon did not confirm the new presentation artifact.')
       }
       setDecks(previous => [created, ...previous.filter(item => item.slug !== created.slug)])
       setNewName(''); setOutline('')
-      await loadDeck(created.slug)
-    } catch (reason) { setError(`Presentation render failed: ${failure(reason)}`); setExportState({ kind: 'failed', message: failure(reason) }) }
-    finally { setBusy(false) }
+      await loadDeck(created.slug, request)
+    } catch (reason) { if (current(request)) { setError(`Presentation render failed: ${failure(reason)}`); setExportState({ kind: 'failed', message: failure(reason) }) } }
+    finally { if (current(request)) setBusy(false) }
   }
 
   async function previewDeck() {
     if (!open || dirty || busy) return
+    const request = ticket()
     setBusy(true); setError('')
     try {
       await checkOwner(scope)
+      if (!current(request)) return
       const result = await renderPreview(open.record.slug, open.version)
+      if (!current(request)) return
       if (result.slug !== open.record.slug || result.version !== open.version) throw new Error('The preview belongs to a different presentation version.')
       setPreview(result)
-    } catch (reason) { setError(`Slide preview failed: ${failure(reason)}`); setPreview(null) }
-    finally { setBusy(false) }
+    } catch (reason) { if (current(request)) { setError(`Slide preview failed: ${failure(reason)}`); setPreview(null) } }
+    finally { if (current(request)) setBusy(false) }
   }
 
   const outlineCount = useMemo(() => (outline.match(/^##\s+.+$/gm) ?? []).length, [outline])
