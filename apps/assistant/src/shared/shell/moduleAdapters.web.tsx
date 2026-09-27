@@ -70,7 +70,7 @@ export function TaskModule(props: ModuleProps) {
         }))} />
     </div></ConsoleModuleProviders>
       : <p role="status" aria-live="polite" className="p-l">Loading task…</p>;
-  return <WorkspaceFrame route={props.route} mode="full" title="Task details"
+  return <WorkspaceFrame route={props.route} mode="full" title={task?.title ?? "Task details"}
     actions={props.returnTo && <button type="button" className="gideon-workspace-back" aria-label="Return to previous workspace" onClick={props.onReturn}>Return to previous workspace</button>}
     onGoToChat={() => props.navigate(createShellRoute("chat"))}>{content}</WorkspaceFrame>;
 }
