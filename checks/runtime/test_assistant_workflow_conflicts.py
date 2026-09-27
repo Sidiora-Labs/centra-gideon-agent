@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-from gideon.automation.workflows import defs as workflow_defs
-from gideon.automation.workflows import service
-from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider, _def_path
-
 
 @pytest.mark.asyncio
 async def test_native_publish_and_graph_save_share_revision_transaction(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    from gideon.automation.workflows import defs as workflow_defs
+    from gideon.automation.workflows import service
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider, _def_path
+
     provider = NativeWorkflowDefProvider()
     prior_provider = workflow_defs.get_provider("native")
     workflow_defs.register_provider(provider)
