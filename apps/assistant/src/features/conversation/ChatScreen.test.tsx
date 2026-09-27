@@ -173,9 +173,12 @@ describe("Gideon conversation presentation", () => {
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatScreen } from '/src/features/conversation/ChatScreen.tsx';
+import { AssistantResponse } from '/src/features/conversation/AssistantResponse.tsx';
 import { ConversationController } from '/src/shared/conversation/controller.ts';
 import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx';
 import { ShellThemeProvider } from '/src/shared/shell/shellTheme.web.ts';
+import { createOwnedRouteResolver } from '/src/features/delivery/entry.web.tsx';
+import { createAssistantRouteController } from '/src/shared/shell/routeState.web.ts';
 const controller = new ConversationController();
 const root = createRoot(document.getElementById('root'));
 let scope;
@@ -247,6 +250,19 @@ window.mountChat = window.renderChat;
 window.unmountChat = () => root.render(null);
 window.snapshot = () => controller.snapshot();
 window.disposeController = () => controller.dispose();
+window.showResult = async (recordId) => {
+  const ownedRoutes = createAssistantRouteController({ resolveRoute: createOwnedRouteResolver(scope, new Map()) });
+  window.resultRoutes = ownedRoutes;
+  const result = { kind: 'result', id: 'result-live', producerKind: 'workflow', producerId: 'run-live',
+    sourceId: 'event-live', status: 'completed', title: 'Conversation result', summary: 'Open the saved conversation.',
+    record: { kind: 'chat_session', id: recordId } };
+  root.render(React.createElement(ShellThemeProvider, { initialPreference: 'light' },
+    React.createElement(AssistantResponse, { content: 'A result is ready.', segments: [result],
+      onNavigate: route => ownedRoutes.navigate({ ...route, returnTo: { destination: 'chat',
+        sessionId: window.resultSessionId, selectionId: 'answer-live', scrollY: 18 } }) })));
+  return true;
+};
+window.resultRouteSnapshot = () => window.resultRoutes?.getSnapshot();
 window.ready = true;
 `;
     vite = await createServer({
@@ -390,6 +406,28 @@ window.ready = true;
         && state.sessionId === null && input && !input.disabled) { clearInterval(timer); done(true); }
       else if (++n > 200) { clearInterval(timer); reject(Error('The new owner context did not become ready: ' + JSON.stringify(state))); }
     }, 50) })`);
+    const ownedResultSession = await evaluate(`fetch('/api/chat/sessions',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:'{}'}).then(response=>response.json()).then(value => { window.resultSessionId=value.key; return value.key })`);
+    await evaluate(`window.showResult(${JSON.stringify(ownedResultSession)})`);
+    expect(await evaluate(`document.querySelector('[aria-label="Open Conversation result"]')?.getAttribute('role')`)).toBe('link');
+    await evaluate(`document.querySelector('[aria-label="Open Conversation result"]')?.click()`);
+    const opened = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      const snapshot=window.resultRouteSnapshot();
+      if (snapshot?.phase === 'ready') { clearInterval(timer); done({ route:snapshot.route, path:location.pathname + location.search }); }
+      else if (snapshot?.phase === 'unavailable' || snapshot?.phase === 'recovery') { clearInterval(timer); reject(Error('Owned result route did not resolve: ' + JSON.stringify(snapshot))); }
+      else if (++n > 150) { clearInterval(timer); reject(Error('Owned result route did not settle: ' + JSON.stringify(snapshot))); }
+    }, 50) })`);
+    expect(opened.route).toMatchObject({ destination: 'chat', sessionId: ownedResultSession,
+      record: { kind: 'chat_session', id: ownedResultSession },
+      returnTo: { destination: 'chat', sessionId: ownedResultSession, selectionId: 'answer-live', scrollY: 18 } });
+    expect(opened.path).toContain(`/assistant/chat?`);
+    await evaluate(`window.resultRoutes.navigate({kind:'route', destination:'chat', view:'detail',
+      sessionId:'chat-missing-linked-result', record:{kind:'chat_session',id:'chat-missing-linked-result'}})`);
+    const stale = await evaluate(`new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+      const snapshot=window.resultRouteSnapshot();
+      if (snapshot?.phase === 'recovery') { clearInterval(timer); done(snapshot.route); }
+      else if (++n > 150) { clearInterval(timer); reject(Error('Missing linked record did not reach recovery')); }
+    }, 50) })`);
+    expect(stale).toMatchObject({ kind: 'recovery', reason: 'missing', action: { label: 'Go to Chat' } });
     await evaluate("window.disposeController()");
   }, 60000);
 });

@@ -38,6 +38,7 @@ export class ConversationController {
   private loading = false
   private loadToken = 0
   private dirtyDuringLoad = false
+  private queuedLiveEvents: ChatSocketEvent[] = []
   private submitting = false
   private submitToken = 0
   private lastChunkSeq = 0
@@ -73,6 +74,7 @@ export class ConversationController {
     this.clearConnection()
     this.loading = false
     this.dirtyDuringLoad = false
+    this.queuedLiveEvents = []
     this.submitting = false
     this.submitToken++
     this.lastChunkSeq = 0
@@ -108,6 +110,7 @@ export class ConversationController {
     this.clearConnection()
     this.loading = false
     this.dirtyDuringLoad = false
+    this.queuedLiveEvents = []
     this.lastChunkSeq = 0
     this.update({ sessionId, title: '', messages: [], draft: changed ? '' : this.state.draft,
       phase: 'loading', running: false, error: '' })
@@ -137,9 +140,18 @@ export class ConversationController {
       this.loading = false
       if (this.dirtyDuringLoad && generation === this.generation) {
         this.dirtyDuringLoad = false
-        void this.refresh()
+        void this.refresh().then(() => this.flushQueuedLiveEvents())
+      } else {
+        this.flushQueuedLiveEvents()
       }
     }
+  }
+
+  private flushQueuedLiveEvents(): void {
+    if (this.loading || !this.queuedLiveEvents.length) return
+    const queued = this.queuedLiveEvents
+    this.queuedLiveEvents = []
+    for (const event of queued) this.receive(event)
   }
 
   async send(): Promise<void> {
@@ -191,8 +203,19 @@ export class ConversationController {
 
   receive(event: ChatSocketEvent): void {
     const { sessionId, scope } = this.state
-    if (!scope || !sessionId || event.data.session !== sessionId) return
-    if (this.loading) { this.dirtyDuringLoad = true; return }
+    const sessionlessApprovalResolution = event.type === 'approval_resolved'
+      && event.data.session === undefined
+    if (!scope || !sessionId || (event.data.session !== sessionId && !sessionlessApprovalResolution)) return
+    if (this.loading) {
+      this.dirtyDuringLoad = true
+      if (event.type === 'chat_chunk' || event.type === 'tool_call' || event.type === 'tool_result'
+        || event.type === 'approval' || event.type === 'approval_resolved'
+        || event.type === 'activity_event' || event.type === 'chat_thinking'
+        || (event.type === 'chat_message' && event.data.role === 'error')) {
+        if (this.queuedLiveEvents.length < 256) this.queuedLiveEvents.push(event)
+      }
+      return
+    }
     if (event.type === 'chat_chunk') {
       const content = event.data.content
       const seq = event.data.seq
@@ -203,6 +226,65 @@ export class ConversationController {
       if (last?.streaming) messages[messages.length - 1] = { ...last, content: last.content + content }
       else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
       this.update({ messages, running: true, phase: 'sending' })
+    } else if (event.type === 'tool_call' || event.type === 'tool_result') {
+      const toolCallId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
+      const messages = [...this.state.messages]
+      const found = toolCallId ? messages.findIndex(message => message.role === 'tool'
+        && message.meta?.tool_call_id === toolCallId) : -1
+      const previous = found >= 0 ? messages[found] : undefined
+      const incoming = event.type === 'tool_call' ? {
+        ...(previous?.meta ?? {}), ...event.data,
+        tool_call_id: toolCallId || undefined,
+        done: event.data.update === true ? previous?.meta?.done : false,
+      } : {
+        ...(previous?.meta ?? {}), ...event.data,
+        tool_call_id: toolCallId || undefined,
+        done: true,
+      }
+      const message: ConversationMessage = {
+        id: previous?.id ?? `${sessionId}:tool:${toolCallId || messages.length}`,
+        role: 'tool', content: typeof event.data.tool === 'string' ? event.data.tool : previous?.content ?? 'Tool',
+        meta: incoming,
+      }
+      if (found >= 0) messages[found] = message
+      else messages.push(message)
+      this.update({ messages, running: true, phase: 'sending' })
+    } else if (event.type === 'approval' || event.type === 'approval_resolved') {
+      const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
+      const messages = [...this.state.messages]
+      const found = approvalId ? messages.findIndex(message => message.role === 'permission'
+        && (message.meta?.approval_id === approvalId || message.meta?.id === approvalId)) : -1
+      if (event.type === 'approval_resolved' && found < 0) return
+      const previous = found >= 0 ? messages[found] : undefined
+      const resolved = event.type === 'approval_resolved'
+        ? (event.data.approved === true ? String(event.data.decision ?? 'approved') : 'rejected')
+        : undefined
+      const message: ConversationMessage = {
+        id: previous?.id ?? `${sessionId}:approval:${approvalId || messages.length}`,
+        role: 'permission', content: typeof event.data.tool === 'string' ? event.data.tool : previous?.content ?? 'Approval request',
+        meta: { ...(previous?.meta ?? {}), ...event.data, id: approvalId || undefined,
+          approval_id: approvalId || undefined, ...(resolved ? { resolved } : {}) },
+      }
+      if (found >= 0) messages[found] = message
+      else messages.push(message)
+      this.update({ messages })
+    } else if (event.type === 'activity_event' || event.type === 'chat_thinking') {
+      const id = typeof event.data.id === 'string' ? event.data.id
+        : typeof event.data.event_id === 'string' ? event.data.event_id
+          : `${event.type}:${String(event.data.seq ?? this.state.messages.length)}`
+      const messages = [...this.state.messages]
+      const role = event.type === 'chat_thinking' ? 'thinking' : 'activity'
+      const messageId = `${sessionId}:${role}:${id}`
+      const existing = messages.findIndex(message => message.id === messageId)
+      const content = typeof event.data.content === 'string' ? event.data.content
+        : typeof event.data.text === 'string' ? event.data.text : ''
+      if (existing >= 0 && role === 'thinking') {
+        const previous = messages[existing]
+        messages[existing] = { ...previous, content: previous.content + content }
+      } else if (content || event.type === 'activity_event') {
+        messages.push({ id: messageId, role, content, meta: event.data })
+      }
+      this.update({ messages, ...(event.type === 'activity_event' ? {} : { running: true, phase: 'sending' as const }) })
     } else if (event.type === 'chat_user_message' || event.type === 'chat_done') {
       void this.refresh()
     } else if (event.type === 'chat_message' && event.data.role === 'error') {

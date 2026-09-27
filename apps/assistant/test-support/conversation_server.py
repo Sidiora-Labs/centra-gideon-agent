@@ -29,7 +29,7 @@ def conversation_provider(config: AppConfig, home: Path):
             credential=Credential(name="conversation-test", kind="api_key", secret=secret, source="env"),
             max_tokens=48,
         )
-        provider.supports_tools = False
+        provider.supports_tools = True
         return provider
 
     registry = get_default_registry()
@@ -63,7 +63,14 @@ async def main(origin: str) -> None:
         provider_rows = [{"name": "conversation-test", "type": "conversation-test-openai", "model": model}] if model else []
         (home / "config.json").write_text(json.dumps({
             "auth": {"login_enabled": True}, "providers": provider_rows,
+            "agents": {
+                "conversation-test-agent": {
+                    "default_dir": str(home),
+                    "system_prompt": "For the conversation lifecycle qualification, only use the explicitly requested workspace tools and never access paths outside the current workspace.",
+                }
+            },
         }), encoding="utf-8")
+        (home / "native-event-output.txt").unlink(missing_ok=True)
 
         import gideon.core.config.loader as loader
         from gideon.cognition.history import ConversationLog
@@ -76,6 +83,7 @@ async def main(origin: str) -> None:
             api_chat_session_detail,
             api_chat_sessions,
         )
+        from gideon.interfaces.dashboard.chat_handlers import api_chat_session_approve
         from gideon.interfaces.dashboard.handlers import auth
         from gideon.interfaces.dashboard.state import ConsoleState
         from gideon.interfaces.dashboard.ws import api_ws
@@ -107,6 +115,7 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/chat/sessions", api_chat_sessions)
         app.router.add_post("/api/chat/sessions", api_chat_session_create)
         app.router.add_get("/api/chat/sessions/{session}", api_chat_session_detail)
+        app.router.add_post("/api/chat/sessions/{session}/approve", api_chat_session_approve)
         app.router.add_post("/api/chat", api_chat)
 
         runner = web.AppRunner(app)

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -146,27 +146,67 @@ window.loaded = true
       const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
       window.controller.setOwner(window.ownerScope(location.origin, owner))
-      const session = await window.controller.create()
+      let session
+      if (expectAnswer) {
+        const createdResponse = await fetch('/api/chat/sessions', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' },
+          body: JSON.stringify({ agent: 'conversation-test-agent' }) })
+        const created = await createdResponse.json()
+        if (!createdResponse.ok || !created.key) throw Error('native conversation creation failed: ' + JSON.stringify(created))
+        session = created.key
+        await window.controller.open(session)
+      } else session = await window.controller.create()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
       const socket = window.controller.socket
       const frames = []
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
-        if (frame.data?.session === session) frames.push({ type: frame.type, role: frame.data.role || '' })
+        if (frame.data?.session === session || frame.type === 'approval_resolved') {
+          frames.push({ type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
+            tool_call_id: frame.data.tool_call_id || '', id: frame.data.id || '',
+            approved: frame.data.approved, decision: frame.data.decision || '' })
+        }
       })
-      window.controller.setDraft('  Reply with one word: ready.  ')
+      const prompt = expectAnswer
+        ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then answer ready.'
+        : '  Reply with one word: ready.  '
+      window.controller.setDraft(prompt)
       await window.controller.send()
       if (expectAnswer) {
+        await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+          const pending = window.controller.snapshot().messages.find(message => message.role === 'permission')
+          if (pending) { clearInterval(timer); done(pending) }
+          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval request was not observed: ' + JSON.stringify(window.controller.snapshot()))) }
+        }, 50) }).then(async pending => {
+          const approvalId = pending.meta?.approval_id
+          if (typeof approvalId !== 'string' || !approvalId) throw Error('native approval row has no canonical ID')
+          const response = await fetch('/api/chat/sessions/' + encodeURIComponent(session) + '/approve', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' },
+            body: JSON.stringify({ action: 'approved', request_id: approvalId }),
+          })
+          const result = await response.json()
+          if (!response.ok || !result.ok) throw Error('native approval resolution failed: ' + JSON.stringify(result))
+        })
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
+        await window.controller.refresh()
       }
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
-        visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
+      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
+        visible: snapshot.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
+        toolRows: detail.messages.filter(m => m.role === 'tool'), permissionRows: detail.messages.filter(m => m.role === 'permission'),
+        liveLifecycle: snapshot.messages.filter(m => m.role === 'tool' || m.role === 'permission'),
         draft: snapshot.draft, ids: snapshot.messages.map(m => m.id) }
+      if (expectAnswer) {
+        await window.signOutOwner()
+        window.controller.setOwner(null)
+        return { ...evidence, frames, socketChanged: window.controller.socket !== socket,
+          cleared: window.controller.snapshot() }
+      }
       socket.close()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (!window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not disconnect')) } }, 50) })
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not reconnect')) } }, 50) })
@@ -192,18 +232,47 @@ window.loaded = true
     expect(new Set(result.ids).size).toBe(result.ids.length)
     if (process.env.GIDEON_TEST_MODEL) {
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_chunk')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('tool_call')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('tool_result')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval_resolved')
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_done')
-      expect(result.frames).toContainEqual({ type: 'chat_message', role: 'assistant' })
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'chat_message', role: 'assistant' }))
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
+      expect(result.toolRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) })]))
+      expect(result.permissionRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) })]))
+      expect(result.liveLifecycle).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) }),
+        expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) }),
+      ]))
+      const writeCall = result.frames.find((frame: { type: string; tool: string }) => frame.type === 'tool_call' && frame.tool === 'write_file')
+      expect(writeCall?.tool_call_id).toBeTruthy()
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'tool_result', tool_call_id: writeCall.tool_call_id }))
+      const approval = result.frames.find((frame: { type: string; tool: string }) => frame.type === 'approval' && frame.tool === 'write_file')
+      expect(approval?.id).toBeTruthy()
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'approval_resolved', id: approval.id, approved: true }))
+      const evidenceDirectory = process.env.GIDEON_TEST_EVIDENCE_DIR
+      if (evidenceDirectory) {
+        await mkdir(evidenceDirectory, { recursive: true })
+        await writeFile(join(evidenceDirectory, 'native-tool-approval.json'), JSON.stringify({
+          sessionId: result.session,
+          liveFrames: result.frames.filter((frame: { type: string }) => ['tool_call', 'tool_result', 'approval', 'approval_resolved'].includes(frame.type)),
+          hydratedTools: result.toolRows.map((message: any) => ({ id: message.meta?.tool_call_id ?? message.id,
+            done: message.meta?.done === true, ok: message.meta?.ok, hasOutput: typeof message.meta?.output === 'string' })),
+          hydratedApprovals: result.permissionRows.map((message: any) => ({ id: message.meta?.approval_id ?? message.id,
+            resolved: message.meta?.resolved ?? null })),
+        }, null, 2) + '\n')
+      }
     }
     console.log('Selected session websocket events:', result.frames.map((frame: { type: string }) => frame.type))
-    console.log('Persisted assistant answer:', result.assistantPersisted)
+    console.log('Persisted assistant answer count:', result.assistantPersisted.length)
     expect(result.socketChanged).toBe(true)
+    expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
+    if (process.env.GIDEON_TEST_MODEL) return
     expect(result.reconnected).toBe(1)
     expect(result.retainedEdit).toBe('Edited while sending')
     expect(result.failed).toEqual({ draft: 'Retain this draft', phase: 'failed' })
-    expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
 
     await evaluate(`(async () => {
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
@@ -264,7 +333,7 @@ window.loaded = true
     })()`)
     const [staleResult] = await Promise.all([stale, fault])
     expect(postFailed && faultDone).toBe(true)
-    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'sending', error: '' })
+    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'recovering', error: '' })
     expect(staleResult.state.sessionId).not.toBe(result.session)
     expect(staleResult.submitting).toBe(true)
     expect(newPostRequest).not.toBe('')
@@ -273,5 +342,5 @@ window.loaded = true
     await command('Fetch.disable')
     expect(newerResult.state).toMatchObject({ draft: 'New owner send', phase: 'failed' })
     expect(newerResult.submitting).toBe(false)
-  }, 45000)
+  }, 120000)
 })
