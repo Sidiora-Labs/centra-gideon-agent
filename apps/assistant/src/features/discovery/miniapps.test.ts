@@ -43,25 +43,34 @@ const names = [
 ];
 
 const nativeStudioServer = String.raw`
-import asyncio, json, os, sys, tempfile
+import asyncio, json, os, sys, tempfile, time
 from pathlib import Path
-from types import SimpleNamespace
 from aiohttp import web
 
 async def main(origin):
     with tempfile.TemporaryDirectory(prefix='gideon-miniapps-studio-') as directory:
         home = Path(directory)
         os.environ['GIDEON_HOME'] = str(home)
+        (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'dashboard': {'document_editing': True}}), encoding='utf-8')
+        from gideon.cognition.history import ConversationLog
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
         from gideon.interfaces.dashboard import token_auth
         from gideon.security.auth import credentials
         from gideon.interfaces.dashboard.handlers import auth
+        from gideon.interfaces.dashboard.state import ConsoleState
         from gideon.workspace.artifacts import registry
         from gideon.workspace.artifacts.native import NativeArtifactProvider
         from gideon.workspace.artifacts.handlers import register_artifact_routes
-        (home / 'config.json').write_text(json.dumps({'auth': {'login_enabled': True}, 'dashboard': {'document_editing': True}}), encoding='utf-8')
         credentials.set_password('studio-owner', 'correct-horse-battery-staple')
         token_auth.use_ephemeral_secret()
         registry.register_provider(NativeArtifactProvider(home / 'artifacts'))
+        state = ConsoleState(
+            sessions=ConversationDirectory(AppConfig.load()),
+            start_time=time.time(),
+            conversation_log=ConversationLog(base_dir=home / 'history'),
+            owner_id='studio-owner',
+        )
         artifact_release = asyncio.Event()
         artifact_release.set()
         artifact_entered = asyncio.Event()
@@ -79,7 +88,7 @@ async def main(origin):
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000), hold_artifact_list])
         app['port'] = 10000
         app['allowed_origins'] = {origin}
-        app['state'] = SimpleNamespace(_restricted_keys=set(), _sessions={})
+        app['state'] = state
         app.router.add_post('/api/auth/login', auth.api_auth_login)
         app.router.add_get('/api/auth/session', auth.api_auth_session)
         register_artifact_routes(app)
