@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Gideon",
+    "slug": "gideon-assistant",
+    "scheme": "gideon",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true },
+    "web": { "bundler": "metro", "name": "Gideon" }
+  }
+}
