@@ -34,6 +34,45 @@ export function gatewayPath(path: string): string {
   return `${url.pathname}${url.search}`
 }
 
+/** Build a relative URL for a native resource so browser navigation sends its session cookie. */
+export function gatewayResourceHref(path: string): string {
+  return gatewayPath(path)
+}
+
+export function gatewayWebSocketUrl(path: string): string {
+  const relative = gatewayPath(path)
+  if (typeof window === 'undefined') throw new Error('A browser session is required for a live stream')
+  const origin = new URL(window.location.origin)
+  const url = new URL(relative, origin)
+  if (url.origin !== origin.origin) throw new TypeError('Live streams must use the assistant origin')
+  url.protocol = origin.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.href
+}
+
+export function openGatewayEventSource(path: string): EventSource {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    throw new Error('This browser does not support live updates')
+  }
+  const href = gatewayResourceHref(path)
+  const url = new URL(href, window.location.origin)
+  if (url.origin !== window.location.origin) throw new TypeError('Live streams must use the assistant origin')
+  return new EventSource(url.href, { withCredentials: true })
+}
+
+export async function gatewayResource(path: string, signal?: AbortSignal): Promise<Response> {
+  const response = await fetch(gatewayResourceHref(path), {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: gatewayHeaders(),
+    signal,
+  })
+  if (!response.ok) {
+    await readGatewayJson<unknown>(response)
+  }
+  return response
+}
+
 export function gatewayHeaders(jsonBody = false): Headers {
   const headers = new Headers({
     Accept: 'application/json',
