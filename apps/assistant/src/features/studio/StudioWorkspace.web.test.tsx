@@ -503,10 +503,26 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     expect(routeQuery.get('from')).toBe('chat')
     expect(await evaluate<string>('location.hash')).toBe('')
     await capture('slides-created-desktop')
+    await evaluate('window.__studioDocumentBeforeReload = true')
     await send('Page.reload', { ignoreCache: true })
-    await waitFor("Boolean(document.querySelector('[aria-label=\"Slide title\"]'))")
+    let reloaded = false
+    for (let attempt = 0; attempt < 120; attempt++) {
+      try {
+        reloaded = await evaluate<boolean>("!window.__studioDocumentBeforeReload && document.readyState === 'complete' && new URLSearchParams(location.search).get('recordId') === 'quarterly-review' && document.querySelector('[aria-label=\"Slide title\"]')?.value === 'Results'")
+      } catch (error) {
+        if (!/Execution context was destroyed|Cannot find context with specified id|Cannot find context with id/.test(String(error))) throw error
+      }
+      if (reloaded) break
+      await new Promise(done => setTimeout(done, 100))
+    }
+    expect(reloaded).toBe(true)
     expect(await evaluate<string>("document.querySelector('[aria-label=\"Slide title\"]').value")).toBe('Results')
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+    expect(await evaluate<boolean>(`(() => {
+      const title = document.querySelector('[aria-label="Slides workspace"] header h2').parentElement.getBoundingClientRect();
+      const picker = document.querySelector('[aria-label="Slides workspace"] header label').getBoundingClientRect();
+      return title.width >= 250 && picker.top >= title.bottom - 1;
+    })()`)).toBe(true)
     await capture('slides-reloaded-narrow')
     expect(await evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth + 1')).toBe(true)
     await evaluate("document.querySelector('.gideon-workspace-back').click()")

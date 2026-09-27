@@ -240,9 +240,9 @@ export default function SlidesWorkspace({ scope, artifactId = '', onSelectArtifa
 
   const outlineCount = useMemo(() => (outline.match(/^##\s+.+$/gm) ?? []).length, [outline])
   return <section aria-label="Slides workspace" className="flex h-full min-h-0 flex-col gap-4 overflow-auto bg-surface p-4 text-on-surface">
-    <header className="flex flex-wrap items-end gap-3">
-      <div className="min-w-0 flex-1"><h2 className="text-xl font-semibold">Slides</h2><p className="text-sm text-on-surface-var">Edit a saved presentation, preview its exact version, and export the rendered PPTX.</p></div>
-      <label className="grid min-w-48 gap-1 text-sm">Presentation
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <div className="min-w-0 sm:flex-1"><h2 className="text-xl font-semibold">Slides</h2><p className="text-sm text-on-surface-var">Edit a saved presentation, preview its exact version, and export the rendered PPTX.</p></div>
+      <label className="grid min-w-0 gap-1 text-sm sm:min-w-48">Presentation
         <select aria-label="Presentation" value={open?.record.slug ?? ''} disabled={busy}
           onChange={event => { if (onSelectArtifact) onSelectArtifact(event.target.value); else void loadDeck(event.target.value) }}>
           <option value="">Choose a PPTX</option>{decks.map(deck => <option key={deck.slug} value={deck.slug}>{deck.name} · v{deck.version}</option>)}
