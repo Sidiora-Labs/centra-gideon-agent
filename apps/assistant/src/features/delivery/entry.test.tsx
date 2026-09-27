@@ -78,7 +78,7 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
       const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
       set('gideon-username','module-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true
     })()`);
-    await browser.waitFor("document.body.innerText.includes('Your Gideon workspace')", "authenticated assistant workspace");
+    await browser.waitFor("document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner') && document.querySelector('[aria-label=\"Message Gideon\"]')", "authenticated assistant workspace");
     const created = await browser.evaluate<{ key: string }>(`fetch('/api/chat/sessions',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:'{}'}).then(r=>r.json())`);
     expect(typeof created.key).toBe("string");
     const sessionUrl = `${origin}/assistant/chat?v=1&view=detail&recordKind=chat_session&recordId=${encodeURIComponent(created.key)}&from=apps&fromPlacement=console&fromq.tab=details`;
@@ -103,7 +103,7 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
     await browser.navigate(`${origin}/assistant/chat?v=1&view=detail&recordKind=session&recordId=absent-session`);
     await browser.waitFor("document.body.innerText.includes('The requested item may have been removed.')", "missing session recovery");
     await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Go to Chat')?.click()`);
-    await browser.waitFor("location.pathname === '/assistant/chat' && document.body.innerText.includes('Your Gideon workspace')", "return to Chat");
+    await browser.waitFor("location.pathname === '/assistant/chat' && document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner') && document.querySelector('[aria-label=\"Message Gideon\"]')", "return to Chat");
     await browser.navigate(`${origin}/assistant/apps?v=1&view=detail&recordKind=app&recordId=app-1`);
     await browser.waitFor("document.body.innerText.includes('This item cannot be checked') && document.body.innerText.includes('Retry destination')", "unavailable module recovery");
   }, 90000);
