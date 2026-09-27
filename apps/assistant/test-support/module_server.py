@@ -18,7 +18,6 @@ async def main(origin: str) -> None:
         home = Path(directory)
         os.environ["GIDEON_HOME"] = str(home)
 
-        import gideon.core.config.loader as loader
         from gideon.cognition.history import ConversationLog
         from gideon.core.config.loader import AppConfig
         from gideon.engine.session import ConversationDirectory
@@ -38,9 +37,6 @@ async def main(origin: str) -> None:
         from gideon.workspace.artifacts import registry as artifact_registry
         from gideon.workspace.artifacts.handlers import register_artifact_routes
 
-        loader.config_dir = lambda: home
-        credentials.config_dir = lambda: home
-        session_store.config_dir = lambda: home
         (home / "config.json").write_text(json.dumps({
             "auth": {"login_enabled": True},
             "dashboard": {"username": "module-owner"},

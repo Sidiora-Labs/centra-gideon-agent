@@ -1,7 +1,79 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createServer as createNetServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll } from 'vitest'
 import { describe, expect, it } from 'vitest'
+import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from '../../test-support/browserHarness'
+import { startNativeServer, type NativeServer } from '../../test-support/nativeServer'
+import type { ViteDevServer } from 'vite'
 import { identityErrorMessage, ownerScope, signInControls } from './auth.web'
 import { isIdentityDenied } from './bootstrap.web'
 import { GatewayError } from './transport.web'
+
+const repositoryRoot = process.cwd().replace(/\/apps\/assistant$/, '')
+const servers: NativeServer[] = []
+const browsers: BrowserHarness[] = []
+const viteServers: ViteDevServer[] = []
+const directories: string[] = []
+
+afterAll(async () => {
+  await Promise.all(browsers.map(browser => browser.close()))
+  await Promise.all(servers.map(server => server.stop()))
+  await Promise.all(viteServers.map(server => server.close()))
+  await Promise.all(directories.map(directory => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })))
+})
+
+async function reservePort(): Promise<number> {
+  const server = createNetServer()
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+  await new Promise<void>(resolve => server.close(() => resolve()))
+  return port
+}
+
+async function startBootstrapBrowser(): Promise<{ browser: BrowserHarness; native: NativeServer }> {
+  const port = await reservePort()
+  const origin = `http://127.0.0.1:${port}`
+  const native = await startNativeServer({
+    script: join(repositoryRoot, 'apps/assistant/test-support/auth_server.py'),
+    origin,
+    repositoryRoot,
+  })
+  servers.push(native)
+  const directory = await mkdtemp(join(tmpdir(), 'gideon-bootstrap-test-'))
+  directories.push(directory)
+  const entryFile = join(directory, 'entry.tsx')
+  await writeFile(entryFile, `import React, { useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { AssistantBootstrapProvider, useAssistantBootstrap } from '/src/shared/bootstrap.web.tsx';
+declare global { interface Window { __refreshBootstrap?: () => Promise<void>; __cleared?: string[] } }
+function Probe() {
+  const { state, refresh } = useAssistantBootstrap();
+  useEffect(() => { window.__refreshBootstrap = refresh }, [refresh]);
+  return <p id="ready-owner">{state.phase === 'ready' ? state.owner.user : state.phase}</p>;
+}
+window.__cleared = [];
+createRoot(document.getElementById('root')!).render(<AssistantBootstrapProvider clearOwnerCache={scope => window.__cleared?.push(scope.cacheKey)}><Probe /></AssistantBootstrapProvider>);`, 'utf8')
+  viteServers.push(await startViteEntryServer({
+    root: join(repositoryRoot, 'apps/assistant'),
+    port,
+    entryFile,
+    apiOrigin: native.apiOrigin,
+    route: '/bootstrap-test',
+  }))
+  const browser = await startBrowserHarness({ profileDirectory: join(directory, 'chromium'), windowSize: { width: 1024, height: 768 } })
+  browsers.push(browser)
+  await browser.navigate(`${origin}/bootstrap-test`)
+  await browser.waitFor("document.querySelector('#gideon-password')", 'real owner sign-in form')
+  await browser.evaluate(`(()=>{
+    const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
+    set('gideon-username','owner-a');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true
+  })()`)
+  await browser.waitFor("document.querySelector('#ready-owner')?.textContent === 'owner-a'", 'authenticated real owner')
+  return { browser, native }
+}
 
 describe('assistant owner bootstrap', () => {
   it('offers password and authenticator controls when configured or required by login', () => {
@@ -38,4 +110,25 @@ describe('assistant owner bootstrap', () => {
     expect(first.cacheKey).not.toBe(ownerScope('https://other.example:9443', { user: 'owner-a' }).cacheKey)
     expect(() => ownerScope('https://gideon.example', { user: '' })).toThrow(TypeError)
   })
+
+  it('preserves owner cache through an interrupted real API refresh', async () => {
+    const { browser, native } = await startBootstrapBrowser()
+    await native.stop()
+    await browser.evaluate('window.__refreshBootstrap?.()')
+    await browser.waitFor("document.querySelector('#gideon-password') && document.querySelector('[role=alert]')", 'unavailable refresh state')
+    const state = await browser.evaluate<{ owner: string | null; cleared: string[] }>(`({ owner: document.querySelector('#ready-owner')?.textContent || null,
+      cleared: window.__cleared || [] })`)
+    expect(state.owner).toBeNull()
+    expect(state.cleared).toEqual([])
+  }, 60000)
+
+  it('clears owner cache when the real gateway revokes the authenticated session', async () => {
+    const { browser, native } = await startBootstrapBrowser()
+    const response = await fetch(`${native.controlOrigin}/revoke`, { method: 'POST' })
+    expect(response.ok).toBe(true)
+    await browser.evaluate('window.__refreshBootstrap?.()')
+    await browser.waitFor("document.querySelector('#gideon-password') && !document.querySelector('#ready-owner')", 'authoritative session loss')
+    const cleared = await browser.evaluate('window.__cleared || []')
+    expect(cleared).toHaveLength(1)
+  }, 60000)
 })
