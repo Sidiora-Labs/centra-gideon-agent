@@ -23,7 +23,7 @@ from gideon.integrations.inbox import InboxItem, InboxStore
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.messaging import api_notifications
-from gideon.interfaces.dashboard.handlers.sessions import api_approvals
+from gideon.interfaces.dashboard.handlers.sessions import api_approval_resolve, api_approvals
 from gideon.interfaces.dashboard.handlers.triggers import (
     api_trigger_history_all,
     api_trigger_history_detail,
@@ -59,14 +59,30 @@ async def main(origin: str) -> None:
         inbox.add(InboxItem(
             id="inbox-1", channel="assistant", channel_name="Assistant", thread_ts=None,
             message="Review result", sender_id="gideon", sender_name="Gideon",
-            item_kind="agent_request", refs={"approval": "approval-1", "task_id": "task-related"},
+            item_kind="agent_request", refs={"approval": "approval-1", "task_id": "task-related", "session": "chat-1"},
             created_at=time.time(), owner="owner-a",
         ))
         inbox.save()
         state._inbox_store = inbox
-        state._pending_approvals["approval-1"] = {
-            "id": "approval-1", "source": "tool", "tool": "send", "session": "chat-1", "ts": time.time(),
-        }
+        approval_requests = {}
+        approval_results = {}
+
+        async def start_approval(approval_id: str, tool: str, tool_input: str, session: str) -> None:
+            task = asyncio.create_task(state.request_approval(
+                approval_id, "dashboard", tool, tool_input=tool_input,
+                tool_purpose=f"Review the native {tool} request", session=session,
+            ))
+            approval_requests[approval_id] = task
+            task.add_done_callback(lambda completed: approval_results.setdefault(approval_id, []).append(
+                completed.result() if not completed.cancelled() else False))
+            for _ in range(200):
+                if approval_id in state._pending_approvals:
+                    return
+                await asyncio.sleep(0.005)
+            raise RuntimeError(f"Approval {approval_id} did not become pending")
+
+        await start_approval("approval-1", "send_message",
+            '{"to":"room-a","text":"first exact request"}', "chat-1")
         state._notification_log = [{
             "kind": "system", "title": "Result ready", "body": "Open the result",
             "ts": str(time.time()), "acked": False,
@@ -101,7 +117,8 @@ async def main(origin: str) -> None:
         )
 
         settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0,
-            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None}
+            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None,
+            "replace_on_success": False}
 
         @web.middleware
         async def delay_reads(request: web.Request, handler):
@@ -149,6 +166,19 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
         app.router.add_get("/api/approvals", api_approvals)
+
+        async def resolve_approval(request: web.Request) -> web.Response:
+            response = await api_approval_resolve(request)
+            if response.status < 300 and settings["replace_on_success"]:
+                settings["replace_on_success"] = False
+                previous = approval_requests.get(request.match_info["id"])
+                if previous is not None and not previous.done():
+                    await previous
+                await start_approval(request.match_info["id"], "write_file",
+                    '{"path":"/workspace/third.txt"}', "chat-3")
+            return response
+
+        app.router.add_post("/api/approvals/{id}/{action}", resolve_approval)
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
         app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
@@ -177,6 +207,22 @@ async def main(origin: str) -> None:
             inbox.items.clear()
             inbox.save()
             return web.json_response({"ok": True})
+
+        async def control_replace_approval(request: web.Request) -> web.Response:
+            existing = approval_requests.get("approval-1")
+            if existing is not None and not existing.done():
+                state.resolve_approval("approval-1", False)
+                await existing
+            await start_approval("approval-1", "delete_file",
+                '{"path":"/workspace/second.txt"}', "chat-2")
+            return web.json_response({"revision": state._pending_approvals["approval-1"]["revision"]})
+
+        async def control_replace_on_success(request: web.Request) -> web.Response:
+            settings["replace_on_success"] = True
+            return web.json_response({"ok": True})
+
+        async def control_approval_state(request: web.Request) -> web.Response:
+            return web.json_response({"pending": sorted(state._pending_approvals), "results": approval_results})
 
         async def control_failures(request: web.Request) -> web.Response:
             return web.json_response({"workflow": settings["workflow_failures"]})
@@ -227,6 +273,9 @@ async def main(origin: str) -> None:
         control.router.add_get("/delay-state", control_delay_state)
         control.router.add_post("/delay-release", control_delay_release)
         control.router.add_post("/empty-inbox", control_empty_inbox)
+        control.router.add_post("/replace-approval", control_replace_approval)
+        control.router.add_post("/replace-on-success", control_replace_on_success)
+        control.router.add_get("/approval-state", control_approval_state)
         control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)
         control.router.add_post("/trigger-pages", control_trigger_pages)
@@ -246,6 +295,10 @@ async def main(origin: str) -> None:
         try:
             await asyncio.Event().wait()
         finally:
+            for task in approval_requests.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*approval_requests.values(), return_exceptions=True)
             await api_runner.cleanup()
             await control_runner.cleanup()
 

@@ -981,8 +981,12 @@ class ConsoleState(WebSocketState):
         closed to deny.
         """
         loop = asyncio.get_running_loop()
+        current = self._approval_futures.get(approval_id)
+        if current is not None and not current.done():
+            return False
         fut: asyncio.Future[bool] = loop.create_future()
         self._approval_futures[approval_id] = fut
+        revision = uuid.uuid4().hex
 
         safe_tool, _ = redact_exfiltration_urls(tool)
         safe_tool, _ = redact_credentials(safe_tool)
@@ -991,8 +995,9 @@ class ConsoleState(WebSocketState):
         safe_purpose, _ = redact_exfiltration_urls(tool_purpose)
         safe_purpose, _ = redact_credentials(safe_purpose)
 
-        self._pending_approvals[approval_id] = {
+        pending = {
             "id": approval_id,
+            "revision": revision,
             "source": source,
             "tool": safe_tool,
             "tool_input": safe_input,
@@ -1000,22 +1005,23 @@ class ConsoleState(WebSocketState):
             "session": session,
             "ts": time.time(),
         }
-        self.broadcast_ws("approval", self._pending_approvals[approval_id])
+        self._pending_approvals[approval_id] = pending
+        self.broadcast_ws("approval", pending)
         self._push_approval(approval_id)
         from gideon.automation.triggers.lifecycle_fire import approval_request_payload
         from gideon.automation.triggers.lifecycle_fire import fire as _fire_lifecycle
 
-        await _fire_lifecycle(
-            approval_request_payload(
-                tool=safe_tool,
-                source=source,
-                session_key=session,
-                approval_id=approval_id,
-            ),
-            tool_name=safe_tool,
-        )
-        timeout = self._approval_timeout_for(source)
         try:
+            await _fire_lifecycle(
+                approval_request_payload(
+                    tool=safe_tool,
+                    source=source,
+                    session_key=session,
+                    approval_id=approval_id,
+                ),
+                tool_name=safe_tool,
+            )
+            timeout = self._approval_timeout_for(source)
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             try:
@@ -1031,8 +1037,10 @@ class ConsoleState(WebSocketState):
                 self._log.debug("SEL audit failed for approval timeout", exc_info=True)
             return False
         finally:
-            self._pending_approvals.pop(approval_id, None)
-            self._approval_futures.pop(approval_id, None)
+            if self._pending_approvals.get(approval_id) is pending:
+                self._pending_approvals.pop(approval_id, None)
+            if self._approval_futures.get(approval_id) is fut:
+                self._approval_futures.pop(approval_id, None)
 
     async def request_mcp_elicitation(self, server: str, params: Any) -> Any:
         from mcp.types import ElicitResult
@@ -1145,6 +1153,25 @@ class ConsoleState(WebSocketState):
                 self.push_sessions_update()
                 return True
         return False
+
+    def resolve_approval_revision(
+        self, approval_id: str, approved: bool, expected_revision: str
+    ) -> str:
+        """Resolve one state-level request only if its native revision still matches.
+
+        The lookup, revision check, and future completion contain no await, so another
+        dashboard decision cannot replace the pending request between comparison and
+        resolution. Session-level approvals retain their legacy unversioned contract.
+        """
+        pending = self._pending_approvals.get(approval_id)
+        fut = self._approval_futures.get(approval_id)
+        if pending is None or fut is None or fut.done():
+            return "missing"
+        if pending.get("revision") != expected_revision:
+            return "revision_conflict"
+        if not self.resolve_approval(approval_id, approved):
+            return "missing"
+        return "resolved"
 
     def start_flush_loop(self) -> None:
         """Start background loop that flushes dirty sessions to disk every 5s."""
