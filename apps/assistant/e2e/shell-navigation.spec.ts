@@ -121,8 +121,15 @@ async function buildRootServiceWorker(temporary: string, exportDirectory: string
     cp(join(repository, "apps/console/public"), join(stagedConsole, "public"), { recursive: true }),
     cp(join(assistant, "src"), join(stagedAssistant, "src"), { recursive: true }),
     cp(join(assistant, "tooling"), join(stagedAssistant, "tooling"), { recursive: true }),
-    cp(join(assistant, "public"), join(stagedAssistant, "public"), { recursive: true }),
     cp(exportDirectory, join(stagedAssistant, "dist/web"), { recursive: true }),
+    (async () => {
+      const source = join(assistant, "public");
+      try { await stat(source); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      await cp(source, join(stagedAssistant, "public"), { recursive: true });
+    })(),
   ]);
   await mkdir(join(stagedConsole, "dist"), { recursive: true });
   await mkdir(join(stagedAssistant, "dist"), { recursive: true });
