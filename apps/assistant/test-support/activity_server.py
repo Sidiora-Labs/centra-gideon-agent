@@ -69,9 +69,10 @@ async def main(origin: str) -> None:
             "ts": str(time.time()), "acked": False,
         }]
 
+        await task_registry.create_task(title="Another owner's task", status="open", author="owner-b")
+        await asyncio.sleep(1.05)
         for index in range(22):
             await task_registry.create_task(title=f"Native task {index}", status="open", author="owner-a")
-        await task_registry.create_task(title="Another owner's task", status="open", author="owner-b")
         workflow_store.create(WorkflowRun(
             id="workflow-1", workflow_name="native-workflow", status=RunStatus.NEEDS_INPUT,
             owner_username="owner-a",
@@ -84,15 +85,23 @@ async def main(origin: str) -> None:
             name="Native result", content="Result", kind="markdown", source="chat", slug="native-result",
         )
 
-        settings = {"delay": 0.0}
+        settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0}
 
         @web.middleware
-        async def delay_tasks(request: web.Request, handler):
-            if request.path == "/api/tasks" and settings["delay"]:
+        async def delay_reads(request: web.Request, handler):
+            if request.path == settings["delay_path"] and settings["delay"]:
                 await asyncio.sleep(settings["delay"])
-            return await handler(request)
+            try:
+                response = await handler(request)
+            except Exception:
+                if request.path == "/api/workflows/runs":
+                    settings["workflow_failures"] += 1
+                raise
+            if request.path == "/api/workflows/runs" and response.status >= 400:
+                settings["workflow_failures"] += 1
+            return response
 
-        app = web.Application(middlewares=[delay_tasks, token_auth.token_auth_middleware(port=10000)])
+        app = web.Application(middlewares=[delay_reads, token_auth.token_auth_middleware(port=10000)])
         app["port"] = 10000
         app["allowed_origins"] = {origin}
         app["state"] = state
@@ -111,7 +120,16 @@ async def main(origin: str) -> None:
         async def control_delay(request: web.Request) -> web.Response:
             body = await request.json()
             settings["delay"] = float(body["seconds"])
+            settings["delay_path"] = body.get("path", "/api/tasks")
             return web.json_response({"ok": True})
+
+        async def control_empty_inbox(request: web.Request) -> web.Response:
+            inbox.items.clear()
+            inbox.save()
+            return web.json_response({"ok": True})
+
+        async def control_failures(request: web.Request) -> web.Response:
+            return web.json_response({"workflow": settings["workflow_failures"]})
 
         async def control_add_task(request: web.Request) -> web.Response:
             body = await request.json()
@@ -134,6 +152,8 @@ async def main(origin: str) -> None:
 
         control = web.Application()
         control.router.add_post("/delay", control_delay)
+        control.router.add_post("/empty-inbox", control_empty_inbox)
+        control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)
         control.router.add_post("/workflow-store", control_workflow_store)
         api_runner = web.AppRunner(app)

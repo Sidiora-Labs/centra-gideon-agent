@@ -73,6 +73,11 @@ export function useActivity(scope: OwnerScope | null): Readonly<{
   const controller = useMemo(() => new ActivityController(), [])
   useEffect(() => { controller.setScope(scope) }, [controller, scope?.cacheKey])
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
-  return { snapshot, refresh: () => controller.refresh(), loadMore: source => controller.loadMore(source),
-    returnedFromDetail: () => controller.returnedFromDetail(), reconnected: () => controller.reconnected() }
+  const maskedSnapshot = useMemo(() => emptyActivitySnapshot(scope), [scope?.cacheKey])
+  const visibleSnapshot = snapshot.ownerScopeKey === (scope?.cacheKey ?? null) ? snapshot : maskedSnapshot
+  return { snapshot: visibleSnapshot,
+    refresh: () => { controller.setScope(scope); return controller.refresh() },
+    loadMore: source => { controller.setScope(scope); return controller.loadMore(source) },
+    returnedFromDetail: () => { controller.setScope(scope); return controller.returnedFromDetail() },
+    reconnected: () => { controller.setScope(scope); return controller.reconnected() } }
 }

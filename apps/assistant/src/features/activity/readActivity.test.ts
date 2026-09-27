@@ -114,11 +114,24 @@ describe('canonical Gideon Activity reads', () => {
         name: 'activity-integration',
         resolveId(id) { if (id === '/activity-entry.ts') return '\0activity-entry' },
         load(id) { if (id === '\0activity-entry') return `
-import { ActivityController } from '/src/features/activity/useActivity.ts'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
+import { ActivityController, useActivity } from '/src/features/activity/useActivity.ts'
 import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx'
 window.activity = new ActivityController()
 window.signInOwner = signInOwner
 window.ownerScope = ownerScope
+window.hookObservations = []
+const hookRoot = createRoot(document.createElement('div'))
+function CaptureActivity({ scope }) {
+  const view = useActivity(scope)
+  window.hookView = view
+  window.hookObservations.push({ requested: scope?.cacheKey ?? null,
+    owner: view.snapshot.ownerScopeKey, entries: view.snapshot.entries.length })
+  return null
+}
+window.renderActivityHook = scope => flushSync(() => hookRoot.render(React.createElement(CaptureActivity, { scope })))
 window.loaded = true
 ` },
         configureServer(devServer) {
@@ -173,13 +186,67 @@ window.loaded = true
     expect(recovered.workflow.phase).toBe('ready')
     expect(recovered.task.nextOffset).toBe(20)
 
+    await control(server.control, '/empty-inbox', {})
+    await evaluate('window.activity.refresh()')
+    const emptyInbox = await evaluate('window.activity.getSnapshot().sources.inbox_item')
+    expect(emptyInbox.phase).toBe('empty')
+    expect(emptyInbox.freshness).toBe('current')
+    expect(emptyInbox.entries).toHaveLength(0)
+    expect(emptyInbox.error).toBeNull()
+    expect(await evaluate('window.activity.getSnapshot().sources.task.entries.length')).toBe(20)
+
+    await evaluate('window.renderActivityHook(window.scopeA)')
+    await evaluate('window.hookView.refresh()')
+    expect(await evaluate('window.hookView.snapshot.entries.length')).toBeGreaterThan(0)
+    const sameOwner = await evaluate(`(() => {
+      window.hookObservations = []
+      window.renderActivityHook({ ...window.scopeA })
+      return window.hookObservations
+    })()`)
+    expect(sameOwner.every((render: { owner: string; entries: number }) =>
+      render.owner === first.sources.task.entries[0].identity.ownerScopeKey && render.entries > 0)).toBe(true)
+    const switchedRender = await evaluate(`(() => {
+      window.hookObservations = []
+      window.scopeB = window.ownerScope(location.origin, { user: 'owner-b' })
+      window.renderActivityHook(window.scopeB)
+      return window.hookObservations
+    })()`)
+    expect(switchedRender.length).toBeGreaterThan(0)
+    expect(switchedRender.every((render: { requested: string; owner: string; entries: number }) =>
+      render.requested === render.owner && render.entries === 0)).toBe(true)
+
     await control(server.control, '/delay', { seconds: 0.4 })
     await evaluate(`(() => { window.pendingRefresh = window.activity.refresh();
-      window.activity.setScope({ ...window.scopeA, ownerId: 'owner-b', cacheKey: '["owner-b"]' });
+      window.activity.setScope(window.scopeB);
       return window.activity.getSnapshot().entries.length })()`)
     expect(await evaluate('window.activity.getSnapshot().entries.length')).toBe(0)
     await evaluate('window.pendingRefresh')
     expect(await evaluate('window.activity.getSnapshot().entries.length')).toBe(0)
-    expect(await evaluate('window.activity.getSnapshot().ownerScopeKey')).toBe('["owner-b"]')
+    expect(await evaluate('window.activity.getSnapshot().ownerScopeKey')).toBe(switchedRender[0].requested)
+
+    await control(server.control, '/delay', { seconds: 0 })
+    await evaluate('window.activity.setScope(window.scopeA)')
+    await evaluate('window.activity.refresh()')
+    await control(server.control, '/workflow-store', { unavailable: true })
+    await control(server.control, '/delay', { seconds: 0.4, path: '/api/workflows/runs' })
+    const failuresBefore = await (await fetch(`${server.control}/failures`)).json() as { workflow: number }
+    await evaluate(`(() => {
+      window.pendingFailure = window.activity.refresh()
+      window.activity.setScope(window.scopeB)
+      return true
+    })()`)
+    await evaluate('window.pendingFailure')
+    const failuresAfter = await (await fetch(`${server.control}/failures`)).json() as { workflow: number }
+    expect(failuresAfter.workflow).toBeGreaterThan(failuresBefore.workflow)
+    const afterLateFailure = await evaluate(`(() => {
+      const snapshot = window.activity.getSnapshot()
+      return { owner: snapshot.ownerScopeKey, entries: snapshot.entries.length,
+        workflow: snapshot.sources.workflow_run }
+    })()`)
+    expect(afterLateFailure.owner).toBe(switchedRender[0].requested)
+    expect(afterLateFailure.entries).toBe(0)
+    expect(afterLateFailure.workflow.phase).toBe('idle')
+    expect(afterLateFailure.workflow.error).toBeNull()
+    expect(afterLateFailure.workflow.entries).toHaveLength(0)
   }, 30000)
 })
