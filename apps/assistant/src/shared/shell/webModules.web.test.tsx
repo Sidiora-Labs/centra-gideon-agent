@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { OwnerScope } from "../auth.web";
 import { createShellRoute } from "./shellRoutes";
 import {
+  artifactRequest,
   moduleDefinitions,
   moduleForRoute,
   resolveModuleRoute,
@@ -15,6 +16,20 @@ const scope: OwnerScope = {
 };
 
 describe("trusted assistant module registration", () => {
+  it("uses only exact positive native artifact versions and keeps current edits unpinned", () => {
+    const route = (version?: string) => createShellRoute("apps", {
+      view: "workspace", placement: { id: "artifacts/editor", query: version === undefined ? undefined : { version } },
+      record: { kind: "artifact", id: "room-reference-guide" },
+    });
+    expect(artifactRequest(route())).toEqual({ slug: "room-reference-guide", path: "/api/artifacts/room-reference-guide" });
+    expect(artifactRequest(route("2"))).toEqual({
+      slug: "room-reference-guide", path: "/api/artifacts/room-reference-guide/versions/2", version: 2,
+    });
+    for (const invalid of ["", "0", "01", "-1", "1.5", "Infinity", "9007199254740992"]) {
+      expect(artifactRequest(route(invalid)), invalid).toBeUndefined();
+    }
+  });
+
   it("keeps the published task and artifact editor placements as unique full workspaces", () => {
     const taskRoute = createShellRoute("activity", {
       view: "detail", placement: { id: "tasks" }, record: { kind: "task", id: "task-one" },
