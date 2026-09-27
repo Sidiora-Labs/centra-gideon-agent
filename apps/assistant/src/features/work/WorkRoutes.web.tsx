@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { OwnerScope } from '../../shared/auth.web'
-import { createShellRoute, type ShellDestination, type ShellReturnContext, type ShellRoute } from '../../shared/shell/shellRoutes'
+import { createShellRoute, serializeShellRoute, type ShellDestination, type ShellReturnContext, type ShellRoute } from '../../shared/shell/shellRoutes'
 import { WorkspaceFrame, type WorkspaceFrameState } from '../../shared/shell/WorkspaceFrame.web'
 import { WorkClient, type WorkEntry, type WorkKind, type WorkRead } from './workClient'
 
@@ -128,7 +128,12 @@ export type WorkRoutesProps = Readonly<{
   onReturn?: () => void
 }>
 
-export default function WorkRoutes({ route, scope, navigate, onReturn }: WorkRoutesProps) {
+export default function WorkRoutes(props: WorkRoutesProps) {
+  const key = JSON.stringify([props.scope.cacheKey, serializeShellRoute(props.route)])
+  return <WorkRouteInstance key={key} {...props} />
+}
+
+function WorkRouteInstance({ route, scope, navigate, onReturn }: WorkRoutesProps) {
   const page = findWorkDestination(route)
   const client = useMemo(() => new WorkClient(scope), [scope.cacheKey])
   const [view, setView] = useState<ViewState>({ state: 'loading' })
@@ -150,6 +155,7 @@ export default function WorkRoutes({ route, scope, navigate, onReturn }: WorkRou
     setActionError(null)
     setConfirmRisk(false)
     setSaving(false)
+    return () => { actionEpoch.current += 1 }
   }, [scope.cacheKey, page?.kind, page?.intent, id])
 
   useEffect(() => {
