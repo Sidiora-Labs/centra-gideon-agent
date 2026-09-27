@@ -2808,7 +2808,7 @@ export interface SystemInfo {
 export interface AuthStatus { mode: string; bind_host: string; valid: boolean; minutes_remaining?: number; oauth2_issuer?: string }
 
 export interface PendingApproval {
-  id: string; source: string; tool: string
+  id: string; revision?: string; source: string; tool: string
   tool_input?: unknown; tool_purpose?: string
   session: string; ts: number
 }
