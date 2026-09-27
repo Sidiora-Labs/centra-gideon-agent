@@ -111,6 +111,13 @@ import { activityModuleDefinitions } from '/src/features/activity/moduleDefiniti
 import { signInOwner, ownerScope } from '/src/shared/auth.web.tsx'
 import { createShellRoute, serializeShellRoute, parseShellRoute } from '/src/shared/shell/shellRoutes.ts'
 import { ShellThemeProvider } from '/src/shared/shell/shellTheme.web.ts'
+const nativeFetch = window.fetch.bind(window)
+window.notificationReads = 0
+window.fetch = (input, init) => {
+  const url = new URL(typeof input === 'string' ? input : input.url, location.href)
+  if (url.pathname === '/api/notifications') window.notificationReads++
+  return nativeFetch(input, init)
+}
 const root = createRoot(document.getElementById('root'))
 window.activityModuleDefinitions = activityModuleDefinitions
 window.beginJourney = async () => {
@@ -210,8 +217,14 @@ window.loaded = true
     await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
     await fetch(`http://127.0.0.1:${api.control_port}/delay`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seconds: 1, path: '/api/notifications' }) })
+    await evaluate('window.notificationReads = 0')
+    await evaluate(`window.openNativeDetail({ destination: 'activity', view: 'detail', record: { kind: 'notification', id: 'notification-1' } })`)
+    await until(evaluate, `window.notificationReads === 1`)
     await evaluate('window.switchOwner()')
+    await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'denied'`)
     expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
-    await until(evaluate, `document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state') === 'ready'`)
+    await new Promise(done => setTimeout(done, 1200))
+    expect(await evaluate(`document.querySelector('[data-activity-detail="notification"]')?.getAttribute('data-read-state')`)).toBe('denied')
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('Receipt available')`)).toBe(false)
   }, 30_000)
 })

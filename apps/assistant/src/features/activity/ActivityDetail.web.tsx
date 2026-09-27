@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
-import { createShellRoute, type ShellReturnContext } from '../../shared/shell/shellRoutes'
+import { createShellRoute, serializeShellRoute, type ShellReturnContext } from '../../shared/shell/shellRoutes'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { readActivityDetail, type ActivityDetailKind, type ActivityDetailRead, type ActivityDetailRecord } from './activityRoutes'
@@ -56,7 +56,7 @@ export default function ActivityDetail(props: ModuleProps) {
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<{ key: string; result: ActivityDetailRead }>()
   const requestGeneration = useRef(0)
-  const requestKey = `${scope.cacheKey}:${kind ?? ''}:${id}:${attempt}`
+  const requestKey = `${scope.cacheKey}:${serializeShellRoute(route)}:${kind ?? ''}:${id}:${attempt}`
   const returnContext: ShellReturnContext | undefined = route.returnTo ?? props.returnTo
   useEffect(() => {
     const generation = ++requestGeneration.current

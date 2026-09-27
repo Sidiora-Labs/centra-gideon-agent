@@ -1,4 +1,4 @@
-import type { OwnerScope } from '../../shared/auth.web'
+import { readOwnerSession, type OwnerScope } from '../../shared/auth.web'
 import { GatewayError, gatewayJson } from '../../shared/transport.web'
 import type {
   Artifact, InboxItem, NotificationItem, PendingApproval, ScheduleRun, Trigger,
@@ -115,6 +115,13 @@ export async function readActivityDetail(scope: OwnerScope, kind: ActivityDetail
   signal?: AbortSignal): Promise<ActivityDetailRead> {
   if (!scope.ownerId || !scope.cacheKey) return { state: 'denied', message: 'Sign in to the record owner account to open this item.' }
   try {
+    if (typeof location === 'undefined' || scope.runtimeOrigin !== location.origin) {
+      return { state: 'denied', message: 'Sign in to the record owner account to open this item.' }
+    }
+    const session = await readOwnerSession(signal)
+    if (session.user !== scope.ownerId) {
+      return { state: 'denied', message: 'Sign in to the record owner account to open this item.' }
+    }
     const value = await nativeDetail(kind, id, signal)
     if (value.id !== id) return { state: 'missing', message: 'The requested native record no longer exists.' }
     return { state: 'ready', value }
