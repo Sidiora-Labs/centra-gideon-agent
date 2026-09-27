@@ -2,17 +2,26 @@
 import { describe, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium } from 'playwright'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { once } from 'node:events'
-import { buildServiceWorker } from '../../../tooling/buildServiceWorker.mjs'
 import { APP_SHELL } from './swPolicy'
 
 const consoleRoot = resolve(import.meta.dirname, '../../..')
 const repositoryRoot = resolve(consoleRoot, '../..')
+const execFileAsync = promisify(execFile)
+const buildServiceWorkerModule = pathToFileURL(join(consoleRoot, 'tooling/buildServiceWorker.mjs')).href
+
+async function buildServiceWorker(webDir: string): Promise<{ version: string }> {
+  const script = `import { buildServiceWorker } from ${JSON.stringify(buildServiceWorkerModule)}; console.log(JSON.stringify(await buildServiceWorker(process.argv[1])))`
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '-e', script, webDir], { cwd: consoleRoot })
+  return JSON.parse(stdout) as { version: string }
+}
 
 async function fixture() {
   const temporary = await mkdtemp(join(tmpdir(), 'gideon-worker-'))
@@ -51,8 +60,8 @@ describe('root worker distribution', () => {
   it('keeps one root registration, separates offline documents, and never caches an authenticated owner', async () => {
     const { temporary, web } = await fixture()
     const registration = await build({
-      stdin: { contents: `import { registerServiceWorker } from ${JSON.stringify(join(consoleRoot, 'src/app/shell/registerServiceWorker.ts'))}; window.workerRegistration = registerServiceWorker(true);`, resolveDir: consoleRoot },
-      bundle: true, format: 'iife', write: false, define: { 'import.meta.env.PROD': 'true' },
+      stdin: { contents: `import { registerServiceWorker } from ${JSON.stringify(join(consoleRoot, 'src/app/shell/registerServiceWorker.ts'))}; window.workerRegistration = registerServiceWorker();`, resolveDir: consoleRoot },
+      bundle: true, format: 'iife', write: false, define: { 'process.env.NODE_ENV': '"production"' },
     })
     const script = registration.outputFiles[0].text
     await writeFile(join(web, 'dist/index.html'), `<title>Gideon Console</title><h1>Console document</h1><script>${script}</script>`)
