@@ -266,6 +266,14 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.waitFor("document.getElementById('gideon-message-composer')", "deep-linked conversation composer");
   assert.equal(await browser.evaluate("location.href"), sessionHref);
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
+  const returnMessage = "Shell return context marker. ".repeat(100);
+  await browser.evaluate(`(()=>{const input=document.getElementById('gideon-message-composer');const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value').set;setter.call(input,${JSON.stringify(returnMessage)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[aria-label="Send message"]')?.click();return true})()`);
+  await browser.waitFor(`Array.from(document.querySelectorAll('[id^="gideon-message-"]')).some(message=>message.textContent.includes(${JSON.stringify(returnMessage.slice(0, 30))}))`, "persisted native user message for return context");
+  const selectionId = await browser.evaluate<string>(`Array.from(document.querySelectorAll('[id^="gideon-message-"]')).find(message=>message.textContent.includes(${JSON.stringify(returnMessage.slice(0, 30))}) )?.id.replace(/^gideon-message-/,'')||''`);
+  assert.ok(selectionId, "the native conversation rendered a stable message ID for selection");
+  await browser.waitFor(`(()=>{const list=document.getElementById('gideon-chat-scroll');return !!list&&list.scrollHeight>list.clientHeight+320})()`, "conversation content tall enough to restore its scroll position");
+  const scrollBeforeWorkspace = await browser.evaluate<number>(`(()=>{const list=document.getElementById('gideon-chat-scroll');list.scrollTop=320;list.dispatchEvent(new Event('scroll',{bubbles:true}));return list.scrollTop})()`);
+  assert.ok(scrollBeforeWorkspace >= 300, `source conversation scroll was set before workspace handoff: ${scrollBeforeWorkspace}`);
   const apiHeaders = JSON.stringify({ "X-Gideon-API-Version": "1", "X-Session-Key": "dashboard:ui" });
   const taskRecord = await browser.evaluate<{ title: string }>(`fetch('/api/tasks/'+encodeURIComponent(${JSON.stringify(String(fixtureState.task_id))}),{credentials:'same-origin',headers:${apiHeaders}}).then(async response=>{if(!response.ok)throw Error('task fixture read failed: '+response.status);return response.json()})`);
   const artifactRecord = await browser.evaluate<{ name: string; content: string; kind: string }>(`fetch('/api/artifacts/'+encodeURIComponent(${JSON.stringify(String(fixtureState.artifact_slug))}),{credentials:'same-origin',headers:${apiHeaders}}).then(async response=>{if(!response.ok)throw Error('artifact fixture read failed: '+response.status);return response.json()})`);
@@ -314,7 +322,7 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.command("Network.setBlockedURLs", { urls: ["*gideon-console.css"] });
   const taskHref = routeHref(served.origin, "activity", {
     view: "workspace", record: { kind: "task", id: fixtureState.task_id }, placement: "tasks",
-    returnTo: { destination: "chat", sessionId: session.key, selectionId: "shell-return-selection", scrollY: 320 },
+    returnTo: { destination: "chat", sessionId: session.key, selectionId, scrollY: 320 },
   });
   await browser.command("Page.navigate", { url: taskHref });
   await browser.waitFor(`document.body.innerText.includes('The trusted workspace could not be prepared.')`, "trusted module stylesheet failure");
@@ -357,7 +365,7 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
 
   const artifactHref = routeHref(served.origin, "apps", {
     view: "workspace", record: { kind: "artifact", id: fixtureState.artifact_slug }, placement: "artifacts/editor",
-    returnTo: { destination: "chat", sessionId: session.key, selectionId: "artifact-return-selection", scrollY: 320 },
+    returnTo: { destination: "chat", sessionId: session.key, selectionId, scrollY: 320 },
   });
   await browser.command("Page.addScriptToEvaluateOnNewDocument", { source: `window.__assistantE2eWorkerUrls=[];const NativeWorker=window.Worker;window.Worker=new Proxy(NativeWorker,{construct(target,args,newTarget){window.__assistantE2eWorkerUrls.push(new URL(String(args[0]),location.href).href);return Reflect.construct(target,args,newTarget)}});` });
   await browser.command("Page.navigate", { url: artifactHref });
@@ -400,6 +408,9 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await browser.waitFor(`!document.querySelector('[data-gideon-assistant-overlay]')&&document.activeElement?.getAttribute('aria-label')==='Open Gideon menu'`, "overlay focus restoration in module route");
   await browser.evaluate(`document.querySelector('[aria-label="Return to previous workspace"]')?.click()`);
-  await browser.waitFor(`location.pathname==='/assistant/chat'&&new URLSearchParams(location.search).get('session')===${JSON.stringify(session.key)}&&new URLSearchParams(location.search).get('view')==='workspace'`, "internal return to the same conversation");
+  await browser.waitFor(`location.pathname==='/assistant/chat'&&new URLSearchParams(location.search).get('session')===${JSON.stringify(session.key)}&&new URLSearchParams(location.search).get('fromSelection')===${JSON.stringify(selectionId)}&&new URLSearchParams(location.search).get('fromScroll')==='320'`, "return to the same conversation, selected message and scroll context");
+  await browser.waitFor(`(()=>{const message=document.getElementById(${JSON.stringify(`gideon-message-${selectionId}`)});const list=document.getElementById('gideon-chat-scroll');return !!message&&getComputedStyle(message).borderTopWidth==='2px'&&!!list&&list.scrollTop>=300})()`, "selected message highlight and conversation scroll restoration");
+  assert.equal(await browser.evaluate(`Boolean(document.getElementById('gideon-message-composer'))`), true);
+  assert.equal(await browser.evaluate(`Boolean(document.querySelector('[aria-label="Return to previous workspace"]'))`), false, "returning to the source conversation does not create a self-return action");
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
 });
