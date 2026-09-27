@@ -13,6 +13,8 @@ import { Field, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 import { AreaNavigation } from '../AreaNavigation'
 import { Cable, FolderGit2, FolderKanban, GitBranch, HardDrive, Monitor, Save, ServerCog, TerminalSquare } from 'lucide-react'
+import { assistantHandoffHref } from '../../../app/shell/assistantRouteBridge'
+import { codeRoute } from '../../../../../assistant/src/features/code/codeRoute'
 
 type Snapshot = { id: string; project_id: string; workspace: string; branch: string | null; dirty: boolean; terminal_ids: string[]; task_ids: string[]; captured_at: string; revision: number }
 type Comparison = { live: { branch: string | null; dirty: boolean }; branch_matches: boolean | null; surviving_terminal_ids: string[]; missing_terminal_ids: string[]; surviving_task_ids: string[]; missing_task_ids: string[] }
@@ -72,7 +74,7 @@ export default function Page() {
     {selected && !row && loaded && <p>Context not found in this page.</p>}
     {row && <Surface className="space-y-m break-words p-l">
       <h3 data-type="title-m">{row.project_id}</h3><p className="text-on-surface-low">{row.workspace}</p><p>Saved branch: {row.branch || 'Detached'} · {row.dirty ? 'Uncommitted changes' : 'Clean'}</p>
-      <div className="flex flex-wrap gap-2"><Button loading={busy} onClick={() => void act(async () => { setComparison(await requestJson<Comparison>(`${base}/${row.id}/reconcile`, 'POST', {})) })}>Compare with live workspace</Button>
+      <div className="flex flex-wrap gap-2"><a href={assistantHandoffHref(codeRoute({ kind: 'snapshot', id: row.id }))}>Open in Code workspace</a><Button loading={busy} onClick={() => void act(async () => { setComparison(await requestJson<Comparison>(`${base}/${row.id}/reconcile`, 'POST', {})) })}>Compare with live workspace</Button>
       <Button variant="danger" loading={busy} onClick={() => void act(async () => { await requestJson(`${base}/${row.id}?revision=${row.revision}`, 'DELETE'); setRows(old => old.filter(x => x.id !== row.id)); choose('') })}>Delete saved context</Button></div>
       {comparison && <div aria-live="polite"><p>Live branch: {comparison.live.branch || 'Detached'} · {comparison.branch_matches === null ? 'No saved branch' : comparison.branch_matches ? 'Branch matches' : 'Branch changed'} · {comparison.live.dirty ? 'Uncommitted changes' : 'Clean'}</p>
         {(['surviving_terminal_ids', 'missing_terminal_ids', 'surviving_task_ids', 'missing_task_ids'] as const).map(key => <p key={key}>{key.replaceAll('_', ' ')}: {comparison[key].join(', ') || 'None'}</p>)}</div>}
