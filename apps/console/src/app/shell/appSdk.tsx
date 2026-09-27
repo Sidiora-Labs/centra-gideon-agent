@@ -436,7 +436,7 @@ export async function loadContributedModule(
     source = await response.text()
     if (response.url) sourceUrl = response.url
   } catch {
-    return import(/* @vite-ignore */ src) as Promise<Record<string, unknown>>
+    return import(/* @vite-ignore */ /* @metro-ignore */ src) as Promise<Record<string, unknown>>
   }
   installAppSdk()
   const allowed = new Set(resolvableAppSpecs(app))
@@ -444,7 +444,7 @@ export async function loadContributedModule(
     allowed.has(specifier) ? appModuleShimUrl(specifier) : null, sourceUrl)
   const moduleUrl = URL.createObjectURL(new Blob([resolved], { type: 'text/javascript' }))
   try {
-    return await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>
+    return await import(/* @vite-ignore */ /* @metro-ignore */ moduleUrl) as Record<string, unknown>
   } finally {
     URL.revokeObjectURL(moduleUrl)
   }

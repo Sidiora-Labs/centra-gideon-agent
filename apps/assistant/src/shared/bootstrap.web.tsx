@@ -71,12 +71,13 @@ export function AssistantBootstrapProvider({ children, clearOwnerCache }: {
       adoptOwner(owner, status)
     } catch (error) {
       if (epoch !== epochRef.current) return
-      clearOwner()
+      const identityDenied = isIdentityDenied(error)
+      if (identityDenied) clearOwner()
       publish({
-        phase: isIdentityDenied(error) ? 'signed_out' : 'unavailable',
+        phase: identityDenied ? 'signed_out' : 'unavailable',
         status: stateRef.current.status,
         owner: null,
-        error: isIdentityDenied(error) ? '' : identityErrorMessage(error),
+        error: identityDenied ? '' : identityErrorMessage(error),
       })
     }
   }, [adoptOwner, clearOwner, publish])

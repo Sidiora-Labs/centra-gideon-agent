@@ -7,6 +7,7 @@ import {
   type AssistantRouteSnapshot,
   type RouteAvailability,
 } from "../../shared/shell/routeState.web";
+import { resolveModuleRoute } from "../../shared/shell/webModules";
 import type { ShellRoute } from "../../shared/shell/shellRoutes";
 
 export { assistantConsoleReturnHref as consoleReturnHref } from "../../../../console/src/app/shell/assistantRouteBridge";
@@ -33,6 +34,8 @@ export function targetSessionId(route: ShellRoute): string | null | undefined {
 
 export function createOwnedRouteResolver(scope: OwnerScope, sessions: Map<string, OwnedSession>) {
   return async (route: ShellRoute): Promise<RouteAvailability> => {
+    const moduleAvailability = await resolveModuleRoute(scope, route);
+    if (moduleAvailability !== undefined) return moduleAvailability;
     const sessionId = targetSessionId(route);
     if (sessionId === undefined) return "unavailable";
     if (sessionId === null) return "available";
