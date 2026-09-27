@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import aiohttp
@@ -11,11 +12,13 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.cognition.history import ConversationLog
+from gideon.security.auth import credentials
 from gideon.integrations.browse.customer_sessions import (
     CustomerBrowserSessionStore,
     SessionNotFound,
 )
 from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.handlers import auth as auth_h
 from gideon.interfaces.dashboard.handlers.browser_sessions import (
     KEY,
     register_browser_session_routes,
@@ -31,20 +34,28 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
     from gideon.core.config import loader
 
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(credentials, "config_dir", lambda: tmp_path)
     for variable in ("GIDEON_DEV_NO_AUTH", "GIDEON_BYPASS_LOCAL_NETWORKS"):
         monkeypatch.delenv(variable, raising=False)
     token_auth.use_persistent_secret()
     token_auth.revoke_all_sessions()
+    auth_h.reset_lockouts()
+    credentials.set_password("api_key", "correct-horse-battery-staple")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8"
+    )
     log = ConversationLog(base_dir=tmp_path / "conversations")
     log.append("dashboard:chat-one", "user", "Open my browser")
     log.append("channel-thread", "user", "A separate channel conversation")
     log.append("chat-two", "user", "Channel conversation")
     log.append("dashboard:chat-two", "user", "Dashboard conversation")
+    log.append("dashboard:login-chat", "user", "Credential owner conversation")
     state = ConsoleState(None, time.time(), conversation_log=log)
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=PORT)])
     app["state"] = state
     app["port"] = PORT
     app["allowed_origins"] = {f"http://localhost:{PORT}"}
+    app.router.add_post("/api/auth/login", auth_h.api_auth_login)
     path = tmp_path / "browser.sqlite3"
     register_browser_session_routes(app, store_path=path)
     alice = token_auth.generate_token("alice", ttl_seconds=3600)
@@ -149,6 +160,32 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         assert own_read.status == 200
         assert (await own_read.json())["session"] == first
 
+        login = await client.post(
+            "/api/auth/login",
+            json={"username": "api_key", "password": "correct-horse-battery-staple"},
+        )
+        assert login.status == 200
+        login_cookie = login.cookies.get(COOKIE)
+        assert login_cookie is not None
+        valid, login_owner, _ = token_auth.validate_token(
+            login_cookie.value, use_session_exp=True
+        )
+        assert valid and login_owner == "api_key"
+        logged_in_create = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "login-chat"},
+            cookies=owned(login_cookie.value),
+        )
+        assert logged_in_create.status == 201
+        logged_in_row = (await logged_in_create.json())["session"]
+        assert logged_in_row["conversation_id"] == "login-chat"
+        logged_in_read = await client.get(
+            f"/api/browser/sessions/{logged_in_row['id']}",
+            cookies=owned(login_cookie.value),
+        )
+        assert logged_in_read.status == 200
+        assert (await logged_in_read.json())["session"] == logged_in_row
+
         app_token = token_auth.generate_token("alice", ttl_seconds=3600, app="notes")
         app_headers = {"Authorization": f"Bearer {app_token}"}
         app_create = await client.post(
@@ -242,3 +279,4 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         assert rotated_existing.status == 404
 
     token_auth.revoke_all_sessions()
+    auth_h.reset_lockouts()
