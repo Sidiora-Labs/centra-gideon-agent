@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
-import { canonicalMessages, receivedPrompt, reconcileStreamChunk, streamCursorDisposition } from './controller'
-import type { ChatDetail, ConversationStreamCursor } from './types'
+import { canonicalMessages, receivedPrompt, reconcileStreamChunk, reconcileToolEvent, streamCursorDisposition } from './controller'
+import type { ChatDetail, ChatSocketEvent, ConversationStreamCursor } from './types'
 
 const root = resolve(process.cwd(), '../..')
 const children: ChildProcessWithoutNullStreams[] = []
@@ -139,13 +139,46 @@ describe('canonical Gideon conversation', () => {
       { stream_epoch: terminal.stream_epoch, stream_turn: terminal.stream_turn + 1, stream_seq: 1 })!
     expect(nextTurn.messages).toEqual([
       terminalSnapshot[0],
-      expect.objectContaining({ id: 'session-a:live:epoch-a:5', content: 'ha', streaming: true,
+      expect.objectContaining({ id: 'session-a:live:epoch-a:5:1', content: 'ha', streaming: true,
         meta: { stream_epoch: 'epoch-a', stream_turn: 5, stream_seq: 1 } }),
     ])
     const restarted = reconcileStreamChunk('session-a', nextTurn.messages, nextTurn.cursor, 'ha',
       { stream_epoch: 'epoch-b', stream_turn: 1, stream_seq: 1 })!
     expect(restarted.messages.filter(message => message.streaming)).toHaveLength(1)
     expect(restarted.messages.at(-1)?.content).toBe('ha')
+  })
+
+  it('keeps assistant segments on either side of native tool frames in live and hydrated history', () => {
+    const beforeTool: ConversationStreamCursor = { stream_epoch: 'epoch-a', stream_turn: 8, stream_seq: 1 }
+    const afterTool: ConversationStreamCursor = { ...beforeTool, stream_seq: 2 }
+    const frames = [
+      { type: 'tool_call', data: { tool_call_id: 'call-1', tool: 'write_file', update: false } },
+      { type: 'tool_result', data: { tool_call_id: 'call-1', tool: 'write_file', output: 'saved' } },
+    ] satisfies readonly ChatSocketEvent[]
+
+    const first = reconcileStreamChunk('session-a', [], null, 'before ', beforeTool)!
+    let liveMessages = first.messages
+    liveMessages = reconcileToolEvent('session-a', liveMessages, frames[0])
+    liveMessages = reconcileToolEvent('session-a', liveMessages, frames[1])
+    const live = reconcileStreamChunk('session-a', liveMessages, first.cursor, 'after', afterTool)!
+
+    expect(live.messages.map(message => message.role)).toEqual(['assistant', 'tool', 'assistant'])
+    expect(live.messages.map(message => message.content)).toEqual(['before ', 'write_file', 'after'])
+    expect(live.messages.map(message => message.streaming ?? false)).toEqual([false, false, true])
+    expect(live.messages[1].meta).toMatchObject({ tool_call_id: 'call-1', done: true, output: 'saved' })
+    expect(new Set(live.messages.map(message => message.id)).size).toBe(3)
+
+    const hydrated: ChatDetail = { key: 'session-a', title: '', running: true, stream_cursor: beforeTool, messages: [
+      { role: 'assistant', content: 'before ', meta: { ...beforeTool } },
+      { role: 'tool', content: 'write_file', meta: { tool_call_id: 'call-1', done: false } },
+    ] }
+    let hydratedMessages = canonicalMessages(hydrated)
+    hydratedMessages = reconcileToolEvent('session-a', hydratedMessages, frames[0])
+    hydratedMessages = reconcileToolEvent('session-a', hydratedMessages, frames[1])
+    const hydratedLive = reconcileStreamChunk('session-a', hydratedMessages, beforeTool, 'after', afterTool)!
+    expect(hydratedLive.messages.map(message => message.role)).toEqual(['assistant', 'tool', 'assistant'])
+    expect(hydratedLive.messages.map(message => message.content)).toEqual(['before ', 'write_file', 'after'])
+    expect(new Set(hydratedLive.messages.map(message => message.id)).size).toBe(3)
   })
 
   it('retains producer IDs and recognizes only the submitted user timestamp', () => {

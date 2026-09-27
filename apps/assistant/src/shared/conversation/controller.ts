@@ -68,10 +68,47 @@ export function reconcileStreamChunk(
     const streaming = next[streamingIndex]
     next[streamingIndex] = { ...streaming, content: streaming.content + content, meta: { ...streaming.meta, ...meta } }
   } else {
-    next.push({ id: `${sessionId}:live:${incoming.stream_epoch}:${incoming.stream_turn}`,
+    next.push({ id: `${sessionId}:live:${incoming.stream_epoch}:${incoming.stream_turn}:${incoming.stream_seq}`,
       role: 'assistant', content, streaming: true, meta })
   }
   return { messages: next, cursor: incoming }
+}
+
+export function reconcileToolEvent(
+  sessionId: string,
+  messages: readonly ConversationMessage[],
+  event: ChatSocketEvent,
+): readonly ConversationMessage[] {
+  if (event.type !== 'tool_call' && event.type !== 'tool_result') return messages
+  const toolCallId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
+  const found = toolCallId ? messages.findIndex(message => message.role === 'tool'
+    && message.meta?.tool_call_id === toolCallId) : -1
+  const previous = found >= 0 ? messages[found] : undefined
+  if (previous?.meta?.done === true) return messages
+
+  const next = [...messages]
+  if (found < 0) {
+    for (let index = 0; index < next.length; index++) {
+      if (next[index].streaming) next[index] = { ...next[index], streaming: false }
+    }
+  }
+  const incoming = event.type === 'tool_call' ? {
+    ...(previous?.meta ?? {}), ...event.data,
+    tool_call_id: toolCallId || undefined,
+    done: event.data.update === true ? previous?.meta?.done : false,
+  } : {
+    ...(previous?.meta ?? {}), ...event.data,
+    tool_call_id: toolCallId || undefined,
+    done: true,
+  }
+  const message: ConversationMessage = {
+    id: previous?.id ?? `${sessionId}:tool:${toolCallId || messages.length}`,
+    role: 'tool', content: typeof event.data.tool === 'string' ? event.data.tool : previous?.content ?? 'Tool',
+    meta: incoming,
+  }
+  if (found >= 0) next[found] = message
+  else next.push(message)
+  return next
 }
 
 function streamCursor(value: unknown): ConversationStreamCursor | null {
@@ -315,28 +352,8 @@ export class ConversationController {
       } else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
       this.update({ messages, running: true, phase: 'sending' })
     } else if (event.type === 'tool_call' || event.type === 'tool_result') {
-      const toolCallId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
-      const messages = [...this.state.messages]
-      const found = toolCallId ? messages.findIndex(message => message.role === 'tool'
-        && message.meta?.tool_call_id === toolCallId) : -1
-      const previous = found >= 0 ? messages[found] : undefined
-      if (previous?.meta?.done === true) return
-      const incoming = event.type === 'tool_call' ? {
-        ...(previous?.meta ?? {}), ...event.data,
-        tool_call_id: toolCallId || undefined,
-        done: event.data.update === true ? previous?.meta?.done : false,
-      } : {
-        ...(previous?.meta ?? {}), ...event.data,
-        tool_call_id: toolCallId || undefined,
-        done: true,
-      }
-      const message: ConversationMessage = {
-        id: previous?.id ?? `${sessionId}:tool:${toolCallId || messages.length}`,
-        role: 'tool', content: typeof event.data.tool === 'string' ? event.data.tool : previous?.content ?? 'Tool',
-        meta: incoming,
-      }
-      if (found >= 0) messages[found] = message
-      else messages.push(message)
+      const messages = reconcileToolEvent(sessionId, this.state.messages, event)
+      if (messages === this.state.messages) return
       this.update(terminalSnapshot ? { messages } : { messages, running: true, phase: 'sending' })
     } else if (event.type === 'approval' || event.type === 'approval_resolved') {
       const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
