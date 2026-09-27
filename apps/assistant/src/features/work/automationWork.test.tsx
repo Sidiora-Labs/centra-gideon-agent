@@ -81,6 +81,7 @@ const fromUrl = () => { const shell = new URL(location.href).searchParams.get('s
 const render = route => { window.currentRoute = route; window.currentOwner = owner; root.render(React.createElement(WorkRoutes, { scope: { runtimeOrigin: location.origin, ownerId: owner, cacheKey: owner }, route, navigate: next => { history.pushState({}, '', location.pathname + '?shell=' + encodeURIComponent(serializeShellRoute(next))); render(next) } })) }
 render(fromUrl()); window.loaded = true
 window.gotoWork = id => { const next = createWorkRoute(id, undefined, window.currentRoute.returnTo); history.pushState({}, '', location.pathname + '?shell=' + encodeURIComponent(serializeShellRoute(next))); render(next) }
+window.gotoWorkRecord = (placement, id) => { const next = createWorkRoute(placement, id, window.currentRoute.returnTo); history.pushState({}, '', location.pathname + '?shell=' + encodeURIComponent(serializeShellRoute(next))); render(next) }
 window.changeOwner = id => { owner = id; flushSync(() => render(fromUrl())) }
 ` },
       configureServer(server) { server.middlewares.use('/integration', (_request, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/automation-entry.ts"></script></body></html>') }) },
@@ -137,14 +138,51 @@ describe('native triggers and loops in WorkRoutes', () => {
     await waitFor(`window.currentRoute?.destination === 'chat' && window.currentRoute?.sessionId === 'automation-source'`)
   }, 30000)
 
+  it('shows a real missing trigger and distinguishes failed history reads from unsupported history', async () => {
+    await evaluate(`window.changeOwner('automation-owner')`)
+    await evaluate(`window.gotoWorkRecord('triggers', 'event:missing-native-trigger')`)
+    await waitFor(`document.querySelector('[aria-label="Missing trigger"]')?.textContent.includes('event:missing-native-trigger')`)
+    expect(await fetch(`${api}/api/triggers/event%3Amissing-native-trigger/history`, {
+      headers: { Authorization: `Bearer ${credential}` },
+    }).then(response => response.status)).toBe(404)
+
+    await evaluate(`window.gotoWorkRecord('triggers', '${triggerId}')`)
+    await waitFor(`document.querySelector('[aria-label="Trigger run history"]')?.textContent.includes('does not expose run history')`)
+    await browser!.command('Network.setBlockedURLs', { urls: ['*api/triggers/*/history*'] })
+    try {
+      await click('Refresh')
+      await waitFor(`document.querySelector('[aria-label="Trigger run history"] [role="alert"]')?.textContent.includes('could not be loaded')`)
+      expect(await evaluate(`document.querySelector('[aria-label="Trigger run history"]')?.textContent`)).not.toContain('does not expose run history')
+    } finally {
+      await browser!.command('Network.setBlockedURLs', { urls: [] })
+    }
+    await click('Retry run history')
+    await waitFor(`document.querySelector('[aria-label="Trigger run history"]')?.textContent.includes('does not expose run history')`)
+  }, 30000)
+
   it('retains native loop plan drafts after a committed comment loses its acknowledgement and routes loop creation', async () => {
     await evaluate(`window.gotoWork('loops')`)
     await waitFor(`document.querySelector('[aria-label="Loop catalogue"]')?.textContent.includes('${loopId}')`)
     await click(loopId)
     await waitFor(`document.querySelector('[aria-label="Loop plan and review"]')?.textContent.includes('Review current state')`)
+    await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates connected.')`)
     await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Which follow-up should happen next?')`)
     expect(await evaluate(`window.currentRoute?.placement?.id`)).toBe('loops/run')
     expect(await evaluate(`document.querySelector('[aria-label="Loop report"]')?.textContent`)).toContain('Native fixture report')
+    const connectedStream = await fetch(`${api}/__test/loop-stream-count`).then(response => response.json()) as { active: number }
+    expect(connectedStream.active).toBeGreaterThan(0)
+    const streamPattern = `*api/loops/${loopId}/stream*`
+    await browser!.command('Network.setBlockedURLs', { urls: [streamPattern] })
+    try {
+      await click('Refresh native state')
+      await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates disconnected')`)
+    } finally {
+      await browser!.command('Network.setBlockedURLs', { urls: [] })
+    }
+    await click('Reconnect live updates')
+    await waitFor(`document.querySelector('[aria-label="Loop status"]')?.textContent.includes('Live updates connected.')`)
+    const recoveredStream = await fetch(`${api}/__test/loop-stream-count`).then(response => response.json()) as { active: number }
+    expect(recoveredStream.active).toBeGreaterThan(0)
     const note = 'Keep the source run linked in the final report.'
     await evaluate(`(() => { const node = document.querySelector('[aria-label="Loop plan and review"] textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(node, ${JSON.stringify(note)}); node.dispatchEvent(new Event('input', {bubbles:true})) })()`)
     await fetch(`${api}/__test/hold-next-native-write`, { method: 'POST' })

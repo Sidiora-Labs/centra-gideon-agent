@@ -30,6 +30,7 @@ export default function LoopWorkspace({ route, scope, loopId, creating = false, 
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'disconnected'>('disconnected')
   const epoch = useRef(0)
   const ownerKey = scope.cacheKey
   const path = loopId ? `/api/loops/${encodeURIComponent(loopId)}` : ''
@@ -39,6 +40,7 @@ export default function LoopWorkspace({ route, scope, loopId, creating = false, 
     const token = ++epoch.current
     const controller = new AbortController()
     setLoop(null); setPlan(null); setReport(null); setError(''); setNotice('')
+    setStreamStatus(loopId ? 'connecting' : 'disconnected')
     const guarded = (fn: () => void) => { if (live && token === epoch.current && scope.cacheKey === ownerKey) fn() }
     if (loopId) {
       Promise.all([
@@ -50,12 +52,16 @@ export default function LoopWorkspace({ route, scope, loopId, creating = false, 
       let stream: EventSource | undefined
       try {
         stream = openGatewayEventSource(`${path}/stream`)
+        stream.onopen = () => { if (live && token === epoch.current && scope.cacheKey === ownerKey) setStreamStatus('live') }
         stream.onmessage = () => {
           if (!live || token !== epoch.current || scope.cacheKey !== ownerKey) return
           void gatewayJson<Loop>(path, { signal: controller.signal }).then(value => guarded(() => setLoop(value))).catch(() => undefined)
         }
-        stream.onerror = () => { if (live && token === epoch.current) stream?.close() }
-      } catch { /* Poll-on-refresh remains available when live streaming is not supported. */ }
+        stream.onerror = () => {
+          if (live && token === epoch.current && scope.cacheKey === ownerKey) setStreamStatus('disconnected')
+          stream?.close()
+        }
+      } catch { setStreamStatus('disconnected') }
       return () => { live = false; controller.abort(); stream?.close(); if (epoch.current === token) epoch.current += 1 }
     }
     gatewayJson<{ loops: Loop[] }>('/api/loops', { signal: controller.signal })
@@ -143,6 +149,12 @@ export default function LoopWorkspace({ route, scope, loopId, creating = false, 
     </section>}
     {!creating && loopId && loop && <div style={{ display: 'grid', gap: 14 }}>
       <section aria-label="Loop status"><h2>Live progress</h2><p>Loop ID: <code>{loop.id}</code> · Kind: {loop.kind} · Status: {loop.status}</p>
+        <p role={streamStatus === 'disconnected' ? 'alert' : 'status'}>{streamStatus === 'live'
+          ? 'Live updates connected.'
+          : streamStatus === 'connecting'
+            ? 'Connecting to native live updates…'
+            : 'Live updates disconnected. Showing the last native snapshot; reconnect to refresh and resume updates.'}</p>
+        {streamStatus === 'disconnected' && <button style={button} type="button" onClick={() => setRevision(value => value + 1)}>Reconnect live updates</button>}
         <p>Cycles: {loop.total_cycles} · Workspace: {loop.workspace_dir || 'not assigned'} · Project: {loop.project_id || 'none'}</p>
         {loop.error_message && <p role="alert">{loop.error_message}</p>}{loop.pending_question && <p role="status">Question: {typeof loop.pending_question === 'string' ? loop.pending_question : loop.pending_question.question}</p>}
       </section>

@@ -13,7 +13,9 @@ const input: React.CSSProperties = { minHeight: 40, boxSizing: 'border-box', wid
 
 export default function TriggerWorkspace({ route, scope, triggerId, creating = false, onBack, navigate }: Props) {
   const [rows, setRows] = useState<Trigger[]>([])
+  const [rowsLoaded, setRowsLoaded] = useState(false)
   const [history, setHistory] = useState<History | null>(null)
+  const [historyError, setHistoryError] = useState('')
   const [type, setType] = useState<'schedule' | 'event' | 'lifecycle'>('schedule')
   const [name, setName] = useState('')
   const [schedule, setSchedule] = useState('0 9 * * *')
@@ -33,13 +35,13 @@ export default function TriggerWorkspace({ route, scope, triggerId, creating = f
   useEffect(() => {
     let live = true
     const controller = new AbortController()
-    setRows([]); setHistory(null); setError(''); setNotice('')
+    setRows([]); setRowsLoaded(false); setHistory(null); setHistoryError(''); setError(''); setNotice('')
     gatewayJson<{ triggers: Trigger[] }>('/api/triggers', { signal: controller.signal }).then(value => {
-      if (live && scope.cacheKey === stableOwner) setRows(value.triggers)
+      if (live && scope.cacheKey === stableOwner) { setRows(value.triggers); setRowsLoaded(true) }
     }).catch(reason => { if (live && !controller.signal.aborted) setError(message(reason)) })
     if (triggerId) gatewayJson<History>(`/api/triggers/${encodeURIComponent(triggerId)}/history`, { signal: controller.signal })
-      .then(value => { if (live && scope.cacheKey === stableOwner) setHistory(value) })
-      .catch(reason => { if (live && !controller.signal.aborted && !notFound(reason)) setHistory({ supported: false }) })
+      .then(value => { if (live && scope.cacheKey === stableOwner) { setHistory(value); setHistoryError('') } })
+      .catch(reason => { if (live && !controller.signal.aborted) { setHistory(null); setHistoryError(`Native run history could not be loaded. ${message(reason)}`) } })
     return () => { live = false; controller.abort() }
   }, [scope.cacheKey, triggerId, revision])
 
@@ -91,7 +93,7 @@ export default function TriggerWorkspace({ route, scope, triggerId, creating = f
 
   const title = creating ? 'Create an automation' : triggerId ? selected?.name ?? 'Automation' : 'Schedules and triggers'
   const errorState = error && !selected && !creating ? { kind: 'error' as const, message: error, onRetry: () => setRevision(value => value + 1) }
-    : !creating && triggerId && rows.length === 0 && !error ? { kind: 'loading' as const, message: 'Checking native trigger and source readiness…' }
+    : !creating && triggerId && !rowsLoaded ? { kind: 'loading' as const, message: 'Checking native trigger and source readiness…' }
       : { kind: 'ready' as const }
   const open = (id: string) => navigate(createWorkRoute('triggers', id, route.returnTo))
 
@@ -120,6 +122,11 @@ export default function TriggerWorkspace({ route, scope, triggerId, creating = f
       {rows.length ? <ul>{rows.map(row => <li key={row.id}><button style={button} type="button" onClick={() => open(row.id)}>
         {row.name} · {row.kind} · {row.enabled ? 'enabled' : row.state ?? 'disabled'}</button></li>)}</ul> : <p>No native triggers are recorded. Create one to see only readiness and next-run data confirmed by Gideon.</p>}
     </section>}
+    {!creating && triggerId && rowsLoaded && !selected && <section aria-label="Missing trigger">
+      <h2>Automation not found</h2><p>Gideon returned the native trigger catalogue, but it does not contain <code>{triggerId}</code>.</p>
+      <button style={button} type="button" onClick={() => setRevision(value => value + 1)}>Retry native read</button>
+      <button style={button} type="button" onClick={() => navigate(createWorkRoute('triggers', undefined, route.returnTo))}>Return to catalogue</button>
+    </section>}
     {!creating && triggerId && selected && <div style={{ display: 'grid', gap: 14 }}>
       <section aria-label="Trigger readiness"><h2>Readiness</h2><p>Native ID: <code>{selected.id}</code> · Type: {selected.kind}</p>
         <p>Status: {selected.enabled ? selected.state ?? 'enabled' : 'disabled'} · Health: {selected.health ?? 'not reported'}</p>
@@ -137,7 +144,9 @@ export default function TriggerWorkspace({ route, scope, triggerId, creating = f
         <button style={button} disabled={busy || Boolean(selected.read_only)} onClick={() => void remove()}>Delete</button>
       </section>
       <section aria-label="Trigger run history"><h2>Run history</h2>
-        {history?.supported === false ? <p>This native trigger type does not expose run history.</p>
+        {historyError ? <><p role="alert">{historyError}</p><button style={button} type="button" onClick={() => setRevision(value => value + 1)}>Retry run history</button></>
+          : !history ? <p role="status">Loading native run history…</p>
+          : history.supported === false ? <p>This native trigger type does not expose run history.</p>
           : history?.runs?.length || history?.entries?.length ? <ol>{(history.runs ?? history.entries ?? []).map((run, index) => <li key={String(run.id ?? run.run_id ?? index)}>{String(run.status ?? run.outcome ?? 'Recorded')} · <code>{String(run.id ?? run.run_id ?? '')}</code></li>)}</ol>
             : <p>No native run history is recorded.</p>}
       </section>
@@ -145,5 +154,4 @@ export default function TriggerWorkspace({ route, scope, triggerId, creating = f
   </WorkspaceFrame>
 }
 
-function notFound(error: unknown): boolean { return !!error && typeof error === 'object' && 'status' in error && error.status === 404 }
 function message(error: unknown): string { return error instanceof Error && error.message ? error.message : 'Native trigger data is unavailable.' }

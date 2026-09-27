@@ -27,6 +27,7 @@ async def main() -> None:
         from gideon.interfaces.dashboard.state import ConsoleState
         from gideon.interfaces.dashboard.handlers.triggers import register_trigger_routes
         from gideon.interfaces.dashboard.handlers.loop_routes import register_unified_loop_routes
+        from gideon.automation.loop.watchdog import registry_key
         from gideon.security.auth.modes import AuthConfig, AuthMode
 
         register_provider(NativeWorkflowDefProvider())
@@ -137,6 +138,9 @@ async def main() -> None:
                 hold_loop_preflight = False
                 release_loop_preflight.set()
                 return web.json_response({"released": True})
+            if request.path == "/__test/loop-stream-count" and request.method == "GET":
+                hub = app["state"].loop_sse().peek(registry_key(loop.id))
+                return web.json_response({"active": hub.subscriber_count if hub else 0})
             if request.path == "/__test/arm" and request.method == "POST":
                 held_detail = True
                 save_writes = 0
