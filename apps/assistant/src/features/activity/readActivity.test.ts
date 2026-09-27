@@ -118,8 +118,10 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { ActivityController, useActivity } from '/src/features/activity/useActivity.ts'
+import { nextActivityOffset } from '/src/features/activity/readActivity.ts'
 import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx'
 window.activity = new ActivityController()
+window.nextActivityOffset = nextActivityOffset
 window.signInOwner = signInOwner
 window.ownerScope = ownerScope
 window.hookObservations = []
@@ -164,10 +166,32 @@ window.loaded = true
     expect(first.sources.notification.coverage).toBe('missing_ids')
     expect(first.sources.notification.omittedWithoutId).toBe(1)
     expect(first.sources.chat_session.phase).toBe('unavailable')
+    expect(await evaluate('window.nextActivityOffset(0, 20, 20)')).toBeNull()
+    expect(await evaluate('window.nextActivityOffset(0, 20, null)')).toBe(20)
+
+    await new Promise(done => setTimeout(done, 1100))
+    await control(server.control, '/task', { title: 'Inserted between pages' })
     await evaluate(`window.activity.loadMore('task')`)
     const second = await evaluate('window.activity.getSnapshot().sources.task')
     expect(second.entries).toHaveLength(22)
+    expect(new Set(second.entries.map((entry: { identity: { key: string } }) => entry.identity.key)).size).toBe(22)
+    expect(first.sources.task.entries.every((entry: { identity: { key: string } }) =>
+      second.entries.some((next: { identity: { key: string } }) => next.identity.key === entry.identity.key))).toBe(true)
     expect(second.nextOffset).toBeNull()
+
+    await control(server.control, '/trigger-pages', {})
+    await evaluate('window.activity.refresh()')
+    const triggerPage = await evaluate('window.activity.getSnapshot().sources.trigger_run')
+    expect(triggerPage.entries).toHaveLength(19)
+    expect(triggerPage.omittedWithoutId).toBe(1)
+    expect(triggerPage.nextOffset).toBe(20)
+    await evaluate(`window.activity.loadMore('trigger_run')`)
+    const triggerTail = await evaluate('window.activity.getSnapshot().sources.trigger_run')
+    expect(triggerTail.entries).toHaveLength(20)
+    expect(triggerTail.omittedWithoutId).toBe(1)
+    expect(triggerTail.coverage).toBe('missing_ids')
+    expect(triggerTail.entries.some((entry: { identity: { sourceId: string } }) =>
+      entry.identity.sourceId === 'trigger-1')).toBe(true)
 
     await control(server.control, '/workflow-store', { unavailable: true })
     await evaluate('window.activity.refresh()')

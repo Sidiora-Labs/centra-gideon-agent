@@ -138,6 +138,18 @@ async def main(origin: str) -> None:
             )
             return web.json_response({"id": task.id})
 
+        async def control_trigger_pages(request: web.Request) -> web.Response:
+            started_at = time.time()
+            journal = ExecutionJournal(home)
+            for index in range(20):
+                await journal.append(ExecutionRecord(
+                    run_id="" if index == 19 else f"trigger-page-{index}",
+                    job_id="schedule-1", started_at=started_at + index / 1000,
+                    finished_at=started_at + index / 1000, status="success",
+                    summary="Scheduled work ran",
+                ))
+            return web.json_response({"ok": True})
+
         async def control_workflow_store(request: web.Request) -> web.Response:
             body = await request.json()
             database = home / "workflows" / "runs.db"
@@ -155,6 +167,7 @@ async def main(origin: str) -> None:
         control.router.add_post("/empty-inbox", control_empty_inbox)
         control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)
+        control.router.add_post("/trigger-pages", control_trigger_pages)
         control.router.add_post("/workflow-store", control_workflow_store)
         api_runner = web.AppRunner(app)
         control_runner = web.AppRunner(control)
