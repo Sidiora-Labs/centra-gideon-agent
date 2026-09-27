@@ -157,12 +157,13 @@ export function ArtifactModule(props: ModuleProps) {
         method: "PATCH", body: { content, snapshot: false, event_type: "edited" },
       });
       if (updated?.slug !== slug || typeof updated.name !== "string" || typeof updated.kind !== "string") {
-        setSaveFailure("Gideon returned an invalid saved artifact.");
-        return;
+        throw new Error("Gideon returned an invalid saved artifact.");
       }
       setArtifact(updated);
     } catch (error) {
-      setSaveFailure(error instanceof Error ? error.message : "Gideon could not save this artifact.");
+      const message = error instanceof Error ? error.message : "Gideon could not save this artifact.";
+      setSaveFailure(message);
+      throw error instanceof Error ? error : new Error(message);
     }
   };
 
