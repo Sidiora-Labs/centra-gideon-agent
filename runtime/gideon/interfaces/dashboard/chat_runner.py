@@ -922,7 +922,7 @@ def _flush_segment(
     redacted, cred_warnings = redact_credentials(redacted)
     for w in cred_warnings:
         logger.warning("Credential redacted in chat segment: %s", w)
-    session.append("assistant", redacted, "msg msg-a")
+    session.append("assistant", redacted, "msg msg-a", meta=session.stream_cursor())
     last_msg: dict = session.messages[-1]
     if session._memory_citations:
         meta = last_msg.get("meta")
@@ -1661,6 +1661,8 @@ async def run_chat(
     still a contract — the door's injected `turn_runner` calls it by that shape —
     while `_prompt_depth` stays private as this function's own recursion counter.
     """
+    if _prompt_depth == 0:
+        session.begin_stream()
     session._last_turn_errored = False
     if _prompt_depth == 0:
         session._acp_breaker.reset()
@@ -1783,7 +1785,6 @@ async def run_chat(
 
     assistant_text = ""
     last_heartbeat = time.time()
-    chunk_seq = 0
     in_tool_group = False
     _pending_tools: dict[str, str] = {}
     _gated_tool_calls: set[str] = set()
@@ -2582,14 +2583,15 @@ async def run_chat(
                         elif m.get("role") not in ("tool", "permission", "chunk"):
                             break
                 in_tool_group = False
-                chunk_seq += 1
                 safe_chunk, _ = redact_exfiltration_urls(event.text)
                 safe_chunk, _ = redact_credentials(safe_chunk)
                 assistant_text += safe_chunk
-                session.append("chunk", safe_chunk, "chunk")
+                cursor = session.next_stream_chunk()
+                session.append("chunk", safe_chunk, "chunk", meta=cursor)
                 state.broadcast_ws(
                     "chat_chunk",
-                    {"session": session.key, "content": safe_chunk, "seq": chunk_seq},
+                    {"session": session.key, "content": safe_chunk, **cursor,
+                     "seq": cursor["stream_seq"]},
                 )
             elif event.kind == EVENT_THINKING_CHUNK:
                 safe_text, exfil_warnings = redact_exfiltration_urls(event.text)

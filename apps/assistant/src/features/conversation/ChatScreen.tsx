@@ -4,10 +4,12 @@ import type { OwnerScope } from "../../shared/auth.web";
 import { ConversationController } from "../../shared/conversation/controller";
 import type { ConversationMessage } from "../../shared/conversation/types";
 import type { ShellReturnContext } from "../../shared/shell/shellRoutes";
+import type { ShellRoute } from "../../shared/shell/shellRoutes";
 import { useShellTheme } from "../../shared/shell/shellTheme";
 import { AssistantResponse } from "./AssistantResponse";
 import { Composer } from "./Composer";
 import { chatStyles } from "./chatStyles";
+import { adaptConversationMessage } from "../../shared/conversation/turnAdapter";
 
 export type ChatScreenProps = {
   controller: ConversationController;
@@ -18,6 +20,7 @@ export type ChatScreenProps = {
   scrollY?: number;
   onScrollChange?: (scrollY: number) => void;
   selectedMessageId?: string;
+  navigate?: (route: ShellRoute) => void;
 };
 
 const suggestions = [
@@ -45,6 +48,7 @@ export function ChatScreen({
   scrollY,
   onScrollChange,
   selectedMessageId,
+  navigate,
 }: ChatScreenProps) {
   const { palette } = useShellTheme();
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot, controller.snapshot);
@@ -67,7 +71,8 @@ export function ChatScreen({
   const followLatest = useRef(true);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const activeSessionId = state.sessionId;
-  const messages = useMemo(() => state.messages.filter(isVisibleMessage), [state.messages]);
+  const messages = useMemo(() => state.messages.filter(message =>
+    isVisibleMessage(message) || adaptConversationMessage(message).segments.length > 0), [state.messages]);
   const key = scrollKey(scope, activeSessionId);
   const busy = state.phase === "loading" || state.phase === "recovering";
   const waitingForAnswer = state.running || state.phase === "sending";
@@ -182,6 +187,7 @@ export function ChatScreen({
 
         {messages.map(message => {
           const isUser = message.role === "user";
+          const adapted = adaptConversationMessage(message);
           const selected = selectedMessageId === message.id;
           return (
             <View
@@ -197,7 +203,13 @@ export function ChatScreen({
               {isUser ? (
                 <Text selectable style={[chatStyles.messageText, { color: palette.text }]}>{message.content}</Text>
               ) : (
-                <AssistantResponse content={message.content} />
+                <AssistantResponse content={message.content} segments={adapted.segments} onNavigate={route => {
+                  if (!matchesCurrentContext()) return;
+                  navigate?.({ ...route, returnTo: {
+                    destination: "chat", sessionId: activeSessionId ?? undefined,
+                    selectionId: message.id, scrollY: rememberedScroll.get(key) ?? 0,
+                  } });
+                }} />
               )}
             </View>
           );

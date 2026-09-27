@@ -28,11 +28,18 @@ export type ChatHistoryMessage = Readonly<{
   meta?: Readonly<Record<string, unknown>>
 }>
 
+export type ConversationStreamCursor = Readonly<{
+  stream_epoch: string
+  stream_turn: number
+  stream_seq: number
+}>
+
 export type ChatDetail = Readonly<{
   key: string
   title: string
   running: boolean
   messages: readonly ChatHistoryMessage[]
+  stream_cursor?: ConversationStreamCursor
 }>
 
 export type ChatSocketEvent = Readonly<{
