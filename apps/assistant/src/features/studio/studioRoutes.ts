@@ -68,7 +68,11 @@ const RECORDS: Readonly<Record<string, RecordBinding>> = Object.freeze({
   'capabilities/media/sketches': { kind: 'media.sketch', endpoint: '/api/capabilities/media/sketches', queryKey: 'sketch' },
   'capabilities/media/library': { kind: 'media.artifact', endpoint: '/api/capabilities/media/library', queryKey: 'artifact' },
   'capabilities/media/timelines': { kind: 'media.timeline', endpoint: '/api/capabilities/media/timelines', queryKey: 'timeline' },
+  'capabilities/media/episodes': { kind: 'media.episode', endpoint: '/api/capabilities/media/episodes', queryKey: 'episode' },
   'capabilities/media/jobs': { kind: 'media.job', endpoint: '/api/capabilities/media/jobs', queryKey: 'job' },
+  'capabilities/media/animations': { kind: 'media.job', endpoint: '/api/capabilities/media/jobs', queryKey: 'job' },
+  'capabilities/media/sprites': { kind: 'media.job', endpoint: '/api/capabilities/media/jobs', queryKey: 'job' },
+  'capabilities/media/downloads': { kind: 'media.job', endpoint: '/api/capabilities/media/jobs', queryKey: 'job' },
 })
 
 export type StudioRouteResolution = 'available' | 'missing' | 'denied' | 'unavailable'
@@ -151,12 +155,16 @@ export async function resolveStudioRoute(route: ShellRoute, scope: OwnerScope): 
     || (typeof location !== 'undefined' && scope.runtimeOrigin !== location.origin)) return 'unavailable'
   const slides = isSlidesRoute(route)
   if (entry.id === 'design' && !slides && (route.placement?.subview || route.record)) return 'unavailable'
-  if (!slides && entry.id !== 'design' && entry.id !== 'capabilities/media/library' && studioTarget(route)?.area !== 'creative') return 'unavailable'
+  if (!slides && entry.id !== 'design' && studioTarget(route)?.area !== 'media' && studioTarget(route)?.area !== 'creative') return 'unavailable'
   const binding = RECORDS[entry.id]
   if (route.record && (!binding || binding.kind !== route.record.kind)) return 'unavailable'
   try {
     const session = await readOwnerSession()
     if (session.user !== scope.ownerId) return 'denied'
+    if (studioTarget(route)?.area === 'media') {
+      const listing = await gatewayJson<unknown>('/api/capabilities/media/jobs')
+      if (!listing || typeof listing !== 'object' || !('items' in listing) || !Array.isArray(listing.items)) return 'unavailable'
+    }
     if (slides) {
       if (!route.record) {
         const listing = await gatewayJson<unknown>('/api/artifacts?kind=pptx')

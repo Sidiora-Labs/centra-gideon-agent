@@ -17,14 +17,14 @@ export function EpisodeScenes({ jobId }: { jobId: string }) {
 }
 const base = '/api/capabilities/media/episodes'
 async function api(path: string, method = 'GET', body?: unknown) { const response = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); const value = await response.json(); if (!response.ok) throw new Error(value.error); return value }
-export default function EpisodePage() {
+export default function EpisodePage({ episodeId }: { episodeId?: string } = {}) {
   const [items, setItems] = useState<Episode[]>([]), [saved, setSaved] = useState<Episode | null>(null), [draft, setDraft] = useState<Plan>(newEpisode), [history, setHistory] = useState<Episode[]>([])
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [error, setError] = useState(''), [job, setJob] = useState('')
   const clean = (value: Episode): Plan => ({ title: value.title, width: value.width, height: value.height, fps: value.fps, aspect_ratio: value.aspect_ratio, scenes: value.scenes })
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved ? clean(saved) : newEpisode())
   async function action(work: () => Promise<void>) { setBusy(true); setError(''); try { await work() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
   async function choose(id: string) { const value = id ? await api(base + '/' + encodeURIComponent(id)) : null; setSaved(value); setDraft(value ? clean(value) : newEpisode()); setHistory(value ? (await api(base + '/' + value.id + '/history')).items : []); setJob('') }
-  useEffect(() => { void action(async () => { setItems((await api(base)).items); const id = new URLSearchParams(location.hash.split('?')[1] || '').get('episode'); if (id) await choose(id) }).finally(() => setLoading(false)) }, [])
+  useEffect(() => { void action(async () => { setItems((await api(base)).items); const id = episodeId ?? new URLSearchParams(location.hash.split('?')[1] || '').get('episode'); if (id) await choose(id) }).finally(() => setLoading(false)) }, [episodeId])
   function update(index: number, patch: Partial<Scene>) { setDraft({ ...draft, scenes: draft.scenes.map((scene, i) => i === index ? { ...scene, ...patch } : scene) }) }
   return <NativeMediaPage title="Continuous episodes" actions={<a href="#/capabilities/media?view=jobs">Media jobs</a>}><p>Establish a scene, continue from its predecessor, or reuse a pinned clip. Provider support and credentials are required for generation. Completed clips survive retries. Continuation may use only the final frame; fresh establishment fallback requires explicit consent per scene.</p><p>Assembly mutes clip audio. Add soundtracks in the resulting timeline. Any trimmed clip must be saved as a separate artifact before continuing from it.</p>{loading && <p>Loading episodes…</p>}<fieldset disabled={loading || busy}>
     <label>Episode<select disabled={dirty} value={saved?.id || ''} onChange={e => void action(() => choose(e.target.value))}><option value="">New episode</option>{items.map(item => <option key={item.id} value={item.id}>{item.title} · revision {item.revision}</option>)}</select></label><Button disabled={!dirty} onClick={() => setDraft(saved ? clean(saved) : newEpisode())}>Discard changes</Button>

@@ -24,7 +24,7 @@ async function api(path: string, method = 'GET', body?: unknown) {
   if (!response.ok) throw new Error(result.error || 'Timeline request failed')
   return result
 }
-export default function TimelinePage() {
+export default function TimelinePage({ timelineId }: { timelineId?: string } = {}) {
   const [items, setItems] = useState<Timeline[]>([]), [selected, setSelected] = useState<Timeline | null>(null), [draft, setDraft] = useState<Draft>(emptyTimeline)
   const [loading, setLoading] = useState(true)
   const [history, setHistory] = useState<Timeline[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false), [job, setJob] = useState('')
@@ -32,7 +32,7 @@ export default function TimelinePage() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(selected ? clean(selected) : emptyTimeline())
   async function action(work: () => Promise<void>) { setBusy(true); setError(''); try { await work() } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
   async function choose(id: string) { const value = id ? await api(base + '/' + encodeURIComponent(id)) : null; setSelected(value); setDraft(value ? clean(value) : emptyTimeline()); setHistory(value ? (await api(base + '/' + value.id + '/history')).items : []); setJob('') }
-  useEffect(() => { void action(async () => { setItems((await api(base)).items); const id = new URLSearchParams(location.hash.split('?')[1] || '').get('timeline'); if (id) await choose(id) }).finally(() => setLoading(false)) }, [])
+  useEffect(() => { void action(async () => { setItems((await api(base)).items); const id = timelineId ?? new URLSearchParams(location.hash.split('?')[1] || '').get('timeline'); if (id) await choose(id) }).finally(() => setLoading(false)) }, [timelineId])
   return <NativeMediaPage title="Video timeline" actions={<a href="#/capabilities/media?view=jobs">Media jobs</a>}><p>Sequence pinned clips and stills, then place image overlays and soundtracks. Segment start trims the source; overlay/audio start is timeline placement. Original clip audio is muted; add an explicit soundtrack to include sound. Output is MP4, up to 300 seconds and 1920 pixels per side.</p>{loading && <p>Loading timelines…</p>}<fieldset disabled={busy || loading}><label>Project<select disabled={busy || dirty} value={selected?.id || ''} onChange={e => void action(() => choose(e.target.value))}><option value="">New timeline</option>{items.map(item => <option key={item.id} value={item.id}>{item.title} · revision {item.revision}</option>)}</select></label><Button disabled={busy || !dirty} onClick={() => setDraft(selected ? clean(selected) : emptyTimeline())}>Discard changes</Button>
     <label>Title<input value={draft.title} maxLength={120} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>{(['width', 'height', 'fps'] as const).map(key => <label key={key}>{key}<input type="number" value={draft[key]} onChange={e => setDraft({ ...draft, [key]: Number(e.target.value) })} /></label>)}
     {(['segments', 'overlays', 'audio'] as const).map(track => <TimelineTrack key={track} track={track} entries={draft[track]} change={entries => setDraft({ ...draft, [track]: entries })} />)}

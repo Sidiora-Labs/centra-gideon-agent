@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from aiohttp import web
 
@@ -22,9 +23,14 @@ async def main(origin: str) -> None:
 
         from gideon.interfaces.dashboard.handlers import auth
         from gideon.workspace.artifacts.native import NativeArtifactProvider
-        from gideon.workspace.capabilities.media.library_http import register_library
+        from gideon.workspace.artifacts import registry
+        from gideon.workspace.artifacts.handlers import register_artifact_routes
+        from gideon.interfaces.dashboard.handlers.capabilities_media import register as register_media, STORE_KEY
+        from gideon.workspace.capabilities.media.jobs import MediaWorker
+        from gideon.workspace.capabilities.media.jobs_http import JOBS_KEY
 
         artifacts = NativeArtifactProvider(home / "artifacts")
+        registry.register_provider(artifacts)
         image = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="
         )
@@ -35,9 +41,16 @@ async def main(origin: str) -> None:
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
         app["port"] = 10000
         app["allowed_origins"] = {origin}
+        app["state"] = SimpleNamespace(_restricted_keys=set(), _sessions={})
         app.router.add_post("/api/auth/login", auth.api_auth_login)
         app.router.add_get("/api/auth/session", auth.api_auth_session)
-        register_library(app, artifacts)
+        register_artifact_routes(app)
+        register_media(app)
+        sketch = app[STORE_KEY].create({"width": 16, "height": 16, "request_id": "studio-seeded-sketch"})
+        job = app[JOBS_KEY].submit({"operation": "sketch_export", "sketch_id": sketch["id"],
+                                    "revision": sketch["revision"], "request_id": "studio-seeded-export"})
+        MediaWorker(app[JOBS_KEY]).run_once(SimpleNamespace(should_stop=lambda: False))
+        completed = app[JOBS_KEY].get(job["id"])
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -45,7 +58,8 @@ async def main(origin: str) -> None:
         await site.start()
         sockets = site._server.sockets if site._server else []
         port = sockets[0].getsockname()[1]
-        print(json.dumps({"api_port": port, "artifact_id": artifact.slug, "version": artifact.version}), flush=True)
+        print(json.dumps({"api_port": port, "artifact_id": artifact.slug, "version": artifact.version,
+                          "completed_job_id": completed["id"], "completed_artifact": completed["result"]}), flush=True)
         try:
             await asyncio.Event().wait()
         finally:
