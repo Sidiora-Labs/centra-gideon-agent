@@ -51,15 +51,6 @@ class CustomerBrowserSessionStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
-            columns = {
-                row["name"] for row in db.execute(
-                    "PRAGMA table_info(customer_browser_sessions)"
-                )
-            }
-            if columns and "canonical_key" not in columns:
-                db.execute(
-                    "ALTER TABLE customer_browser_sessions RENAME TO customer_browser_sessions_legacy"
-                )
             db.execute(
                 """CREATE TABLE IF NOT EXISTS customer_browser_sessions (
                     id TEXT PRIMARY KEY,
@@ -74,16 +65,6 @@ class CustomerBrowserSessionStore:
                     UNIQUE(account_id, canonical_key)
                 )"""
             )
-            if columns and "canonical_key" not in columns:
-                db.execute(
-                    """INSERT INTO customer_browser_sessions
-                       (id, account_id, owner_id, conversation_id, canonical_key,
-                        status, version, created_at, updated_at)
-                       SELECT id, account_id, owner_id, conversation_id, conversation_id,
-                              status, version, created_at, updated_at
-                       FROM customer_browser_sessions_legacy"""
-                )
-                db.execute("DROP TABLE customer_browser_sessions_legacy")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
