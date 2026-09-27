@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -162,7 +162,9 @@ window.loaded = true
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
         if (frame.data?.session === session || frame.type === 'approval_resolved') {
-          frames.push({ type: frame.type, role: frame.data.role || '' })
+          frames.push({ type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
+            tool_call_id: frame.data.tool_call_id || '', id: frame.data.id || '',
+            approved: frame.data.approved, decision: frame.data.decision || '' })
         }
       })
       const prompt = expectAnswer
@@ -235,7 +237,7 @@ window.loaded = true
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval')
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('approval_resolved')
       expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_done')
-      expect(result.frames).toContainEqual({ type: 'chat_message', role: 'assistant' })
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'chat_message', role: 'assistant' }))
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
       expect(result.toolRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) })]))
@@ -244,6 +246,24 @@ window.loaded = true
         expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) }),
         expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) }),
       ]))
+      const writeCall = result.frames.find((frame: { type: string; tool: string }) => frame.type === 'tool_call' && frame.tool === 'write_file')
+      expect(writeCall?.tool_call_id).toBeTruthy()
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'tool_result', tool_call_id: writeCall.tool_call_id }))
+      const approval = result.frames.find((frame: { type: string; tool: string }) => frame.type === 'approval' && frame.tool === 'write_file')
+      expect(approval?.id).toBeTruthy()
+      expect(result.frames).toContainEqual(expect.objectContaining({ type: 'approval_resolved', id: approval.id, approved: true }))
+      const evidenceDirectory = process.env.GIDEON_TEST_EVIDENCE_DIR
+      if (evidenceDirectory) {
+        await mkdir(evidenceDirectory, { recursive: true })
+        await writeFile(join(evidenceDirectory, 'native-tool-approval.json'), JSON.stringify({
+          sessionId: result.session,
+          liveFrames: result.frames.filter((frame: { type: string }) => ['tool_call', 'tool_result', 'approval', 'approval_resolved'].includes(frame.type)),
+          hydratedTools: result.toolRows.map((message: any) => ({ id: message.meta?.tool_call_id ?? message.id,
+            done: message.meta?.done === true, ok: message.meta?.ok, hasOutput: typeof message.meta?.output === 'string' })),
+          hydratedApprovals: result.permissionRows.map((message: any) => ({ id: message.meta?.approval_id ?? message.id,
+            resolved: message.meta?.resolved ?? null })),
+        }, null, 2) + '\n')
+      }
     }
     console.log('Selected session websocket events:', result.frames.map((frame: { type: string }) => frame.type))
     console.log('Persisted assistant answer count:', result.assistantPersisted.length)
@@ -313,7 +333,7 @@ window.loaded = true
     })()`)
     const [staleResult] = await Promise.all([stale, fault])
     expect(postFailed && faultDone).toBe(true)
-    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'sending', error: '' })
+    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'recovering', error: '' })
     expect(staleResult.state.sessionId).not.toBe(result.session)
     expect(staleResult.submitting).toBe(true)
     expect(newPostRequest).not.toBe('')
