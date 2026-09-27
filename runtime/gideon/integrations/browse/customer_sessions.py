@@ -1,0 +1,168 @@
+"""Durable browser reservations bound to a customer and chat conversation."""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator
+
+
+class SessionNotFound(Exception):
+    pass
+
+
+class StaleSessionVersion(Exception):
+    pass
+
+
+class InvalidSessionTransition(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class CustomerBrowserSession:
+    id: str
+    account_id: str
+    owner_id: str
+    conversation_id: str
+    status: str
+    version: int
+    created_at: float
+    updated_at: float
+
+    def public(self) -> dict[str, str | int | float]:
+        return {
+            "id": self.id,
+            "conversation_id": self.conversation_id,
+            "status": self.status,
+            "version": self.version,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class CustomerBrowserSessionStore:
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._db() as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS customer_browser_sessions (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    conversation_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('reserved', 'closed', 'error')),
+                    version INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    UNIQUE(account_id, conversation_id)
+                )"""
+            )
+
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
+        db = sqlite3.connect(self.path, timeout=10)
+        db.row_factory = sqlite3.Row
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def _session(row: sqlite3.Row) -> CustomerBrowserSession:
+        return CustomerBrowserSession(**dict(row))
+
+    @staticmethod
+    def _owned(
+        row: sqlite3.Row | None, account_id: str, owner_id: str
+    ) -> CustomerBrowserSession:
+        if row is None or row["account_id"] != account_id or row["owner_id"] != owner_id:
+            raise SessionNotFound
+        return CustomerBrowserSessionStore._session(row)
+
+    def find_conversation(
+        self, account_id: str, owner_id: str, conversation_id: str
+    ) -> CustomerBrowserSession | None:
+        with self._db() as db:
+            row = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND conversation_id=?",
+                (account_id, conversation_id),
+            ).fetchone()
+            return self._owned(row, account_id, owner_id) if row else None
+
+    def reserve(
+        self, account_id: str, owner_id: str, conversation_id: str
+    ) -> tuple[CustomerBrowserSession, bool]:
+        if not account_id or not owner_id or not conversation_id:
+            raise ValueError("account, owner and conversation are required")
+        with self._db() as db:
+            row = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND conversation_id=?",
+                (account_id, conversation_id),
+            ).fetchone()
+            if row:
+                return self._owned(row, account_id, owner_id), False
+            stamp = time.time()
+            session_id = uuid.uuid4().hex
+            db.execute(
+                """INSERT INTO customer_browser_sessions
+                   (id, account_id, owner_id, conversation_id, status, version, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'reserved', 1, ?, ?)""",
+                (session_id, account_id, owner_id, conversation_id, stamp, stamp),
+            )
+            row = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
+            ).fetchone()
+            return self._session(row), True
+
+    def get(
+        self, session_id: str, account_id: str, owner_id: str
+    ) -> CustomerBrowserSession:
+        with self._db() as db:
+            row = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
+            ).fetchone()
+            return self._owned(row, account_id, owner_id)
+
+    def transition(
+        self, session_id: str, account_id: str, owner_id: str,
+        *, expected_version: int, action: str
+    ) -> CustomerBrowserSession:
+        if type(expected_version) is not int or expected_version < 1:
+            raise ValueError("expected_version must be a positive integer")
+        if action not in {"close", "reopen", "error"}:
+            raise ValueError("invalid session action")
+        with self._db() as db:
+            row = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
+            ).fetchone()
+            current = self._owned(row, account_id, owner_id)
+            if current.version != expected_version:
+                raise StaleSessionVersion
+            allowed = {
+                "close": {"reserved", "error"},
+                "reopen": {"closed", "error"},
+                "error": {"reserved"},
+            }
+            if current.status not in allowed[action]:
+                raise InvalidSessionTransition
+            status = {"close": "closed", "reopen": "reserved", "error": "error"}[action]
+            db.execute(
+                """UPDATE customer_browser_sessions
+                   SET status=?, version=version+1, updated_at=? WHERE id=?""",
+                (status, time.time(), session_id),
+            )
+            changed = db.execute(
+                "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
+            ).fetchone()
+            return self._session(changed)
