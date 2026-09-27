@@ -323,10 +323,10 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')&&document.body.innerText.includes(${JSON.stringify(taskRecord.title)})`, "real task detail after module retry");
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
   assert.equal(await browser.evaluate(`Boolean(document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')?.closest('#root'))`), true);
-  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"] .gideon-workspace-frame[data-workspace-mode="full"]')&&[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Edit')&&document.querySelector('textarea[aria-label="Comment"]')`, "native TaskDetail actions and full workspace frame");
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"] main.gideon-workspace-frame[data-workspace-mode="full"] h1')?.textContent.trim()===${JSON.stringify(taskRecord.title)}&&[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Edit')&&document.querySelector('textarea[aria-label="Comment"]')`, "native TaskDetail title, actions and full workspace frame");
   assert.equal(await browser.evaluate(`document.querySelectorAll('main').length`), 1);
   await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent.trim()==='Edit')?.click()`);
-  await browser.waitFor(`Array.from(document.querySelectorAll('input')).some(input=>input.value===${JSON.stringify(taskRecord.title)})`, "TaskDetail edit controls");
+  await browser.waitFor(`document.querySelector('input[aria-label="Title"]')?.value===${JSON.stringify(taskRecord.title)}`, "TaskDetail title edit control");
   await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent.trim()==='Cancel')?.click()`);
   await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')&&[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')==='Mark criterion complete')`, "native task exit criterion action");
   await browser.evaluate(`document.querySelector('[aria-label="Mark criterion complete"]')?.click()`);
@@ -359,14 +359,17 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
     view: "workspace", record: { kind: "artifact", id: fixtureState.artifact_slug }, placement: "artifacts/editor",
     returnTo: { destination: "chat", sessionId: session.key, selectionId: "artifact-return-selection", scrollY: 320 },
   });
+  await browser.command("Page.addScriptToEvaluateOnNewDocument", { source: `window.__assistantE2eWorkerUrls=[];const NativeWorker=window.Worker;window.Worker=new Proxy(NativeWorker,{construct(target,args,newTarget){window.__assistantE2eWorkerUrls.push(new URL(String(args[0]),location.href).href);return Reflect.construct(target,args,newTarget)}});` });
   await browser.command("Page.navigate", { url: artifactHref });
-  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('.monaco-editor textarea[aria-label]')`, "real artifact editor module and initialized Monaco model");
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('[aria-label="Document view"] [aria-label="Edit"]')`, "native artifact edit view control");
+  await browser.evaluate(`document.querySelector('[aria-label="Document view"] [aria-label="Edit"]')?.click()`);
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')`, "real artifact editor module and accessible Monaco textbox");
   assert.equal(await browser.evaluate(`Boolean(document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')?.closest('#root'))`), true);
   const editorProof = await browser.evaluate<{ editor: boolean; accessibleName: string; modelText: string; moduleMode: string; workerUrls: string[]; mainBundleUrls: string[]; external: string[]; rootCount: number }>(`(()=>{
-    const input=document.querySelector('.monaco-editor textarea[aria-label]');
+    const input=document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label]');
     const resources=performance.getEntriesByType('resource').map(entry=>entry.name);
-    const workerUrls=resources.filter(url=>/\/assistant\/assets\/workers\/gideon-monaco-[^/]+\.worker\.js(?:$|\?)/.test(url));
-    return {editor:!!document.querySelector('.monaco-editor'),accessibleName:input?.getAttribute('aria-label')||'',modelText:document.querySelector('.monaco-editor .view-lines')?.textContent||'',moduleMode:document.querySelector('.gideon-trusted-module')?.className||'',workerUrls,mainBundleUrls:resources.filter(url=>new URL(url,location.href).origin===location.origin&&/_expo\/static\/js\/web\//.test(new URL(url,location.href).pathname)&&/\.(?:js|bundle)$/.test(new URL(url,location.href).pathname)),external:resources.filter(url=>/https?:\/\/(?:[^/]+\.)?(?:jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)\//i.test(url)),rootCount:document.querySelectorAll('#root').length};
+    const workerUrls=[...new Set([...resources,...window.__assistantE2eWorkerUrls].filter(url=>/\/assistant\/assets\/workers\/gideon-monaco-[^/]+\.worker\.js(?:$|\?)/.test(url)))];
+    return {editor:!!document.querySelector('.monaco-editor'),accessibleName:input?.getAttribute('aria-label')||'',modelText:document.querySelector('.monaco-editor .view-lines')?.textContent||'',moduleMode:document.querySelector('.gideon-trusted-module main.gideon-workspace-frame')?.getAttribute('data-workspace-mode')||'',workerUrls,mainBundleUrls:resources.filter(url=>new URL(url,location.href).origin===location.origin&&/_expo\/static\/js\/web\//.test(new URL(url,location.href).pathname)&&/\.(?:js|bundle)$/.test(new URL(url,location.href).pathname)),external:resources.filter(url=>/https?:\/\/(?:[^/]+\.)?(?:jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)\//i.test(url)),rootCount:document.querySelectorAll('#root').length};
   })()`);
   assert.equal(editorProof.editor, true);
   assert.match(editorProof.accessibleName, /Trusted module editor.*editor/i);
@@ -377,8 +380,8 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   assert.ok(editorProof.mainBundleUrls.length > 0, "the local Expo main JavaScript bundle initialized the real Monaco editor");
   assert.deepEqual(editorProof.external, []);
   assert.equal(editorProof.rootCount, 1);
-  await browser.evaluate(`(()=>{window.__assistantE2eEditor=document.querySelector('.monaco-editor');document.querySelector('.monaco-editor textarea[aria-label]')?.focus();return true})()`);
-  await browser.waitFor(`document.activeElement?.matches('.monaco-editor textarea[aria-label]')`, "keyboard focus in accessible Monaco editor");
+  await browser.evaluate(`(()=>{window.__assistantE2eEditor=document.querySelector('.monaco-editor');document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')?.focus();return true})()`);
+  await browser.waitFor(`document.activeElement?.matches('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')`, "keyboard focus in accessible Monaco editor");
   await browser.command("Input.insertText", { text: "Keyboard operation marker" });
   await browser.waitFor(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('Keyboard operation marker')`, "keyboard edit in the native artifact model");
 
