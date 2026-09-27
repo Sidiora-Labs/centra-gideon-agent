@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { BootstrapState } from "../bootstrap.web";
+import { useShellTheme } from "./shellTheme";
 
 const s = StyleSheet.create({
   heading: { color: "#11191C", fontSize: 16, fontWeight: "600", letterSpacing: -0.25 },
@@ -39,16 +40,17 @@ export function ShellIdentity({ state, onRefresh, onSignOut }: {
   onSignOut: () => void;
 }) {
   const identity = shellIdentityView(state);
+  const { palette } = useShellTheme();
   return (
     <View style={{ alignItems: "center", gap: 3 }}>
-      <Text style={s.heading}>{identity.name}</Text>
-      <Text style={s.small}>{identity.status}</Text>
+      <Text style={[s.heading, { color: palette.text }]}>{identity.name}</Text>
+      <Text style={[s.small, { color: palette.muted }]}>{identity.status}</Text>
       {identity.available && <View style={[s.row, { gap: 14, marginTop: 4 }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Refresh Gideon session" onPress={onRefresh}>
-          <Text style={[s.small, { color: "#1473C8" }]}>Refresh</Text>
+          <Text style={[s.small, { color: palette.blueDark }]}>Refresh</Text>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Sign out of Gideon" onPress={onSignOut}>
-          <Text style={[s.small, { color: "#1473C8" }]}>Sign out</Text>
+          <Text style={[s.small, { color: palette.blueDark }]}>Sign out</Text>
         </Pressable>
       </View>}
     </View>
