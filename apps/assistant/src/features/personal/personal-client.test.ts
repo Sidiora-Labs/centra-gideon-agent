@@ -9,7 +9,7 @@ import { personalDetailRoute, personalSpaceRoute } from './routes'
 import { parseShellRoute, serializeShellRoute } from '../../shared/shell/shellRoutes'
 import { createShellRoute } from '../../shared/shell/shellRoutes'
 import { personalModuleDefinitions } from './moduleDefinitions.web'
-import { readIdentitySpace } from './PersonalHome'
+import { readIdentitySpace, summarizePersonalValue } from './PersonalHome'
 import type { OwnerScope } from '../../shared/auth.web'
 
 const scope: OwnerScope = Object.freeze({ runtimeOrigin: 'http://127.0.0.1', ownerId: 'owner-a', cacheKey: JSON.stringify(['http://127.0.0.1', 'owner-a']) })
@@ -73,12 +73,21 @@ describe('personal native contracts', () => {
 
   it('loads autobiography stories for its published route and the twin snapshot only on the twin route', async () => {
     const client = createPersonalClient({ ...scope, runtimeOrigin: nativeOrigin, cacheKey: JSON.stringify([nativeOrigin, scope.ownerId]) })
+    const emptyAutobiography = await readIdentitySpace(client, personalSpaceRoute('identity').placement?.id)
+    expect(emptyAutobiography.state).toBe('available')
+    if (emptyAutobiography.state === 'available') {
+      expect(summarizePersonalValue('Identity', emptyAutobiography.value)).toEqual({ state: 'empty', message: 'No autobiography stories yet.' })
+    }
+
     const story = await client.saveIdentityStory(undefined, { prompt: 'What should Gideon know?', theme: 'continuity', text: 'A native autobiography record.' }, 'identity-create-001', 0)
     const autobiography = await readIdentitySpace(client, personalSpaceRoute('identity').placement?.id)
     expect(autobiography.state).toBe('available')
     if (autobiography.state === 'available') {
       expect(autobiography.value.kind).toBe('autobiography')
-      if (autobiography.value.kind === 'autobiography') expect(autobiography.value.stories.map(item => item.id)).toContain(story.identity.nativeId)
+      if (autobiography.value.kind === 'autobiography') {
+        expect(autobiography.value.stories.map(item => item.identity.nativeId)).toContain(story.identity.nativeId)
+        expect(summarizePersonalValue('Identity', autobiography.value)).toEqual({ state: 'ready', message: '1 autobiography story is available.' })
+      }
     }
 
     const twin = await readIdentitySpace(client, 'capabilities/identity/twin')
