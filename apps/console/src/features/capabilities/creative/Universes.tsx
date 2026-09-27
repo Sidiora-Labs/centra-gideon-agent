@@ -17,9 +17,9 @@ const readId = () => new URLSearchParams(location.hash.split('?')[1]).get('unive
 const control = 'min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 const values = (item: Universe): Values => ({ title: item.title, canon: item.canon, visual_identity: item.visual_identity, ingredient_ids: item.ingredient_ids, board_refs: item.board_refs })
 
-export default function Universes({ apiRoot = '/api/capabilities/creative/universes' }: { apiRoot?: string }) {
+export default function Universes({ apiRoot = '/api/capabilities/creative/universes', universeId, onSelectUniverse }: { apiRoot?: string; universeId?: string; onSelectUniverse?: (id: string) => void }) {
   const t = (value: string) => value
-  const [id, setId] = useState(readId)
+  const [id, setId] = useState(() => universeId ?? readId())
   const [selected, setSelected] = useState<Universe | null>(null)
   const [draft, setDraft] = useState<Values>(blank)
   const [palette, setPalette] = useState('')
@@ -42,12 +42,14 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load universes'))
   function apply(record: Universe) { setSelected(record); setDraft(values(record)); setPalette(record.visual_identity.colors.join(', ')) }
   function choose(next: string) {
-    location.hash = `/capabilities/creative?view=universes${next ? `&universe=${next}` : ''}`
+    if (onSelectUniverse) onSelectUniverse(next)
+    else location.hash = `/capabilities/creative?view=universes${next ? `&universe=${encodeURIComponent(next)}` : ''}`
     setId(next); setError(''); setExported(''); setCreating(true)
     if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setPalette(''); setRequestId(crypto.randomUUID()) }
   }
   function startNew() { choose(''); setCreating(true) }
-  useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  useEffect(() => { if (universeId !== undefined) setId(universeId) }, [universeId])
+  useEffect(() => { if (onSelectUniverse) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectUniverse])
   useEffect(() => {
     let alive = true
     setLoading(true)

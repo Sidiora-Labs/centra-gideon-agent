@@ -10,9 +10,10 @@ type Step = { id: string; title: string; operation: string; depends_on: string[]
 type Project = { id: string; revision: number; name: string; treatment: string; status: string; sources: { kind: string; id: string; revision: number; chapters: { content_hash: string }[] }[]; steps: Step[] }
 const initial = [{ id: 'verify-sources', title: 'Verify canonical sources', operation: 'source.verify', depends_on: [] }, { id: 'review-treatment', title: 'Review treatment against sources', operation: 'source.verify', depends_on: ['verify-sources'] }]
 
-export default function CreativeDirection({ baseUrl = '', apiRoot = '/api/capabilities/creative/direction' }: { baseUrl?: string; apiRoot?: string }) {
+export default function CreativeDirection({ baseUrl = '', apiRoot = '/api/capabilities/creative/direction', source }: { baseUrl?: string; apiRoot?: string; source?: { kind: 'work' | 'series'; id: string; revision: number } }) {
   const root = baseUrl + apiRoot
-  const [items, setItems] = useState<Project[]>([]), [name, setName] = useState(''), [treatment, setTreatment] = useState(''), [kind, setKind] = useState('work'), [sourceId, setSourceId] = useState(''), [revision, setRevision] = useState(1), [error, setError] = useState('')
+  const [items, setItems] = useState<Project[]>([]), [name, setName] = useState(''), [treatment, setTreatment] = useState(''), [kind, setKind] = useState<string>(source?.kind || 'work'), [sourceId, setSourceId] = useState(source?.id || ''), [revision, setRevision] = useState(source?.revision || 1), [error, setError] = useState('')
+  useEffect(() => { if (source) { setKind(source.kind); setSourceId(source.id); setRevision(source.revision) } }, [source?.kind, source?.id, source?.revision])
   const load = async () => setItems((await readJson<{ items: Project[] }>(await gatewayRequest(root))).items)
   useEffect(() => { void load().catch(reason => setError(String(reason))) }, [root])
   const create = async () => { setError(''); try { await readJson(await gatewayRequest(root, 'POST', { request_id: crypto.randomUUID(), name, treatment, sources: [{ kind, id: sourceId, revision }], steps: initial })); await load() } catch (reason) { setError(String(reason)) } }
