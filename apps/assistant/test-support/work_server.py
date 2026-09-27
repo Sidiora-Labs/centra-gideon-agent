@@ -24,6 +24,7 @@ async def main() -> None:
         credential = secrets.token_urlsafe(24)
         os.environ["GIDEON_WORK_TEST_API_KEY"] = credential
         held_path = None
+        held_method = "GET"
         started = asyncio.Event()
         release = asyncio.Event()
         settled = asyncio.Event()
@@ -32,7 +33,7 @@ async def main() -> None:
         @web.middleware
         async def preflight_gate(request, handler):
             nonlocal held_path
-            if request.method == "GET" and request.path == held_path:
+            if request.method == held_method and request.path == held_path:
                 held_path = None
                 started.set()
                 await release.wait()
@@ -46,10 +47,11 @@ async def main() -> None:
             return await handler(request)
 
         async def control(request):
-            nonlocal held_path
+            nonlocal held_path, held_method
             action = request.match_info["action"]
             if action == "arm":
                 held_path = request.query["path"]
+                held_method = request.query.get("method", "GET")
                 started.clear()
                 release.clear()
                 settled.clear()

@@ -1,5 +1,6 @@
 """Hierarchy request policies and project/list route composition."""
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -9,7 +10,7 @@ from aiohttp import web
 from gideon.automation.workflows import containers, leases
 from gideon.automation.workflows import store as run_store
 from gideon.core.http_request import read_json_body
-from gideon.engine.tasks.hierarchy import HierarchyStore
+from gideon.engine.tasks.hierarchy import HierarchyStore, ProjectRevisionConflict
 from gideon.engine.tasks.project_views import (
     BoardProjection,
     LinkedProjectInventory,
@@ -411,18 +412,30 @@ async def api_projects_work_release(request: web.Request) -> web.Response:
 
 
 async def api_projects_update(request: web.Request) -> web.Response:
-    body = await HierarchyRequest.patch(request, _PROJECT_UPDATABLE)
+    body = await HierarchyRequest.patch(request, _PROJECT_UPDATABLE | {"expected_revision"})
     if isinstance(body, web.Response):
         return body
+    expected_revision = body.pop("expected_revision", None)
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str) or not expected_revision
+    ):
+        return json_error("invalid_request", message="expected_revision must be a nonempty string", status=400)
     if "workspace_dir" in body:
         refusal = _workspace_refusal(str(body["workspace_dir"] or "").strip())
         if refusal is not None:
             return refusal
     store = _store()
-    return HierarchyRequest.write(
-        lambda: store.update_project(request.match_info["project_id"], **body),
-        lambda project: _project_payload(store, project),
-    )
+    try:
+        updated = await asyncio.to_thread(
+            store.update_project, request.match_info["project_id"],
+            expected_revision=expected_revision, **body,
+        )
+    except ProjectRevisionConflict as exc:
+        return json_error("version_conflict", message=str(exc), status=409,
+                          current_revision=exc.current_revision)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return HierarchyRequest.record(updated, lambda project: _project_payload(store, project))
 
 
 def _bound_work_counts(pid: str) -> tuple[int, int]:

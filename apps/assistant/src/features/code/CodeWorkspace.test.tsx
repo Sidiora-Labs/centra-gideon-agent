@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -18,6 +18,29 @@ const conversation: ShellReturnContext = {
   destination: 'chat', sessionId: 'conversation-17', selectionId: 'message-4', scrollY: 512,
   placement: { id: 'chat/session', subview: '/messages', query: { selected: 'message-4' } },
 }
+
+const nativeFileServer = String.raw`
+import asyncio, json, os
+from aiohttp import web
+from gideon.interfaces.dashboard.handlers import api_file_list, api_file_read, api_file_write
+
+async def main():
+    app = web.Application()
+    app.router.add_get('/api/file-list', api_file_list)
+    app.router.add_get('/api/file-read', api_file_read)
+    app.router.add_post('/api/file-write', api_file_write)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '127.0.0.1', 0)
+    await site.start()
+    print(json.dumps({'origin': f'http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}'}), flush=True)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
+asyncio.run(main())
+`
 
 describe('Code workspace routes', () => {
   it('round trips distinct native project, saved context and Code run IDs with conversation return', () => {
@@ -123,12 +146,15 @@ describe('Code workspace against native owner records', () => {
     expect(await resolveCodeRoute(scope, codeRoute({ kind: 'snapshot', id: saved.id }))).toBe('missing')
   }, 30000)
 
-  it('keeps a delayed native capture in its original owner and route and uses themed native pickers', async () => {
+  it('keeps owner-safe capture, opens and saves native project files, and returns from Work planning to Code', async () => {
     const first = await gatewayJson<{ project: { id: string } }>('/api/capabilities/workspace/projects', {
       method: 'POST', body: { name: 'First workspace', workspace: repo, request_id: crypto.randomUUID() },
     })
     const second = await gatewayJson<{ project: { id: string } }>('/api/capabilities/workspace/projects', {
       method: 'POST', body: { name: 'Second workspace', workspace: repo, request_id: crypto.randomUUID() },
+    })
+    const nativeProject = await gatewayJson<{ id: string }>('/api/projects', {
+      method: 'POST', body: { name: 'Native Code and planning project', workspace_dir: repo },
     })
     const firstTask = await gatewayJson<{ id: string }>('/api/tasks', {
       method: 'POST', body: { title: 'Review first workspace', project_id: first.project.id },
@@ -151,8 +177,23 @@ describe('Code workspace against native owner records', () => {
     const browserPort = typeof browserAddress === 'object' && browserAddress ? browserAddress.port : 0
     await new Promise<void>(done => browserPortServer.close(() => done()))
     const directory = await mkdtemp(join(tmpdir(), 'gideon-code-browser-'))
+    const files = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-c', nativeFileServer], {
+      env: { ...process.env, GIDEON_HOME: directory, GIDEON_WORKSPACE: repo, PYTHONPATH: resolve(process.cwd(), '../..', 'runtime') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const fileOrigin = await new Promise<string>((accept, reject) => {
+      let output = '', errors = ''
+      files.stderr!.on('data', chunk => { errors = (errors + String(chunk)).slice(-4000) })
+      files.on('exit', code => reject(new Error(`Native file handlers exited ${code}: ${errors}`)))
+      files.stdout!.on('data', chunk => {
+        output += String(chunk)
+        const line = output.split('\n').find(value => value.startsWith('{"origin"'))
+        if (line) accept(JSON.parse(line).origin)
+      })
+    })
     const initial = JSON.stringify({ first: first.project.id, second: second.project.id,
-      firstTask: firstTask.id, secondTask: secondTask.id, terminal: terminal.session_id, token })
+      nativeProject: nativeProject.id, firstTask: firstTask.id, secondTask: secondTask.id,
+      terminal: terminal.session_id, token, conversation })
     const vite = await createServer({
       configFile: false, root: resolve(process.cwd()), cacheDir: join(directory, 'vite-cache'),
       resolve: { alias: [{ find: /^react-native$/, replacement: 'react-native-web' }],
@@ -189,17 +230,20 @@ describe('Code workspace against native owner records', () => {
             return response;
           };
           function App() {
-            const [view, setView] = React.useState({ owner: 'owner-a', project: ids.first, theme: 'dark' });
+          const [view, setView] = React.useState({ owner: 'owner-a', project: ids.first, theme: 'dark', route: null });
           window.__switchCode = () => flushSync(() => setView({ owner: 'owner-b', project: ids.second, theme: 'dark' }));
-          window.__openIndex = () => flushSync(() => setView(current => ({ ...current, project: null })));
+          window.__openIndex = () => flushSync(() => setView(current => ({ ...current, project: null, route: null })));
+          window.__openNativeProject = () => flushSync(() => setView(current => ({ ...current,
+            project: ids.nativeProject, route: codeRoute({ kind: 'project', id: ids.nativeProject }, ids.conversation) })));
           window.__setCodeTheme = theme => flushSync(() => setView(current => ({ ...current, theme })));
           window.__ids = ids;
-            const route = view.project ? codeRoute({ kind: 'project', id: view.project }) : codeIndexRoute();
+            const route = view.route ?? (view.project ? codeRoute({ kind: 'project', id: view.project }) : codeIndexRoute());
             return React.createElement(ShellThemeProvider, { key: view.theme, initialPreference: view.theme },
               React.createElement(CodeWorkspace, { route,
                 scope: { ownerId: view.owner, runtimeOrigin: location.origin,
                   cacheKey: JSON.stringify([location.origin, view.owner]) },
-                navigate: next => window.__navigations.push(next), onReturn: () => {} }));
+                navigate: next => { window.__navigations.push(next); setView(current => ({ ...current, route: next })) },
+                onReturn: () => {} }));
           }
           createRoot(document.getElementById('root')).render(React.createElement(App));
         ` },
@@ -208,7 +252,7 @@ describe('Code workspace against native owner records', () => {
           response.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/entry-code-browser.tsx"></script></body></html>')
         }) },
       }],
-      server: { host: '127.0.0.1', port, strictPort: true, proxy: { '/api': origin } },
+      server: { host: '127.0.0.1', port, strictPort: true, proxy: { '/api/file-': fileOrigin, '/api': origin } },
     })
     let chrome: ChildProcess | undefined
     let socket: WebSocket | undefined
@@ -308,8 +352,35 @@ describe('Code workspace against native owner records', () => {
       await waitFor(`document.querySelector('[aria-label="Code workspace"]').getAttribute('data-workspace-state') === 'ready'`)
       expect(await evaluate(`Array.from(document.querySelectorAll('#code-project option')).map(option => option.textContent)`))
         .toEqual(expect.arrayContaining(['First workspace', 'Second workspace']))
+      await evaluate(`window.__openNativeProject()`)
+      await waitFor(`document.querySelector('[aria-label="Project files"]') &&
+        document.querySelector('[aria-label="Open file note.txt"]')`)
+      expect(await evaluate(`document.querySelectorAll('main[aria-label="Code workspace"]').length`)).toBe(1)
+      await evaluate(`document.querySelector('[aria-label="Open file note.txt"]').click()`)
+      await waitFor(`document.querySelector('#code-file-editor')?.value === 'original\\n'`)
+      await evaluate(`(() => { const editor = document.querySelector('#code-file-editor');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(editor, 'saved through Code parent\\n');
+        editor.dispatchEvent(new Event('input', { bubbles: true })); })()`)
+      await waitFor(`Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Save file' && !button.disabled)`)
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Save file').click()`)
+      await waitFor(`document.body.innerText.includes('Saved to the selected project.')`)
+      expect(await readFile(join(repo, 'note.txt'), 'utf8')).toBe('saved through Code parent\n')
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Open project planning').click()`)
+      await waitFor(`document.querySelector('main[aria-label="Native Code and planning project"]') &&
+        document.querySelector('[aria-label="Project context"]')`)
+      expect(await evaluate(`document.querySelectorAll('main').length`)).toBe(1)
+      expect(await evaluate(`document.querySelector('[aria-label="Project files"]') === null`)).toBe(true)
+      expect(await evaluate(`window.__navigations.at(-1).record.id`)).toBe(nativeProject.id)
+      expect(await evaluate(`window.__navigations.at(-1).placement.subview`)).toBe('/planning')
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Open code workspace').click()`)
+      await waitFor(`document.querySelector('[aria-label="Project files"]') &&
+        document.querySelector('[aria-label="Open file note.txt"]')`)
+      expect(await evaluate(`document.querySelectorAll('main').length`)).toBe(1)
+      expect(await evaluate(`window.__navigations.at(-1).record.id`)).toBe(nativeProject.id)
+      expect(await evaluate(`window.__navigations.at(-1).placement.subview`)).toBe(undefined)
+      expect(await evaluate(`window.__navigations.at(-1).returnTo.destination`)).toBe('chat')
     } finally {
-      socket?.close(); chrome?.kill(); await vite.close(); await rm(directory, { recursive: true, force: true })
+      socket?.close(); chrome?.kill(); await vite.close(); files.kill(); await rm(directory, { recursive: true, force: true })
     }
   }, 90000)
 })

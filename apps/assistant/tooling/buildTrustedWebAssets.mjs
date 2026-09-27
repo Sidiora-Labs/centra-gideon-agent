@@ -23,6 +23,9 @@ const workerEntries = {
   html: "language/html/html.worker.js",
   typescript: "language/typescript/ts.worker.js",
 };
+// editor.main registers the language definitions and language services used by
+// native artifact editors (including Markdown, JSON, and TypeScript).
+const monacoEntry = "editor/editor.main.js";
 
 function parseArguments(args) {
   const index = args.indexOf("--out-dir");
@@ -113,6 +116,7 @@ export async function buildTrustedWebAssets({ outputDirectory, assistantDirector
     [shellPath, "console shell stylesheet"],
     ...fontFiles.map((font) => [path.join(fontsDirectory, font), `console font ${font}`]),
     ...Object.entries(workerEntries).map(([family, entry]) => [path.join(monacoDirectory, entry), `Monaco ${family} worker source`]),
+    [path.join(monacoDirectory, monacoEntry), "Monaco editor and language registrations source"],
   ];
   for (const [filePath, label] of sourceFiles) await requireFile(filePath, label);
 
@@ -162,9 +166,12 @@ export async function buildTrustedWebAssets({ outputDirectory, assistantDirector
     await rm(path.join(outDir, "fonts"), { recursive: true, force: true });
     await rm(workerOutDir, { recursive: true, force: true });
     await rm(path.join(outDir, "gideon-console.css"), { force: true });
+    await rm(path.join(outDir, "monaco"), { recursive: true, force: true });
     await rm(path.join(outDir, "manifest.json"), { force: true });
     await mkdir(path.join(outDir, "fonts"), { recursive: true });
     await mkdir(workerOutDir, { recursive: true });
+    const monacoOutDir = path.join(outDir, "monaco");
+    await mkdir(monacoOutDir, { recursive: true });
     await writeFile(path.join(outDir, "gideon-console.css"), css, "utf8");
     for (const font of fontFiles) await cp(path.join(fontsDirectory, font), path.join(outDir, "fonts", font));
 
@@ -184,9 +191,43 @@ export async function buildTrustedWebAssets({ outputDirectory, assistantDirector
       sourcemap: false,
     });
 
+    const monacoOutputDirectory = path.join(assistantDirectory, "tooling", `.trusted-monaco-${process.pid}`);
+    const monacoOutput = await bundle({
+        absWorkingDir: assistantDirectory,
+        entryPoints: [path.join(monacoDirectory, monacoEntry)],
+        outdir: monacoOutputDirectory,
+        entryNames: "gideon-monaco-editor.api",
+        chunkNames: "gideon-monaco-[name]-[hash]",
+        assetNames: "gideon-monaco-[name]-[hash]",
+        bundle: true,
+        splitting: true,
+        format: "esm",
+        platform: "browser",
+        target: "es2022",
+        legalComments: "eof",
+        sourcemap: false,
+        loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file" },
+        write: false,
+      });
+    for (const file of monacoOutput.outputFiles ?? []) {
+      const relativePath = path.relative(monacoOutputDirectory, file.path);
+      if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) throw new Error("Monaco editor API emitted an invalid asset path");
+      await mkdir(path.dirname(path.join(monacoOutDir, relativePath)), { recursive: true });
+      await writeFile(path.join(monacoOutDir, relativePath), file.contents);
+    }
+
     const generatedFiles = await readdir(outDir, { recursive: true });
     const records = [];
-    for (const relativePath of ["gideon-console.css", ...fontFiles.map((font) => `fonts/${font}`), ...Object.keys(workerEntries).map((family) => `workers/gideon-monaco-${family}.worker.js`)]) {
+    for (const relativePath of ["gideon-console.css", ...fontFiles.map((font) => `fonts/${font}`), ...Object.keys(workerEntries).map((family) => `workers/gideon-monaco-${family}.worker.js`), "monaco/gideon-monaco-editor.api.js", "monaco/gideon-monaco-editor.api.css"]) {
+      const filePath = path.join(outDir, relativePath);
+      await requireFile(filePath, `built trusted web asset ${relativePath}`);
+      const content = await readFile(filePath);
+      records.push({ path: relativePath, bytes: content.length, sha256: createHash("sha256").update(content).digest("hex") });
+    }
+    const monacoFiles = await readdir(monacoOutDir, { recursive: true });
+    const monacoJsFiles = monacoFiles.filter((file) => file.endsWith(".js"));
+    if (monacoJsFiles.length < 1 || !monacoJsFiles.includes("gideon-monaco-editor.api.js")) throw new Error("Monaco editor API ESM bundle is incomplete");
+    for (const relativePath of monacoJsFiles.filter((file) => file !== "gideon-monaco-editor.api.js").map((file) => `monaco/${file}`)) {
       const filePath = path.join(outDir, relativePath);
       await requireFile(filePath, `built trusted web asset ${relativePath}`);
       const content = await readFile(filePath);
@@ -204,7 +245,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const outputDirectory = parseArguments(process.argv.slice(2));
   try {
     const assets = await buildTrustedWebAssets({ outputDirectory });
-    console.log(`Built ${assets.length} trusted console stylesheet, font, and Monaco worker assets in ${outputDirectory}`);
+    console.log(`Built ${assets.length} trusted console stylesheet, font, and Monaco editor, language, and worker assets in ${outputDirectory}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
