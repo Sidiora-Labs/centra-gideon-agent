@@ -33,6 +33,9 @@ export class LibraryReadError extends Error {
 function readError(error: unknown, detail: boolean): LibraryReadError {
   if (error instanceof LibraryReadError) return error;
   if (error instanceof GatewayError) {
+    if (error.status === 401 || (error.status === 403 && error.authRequired)) {
+      return new LibraryReadError("forbidden", "Your Gideon session no longer has access to this Library record.", error.status);
+    }
     if (error.status === 403 && !error.authRequired) return new LibraryReadError("forbidden", "Your account cannot open this Library record.", 403);
     if (detail && error.status === 404) return new LibraryReadError("missing", "This Library record is unavailable.", 404);
     if (error.status === 502 || error.status === 503 || error.status === 504) {

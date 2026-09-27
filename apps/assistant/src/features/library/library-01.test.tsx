@@ -56,6 +56,12 @@ async def main(origin):
     created = store.create_typed_item(item_type="note", title="Native library record", content="A real record from the ephemeral Gideon knowledge store.", provider="native")
     native_id = "native item?one"
     store.db.execute("UPDATE items SET id = ? WHERE id = ?", (native_id, created))
+    second = store.create_typed_item(item_type="note", title="Second native record", content="The second real record from the ephemeral Gideon knowledge store.", provider="native")
+    second_id = "native item?two"
+    store.db.execute("UPDATE items SET id = ? WHERE id = ?", (second_id, second))
+    async def delayed_get_item(request):
+      if request.match_info["id"] == second_id: await asyncio.sleep(1)
+      return await get_item(request)
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
     app["port"] = 10000
     app["allowed_origins"] = {origin}
@@ -65,12 +71,12 @@ async def main(origin):
     app.router.add_post("/api/auth/login", auth.api_auth_login)
     app.router.add_post("/api/auth/logout", auth.api_auth_logout)
     app.router.add_get("/api/knowledge/items", list_items)
-    app.router.add_get("/api/knowledge/items/{id}", get_item)
+    app.router.add_get("/api/knowledge/items/{id}", delayed_get_item)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"api_port": site._server.sockets[0].getsockname()[1], "record_id": native_id}), flush=True)
+    print(json.dumps({"api_port": site._server.sockets[0].getsockname()[1], "record_id": native_id, "second_record_id": second_id}), flush=True)
     try: await asyncio.Event().wait()
     finally:
       await runner.cleanup()
@@ -79,7 +85,7 @@ async def main(origin):
 asyncio.run(main(sys.argv[1]))
 `;
 
-async function startApi(origin: string): Promise<{ url: string; recordId: string }> {
+async function startApi(origin: string): Promise<{ url: string; recordId: string; secondRecordId: string }> {
   const gideonHome = await mkdtemp(join(tmpdir(), "gideon-library-home-"));
   directories.push(gideonHome);
   const child = spawn(process.env.GIDEON_TEST_PYTHON || "python3", ["-c", knowledgeServer, origin], {
@@ -97,8 +103,8 @@ async function startApi(origin: string): Promise<{ url: string; recordId: string
     child.stderr.on("data", chunk => { errors += String(chunk); });
     child.once("exit", code => { clearTimeout(timeout); fail(new Error(`Native knowledge API exited ${code}: ${errors}`)); });
   });
-  const ready = JSON.parse(line) as { api_port: number; record_id: string };
-  return { url: `http://127.0.0.1:${ready.api_port}`, recordId: ready.record_id };
+  const ready = JSON.parse(line) as { api_port: number; record_id: string; second_record_id: string };
+  return { url: `http://127.0.0.1:${ready.api_port}`, recordId: ready.record_id, secondRecordId: ready.second_record_id };
 }
 
 async function startVite(port: number, api: string): Promise<void> {
@@ -214,9 +220,9 @@ describe("Library native knowledge route", () => {
     await waitFor(send, "document.querySelector('#gideon-password')");
     await evaluate(send, `(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username','library-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true})()`);
     await waitFor(send, "document.body.innerText.includes('Native library record')");
-    const selectedHref = await evaluate(send, "document.querySelector('.gideon-library__link[href*=recordId]')?.getAttribute('href')");
+    const selectedHref = await evaluate(send, "Array.from(document.querySelectorAll('.gideon-library__link[href*=recordId]')).find(link=>link.innerText.includes('Native library record'))?.getAttribute('href')");
     expect(selectedHref).toContain("recordId=native+item%3Fone");
-    await evaluate(send, "document.querySelector('.gideon-library__link[href*=recordId]')?.click()");
+    await evaluate(send, "Array.from(document.querySelectorAll('.gideon-library__link[href*=recordId]')).find(link=>link.innerText.includes('Native library record'))?.click()");
     await waitFor(send, "document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')");
     const readerUrl = await evaluate(send, "location.href");
     expect(readerUrl).toContain("recordId=native+item%3Fone");
@@ -229,5 +235,19 @@ describe("Library native knowledge route", () => {
     await waitFor(send, "location.pathname === '/assistant/chat' && location.search.includes('session=conversation%2F7')");
     expect(await evaluate(send, "location.search")).toContain("session=conversation%2F7");
     expect(await evaluate(send, "location.search")).toContain("fromId=native+item%3Fone");
+
+    const firstRecordRoute = libraryRecordHref({ kind: "knowledge", id: api.recordId });
+    await evaluate(send, `(()=>{history.pushState(null,'',${JSON.stringify(firstRecordRoute)});dispatchEvent(new PopStateEvent('popstate'));return true})()`);
+    await waitFor(send, "document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')");
+    const secondRecordRoute = libraryRecordHref({ kind: "knowledge", id: api.secondRecordId });
+    await evaluate(send, `(()=>{history.pushState(null,'',${JSON.stringify(secondRecordRoute)});dispatchEvent(new PopStateEvent('popstate'));return true})()`);
+    await waitFor(send, "document.querySelector('[aria-label]')?.getAttribute('aria-busy') === 'true'");
+    expect(await evaluate(send, "document.body.innerText.includes('A real record from the ephemeral Gideon knowledge store.')")).toBe(false);
+    await waitFor(send, "document.body.innerText.includes('The second real record from the ephemeral Gideon knowledge store.')");
+
+    await evaluate(send, "fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}).then(response=>{if(!response.ok)throw new Error('logout failed');return true})");
+    await evaluate(send, "Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Refresh')?.click()");
+    await waitFor(send, "document.querySelector('[data-workspace-state=denied]')");
+    expect(await evaluate(send, "document.body.innerText.includes('The second real record from the ephemeral Gideon knowledge store.')")).toBe(false);
   }, 90000);
 });
