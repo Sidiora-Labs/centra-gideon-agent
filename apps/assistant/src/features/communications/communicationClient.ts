@@ -1,4 +1,4 @@
-import { gatewayJson } from '../../shared/transport.web'
+import { GatewayError, gatewayJson } from '../../shared/transport.web'
 import type { OwnerScope } from '../../shared/auth.web'
 import {
   mirrorReadiness,
@@ -18,6 +18,8 @@ import {
   type MirrorAccount,
   type MirrorAccountInput,
   type MirrorMessage,
+  type MirrorMessageReadState,
+  type OutboundDraftEditInput,
   type MirrorSyncResult,
   type MirrorUploadResult,
   type MirrorUploadInput,
@@ -208,11 +210,31 @@ export class CommunicationClient {
       return { value: items, freshness: imported ? 'imported' : 'current' }
     } catch (error) {
       this.requireCurrentSelection(token)
+      if (error instanceof GatewayError && (error.status === 401 || error.status === 403)) {
+        prior.forEach(item => this.cache.delete(providerItemKey(item.identity)))
+        throw error
+      }
       if (!prior.length) throw error
       const stale = prior.map(item => ({ ...item, freshness: 'stale' as const }))
       stale.forEach(item => this.storeItem(item))
       return { value: stale, freshness: 'stale', error: error instanceof Error ? error.message : 'Refresh failed' }
     }
+  }
+
+  async setMirrorMessageReadState(accountId: string, externalId: string, isRead: boolean,
+    signal?: AbortSignal): Promise<CommunicationItem<MirrorMessage> | undefined> {
+    this.requireActive(accountId, 'mail-mirror')
+    const token = this.captureSelectionToken()
+    const result = await this.selectedRequest(token, gatewayJson<{ message: MirrorMessageReadState }>(
+      `/api/capabilities/communications/mirror/accounts/${enc(accountId)}/messages/${enc(externalId)}/read-state`,
+      { method: 'PATCH', body: { is_read: isRead }, signal },
+    ))
+    if (result.message.account_id !== accountId || result.message.external_id !== externalId) {
+      throw new Error('Read-state response belongs to a different native mailbox item')
+    }
+    const identity: ProviderItemIdentity = this.identity(accountId, 'mail-mirror', 'mail-mirror-message', externalId)
+    const prior = this.cachedItem<MirrorMessage>(identity)
+    return prior ? this.storeItem({ ...prior, value: { ...prior.value, is_read: result.message.is_read, read_state: result.message.read_state } }) : undefined
   }
 
   async uploadMirrorMailbox(accountId: string, input: MirrorUploadInput,
@@ -392,6 +414,23 @@ export class CommunicationClient {
       `/api/capabilities/communications/outbound-email/drafts/${enc(draftId)}`, { signal },
     ))
     if (result.draft.account_id !== accountId) throw new Error('Outbound draft belongs to a different native account')
+    return this.cacheDraft(result.draft)
+  }
+
+  async editOutboundDraft(item: OutboundDraftItem, input: OutboundDraftEditInput,
+    signal?: AbortSignal): Promise<OutboundDraftItem> {
+    this.assertSelectedItem(item.identity)
+    if (input.account_id !== item.identity.accountId || input.revision !== item.value.revision) {
+      throw new Error('Outbound draft account or revision changed; reload before editing')
+    }
+    const token = this.captureSelectionToken()
+    const result = await this.selectedRequest(token, gatewayJson<{ draft: OutboundEmailDraft }>(
+      `/api/capabilities/communications/outbound-email/drafts/${enc(item.value.id)}`,
+      { method: 'PATCH', body: input, signal },
+    ))
+    if (result.draft.id !== item.value.id || result.draft.account_id !== item.identity.accountId) {
+      throw new Error('Edited draft identity changed during the update')
+    }
     return this.cacheDraft(result.draft)
   }
 
