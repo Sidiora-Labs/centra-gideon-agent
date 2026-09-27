@@ -67,3 +67,34 @@ export function assistantHandoffHref(route: ShellRoute, sourceHash = typeof wind
 export function navigateToAssistant(route: ShellRoute, sourceHash?: string): void {
   window.location.assign(assistantHandoffHref(route, sourceHash))
 }
+
+export type AssistantOAuthCallback = Readonly<
+  | { kind: 'success'; code: string; state: string }
+  | { kind: 'denied'; error: string }
+>
+
+export function stripAssistantOAuthCallback(location: Pick<Location, 'origin' | 'pathname' | 'search' | 'hash'>,
+  history: Pick<History, 'state' | 'replaceState'>): AssistantOAuthCallback | undefined {
+  const url = new URL(`${location.pathname}${location.search}${location.hash}`, location.origin)
+  if (url.origin !== location.origin) throw new TypeError('OAuth returns must stay on the assistant origin')
+  const codeValues = url.searchParams.getAll('code')
+  const stateValues = url.searchParams.getAll('state')
+  const errorValues = url.searchParams.getAll('error')
+  const callbackPresent = codeValues.length + stateValues.length + errorValues.length > 0
+  if (!callbackPresent) return undefined
+
+  const code = codeValues.length === 1 ? codeValues[0] : ''
+  const state = stateValues.length === 1 ? stateValues[0] : ''
+  const error = errorValues.length === 1 ? errorValues[0] : ''
+  for (const key of ['code', 'state', 'error', 'error_description', 'iss']) url.searchParams.delete(key)
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
+
+  if (error && error.length <= 100 && !/[\u0000-\u001f\u007f]/.test(error)) {
+    return { kind: 'denied', error }
+  }
+  if (!code || code.length > 4000 || !state || state.length > 100 ||
+      /[\u0000-\u001f\u007f]/.test(code + state)) {
+    return { kind: 'denied', error: 'invalid_callback' }
+  }
+  return { kind: 'success', code, state }
+}
