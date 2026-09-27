@@ -58,7 +58,7 @@ export function DialogShell({ request, onClose, active = true }: {
   const resting = { opacity: 1, scale: 1, y: 0 }
   const hidden = { opacity: 0, scale: reduced ? 1 : 0.98, y: reduced ? 0 : expr(12, 0.3) }
   return createPortal(
-    <motion.div className="fixed inset-0 z-[var(--z-modal)] flex min-h-0 items-center justify-center overflow-y-auto overscroll-contain p-s sm:p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
+    <motion.div data-gideon-dialog-portal className="fixed inset-0 z-[var(--z-modal)] flex min-h-0 items-center justify-center overflow-y-auto overscroll-contain p-s sm:p-2xl" inert={!ownsInteraction} aria-hidden={!ownsInteraction || undefined}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={spring.effects}>
       <div className="absolute inset-0 bg-canvas/70 backdrop-blur-sm" onClick={cancel} aria-hidden="true" />
       <motion.div ref={trapRef} role={isAlert || danger ? 'alertdialog' : 'dialog'} aria-modal="true"

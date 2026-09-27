@@ -33,7 +33,7 @@ function parseLines(value: string, key: 'id' | 'target_id') {
   })
 }
 
-function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
+function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { apiRoot?: string; ingredientId?: string; onSelectIngredient?: (id: string) => void } = {}) {
   const [items, setItems] = useState<Ingredient[]>([])
   const [selected, setSelected] = useState<Ingredient | null>(null)
   const [history, setHistory] = useState<Ingredient[]>([])
@@ -48,7 +48,7 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
-  const [recordId, setRecordId] = useState(() => new URLSearchParams(location.hash.split('?')[1]).get('ingredient') || '')
+  const [recordId, setRecordId] = useState(() => ingredientId ?? (new URLSearchParams(location.hash.split('?')[1]).get('ingredient') || ''))
 
   function accept(item: Ingredient) {
     setSelected(item)
@@ -57,16 +57,19 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
       relations: item.relations.map(ref => `${ref.kind}:${ref.target_id}`).join('\n') })
   }
   function choose(id: string) {
-    location.hash = `/capabilities/creative${id ? `?ingredient=${encodeURIComponent(id)}` : ''}`
+    if (onSelectIngredient) onSelectIngredient(id)
+    else location.hash = `/capabilities/creative${id ? `?ingredient=${encodeURIComponent(id)}` : ''}`
     setRecordId(id)
     setError('')
     if (!id) { setSelected(null); setHistory([]); setDraft(empty()); setRequestId(crypto.randomUUID()) }
   }
+  useEffect(() => { if (ingredientId !== undefined) setRecordId(ingredientId) }, [ingredientId])
   useEffect(() => {
+    if (onSelectIngredient) return
     const changed = () => setRecordId(new URLSearchParams(location.hash.split('?')[1]).get('ingredient') || '')
     addEventListener('hashchange', changed)
     return () => removeEventListener('hashchange', changed)
-  }, [])
+  }, [onSelectIngredient])
   useEffect(() => {
     let alive = true
     setLoading(true)
@@ -143,22 +146,28 @@ function CatalogPage({ apiRoot = base }: { apiRoot?: string } = {}) {
   </main></ListScaffold>
 }
 
-function ProductionView({ apiRoot }: { apiRoot?: string }) {
+function ProductionView({ apiRoot, seriesId, onChooseSeries }: { apiRoot?: string; seriesId?: string; onChooseSeries?: () => void }) {
   const seriesRoot = apiRoot?.replace(/ingredients$/, 'series') || '/api/capabilities/creative/series'
-  const id = new URLSearchParams(location.hash.split('?')[1]).get('series') || ''
+  const id = seriesId ?? (new URLSearchParams(location.hash.split('?')[1]).get('series') || '')
   const [revision, setRevision] = useState<number>()
   const [error, setError] = useState('')
   useEffect(() => { let alive = true; setRevision(undefined); setError(''); if (id) requestJson<{ revision: number }>(`${seriesRoot}/${id}`).then(row => { if (alive) setRevision(row.revision) }).catch(reason => { if (alive) setError(message(reason)) }); return () => { alive = false } }, [id, seriesRoot])
-  if (!id) return <ListScaffold title="Production"><div className="space-y-m"><p data-type="body-m" className="text-on-surface-low">Choose a series before opening production.</p><Button onClick={() => { window.location.hash = "/capabilities/creative?view=series" }}>Choose a series</Button></div></ListScaffold>
+  if (!id) return <ListScaffold title="Production"><div className="space-y-m"><p data-type="body-m" className="text-on-surface-low">Choose a series before opening production.</p><Button onClick={() => { if (onChooseSeries) onChooseSeries(); else window.location.hash = "/capabilities/creative?view=series" }}>Choose a series</Button></div></ListScaffold>
   if (error) return <ListScaffold title="Production"><p role="alert">{error}</p></ListScaffold>
   return revision ? <Production id={id} revision={revision} apiRoot={seriesRoot} /> : <ListScaffold title="Production"><p role="status">Loading series production…</p></ListScaffold>
 }
 
-export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
+export default function Page({ apiRoot, activeView, onViewChange, workId, workRevision, onSelectWork, onWorkLoaded, draftStorageKey, seriesId, onSelectSeries, ingredientId, onSelectIngredient, boardId, onSelectBoard, universeId, onSelectUniverse, authorId, onSelectAuthor }: {
+  apiRoot?: string; activeView?: string; onViewChange?: (view: string) => void;
+  workId?: string; workRevision?: number; onSelectWork?: (id: string) => void; onWorkLoaded?: (work: { id: string; title: string; revision: number; active_draft_id: string | null; author_ref: { id: string; revision: number } | null; universe_ref: { id: string; revision: number } | null } | null) => void;
+  draftStorageKey?: string; seriesId?: string; onSelectSeries?: (id: string) => void; ingredientId?: string; onSelectIngredient?: (id: string) => void;
+  boardId?: string; onSelectBoard?: (id: string) => void; universeId?: string; onSelectUniverse?: (id: string) => void; authorId?: string; onSelectAuthor?: (id: string) => void
+} = {}) {
   const readView = () => new URLSearchParams(location.hash.split('?')[1]).get('view') || 'ingredients'
-  const [view, setView] = useState(readView)
-  useEffect(() => { const changed = () => setView(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
-  const selectedSeries = new URLSearchParams(location.hash.split('?')[1]).get('series')
+  const [localView, setView] = useState(readView)
+  const view = activeView ?? localView
+  useEffect(() => { if (onViewChange) return; const changed = () => setView(readView()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onViewChange])
+  const selectedSeries = seriesId ?? new URLSearchParams(location.hash.split('?')[1]).get('series')
   const destinations: AreaDestination[] = [
     { id: 'ingredients', label: 'Ingredients', icon: Library, group: 'Library' },
     { id: 'boards', label: 'Moodboards', icon: Images, group: 'Library' },
@@ -172,8 +181,10 @@ export default function Page({ apiRoot }: { apiRoot?: string } = {}) {
     { id: 'commissions', label: 'Commissions', icon: Timer, group: 'Studio' },
     { id: 'exports', label: 'Exports', icon: FileArchive, group: 'Studio' },
   ]
-  const content = view === 'commissions' ? <Commissions apiRoot={apiRoot?.replace(/ingredients$/, 'commissions')} /> : view === 'direction' ? <CreativeDirection apiRoot={apiRoot?.replace(/ingredients$/, 'direction')} /> : view === 'production' ? <ProductionView apiRoot={apiRoot} /> : view === 'exports' ? <ManuscriptExports apiRoot={apiRoot?.replace(/ingredients$/, 'exports')} /> : view === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} /> : view === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : view === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} /> : view === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} /> : view === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} /> : view === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} /> : <CatalogPage apiRoot={apiRoot} />
+  const source = workId && workRevision ? { kind: 'work' as const, id: workId, revision: workRevision } : undefined
+  const content = view === 'commissions' ? <Commissions apiRoot={apiRoot?.replace(/ingredients$/, 'commissions')} source={source} /> : view === 'direction' ? <CreativeDirection apiRoot={apiRoot?.replace(/ingredients$/, 'direction')} source={source} /> : view === 'production' ? <ProductionView apiRoot={apiRoot} seriesId={seriesId} onChooseSeries={onViewChange ? () => onViewChange('series') : undefined} /> : view === 'exports' ? <ManuscriptExports apiRoot={apiRoot?.replace(/ingredients$/, 'exports')} source={source} /> : view === 'series' ? <Series apiRoot={apiRoot?.replace(/ingredients$/, 'series')} seriesId={seriesId} onSelectSeries={onSelectSeries} /> : view === 'stories' ? <Stories apiRoot={apiRoot?.replace(/ingredients$/, 'stories')} /> : view === 'works' ? <Works apiRoot={apiRoot?.replace(/ingredients$/, 'works')} workId={workId} onSelectWork={onSelectWork} onWorkLoaded={onWorkLoaded} draftStorageKey={draftStorageKey} /> : view === 'authors' ? <Authors apiRoot={apiRoot?.replace(/ingredients$/, 'authors')} authorId={authorId} onSelectAuthor={onSelectAuthor} /> : view === 'universes' ? <Universes apiRoot={apiRoot?.replace(/ingredients$/, 'universes')} universeId={universeId} onSelectUniverse={onSelectUniverse} /> : view === 'boards' ? <Moodboards apiRoot={apiRoot?.replace(/ingredients$/, 'boards')} boardId={boardId} onSelectBoard={onSelectBoard} /> : <CatalogPage apiRoot={apiRoot} ingredientId={ingredientId} onSelectIngredient={onSelectIngredient} />
   const navigate = (next: string) => {
+    if (onViewChange) { onViewChange(next); return }
     location.hash = next === 'ingredients' ? '/capabilities/creative'
       : `/capabilities/creative?view=${encodeURIComponent(next)}${next === 'production' && selectedSeries ? `&series=${encodeURIComponent(selectedSeries)}` : ''}`
   }

@@ -20,9 +20,9 @@ function initialTheme(): ThemeState {
   try { preference = preferenceOf(localStorage.getItem('mode')) ?? DEFAULT_PREFERENCE } catch { /* Storage is optional. */ }
   return { preference, system: mediaQuery()?.matches ? 'light' : 'dark' }
 }
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export function ThemeProvider({ children, controlledMode }: { children: ReactNode; controlledMode?: Mode }) {
   const [state, dispatch] = useReducer(themeReducer, undefined, initialTheme)
-  const mode = resolveMode(state)
+  const mode = controlledMode ?? resolveMode(state)
   useEffect(() => {
     const media = mediaQuery()
     const onSystem = () => dispatch({ type: 'system', value: media?.matches ? 'light' : 'dark' })
@@ -35,11 +35,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => { media?.removeEventListener?.('change', onSystem); window.removeEventListener('storage', onStorage) }
   }, [])
   useEffect(() => {
+    if (controlledMode) return
     document.documentElement.classList.toggle('light', mode === 'light')
     document.documentElement.dataset.mode = mode
-  }, [mode])
-  useEffect(() => attachThemeFavicon(mode), [mode])
-  useEffect(() => { try { localStorage.setItem('mode', state.preference) } catch { /* Storage is optional. */ } }, [state.preference])
+  }, [mode, controlledMode])
+  useEffect(() => controlledMode ? undefined : attachThemeFavicon(mode), [mode, controlledMode])
+  useEffect(() => {
+    if (controlledMode) return
+    try { localStorage.setItem('mode', state.preference) } catch { /* Storage is optional. */ }
+  }, [state.preference, controlledMode])
   const toggle = useCallback(() => dispatch({ type: 'toggle' }), [])
   const setPreference = useCallback((value: Preference) => dispatch({ type: 'preference', value }), [])
   const value = useMemo(() => ({ mode, preference: state.preference, toggle, setPreference }), [mode, state.preference, toggle, setPreference])

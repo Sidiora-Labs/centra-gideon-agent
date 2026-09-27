@@ -21,10 +21,10 @@ const control = 'min-h-10 w-full rounded-md border border-outline-variant/30 bg-
 const values = (s: SeriesRecord): Values => ({ title: s.title, synopsis: s.synopsis, volumes: s.volumes, arcs: s.arcs, author_ref: s.author_ref, universe_ref: s.universe_ref })
 function moved<T>(items: T[], index: number) { const result = [...items]; [result[index - 1], result[index]] = [result[index], result[index - 1]]; return result }
 
-export default function Series({ apiRoot = '/api/capabilities/creative/series' }: { apiRoot?: string }) {
+export default function Series({ apiRoot = '/api/capabilities/creative/series', seriesId, onSelectSeries }: { apiRoot?: string; seriesId?: string; onSelectSeries?: (id: string) => void }) {
   const t = (value: string) => value
   const selectionToken = useRef(0)
-  const [id, setId] = useState(readId)
+  const [id, setId] = useState(() => seriesId ?? readId())
   const [selected, setSelected] = useState<SeriesRecord | null>(null)
   const [draft, setDraft] = useState<Values>(blank)
   const [items, setItems] = useState<SeriesRecord[]>([])
@@ -48,10 +48,11 @@ export default function Series({ apiRoot = '/api/capabilities/creative/series' }
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const [draftRequest, setDraftRequest] = useState(() => crypto.randomUUID())
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load series'))
-  function choose(next: string) { location.hash = `/capabilities/creative?view=series${next ? `&series=${next}` : ''}`; setId(next); setError(''); setCreating(true); if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setChapterId(''); setManuscript(''); selectionToken.current++; setRequestId(crypto.randomUUID()) } }
+  function choose(next: string) { if (onSelectSeries) onSelectSeries(next); else location.hash = `/capabilities/creative?view=series${next ? `&series=${encodeURIComponent(next)}` : ''}`; setId(next); setError(''); setCreating(true); if (!next) { setSelected(null); setDraft(blank()); setHistory([]); setChapterId(''); setManuscript(''); selectionToken.current++; setRequestId(crypto.randomUUID()) } }
   function startNew() { choose(''); setCreating(true) }
   async function load(seriesId: string) { const [record, versions] = await Promise.all([requestJson<SeriesRecord>(`${apiRoot}/${seriesId}`), requestJson<{ items: SeriesRecord[] }>(`${apiRoot}/${seriesId}/revisions`)]); setSelected(record); setDraft(values(record)); setHistory(versions.items); return record }
-  useEffect(() => { const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [])
+  useEffect(() => { if (seriesId !== undefined) setId(seriesId) }, [seriesId])
+  useEffect(() => { if (onSelectSeries) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectSeries])
   useEffect(() => {
     let alive = true; setLoading(true)
     Promise.all([requestJson<{ items: SeriesRecord[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`), requestJson<{ items: (Ref & { title: string })[] }>(`${apiRoot.replace(/series$/, 'authors')}?q=${encodeURIComponent(references)}&limit=100`), requestJson<{ items: (Ref & { title: string })[] }>(`${apiRoot.replace(/series$/, 'universes')}?q=${encodeURIComponent(references)}&limit=100`)])

@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from gideon.security.security import (
 logger = logging.getLogger(__name__)
 
 _MAX_INLINE_READ_BYTES = 50 * 1024 * 1024
+_file_write_lock = asyncio.Lock()
 
 from gideon.security.security import _SYSTEM_SUBTREES as _SYSTEM_ROOTS  # noqa: E402
 
@@ -1289,6 +1291,7 @@ async def api_file_read(request: web.Request) -> web.Response:
             raw = f.read(read_cap + 1)
         truncated = len(raw) > read_cap
         raw = raw[:read_cap]
+        validator = hashlib.sha256(raw).hexdigest() if not truncated else ""
         if b"\x00" in raw[:8192]:
             _sel().log_tool_invocation(
                 session_key="dashboard",
@@ -1308,7 +1311,7 @@ async def api_file_read(request: web.Request) -> web.Response:
             outcome="success",
             resources=path,
         )
-        headers = {"X-Truncated": "true"} if truncated else {}
+        headers = {"X-Truncated": "true"} if truncated else {"X-Content-Validator": validator}
         return web.Response(text=content, content_type="text/plain", headers=headers)
     except Exception:
         logging.getLogger(__name__).exception("file_read failed for %s", path)
@@ -1426,6 +1429,13 @@ async def api_file_write(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "invalid JSON body"}, status=400)
 
+    expected_validator = body.get("expected_validator")
+    if expected_validator is not None and (
+        not isinstance(expected_validator, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_validator)
+    ):
+        return web.json_response({"error": "invalid content validator"}, status=400)
+
     try:
         validate_tool_args(
             {"path": body.get("path", ""), "content": body.get("content", "")},
@@ -1449,47 +1459,50 @@ async def api_file_write(request: web.Request) -> web.Response:
             resources=body.get("path", ""),
         )
         return web.json_response({"error": "invalid or forbidden path"}, status=400)
-    if not os.path.isfile(path):
-        _sel().log_tool_invocation(
-            session_key="dashboard",
-            tool_name="file_write",
-            outcome="not_found",
-            resources=path,
-        )
-        return web.json_response({"error": "not found"}, status=404)
-    try:
-
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    async with _file_write_lock:
+        if not os.path.isfile(path):
+            _sel().log_tool_invocation(
+                session_key="dashboard", tool_name="file_write", outcome="not_found", resources=path,
+            )
+            return web.json_response({"error": "not found"}, status=404)
         try:
+            if expected_validator is not None:
+                digest = hashlib.sha256()
+                with open(path, "rb") as source:
+                    for chunk in iter(lambda: source.read(65_536), b""):
+                        digest.update(chunk)
+                current_validator = digest.hexdigest()
+                if current_validator != expected_validator:
+                    _sel().log_tool_invocation(
+                        session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
+                    )
+                    return web.json_response({"error": "file changed since read"}, status=409)
+
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
             try:
-                shutil.copymode(path, tmp_path)
-            except OSError:
-                pass
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                f.write(body.get("content", ""))
-            os.replace(tmp_path, path)
+                try:
+                    shutil.copymode(path, tmp_path)
+                except OSError:
+                    pass
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    f.write(body.get("content", ""))
+                os.replace(tmp_path, path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+            _sel().log_tool_invocation(
+                session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
+            )
+            return web.json_response({"ok": True, "validator": hashlib.sha256(body["content"].encode("utf-8")).hexdigest()})
         except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-        _sel().log_tool_invocation(
-            session_key="dashboard",
-            tool_name="file_write",
-            outcome="success",
-            resources=path,
-        )
-        return web.json_response({"ok": True})
-    except Exception:
-        logging.getLogger(__name__).exception("file_write failed for %s", path)
-        _sel().log_tool_invocation(
-            session_key="dashboard",
-            tool_name="file_write",
-            outcome="failure",
-            resources=path,
-        )
-        return web.json_response({"error": "failed to write file"}, status=500)
+            logging.getLogger(__name__).exception("file_write failed for %s", path)
+            _sel().log_tool_invocation(
+                session_key="dashboard", tool_name="file_write", outcome="failure", resources=path,
+            )
+            return web.json_response({"error": "failed to write file"}, status=500)
 
 
 _EXPLORER_MAX_ENTRIES = 2_000

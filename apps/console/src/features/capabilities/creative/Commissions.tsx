@@ -4,6 +4,7 @@ import { EmptyState, ListRow, ListScaffold } from '../../../shared/ui/ListScaffo
 import { Clock3, Plus, Sparkles, Zap } from 'lucide-react'
 import { Checkbox, Field, NumberField, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
+import { requestJson } from '../../../shared/data/gatewayRequest'
 
 type Output = { artifact_id: string; artifact_version: number; content_hash: string; path?: string }
 type Receipt = { backend: string; operation: string; request_id: string; resource_id: string; status: string; upstream_status: string; error_code: string }
@@ -12,16 +13,17 @@ type Reaction = { id: string; revision: number; author: string; rating: string; 
 type Commission = { id: string; revision: number; name: string; target_ability: string; mode: string; mode_source: string; enabled: boolean; schedule_error: string; schedule_state?: string; next_fire_at?: string; runs?: Run[]; feedback?: Reaction[] }
 type Peer = { id: string; label: string }
 
-export function Commissions({ apiRoot = '/api/capabilities/creative/commissions' }: { apiRoot?: string }) {
+export function Commissions({ apiRoot = '/api/capabilities/creative/commissions', source }: { apiRoot?: string; source?: { kind: 'work' | 'series'; id: string; revision: number } }) {
   const [items, setItems] = useState<Commission[]>([])
   const [selected, setSelected] = useState<Commission | null>(null)
   const [name, setName] = useState('Weekly treatment')
   const [intent, setIntent] = useState('Create a focused treatment from the selected manuscript.')
   const [ability, setAbility] = useState('series')
   const [mode, setMode] = useState('planning')
-  const [sourceKind, setSourceKind] = useState('work')
-  const [sourceId, setSourceId] = useState('')
-  const [sourceRevision, setSourceRevision] = useState(1)
+  const [sourceKind, setSourceKind] = useState<string>(source?.kind || 'work')
+  const [sourceId, setSourceId] = useState(source?.id || '')
+  const [sourceRevision, setSourceRevision] = useState(source?.revision || 1)
+  useEffect(() => { if (source) { setSourceKind(source.kind); setSourceId(source.id); setSourceRevision(source.revision) } }, [source?.kind, source?.id, source?.revision])
   const [cadenceKind, setCadenceKind] = useState('interval')
   const [recurrenceStart, setRecurrenceStart] = useState('2026-10-01T09:00:00')
   const [recurrenceRule, setRecurrenceRule] = useState('FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1')
@@ -44,16 +46,16 @@ export function Commissions({ apiRoot = '/api/capabilities/creative/commissions'
   const [creating, setCreating] = useState(true)
 
   async function list() {
-    const data = await fetch(apiRoot).then(response => response.json())
+    const data = await requestJson<{ items: Commission[] }>(apiRoot)
     setItems(data.items || [])
   }
   async function listPeers() {
-    const data = await fetch(`${apiRoot}/peer-feedback/peers`).then(response => response.json())
+    const data = await requestJson<{ items: Peer[] }>(`${apiRoot}/peer-feedback/peers`)
     const available = data.items || []
     setPeers(available); setPeerId(current => current || available[0]?.id || '')
   }
   async function load(id: string) {
-    const data = await fetch(`${apiRoot}/${id}`).then(response => response.json())
+    const data = await requestJson<Commission>(`${apiRoot}/${encodeURIComponent(id)}`)
     setSelected(data); setCreating(false); await list()
   }
   async function create() {
@@ -65,7 +67,8 @@ export function Commissions({ apiRoot = '/api/capabilities/creative/commissions'
           music_length_ms: musicLength, force_instrumental: true, license }
       : ability === 'music-video' ? { project_id: projectId, revision: projectRevision }
       : { series_id: sourceId, series_revision: sourceRevision, mode: seriesMode, max_attempts: 2 }
-    const response = await fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    try {
+      const data = await requestJson<{ id: string }>(apiRoot, 'POST', {
       request_id: `commission-${Date.now()}`, name, target_ability: ability, mode,
       brief: { intent, genre: '', category: '', style: '', constraints: {}, seed_refs: [] },
       cadence: cadenceKind === 'recurrence'
@@ -77,53 +80,49 @@ export function Commissions({ apiRoot = '/api/capabilities/creative/commissions'
         { id: 'verify', title: 'Verify canonical source', operation: 'source.verify', depends_on: [] },
         { id: 'snapshot', title: 'Snapshot treatment', operation: 'treatment.snapshot', depends_on: ['verify'] },
       ],
-    }) })
-    const data = await response.json()
-    if (!response.ok) return setError(data.error || 'Unable to create commission')
-    await load(data.id)
+    })
+      await load(data.id)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to create commission') }
   }
   async function update(enabled: boolean) {
     if (!selected) return
-    const response = await fetch(`${apiRoot}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revision: selected.revision, enabled }) })
-    const data = await response.json()
-    if (!response.ok) return setError(data.error || 'Unable to update commission')
-    await load(data.id)
+    try {
+      const data = await requestJson<{ id: string }>(`${apiRoot}/${encodeURIComponent(selected.id)}`, 'PATCH', { revision: selected.revision, enabled })
+      await load(data.id)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update commission') }
   }
   async function runNow() {
     if (!selected) return
-    const data = await fetch(`${apiRoot}/${selected.id}/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: `manual-${Date.now()}` }) }).then(response => response.json())
-    if (data.error) return setError(data.error)
-    await load(selected.id)
+    try {
+      await requestJson(`${apiRoot}/${encodeURIComponent(selected.id)}/run`, 'POST', { request_id: crypto.randomUUID() })
+      await load(selected.id)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to run commission') }
   }
   async function react(run: Run, output: Output, rating: string) {
     if (!selected) return
-    const response = await fetch(`${apiRoot}/${selected.id}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    try {
+      await requestJson(`${apiRoot}/${encodeURIComponent(selected.id)}/feedback`, 'POST', {
       run_id: run.id, author: 'dashboard-owner', output: { artifact_id: output.artifact_id, artifact_version: output.artifact_version, content_hash: output.content_hash },
       rating, note: rating === 'liked' ? 'Keep this direction.' : 'Change this direction.', tags: ['dashboard'],
-    }) })
-    const data = await response.json()
-    if (!response.ok) return setError(data.error || 'Unable to save feedback')
-    await load(selected.id)
+    })
+      await load(selected.id)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save feedback') }
   }
   async function deliver(row: Reaction) {
     if (!selected || !peerId || !approved[row.id]) return
     setError('')
-    const response = await fetch(`${apiRoot}/${selected.id}/feedback/${row.id}/deliver`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    try {
+      const data = await requestJson<{ receipt: { state: string }; reaction_revision: number }>(`${apiRoot}/${encodeURIComponent(selected.id)}/feedback/${encodeURIComponent(row.id)}/deliver`, 'POST', {
         peer_id: peerId,
         approval: { decision: 'approved', commission_id: selected.id, peer_id: peerId,
           reaction_id: row.id, reaction_revision: row.revision },
-      }),
-    })
-    const data = await response.json()
-    if (!response.ok) return setError(data.error || 'Unable to deliver feedback')
-    setApproved(current => ({ ...current, [row.id]: false }))
-    setDeliveries(current => ({ ...current, [row.id]: `${data.receipt.state} · revision ${data.reaction_revision}` }))
+      })
+      setApproved(current => ({ ...current, [row.id]: false }))
+      setDeliveries(current => ({ ...current, [row.id]: `${data.receipt.state} · revision ${data.reaction_revision}` }))
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to deliver feedback') }
   }
 
-  useEffect(() => { void list(); void listPeers() }, [apiRoot])
+  useEffect(() => { void list().catch(reason => setError(String(reason))); void listPeers().catch(reason => setError(String(reason))) }, [apiRoot])
   return <ListScaffold title="Commissions" right={<Button onClick={() => { setSelected(null); setCreating(true) }}><Plus size={16} aria-hidden/>New commission</Button>}>
     <p data-type="body-m" className="mb-xl max-w-[48rem] text-on-surface-low">Schedule a typed standing brief. Each occurrence creates one attributable direction project and retains its attempts, outputs, and bounded feedback context.</p>
     {error && <p role="alert" className="mb-m border-l-2 border-danger/40 pl-s text-danger">{error}</p>}

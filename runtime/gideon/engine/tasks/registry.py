@@ -171,6 +171,7 @@ async def list_all_tasks(
     project: str | None = None,
     task_list_id: str | None = None,
     provider_filter: str | None = None,
+    owner: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Task], int]:
@@ -185,7 +186,9 @@ async def list_all_tasks(
         },
     )
     selected = [
-        row for row in rows if not task_list_id or row.task_list_id == task_list_id
+        row for row in rows
+        if (not task_list_id or row.task_list_id == task_list_id)
+        and (not owner or row.belongs_to(owner))
     ]
     selected.sort(key=lambda row: row.updated_at or row.created_at, reverse=True)
     return selected[offset : offset + limit], len(selected)
@@ -207,16 +210,22 @@ async def create_task(provider_name: str = "native", **fields: Any) -> Task:
 
 
 async def update_task(
-    task_id: str, provider_name: str | None = None, **fields: Any
+    task_id: str, provider_name: str | None = None,
+    expected_revision: str | None = None, **fields: Any
 ) -> Task | None:
     sources = _directory()
     provider = await _resolve_one(task_id, provider_name)
-    return (
-        None
-        if provider is None
-        else await sources.writable(provider).update_task(
-            task_id, **_task_write_fields(provider, fields, resolve=True)
+    if provider is None:
+        return None
+    provider = sources.writable(provider)
+    if expected_revision is not None:
+        if provider.name != "native":
+            raise ValueError("expected_revision is supported only for native tasks")
+        return await provider.update_task(
+            task_id, expected_revision=expected_revision, **fields
         )
+    return await provider.update_task(
+        task_id, **_task_write_fields(provider, fields, resolve=True)
     )
 
 
