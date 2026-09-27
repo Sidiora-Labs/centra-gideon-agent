@@ -2401,13 +2401,19 @@ async def api_trigger_history_all(request: web.Request) -> web.Response:
     kind_filter = ""
     if raw_filter:
         kind_filter, raw_filter = _split_id(raw_filter)
-    runs, total = await _runs_store().list_all(offset, limit, raw_filter)
+    journal = _runs_store()
+    legacy = (request.query.get("shape") or "").lower() == "legacy"
+    if legacy:
+        runs, total = await journal.list_all(offset, limit, raw_filter)
+    else:
+        _, total = await journal.list_all(0, 1, raw_filter)
+        runs, _ = await journal.list_all(0, max(1, total), raw_filter)
     names = _trigger_names(state)
     enriched = [
         _redact_run(r, job_name=names.get(r.get("job_id", ""), "")) for r in runs
     ]
 
-    if (request.query.get("shape") or "").lower() == "legacy":
+    if legacy:
         return web.json_response({"runs": enriched, "total": total})
 
     hooks: list[Any] = []
@@ -2432,11 +2438,12 @@ async def api_trigger_history_all(request: web.Request) -> web.Response:
         schedule_runs=enriched if (not raw_filter or kind_filter == _SCHEDULE) else [],
         hooks=hooks,
         event_triggers=events,
-        limit=limit,
+        limit=max(1, total + len(hooks) + len(events)),
     )
-    payload = H.feed_response(records)
+    page = records[offset : offset + limit]
+    payload = H.feed_response(page, total=len(records))
     payload["schedule_total"] = total
-    payload["outcomes"] = H.outcome_counts(records)
+    payload["outcomes"] = H.outcome_counts(page)
     return web.json_response(payload)
 
 

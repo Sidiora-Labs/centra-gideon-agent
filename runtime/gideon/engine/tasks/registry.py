@@ -171,6 +171,7 @@ async def list_all_tasks(
     project: str | None = None,
     task_list_id: str | None = None,
     provider_filter: str | None = None,
+    owner: str = "",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Task], int]:
@@ -185,7 +186,9 @@ async def list_all_tasks(
         },
     )
     selected = [
-        row for row in rows if not task_list_id or row.task_list_id == task_list_id
+        row for row in rows
+        if (not task_list_id or row.task_list_id == task_list_id)
+        and (not owner or row.belongs_to(owner))
     ]
     selected.sort(key=lambda row: row.updated_at or row.created_at, reverse=True)
     return selected[offset : offset + limit], len(selected)
