@@ -18,11 +18,12 @@ An inventory placement describes where a view belongs. It does not establish tha
   Keep migration aliases and query/subview preservation in the shell route contract.
   The 214 placements divide into Chat 8, Work 34, Create 43, Library 25, Personal 47, Inbox 2, Apps 13, Settings 38, and Getting started 4.
   Use `spec/gideon-assistant/destinations.md` as the public placement checklist for the 214 IDs and their feature owners.
-  Chat placements enter the conversation family; Work placements open task, room, automation, or agent workspaces.
-  Create placements open writing, media, music, and world workspaces; Library placements open research and knowledge.
-  Personal placements open ideas, goals, memory, identity, and health; Inbox placements open Activity review flows.
-  Apps placements open the catalog, app host, and service sections; Settings placements open configuration sections.
-  Getting started placements open the delivery onboarding journey.
+  Treat those group names as inventory buckets; use the checklist's per-route owner rather than assigning ownership from a group.
+  Chat includes Work-owned Rooms; Work includes Code-owned views.
+  Library includes Code-owned files and artifacts, plus Personal-owned Ideas and Journal.
+  Personal includes Communications-owned views.
+  Discovery provides Apps and settings/platform navigation; Delivery provides onboarding.
+  Keep each placement's category and feature owner as separate fields in the registry.
   A placement can be discoverable before its family is implemented, but its status and next action must say so.
   Do not count a matching route string alone as proof that the destination works.
   Acceptance: all 214 IDs have a declared placement and verification state, with no invented claim of route readiness.
