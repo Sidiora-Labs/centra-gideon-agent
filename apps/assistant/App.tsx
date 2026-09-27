@@ -1,9 +1,11 @@
 import { StatusBar } from "expo-status-bar";
 import { Bell, Lightbulb, Menu, MessageCircle, PanelsTopLeft, Shapes, SquareCheck } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AssistantBootstrapProvider, useAssistantBootstrap, type BootstrapState } from "./src/shared/bootstrap.web";
+import { ChatScreen } from "./src/features/conversation/ChatScreen";
+import { ConversationController } from "./src/shared/conversation/controller";
 import { targetSessionId, useAssistantEntry } from "./src/features/delivery/entry.web";
 import { CONSOLE_HANDOFFS, ShellIdentity } from "./src/shared/shell/ShellIdentity";
 import { ShellNavigation, type ShellNavigationIcon } from "./src/shared/shell/ShellNavigation";
@@ -34,12 +36,16 @@ function openConsole(key: keyof typeof CONSOLE_HANDOFFS) {
 }
 
 export default function App() {
+  const [conversationController] = useState(() => new ConversationController());
+  useEffect(() => () => conversationController.dispose(), [conversationController]);
   return (
     <SafeAreaProvider>
       <ShellThemeProvider>
         <ThemedStatusBar />
         {Platform.OS === "web" ? (
-          <AssistantBootstrapProvider><WorkspaceApp /></AssistantBootstrapProvider>
+          <AssistantBootstrapProvider clearOwnerCache={() => conversationController.setOwner(null)}>
+            <WorkspaceApp conversationController={conversationController} />
+          </AssistantBootstrapProvider>
         ) : <NativeNotice />}
       </ShellThemeProvider>
     </SafeAreaProvider>
@@ -60,25 +66,25 @@ function NativeNotice() {
   </SafeAreaView>;
 }
 
-function WorkspaceApp() {
+function WorkspaceApp({ conversationController }: { conversationController: ConversationController }) {
   const { state, refresh, signOut } = useAssistantBootstrap();
   if (state.phase !== "ready") return null;
-  return <ReadyWorkspace state={state} refresh={refresh} signOut={signOut} />;
+  return <ReadyWorkspace state={state} refresh={refresh} signOut={signOut} conversationController={conversationController} />;
 }
 
-function ReadyWorkspace({ state, refresh, signOut }: {
+function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
   state: Extract<BootstrapState, { phase: "ready" }>;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
+  conversationController: ConversationController;
 }) {
   const { palette } = useShellTheme();
-  const { snapshot, navigate, refresh: refreshRoute, session } = useAssistantEntry(state.scope);
+  const { snapshot, navigate, refresh: refreshRoute } = useAssistantEntry(state.scope);
   const section: ShellDestination = snapshot.route.kind === "route" ? snapshot.route.destination : "chat";
   const [menuOpen, setMenuOpen] = useState(false);
   const { width, fontScale } = useWindowDimensions();
   const desktop = width >= 900;
   const title = titles[section];
-  const routeForLinks = snapshot.route.kind === "route" ? snapshot.route : snapshot.route.action.route;
   const returnTo = snapshot.route.kind === "route" ? snapshot.route.returnTo : undefined;
   const trustedModule = snapshot.phase === "ready" && snapshot.route.kind === "route"
     ? moduleForRoute(snapshot.route) : undefined;
@@ -133,25 +139,13 @@ function ReadyWorkspace({ state, refresh, signOut }: {
               <Button primary onPress={() => openConsole(title.console)}>
                 Open {CONSOLE_HANDOFFS[title.console].label} in Gideon console
               </Button>
-            </Card> : <View style={{ flex: 1,
-            paddingHorizontal: desktop ? 42 : 17, justifyContent: "flex-end", paddingBottom: 22 }}>
-            <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 13 }}>
-              <Avatar size={68} variant="lilac" />
-              <Text style={[s.title, { color: palette.text, textAlign: "center" }]}>
-                {session ? session.title || "Gideon conversation" : "Your Gideon workspace"}
-              </Text>
-              <Text style={[s.muted, { color: palette.muted, textAlign: "center", maxWidth: 360 }]}>
-                {session ? `${session.total} messages in this conversation.` : "Your conversation is available in Gideon console."}
-              </Text>
-            </View>
-            <Card style={{ gap: 12, borderWidth: 1 }}>
-              <Text style={[s.muted, { color: palette.muted }]}>Continue in your authenticated conversation</Text>
-              <Button primary onPress={() => window.location.assign(session
-                ? `/#/chat/${encodeURIComponent(targetSessionId(routeForLinks) ?? "")}` : CONSOLE_HANDOFFS.chat.href)}>
-                Open Chat in Gideon console
-              </Button>
-            </Card>
-          </View>}
+            </Card> : <ChatScreen controller={conversationController} scope={state.scope}
+              sessionId={snapshot.phase === "ready" && snapshot.route.destination === "chat"
+                ? targetSessionId(snapshot.route) ?? undefined : undefined}
+              returnTo={snapshot.phase === "ready" && snapshot.route.destination === "chat"
+                ? snapshot.route.returnTo : undefined}
+              onReturn={returnTo ? returnToAssistant : undefined}
+              scrollY={returnTo?.scrollY} />}
             </WorkspaceFrame>}
         </View>
 
