@@ -32,6 +32,8 @@ describe('typed conversation turn adaptation', () => {
     expect(answer.segments).toContainEqual(expect.objectContaining({ kind: 'citation', id: 'source-3', label: 'Project notes' }))
     expect(resultRecordRoute({ kind: 'task', id: 'task-6' })).toMatchObject({ destination: 'activity', view: 'detail',
       placement: { id: 'tasks' }, record: { kind: 'task', id: 'task-6' } })
+    expect(resultRecordRoute({ kind: 'project', id: 'project-7' })).toMatchObject({ destination: 'apps', view: 'detail',
+      placement: { id: 'projects/detail' }, record: { kind: 'project', id: 'project-7' } })
   })
 
   it('keeps unknown producers and broken or untyped targets visible without fabricating a link', () => {

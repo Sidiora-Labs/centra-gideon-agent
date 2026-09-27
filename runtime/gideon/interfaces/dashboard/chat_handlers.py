@@ -719,6 +719,13 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
     if not session:
         return web.json_response({"error": "not found"}, status=404)
 
+    # This handler has no await between copying the selected transcript and building
+    # the response, so the cursor and the selected rows below describe one event-loop
+    # snapshot. Never sample the live cursor after history preparation.
+    snapshot_running = session.running
+    snapshot_epoch = session._stream_epoch
+    snapshot_turn = session._stream_turn
+
     resolved_key = persisted_history_key(state.conversation_log, session.key)
 
     limit_raw = request.query.get("limit")
@@ -770,7 +777,38 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
         messages = all_msgs[start:end]
         has_more = start > 0
 
-    prepared = _prepare_messages(messages, session.running)
+    prepared = _prepare_messages(messages, snapshot_running)
+    snapshot_seq = 0
+    active_stream_in_snapshot = False
+    for message in messages:
+        meta = message.get("meta")
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("stream_epoch") != snapshot_epoch or meta.get("stream_turn") != snapshot_turn:
+            continue
+        seq = meta.get("stream_seq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            snapshot_seq = max(snapshot_seq, seq)
+            if message.get("role") == "chunk" and seq > 0:
+                active_stream_in_snapshot = True
+    if snapshot_running and active_stream_in_snapshot:
+        for message in reversed(prepared):
+            if message.get("role") == "streaming":
+                meta = message.get("meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                    message["meta"] = meta
+                meta.update({
+                    "stream_epoch": snapshot_epoch,
+                    "stream_turn": snapshot_turn,
+                    "stream_seq": snapshot_seq,
+                })
+                break
+    stream_cursor = {
+        "stream_epoch": snapshot_epoch,
+        "stream_turn": snapshot_turn,
+        "stream_seq": snapshot_seq,
+    }
 
     forked_from = getattr(session, "forked_from", "") or ""
     forked_from_title = ""
@@ -791,7 +829,8 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
         {
             "key": session.key,
             "title": session.title,
-            "running": session.running,
+            "running": snapshot_running,
+            "stream_cursor": stream_cursor,
             "stopping": session._stopping,
             "messages": prepared,
             "queue": [

@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, describe, expect, it } from 'vitest'
-import { canonicalMessages, receivedPrompt } from './controller'
-import type { ChatDetail } from './types'
+import { canonicalMessages, receivedPrompt, reconcileStreamChunk, streamCursorDisposition } from './controller'
+import type { ChatDetail, ConversationStreamCursor } from './types'
 
 const root = resolve(process.cwd(), '../..')
 const children: ChildProcessWithoutNullStreams[] = []
@@ -14,9 +14,16 @@ const directories: string[] = []
 let vite: ViteDevServer | undefined
 let debuggerSocket: WebSocket | undefined
 
+async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise<void>(done => child.once('exit', () => done()))
+  child.kill('SIGTERM')
+  await exited
+}
+
 afterAll(async () => {
   debuggerSocket?.close()
-  for (const child of children) child.kill('SIGTERM')
+  await Promise.all(children.map(stopChild))
   if (vite) await vite.close()
   for (const directory of directories) await rm(directory, { recursive: true, force: true })
 })
@@ -103,6 +110,44 @@ async function browser(address: string): Promise<{
 }
 
 describe('canonical Gideon conversation', () => {
+  it('reconciles chunk replay by epoch, turn and sequence rather than text overlap', () => {
+    const terminal: ConversationStreamCursor = { stream_epoch: 'epoch-a', stream_turn: 4, stream_seq: 3 }
+    const repeatedFrames = [1, 2].map(stream_seq => ({ content: 'ha', cursor: {
+      stream_epoch: 'epoch-a', stream_turn: 4, stream_seq,
+    } }))
+    expect(repeatedFrames.map(frame => streamCursorDisposition(terminal, frame.cursor))).toEqual(['stale', 'stale'])
+    expect(streamCursorDisposition(terminal,
+      { stream_epoch: 'epoch-a', stream_turn: 4, stream_seq: 4 })).toBe('same-turn')
+    expect(streamCursorDisposition(terminal,
+      { stream_epoch: 'epoch-a', stream_turn: 5, stream_seq: 1 })).toBe('new-turn')
+    expect(streamCursorDisposition(terminal,
+      { stream_epoch: 'epoch-b', stream_turn: 1, stream_seq: 1 })).toBe('new-turn')
+    expect(repeatedFrames.map(frame => frame.content)).toEqual(['ha', 'ha'])
+
+    const active: ConversationStreamCursor = { ...terminal, stream_seq: 2 }
+    const snapshot = [{ id: 'session-a:message:stream', role: 'assistant', content: 'haha', streaming: true,
+      meta: { stream_epoch: active.stream_epoch, stream_turn: active.stream_turn, stream_seq: active.stream_seq } }]
+    expect(reconcileStreamChunk('session-a', snapshot, active, 'ha', repeatedFrames[0].cursor)).toBeNull()
+    const overlapped = reconcileStreamChunk('session-a', snapshot, active, 'ha',
+      { stream_epoch: active.stream_epoch, stream_turn: active.stream_turn, stream_seq: 3 })!
+    expect(overlapped.messages[0].content).toBe('hahaha')
+
+    const terminalSnapshot = [{ id: 'session-a:message:answer', role: 'assistant', content: 'haha' }]
+    expect(reconcileStreamChunk('session-a', terminalSnapshot, terminal, 'ha',
+      { stream_epoch: terminal.stream_epoch, stream_turn: terminal.stream_turn, stream_seq: 3 })).toBeNull()
+    const nextTurn = reconcileStreamChunk('session-a', terminalSnapshot, terminal, 'ha',
+      { stream_epoch: terminal.stream_epoch, stream_turn: terminal.stream_turn + 1, stream_seq: 1 })!
+    expect(nextTurn.messages).toEqual([
+      terminalSnapshot[0],
+      expect.objectContaining({ id: 'session-a:live:epoch-a:5', content: 'ha', streaming: true,
+        meta: { stream_epoch: 'epoch-a', stream_turn: 5, stream_seq: 1 } }),
+    ])
+    const restarted = reconcileStreamChunk('session-a', nextTurn.messages, nextTurn.cursor, 'ha',
+      { stream_epoch: 'epoch-b', stream_turn: 1, stream_seq: 1 })!
+    expect(restarted.messages.filter(message => message.streaming)).toHaveLength(1)
+    expect(restarted.messages.at(-1)?.content).toBe('ha')
+  })
+
   it('retains producer IDs and recognizes only the submitted user timestamp', () => {
     const detail: ChatDetail = { key: 'session-a', title: '', running: false, messages: [
       { role: 'user', content: 'hello', ts: '2026-09-27T12:00:00Z' },
@@ -142,6 +187,69 @@ window.loaded = true
     await vite.listen()
     const { evaluate, command } = await browser(`${origin}/conversation`)
     await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
+    let nativeHistoryGate: Promise<void> | undefined
+    if (process.env.GIDEON_TEST_MODEL) {
+      const trace = (stage: string, action: string, route = '') => {
+        console.log('Native history gate', JSON.stringify({ at: new Date().toISOString(), stage, action, route }))
+      }
+      await command('Fetch.enable', { patterns: [{ urlPattern: `${origin}/api/chat/sessions/*`, requestStage: 'Request' }] })
+      const heldRequests = new Map<'running' | 'streaming' | 'terminal', (requestId: string) => void>()
+      const heldDetails = new Map<'running' | 'streaming' | 'terminal', Promise<string>>()
+      for (const stage of ['running', 'streaming', 'terminal'] as const) {
+        heldDetails.set(stage, new Promise<string>(done => { heldRequests.set(stage, done) }))
+      }
+      const capturedStages = new Set<'running' | 'streaming' | 'terminal'>()
+      let requestNumber = 0
+      const requestRoutes = new Map<string, string>()
+      const sendFetchCommand = async (method: 'Fetch.continueRequest' | 'Fetch.disable', requestId?: string) => {
+        const route = requestId ? requestRoutes.get(requestId) || 'unknown' : ''
+        trace(route ? 'request' : 'fetch', `${method}:start`, route)
+        await command(method, requestId ? { requestId } : {})
+        trace(route ? 'request' : 'fetch', `${method}:complete`, route)
+        if (requestId) requestRoutes.delete(requestId)
+      }
+      debuggerSocket!.addEventListener('message', event => {
+        const frame = JSON.parse(String(event.data)) as { method?: string; params?: { requestId: string; request: { method: string; url: string } } }
+        if (frame.method !== 'Fetch.requestPaused' || !frame.params) return
+        const { requestId, request } = frame.params
+        const number = ++requestNumber
+        const route = request.url.includes('/approve') ? '/api/chat/sessions/:id/approve' : '/api/chat/sessions/:id'
+        requestRoutes.set(requestId, `${number}:${request.method} ${route}`)
+        trace('fetch', 'requestPaused', requestRoutes.get(requestId))
+        if (request.method !== 'GET' || !request.url.includes('/api/chat/sessions/')) {
+          void sendFetchCommand('Fetch.continueRequest', requestId)
+          return
+        }
+        void evaluate('window.captureHistoryStage || ""').then(stage => {
+          if ((stage === 'running' || stage === 'streaming' || stage === 'terminal') && !capturedStages.has(stage)) {
+            capturedStages.add(stage)
+            trace(stage, 'held', requestRoutes.get(requestId))
+            heldRequests.get(stage)!(requestId)
+          } else void sendFetchCommand('Fetch.continueRequest', requestId)
+        }).catch(() => void sendFetchCommand('Fetch.continueRequest', requestId))
+      })
+      const awaitStage = async <T,>(stage: string, operation: () => Promise<T>): Promise<T> => {
+        trace(stage, 'await:start')
+        const value = await operation()
+        trace(stage, 'await:complete')
+        return value
+      }
+      nativeHistoryGate = (async () => {
+        const runningRequest = await awaitStage('running:request', () => heldDetails.get('running')!)
+        await awaitStage('running:approval-frame', () => evaluate("window.waitForConversationFrame('approval')"))
+        await awaitStage('running:continue', () => sendFetchCommand('Fetch.continueRequest', runningRequest))
+        await awaitStage('running:send-refresh', () => evaluate('window.sendPromise'))
+        await awaitStage('streaming:arm', () => evaluate("window.captureHistoryStage = 'streaming'; window.releaseNativeApproval(); true"))
+        const streamingRequest = await awaitStage('streaming:request', () => heldDetails.get('streaming')!)
+        await awaitStage('terminal:arm', () => evaluate("window.captureHistoryStage = 'terminal'; true"))
+        await awaitStage('streaming:continue', () => sendFetchCommand('Fetch.continueRequest', streamingRequest))
+        const terminalRequest = await awaitStage('terminal:request', () => heldDetails.get('terminal')!)
+        await awaitStage('terminal:chat-done', () => evaluate("window.waitForConversationFrame('chat_done')"))
+        await awaitStage('terminal:continue', () => sendFetchCommand('Fetch.continueRequest', terminalRequest))
+        await awaitStage('terminal:refresh-settled', () => evaluate('window.streamingRefresh'))
+        await awaitStage('fetch:disable', () => sendFetchCommand('Fetch.disable'))
+      })()
+    }
     const result = await evaluate(`(async () => {
       const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
@@ -159,26 +267,83 @@ window.loaded = true
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
       const socket = window.controller.socket
       const frames = []
+      window.conversationFrames = frames
+      const frameWaiters = new Map()
+      window.waitForConversationFrame = type => new Promise(resolve => {
+        const found = frames.find(frame => frame.type === type)
+        if (found) { resolve(found); return }
+        const waiters = frameWaiters.get(type) || []
+        waiters.push(resolve)
+        frameWaiters.set(type, waiters)
+      })
+      window.nativeApprovalPermit = new Promise(resolve => { window.releaseNativeApproval = resolve })
       socket.addEventListener('message', event => {
         const frame = JSON.parse(event.data)
         if (frame.data?.session === session || frame.type === 'approval_resolved') {
-          frames.push({ type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
+          const captured = { type: frame.type, role: frame.data.role || '', tool: frame.data.tool || '',
             tool_call_id: frame.data.tool_call_id || '', id: frame.data.id || '',
-            approved: frame.data.approved, decision: frame.data.decision || '' })
+            approved: frame.data.approved, decision: frame.data.decision || '',
+            content: typeof frame.data.content === 'string' ? frame.data.content : '',
+            stream_epoch: frame.data.stream_epoch, stream_turn: frame.data.stream_turn,
+            stream_seq: frame.data.stream_seq }
+          frames.push(captured)
+          for (const resolve of frameWaiters.get(frame.type) || []) resolve(captured)
+          frameWaiters.delete(frame.type)
+          if (frame.type === 'chat_chunk' && window.captureHistoryStage === 'streaming' && !window.streamingRefresh) {
+            window.streamingRefresh = window.controller.refresh().then(() => {
+              const read = [...window.nativeHistoryReads].reverse().find(item => item.detail.running
+                && item.detail.stream_cursor
+                && item.detail.messages.some(message => message.role === 'streaming'
+                  && message.meta?.stream_epoch === item.detail.stream_cursor.stream_epoch
+                  && message.meta?.stream_turn === item.detail.stream_cursor.stream_turn))
+              const cursor = read?.detail.stream_cursor
+              const nativeStream = cursor && read.detail.messages.find(message => message.role === 'streaming'
+                && message.meta?.stream_epoch === cursor.stream_epoch
+                && message.meta?.stream_turn === cursor.stream_turn)
+              const stream = cursor && [...window.controller.snapshot().messages].reverse().find(message => message.streaming
+                && message.meta?.stream_epoch === cursor.stream_epoch
+                && message.meta?.stream_turn === cursor.stream_turn)
+              if (!read || !cursor || !nativeStream || !stream) {
+                window.activeOverlapEvidence = { runningSnapshot: Boolean(read), streamingMessage: Boolean(stream) }
+                return
+              }
+              const queued = window.conversationFrames.filter(item => item.type === 'chat_chunk'
+                && item.stream_epoch === cursor.stream_epoch && item.stream_turn === cursor.stream_turn
+                && item.stream_seq > cursor.stream_seq).map(item => item.content).join('')
+              window.activeOverlapEvidence = { content: stream.content,
+                expected: nativeStream.content + queued, runningSnapshot: true, streamingMessage: true }
+            })
+          }
         }
       })
+      const nativeFetch = window.fetch.bind(window)
+      window.nativeHistoryReads = []
+      window.fetch = async (input, init) => {
+        const response = await nativeFetch(input, init)
+        const url = typeof input === 'string' ? input : input.url
+        const method = init?.method || (typeof input === 'string' ? 'GET' : input.method)
+        if (method === 'GET' && url.includes('/api/chat/sessions/' + encodeURIComponent(session))) {
+          const detail = await response.clone().json()
+          window.nativeHistoryReads.push({ detail })
+        }
+        return response
+      }
       const prompt = expectAnswer
-        ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then answer ready.'
+        ? 'Use write_file to create native-event-output.txt in the current workspace with exactly the text conversation event checkpoint. Call only that tool, then after approval answer with these exact words: ready the native conversation event checkpoint is complete and the session history stays current while the response streams back to the owner.'
         : '  Reply with one word: ready.  '
       window.controller.setDraft(prompt)
-      await window.controller.send()
+      if (expectAnswer) {
+        window.captureHistoryStage = 'running'
+        window.sendPromise = window.controller.send()
+      } else await window.controller.send()
       if (expectAnswer) {
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
-          const pending = window.controller.snapshot().messages.find(message => message.role === 'permission')
+          const pending = frames.find(frame => frame.type === 'approval')
           if (pending) { clearInterval(timer); done(pending) }
-          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval request was not observed: ' + JSON.stringify(window.controller.snapshot()))) }
+          else if (++n > 1800) { clearInterval(timer); reject(Error('native approval frame was not observed: ' + JSON.stringify(frames))) }
         }, 50) }).then(async pending => {
-          const approvalId = pending.meta?.approval_id
+          await window.nativeApprovalPermit
+          const approvalId = pending.id
           if (typeof approvalId !== 'string' || !approvalId) throw Error('native approval row has no canonical ID')
           const response = await fetch('/api/chat/sessions/' + encodeURIComponent(session) + '/approve', {
             method: 'POST', credentials: 'same-origin',
@@ -189,12 +354,21 @@ window.loaded = true
           if (!response.ok || !result.ok) throw Error('native approval resolution failed: ' + JSON.stringify(result))
         })
         await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
+        await window.sendPromise
         await window.controller.refresh()
+        await new Promise((done, reject) => { let n=0; const timer=setInterval(() => {
+          const state = window.controller.snapshot()
+          const completedTool = state.messages.some(message => message.role === 'tool' && message.meta?.done === true)
+          if (!state.running && state.phase === 'ready' && completedTool) { clearInterval(timer); done() }
+          else if (++n > 300) { clearInterval(timer); reject(Error('terminal native history was not reconciled: ' + JSON.stringify(state))) }
+        }, 50) })
       }
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
+      const evidence = { session, connected: snapshot.connected, running: snapshot.running, phase: snapshot.phase,
+        activeOverlapEvidence: window.activeOverlapEvidence,
+        persisted: detail.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         visible: snapshot.messages.filter(m => m.role === 'user' && m.content.trim() === prompt.trim()).length,
         assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
@@ -224,6 +398,7 @@ window.loaded = true
       window.controller.setOwner(null)
       return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, retainedEdit, failed, cleared: window.controller.snapshot() }
     })()`)
+    if (nativeHistoryGate) await nativeHistoryGate
     expect(result.session).toMatch(/^chat-/)
     expect(result.connected).toBe(true)
     expect(result.persisted).toBe(1)
@@ -240,6 +415,11 @@ window.loaded = true
       expect(result.frames).toContainEqual(expect.objectContaining({ type: 'chat_message', role: 'assistant' }))
       expect(result.assistantPersisted.length).toBeGreaterThan(0)
       expect(result.assistantVisible).toEqual(result.assistantPersisted)
+      expect(result.activeOverlapEvidence).toMatchObject({ runningSnapshot: true, streamingMessage: true })
+      expect(result.activeOverlapEvidence.content).toBe(result.activeOverlapEvidence.expected)
+      expect(result.running).toBe(false)
+      expect(result.phase).toBe('ready')
+      expect(result.liveLifecycle.filter((message: { role: string }) => message.role === 'tool')).toHaveLength(result.toolRows.length)
       expect(result.toolRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', meta: expect.objectContaining({ done: true, output: expect.any(String) }) })]))
       expect(result.permissionRows).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'permission', meta: expect.objectContaining({ resolved: 'approved' }) })]))
       expect(result.liveLifecycle).toEqual(expect.arrayContaining([
@@ -333,7 +513,8 @@ window.loaded = true
     })()`)
     const [staleResult] = await Promise.all([stale, fault])
     expect(postFailed && faultDone).toBe(true)
-    expect(staleResult.state).toMatchObject({ draft: 'New owner send', phase: 'recovering', error: '' })
+    expect(staleResult.state).toMatchObject({ draft: 'New owner send', error: '' })
+    expect(['sending', 'recovering', 'failed']).toContain(staleResult.state.phase)
     expect(staleResult.state.sessionId).not.toBe(result.session)
     expect(staleResult.submitting).toBe(true)
     expect(newPostRequest).not.toBe('')

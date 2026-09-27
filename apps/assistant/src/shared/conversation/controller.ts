@@ -1,6 +1,7 @@
 import { gatewayJson, GatewayError } from '../transport.web'
 import type { OwnerScope } from '../auth.web'
-import type { ChatDetail, ChatHistoryMessage, ChatSocketEvent, ConversationMessage, ConversationState } from './types'
+import type { ChatDetail, ChatHistoryMessage, ChatSocketEvent, ConversationMessage, ConversationState,
+  ConversationStreamCursor } from './types'
 
 function messageId(session: string, message: ChatHistoryMessage, index: number): string {
   const sourceId = message.meta?.id
@@ -24,6 +25,64 @@ export function receivedPrompt(detail: ChatDetail, clientTs: string): boolean {
   return detail.messages.some(message => message.role === 'user' && message.ts === clientTs)
 }
 
+export function streamCursorDisposition(
+  current: ConversationStreamCursor | null,
+  incoming: ConversationStreamCursor,
+): 'stale' | 'same-turn' | 'new-turn' {
+  if (!current || incoming.stream_epoch !== current.stream_epoch) return 'new-turn'
+  if (incoming.stream_turn < current.stream_turn) return 'stale'
+  if (incoming.stream_turn > current.stream_turn) return 'new-turn'
+  if (incoming.stream_seq <= current.stream_seq) return 'stale'
+  return 'same-turn'
+}
+
+export function reconcileStreamChunk(
+  sessionId: string,
+  messages: readonly ConversationMessage[],
+  current: ConversationStreamCursor | null,
+  content: string,
+  incoming: ConversationStreamCursor,
+): { messages: readonly ConversationMessage[]; cursor: ConversationStreamCursor } | null {
+  const disposition = streamCursorDisposition(current, incoming)
+  if (disposition === 'stale') return null
+  const next = [...messages]
+  let streamingIndex = -1
+  if (disposition === 'same-turn') {
+    for (let index = next.length - 1; index >= 0; index--) {
+      const message = next[index]
+      if (message.streaming && message.meta?.stream_epoch === incoming.stream_epoch
+        && message.meta?.stream_turn === incoming.stream_turn) {
+        streamingIndex = index
+        break
+      }
+    }
+  }
+  if (disposition === 'new-turn') {
+    for (let index = 0; index < next.length; index++) {
+      if (next[index].streaming) next[index] = { ...next[index], streaming: false }
+    }
+  }
+  const meta = { stream_epoch: incoming.stream_epoch, stream_turn: incoming.stream_turn,
+    stream_seq: incoming.stream_seq }
+  if (streamingIndex >= 0) {
+    const streaming = next[streamingIndex]
+    next[streamingIndex] = { ...streaming, content: streaming.content + content, meta: { ...streaming.meta, ...meta } }
+  } else {
+    next.push({ id: `${sessionId}:live:${incoming.stream_epoch}:${incoming.stream_turn}`,
+      role: 'assistant', content, streaming: true, meta })
+  }
+  return { messages: next, cursor: incoming }
+}
+
+function streamCursor(value: unknown): ConversationStreamCursor | null {
+  if (!value || typeof value !== 'object') return null
+  const cursor = value as Record<string, unknown>
+  if (typeof cursor.stream_epoch !== 'string' || !cursor.stream_epoch
+    || typeof cursor.stream_turn !== 'number' || !Number.isInteger(cursor.stream_turn) || cursor.stream_turn < 0
+    || typeof cursor.stream_seq !== 'number' || !Number.isInteger(cursor.stream_seq) || cursor.stream_seq < 0) return null
+  return { stream_epoch: cursor.stream_epoch, stream_turn: cursor.stream_turn, stream_seq: cursor.stream_seq }
+}
+
 const EMPTY: ConversationState = {
   scope: null, sessionId: null, title: '', messages: [], draft: '', phase: 'signed-out',
   connected: false, running: false, error: '',
@@ -42,6 +101,7 @@ export class ConversationController {
   private submitting = false
   private submitToken = 0
   private lastChunkSeq = 0
+  private streamCursor: ConversationStreamCursor | null = null
   private closed = false
 
   subscribe = (listener: () => void): (() => void) => {
@@ -78,6 +138,7 @@ export class ConversationController {
     this.submitting = false
     this.submitToken++
     this.lastChunkSeq = 0
+    this.streamCursor = null
     this.update(scope ? { ...EMPTY, scope, phase: 'idle' } : EMPTY)
     if (scope && !this.closed) this.connect()
   }
@@ -112,6 +173,7 @@ export class ConversationController {
     this.dirtyDuringLoad = false
     this.queuedLiveEvents = []
     this.lastChunkSeq = 0
+    this.streamCursor = null
     this.update({ sessionId, title: '', messages: [], draft: changed ? '' : this.state.draft,
       phase: 'loading', running: false, error: '' })
     this.connect()
@@ -130,7 +192,8 @@ export class ConversationController {
     try {
       const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
       if (generation !== this.generation || loadToken !== this.loadToken || scope.cacheKey !== this.state.scope?.cacheKey || detail.key !== sessionId) return
-      this.lastChunkSeq = 0
+      this.streamCursor = streamCursor(detail.stream_cursor)
+      this.lastChunkSeq = this.streamCursor?.stream_seq ?? 0
       this.update({ title: detail.title, messages: canonicalMessages(detail), running: detail.running,
         phase: detail.running ? 'sending' : 'ready', error: '' })
     } catch (error) {
@@ -151,7 +214,8 @@ export class ConversationController {
     if (this.loading || !this.queuedLiveEvents.length) return
     const queued = this.queuedLiveEvents
     this.queuedLiveEvents = []
-    for (const event of queued) this.receive(event)
+    const terminalSnapshot = this.state.phase === 'ready' && !this.state.running
+    for (const event of queued) this.applyEvent(event, terminalSnapshot)
   }
 
   async send(): Promise<void> {
@@ -207,7 +271,8 @@ export class ConversationController {
       && event.data.session === undefined
     if (!scope || !sessionId || (event.data.session !== sessionId && !sessionlessApprovalResolution)) return
     if (this.loading) {
-      this.dirtyDuringLoad = true
+      if (event.type === 'chat_user_message' || event.type === 'chat_done'
+        || (event.type === 'chat_message' && event.data.role === 'error')) this.dirtyDuringLoad = true
       if (event.type === 'chat_chunk' || event.type === 'tool_call' || event.type === 'tool_result'
         || event.type === 'approval' || event.type === 'approval_resolved'
         || event.type === 'activity_event' || event.type === 'chat_thinking'
@@ -216,15 +281,38 @@ export class ConversationController {
       }
       return
     }
+    this.applyEvent(event)
+  }
+
+  private applyEvent(event: ChatSocketEvent, terminalSnapshot = false): void {
+    const { sessionId } = this.state
+    if (!sessionId) return
     if (event.type === 'chat_chunk') {
       const content = event.data.content
       const seq = event.data.seq
-      if (typeof content !== 'string' || typeof seq !== 'number' || seq <= this.lastChunkSeq) return
-      this.lastChunkSeq = seq
+      if (typeof content !== 'string' || typeof seq !== 'number') return
+      const incomingCursor = streamCursor(event.data)
+      if (incomingCursor) {
+        const reconciled = reconcileStreamChunk(sessionId, this.state.messages,
+          this.streamCursor, content, incomingCursor)
+        if (!reconciled) return
+        this.streamCursor = reconciled.cursor
+        this.lastChunkSeq = incomingCursor.stream_seq
+        this.update({ messages: reconciled.messages, running: true, phase: 'sending' })
+        return
+      } else {
+        if (terminalSnapshot || seq <= this.lastChunkSeq) return
+        this.lastChunkSeq = seq
+      }
       const messages = [...this.state.messages]
-      const last = messages[messages.length - 1]
-      if (last?.streaming) messages[messages.length - 1] = { ...last, content: last.content + content }
-      else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
+      let streamingIndex = -1
+      for (let index = messages.length - 1; index >= 0; index--) {
+        if (messages[index].streaming) { streamingIndex = index; break }
+      }
+      if (streamingIndex >= 0) {
+        const streaming = messages[streamingIndex]
+        messages[streamingIndex] = { ...streaming, content: streaming.content + content }
+      } else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
       this.update({ messages, running: true, phase: 'sending' })
     } else if (event.type === 'tool_call' || event.type === 'tool_result') {
       const toolCallId = typeof event.data.tool_call_id === 'string' ? event.data.tool_call_id : ''
@@ -232,6 +320,7 @@ export class ConversationController {
       const found = toolCallId ? messages.findIndex(message => message.role === 'tool'
         && message.meta?.tool_call_id === toolCallId) : -1
       const previous = found >= 0 ? messages[found] : undefined
+      if (previous?.meta?.done === true) return
       const incoming = event.type === 'tool_call' ? {
         ...(previous?.meta ?? {}), ...event.data,
         tool_call_id: toolCallId || undefined,
@@ -248,7 +337,7 @@ export class ConversationController {
       }
       if (found >= 0) messages[found] = message
       else messages.push(message)
-      this.update({ messages, running: true, phase: 'sending' })
+      this.update(terminalSnapshot ? { messages } : { messages, running: true, phase: 'sending' })
     } else if (event.type === 'approval' || event.type === 'approval_resolved') {
       const approvalId = typeof event.data.id === 'string' ? event.data.id : ''
       const messages = [...this.state.messages]
@@ -284,7 +373,7 @@ export class ConversationController {
       } else if (content || event.type === 'activity_event') {
         messages.push({ id: messageId, role, content, meta: event.data })
       }
-      this.update({ messages, ...(event.type === 'activity_event' ? {} : { running: true, phase: 'sending' as const }) })
+      this.update({ messages, ...(event.type === 'activity_event' || terminalSnapshot ? {} : { running: true, phase: 'sending' as const }) })
     } else if (event.type === 'chat_user_message' || event.type === 'chat_done') {
       void this.refresh()
     } else if (event.type === 'chat_message' && event.data.role === 'error') {

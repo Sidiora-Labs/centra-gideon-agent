@@ -6,7 +6,7 @@ import { useShellTheme } from '../../shared/shell/shellTheme'
 const destinations: Record<NativeResultRecord['kind'], Pick<ShellRoute, 'destination' | 'view' | 'placement'>> = {
   task: { destination: 'activity', view: 'detail', placement: { id: 'tasks' } },
   artifact: { destination: 'apps', view: 'workspace', placement: { id: 'artifacts/editor' } },
-  project: { destination: 'apps', view: 'workspace', placement: { id: 'projects' } },
+  project: { destination: 'apps', view: 'detail', placement: { id: 'projects/detail' } },
   chat_session: { destination: 'chat', view: 'detail' },
 }
 
