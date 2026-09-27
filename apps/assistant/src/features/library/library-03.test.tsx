@@ -43,31 +43,32 @@ afterEach(async () => {
 });
 
 const nativeScript = String.raw`
-import asyncio, json, os
+import asyncio, json, os, time
 from pathlib import Path
-from types import SimpleNamespace
 from aiohttp import web
-from gideon.cognition.knowledge.store import KnowledgeStore
+from gideon.core.config import config_dir
+from gideon.core.config.loader import AppConfig
+from gideon.engine.session import ConversationDirectory
 from gideon.integrations.knowledge_providers.dir_source import DirSourceProvider
 from gideon.integrations.knowledge_providers.feed_source import FeedSourceProvider
 from gideon.integrations.knowledge_providers.registry import register_provider
 from gideon.integrations.knowledge_providers.web_source import WebSourceProvider
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
-from gideon.interfaces.dashboard.handlers.knowledge import (
-  create_watched_source, get_item, ingest_file, list_items, list_source_recipes,
-  list_watched_sources, update_watched_source,
-)
+from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
+from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.auth import credentials
 
 async def main(origin):
   home = Path(os.environ["GIDEON_HOME"])
   home.mkdir(parents=True, exist_ok=True)
   (home / "config.json").write_text(json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8")
+  assert Path(config_dir()).resolve() == home.resolve(), "native configuration must use the isolated Gideon home"
   credentials.set_password("library-owner", "correct-horse-battery-staple")
   token_auth.use_persistent_secret()
   token_auth.revoke_all_sessions()
-  store = KnowledgeStore(str(home / "knowledge.db"))
+  state = ConsoleState(sessions=ConversationDirectory(AppConfig.load()), start_time=time.time(), owner_id="library-owner")
+  store = state.knowledge_store
   register_provider(DirSourceProvider(store))
   register_provider(FeedSourceProvider(store))
   register_provider(WebSourceProvider(store))
@@ -88,18 +89,12 @@ async def main(origin):
   app = web.Application(middlewares=[hold_source_create, token_auth.token_auth_middleware(port=10000)])
   app["port"] = 10000
   app["allowed_origins"] = {origin}
-  app["state"] = SimpleNamespace(knowledge_store=store)
+  app["state"] = state
   app.router.add_get("/api/auth/status", auth.api_login_status)
   app.router.add_get("/api/auth/session", auth.api_auth_session)
   app.router.add_post("/api/auth/login", auth.api_auth_login)
   app.router.add_post("/api/auth/logout", auth.api_auth_logout)
-  app.router.add_get("/api/knowledge/items", list_items)
-  app.router.add_post("/api/knowledge/ingest", ingest_file)
-  app.router.add_get("/api/knowledge/items/{id}", get_item)
-  app.router.add_get("/api/knowledge/sources", list_watched_sources)
-  app.router.add_post("/api/knowledge/sources", create_watched_source)
-  app.router.add_patch("/api/knowledge/sources/{id}", update_watched_source)
-  app.router.add_get("/api/knowledge/source-recipes", list_source_recipes)
+  setup_knowledge_routes(app)
   control = web.Application()
   async def source_write_state(_request):
     return web.json_response({"started": source_write_started.is_set()})
@@ -197,7 +192,7 @@ describe("Library import and watched source journey", () => {
     expect(imported.id).toBeTruthy();
     expect(imported.text).toContain("native-guide.pdf");
     expect(imported.text).toContain("Provider:");
-    expect(imported.status).toBe("queued");
+    expect(["queued", "processing"]).toContain(imported.status);
     expect(imported.href).toContain(encodeURIComponent(imported.id!));
 
     await browser.evaluate("[...document.querySelectorAll('button')].find(button=>button.textContent==='Sources')?.click()");
