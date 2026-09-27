@@ -166,8 +166,15 @@ window.loaded = true
         headers: { Accept: 'application/json', 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } });
       const page = await response.json();
       return { sources: snapshot.sources, ids: snapshot.entries.map(e => e.identity.key),
-        rawTaskPage: { status: response.status, total: page.total, ids: page.tasks?.map(task => task.id),
-          titles: page.tasks?.map(task => task.title) } } })()`)
+        rawTaskPage: { status: response.status, total: page.total, owner: page.owner,
+          ids: page.tasks?.map(task => task.id), titles: page.tasks?.map(task => task.title),
+          authors: page.tasks?.map(task => task.author), assignees: page.tasks?.map(task => task.assignee) } } })()`)
+    const ownershipResponse = await fetch(`${server.control}/task-ownership?owner=owner-a`)
+    const ownership = await ownershipResponse.json() as { total: number; owner: string; tasks: Array<{
+      id: string; title: string; author: string; assignee: string; belongs_to: boolean }> }
+    first.rawTaskPage.fixture = { total: ownership.total, owner: ownership.owner,
+      rejected: ownership.tasks.filter(task => !task.belongs_to),
+      omitted: ownership.tasks.filter(task => !first.rawTaskPage.ids.includes(task.id)) }
     expect(first.sources.task.entries, JSON.stringify(first.rawTaskPage)).toHaveLength(20)
     expect(first.sources.task.total).toBe(22)
     expect(first.sources.task.nextOffset).toBe(20)

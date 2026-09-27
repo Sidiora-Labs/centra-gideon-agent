@@ -227,7 +227,14 @@ window.loaded = true
     await control(server.control, '/task', { title: 'Recovered after reconnect' })
     await control(server.control, '/websocket-offline', { offline: false })
     await until(evaluate, `Array.from(document.querySelectorAll('[data-source="task"]')).some(card => card.textContent.includes('Recovered after reconnect'))`)
-    expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness')`)).toBe('current')
+    const reconnectDeadline = Date.now() + 5_000
+    let socketState = await controlState(server.control, '/websocket-state') as { open: number }
+    while (socketState.open < 1 && Date.now() < reconnectDeadline) {
+      await new Promise(done => setTimeout(done, 50))
+      socketState = await controlState(server.control, '/websocket-state')
+    }
+    expect(socketState.open).toBeGreaterThan(0)
+    await until(evaluate, `document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness') === 'current'`, 5_000)
 
     const createdAt = Date.now()
     await control(server.control, '/task', { title: 'Recovered by periodic snapshot' })
