@@ -29,6 +29,7 @@ class CustomerBrowserSession:
     account_id: str
     owner_id: str
     conversation_id: str
+    canonical_key: str
     status: str
     version: int
     created_at: float
@@ -56,11 +57,12 @@ class CustomerBrowserSessionStore:
                     account_id TEXT NOT NULL,
                     owner_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
+                    canonical_key TEXT NOT NULL,
                     status TEXT NOT NULL CHECK(status IN ('reserved', 'closed', 'error')),
                     version INTEGER NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
-                    UNIQUE(account_id, conversation_id)
+                    UNIQUE(account_id, canonical_key)
                 )"""
             )
 
@@ -91,24 +93,24 @@ class CustomerBrowserSessionStore:
         return CustomerBrowserSessionStore._session(row)
 
     def find_conversation(
-        self, account_id: str, owner_id: str, conversation_id: str
+        self, account_id: str, owner_id: str, canonical_key: str
     ) -> CustomerBrowserSession | None:
         with self._db() as db:
             row = db.execute(
-                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND conversation_id=?",
-                (account_id, conversation_id),
+                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND canonical_key=?",
+                (account_id, canonical_key),
             ).fetchone()
             return self._owned(row, account_id, owner_id) if row else None
 
     def reserve(
-        self, account_id: str, owner_id: str, conversation_id: str
+        self, account_id: str, owner_id: str, conversation_id: str, canonical_key: str
     ) -> tuple[CustomerBrowserSession, bool]:
-        if not account_id or not owner_id or not conversation_id:
-            raise ValueError("account, owner and conversation are required")
+        if not account_id or not owner_id or not conversation_id or not canonical_key:
+            raise ValueError("account, owner and conversation identity are required")
         with self._db() as db:
             row = db.execute(
-                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND conversation_id=?",
-                (account_id, conversation_id),
+                "SELECT * FROM customer_browser_sessions WHERE account_id=? AND canonical_key=?",
+                (account_id, canonical_key),
             ).fetchone()
             if row:
                 return self._owned(row, account_id, owner_id), False
@@ -116,9 +118,10 @@ class CustomerBrowserSessionStore:
             session_id = uuid.uuid4().hex
             db.execute(
                 """INSERT INTO customer_browser_sessions
-                   (id, account_id, owner_id, conversation_id, status, version, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 'reserved', 1, ?, ?)""",
-                (session_id, account_id, owner_id, conversation_id, stamp, stamp),
+                   (id, account_id, owner_id, conversation_id, canonical_key,
+                    status, version, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'reserved', 1, ?, ?)""",
+                (session_id, account_id, owner_id, conversation_id, canonical_key, stamp, stamp),
             )
             row = db.execute(
                 "SELECT * FROM customer_browser_sessions WHERE id=?", (session_id,)
