@@ -345,6 +345,15 @@ async def handle(request):
             )
         if "/mirror/" in request.path:
             account_id = request.match_info.get("account_id")
+            external_id = request.match_info.get("external_id")
+            if external_id is not None:
+                return web.json_response(
+                    {
+                        "message": mirrors.set_message_read_state(
+                            store, account_id, external_id, await request.json()
+                        )
+                    }
+                )
             if request.path.endswith("/capabilities"):
                 return web.json_response({"adapters": mirrors.COVERAGE})
             if request.path.endswith("/messages"):
@@ -517,6 +526,9 @@ def register(app):
     app.router.add_get(mirror + "/accounts/{account_id}", handle)
     app.router.add_put(mirror + "/accounts/{account_id}", handle)
     app.router.add_get(mirror + "/accounts/{account_id}/messages", handle)
+    app.router.add_patch(
+        mirror + "/accounts/{account_id}/messages/{external_id}/read-state", handle
+    )
     app.router.add_post(mirror + "/accounts/{account_id}/upload", handle)
     app.router.add_post(mirror + "/accounts/{account_id}/sync", handle)
     app.router.add_get("/api/capabilities/communications/threads", handle)

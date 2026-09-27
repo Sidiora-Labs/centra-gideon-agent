@@ -80,6 +80,9 @@ def schema(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS mirror_messages (account_id TEXT NOT NULL, external_id TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(account_id,external_id))"
     )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS mirror_message_read_state (account_id TEXT NOT NULL, external_id TEXT NOT NULL, is_read INTEGER NOT NULL CHECK (is_read IN (0,1)), updated_at TEXT NOT NULL, PRIMARY KEY(account_id,external_id))"
+    )
 
 
 def account_values(data):
@@ -562,13 +565,43 @@ def imap_messages(account):
 def messages(store, account_id):
     get_account(store, account_id)
     with closing(store.connect()) as db:
+        schema(db)
         return [
-            json.loads(body)
-            for body, in db.execute(
-                "SELECT body FROM mirror_messages WHERE account_id=? ORDER BY external_id",
+            {**json.loads(body), "is_read": bool(is_read), "read_state": "local_only"}
+            for body, is_read in db.execute(
+                "SELECT m.body,COALESCE(r.is_read,0) FROM mirror_messages m LEFT JOIN mirror_message_read_state r ON r.account_id=m.account_id AND r.external_id=m.external_id WHERE m.account_id=? ORDER BY m.external_id",
                 (account_id,),
             )
         ]
+
+
+def set_message_read_state(store, account_id, external_id, data):
+    fields(data, {"is_read"})
+    is_read = data.get("is_read")
+    if type(is_read) is not bool:
+        raise PeopleError("is_read must be a boolean")
+    external_id = text(external_id, "external_id", 500, True)
+    get_account(store, account_id)
+    updated_at = datetime.now(timezone.utc).isoformat()
+    with closing(store.connect()) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        schema(db)
+        if db.execute(
+            "SELECT 1 FROM mirror_messages WHERE account_id=? AND external_id=?",
+            (account_id, external_id),
+        ).fetchone() is None:
+            raise PeopleError("Mirror message not found for this account", 404)
+        db.execute(
+            "INSERT INTO mirror_message_read_state(account_id,external_id,is_read,updated_at) VALUES (?,?,?,?) ON CONFLICT(account_id,external_id) DO UPDATE SET is_read=excluded.is_read,updated_at=excluded.updated_at",
+            (account_id, external_id, int(is_read), updated_at),
+        )
+    return {
+        "account_id": account_id,
+        "external_id": external_id,
+        "is_read": is_read,
+        "read_state": "local_only",
+        "updated_at": updated_at,
+    }
 
 
 def sync(store, account_id, *, attachment_policy=STRICT):
@@ -677,6 +710,10 @@ def _sync(store, account_id, *, attachment_policy=STRICT):
                     (account_id,),
                 ).fetchall():
                     if external_id not in normalized:
+                        db.execute(
+                            "DELETE FROM mirror_message_read_state WHERE account_id=? AND external_id=?",
+                            (account_id, external_id),
+                        )
                         db.execute(
                             "DELETE FROM mirror_messages WHERE account_id=? AND external_id=?",
                             (account_id, external_id),

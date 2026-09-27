@@ -29,6 +29,15 @@ _DRAFT_FIELDS = {
     "source_message_id",
     "attachments",
 }
+_EDIT_FIELDS = {
+    "revision",
+    "account_id",
+    "to",
+    "subject",
+    "body",
+    "source_message_id",
+    "attachments",
+}
 _URL = re.compile(r'https?://[^\s<>"\']+', re.I)
 
 
@@ -104,6 +113,25 @@ def _message(row, provider):
             filename=resolved["name"],
         )
     return message.as_bytes(policy=SMTP)
+
+
+def _fingerprint(row):
+    return hashlib.sha256(
+        json.dumps(
+            {
+                k: row[k]
+                for k in (
+                    "sender",
+                    "to",
+                    "subject",
+                    "body",
+                    "source_message_id",
+                    "attachments",
+                )
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
 
 
 class SMTPTransport:
@@ -256,22 +284,7 @@ class OutboundEmail:
         }
         raw = _message(row, self.artifacts)
         row["content_sha256"] = hashlib.sha256(raw).hexdigest()
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    k: row[k]
-                    for k in (
-                        "sender",
-                        "to",
-                        "subject",
-                        "body",
-                        "source_message_id",
-                        "attachments",
-                    )
-                },
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()
+        fingerprint = _fingerprint(row)
         with closing(self.store.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             _schema(db)
@@ -281,17 +294,89 @@ class OutboundEmail:
             ).fetchone()
             if old:
                 existing = json.loads(old[1])
-                if existing["fingerprint"] != fingerprint:
+                original_fingerprint = existing.get(
+                    "request_fingerprint", existing["fingerprint"]
+                )
+                if original_fingerprint != fingerprint:
                     raise PeopleError(
                         "Request key already binds different email content", 409
                     )
                 return self._get(old[0]), False
             row["fingerprint"] = fingerprint
+            row["request_fingerprint"] = fingerprint
             db.execute(
                 "INSERT INTO outbound_email_drafts VALUES (?,?,?,?,?)",
                 (row["id"], account["id"], request_key, json.dumps(row), 1),
             )
         return self._get(row["id"]), True
+
+    def edit(self, draft_id, data):
+        fields(data, _EDIT_FIELDS)
+        revision = data.get("revision")
+        if type(revision) is not int:
+            raise PeopleError("revision is required")
+        current = self._get(draft_id)
+        account_id = text(data.get("account_id"), "account_id", 64, True)
+        if account_id != current["account_id"]:
+            raise PeopleError("Outbound email draft belongs to another account", 409)
+        account = mirrors.get_account(self.store, current["account_id"])
+        if (
+            account["owner_email"] != current["sender"]
+            or account["credential_ref"] != current["credential_ref"]
+            or account["kind"] != "imap"
+            or not account["credential_ref"]
+        ):
+            raise PeopleError("Account identity or credential binding changed", 409)
+
+        source_id = text(data.get("source_message_id", ""), "source_message_id", 500)
+        if source_id and not any(
+            row["external_id"] == source_id
+            for row in mirrors.messages(self.store, account["id"])
+        ):
+            raise PeopleError("Source message is not owned by this account", 404)
+        supplied = data.get("attachments", [])
+        if not isinstance(supplied, list) or len(supplied) > MAX_ATTACHMENTS:
+            raise PeopleError("At most ten artifact attachments are allowed")
+        attachments, total = [], 0
+        for value in supplied:
+            fields(value, {"artifact_id", "version"})
+            ref, content = _artifact(self.artifacts, value)
+            total += len(content)
+            attachments.append(ref)
+        if total > MAX_ATTACHMENT_BYTES:
+            raise PeopleError("Attachments exceed 10 MiB")
+
+        replacement = {
+            "account_revision": account["revision"],
+            "sender": account["owner_email"],
+            "to": _addresses(data.get("to")),
+            "subject": text(data.get("subject", ""), "subject", 1000),
+            "body": text(data.get("body"), "body", 100000, True),
+            "source_message_id": source_id or None,
+            "attachments": attachments,
+        }
+
+        def change(row):
+            if row["account_id"] != account["id"]:
+                raise PeopleError("Outbound email draft belongs to another account", 409)
+            if row["state"] not in ("draft", "approved"):
+                raise PeopleError("Only an unsent draft can be edited", 409)
+            row.setdefault("request_fingerprint", row["fingerprint"])
+            row.update(replacement)
+            row["state"] = "draft"
+            row["provider_acceptance"] = "not_submitted"
+            row["delivery"] = "not_submitted"
+            row.pop("approved_at", None)
+            row.pop("error", None)
+            row.pop("transport_receipt", None)
+            row.pop("accepted_at", None)
+            row.pop("verification", None)
+            row["content_sha256"] = hashlib.sha256(
+                _message(row, self.artifacts)
+            ).hexdigest()
+            row["fingerprint"] = _fingerprint(row)
+
+        return self._change(draft_id, revision, change)
 
     def _change(self, draft_id, revision, fn):
         if type(revision) is not int:

@@ -3,6 +3,8 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, Select, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
+import { assistantHandoffHref } from '../../../app/shell/assistantRouteBridge'
+import { codeRoute } from '../../../../../assistant/src/features/code/codeRoute'
 
 type Detection = { workspace: string; types: string[]; commands: Record<string, string>; ports: number[]; has_git: boolean; source_files: string[] }
 type Project = { project: { id: string; name: string; workspace_dir: string }; detection: Detection }
@@ -66,6 +68,6 @@ export default function Projects() {
     {loaded && rows.length === 0 && <p>No registered local projects.</p>}
     <ul className="space-y-s">{rows.map(item => <li key={item.project.id}><Button className="w-full justify-start" variant={selected === item.project.id ? 'tonal' : 'secondary'} disabled={busy} onClick={() => choose(item.project.id)}>{item.project.name}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Project not found in this view.</p>}
-    {row && <Surface className="space-y-m break-words p-l"><h3 data-type="title-m">{row.project.name}</h3><p className="text-on-surface-low">{row.project.workspace_dir}</p><p>{row.detection.types.join(', ') || 'Unrecognized project type'}</p><pre className="overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-m">{JSON.stringify(row.detection.commands, null, 2)}</pre></Surface>}
+    {row && <Surface className="space-y-m break-words p-l"><h3 data-type="title-m">{row.project.name}</h3><p className="text-on-surface-low">{row.project.workspace_dir}</p><p>{row.detection.types.join(', ') || 'Unrecognized project type'}</p><a href={assistantHandoffHref(codeRoute({ kind: 'project', id: row.project.id }))}>Open in Code workspace</a><pre className="overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-m">{JSON.stringify(row.detection.commands, null, 2)}</pre></Surface>}
   </section>
 }
