@@ -12,6 +12,7 @@ export function PdfReader({ scope, itemId, title, extractedText }: {
 }) {
   const key = `${scope.cacheKey}\u0000${itemId}`;
   const [reload, setReload] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<PdfState>({ key: "", status: "loading" });
   const current = state.key === key ? state : { key, status: "loading" as const };
 
@@ -19,6 +20,7 @@ export function PdfReader({ scope, itemId, title, extractedText }: {
     const controller = new AbortController();
     let live = true;
     let objectUrl: string | undefined;
+    setPreviewOpen(false);
     setState({ key, status: "loading" });
     void getLibraryOriginalPdf(scope, itemId, controller.signal).then(blob => {
       if (!live) return;
@@ -47,11 +49,16 @@ export function PdfReader({ scope, itemId, title, extractedText }: {
         <a href={current.href} target="_blank" rel="noreferrer">Open PDF in a new tab</a>
         <a href={current.href} download={`${title || "document"}.pdf`}>Download PDF</a>
       </div>
-      <iframe className="gideon-library-reader__pdf-frame" src={current.href} title={`PDF document: ${title}`} />
-      {extractedText && <details className="gideon-library-reader__extracted">
-        <summary>Read extracted text</summary>
-        <div id="library-extracted-text" className="gideon-library-reader__text" role="document" aria-label={`Extracted text: ${title}`}>{extractedText}</div>
-      </details>}
+      {extractedText
+        ? <section className="gideon-library-reader__extracted" aria-label="Extracted document text">
+          <h3>Document text</h3>
+          <div id="library-extracted-text" className="gideon-library-reader__text" role="document" aria-label={`Extracted text: ${title}`}>{extractedText}</div>
+        </section>
+        : <p className="gideon-library__notice" role="status">No extracted text is available for this item. You can open or download the original PDF.</p>}
+      <details className="gideon-library-reader__original-preview" onToggle={event => setPreviewOpen(event.currentTarget.open)}>
+        <summary>Preview original PDF</summary>
+        {previewOpen && <iframe className="gideon-library-reader__pdf-frame" src={current.href} title={`PDF document: ${title}`} />}
+      </details>
     </section>;
   }
 

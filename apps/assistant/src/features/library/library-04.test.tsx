@@ -189,12 +189,19 @@ describe("Library source-aware reader and durable notes", () => {
     expect(importedId).toBeTruthy();
     await browser.evaluate("[...document.querySelectorAll('[data-import-item-id] button')].find(button=>button.textContent==='Open item')?.click()");
     await browser.waitFor("document.querySelector('[data-library-reader-key] h2')?.textContent==='reader-source.pdf'", "PDF reader route");
-    await browser.waitFor("document.querySelector('[data-pdf-state=ready] iframe[title^=\"PDF document:\"]')", "authorized original PDF");
+    await browser.waitFor("(()=>{const panel=document.querySelector('[data-pdf-state=ready]');const text=document.querySelector('#library-extracted-text');return !!panel?.querySelector('a[download]')&&!!text&&getComputedStyle(text).visibility==='visible'&&text.getBoundingClientRect().height>0&&!panel.querySelector('.gideon-library-reader__original-preview[open]')&&!panel.querySelector('.gideon-library-reader__pdf-frame')})()", "visible extracted text with authorized original actions");
     const reader = await browser.evaluate<{ width: number; pdfState?: string; provider?: string; source?: string }>("(()=>{const panel=document.querySelector('[data-pdf-state=ready]');const reader=document.querySelector('.gideon-library-reader');const meta=reader?.querySelector('.gideon-library-reader__metadata')?.textContent;return {width:reader?.getBoundingClientRect().width||0,pdfState:panel?.getAttribute('data-pdf-state'),provider:meta?.includes('native')?'native':'',source:meta||''}})()");
     expect(reader.width).toBeGreaterThan(900);
     expect(reader.pdfState).toBe("ready");
     expect(reader.provider).toBe("native");
     expect(reader.source).toContain("reader-source.pdf");
+    const original = await browser.evaluate<{ open?: string; download?: string; header?: string; textVisible?: boolean; previewOpen?: boolean; previewFrame?: boolean }>("(async()=>{const panel=document.querySelector('[data-pdf-state=ready]');const open=panel?.querySelector('a[target=_blank]')?.getAttribute('href')||'';const download=panel?.querySelector('a[download]')?.getAttribute('href')||'';const response=await fetch(open);const bytes=new Uint8Array(await response.arrayBuffer());const text=document.querySelector('#library-extracted-text');return {open,download,header:new TextDecoder().decode(bytes.slice(0,8)),textVisible:!!text&&getComputedStyle(text).visibility==='visible'&&text.getBoundingClientRect().height>0&&text.textContent?.includes('A native reader passage.'),previewOpen:!!panel?.querySelector('.gideon-library-reader__original-preview[open]'),previewFrame:!!panel?.querySelector('.gideon-library-reader__pdf-frame')}})()");
+    expect(original.open).toMatch(/^blob:/);
+    expect(original.download).toMatch(/^blob:/);
+    expect(original.header).toBe("%PDF-1.4");
+    expect(original.textVisible).toBe(true);
+    expect(original.previewOpen).toBe(false);
+    expect(original.previewFrame).toBe(false);
 
     await browser.evaluate(`(${setValue})('library-annotation-quote','A native reader passage.')`);
     await browser.evaluate(`(${setValue})('library-annotation-note','Keep this passage for review.')`);
@@ -203,12 +210,14 @@ describe("Library source-aware reader and durable notes", () => {
 
     await capture("library-04-desktop.png");
     await browser.command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await browser.waitFor("document.querySelector('.gideon-library-reader__pdf-frame')?.getBoundingClientRect().width<=390", "narrow PDF reader layout");
+    await browser.waitFor("document.querySelector('#library-extracted-text')?.getBoundingClientRect().width<=390", "narrow extracted text layout");
     await capture("library-04-narrow.png");
     const narrow = await browser.evaluate<{ width: number; scrollWidth: number }>("(()=>({width:document.querySelector('.gideon-library-reader')?.getBoundingClientRect().width||0,scrollWidth:document.documentElement.scrollWidth}))()");
     expect(narrow.width).toBeLessThanOrEqual(390);
     expect(narrow.scrollWidth).toBeLessThanOrEqual(390);
 
+    await browser.evaluate("document.querySelector('.gideon-library-reader__original-preview summary')?.click()");
+    await browser.waitFor("document.querySelector('.gideon-library-reader__original-preview[open] iframe')", "user-invoked original PDF preview");
     await browser.command("Emulation.clearDeviceMetricsOverride");
     const beforeReload = await browser.evaluate<number>("performance.timeOrigin");
     const readerUrl = await browser.evaluate<string>("location.href");
