@@ -117,7 +117,8 @@ async def main(origin: str) -> None:
         )
 
         settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0,
-            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None}
+            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None,
+            "replace_on_success": False}
 
         @web.middleware
         async def delay_reads(request: web.Request, handler):
@@ -165,7 +166,19 @@ async def main(origin: str) -> None:
         app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
         app.router.add_get("/api/approvals", api_approvals)
-        app.router.add_post("/api/approvals/{id}/{action}", api_approval_resolve)
+
+        async def resolve_approval(request: web.Request) -> web.Response:
+            response = await api_approval_resolve(request)
+            if response.status < 300 and settings["replace_on_success"]:
+                settings["replace_on_success"] = False
+                previous = approval_requests.get(request.match_info["id"])
+                if previous is not None and not previous.done():
+                    await previous
+                await start_approval(request.match_info["id"], "write_file",
+                    '{"path":"/workspace/third.txt"}', "chat-3")
+            return response
+
+        app.router.add_post("/api/approvals/{id}/{action}", resolve_approval)
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
         app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
@@ -203,6 +216,10 @@ async def main(origin: str) -> None:
             await start_approval("approval-1", "delete_file",
                 '{"path":"/workspace/second.txt"}', "chat-2")
             return web.json_response({"revision": state._pending_approvals["approval-1"]["revision"]})
+
+        async def control_replace_on_success(request: web.Request) -> web.Response:
+            settings["replace_on_success"] = True
+            return web.json_response({"ok": True})
 
         async def control_approval_state(request: web.Request) -> web.Response:
             return web.json_response({"pending": sorted(state._pending_approvals), "results": approval_results})
@@ -257,6 +274,7 @@ async def main(origin: str) -> None:
         control.router.add_post("/delay-release", control_delay_release)
         control.router.add_post("/empty-inbox", control_empty_inbox)
         control.router.add_post("/replace-approval", control_replace_approval)
+        control.router.add_post("/replace-on-success", control_replace_on_success)
         control.router.add_get("/approval-state", control_approval_state)
         control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)

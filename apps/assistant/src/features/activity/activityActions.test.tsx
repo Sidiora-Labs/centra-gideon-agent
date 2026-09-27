@@ -174,11 +174,33 @@ window.loaded = true
     expect(state.pending).toContain('approval-1')
     expect(state.results['approval-1']).toEqual([false])
 
+    await evaluate(`window.mountRecord({ kind: 'inbox_item', id: 'inbox-1' })`)
+    await until(evaluate, `document.querySelector('[data-activity-detail="inbox_item"]')?.getAttribute('data-read-state') === 'ready'`)
+    expect(await evaluate(`Array.from(document.querySelectorAll('[role="alert"]')).some(item => item.textContent.includes('changed or is no longer pending'))`)).toBe(false)
+
+    await evaluate(`window.mountRecord({ kind: 'approval', id: 'approval-1' })`)
+    await until(evaluate, `document.querySelector('[data-approval-id="approval-1"]')?.getAttribute('data-approval-revision') === ${JSON.stringify(replacement.revision)}`)
     await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Reject request').click()`)
     await until(evaluate, `document.querySelector('[data-activity-detail]')?.getAttribute('data-read-state') === 'missing'`)
     state = await (await fetch(`${control}/approval-state`)).json() as typeof state
     expect(state.pending).not.toContain('approval-1')
     expect(state.results['approval-1']).toEqual([false, false])
+
+    const next = await (await fetch(`${control}/replace-approval`, { method: 'POST' })).json() as { revision: string }
+    await evaluate(`window.mountRecord({ kind: 'approval', id: 'approval-1' })`)
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Reload record').click()`)
+    await until(evaluate, `document.querySelector('[data-approval-id="approval-1"]')?.getAttribute('data-approval-revision') === ${JSON.stringify(next.revision)}`)
+    await fetch(`${control}/replace-on-success`, { method: 'POST' })
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Approve request').click()`)
+    await until(evaluate, `document.querySelector('[data-approval-id="approval-1"]')?.getAttribute('data-approval-revision') !== ${JSON.stringify(next.revision)}`)
+    const immediatelyReplacedRevision = await evaluate(`document.querySelector('[data-approval-id="approval-1"]').getAttribute('data-approval-revision')`)
+    expect(immediatelyReplacedRevision).toMatch(/^[a-f0-9]{32}$/)
+    expect(immediatelyReplacedRevision).not.toBe(next.revision)
+    expect(await evaluate(`document.querySelector('[data-activity-detail]')?.textContent.includes('/workspace/third.txt')`)).toBe(true)
+    expect(await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Approve request').disabled`)).toBe(false)
+    state = await (await fetch(`${control}/approval-state`)).json() as typeof state
+    expect(state.pending).toContain('approval-1')
+    expect(state.results['approval-1']).toEqual([false, false, true])
 
     await evaluate(`window.mountRecord({ kind: 'inbox_item', id: 'inbox-1' })`)
     await until(evaluate, `document.querySelector('[data-activity-detail="inbox_item"]')?.getAttribute('data-read-state') === 'ready'`)

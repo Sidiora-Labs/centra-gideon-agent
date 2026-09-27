@@ -56,9 +56,11 @@ export default function ActivityDetail(props: ModuleProps) {
   const id = route.record?.id ?? ''
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<{ key: string; result: ActivityDetailRead }>()
-  const [actionError, setActionError] = useState('')
+  const [actionError, setActionError] = useState<{ key: string; message: string }>()
   const requestGeneration = useRef(0)
   const requestKey = `${scope.cacheKey}:${serializeShellRoute(route)}:${kind ?? ''}:${id}:${attempt}`
+  const actionContextKey = `${scope.cacheKey}:${serializeShellRoute(route)}:${kind ?? ''}:${id}`
+  const actionContext = useRef(actionContextKey)
   const returnContext: ShellReturnContext | undefined = route.returnTo ?? props.returnTo
   useEffect(() => {
     const generation = ++requestGeneration.current
@@ -73,6 +75,13 @@ export default function ActivityDetail(props: ModuleProps) {
     })
     return () => { requestGeneration.current++; abort.abort() }
   }, [scope, requestKey, kind, id])
+
+  useEffect(() => {
+    if (actionContext.current !== actionContextKey) {
+      actionContext.current = actionContextKey
+      setActionError(undefined)
+    }
+  }, [actionContextKey])
 
   const result = loaded?.key === requestKey ? loaded.result
     : { state: 'unavailable' as const, message: 'Loading native detail.' }
@@ -96,7 +105,8 @@ export default function ActivityDetail(props: ModuleProps) {
       background: palette.card, color: palette.text, font: 'inherit', cursor: 'pointer' }}>Reload record</button>}>
     <main data-activity-detail={kind} data-read-state={result.state}
       style={{ maxWidth: 860, margin: '0 auto', padding: '20px clamp(12px, 3vw, 28px) 48px' }}>
-      {actionError && <p role="alert" style={{ color: palette.danger }}>{actionError}</p>}
+      {actionContext.current === actionContextKey && actionError?.key === actionContextKey && actionError.message &&
+        <p role="alert" style={{ color: palette.danger }}>{actionError.message}</p>}
       {record ? <>
         <h2 style={{ margin: '0 0 20px', color: palette.text, overflowWrap: 'anywhere' }}>
           {record.kind === 'artifact' ? record.record.name : record.kind === 'inbox_item' ? record.record.message
@@ -110,9 +120,11 @@ export default function ActivityDetail(props: ModuleProps) {
             <dd style={{ margin: 0, color: palette.text, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</dd>
           </div>)}
         </dl>
-        {approval && <ActivityAttention approval={approval} scope={scope} palette={palette}
+        {approval && <ActivityAttention key={`${scope.cacheKey}:${approval.id}:${approval.revision}`}
+          approval={approval} scope={scope} palette={palette}
           onRefresh={() => setAttempt(value => value + 1)}
-          onActionError={setActionError}
+          onActionError={message => setActionError(message
+            ? { key: actionContextKey, message } : undefined)}
           onContinue={() => {
             const next = approvalChatRoute(approval, route)
             if (next) navigate(next)
