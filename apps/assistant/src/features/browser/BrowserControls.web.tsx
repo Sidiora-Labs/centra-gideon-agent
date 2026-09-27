@@ -13,6 +13,16 @@ export default function BrowserControls({ client, session, onSessionChange }: Pr
   const { palette } = useShellTheme()
   const [current, setCurrent] = useState(session)
   const currentRef = useRef(session)
+  const identity = JSON.stringify([client.scope.runtimeOrigin, client.scope.cacheKey, client.scope.ownerId, session.id])
+  const scopeRef = useRef({ identity, generation: 0 })
+  if (scopeRef.current.identity !== identity) {
+    scopeRef.current = { identity, generation: scopeRef.current.generation + 1 }
+    currentRef.current = session
+  } else if (session.version > currentRef.current.version) {
+    currentRef.current = session
+  }
+  const [stateIdentity, setStateIdentity] = useState(identity)
+  const scopeChanged = stateIdentity !== identity
   const [fresh, setFresh] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -20,30 +30,50 @@ export default function BrowserControls({ client, session, onSessionChange }: Pr
   const [url, setUrl] = useState('')
   const [inputText, setInputText] = useState('')
 
-  function accept(next: BrowserSession) {
+  function live(generation: number, base: BrowserSession) {
+    return scopeRef.current.generation === generation && scopeRef.current.identity === identity &&
+      currentRef.current.id === session.id &&
+      currentRef.current.version === base.version
+  }
+
+  function accept(next: BrowserSession, generation: number, base: BrowserSession) {
+    if (!live(generation, base) || next.id !== base.id || next.version < base.version) return false
     currentRef.current = next
     setCurrent(next)
     onSessionChange?.(next)
+    return true
   }
 
   useEffect(() => {
-    if (session.id !== currentRef.current.id || session.version > currentRef.current.version) {
+    if (stateIdentity !== identity) {
+      setStateIdentity(identity)
       currentRef.current = session
       setCurrent(session)
       setFresh(true)
+      setBusy(false)
       setPreview(null)
       setMessage('')
+      setUrl('')
+      setInputText('')
+    } else if (session.id === currentRef.current.id && session.version >= currentRef.current.version) {
+      currentRef.current = session
+      setCurrent(session)
+      setFresh(true)
+      setBusy(false)
+      setPreview(null)
     }
-  }, [session])
+  }, [identity, session, stateIdentity])
 
   async function refresh() {
+    const generation = scopeRef.current.generation
+    const base = currentRef.current
     setBusy(true)
-    const result = await client.get(currentRef.current.id)
-    if (result.state === 'ready') {
-      accept(result.value)
+    const result = await client.get(base.id)
+    if (!live(generation, base)) return
+    if (result.state === 'ready' && accept(result.value, generation, base)) {
       setFresh(true)
       setMessage('Browser state refreshed.')
-    } else {
+    } else if (result.state !== 'ready') {
       setFresh(false)
       setMessage(result.message)
     }
@@ -53,42 +83,45 @@ export default function BrowserControls({ client, session, onSessionChange }: Pr
 
   async function showPreview() {
     if (busy || !fresh || currentRef.current.status !== 'active') return
+    const generation = scopeRef.current.generation
+    const base = currentRef.current
     setBusy(true)
-    const result = await client.preview(currentRef.current)
-    if (result.state === 'ready' && result.value.version === currentRef.current.version &&
-        result.value.controlHolder === currentRef.current.controlHolder) {
+    const result = await client.preview(base)
+    if (!live(generation, base)) return
+    if (result.state === 'ready' && result.value.version === base.version &&
+        result.value.controlHolder === base.controlHolder) {
       setPreview(result.value)
       setMessage('')
     } else {
       setPreview(null)
       setFresh(false)
       setMessage(result.state === 'ready' ? 'The browser changed while the preview loaded.' : result.message)
-      const latest = await client.get(currentRef.current.id)
-      if (latest.state === 'ready') {
-        accept(latest.value)
-        setFresh(true)
-      }
+      const latest = await client.get(base.id)
+      if (!live(generation, base)) return
+      if (latest.state === 'ready' && accept(latest.value, generation, base)) setFresh(true)
     }
     setBusy(false)
   }
 
   async function act(operation: (current: BrowserSession) => Promise<BrowserResult<BrowserSession>>) {
     if (busy || !fresh) return
+    const generation = scopeRef.current.generation
+    const base = currentRef.current
     setBusy(true)
-    const result = await operation(currentRef.current)
+    const result = await operation(base)
+    if (!live(generation, base)) return
     setPreview(null)
     if (result.state === 'ready') {
-      accept(result.value)
+      if (!accept(result.value, generation, base)) { setBusy(false); return }
       setMessage('')
     } else {
       setMessage(result.message)
       setFresh(false)
-      if (result.current) accept(result.current)
-      const latest = await client.get(currentRef.current.id)
-      if (latest.state === 'ready') {
-        accept(latest.value)
-        setFresh(true)
-      }
+      let latestBase = base
+      if (result.current && accept(result.current, generation, base)) latestBase = result.current
+      const latest = await client.get(latestBase.id)
+      if (!live(generation, latestBase)) return
+      if (latest.state === 'ready' && accept(latest.value, generation, latestBase)) setFresh(true)
     }
     setBusy(false)
   }
@@ -103,11 +136,18 @@ export default function BrowserControls({ client, session, onSessionChange }: Pr
     if (inputText) void act(row => client.input(row, 'text', inputText))
   }
 
-  const customer = current.status === 'active' && current.controlHolder === 'customer'
-  const canAct = fresh && !busy
-  const button = { minHeight: 40, border: `1px solid ${palette.line}`, borderRadius: 8,
+  const visibleCurrent = scopeChanged ? session : session.version > current.version ? session : current
+  const visibleFresh = scopeChanged ? true : fresh
+  const visibleBusy = scopeChanged ? false : busy
+  const visibleMessage = scopeChanged ? '' : message
+  const visiblePreview = scopeChanged ? null : preview
+  const visibleUrl = scopeChanged ? '' : url
+  const visibleInputText = scopeChanged ? '' : inputText
+  const customer = visibleCurrent.status === 'active' && visibleCurrent.controlHolder === 'customer'
+  const canAct = visibleFresh && !visibleBusy
+  const button = { minHeight: 44, border: `1px solid ${palette.line}`, borderRadius: 8,
     padding: '8px 12px', background: palette.secondary, color: palette.text, cursor: 'pointer' }
-  const field = { minHeight: 40, border: `1px solid ${palette.line}`, borderRadius: 8,
+  const field = { minHeight: 44, border: `1px solid ${palette.line}`, borderRadius: 8,
     padding: '8px 12px', background: palette.card, color: palette.text, flex: '1 1 180px' }
 
   return <section aria-label="Browser controls" style={{ display: 'grid', gap: 14, padding: 18,
@@ -115,37 +155,37 @@ export default function BrowserControls({ client, session, onSessionChange }: Pr
     <div>
       <h2 style={{ margin: '0 0 6px' }}>Browser controls</h2>
       <p role="status" style={{ margin: 0, color: palette.muted }}>
-        {current.status === 'active' ? 'Connected' : current.status === 'reserved' ? 'Ready to connect' :
-          current.status === 'closed' ? 'Closed' : 'Connection unavailable'} ·
-        {' '}{current.controlHolder === 'customer' ? 'You have control' : 'Gideon has control'} · version {current.version}
+        {visibleCurrent.status === 'active' ? 'Connected' : visibleCurrent.status === 'reserved' ? 'Ready to connect' :
+          visibleCurrent.status === 'closed' ? 'Closed' : 'Connection unavailable'} ·
+        {' '}{visibleCurrent.controlHolder === 'customer' ? 'You have control' : 'Gideon has control'} · version {visibleCurrent.version}
       </p>
     </div>
-    {message && <p role="alert" style={{ margin: 0, color: palette.danger }}>{message}</p>}
+    {visibleMessage && <p role="alert" style={{ margin: 0, color: palette.danger }}>{visibleMessage}</p>}
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      {current.status === 'reserved' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('start')}>Connect browser</button>}
-      {(current.status === 'closed' || current.status === 'error') && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('reopen')}>Reopen browser</button>}
-      {current.status !== 'closed' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('close')}>Close browser</button>}
-      {current.status === 'active' && current.controlHolder === 'assistant' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('takeover')}>Take control</button>}
+      {visibleCurrent.status === 'reserved' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('start')}>Connect browser</button>}
+      {(visibleCurrent.status === 'closed' || visibleCurrent.status === 'error') && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('reopen')}>Reopen browser</button>}
+      {visibleCurrent.status !== 'closed' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('close')}>Close browser</button>}
+      {visibleCurrent.status === 'active' && visibleCurrent.controlHolder === 'assistant' && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('takeover')}>Take control</button>}
       {customer && <button type="button" style={button} disabled={!canAct} onClick={() => mutate('handback')}>Hand back to Gideon</button>}
-      <button type="button" style={button} disabled={busy} onClick={() => void refresh()}>Refresh state</button>
-      <button type="button" style={button} disabled={!canAct || current.status !== 'active'} onClick={() => void showPreview()}>Refresh preview</button>
+      <button type="button" style={button} disabled={visibleBusy} onClick={() => void refresh()}>Refresh state</button>
+      <button type="button" style={button} disabled={!canAct || visibleCurrent.status !== 'active'} onClick={() => void showPreview()}>Refresh preview</button>
     </div>
-    {current.status === 'active' && <div aria-label="Browser preview" style={{ display: 'grid', gap: 8 }}>
-      {preview && preview.version === current.version ? <>
-        <p style={{ margin: 0, overflowWrap: 'anywhere' }}>{preview.title || 'Untitled page'} · {preview.url || 'Blank page'}</p>
-        <p style={{ margin: 0, color: palette.muted }}>Captured {new Date(preview.timestamp * 1000).toLocaleString()} · {preview.controlHolder === 'customer' ? 'You have control' : 'Gideon has control'} · version {preview.version} · {preview.image.size} image bytes</p>
+    {visibleCurrent.status === 'active' && <div aria-label="Browser preview" style={{ display: 'grid', gap: 8 }}>
+      {visiblePreview && visiblePreview.version === visibleCurrent.version ? <>
+        <p style={{ margin: 0, overflowWrap: 'anywhere' }}>{visiblePreview.title || 'Untitled page'} · {visiblePreview.url || 'Blank page'}</p>
+        <p style={{ margin: 0, color: palette.muted }}>Captured {new Date(visiblePreview.timestamp * 1000).toLocaleString()} · {visiblePreview.controlHolder === 'customer' ? 'You have control' : 'Gideon has control'} · version {visiblePreview.version} · {visiblePreview.image.size} image bytes</p>
       </> : <p style={{ margin: 0, color: palette.muted }}>Preview unavailable or stale. Refresh the preview to see the current page.</p>}
     </div>}
     {customer && <>
       <form onSubmit={navigate} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <label htmlFor={`browser-url-${current.id}`} style={{ flexBasis: '100%' }}>Address</label>
-        <input id={`browser-url-${current.id}`} type="url" required value={url} onChange={event => setUrl(event.target.value)} placeholder="https://example.com" style={field} disabled={!canAct} />
+        <label htmlFor={`browser-url-${visibleCurrent.id}`} style={{ flexBasis: '100%' }}>Address</label>
+        <input id={`browser-url-${visibleCurrent.id}`} type="url" required value={visibleUrl} onChange={event => setUrl(event.target.value)} placeholder="https://example.com" style={field} disabled={!canAct} />
         <button type="submit" style={button} disabled={!canAct}>Navigate</button>
       </form>
       <form onSubmit={insertText} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <label htmlFor={`browser-text-${current.id}`} style={{ flexBasis: '100%' }}>Type into the focused page field</label>
-        <input id={`browser-text-${current.id}`} value={inputText} onChange={event => setInputText(event.target.value)} maxLength={2000} style={field} disabled={!canAct} />
-        <button type="submit" style={button} disabled={!canAct || !inputText}>Type text</button>
+        <label htmlFor={`browser-text-${visibleCurrent.id}`} style={{ flexBasis: '100%' }}>Type into the focused page field</label>
+        <input id={`browser-text-${visibleCurrent.id}`} value={visibleInputText} onChange={event => setInputText(event.target.value)} maxLength={2000} style={field} disabled={!canAct} />
+        <button type="submit" style={button} disabled={!canAct || !visibleInputText}>Type text</button>
       </form>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button type="button" style={button} disabled={!canAct} onClick={() => void act(row => client.input(row, 'scroll', 'up'))}>Scroll up</button>
