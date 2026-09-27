@@ -8,29 +8,32 @@ from pathlib import Path
 
 from aiohttp import web
 
-import gideon.core.config.loader as loader
 from gideon.automation.event_triggers import EventTrigger, EventTriggerStore
 from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
 from gideon.automation.workflows import store as workflow_store
-from gideon.automation.workflows.handlers import api_runs_list
+from gideon.automation.workflows.handlers import api_run_status, api_runs_list
 from gideon.automation.workflows.models import RunStatus, WorkflowRun
 from gideon.cognition.history import ConversationLog
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.engine.hooks import ScriptHookStore
 from gideon.engine.tasks import registry as task_registry
-from gideon.engine.tasks.handlers import api_tasks_list
+from gideon.engine.tasks.handlers import api_tasks_get, api_tasks_list
 from gideon.integrations.inbox import InboxItem, InboxStore
-from gideon.interfaces.dashboard import session_store, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.messaging import api_notifications
 from gideon.interfaces.dashboard.handlers.sessions import api_approvals
-from gideon.interfaces.dashboard.handlers.triggers import api_trigger_history_all
-from gideon.interfaces.dashboard.handlers_inbox import api_inbox_open_items
+from gideon.interfaces.dashboard.handlers.triggers import (
+    api_trigger_history_all,
+    api_trigger_history_detail,
+    api_triggers,
+)
+from gideon.interfaces.dashboard.handlers_inbox import api_inbox_list, api_inbox_open_items
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.auth import credentials
 from gideon.workspace.artifacts import registry as artifact_registry
-from gideon.workspace.artifacts.handlers import api_artifacts_list
+from gideon.workspace.artifacts.handlers import api_artifact_detail, api_artifacts_list
 
 
 PASSWORD = "correct-horse-battery-staple"
@@ -39,9 +42,7 @@ PASSWORD = "correct-horse-battery-staple"
 async def main(origin: str) -> None:
     with tempfile.TemporaryDirectory(prefix="gideon-activity-") as temporary_home:
         home = Path(temporary_home)
-        loader.config_dir = lambda: home
-        credentials.config_dir = lambda: home
-        session_store.config_dir = lambda: home
+        os.environ["GIDEON_HOME"] = str(home)
         (home / "config.json").write_text(json.dumps({
             "auth": {"login_enabled": True}, "dashboard": {"username": "owner-a"},
         }), encoding="utf-8")
@@ -99,12 +100,25 @@ async def main(origin: str) -> None:
             name="Native result", content="Result", kind="markdown", source="chat", slug="native-result",
         )
 
-        settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0}
+        settings = {"delay": 0.0, "delay_path": "/api/tasks", "workflow_failures": 0,
+            "delay_remaining": None, "delay_entered": 0, "delay_completed": 0, "delay_release": None}
 
         @web.middleware
         async def delay_reads(request: web.Request, handler):
-            if request.path == settings["delay_path"] and settings["delay"]:
-                await asyncio.sleep(settings["delay"])
+            should_delay = request.path == settings["delay_path"] and settings["delay"] and (
+                settings["delay_remaining"] is None or settings["delay_remaining"] > 0)
+            if should_delay:
+                if settings["delay_remaining"] is not None:
+                    settings["delay_remaining"] -= 1
+                settings["delay_entered"] += 1
+                try:
+                    release = settings["delay_release"]
+                    if release is not None:
+                        await release.wait()
+                    else:
+                        await asyncio.sleep(settings["delay"])
+                except asyncio.CancelledError:
+                    raise
             try:
                 response = await handler(request)
             except Exception:
@@ -113,6 +127,8 @@ async def main(origin: str) -> None:
                 raise
             if request.path == "/api/workflows/runs" and response.status >= 400:
                 settings["workflow_failures"] += 1
+            if should_delay:
+                settings["delay_completed"] += 1
             return response
 
         app = web.Application(middlewares=[delay_reads, token_auth.token_auth_middleware(port=10000)])
@@ -124,17 +140,37 @@ async def main(origin: str) -> None:
         app.router.add_post("/api/auth/login", auth.api_auth_login)
         app.router.add_post("/api/auth/logout", auth.api_auth_logout)
         app.router.add_get("/api/tasks", api_tasks_list)
+        app.router.add_get("/api/tasks/{task_id}", api_tasks_get)
         app.router.add_get("/api/workflows/runs", api_runs_list)
+        app.router.add_get("/api/workflows/runs/{run_id}", api_run_status)
         app.router.add_get("/api/triggers/history", api_trigger_history_all)
+        app.router.add_get("/api/triggers/{id}/history/{run_id}", api_trigger_history_detail)
+        app.router.add_get("/api/triggers", api_triggers)
+        app.router.add_get("/api/inbox", api_inbox_list)
         app.router.add_get("/api/inbox/open", api_inbox_open_items)
         app.router.add_get("/api/approvals", api_approvals)
         app.router.add_get("/api/notifications", api_notifications)
         app.router.add_get("/api/artifacts", api_artifacts_list)
+        app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
 
         async def control_delay(request: web.Request) -> web.Response:
             body = await request.json()
             settings["delay"] = float(body["seconds"])
             settings["delay_path"] = body.get("path", "/api/tasks")
+            settings["delay_remaining"] = body.get("requests")
+            settings["delay_entered"] = 0
+            settings["delay_completed"] = 0
+            settings["delay_release"] = asyncio.Event() if body.get("hold") else None
+            return web.json_response({"ok": True})
+
+        async def control_delay_state(request: web.Request) -> web.Response:
+            return web.json_response({"entered": settings["delay_entered"],
+                "completed": settings["delay_completed"], "remaining": settings["delay_remaining"]})
+
+        async def control_delay_release(request: web.Request) -> web.Response:
+            release = settings["delay_release"]
+            if release is not None:
+                release.set()
             return web.json_response({"ok": True})
 
         async def control_empty_inbox(request: web.Request) -> web.Response:
@@ -155,11 +191,11 @@ async def main(origin: str) -> None:
         async def control_trigger_pages(request: web.Request) -> web.Response:
             started_at = time.time()
             journal = ExecutionJournal(home)
-            for index in range(20):
+            for index in range(120):
                 await journal.append(ExecutionRecord(
                     run_id="" if index == 19 else f"trigger-page-{index}",
-                    job_id="schedule-1", started_at=started_at + index / 1000,
-                    finished_at=started_at + index / 1000, status="success",
+                    job_id="schedule-1", started_at=started_at + (120 - index) / 1000,
+                    finished_at=started_at + (120 - index) / 1000, status="success",
                     summary="Scheduled work ran",
                 ))
             hooks = ScriptHookStore(home)
@@ -188,6 +224,8 @@ async def main(origin: str) -> None:
 
         control = web.Application()
         control.router.add_post("/delay", control_delay)
+        control.router.add_get("/delay-state", control_delay_state)
+        control.router.add_post("/delay-release", control_delay_release)
         control.router.add_post("/empty-inbox", control_empty_inbox)
         control.router.add_get("/failures", control_failures)
         control.router.add_post("/task", control_add_task)
