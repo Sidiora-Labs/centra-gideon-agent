@@ -26,6 +26,12 @@ describe("assistant web module registry", () => {
       ["studio", createShellRoute("apps", { view: "workspace", placement: { id: "capabilities/media/library" } })],
       ["ideas", createShellRoute("ideas")],
       ["knowledge", createShellRoute("apps", { view: "workspace", placement: { id: "knowledge" } })],
+      ["browser/session", createShellRoute("apps", {
+        view: "workspace", placement: { id: "browser/session" }, sessionId: "browser-session-one",
+      })],
+      ["capabilities/communications/outbound", createShellRoute("apps", {
+        view: "workspace", placement: { id: "capabilities/communications/outbound" },
+      })],
     ] as const;
 
     for (const [owner, route] of ownedRoutes) {
@@ -49,6 +55,33 @@ describe("assistant web module registry", () => {
     expect(await resolveModuleRoute(scope, unknown)).toBe("unavailable");
     expect(moduleForRoute(createShellRoute("chat"))).toBeUndefined();
     expect(await resolveModuleRoute(scope, createShellRoute("chat"))).toBeUndefined();
+  });
+
+  it("keeps malformed Browser and misplaced Mail routes unavailable", async () => {
+    const browserWithoutSession = createShellRoute("apps", {
+      view: "workspace", placement: { id: "browser/session" },
+    });
+    expect(moduleForRoute(browserWithoutSession)).toBeUndefined();
+    expect(await resolveModuleRoute(scope, browserWithoutSession)).toBe("unavailable");
+
+    const browserWithRecord = createShellRoute("apps", {
+      view: "workspace", placement: { id: "browser/session" }, sessionId: "browser-session-one",
+      record: { kind: "browser-session", id: "browser-session-one" },
+    });
+    expect(moduleForRoute(browserWithRecord)).toBeUndefined();
+    expect(await resolveModuleRoute(scope, browserWithRecord)).toBe("unavailable");
+
+    const misplacedMail = createShellRoute("activity", {
+      view: "workspace", placement: { id: "capabilities/communications/outbound" },
+    });
+    expect(moduleForRoute(misplacedMail)).toBeUndefined();
+    expect(await resolveModuleRoute(scope, misplacedMail)).toBe("unavailable");
+
+    const unknownPlacement = createShellRoute("apps", {
+      view: "workspace", placement: { id: "capabilities/communications/unknown" },
+    });
+    expect(moduleForRoute(unknownPlacement)).toBeUndefined();
+    expect(await resolveModuleRoute(scope, unknownPlacement)).toBe("unavailable");
   });
 
   it("does not register web modules in the native resolver", async () => {
