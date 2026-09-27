@@ -11,6 +11,9 @@ type OpenDeck = Readonly<{ record: DeckRecord; version: number; model: DeckModel
 type ExportState = Readonly<{ kind: 'ready'; slug: string; version: number } | { kind: 'failed'; message: string }>
 
 const slideMarker = /(?:^|\n)<!-- gideon-slide-id:([0-9a-f]{8}-[0-9a-f-]{27,36}) -->\s*$/i
+const buttonClass = 'inline-flex min-h-11 items-center justify-center rounded-pill bg-surface-high px-4 py-2 text-center text-sm font-medium text-on-surface transition-colors hover:bg-surface-highest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40'
+const primaryButtonClass = 'inline-flex min-h-11 items-center justify-center rounded-pill bg-primary px-4 py-2 text-center text-sm font-medium text-on-primary transition-colors hover:bg-primary-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40'
+const fieldClass = 'min-h-11 w-full min-w-0 rounded-md border border-outline-variant/60 bg-surface-container px-3 py-2 text-on-surface outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40'
 
 function failure(error: unknown): string {
   if (error instanceof GatewayError && error.status === 409) return 'The deck changed in another session. Your edits are still here. Reload the current version before saving.'
@@ -243,52 +246,54 @@ export default function SlidesWorkspace({ scope, artifactId = '', onSelectArtifa
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end">
       <div className="min-w-0 sm:flex-1"><h2 className="text-xl font-semibold">Slides</h2><p className="text-sm text-on-surface-var">Edit a saved presentation, preview its exact version, and export the rendered PPTX.</p></div>
       <label className="grid min-w-0 gap-1 text-sm sm:min-w-48">Presentation
-        <select aria-label="Presentation" value={open?.record.slug ?? ''} disabled={busy}
+        <select className={fieldClass} aria-label="Presentation" value={open?.record.slug ?? ''} disabled={busy}
           onChange={event => { if (onSelectArtifact) onSelectArtifact(event.target.value); else void loadDeck(event.target.value) }}>
           <option value="">Choose a PPTX</option>{decks.map(deck => <option key={deck.slug} value={deck.slug}>{deck.name} · v{deck.version}</option>)}
         </select>
       </label>
-      {open && <button type="button" disabled={busy || dirty} onClick={() => void loadDeck(open.record.slug)}>Reload</button>}
+      {open && <button className={`${buttonClass} w-full sm:w-auto`} type="button" disabled={busy || dirty} onClick={() => void loadDeck(open.record.slug)}>Reload</button>}
     </header>
     {error && <p role="alert" className="rounded-lg border border-error/50 p-3">{error}</p>}
     {!open && <div className="grid gap-2 rounded-lg border border-outline/40 p-3">
       <h3 className="font-medium">Create from outline</h3>
-      <label className="grid gap-1">Presentation name<input aria-label="New presentation name" value={newName} onChange={event => setNewName(event.currentTarget.value)} /></label>
-      <label className="grid gap-1">Outline<textarea aria-label="New presentation outline" rows={7} value={outline} onChange={event => setOutline(event.currentTarget.value)}
+      <label className="grid gap-1">Presentation name<input className={fieldClass} aria-label="New presentation name" value={newName} onChange={event => setNewName(event.currentTarget.value)} /></label>
+      <label className="grid gap-1">Outline<textarea className={`${fieldClass} resize-y`} aria-label="New presentation outline" rows={7} value={outline} onChange={event => setOutline(event.currentTarget.value)}
         placeholder={'## First slide\n- Main point\n<!-- notes: Speaker context -->'} /></label>
-      <button type="button" disabled={busy || !newName.trim() || !outlineCount} onClick={() => void createFromOutline()}>Create presentation ({outlineCount} slides)</button>
+      <button className={`${primaryButtonClass} w-full sm:w-fit`} type="button" disabled={busy || !newName.trim() || !outlineCount} onClick={() => void createFromOutline()}>Create presentation ({outlineCount} slides)</button>
       <p role="status">{busy ? 'Rendering presentation…' : decks.length ? 'Or choose a saved PPTX above.' : 'Your presentation will be saved to this account.'}</p>
     </div>}
     {exportState?.kind === 'failed' && !open && <p role="status">Presentation render failed: {exportState.message}</p>}
     {open && <>
       <div className="grid gap-2 rounded-lg border border-outline/40 p-3">
         <label htmlFor="slides-outline">Outline</label>
-        <textarea id="slides-outline" rows={4} value={outline} onChange={event => setOutline(event.currentTarget.value)}
+        <textarea className={`${fieldClass} resize-y`} id="slides-outline" rows={4} value={outline} onChange={event => setOutline(event.currentTarget.value)}
           placeholder={'## First slide\n- Main point\n<!-- notes: Speaker context -->'} />
-        <button type="button" disabled={busy || !outlineCount} onClick={() => {
+        <button className={`${buttonClass} w-full sm:w-fit`} type="button" disabled={busy || !outlineCount} onClick={() => {
           const parsed = slidesFromOutline(outline); setEntries(parsed); setSelectedId(parsed[0]?.id ?? ''); setPreview(null); setExportState(null)
         }}>Use outline in this deck ({outlineCount} slides)</button>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span>{open.record.name} · saved version {open.version}{dirty ? ' · unsaved changes' : ''}</span>
-        <button type="button" disabled={busy} onClick={() => { const entry = { id: crypto.randomUUID(), slide: emptySlide() }; setEntries([...entries, entry]); setSelectedId(entry.id); setPreview(null); setExportState(null) }}>Add slide</button>
-        <button type="button" disabled={busy || selectedIndex <= 0} onClick={() => moveSelected(-1)}>Move up</button>
-        <button type="button" disabled={busy || selectedIndex < 0 || selectedIndex >= entries.length - 1} onClick={() => moveSelected(1)}>Move down</button>
-        <button type="button" disabled={busy || selectedIndex < 0} onClick={() => { const remaining = entries.filter(entry => entry.id !== selectedId); setEntries(remaining); setSelectedId(remaining[Math.min(selectedIndex, remaining.length - 1)]?.id ?? ''); setPreview(null); setExportState(null) }}>Delete slide</button>
+      <div className="grid gap-3 rounded-lg border border-outline/40 bg-surface-container p-3 sm:flex sm:items-center sm:justify-between">
+        <span className="min-w-0 text-sm text-on-surface-var">{open.record.name} · saved version {open.version}{dirty ? ' · unsaved changes' : ''}</span>
+        <div className="flex flex-wrap gap-2">
+          <button className={buttonClass} type="button" disabled={busy} onClick={() => { const entry = { id: crypto.randomUUID(), slide: emptySlide() }; setEntries([...entries, entry]); setSelectedId(entry.id); setPreview(null); setExportState(null) }}>Add slide</button>
+          <button className={buttonClass} type="button" disabled={busy || selectedIndex <= 0} onClick={() => moveSelected(-1)}>Move up</button>
+          <button className={buttonClass} type="button" disabled={busy || selectedIndex < 0 || selectedIndex >= entries.length - 1} onClick={() => moveSelected(1)}>Move down</button>
+          <button className={buttonClass} type="button" disabled={busy || selectedIndex < 0} onClick={() => { const remaining = entries.filter(entry => entry.id !== selectedId); setEntries(remaining); setSelectedId(remaining[Math.min(selectedIndex, remaining.length - 1)]?.id ?? ''); setPreview(null); setExportState(null) }}>Delete slide</button>
+        </div>
       </div>
-      <nav aria-label="Slides" className="flex flex-wrap gap-2">{entries.map((entry, index) => <button key={entry.id} type="button" aria-current={entry.id === selectedId ? 'page' : undefined} onClick={() => setSelectedId(entry.id)}>{index + 1}. {slideLabel(entry.slide, index)}</button>)}</nav>
+      <nav aria-label="Slides" className="flex flex-wrap gap-2">{entries.map((entry, index) => <button className={`${buttonClass} aria-[current=page]:bg-primary aria-[current=page]:text-on-primary`} key={entry.id} type="button" aria-current={entry.id === selectedId ? 'page' : undefined} onClick={() => setSelectedId(entry.id)}>{index + 1}. {slideLabel(entry.slide, index)}</button>)}</nav>
       {selected && <div className="grid gap-4 rounded-lg border border-outline/40 p-4">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <section aria-label={`Slide ${selectedIndex + 1} editor`} className="grid gap-3">
-            <label className="grid gap-1">Slide title<input aria-label="Slide title" value={selected.slide.title} disabled={busy}
+            <label className="grid gap-1">Slide title<input className={fieldClass} aria-label="Slide title" value={selected.slide.title} disabled={busy}
               onChange={event => editSlide(slide => ({ ...slide, title: event.currentTarget.value }))} /></label>
             <div className="grid gap-2"><span>Points</span>{selected.slide.bullets.map((bullet, index) => <div key={`${selected.id}-point-${index}`} className="flex gap-2">
-              <input aria-label={`Point ${index + 1}`} className="min-w-0 flex-1" value={bullet.text} disabled={busy}
+              <input aria-label={`Point ${index + 1}`} className={`${fieldClass} flex-1`} value={bullet.text} disabled={busy}
                 onChange={event => editSlide(slide => ({ ...slide, bullets: slide.bullets.map((entry, position) => position === index ? { ...entry, text: event.currentTarget.value } : entry) }))} />
-              <button type="button" disabled={busy} aria-label={`Remove point ${index + 1}`} onClick={() => editSlide(slide => ({ ...slide, bullets: slide.bullets.filter((_, position) => position !== index) }))}>Remove</button>
+              <button className={buttonClass} type="button" disabled={busy} aria-label={`Remove point ${index + 1}`} onClick={() => editSlide(slide => ({ ...slide, bullets: slide.bullets.filter((_, position) => position !== index) }))}>Remove</button>
             </div>)}</div>
-            <button type="button" disabled={busy} onClick={() => editSlide(slide => ({ ...slide, bullets: [...slide.bullets, { text: '', level: 0 }] }))}>Add point</button>
-            <label className="grid gap-1">Speaker notes<textarea aria-label="Speaker notes" rows={4} value={selected.slide.notes} disabled={busy}
+            <button className={`${buttonClass} w-full sm:w-fit`} type="button" disabled={busy} onClick={() => editSlide(slide => ({ ...slide, bullets: [...slide.bullets, { text: '', level: 0 }] }))}>Add point</button>
+            <label className="grid gap-1">Speaker notes<textarea className={`${fieldClass} resize-y`} aria-label="Speaker notes" rows={4} value={selected.slide.notes} disabled={busy}
               onChange={event => editSlide(slide => ({ ...slide, notes: event.currentTarget.value }))} /></label>
           </section>
           <section aria-label={`Slide ${selectedIndex + 1} preview`} className="aspect-video rounded-lg border border-outline/40 bg-surface-container p-6">
@@ -301,9 +306,9 @@ export default function SlidesWorkspace({ scope, artifactId = '', onSelectArtifa
       </div>}
       {!open.lossless && <label className="rounded-lg border border-warning/50 p-3"><input type="checkbox" checked={acceptLoss} onChange={event => setAcceptLoss(event.currentTarget.checked)} /> I understand that saving may change unsupported PPTX formatting. {open.warnings.join(' ')}</label>}
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" disabled={busy || !dirty || (!open.lossless && !acceptLoss)} onClick={() => void save()}>{busy ? 'Rendering…' : 'Save and export PPTX'}</button>
-        <button type="button" disabled={busy || dirty} onClick={() => void previewDeck()}>Render preview of version {open.version}</button>
-        {download && <a href={download} download={`${open.record.name}.pptx`}>Download PPTX version {exportState?.kind === 'ready' ? exportState.version : ''}</a>}
+        <button className={primaryButtonClass} type="button" disabled={busy || !dirty || (!open.lossless && !acceptLoss)} onClick={() => void save()}>{busy ? 'Rendering…' : 'Save and export PPTX'}</button>
+        <button className={buttonClass} type="button" disabled={busy || dirty} onClick={() => void previewDeck()}>Render preview of version {open.version}</button>
+        {download && <a className={buttonClass} href={download} download={`${open.record.name}.pptx`}>Download PPTX version {exportState?.kind === 'ready' ? exportState.version : ''}</a>}
       </div>
       {exportState?.kind === 'failed' && <p role="status">Presentation render failed: {exportState.message}</p>}
       {selectedPreview && <p role="status">Preview of {selectedPreview.slug} version {selectedPreview.version}: {selectedPreview.fidelity}</p>}

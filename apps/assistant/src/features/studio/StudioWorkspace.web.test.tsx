@@ -466,6 +466,22 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       if (!response.result?.result) throw new Error(`Browser evaluation did not complete: ${JSON.stringify(response)}`)
       return response.result.result.value as T
     }
+    const assertSlideControls = async () => {
+      const metrics = await evaluate<{ buttons: Array<{ label: string; height: number }>; fields: Array<{ label: string; height: number }>; pageWidth: number; viewportWidth: number }>(`(() => {
+        const slide = document.querySelector('[aria-label="Slides workspace"]');
+        const visible = element => element.getClientRects().length > 0;
+        return {
+          buttons: [...slide.querySelectorAll('button')].filter(visible).map(button => ({ label: button.textContent.trim(), height: button.getBoundingClientRect().height })),
+          fields: [...slide.querySelectorAll('input:not([type=checkbox]), select, textarea')].filter(visible).map(field => ({ label: field.getAttribute('aria-label') || field.id || field.tagName, height: field.getBoundingClientRect().height })),
+          pageWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        };
+      })()`)
+      expect(metrics.buttons.length).toBeGreaterThanOrEqual(10)
+      expect(metrics.buttons.filter(button => button.height < 44)).toEqual([])
+      expect(metrics.fields.filter(field => field.height < 44)).toEqual([])
+      expect(metrics.pageWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1)
+    }
     const waitFor = async (expression: string) => {
       for (let attempt = 0; attempt < 120; attempt++) {
         if (await evaluate<boolean>(expression)) return
@@ -502,6 +518,7 @@ it('opens Slides through the registered Studio module, reloads its native artifa
     expect(routeQuery.get('recordId')).toBe('quarterly-review')
     expect(routeQuery.get('from')).toBe('chat')
     expect(await evaluate<string>('location.hash')).toBe('')
+    await assertSlideControls()
     await capture('slides-created-desktop')
     await evaluate('window.__studioDocumentBeforeReload = true')
     await send('Page.reload', { ignoreCache: true })
@@ -523,6 +540,7 @@ it('opens Slides through the registered Studio module, reloads its native artifa
       const picker = document.querySelector('[aria-label="Slides workspace"] header label').getBoundingClientRect();
       return title.width >= 250 && picker.top >= title.bottom - 1;
     })()`)).toBe(true)
+    await assertSlideControls()
     await capture('slides-reloaded-narrow')
     expect(await evaluate<boolean>('document.documentElement.scrollWidth <= window.innerWidth + 1')).toBe(true)
     await evaluate("document.querySelector('.gideon-workspace-back').click()")
