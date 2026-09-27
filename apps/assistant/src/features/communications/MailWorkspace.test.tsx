@@ -576,6 +576,11 @@ asyncio.run(main(sys.argv[1]))
     await waitFor(send, `document.querySelector('#mail-detail-title')?.innerText==='Native fixture message'`)
     await evaluate(send, `window.__navigate({...window.__route,returnTo:{destination:'chat',sessionId:'previous-conversation'}})`)
     await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Back to messages')).click()`)
+    await waitFor(send, `window.__route.destination==='apps' && window.__route.view==='list' && document.querySelector('[aria-label="Mailbox account"]')?.value===${JSON.stringify(maildirId)}`)
+    expect(await evaluate(send, `({destination:window.__route.destination,view:window.__route.view,account:window.__route.placement?.query?.account,returnTo:window.__route.returnTo})`)).toMatchObject({
+      destination: 'apps', view: 'list', account: maildirId, returnTo: { destination: 'chat', sessionId: 'previous-conversation' },
+    })
+    await evaluate(send, `document.querySelector('.gideon-workspace-back')?.click()`)
     await waitFor(send, `document.body.innerText.includes('Returned to chat previous-conversation')`)
     await evaluate(send, `window.__navigate({destination:'apps',view:'list',placement:{id:'capabilities/communications/outbound',query:{account:${JSON.stringify(maildirId)}}}})`)
     await waitFor(send, `document.querySelector('[aria-label="Mailbox account"]') && document.body.innerText.includes('Native fixture message')`)
@@ -705,8 +710,17 @@ asyncio.run(main(sys.argv[1]))
     expect(afterReloadDocument.timeOrigin).not.toBe(beforeReloadDocument.timeOrigin)
     const reloadedState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {record:route.record,placement:route.placement,returnTo:route.returnTo,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
     expect(reloadedState).toEqual(recordState)
-    currentPhase = 'returning from the reloaded native Mail record to the source Chat composer'
+    currentPhase = 'returning from the reloaded native Mail record to its selected account list'
     await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Back to messages'))?.click()`)
+    await waitFor(send, `window.__mailAppRoute().destination==='apps' && window.__mailAppRoute().view==='list' && window.__mailAppRoute().placement?.query?.account===${JSON.stringify(startup.account_id)} && document.querySelector('[aria-label="Mailbox account"]')?.value===${JSON.stringify(startup.account_id)} && document.querySelector('[aria-label="Messages"]')`)
+    const listReturnState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {route:{destination:route.destination,view:route.view,placement:route.placement,returnTo:route.returnTo},account:document.querySelector('[aria-label="Mailbox account"]')?.value,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
+    expect(listReturnState).toEqual({
+      route: { destination: 'apps', view: 'list', placement: { id: 'capabilities/communications/outbound', query: { account: startup.account_id } },
+        returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 } },
+      account: startup.account_id, frames: 1, module: 1,
+    })
+    currentPhase = 'returning from the Mail list header to the typed source Chat context'
+    await evaluate(send, `document.querySelector('.gideon-workspace-back')?.click()`)
     await waitFor(send, `window.__mailAppRoute().destination==='chat' && document.querySelector('#gideon-message-composer')`)
     const returnedState = await evaluate<{ route: { destination: string; returnTo?: { destination: string; selectionId?: string; scrollY?: number } }; composer: boolean }>(
       send, `({route:window.__mailAppRoute(),composer:!!document.querySelector('#gideon-message-composer')})`)

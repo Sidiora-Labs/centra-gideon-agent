@@ -100,7 +100,13 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
       (!currentContext.current.desiredAccountId || currentContext.current.desiredAccountId === accountId)
   }
 
-  const returnFromDetail = useCallback(() => {
+  const returnToMessages = useCallback(() => {
+    setComposer(null)
+    setDraft(null)
+    navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account?.id), returnTo: returnTo ?? route.returnTo }))
+  }, [account?.id, navigate, returnTo, route])
+
+  const returnFromWorkspace = useCallback(() => {
     setComposer(null)
     setDraft(null)
     if (returnTo || route.returnTo) onReturn()
@@ -340,7 +346,7 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
   const mode = typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches ? 'compact' : 'full'
   const themeVariables = { '--mail-card': palette.card, '--mail-text': palette.text, '--mail-muted': palette.muted,
     '--mail-line': palette.line, '--mail-green': palette.green, '--mail-danger': palette.danger } as React.CSSProperties
-  return <WorkspaceFrame route={route} mode={mode} title={detail ? 'Mail detail' : 'Mail'} onBack={detail ? returnFromDetail : undefined}>
+  return <WorkspaceFrame route={route} mode={mode} title={detail ? 'Mail detail' : 'Mail'} onBack={detail || returnContext ? returnFromWorkspace : undefined}>
     <div style={{ ...themeVariables, display: 'grid', gap: 16, padding: 'clamp(14px, 3vw, 28px)', maxWidth: 1040, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
       {accountError && <section role="alert" style={panel}><h2>Mailbox account unavailable</h2><p>{accountError}</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button type="button" onClick={() => void loadAccounts()} style={primary}>Retry accounts</button>
@@ -420,7 +426,7 @@ export function MailWorkspace({ route, scope, navigate, onReturn, returnTo }: Mo
             {!snapshot && !mailError && <p role="status">Mailbox messages have not loaded.</p>}
           </section>}
         </>}
-        {detail && account && <MailDetail account={account} item={selectedDraft ?? selectedMessage!} thread={selectedThread} onBack={returnFromDetail}
+        {detail && account && <MailDetail account={account} item={selectedDraft ?? selectedMessage!} thread={selectedThread} onBack={returnToMessages}
           onReply={startCompose} onSetReadState={(item, isRead) => void setMessageReadState(item, isRead)} readBusy={readBusy}
           onEditDraft={editDraft} onReviewDraft={item => { setDraft(item); navigate(createShellRoute('apps', { view: 'list', placement: placementFor(account.id), returnTo: returnContext })) }} />}
         {!detail && route.view === 'detail' && !loading && <section role="alert" style={panel}>
