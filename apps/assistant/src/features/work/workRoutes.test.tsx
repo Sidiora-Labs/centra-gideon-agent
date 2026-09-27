@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { OwnerScope } from '../../shared/auth.web'
-import { parseShellRoute, serializeShellRoute, type ShellReturnContext } from '../../shared/shell/shellRoutes'
+import { createShellRoute, parseShellRoute, serializeShellRoute, type ShellReturnContext } from '../../shared/shell/shellRoutes'
 import { GatewayError } from '../../shared/transport.web'
 import WorkRoutes, { WORK_DESTINATIONS, createWorkRoute, findWorkDestination, workReturnRoute } from './WorkRoutes.web'
 import { WorkClient, classifyWorkError, workEntry } from './workClient'
@@ -139,7 +139,8 @@ describe('Work routes', () => {
       expect(parseShellRoute(serializeShellRoute(route))).toEqual(route)
       expect(route.record).toEqual({ kind: destination.kind, id: 'canonical-record' })
       expect(route.returnTo).toEqual(origin)
-      expect(workModuleDefinitions.some(module => module.matches(route))).toBe(true)
+      expect(workModuleDefinitions.some(module => module.matches(route)))
+        .toBe(destination.kind !== 'project' && destination.kind !== 'task')
     }
     expect(new Set(workModuleDefinitions.map(module => module.id)).size).toBe(workModuleDefinitions.length)
     expect(unique.has('skills:/edit')).toBe(true)
@@ -150,6 +151,24 @@ describe('Work routes', () => {
     expect(unique.has('tools:/invoke')).toBe(true)
     expect(unique.has('tools:/availability')).toBe(true)
     expect(workReturnRoute(origin)).toMatchObject({ destination: 'chat', sessionId: 'conversation-12' })
+  })
+
+  it('keeps Work module matching clear of Code projects and the shell task detail', () => {
+    const taskList = createWorkRoute('tasks')
+    expect(workModuleDefinitions.find(module => module.id === 'tasks')?.matches(taskList)).toBe(true)
+    for (const id of ['tasks', 'tasks/new', 'tasks/graph']) {
+      const detail = createWorkRoute(id, 'native-task')
+      expect(workModuleDefinitions.some(module => module.matches(detail))).toBe(false)
+    }
+    expect(workModuleDefinitions.some(module => module.matches(createShellRoute('activity', {
+      view: 'detail', record: { kind: 'task', id: 'native-task' },
+    })))).toBe(false)
+    for (const id of ['projects', 'projects/detail']) {
+      expect(workModuleDefinitions.some(module => module.id === id)).toBe(false)
+      expect(workModuleDefinitions.some(module => module.matches(createWorkRoute(id)))).toBe(false)
+      expect(workModuleDefinitions.some(module => module.matches(createWorkRoute(id, 'native-project')))).toBe(false)
+    }
+    expect(workModuleDefinitions.some(module => module.matches(createWorkRoute('skills', 'native-skill', undefined, '/detail')))).toBe(true)
   })
 
   it('uses the full-width shared frame for tool execution and keeps controls keyboard reachable', () => {
