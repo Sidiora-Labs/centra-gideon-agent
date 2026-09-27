@@ -34,13 +34,43 @@ export function gatewayPath(path: string): string {
   return `${url.pathname}${url.search}`
 }
 
+const SENSITIVE_RESOURCE_QUERY_KEYS = new Set([
+  'access_token',
+  'api_key',
+  'authorization',
+  'client_secret',
+  'code',
+  'credential',
+  'credentials',
+  'id_token',
+  'oauth_token',
+  'password',
+  'passwd',
+  'refresh_token',
+  'secret',
+  'state',
+  'token',
+])
+
+function safeResourcePath(path: string): string {
+  const relative = gatewayPath(path)
+  const params = new URL(relative, 'https://gideon.invalid').searchParams
+  for (const key of params.keys()) {
+    const normalized = key.trim().toLowerCase().replace(/-/g, '_')
+    if (SENSITIVE_RESOURCE_QUERY_KEYS.has(normalized)) {
+      throw new TypeError('Resource URLs cannot contain credential parameters')
+    }
+  }
+  return relative
+}
+
 /** Build a relative URL for a native resource so browser navigation sends its session cookie. */
 export function gatewayResourceHref(path: string): string {
-  return gatewayPath(path)
+  return safeResourcePath(path)
 }
 
 export function gatewayWebSocketUrl(path: string): string {
-  const relative = gatewayPath(path)
+  const relative = safeResourcePath(path)
   if (typeof window === 'undefined') throw new Error('A browser session is required for a live stream')
   const origin = new URL(window.location.origin)
   const url = new URL(relative, origin)
