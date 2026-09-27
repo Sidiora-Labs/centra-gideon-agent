@@ -1,4 +1,4 @@
-import React, { useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { gatewayJson, GatewayError } from './transport.web'
 
 export type LoginStatus = Readonly<{
