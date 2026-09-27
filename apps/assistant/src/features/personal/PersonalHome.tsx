@@ -2,7 +2,7 @@ import React, { useEffect, useState, type CSSProperties } from 'react'
 import { GatewayError } from '../../shared/transport.web'
 import { WorkspaceFrame } from '../../shared/shell/WorkspaceFrame.web'
 import { createShellRoute, type ShellRoute } from '../../shared/shell/shellRoutes'
-import { createPersonalClient, type PersonalAvailability } from './client'
+import { createPersonalClient, type PersonalAvailability, type PersonalClient, type IdentityStory, type NativeValue } from './client'
 import { PERSONAL_SPACES, personalSpaceRoute, type PersonalSpace } from './routes'
 import type { ModuleProps } from '../../shared/shell/webModules.web'
 import { useShellTheme } from '../../shared/shell/shellTheme.web'
@@ -54,6 +54,21 @@ function NativeStatus({ label, load }: { label: string; load: () => Promise<Pers
   </section>
 }
 
+export type IdentityWorkspaceData =
+  | Readonly<{ kind: 'autobiography'; stories: readonly IdentityStory[] }>
+  | Readonly<{ kind: 'twin'; profile: NativeValue }>
+
+export async function readIdentitySpace(client: PersonalClient, placement: string | undefined): Promise<PersonalAvailability<IdentityWorkspaceData>> {
+  if (placement === 'capabilities/identity/autobiography') {
+    const stories = await client.readIdentityStories()
+    return { state: 'available', value: { kind: 'autobiography', stories: stories.map(item => item.value) } }
+  }
+  if (placement === 'capabilities/identity/twin') {
+    return { state: 'available', value: { kind: 'twin', profile: await client.readIdentityProfile() } }
+  }
+  return { state: 'unavailable', reason: 'This Identity view has no registered native reader.' }
+}
+
 export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: PersonalModuleProps) {
   const priorDraftScope = activeDraftScopeByOrigin.get(scope.runtimeOrigin)
   if (priorDraftScope && priorDraftScope !== scope.cacheKey) drafts.delete(priorDraftScope)
@@ -79,7 +94,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
   const loadGoals = React.useCallback(() => client.readGoals().then(value => ({ state: 'available' as const, value })), [client])
   const loadFocused = React.useCallback(() => {
     switch (space) {
-      case 'identity': return client.readIdentityProfile().then(value => ({ state: 'available' as const, value }))
+      case 'identity': return readIdentitySpace(client, route.placement?.id)
       case 'learning': return client.readLearningCaptures()
       case 'companion': return client.readCompanion()
       case 'memory': return client.readMemory().then(value => ({ state: 'available' as const, value }))
@@ -87,7 +102,7 @@ export function PersonalHome({ route, scope, navigate, onReturn, returnTo }: Per
       case 'journal': return client.readJournal(new Date().toISOString().slice(0, 10), Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
       default: return Promise.resolve({ state: 'unavailable' as const, reason: 'This personal space is unavailable.' })
     }
-  }, [client, space])
+  }, [client, route.placement?.id, space])
   const themeStyle = {
     '--personal-text': palette.text,
     '--personal-muted': palette.muted,

@@ -9,6 +9,7 @@ import { personalDetailRoute, personalSpaceRoute } from './routes'
 import { parseShellRoute, serializeShellRoute } from '../../shared/shell/shellRoutes'
 import { createShellRoute } from '../../shared/shell/shellRoutes'
 import { personalModuleDefinitions } from './moduleDefinitions.web'
+import { readIdentitySpace } from './PersonalHome'
 import type { OwnerScope } from '../../shared/auth.web'
 
 const scope: OwnerScope = Object.freeze({ runtimeOrigin: 'http://127.0.0.1', ownerId: 'owner-a', cacheKey: JSON.stringify(['http://127.0.0.1', 'owner-a']) })
@@ -31,7 +32,7 @@ beforeAll(async () => {
   directories.push(directory)
   const appRoot = resolve(process.cwd(), '../..')
   const port = await freePort()
-  const python = `import asyncio, sys\nfrom pathlib import Path\nfrom aiohttp import web\nfrom gideon.interfaces.dashboard.handlers import capabilities_identity_goals\nasync def main():\n app=web.Application()\n capabilities_identity_goals.register(app, store_path=Path(sys.argv[2])/'goals.sqlite3')\n runner=web.AppRunner(app); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',int(sys.argv[1])); await site.start()\n print('ready',flush=True)\n await asyncio.Event().wait()\nasyncio.run(main())`
+  const python = `import asyncio, sys\nfrom pathlib import Path\nfrom aiohttp import web\nfrom gideon.interfaces.dashboard.handlers import capabilities_identity, capabilities_identity_goals, capabilities_identity_twin\nasync def main():\n app=web.Application()\n home=Path(sys.argv[2])\n capabilities_identity.register(app, store_path=home/'stories.sqlite3')\n capabilities_identity_goals.register(app, store_path=home/'goals.sqlite3')\n capabilities_identity_twin.register(app, store_path=home/'twin.sqlite3')\n runner=web.AppRunner(app); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',int(sys.argv[1])); await site.start()\n print('ready',flush=True)\n await asyncio.Event().wait()\nasyncio.run(main())`
   const child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-c', python, String(port), directory], {
     cwd: appRoot,
     env: { ...process.env, GIDEON_HOME: directory, PYTHONPATH: join(appRoot, 'runtime') },
@@ -67,6 +68,25 @@ describe('personal native contracts', () => {
     const detail = await client.readGoal(created.identity.nativeId)
     expect(detail.value.title).toBe('Learn conversational French')
     expect(detail.revision).toBe(1)
+    client.dispose()
+  })
+
+  it('loads autobiography stories for its published route and the twin snapshot only on the twin route', async () => {
+    const client = createPersonalClient({ ...scope, runtimeOrigin: nativeOrigin, cacheKey: JSON.stringify([nativeOrigin, scope.ownerId]) })
+    const story = await client.saveIdentityStory(undefined, { prompt: 'What should Gideon know?', theme: 'continuity', text: 'A native autobiography record.' }, 'identity-create-001', 0)
+    const autobiography = await readIdentitySpace(client, personalSpaceRoute('identity').placement?.id)
+    expect(autobiography.state).toBe('available')
+    if (autobiography.state === 'available') {
+      expect(autobiography.value.kind).toBe('autobiography')
+      if (autobiography.value.kind === 'autobiography') expect(autobiography.value.stories.map(item => item.id)).toContain(story.identity.nativeId)
+    }
+
+    const twin = await readIdentitySpace(client, 'capabilities/identity/twin')
+    expect(twin.state).toBe('available')
+    if (twin.state === 'available') {
+      expect(twin.value.kind).toBe('twin')
+      if (twin.value.kind === 'twin') expect(twin.value.profile).toHaveProperty('documents')
+    }
     client.dispose()
   })
 
