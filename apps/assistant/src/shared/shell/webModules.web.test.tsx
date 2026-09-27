@@ -15,17 +15,25 @@ const scope: OwnerScope = {
 };
 
 describe("trusted assistant module registration", () => {
-  it("registers only the published task and artifact editor placements as full workspaces", () => {
-    expect(moduleDefinitions.map(({ id, mode }) => [id, mode])).toEqual([
-      ["tasks", "full"],
-      ["artifacts/editor", "full"],
-    ]);
-    expect(moduleForRoute(createShellRoute("activity", {
+  it("keeps the published task and artifact editor placements as unique full workspaces", () => {
+    const taskRoute = createShellRoute("activity", {
       view: "detail", placement: { id: "tasks" }, record: { kind: "task", id: "task-one" },
-    }))?.id).toBe("tasks");
-    expect(moduleForRoute(createShellRoute("apps", {
+    });
+    const artifactRoute = createShellRoute("apps", {
       view: "workspace", placement: { id: "artifacts/editor" }, record: { kind: "artifact", id: "artifact-one" },
-    }))?.id).toBe("artifacts/editor");
+    });
+    for (const [route, id] of [[taskRoute, "tasks"], [artifactRoute, "artifacts/editor"]] as const) {
+      const owners = moduleDefinitions.filter((definition) => definition.matches(route));
+      expect(owners.map((definition) => definition.id)).toEqual([id]);
+      expect(owners[0]?.mode).toBe("full");
+      expect(moduleForRoute(route)?.id).toBe(id);
+    }
+    expect(moduleForRoute(createShellRoute("apps", {
+      view: "workspace", placement: { id: "tasks" }, record: { kind: "task", id: "task-one" },
+    }))).toBeUndefined();
+    expect(moduleForRoute(createShellRoute("activity", {
+      view: "workspace", placement: { id: "artifacts/editor" }, record: { kind: "artifact", id: "artifact-one" },
+    }))).toBeUndefined();
   });
 
   it("keeps unregistered or structurally incomplete placements unavailable without loading a module", async () => {
