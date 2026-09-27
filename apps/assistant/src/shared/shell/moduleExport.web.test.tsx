@@ -1,7 +1,8 @@
 import { createServer as createNetServer } from "node:net";
 import { createServer, request as httpRequest, type Server as HttpServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
-import { extname, resolve, sep } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { extname, join, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { afterAll, describe, expect, it } from "vitest";
 import { startBrowserHarness, type BrowserHarness } from "../../../test-support/browserHarness";
 import { startNativeServer, type NativeServer } from "../../../test-support/nativeServer";
@@ -104,9 +105,15 @@ describe("trusted modules in the Expo web export", () => {
     })()`);
     await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner')`, "authenticated owner shell");
 
+    const evidenceDirectory = process.env.GIDEON_TEST_EVIDENCE_DIR ?? join(tmpdir(), "gideon-assistant-shell-07-monaco-runtime");
+    await mkdir(evidenceDirectory, { recursive: true });
+    const shellScreenshot = await browser.command("Page.captureScreenshot", { format: "png" });
+    await writeFile(join(evidenceDirectory, "authenticated-shell.png"), Buffer.from(String(shellScreenshot.data), "base64"));
+
+    try {
     const taskId = String(native.startup.task_id);
     await browser.navigate(`${served.origin}/assistant/activity?v=1&view=detail&placement=tasks&recordKind=task&recordId=${encodeURIComponent(taskId)}&from=chat`);
-    await browser.waitFor(`document.querySelector('[data-gideon-module="tasks"]')?.innerText.includes('Trusted module task')`, "native TaskDetail inside trusted module", 60000);
+    await browser.waitFor(`document.querySelector('[data-gideon-module="tasks"]')?.innerText.includes('Native task detail fixture')`, "native TaskDetail inside trusted module", 60000);
     const taskSurface = await browser.evaluate<{ rootCount: number; frameCount: number; iframeCount: number; detail: boolean }>(`({
       rootCount: document.querySelectorAll('#root').length,
       frameCount: document.querySelectorAll('main.gideon-workspace-frame').length,
@@ -117,6 +124,8 @@ describe("trusted modules in the Expo web export", () => {
 
     const artifactSlug = String(native.startup.artifact_slug);
     await browser.navigate(`${served.origin}/assistant/apps?v=1&view=workspace&placement=artifacts%2Feditor&recordKind=artifact&recordId=${encodeURIComponent(artifactSlug)}&from=chat`);
+    await browser.waitFor("document.querySelector('[data-gideon-module=\"artifacts/editor\"] button')", "native artifact editor actions");
+    await browser.evaluate(`([...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Edit'))?.click()`);
     await browser.waitFor("document.querySelector('.monaco-editor textarea.inputarea')", "initialized Monaco editor", 60000);
     await browser.waitFor("window.__gideonWorkerUrls?.length > 0", "local Monaco worker startup", 60000);
     const editorSurface = await browser.evaluate<{ rootCount: number; frameCount: number; iframeCount: number; geometry: boolean; focusable: boolean; workers: string[]; resources: string[]; htmlMode: string | null; storedMode: string | null }>(`(()=>{
@@ -166,5 +175,12 @@ describe("trusted modules in the Expo web export", () => {
     await browser.waitFor("document.querySelector('.monaco-editor .view-lines')?.innerText.includes('Keyboard editor verification')", "keyboard edits reflected in Monaco model");
     await browser.evaluate(`document.querySelector('[aria-label="Return to previous workspace"]')?.click()`);
     await browser.waitFor("location.pathname === '/assistant/chat' && !document.querySelector('[data-gideon-module]')", "typed return to assistant chat");
+    } catch (error) {
+      if (browser) {
+        const failureScreenshot = await browser.command("Page.captureScreenshot", { format: "png" }).catch(() => undefined);
+        if (failureScreenshot?.data) await writeFile(join(evidenceDirectory, "failure.png"), Buffer.from(String(failureScreenshot.data), "base64"));
+      }
+      throw error;
+    }
   }, 180000);
 });
