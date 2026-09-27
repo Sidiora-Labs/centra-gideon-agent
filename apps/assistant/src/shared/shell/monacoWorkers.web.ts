@@ -19,6 +19,29 @@ export function monacoWorkerFamily(label: string): MonacoWorkerFamily {
   return languageFamilies.find(([, labels]) => labels.includes(label))?.[0] ?? "editor";
 }
 
+function loadMonacoStylesheet(assetRoot: URL): Promise<void> {
+  const id = "gideon-monaco-editor-stylesheet";
+  const href = new URL("monaco/gideon-monaco-editor.api.css", assetRoot).href;
+  const existing = document.getElementById(id);
+  if (existing instanceof HTMLLinkElement) {
+    if (existing.href === href && existing.sheet) return Promise.resolve();
+    existing.remove();
+  }
+
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = href;
+  return new Promise<void>((resolve, reject) => {
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener("error", () => {
+      link.remove();
+      reject(new Error("compiled Gideon Monaco stylesheet failed to load"));
+    }, { once: true });
+    document.head.append(link);
+  });
+}
+
 export async function configureMonacoWorkers(assetRoot: URL): Promise<void> {
   const urls = Object.fromEntries(Object.entries(workerFiles).map(([family, file]) => [family, new URL(`workers/${file}`, assetRoot).href])) as Record<MonacoWorkerFamily, string>;
 
@@ -30,12 +53,7 @@ export async function configureMonacoWorkers(assetRoot: URL): Promise<void> {
     if ((await response.arrayBuffer()).byteLength === 0) throw new Error(`Monaco ${family} worker asset is empty`);
   }));
 
-  const [{ loader }, monaco] = await Promise.all([
-    import("@monaco-editor/react"),
-    import("monaco-editor/editor/editor.api.js"),
-  ]);
-  loader.config({ monaco });
-
+  await loadMonacoStylesheet(assetRoot);
   const environment = {
     getWorker(_moduleId: string, label: string): Worker {
       const family = monacoWorkerFamily(label);
@@ -43,4 +61,10 @@ export async function configureMonacoWorkers(assetRoot: URL): Promise<void> {
     },
   };
   Object.assign(globalThis, { MonacoEnvironment: environment });
+
+  const [{ loader }, monaco] = await Promise.all([
+    import("@monaco-editor/react"),
+    import(/* @vite-ignore */ /* @metro-ignore */ new URL("monaco/gideon-monaco-editor.api.js", assetRoot).href),
+  ]);
+  loader.config({ monaco });
 }
