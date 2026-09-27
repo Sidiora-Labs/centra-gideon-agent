@@ -3,9 +3,48 @@
   "compilerOptions": {
     "strict": true,
     "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"],
+      "react/jsx-dev-runtime": ["node_modules/@types/react/jsx-dev-runtime.d.ts"],
+      "react/*": ["node_modules/@types/react/*"],
+      "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+      "react-dom/client": ["node_modules/@types/react-dom/client.d.ts"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "jsdom": ["node_modules/@types/jsdom/index.d.ts"],
+      "lucide-react": ["node_modules/lucide-react"],
+      "framer-motion": ["node_modules/framer-motion"],
+      "cn": ["node_modules/cn"],
+      "es-module-lexer/js": ["node_modules/es-module-lexer/types/lexer.d.ts"],
+      "@monaco-editor/react": ["node_modules/@monaco-editor/react"],
+      "monaco-editor": ["node_modules/monaco-editor"],
+      "react-markdown": ["node_modules/react-markdown"],
+      "remark-gfm": ["node_modules/remark-gfm"],
+      "@radix-ui/react-popper": ["node_modules/@radix-ui/react-popper"],
+      "@base-ui/react/*": ["node_modules/@base-ui/react/*"],
+      "@assistant-ui/react-markdown": ["node_modules/@assistant-ui/react-markdown"],
+      "@assistant-ui/react-syntax-highlighter": ["node_modules/@assistant-ui/react-syntax-highlighter"],
+      "react-syntax-highlighter": ["node_modules/@types/react-syntax-highlighter/index.d.ts"],
+      "react-syntax-highlighter/*": ["node_modules/@types/react-syntax-highlighter/*"],
+      "highlight.js": ["node_modules/highlight.js"],
+      "highlight.js/*": ["node_modules/highlight.js/*"],
+      "katex": ["node_modules/katex"],
+      "mermaid": ["node_modules/mermaid"],
+      "rehype-katex": ["node_modules/rehype-katex"],
+      "rehype-raw": ["node_modules/rehype-raw"],
+      "remark-math": ["node_modules/remark-math"],
+      "unified": ["node_modules/unified"]
+    },
     "moduleSuffixes": [".web", ".native", ""],
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vitest/globals"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../console/src/features/tasks/TaskDetail.tsx",
+    "../console/src/shared/ui/content/ContentSurface.tsx",
+    "../console/src/features/capabilities/media/LibraryPage.tsx"
+  ]
 }

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
@@ -6,22 +8,6 @@ import tempfile
 from pathlib import Path
 
 from aiohttp import web
-
-import gideon.core.config.loader as loader
-from gideon.cognition.history import ConversationLog
-from gideon.core.config.loader import AppConfig
-from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.dashboard import session_store, token_auth
-from gideon.interfaces.dashboard.chat import (
-    api_chat,
-    api_chat_session_create,
-    api_chat_session_detail,
-    api_chat_sessions,
-)
-from gideon.interfaces.dashboard.handlers import auth
-from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.interfaces.dashboard.ws import api_ws
-from gideon.security.auth import credentials
 
 
 def conversation_provider(config: AppConfig, home: Path):
@@ -72,14 +58,32 @@ def conversation_provider(config: AppConfig, home: Path):
 async def main(origin: str) -> None:
     with tempfile.TemporaryDirectory(prefix="gideon-conversation-") as directory:
         home = Path(directory)
-        loader.config_dir = lambda: home
-        credentials.config_dir = lambda: home
-        session_store.config_dir = lambda: home
+        os.environ["GIDEON_HOME"] = str(home)
         model = os.environ.get("GIDEON_TEST_MODEL", "")
         provider_rows = [{"name": "conversation-test", "type": "conversation-test-openai", "model": model}] if model else []
         (home / "config.json").write_text(json.dumps({
             "auth": {"login_enabled": True}, "providers": provider_rows,
         }), encoding="utf-8")
+
+        import gideon.core.config.loader as loader
+        from gideon.cognition.history import ConversationLog
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
+        from gideon.interfaces.dashboard import session_store, token_auth
+        from gideon.interfaces.dashboard.chat import (
+            api_chat,
+            api_chat_session_create,
+            api_chat_session_detail,
+            api_chat_sessions,
+        )
+        from gideon.interfaces.dashboard.handlers import auth
+        from gideon.interfaces.dashboard.state import ConsoleState
+        from gideon.interfaces.dashboard.ws import api_ws
+        from gideon.security.auth import credentials
+
+        loader.config_dir = lambda: home
+        credentials.config_dir = lambda: home
+        session_store.config_dir = lambda: home
         credentials.set_password("conversation-owner", "correct-horse-battery-staple")
         token_auth.use_persistent_secret()
         token_auth.revoke_all_sessions()
