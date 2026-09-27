@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from "../../../test-support/browserHarness";
 import { startNativeServer, type NativeServer } from "../../../test-support/nativeServer";
@@ -8,16 +10,19 @@ import { assistantConsoleReturnHref } from "../../../../console/src/app/shell/as
 import { consoleReturnHref, registerAssistantServiceWorker } from "./entry.web";
 
 const root = process.cwd().replace(/\/apps\/assistant$/, "");
+const execute = promisify(execFile);
 let vite: Awaited<ReturnType<typeof startViteEntryServer>> | undefined;
 let browser: BrowserHarness | undefined;
 let native: NativeServer | undefined;
 let entryDirectory: string | undefined;
+let trustedAssetsDirectory: string | undefined;
 
 afterAll(async () => {
   await browser?.close();
   await native?.stop();
   if (vite) await vite.close();
   if (entryDirectory) await rm(entryDirectory, { recursive: true, force: true });
+  if (trustedAssetsDirectory) await rm(trustedAssetsDirectory, { recursive: true, force: true });
 });
 
 async function availablePort(): Promise<number> {
@@ -50,6 +55,10 @@ describe("assistant web entry", () => {
       origin,
       repositoryRoot: root,
     });
+    trustedAssetsDirectory = await mkdtemp(join(root, "apps/assistant/.entry-assets-"));
+    await execute(process.execPath, [join(root, "apps/assistant/tooling/buildTrustedWebAssets.mjs"), "--out-dir", trustedAssetsDirectory], {
+      cwd: join(root, "apps/assistant"),
+    });
     entryDirectory = await mkdtemp(join(root, "apps/assistant/.entry-browser-"));
     const entryFile = join(entryDirectory, "entry.tsx");
     await writeFile(entryFile, `import { createRoot } from 'react-dom/client';
@@ -60,6 +69,7 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
       port,
       entryFile,
       apiOrigin: native.apiOrigin,
+      staticAssetsDirectory: trustedAssetsDirectory,
     });
     browser = await startBrowserHarness({ windowSize: { width: 1280, height: 900 } });
     await browser.navigate(`${origin}/assistant/chat?v=1`);
@@ -80,21 +90,35 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
       const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};
       set('gideon-username','module-owner');set('gideon-password','correct-horse-battery-staple');document.querySelector('form').requestSubmit();return true
     })()`);
-    await browser.waitFor("document.body.innerText.includes('0 messages in this conversation.')", "owned session detail");
+    const ownedConversation = `location.href === ${JSON.stringify(sessionUrl)} && document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner') && document.querySelector('[aria-label="Gideon conversation"]') && document.querySelector('[aria-label="Message Gideon"]')`;
+    await browser.waitFor(ownedConversation, "owned session conversation");
     expect(await browser.evaluate<string>("location.href")).toBe(sessionUrl);
-    await browser.command("Page.reload", { ignoreCache: true });
-    await browser.waitFor("performance.getEntriesByType('navigation')[0]?.type === 'reload' && document.body.innerText.includes('0 messages in this conversation.')", "session after reload");
-    await browser.evaluate(`document.querySelector('[aria-label="Ideas"]')?.click()`);
-    await browser.waitFor("location.pathname === '/assistant/ideas' && document.querySelector('#personal-ideas-title')?.textContent === 'Ideas' && document.querySelector('#personal-idea-draft')", "native Ideas workspace");
+    await browser.command("Page.reload", { ignoreCache: true }).catch((error: unknown) => {
+      if (!(error instanceof Error) || !error.message.includes("Inspected target navigated or closed")) throw error;
+    });
+    await browser.waitFor(`performance.getEntriesByType('navigation')[0]?.type === 'reload' && ${ownedConversation}`, "session after reload");
+    const taskId = String(native.startup.task_id);
+    await browser.navigate(`${origin}/assistant/activity?v=1&view=detail&placement=tasks&recordKind=task&recordId=${encodeURIComponent(taskId)}&from=chat`);
+    await browser.waitFor("document.querySelector('[data-gideon-module=\"tasks\"]')?.innerText.includes('Native task detail fixture')", "real seeded TaskDetail workspace", 60000);
+    const trustedAssets = await browser.evaluate<{ workerStatus: number; workerType: string; workerBytes: number; missingStatus: number }>(`(async()=>{
+      const worker=await fetch('/assistant/assets/workers/gideon-monaco-editor.worker.js');
+      const workerBytes=(await worker.arrayBuffer()).byteLength;
+      const missing=await fetch('/assistant/assets/workers/absent-gideon-worker.js');
+      return {workerStatus:worker.status,workerType:worker.headers.get('content-type')||'',workerBytes,missingStatus:missing.status}
+    })()`);
+    expect(trustedAssets.workerStatus).toBe(200);
+    expect(trustedAssets.workerType).toContain("javascript");
+    expect(trustedAssets.workerBytes).toBeGreaterThan(0);
+    expect(trustedAssets.missingStatus).toBe(404);
     await browser.evaluate("history.back()");
-    await browser.waitFor(`location.href === ${JSON.stringify(sessionUrl)} && document.body.innerText.includes('0 messages in this conversation.')`, "Back to the owned session");
+    await browser.waitFor(ownedConversation, "Back to the owned session");
     await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Return to previous workspace')?.click()`);
-    await browser.waitFor("location.hash === '#/apps?tab=details'", "console return location");
+    await browser.waitFor(`location.pathname === '/assistant/apps' && new URLSearchParams(location.search).get('placement') === 'console' && new URLSearchParams(location.search).get('q.tab') === 'details' && document.querySelector('main.gideon-workspace-frame')?.dataset.workspaceState === 'error' && document.querySelector('[role="alert"]')?.textContent === 'Try again to check access.'`, "typed return context with unavailable console destination");
     await browser.navigate(`${origin}/assistant/chat?v=1&view=detail&recordKind=session&recordId=absent-session`);
     await browser.waitFor("document.body.innerText.includes('The requested item may have been removed.')", "missing session recovery");
     await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Go to Chat')?.click()`);
     await browser.waitFor("location.pathname === '/assistant/chat' && document.querySelector('[data-gideon-assistant]')?.textContent.includes('Signed in as module-owner') && document.querySelector('[aria-label=\"Message Gideon\"]')", "return to Chat");
     await browser.navigate(`${origin}/assistant/apps?v=1&view=detail&recordKind=app&recordId=app-1`);
-    await browser.waitFor("document.body.innerText.includes('This item cannot be checked') && document.body.innerText.includes('Retry destination')", "unavailable module recovery");
+    await browser.waitFor(`document.querySelector('main.gideon-workspace-frame')?.dataset.workspaceState === 'error' && document.querySelector('[role="alert"]')?.textContent === 'Try again to check access.' && Array.from(document.querySelectorAll('button')).some(button=>button.textContent?.trim()==='Retry')`, "unsupported application destination unavailable recovery");
   }, 90000);
 });

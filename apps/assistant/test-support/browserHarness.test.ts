@@ -19,6 +19,27 @@ async function availablePort(): Promise<number> {
   return port;
 }
 
+test("waits for the real Chromium process to close before removing its owned profile", async () => {
+  const browser = await startBrowserHarness({ chromium: process.env.CHROMIUM_BIN || "chromium" });
+  let processClosed = false;
+  browser.child.once("close", () => { processClosed = true; });
+  await browser.close();
+  assert.equal(processClosed, true);
+});
+
+test("waitFor awaits a real asynchronous Chromium predicate until it becomes true", async () => {
+  const browser = await startBrowserHarness({ chromium: process.env.CHROMIUM_BIN || "chromium" });
+  try {
+    await browser.navigate("data:text/html,<body></body>");
+    await browser.waitFor("document.readyState === 'complete'", "async predicate test document");
+    await browser.evaluate("setTimeout(() => { document.body.dataset.asyncReady = 'true'; }, 200); true");
+    await browser.waitFor("Promise.resolve(document.body.dataset.asyncReady === 'true')", "real asynchronous false-to-true predicate", 3000);
+    assert.equal(await browser.evaluate("document.body.dataset.asyncReady"), "true");
+  } finally {
+    await browser.close();
+  }
+});
+
 test("concurrent Vite journeys isolate optimizer caches and clean them up", async () => {
   const root = resolve(import.meta.dirname, "..");
   const entryFile = join(root, "src/shared/shell/WorkspaceFrame.web.tsx");
