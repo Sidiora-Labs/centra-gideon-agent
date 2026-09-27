@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server as HttpServer } from "node:http";
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -46,10 +46,16 @@ function contentType(file: string) {
   } as Record<string, string>)[extname(file)] ?? "application/octet-stream";
 }
 
-async function serveExport(exportDirectory: string, apiOrigin: string, port = 0) {
+async function serveExport(exportDirectory: string, serviceWorkerFile: string, apiOrigin: string, port = 0) {
   const api = new URL(apiOrigin);
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://gideon.test").pathname;
+    if (pathname === "/sw.js") {
+      response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      response.setHeader("Service-Worker-Allowed", "/");
+      response.end(await readFile(serviceWorkerFile));
+      return;
+    }
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       const proxy = httpRequest({ hostname: api.hostname, port: api.port, path: request.url,
         method: request.method, headers: { ...request.headers, host: api.host } }, upstream => {
@@ -104,6 +110,35 @@ async function serveExport(exportDirectory: string, apiOrigin: string, port = 0)
 
   const listeningPort = await listen(server, port);
   return { server, origin: `http://127.0.0.1:${listeningPort}` };
+}
+
+async function buildRootServiceWorker(temporary: string, exportDirectory: string) {
+  const stagedApps = join(temporary, "worker-build/apps");
+  const stagedConsole = join(stagedApps, "console");
+  const stagedAssistant = join(stagedApps, "assistant");
+  await Promise.all([
+    cp(join(repository, "apps/console/src/app"), join(stagedConsole, "src/app"), { recursive: true }),
+    cp(join(repository, "apps/console/public"), join(stagedConsole, "public"), { recursive: true }),
+    cp(join(assistant, "src"), join(stagedAssistant, "src"), { recursive: true }),
+    cp(join(assistant, "tooling"), join(stagedAssistant, "tooling"), { recursive: true }),
+    cp(join(assistant, "public"), join(stagedAssistant, "public"), { recursive: true }),
+    cp(exportDirectory, join(stagedAssistant, "dist/web"), { recursive: true }),
+  ]);
+  await mkdir(join(stagedConsole, "dist"), { recursive: true });
+  await mkdir(join(stagedAssistant, "dist"), { recursive: true });
+  for (const file of ["app.json", "metro.config.cjs", "package.json", "package-lock.json"]) {
+    await cp(join(assistant, file), join(stagedAssistant, file));
+  }
+  const builderPath = join(repository, "apps/console/tooling/buildServiceWorker.mjs");
+  const builderSource = (await readFile(builderPath, "utf8")).replace(
+    "import esbuild from 'esbuild'",
+    `import esbuild from ${JSON.stringify(pathToFileURL(join(assistant, "node_modules/esbuild/lib/main.js")).href)}`,
+  );
+  assert.notEqual(builderSource, await readFile(builderPath, "utf8"), "the official worker builder dependency resolves from the assistant package");
+  const builder = await import(`data:text/javascript;base64,${Buffer.from(builderSource).toString("base64")}`) as {
+    buildServiceWorker: (consoleRoot: string) => Promise<{ version: string; path: string }>;
+  };
+  return builder.buildServiceWorker(stagedConsole);
 }
 
 async function startBrowser(directory: string): Promise<BrowserHarness> {
@@ -197,13 +232,26 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   assert.ok((await stat(join(exportDirectory, "index.html"))).size > 0);
   assert.ok((await stat(join(exportDirectory, "assets/gideon-console.css"))).size > 0);
 
-  const served = await serveExport(exportDirectory, fixture.apiOrigin, webPort);
+  const worker = await buildRootServiceWorker(temporary, exportDirectory);
+  assert.ok((await stat(worker.path)).size > 0);
+  const served = await serveExport(exportDirectory, worker.path, fixture.apiOrigin, webPort);
   webServer = served.server;
+  const workerResponse = await fetch(`${served.origin}/sw.js`);
+  assert.equal(workerResponse.status, 200);
+  assert.match(workerResponse.headers.get("content-type") ?? "", /javascript/);
+  assert.match(await workerResponse.text(), new RegExp(`gideon-shell-${worker.version}`));
   browser = await startBrowser(temporary);
 
   const sessionBootstrap = `${served.origin}/assistant/chat?v=1`;
   await browser.command("Page.navigate", { url: sessionBootstrap });
   await signIn(browser, username);
+  await browser.waitFor(`navigator.serviceWorker?.getRegistration('/').then(registration=>registration?.scope===location.origin+'/')`, "assistant root worker registration");
+  await browser.command("Page.reload", { ignoreCache: true });
+  await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes(${JSON.stringify(`Signed in as ${username}`)})`, "authenticated reload under service worker");
+  await browser.waitFor(`navigator.serviceWorker?.controller?.scriptURL===location.origin+'/sw.js'`, "assistant service worker control");
+  const workerRegistration = await browser.evaluate<{ scope: string; scriptURL: string }>(`navigator.serviceWorker.getRegistration('/').then(registration=>({scope:registration?.scope??'',scriptURL:registration?.active?.scriptURL??''}))`);
+  assert.equal(workerRegistration.scope, `${served.origin}/`);
+  assert.equal(workerRegistration.scriptURL, `${served.origin}/sw.js`);
   const session = await browser.evaluate<{ key: string }>(`fetch('/api/chat/sessions',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:'{}'}).then(async r=>{if(!r.ok)throw Error('session creation failed: '+r.status);return r.json()})`);
   assert.ok(session.key);
   const sessionHref = routeHref(served.origin, "chat", {
@@ -275,10 +323,10 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')&&document.body.innerText.includes(${JSON.stringify(taskRecord.title)})`, "real task detail after module retry");
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
   assert.equal(await browser.evaluate(`Boolean(document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')?.closest('#root'))`), true);
-  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"] .gideon-workspace-frame[data-workspace-mode="full"]')&&[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Edit')&&document.querySelector('textarea[aria-label="Comment"]')`, "native TaskDetail actions and full workspace frame");
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"] main.gideon-workspace-frame[data-workspace-mode="full"] h1')?.textContent.trim()===${JSON.stringify(taskRecord.title)}&&[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Edit')&&document.querySelector('textarea[aria-label="Comment"]')`, "native TaskDetail title, actions and full workspace frame");
   assert.equal(await browser.evaluate(`document.querySelectorAll('main').length`), 1);
   await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent.trim()==='Edit')?.click()`);
-  await browser.waitFor(`Array.from(document.querySelectorAll('input')).some(input=>input.value===${JSON.stringify(taskRecord.title)})`, "TaskDetail edit controls");
+  await browser.waitFor(`document.querySelector('input[aria-label="Title"]')?.value===${JSON.stringify(taskRecord.title)}`, "TaskDetail title edit control");
   await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.textContent.trim()==='Cancel')?.click()`);
   await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="tasks"]')&&[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')==='Mark criterion complete')`, "native task exit criterion action");
   await browser.evaluate(`document.querySelector('[aria-label="Mark criterion complete"]')?.click()`);
@@ -311,14 +359,17 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
     view: "workspace", record: { kind: "artifact", id: fixtureState.artifact_slug }, placement: "artifacts/editor",
     returnTo: { destination: "chat", sessionId: session.key, selectionId: "artifact-return-selection", scrollY: 320 },
   });
+  await browser.command("Page.addScriptToEvaluateOnNewDocument", { source: `window.__assistantE2eWorkerUrls=[];const NativeWorker=window.Worker;window.Worker=new Proxy(NativeWorker,{construct(target,args,newTarget){window.__assistantE2eWorkerUrls.push(new URL(String(args[0]),location.href).href);return Reflect.construct(target,args,newTarget)}});` });
   await browser.command("Page.navigate", { url: artifactHref });
-  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('.monaco-editor textarea[aria-label]')`, "real artifact editor module and initialized Monaco model");
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('[aria-label="Document view"] [aria-label="Edit"]')`, "native artifact edit view control");
+  await browser.evaluate(`document.querySelector('[aria-label="Document view"] [aria-label="Edit"]')?.click()`);
+  await browser.waitFor(`document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')&&document.body.innerText.includes(${JSON.stringify(artifactRecord.name)})&&document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')`, "real artifact editor module and accessible Monaco textbox");
   assert.equal(await browser.evaluate(`Boolean(document.querySelector('.gideon-trusted-module[data-gideon-module="artifacts/editor"]')?.closest('#root'))`), true);
   const editorProof = await browser.evaluate<{ editor: boolean; accessibleName: string; modelText: string; moduleMode: string; workerUrls: string[]; mainBundleUrls: string[]; external: string[]; rootCount: number }>(`(()=>{
-    const input=document.querySelector('.monaco-editor textarea[aria-label]');
+    const input=document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label]');
     const resources=performance.getEntriesByType('resource').map(entry=>entry.name);
-    const workerUrls=resources.filter(url=>/\/assistant\/assets\/workers\/gideon-monaco-[^/]+\.worker\.js(?:$|\?)/.test(url));
-    return {editor:!!document.querySelector('.monaco-editor'),accessibleName:input?.getAttribute('aria-label')||'',modelText:document.querySelector('.monaco-editor .view-lines')?.textContent||'',moduleMode:document.querySelector('.gideon-trusted-module')?.className||'',workerUrls,mainBundleUrls:resources.filter(url=>new URL(url,location.href).origin===location.origin&&/_expo\/static\/js\/web\//.test(new URL(url,location.href).pathname)&&/\.(?:js|bundle)$/.test(new URL(url,location.href).pathname)),external:resources.filter(url=>/https?:\/\/(?:[^/]+\.)?(?:jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)\//i.test(url)),rootCount:document.querySelectorAll('#root').length};
+    const workerUrls=[...new Set([...resources,...window.__assistantE2eWorkerUrls].filter(url=>/\/assistant\/assets\/workers\/gideon-monaco-[^/]+\.worker\.js(?:$|\?)/.test(url)))];
+    return {editor:!!document.querySelector('.monaco-editor'),accessibleName:input?.getAttribute('aria-label')||'',modelText:document.querySelector('.monaco-editor .view-lines')?.textContent||'',moduleMode:document.querySelector('.gideon-trusted-module main.gideon-workspace-frame')?.getAttribute('data-workspace-mode')||'',workerUrls,mainBundleUrls:resources.filter(url=>new URL(url,location.href).origin===location.origin&&/_expo\/static\/js\/web\//.test(new URL(url,location.href).pathname)&&/\.(?:js|bundle)$/.test(new URL(url,location.href).pathname)),external:resources.filter(url=>/https?:\/\/(?:[^/]+\.)?(?:jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)\//i.test(url)),rootCount:document.querySelectorAll('#root').length};
   })()`);
   assert.equal(editorProof.editor, true);
   assert.match(editorProof.accessibleName, /Trusted module editor.*editor/i);
@@ -329,8 +380,8 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   assert.ok(editorProof.mainBundleUrls.length > 0, "the local Expo main JavaScript bundle initialized the real Monaco editor");
   assert.deepEqual(editorProof.external, []);
   assert.equal(editorProof.rootCount, 1);
-  await browser.evaluate(`(()=>{window.__assistantE2eEditor=document.querySelector('.monaco-editor');document.querySelector('.monaco-editor textarea[aria-label]')?.focus();return true})()`);
-  await browser.waitFor(`document.activeElement?.matches('.monaco-editor textarea[aria-label]')`, "keyboard focus in accessible Monaco editor");
+  await browser.evaluate(`(()=>{window.__assistantE2eEditor=document.querySelector('.monaco-editor');document.querySelector('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')?.focus();return true})()`);
+  await browser.waitFor(`document.activeElement?.matches('.monaco-editor .native-edit-context[role="textbox"][aria-label="Trusted module editor — editor"]')`, "keyboard focus in accessible Monaco editor");
   await browser.command("Input.insertText", { text: "Keyboard operation marker" });
   await browser.waitFor(`document.querySelector('.monaco-editor .view-lines')?.textContent.includes('Keyboard operation marker')`, "keyboard edit in the native artifact model");
 
