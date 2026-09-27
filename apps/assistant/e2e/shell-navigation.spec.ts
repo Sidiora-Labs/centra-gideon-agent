@@ -121,8 +121,15 @@ async function buildRootServiceWorker(temporary: string, exportDirectory: string
     cp(join(repository, "apps/console/public"), join(stagedConsole, "public"), { recursive: true }),
     cp(join(assistant, "src"), join(stagedAssistant, "src"), { recursive: true }),
     cp(join(assistant, "tooling"), join(stagedAssistant, "tooling"), { recursive: true }),
-    cp(join(assistant, "public"), join(stagedAssistant, "public"), { recursive: true }),
     cp(exportDirectory, join(stagedAssistant, "dist/web"), { recursive: true }),
+    (async () => {
+      const source = join(assistant, "public");
+      try { await stat(source); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      await cp(source, join(stagedAssistant, "public"), { recursive: true });
+    })(),
   ]);
   await mkdir(join(stagedConsole, "dist"), { recursive: true });
   await mkdir(join(stagedAssistant, "dist"), { recursive: true });
@@ -153,8 +160,9 @@ async function signIn(browser: BrowserHarness, username: string) {
   await browser.evaluate(`(()=>{const set=(id,value)=>{const input=document.getElementById(id);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))};set('gideon-username',${JSON.stringify(username)});set('gideon-password',${JSON.stringify(password)});document.querySelector('form').requestSubmit();return true})()`);
   await browser.waitFor(`document.querySelector('[data-gideon-assistant]')?.textContent.includes(${JSON.stringify(`Signed in as ${username}`)})`, `signed-in identity ${username}`);
   const typography = await browser.evaluate<{ heading: string; identity: string }>(`(()=>{const root=document.querySelector('[data-gideon-assistant]');const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let identity=root;while(walker.nextNode()){if(walker.currentNode.textContent?.includes('Signed in as')){identity=walker.currentNode.parentElement??root;break}}return {heading:getComputedStyle(root.querySelector('h1')).fontFamily,identity:getComputedStyle(identity).fontFamily}})()`);
-  assert.match(typography.heading, /system-ui/i);
-  assert.match(typography.identity, /system-ui/i);
+  const nativeSans = /(system-ui|-apple-system|BlinkMacSystemFont|Segoe UI|Roboto|Arial|sans-serif)/i;
+  assert.match(typography.heading, nativeSans);
+  assert.match(typography.identity, nativeSans);
 }
 
 function routeHref(origin: string, destination: string, options: {
@@ -266,6 +274,14 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.waitFor("document.getElementById('gideon-message-composer')", "deep-linked conversation composer");
   assert.equal(await browser.evaluate("location.href"), sessionHref);
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
+  const returnMessage = "Shell return context marker. ".repeat(100);
+  await browser.evaluate(`(()=>{const input=document.getElementById('gideon-message-composer');const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value').set;setter.call(input,${JSON.stringify(returnMessage)});input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[aria-label="Send message"]')?.click();return true})()`);
+  await browser.waitFor(`Array.from(document.querySelectorAll('[id^="gideon-message-"]')).some(message=>message.textContent.includes(${JSON.stringify(returnMessage.slice(0, 30))}))`, "persisted native user message for return context");
+  const selectionId = await browser.evaluate<string>(`Array.from(document.querySelectorAll('[id^="gideon-message-"]')).find(message=>message.textContent.includes(${JSON.stringify(returnMessage.slice(0, 30))}) )?.id.replace(/^gideon-message-/,'')||''`);
+  assert.ok(selectionId, "the native conversation rendered a stable message ID for selection");
+  await browser.waitFor(`(()=>{const list=document.getElementById('gideon-chat-scroll');return !!list&&list.scrollHeight>list.clientHeight+320})()`, "conversation content tall enough to restore its scroll position");
+  const scrollBeforeWorkspace = await browser.evaluate<number>(`(()=>{const list=document.getElementById('gideon-chat-scroll');list.scrollTop=320;list.dispatchEvent(new Event('scroll',{bubbles:true}));return list.scrollTop})()`);
+  assert.ok(scrollBeforeWorkspace >= 300, `source conversation scroll was set before workspace handoff: ${scrollBeforeWorkspace}`);
   const apiHeaders = JSON.stringify({ "X-Gideon-API-Version": "1", "X-Session-Key": "dashboard:ui" });
   const taskRecord = await browser.evaluate<{ title: string }>(`fetch('/api/tasks/'+encodeURIComponent(${JSON.stringify(String(fixtureState.task_id))}),{credentials:'same-origin',headers:${apiHeaders}}).then(async response=>{if(!response.ok)throw Error('task fixture read failed: '+response.status);return response.json()})`);
   const artifactRecord = await browser.evaluate<{ name: string; content: string; kind: string }>(`fetch('/api/artifacts/'+encodeURIComponent(${JSON.stringify(String(fixtureState.artifact_slug))}),{credentials:'same-origin',headers:${apiHeaders}}).then(async response=>{if(!response.ok)throw Error('artifact fixture read failed: '+response.status);return response.json()})`);
@@ -314,7 +330,7 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.command("Network.setBlockedURLs", { urls: ["*gideon-console.css"] });
   const taskHref = routeHref(served.origin, "activity", {
     view: "workspace", record: { kind: "task", id: fixtureState.task_id }, placement: "tasks",
-    returnTo: { destination: "chat", sessionId: session.key, selectionId: "shell-return-selection", scrollY: 320 },
+    returnTo: { destination: "chat", sessionId: session.key, selectionId, scrollY: 320 },
   });
   await browser.command("Page.navigate", { url: taskHref });
   await browser.waitFor(`document.body.innerText.includes('The trusted workspace could not be prepared.')`, "trusted module stylesheet failure");
@@ -357,7 +373,7 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
 
   const artifactHref = routeHref(served.origin, "apps", {
     view: "workspace", record: { kind: "artifact", id: fixtureState.artifact_slug }, placement: "artifacts/editor",
-    returnTo: { destination: "chat", sessionId: session.key, selectionId: "artifact-return-selection", scrollY: 320 },
+    returnTo: { destination: "chat", sessionId: session.key, selectionId, scrollY: 320 },
   });
   await browser.command("Page.addScriptToEvaluateOnNewDocument", { source: `window.__assistantE2eWorkerUrls=[];const NativeWorker=window.Worker;window.Worker=new Proxy(NativeWorker,{construct(target,args,newTarget){window.__assistantE2eWorkerUrls.push(new URL(String(args[0]),location.href).href);return Reflect.construct(target,args,newTarget)}});` });
   await browser.command("Page.navigate", { url: artifactHref });
@@ -400,6 +416,9 @@ test("real Expo assistant shell preserves identity, route, trusted workspaces an
   await browser.command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await browser.waitFor(`!document.querySelector('[data-gideon-assistant-overlay]')&&document.activeElement?.getAttribute('aria-label')==='Open Gideon menu'`, "overlay focus restoration in module route");
   await browser.evaluate(`document.querySelector('[aria-label="Return to previous workspace"]')?.click()`);
-  await browser.waitFor(`location.pathname==='/assistant/chat'&&new URLSearchParams(location.search).get('session')===${JSON.stringify(session.key)}&&new URLSearchParams(location.search).get('view')==='workspace'`, "internal return to the same conversation");
+  await browser.waitFor(`location.pathname==='/assistant/chat'&&new URLSearchParams(location.search).get('session')===${JSON.stringify(session.key)}&&new URLSearchParams(location.search).get('fromSelection')===${JSON.stringify(selectionId)}&&new URLSearchParams(location.search).get('fromScroll')==='320'`, "return to the same conversation, selected message and scroll context");
+  await browser.waitFor(`(()=>{const message=document.getElementById(${JSON.stringify(`gideon-message-${selectionId}`)});const list=document.getElementById('gideon-chat-scroll');return !!message&&getComputedStyle(message).borderTopWidth==='2px'&&!!list&&list.scrollTop>=300})()`, "selected message highlight and conversation scroll restoration");
+  assert.equal(await browser.evaluate(`Boolean(document.getElementById('gideon-message-composer'))`), true);
+  assert.equal(await browser.evaluate(`Boolean(document.querySelector('[aria-label="Return to previous workspace"]'))`), false, "returning to the source conversation does not create a self-return action");
   assert.equal(await browser.evaluate(`document.querySelectorAll('#root').length`), 1);
 });

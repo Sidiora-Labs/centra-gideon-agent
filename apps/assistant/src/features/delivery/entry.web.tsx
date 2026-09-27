@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { OwnerScope } from "../../shared/auth.web";
 import { GatewayError, gatewayJson } from "../../shared/transport.web";
+import { registerServiceWorker } from "../../../../console/src/app/shell/registerServiceWorker";
 import {
   createAssistantRouteController,
   type AssistantRouteController,
@@ -17,6 +18,24 @@ export type OwnedSession = Readonly<{
   title: string;
   total: number;
 }>;
+
+let rootServiceWorkerRegistration: Promise<ServiceWorkerRegistration | null> | null = null;
+
+export function registerAssistantServiceWorker(enabled: boolean = process.env.NODE_ENV === "production") {
+  if (!enabled) return Promise.resolve(null);
+  if (!rootServiceWorkerRegistration) {
+    const registration = registerServiceWorker(true);
+    const pending = registration.then((result) => {
+      if (!result && rootServiceWorkerRegistration === pending) rootServiceWorkerRegistration = null;
+      return result;
+    }, (error: unknown) => {
+      if (rootServiceWorkerRegistration === pending) rootServiceWorkerRegistration = null;
+      throw error;
+    });
+    rootServiceWorkerRegistration = pending;
+  }
+  return rootServiceWorkerRegistration;
+}
 
 const checkingRoute: AssistantRouteSnapshot = { phase: "checking", route: {
   kind: "route", destination: "chat", view: "list",
@@ -61,6 +80,7 @@ export function useAssistantEntry(scope: OwnerScope) {
   const [entry, setEntry] = useState<{ scopeKey: string; controller: AssistantRouteController;
     sessions: Map<string, OwnedSession> } | null>(null);
   useEffect(() => {
+    void registerAssistantServiceWorker();
     const sessions = new Map<string, OwnedSession>();
     const controller = createAssistantRouteController({ resolveRoute: createOwnedRouteResolver(scope, sessions) });
     setEntry({ scopeKey: scope.cacheKey, controller, sessions });
