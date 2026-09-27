@@ -16,7 +16,7 @@ export class ActivityController {
   private refreshTask: Promise<void> | null = null
   private refreshTaskScopeKey: string | null = null
   private refreshQueued = false
-  private liveDisconnected = false
+  private liveConnection: 'connecting' | 'connected' | 'disconnected' = 'connecting'
   private snapshot = emptyActivitySnapshot(null)
   private listeners = new Set<() => void>()
 
@@ -38,7 +38,7 @@ export class ActivityController {
     if (this.scope?.cacheKey === scope?.cacheKey) return
     this.generation++
     this.scope = scope
-    this.liveDisconnected = false
+    this.liveConnection = 'connecting'
     this.refreshQueued = false
     this.refreshTask = null
     this.refreshTaskScopeKey = null
@@ -58,9 +58,8 @@ export class ActivityController {
       const previous = this.snapshot.sources[source]
       const result = await readActivitySource(scope, source, previous)
       if (generation !== this.generation || this.scope?.cacheKey !== scope.cacheKey) return
-      const visible = this.liveDisconnected && result.coverage !== 'no_read_route'
-        ? { ...result, freshness: 'stale' as const,
-          error: 'Live Activity updates are disconnected. Reconnecting before refreshing canonical records.' }
+      const visible = this.liveConnection !== 'connected' && result.coverage !== 'no_read_route'
+        ? { ...result, freshness: 'stale' as const, error: this.liveStatusMessage() }
         : result
       this.publish(withActivitySource(this.snapshot, visible))
     }))
@@ -74,30 +73,47 @@ export class ActivityController {
     this.publish(withActivitySource(this.snapshot, { ...previous, phase: 'loading', freshness: 'stale' }))
     const result = await readActivitySource(scope, source, previous, previous.nextOffset)
     if (generation !== this.generation || this.scope?.cacheKey !== scope.cacheKey) return
-    const visible = this.liveDisconnected && result.coverage !== 'no_read_route'
-      ? { ...result, freshness: 'stale' as const,
-        error: 'Live Activity updates are disconnected. Reconnecting before refreshing canonical records.' }
+    const visible = this.liveConnection !== 'connected' && result.coverage !== 'no_read_route'
+      ? { ...result, freshness: 'stale' as const, error: this.liveStatusMessage() }
       : result
     this.publish(withActivitySource(this.snapshot, visible))
   }
 
   markDisconnected(cacheKey: string): void {
     if (!this.ownsScope(cacheKey)) return
-    this.liveDisconnected = true
+    this.liveConnection = 'disconnected'
     this.generation++
     let next = this.snapshot
     for (const source of ACTIVITY_SOURCES) {
       const previous = next.sources[source]
       next = withActivitySource(next, { ...previous,
         freshness: previous.coverage === 'no_read_route' ? previous.freshness : 'stale',
-        error: 'Live Activity updates are disconnected. Reconnecting before refreshing canonical records.' })
+        error: this.liveStatusMessage() })
     }
     this.publish(next)
   }
 
   markConnected(cacheKey: string): void {
     if (!this.ownsScope(cacheKey)) return
-    this.liveDisconnected = false
+    this.liveConnection = 'connected'
+  }
+
+  markConnecting(cacheKey: string): void {
+    if (!this.ownsScope(cacheKey)) return
+    this.liveConnection = 'connecting'
+    let next = this.snapshot
+    for (const source of ACTIVITY_SOURCES) {
+      const previous = next.sources[source]
+      if (previous.coverage === 'no_read_route') continue
+      next = withActivitySource(next, { ...previous, freshness: 'stale', error: this.liveStatusMessage() })
+    }
+    this.publish(next)
+  }
+
+  private liveStatusMessage(): string {
+    return this.liveConnection === 'connecting'
+      ? 'Live Activity is connecting. Canonical records remain provisional until the stream opens.'
+      : 'Live Activity updates are disconnected. Reconnecting before refreshing canonical records.'
   }
 
   async refreshForScope(cacheKey: string): Promise<void> {
@@ -141,6 +157,7 @@ export function useActivity(scope: OwnerScope | null): Readonly<{
     const cacheKey = scope.cacheKey
     const events = new ActivityEventWindow()
     const socket = new GatewaySocket(ownedWebSocketUrl())
+    controller.markConnecting(cacheKey)
     const detach = socket.attach({
       message: message => {
         if (currentScopeKey.current !== cacheKey || !controller.ownsScope(cacheKey)
@@ -149,7 +166,10 @@ export function useActivity(scope: OwnerScope | null): Readonly<{
       },
       status: connected => {
         if (currentScopeKey.current !== cacheKey) return
-        if (connected) controller.markConnected(cacheKey)
+        if (connected) {
+          controller.markConnected(cacheKey)
+          void controller.refreshForScope(cacheKey)
+        }
         else controller.markDisconnected(cacheKey)
       },
       reconnect: () => {

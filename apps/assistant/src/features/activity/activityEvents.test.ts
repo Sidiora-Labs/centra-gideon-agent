@@ -179,8 +179,17 @@ window.loaded = true
     await vite.listen()
     const { evaluate } = await browser(`${origin}/integration`)
     await until(evaluate, 'window.loaded === true')
+    await control(server.control, '/websocket-offline', { offline: true })
     await evaluate(`window.beginActivity('owner-a')`)
     await until(evaluate, `document.querySelector('[data-source-health="task"]')?.getAttribute('data-phase') === 'ready'`)
+    expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness')`)).toBe('stale')
+    expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.textContent.includes('Live Activity is connecting')`)).toBe(true)
+    await control(server.control, '/task', { title: 'Recovered from initial stream failure' })
+    const initialReconnectAt = Date.now()
+    await control(server.control, '/websocket-offline', { offline: false })
+    await until(evaluate, `Array.from(document.querySelectorAll('[data-source="task"]')).some(card => card.textContent.includes('Recovered from initial stream failure'))`, 5_000)
+    expect(Date.now() - initialReconnectAt).toBeLessThan(5_000)
+    expect(await evaluate(`document.querySelector('[data-source-health="task"]')?.getAttribute('data-freshness')`)).toBe('current')
     await until(evaluate, `document.querySelector('[data-activity-id="notification-1"]') !== null`)
 
     const notes = await control(server.control, '/out-of-order-notes', {}) as { ids: string[] }
