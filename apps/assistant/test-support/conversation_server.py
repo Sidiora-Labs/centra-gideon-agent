@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -23,21 +24,69 @@ from gideon.interfaces.dashboard.ws import api_ws
 from gideon.security.auth import credentials
 
 
+def conversation_provider(config: AppConfig, home: Path):
+    model = os.environ.get("GIDEON_TEST_MODEL", "")
+    if not model:
+        return None
+    secret = os.environ.get("OPENAI_API_KEY", "")
+    if not secret:
+        raise RuntimeError("The selected test model requires an API credential")
+
+    from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+    from gideon.integrations.llm.credentials import Credential
+    from gideon.integrations.llm.openai import OpenAIProvider
+    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
+
+    def build_provider(*, entry, **_kwargs):
+        provider = OpenAIProvider(
+            model=entry.model,
+            credential=Credential(name="conversation-test", kind="api_key", secret=secret, source="env"),
+            max_tokens=48,
+        )
+        provider.supports_tools = False
+        return provider
+
+    registry = get_default_registry()
+    registry.register_type(
+        ProviderCapability(
+            type="conversation-test-openai",
+            capabilities=frozenset({Capability.CHAT}),
+            supports_streaming=True,
+            supports_tools=False,
+            supports_embeddings=False,
+            supports_vision=False,
+            max_context_tokens=128000,
+        ),
+        build_provider,
+    )
+    registry.register_entry(ProviderEntry(
+        name="conversation-test", type="conversation-test-openai", model=model,
+        declared_capabilities=frozenset({Capability.CHAT}),
+    ))
+    (home / "active_models.json").write_text(
+        json.dumps({"chat": [f"conversation-test:{model}"]}), encoding="utf-8"
+    )
+    return config.create_provider_factory()
+
+
 async def main(origin: str) -> None:
     with tempfile.TemporaryDirectory(prefix="gideon-conversation-") as directory:
         home = Path(directory)
         loader.config_dir = lambda: home
         credentials.config_dir = lambda: home
         session_store.config_dir = lambda: home
-        (home / "config.json").write_text(
-            json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8"
-        )
+        model = os.environ.get("GIDEON_TEST_MODEL", "")
+        provider_rows = [{"name": "conversation-test", "type": "conversation-test-openai", "model": model}] if model else []
+        (home / "config.json").write_text(json.dumps({
+            "auth": {"login_enabled": True}, "providers": provider_rows,
+        }), encoding="utf-8")
         credentials.set_password("conversation-owner", "correct-horse-battery-staple")
         token_auth.use_persistent_secret()
         token_auth.revoke_all_sessions()
 
+        config = AppConfig()
         state = ConsoleState(
-            sessions=ConversationDirectory(AppConfig()),
+            sessions=ConversationDirectory(config, provider_factory=conversation_provider(config, home)),
             start_time=0.0,
             conversation_log=ConversationLog(base_dir=home / "history"),
             owner_id="conversation-owner",

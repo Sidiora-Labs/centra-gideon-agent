@@ -146,24 +146,28 @@ export class ConversationController {
     this.submitting = true
     let sessionId = this.state.sessionId
     const scope = this.state.scope
+    let generation = this.generation
     const clientTs = new Date().toISOString()
     this.update({ phase: 'sending', error: '' })
     try {
-      if (!sessionId) sessionId = await this.create()
-      if (scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      if (!sessionId) {
+        sessionId = await this.create()
+        generation = this.generation
+      }
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
       const accepted = await gatewayJson<{ ok: boolean; session?: string; queued?: boolean }>(
         '/api/chat?ws=1', { method: 'POST', body: { message: text, session: sessionId, meta: { client_ts: clientTs } } },
       )
       if (!accepted.ok || (accepted.session && accepted.session !== sessionId)) throw new Error('Gideon did not confirm the send')
-      if (scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
       this.update({ draft: this.state.draft === text ? '' : this.state.draft, phase: 'sending', running: true })
       await this.refresh()
     } catch (error) {
-      if (scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+      if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
       if (sessionId && !(error instanceof GatewayError && error.status < 500)) {
         try {
           const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
-          if (scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
+          if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
           if (receivedPrompt(detail, clientTs)) {
             this.update({ draft: this.state.draft === text ? '' : this.state.draft, messages: canonicalMessages(detail),
               running: detail.running, phase: detail.running ? 'sending' : 'ready', error: '' })

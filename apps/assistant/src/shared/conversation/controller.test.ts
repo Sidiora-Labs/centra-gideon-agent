@@ -56,7 +56,7 @@ async function browser(address: string): Promise<(expression: string) => Promise
   const child = spawn(process.env.CHROMIUM_BIN || 'chromium', [
     '--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
     `--remote-debugging-port=${debuggingPort}`, `--user-data-dir=${directory}`, 'about:blank',
-  ])
+  ], { env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'OPENAI_API_KEY')) })
   children.push(child)
   let target: { webSocketDebuggerUrl: string } | undefined
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -139,28 +139,41 @@ window.loaded = true
     const evaluate = await browser(`${origin}/conversation`)
     await evaluate('new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.loaded) { clearInterval(timer); done(true) } else if (++n > 100) { clearInterval(timer); reject(Error("entry unavailable")) } }, 50) })')
     const result = await evaluate(`(async () => {
+      const expectAnswer = ${Boolean(process.env.GIDEON_TEST_MODEL)}
       const owner = await window.signInOwner('conversation-owner', 'correct-horse-battery-staple')
       window.controller.setOwner(window.ownerScope(location.origin, owner))
       const session = await window.controller.create()
-      window.controller.setDraft('A real gateway turn')
+      await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not connect')) } }, 50) })
+      const socket = window.controller.socket
+      const frames = []
+      socket.addEventListener('message', event => {
+        const frame = JSON.parse(event.data)
+        if (frame.data?.session === session) frames.push({ type: frame.type, role: frame.data.role || '' })
+      })
+      window.controller.setDraft('Reply with one word: ready.')
       await window.controller.send()
+      if (expectAnswer) {
+        await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (frames.some(frame => frame.type === 'chat_done')) { clearInterval(timer); done() } else if (++n > 300) { clearInterval(timer); reject(Error('selected session completion not received: ' + JSON.stringify(frames))) } }, 50) })
+      }
       const detail = await (await fetch('/api/chat/sessions/' + encodeURIComponent(session), { credentials: 'same-origin', headers: { 'X-Gideon-API-Version': '1', 'X-Session-Key': 'dashboard:ui' } })).json()
       await window.controller.refresh()
       const snapshot = window.controller.snapshot()
-      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length,
-        visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length,
+      const evidence = { session, connected: snapshot.connected, persisted: detail.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
+        visible: snapshot.messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length,
+        assistantPersisted: detail.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
+        assistantVisible: snapshot.messages.filter(m => m.role === 'assistant' && m.content.trim()).map(m => m.content),
         draft: snapshot.draft, ids: snapshot.messages.map(m => m.id) }
-      window.controller.socket.close()
+      socket.close()
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (!window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not disconnect')) } }, 50) })
       await new Promise((done, reject) => { let n=0; const timer=setInterval(() => { if (window.controller.snapshot().connected) { clearInterval(timer); done() } else if (++n > 100) { clearInterval(timer); reject(Error('socket did not reconnect')) } }, 50) })
-      const reconnected = window.controller.snapshot().messages.filter(m => m.role === 'user' && m.content === 'A real gateway turn').length
+      const reconnected = window.controller.snapshot().messages.filter(m => m.role === 'user' && m.content === 'Reply with one word: ready.').length
       await window.controller.open('missing-session')
       window.controller.setDraft('Retain this draft')
       await window.controller.send()
       const failed = { draft: window.controller.snapshot().draft, phase: window.controller.snapshot().phase }
       await window.signOutOwner()
       window.controller.setOwner(null)
-      return { ...evidence, reconnected, failed, cleared: window.controller.snapshot() }
+      return { ...evidence, frames, socketChanged: window.controller.socket !== socket, reconnected, failed, cleared: window.controller.snapshot() }
     })()`)
     expect(result.session).toMatch(/^chat-/)
     expect(result.connected).toBe(true)
@@ -168,6 +181,16 @@ window.loaded = true
     expect(result.visible).toBe(1)
     expect(result.draft).toBe('')
     expect(new Set(result.ids).size).toBe(result.ids.length)
+    if (process.env.GIDEON_TEST_MODEL) {
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_chunk')
+      expect(result.frames.map((frame: { type: string }) => frame.type)).toContain('chat_done')
+      expect(result.frames).toContainEqual({ type: 'chat_message', role: 'assistant' })
+      expect(result.assistantPersisted.length).toBeGreaterThan(0)
+      expect(result.assistantVisible).toEqual(result.assistantPersisted)
+    }
+    console.log('Selected session websocket events:', result.frames.map((frame: { type: string }) => frame.type))
+    console.log('Persisted assistant answer:', result.assistantPersisted)
+    expect(result.socketChanged).toBe(true)
     expect(result.reconnected).toBe(1)
     expect(result.failed).toEqual({ draft: 'Retain this draft', phase: 'failed' })
     expect(result.cleared).toMatchObject({ sessionId: null, draft: '', messages: [], phase: 'signed-out' })
