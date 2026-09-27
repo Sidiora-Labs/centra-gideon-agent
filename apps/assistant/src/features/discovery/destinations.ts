@@ -132,7 +132,7 @@ const DEFINITIONS = [
   ["capabilities/communications/inbox", "Inbox", "Personal", "communications", "apps", "full", null, "pending"],
   ["capabilities/communications/calendar", "Calendar", "Personal", "communications", "apps", "full", null, "pending"],
   ["capabilities/communications/beeper", "Beeper", "Personal", "communications", "apps", "full", null, "pending"],
-  ["capabilities/communications/outbound", "Outbound email", "Personal", "communications", "apps", "full", null, "pending"],
+  ["capabilities/communications/outbound", "Mail", "Personal", "communications", "apps", "full", null, "pending"],
   ["capabilities/communications/desktop", "Desktop imports", "Personal", "communications", "apps", "full", null, "pending"],
   ["capabilities/communications/imports", "People imports", "Personal", "communications", "apps", "full", null, "pending"],
   ["capabilities/communications/threads", "Threads", "Personal", "communications", "apps", "full", null, "pending"],
