@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,7 +15,10 @@ async def main(origin: str) -> None:
     with tempfile.TemporaryDirectory(prefix="gideon-studio-test-") as directory:
         home = Path(directory)
         os.environ["GIDEON_HOME"] = str(home)
+        from gideon.core.config.loader import AppConfig
+        from gideon.engine.session import ConversationDirectory
         from gideon.interfaces.dashboard import token_auth
+        from gideon.interfaces.dashboard.state import ConsoleState
         from gideon.security.auth import credentials
 
         image_key = os.environ.pop("GIDEON_TEST_IMAGE_API_KEY", "")
@@ -59,7 +63,7 @@ async def main(origin: str) -> None:
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
         app["port"] = 10000
         app["allowed_origins"] = {origin}
-        app["state"] = SimpleNamespace(_restricted_keys=set(), _sessions={})
+        app["state"] = ConsoleState(ConversationDirectory(AppConfig.load()), time.time())
         app.router.add_post("/api/auth/login", auth.api_auth_login)
         app.router.add_get("/api/auth/session", auth.api_auth_session)
         register_artifact_routes(app)
