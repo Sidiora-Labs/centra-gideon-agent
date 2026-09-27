@@ -34,23 +34,19 @@ import asyncio, json, os, sys, tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from aiohttp import web
-import gideon.core.config.loader as loader
 from gideon.cognition.knowledge.store import KnowledgeStore
-from gideon.interfaces.dashboard import session_store, token_auth
+from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import auth
 from gideon.interfaces.dashboard.handlers.knowledge import (
   list_items, get_item, library_home, list_collections, create_collection,
   get_collection_items, add_collection_items, remove_collection_item,
-  set_item_read_state, set_item_favorited,
+  set_item_read_state, set_item_favorited, delete_item,
 )
 from gideon.security.auth import credentials
 
 async def main(origin):
   with tempfile.TemporaryDirectory(prefix="gideon-library-native-") as directory:
-    home = Path(directory)
-    loader.config_dir = lambda: home
-    credentials.config_dir = lambda: home
-    session_store.config_dir = lambda: home
+    home = Path(os.environ["GIDEON_HOME"])
     (home / "config.json").write_text(json.dumps({"auth": {"login_enabled": True}}), encoding="utf-8")
     credentials.set_password("library-owner", "correct-horse-battery-staple")
     token_auth.use_persistent_secret()
@@ -67,12 +63,17 @@ async def main(origin):
     store.set_favorited(second_id, True)
     for index in range(105):
       store.create_typed_item(item_type="note", title=f"Later native record {index:03d}", content="A real additional record used to exercise native pagination.", provider="native")
+    concurrent_failed = store.create_typed_item(item_type="note", title="Concurrent scenario failed row", content="A real record removed during a concurrent update.", provider="native")
+    concurrent_success = store.create_typed_item(item_type="note", title="Concurrent scenario successful row", content="A real record updated while another update fails.", provider="native")
     async def delayed_get_item(request):
       if request.match_info["id"] == second_id: await asyncio.sleep(1)
       return await get_item(request)
     async def delayed_library_home(request):
       await asyncio.sleep(0.5)
       return await library_home(request)
+    async def delayed_read_state(request):
+      if request.match_info["id"] == concurrent_failed: await asyncio.sleep(0.7)
+      return await set_item_read_state(request)
     app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10000)])
     app["port"] = 10000
     app["allowed_origins"] = {origin}
@@ -83,19 +84,21 @@ async def main(origin):
     app.router.add_post("/api/auth/logout", auth.api_auth_logout)
     app.router.add_get("/api/knowledge/items", list_items)
     app.router.add_get("/api/knowledge/items/{id}", delayed_get_item)
+    app.router.add_delete("/api/knowledge/items/{id}", delete_item)
     app.router.add_get("/api/knowledge/library-home", delayed_library_home)
     app.router.add_get("/api/knowledge/collections", list_collections)
     app.router.add_post("/api/knowledge/collections", create_collection)
     app.router.add_get("/api/knowledge/collections/{id}/items", get_collection_items)
     app.router.add_post("/api/knowledge/collections/{id}/items", add_collection_items)
     app.router.add_delete("/api/knowledge/collections/{id}/items/{item_id}", remove_collection_item)
-    app.router.add_post("/api/knowledge/items/{id}/read-state", set_item_read_state)
+    app.router.add_post("/api/knowledge/items/{id}/read-state", delayed_read_state)
     app.router.add_post("/api/knowledge/items/{id}/favorite", set_item_favorited)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"api_port": site._server.sockets[0].getsockname()[1], "record_id": native_id, "second_record_id": second_id}), flush=True)
+    print(json.dumps({"api_port": site._server.sockets[0].getsockname()[1], "record_id": native_id, "second_record_id": second_id,
+      "concurrent_failed_id": concurrent_failed, "concurrent_success_id": concurrent_success}), flush=True)
     try: await asyncio.Event().wait()
     finally:
       await runner.cleanup()
@@ -104,7 +107,7 @@ async def main(origin):
 asyncio.run(main(sys.argv[1]))
 `;
 
-async function startApi(origin: string): Promise<{ url: string; recordId: string; secondRecordId: string }> {
+async function startApi(origin: string): Promise<{ url: string; recordId: string; secondRecordId: string; concurrentFailedId: string; concurrentSuccessId: string }> {
   const gideonHome = await mkdtemp(join(tmpdir(), "gideon-library-home-"));
   directories.push(gideonHome);
   const child = spawn(process.env.GIDEON_TEST_PYTHON || "python3", ["-c", knowledgeServer, origin], {
@@ -122,8 +125,9 @@ async function startApi(origin: string): Promise<{ url: string; recordId: string
     child.stderr.on("data", chunk => { errors += String(chunk); });
     child.once("exit", code => { clearTimeout(timeout); fail(new Error(`Native knowledge API exited ${code}: ${errors}`)); });
   });
-  const ready = JSON.parse(line) as { api_port: number; record_id: string; second_record_id: string };
-  return { url: `http://127.0.0.1:${ready.api_port}`, recordId: ready.record_id, secondRecordId: ready.second_record_id };
+  const ready = JSON.parse(line) as { api_port: number; record_id: string; second_record_id: string; concurrent_failed_id: string; concurrent_success_id: string };
+  return { url: `http://127.0.0.1:${ready.api_port}`, recordId: ready.record_id, secondRecordId: ready.second_record_id,
+    concurrentFailedId: ready.concurrent_failed_id, concurrentSuccessId: ready.concurrent_success_id };
 }
 
 async function startVite(port: number, api: string): Promise<void> {
@@ -247,8 +251,8 @@ describe("Library native curation", () => {
     await evaluate(send, "(()=>{const input=document.querySelector('input[type=search]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Native library record');input.dispatchEvent(new Event('input',{bubbles:true}));input.form.requestSubmit();return true})()");
     await waitFor(send, "document.body.innerText.includes('Native library record') && document.body.innerText.includes('matching item')");
     const paginationState = await evaluate(send, "(async()=>{const first=await (await fetch('/api/knowledge/items?limit=100&page=1')).json();const second=await (await fetch('/api/knowledge/items?limit=100&page=2')).json();return {total:first.total,page1:first.items.length,page2:second.items.length,targetPage1:first.items.find(item=>item.id==='native item?one')?.favorited,targetPage2:second.items.find(item=>item.id==='native item?one')?.favorited,secondPageFavorites:second.items.filter(item=>item.favorited).map(item=>item.title)}})()");
-    expect(paginationState.total).toBe(107);
-    expect([paginationState.page1, paginationState.page2]).toEqual([100, 7]);
+    expect(paginationState.total).toBe(109);
+    expect([paginationState.page1, paginationState.page2]).toEqual([100, 9]);
     expect(paginationState.targetPage1 === true || paginationState.targetPage2 === true).toBe(true);
     await evaluate(send, "(()=>{const select=Array.from(document.querySelectorAll('select')).find(value=>value.getAttribute('aria-label')?.startsWith('Reading progress'));Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'read');select.dispatchEvent(new Event('change',{bubbles:true}));return true})()");
     await waitFor(send, "Array.from(document.querySelectorAll('select')).some(value=>value.value==='read')");
@@ -301,5 +305,30 @@ describe("Library native curation", () => {
     await waitFor(send, "Array.from(document.querySelectorAll('input')).some(input=>input.maxLength===80 && input.value==='Research shelf')");
     await evaluate(send, "Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Create collection')?.click()");
     await waitFor(send, "document.querySelector('[role=alert]')?.innerText.includes('already exists')");
+
+    await evaluate(send, "Array.from(document.querySelectorAll('nav[aria-label] button')).find(button=>button.closest('nav')?.getAttribute('aria-label')==='Library sections'&&button.innerText==='Search')?.click()");
+    await evaluate(send, "(()=>{const input=document.querySelector('input[type=search]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Concurrent scenario');input.dispatchEvent(new Event('input',{bubbles:true}));input.form.requestSubmit();return true})()");
+    await waitFor(send, "document.body.innerText.includes('Concurrent scenario failed row') && document.body.innerText.includes('Concurrent scenario successful row')");
+    const deleted = await evaluate(send, `fetch('/api/knowledge/items/${encodeURIComponent(api.concurrentFailedId)}',{method:'DELETE'}).then(response=>response.ok)`);
+    expect(deleted).toBe(true);
+    await evaluate(send, "(()=>{const row=Array.from(document.querySelectorAll('li')).find(item=>item.innerText.includes('Concurrent scenario failed row'));const select=row?.querySelector('select[aria-label^=\"Reading progress\"]');if(!select)return false;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'read');select.dispatchEvent(new Event('change',{bubbles:true}));return true})()");
+    await evaluate(send, "(()=>{const row=Array.from(document.querySelectorAll('li')).find(item=>item.innerText.includes('Concurrent scenario successful row'));Array.from(row?.querySelectorAll('button')||[]).find(button=>button.innerText==='Add favorite')?.click();return Boolean(row)})()");
+    await waitFor(send, "Array.from(document.querySelectorAll('li')).find(item=>item.innerText.includes('Concurrent scenario successful row'))?.querySelector('button')?.innerText==='Remove favorite'");
+    await waitFor(send, "document.querySelector('[role=alert]')?.innerText.includes('item not found')");
+    const concurrentState = await evaluate(send, "Array.from(document.querySelectorAll('li')).find(item=>item.innerText.includes('Concurrent scenario successful row'))?.querySelector('button')?.innerText");
+    expect(concurrentState).toBe("Remove favorite");
+
+    await evaluate(send, "Array.from(document.querySelectorAll('nav[aria-label] button')).find(button=>button.closest('nav')?.getAttribute('aria-label')==='Library sections'&&button.innerText==='Overview')?.click()");
+    await send("Network.enable");
+    await send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
+    await evaluate(send, "Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Refresh overview')?.click()");
+    await waitFor(send, "document.body.innerText.includes('Showing earlier Library information') && document.body.innerText.includes('Native library record')");
+    await send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await evaluate(send, "Array.from(document.querySelectorAll('[role=alert] button')).find(button=>button.innerText==='Retry')?.click()");
+    await waitFor(send, "!document.body.innerText.includes('Showing earlier Library information') && document.body.innerText.includes('Native library record')");
+    const revoked = await evaluate(send, "fetch('/api/auth/logout',{method:'POST',credentials:'include'}).then(response=>response.ok)");
+    expect(revoked).toBe(true);
+    await evaluate(send, "Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Refresh overview')?.click()");
+    await waitFor(send, "document.querySelector('[role=alert]')?.innerText.includes('session no longer has access') && !document.body.innerText.includes('Native library record') && !document.body.innerText.includes('Concurrent scenario successful row')");
   }, 90000);
 });
