@@ -3,11 +3,12 @@ import { Bell, Lightbulb, Menu, MessageCircle, PanelsTopLeft, Shapes, SquareChec
 import { useState } from "react";
 import { ActivityIndicator, Platform, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { AssistantBootstrapProvider, useAssistantBootstrap } from "./src/shared/bootstrap.web";
+import { AssistantBootstrapProvider, useAssistantBootstrap, type BootstrapState } from "./src/shared/bootstrap.web";
+import { consoleReturnHref, targetSessionId, useAssistantEntry } from "./src/features/delivery/entry.web";
 import { CONSOLE_HANDOFFS, ShellIdentity } from "./src/shared/shell/ShellIdentity";
 import { ShellNavigation, type ShellNavigationIcon } from "./src/shared/shell/ShellNavigation";
 import { ShellThemeControls, ShellThemeProvider, useShellTheme } from "./src/shared/shell/shellTheme";
-import { SHELL_DESTINATIONS, type ShellDestination } from "./src/shared/shell/shellRoutes";
+import { createShellRoute, SHELL_DESTINATIONS, type ShellDestination } from "./src/shared/shell/shellRoutes";
 import { Avatar, Button, Card, IconButton, LinkRow, s, Sheet } from "./src/ui";
 
 const icons: Record<ShellDestination, ShellNavigationIcon> = {
@@ -59,19 +60,22 @@ function NativeNotice() {
 
 function WorkspaceApp() {
   const { state, refresh, signOut } = useAssistantBootstrap();
+  if (state.phase !== "ready") return null;
+  return <ReadyWorkspace state={state} refresh={refresh} signOut={signOut} />;
+}
+
+function ReadyWorkspace({ state, refresh, signOut }: {
+  state: Extract<BootstrapState, { phase: "ready" }>;
+  refresh: () => Promise<void>;
+  signOut: () => Promise<void>;
+}) {
   const { palette } = useShellTheme();
-  const [section, setSection] = useState<ShellDestination>("chat");
+  const { snapshot, navigate, refresh: refreshRoute, session } = useAssistantEntry(state.scope);
+  const section: ShellDestination = snapshot.route.kind === "route" ? snapshot.route.destination : "chat";
   const [menuOpen, setMenuOpen] = useState(false);
   const { width, fontScale } = useWindowDimensions();
   const desktop = width >= 900;
   const title = titles[section];
-
-  if (state.phase !== "ready") return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: palette.canvas, alignItems: "center", justifyContent: "center" }}>
-      <ActivityIndicator color={palette.blueDark} />
-      <Text style={[s.muted, { color: palette.muted, marginTop: 12 }]}>Checking Gideon session…</Text>
-    </SafeAreaView>
-  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.canvas }} edges={["top", "bottom"]}>
@@ -90,7 +94,23 @@ function WorkspaceApp() {
         </View>
 
         <View style={{ flex: 1, minHeight: 0 }}>
-          {section !== "chat" && (
+          {snapshot.phase === "checking" ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+            <ActivityIndicator color={palette.blueDark} />
+            <Text style={[s.muted, { color: palette.muted, marginTop: 12 }]}>Opening Gideon destination…</Text>
+          </View> : snapshot.phase === "recovery" || snapshot.phase === "unavailable" ?
+            <ScrollView contentContainerStyle={{ paddingHorizontal: desktop ? 42 : 22, paddingBottom: 28 }}>
+              <Card style={{ gap: 12 }}>
+                <Text accessibilityRole="header" style={[s.title, { color: palette.text }]}>
+                  {snapshot.phase === "recovery" ? snapshot.route.title : snapshot.title}
+                </Text>
+                <Text style={[s.muted, { color: palette.muted }]}>
+                  {snapshot.phase === "recovery" ? snapshot.route.message : snapshot.message}
+                </Text>
+                {snapshot.phase === "recovery" ?
+                  <Button primary onPress={() => navigate(snapshot.route.action.route)}>{snapshot.route.action.label}</Button> :
+                  <Button primary onPress={refreshRoute}>Retry destination</Button>}
+              </Card>
+            </ScrollView> : section !== "chat" ? (
             <ScrollView key={section} showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: desktop ? 42 : 22, paddingBottom: 28 }}
               keyboardShouldPersistTaps="handled">
@@ -101,36 +121,46 @@ function WorkspaceApp() {
                 <Button primary onPress={() => openConsole(title.console)}>
                   Open {CONSOLE_HANDOFFS[title.console].label} in Gideon console
                 </Button>
+                {snapshot.route.returnTo && <Button onPress={() => window.location.assign(consoleReturnHref(snapshot.route.returnTo!))}>
+                  Return to previous workspace
+                </Button>}
               </Card>
             </ScrollView>
-          )}
-          <View style={{ display: section === "chat" ? "flex" : "none", flex: 1,
+          ) : <View style={{ flex: 1,
             paddingHorizontal: desktop ? 42 : 17, justifyContent: "flex-end", paddingBottom: 22 }}>
             <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 13 }}>
               <Avatar size={68} variant="lilac" />
-              <Text style={[s.title, { color: palette.text, textAlign: "center" }]}>Your Gideon workspace</Text>
+              <Text style={[s.title, { color: palette.text, textAlign: "center" }]}>
+                {session ? session.title || "Gideon conversation" : "Your Gideon workspace"}
+              </Text>
               <Text style={[s.muted, { color: palette.muted, textAlign: "center", maxWidth: 360 }]}>
-                Your conversation is available in Gideon console.
+                {session ? `${session.total} messages in this conversation.` : "Your conversation is available in Gideon console."}
               </Text>
             </View>
             <Card style={{ gap: 12, borderWidth: 1 }}>
               <Text style={[s.muted, { color: palette.muted }]}>Continue in your authenticated conversation</Text>
-              <Button primary onPress={() => openConsole("chat")}>Open Chat in Gideon console</Button>
+              <Button primary onPress={() => window.location.assign(session
+                ? `/#/chat/${encodeURIComponent(targetSessionId(snapshot.route) ?? "")}` : CONSOLE_HANDOFFS.chat.href)}>
+                Open Chat in Gideon console
+              </Button>
+              {snapshot.route.returnTo && <Button onPress={() => window.location.assign(consoleReturnHref(snapshot.route.returnTo!))}>
+                Return to previous workspace
+              </Button>}
             </Card>
-          </View>
+          </View>}
         </View>
 
-        <View style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: desktop ? 22 : 7, alignItems: "center" }}>
-          <ShellNavigation selected={section} onSelect={setSection}
+        {snapshot.phase !== "recovery" && snapshot.phase !== "checking" && <View style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: desktop ? 22 : 7, alignItems: "center" }}>
+          <ShellNavigation selected={section} onSelect={(next) => navigate(createShellRoute(next))}
             availableWidth={Math.max(1, Math.min(width - 44, 540))} fontScale={fontScale} icons={icons} />
-        </View>
+        </View>}
       </View>
 
       {menuOpen && <Sheet title="Gideon" subtitle={`Signed in as ${state.owner.user}`} onClose={() => setMenuOpen(false)}>
         <Text style={[s.label, { color: palette.muted, marginBottom: 12 }]}>Your workspace</Text>
         {SHELL_DESTINATIONS.map((item) => (
           <LinkRow key={item.id} icon={icons[item.id]} title={item.label}
-            detail={`View ${item.label} in this assistant`} onPress={() => { setSection(item.id); setMenuOpen(false); }} />
+            detail={`View ${item.label} in this assistant`} onPress={() => { navigate(createShellRoute(item.id)); setMenuOpen(false); }} />
         ))}
         <View style={[s.divider, { backgroundColor: palette.line }]} />
         <Text style={[s.label, { color: palette.muted, marginBottom: 12 }]}>Appearance</Text>
