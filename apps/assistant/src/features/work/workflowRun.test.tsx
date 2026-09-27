@@ -5,18 +5,17 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { startBrowserHarness, type BrowserHarness } from '../../../test-support/browserHarness'
 import { timelineEvents, unresolvedReviewMessage, type ReviewIntent } from './workflowRunState'
 
 let native: ChildProcessWithoutNullStreams | undefined
-let chromium: ChildProcessWithoutNullStreams | undefined
 let profile = ''
 let viteCache = ''
 let vite: ViteDevServer | undefined
 let api = ''
 let credential = ''
 let runId = ''
-let browserSocket: WebSocket | undefined
-let evaluate: (expression: string) => Promise<any>
+let browser: BrowserHarness | undefined
 let address = ''
 
 async function port() {
@@ -28,12 +27,19 @@ async function port() {
   return number
 }
 
+async function evaluate<T = unknown>(expression: string): Promise<T> {
+  if (!browser) throw new Error('Chromium harness is unavailable')
+  return browser.evaluate<T>(expression)
+}
+
 async function waitFor(expression: string) {
-  for (let index = 0; index < 120; index++) {
-    if (await evaluate(expression)) return
-    await new Promise(done => setTimeout(done, 75))
+  if (!browser) throw new Error('Chromium harness is unavailable')
+  try {
+    await browser.waitFor(expression, `workflow run: ${expression}`, 9000)
+  } catch (error) {
+    const page = await browser.evaluate(`JSON.stringify({ url: location.href, readyState: document.readyState, loaded: window.loaded, title: document.title, body: document.body?.innerText?.slice(0, 3000), currentRoute: window.currentRoute, scripts: Array.from(document.scripts, script => script.src), errors: window.__gideonErrors ?? [] })`).catch(value => String(value))
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nFirst-failure page diagnostics: ${page}\nBrowser diagnostics: ${browser.diagnostics().join('\n')}`)
   }
-  throw new Error(`Browser condition did not become true: ${expression}`)
 }
 
 beforeAll(async () => {
@@ -76,27 +82,12 @@ render(fromUrl()); window.loaded = true
   })
   await vite.listen()
   profile = await mkdtemp(join(tmpdir(), 'gideon-workflow-run-browser-'))
-  const debug = await port()
-  chromium = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
-    `--remote-debugging-port=${debug}`, `--user-data-dir=${profile}`, 'about:blank'])
-  let target: { webSocketDebuggerUrl: string } | undefined
-  for (let index = 0; index < 100 && !target; index++) {
-    try { const pages = await (await fetch(`http://127.0.0.1:${debug}/json/list`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>; target = pages.find(page => page.type === 'page') } catch {}
-    if (!target) await new Promise(done => setTimeout(done, 100))
-  }
-  if (!target) throw new Error('Chromium did not expose a page')
-  browserSocket = new WebSocket(target.webSocketDebuggerUrl)
-  await new Promise<void>((done, reject) => { browserSocket!.addEventListener('open', () => done(), { once: true }); browserSocket!.addEventListener('error', reject, { once: true }) })
-  let next = 0
-  const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
-  browserSocket.addEventListener('message', event => { const response = JSON.parse(String(event.data)); if (!response.id) return; const item = pending.get(response.id); if (!item) return; pending.delete(response.id); response.error ? item.reject(new Error(response.error.message)) : item.resolve(response.result) })
-  const command = (method: string, params: Record<string, unknown> = {}) => new Promise<any>((done, reject) => { const id = ++next; pending.set(id, { resolve: done, reject }); browserSocket!.send(JSON.stringify({ id, method, params })) })
-  await command('Page.enable'); await command('Runtime.enable'); await command('Page.navigate', { url: address })
-  evaluate = async expression => { const response = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (response.result?.exceptionDetails) throw new Error(response.result.exceptionDetails.exception?.description ?? 'Browser evaluation failed'); return response.result?.result?.value }
+  browser = await startBrowserHarness({ profileDirectory: profile, windowSize: { width: 1280, height: 900 } })
+  await browser.navigate(address)
 }, 30000)
 
 afterAll(async () => {
-  browserSocket?.close(); chromium?.kill('SIGTERM'); if (vite) await vite.close(); native?.kill('SIGTERM')
+  await browser?.close(); if (vite) await vite.close(); native?.kill('SIGTERM')
   for (const directory of [profile, viteCache]) if (directory) await rm(directory, { recursive: true, force: true })
 })
 
@@ -111,15 +102,31 @@ describe('native workflow run workspace', () => {
 
   it('opens the real native run from the Work catalogue, reloads it, and returns to its source', async () => {
     await waitFor(`window.loaded === true && !!document.querySelector('[aria-label="Workflow run catalogue"]')`)
+    await waitFor(`document.querySelector('[aria-label="Workflow run catalogue"]')?.textContent.includes('assistant-workflow')`)
     expect(await fetch(`${api}/api/workflows/runs/${runId}`, { headers: { Authorization: `Bearer ${credential}` } }).then(response => response.ok)).toBe(true)
-    expect(await evaluate('document.body.textContent.includes("assistant-workflow")')).toBe(true)
     await evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('${runId}')).click()`)
     await waitFor(`document.querySelector('[aria-label="Run timeline"]')?.textContent.includes('${runId}')`)
     expect(await evaluate(`document.querySelector('[aria-label="Run timeline"]')?.textContent.includes('root.children[0]')`)).toBe(true)
     const route = JSON.parse(await evaluate('JSON.stringify(window.currentRoute)'))
     expect(route).toMatchObject({ placement: { id: 'workflows/run' }, record: { kind: 'workflow_run', id: runId }, returnTo: { destination: 'chat', sessionId: 'run-source' } })
+    await waitFor(`document.querySelector('[aria-label="Exact run review"]')?.textContent.includes('review-success')`)
+    await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-success'))?.querySelectorAll('button')[1].click()`)
+    await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="status"]')?.textContent.includes('Review recorded for run ${runId}')`)
+    const firstTriage = await fetch(`${api}/__test/stats`).then(response => response.json()) as { triage_attempts: number; calibration_count: number }
+    expect(firstTriage).toMatchObject({ triage_attempts: 1, calibration_count: 1 })
     await evaluate('location.reload()')
     await waitFor(`document.querySelector('[aria-label="Run timeline"]')?.textContent.includes('${runId}')`)
+    await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="status"]')?.textContent.includes('Review recorded for run ${runId}')`)
+    const afterSuccessfulRecovery = await fetch(`${api}/__test/stats`).then(response => response.json()) as { triage_attempts: number; calibration_count: number }
+    expect(afterSuccessfulRecovery).toMatchObject({ triage_attempts: 1, calibration_count: 1 })
+    await fetch(`${api}/__test/drop-next-triage`, { method: 'POST' })
+    await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[1].click()`)
+    await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="alert"]')?.textContent.includes('will not be replayed automatically')`)
+    await evaluate('location.reload()')
+    await waitFor(`document.querySelector('[aria-label="Exact run review"] [role="alert"]')?.textContent.includes('will not be replayed automatically')`)
+    const afterAmbiguousRecovery = await fetch(`${api}/__test/stats`).then(response => response.json()) as { triage_attempts: number; calibration_count: number }
+    expect(afterAmbiguousRecovery).toMatchObject({ triage_attempts: 2, calibration_count: 2 })
+    expect(await evaluate(`Array.from(document.querySelectorAll('[aria-label="Exact run review"] li')).find(item => item.textContent.includes('review-ambiguous'))?.querySelectorAll('button')[1].disabled`)).toBe(true)
     await evaluate(`document.querySelector('[aria-label="Back"]').click()`)
     await waitFor('window.currentRoute?.destination === "chat" && window.currentRoute?.sessionId === "run-source"')
   }, 30000)
