@@ -89,8 +89,10 @@ beforeAll(async () => {
     server.stderr.on('data', chunk => { errors += String(chunk) })
     server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Browser server exited ${code}: ${errors}`)) })
   })
+  const cacheDir = await mkdtemp(join(tmpdir(), 'gideon-browser-controls-vite-'))
+  directories.push(cacheDir)
   vite = await createServer({
-    configFile: false, root: join(root, 'apps/assistant'),
+    configFile: false, root: join(root, 'apps/assistant'), cacheDir,
     optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client', 'react/jsx-dev-runtime', 'react-native-web'] },
     resolve: {
       alias: [

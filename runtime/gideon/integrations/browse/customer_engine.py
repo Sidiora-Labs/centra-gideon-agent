@@ -74,6 +74,8 @@ async def launch_owned_browser(profile: Path, *, timeout: float = 15) -> OwnedBr
         raise BrowserUnavailable("Chromium is unavailable")
     profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     profile.chmod(0o700)
+    port_file = profile / "DevToolsActivePort"
+    port_file.unlink(missing_ok=True)
     proxy = CustomerBrowserProxy()
     await proxy.start()
     args = [
@@ -96,7 +98,6 @@ async def launch_owned_browser(profile: Path, *, timeout: float = 15) -> OwnedBr
     transport = None
     try:
         deadline = time.monotonic() + timeout
-        port_file = profile / "DevToolsActivePort"
         while not port_file.exists() and time.monotonic() < deadline:
             if process.poll() is not None:
                 raise BrowserUnavailable("Chromium exited before readiness")

@@ -45,7 +45,10 @@ class CustomerBrowserControl:
                 raise StaleSessionVersion
             if current.status != "reserved":
                 raise InvalidSessionTransition
+            previous = self._engines.pop(session_id, None)
             try:
+                if previous is not None:
+                    await previous.close()
                 engine = await launch_owned_browser(self.profile_root / current.id)
             except Exception as exc:
                 self.store.transition(session_id, account_id, owner_id,
