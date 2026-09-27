@@ -7,7 +7,9 @@ import {
   type AssistantRouteSnapshot,
   type RouteAvailability,
 } from "../../shared/shell/routeState.web";
-import type { ShellReturnContext, ShellRoute } from "../../shared/shell/shellRoutes";
+import type { ShellRoute } from "../../shared/shell/shellRoutes";
+
+export { assistantConsoleReturnHref as consoleReturnHref } from "../../../../console/src/app/shell/assistantRouteBridge";
 
 export type OwnedSession = Readonly<{
   key: string;
@@ -27,23 +29,6 @@ export function targetSessionId(route: ShellRoute): string | null | undefined {
   if (route.sessionId && route.destination !== "chat") return undefined;
   if (route.record && route.sessionId && route.record.id !== route.sessionId) return undefined;
   return route.sessionId ?? route.record?.id ?? null;
-}
-
-export function consoleReturnHref(context: ShellReturnContext): string {
-  const paths = {
-    chat: "chat/new", activity: "tasks", ideas: "capabilities/knowledge/ideas",
-    goals: "capabilities/identity/goals", apps: "apps",
-  };
-  let path = paths[context.destination];
-  if (context.destination === "chat" && context.sessionId) path = `chat/${encodeURIComponent(context.sessionId)}`;
-  if (context.destination === "activity" && context.record?.kind === "task") {
-    path = `tasks/${encodeURIComponent(context.record.id)}`;
-  }
-  const query = new URLSearchParams(Object.entries(context.placement?.query ?? {}).filter(([key, value]) =>
-    /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(key) &&
-    !/secret|token|password|credential|auth|code|key|draft|nonce|access|session|state/i.test(key) &&
-    value.length <= 512 && !/[\u0000-\u001f\u007f]/.test(value)).slice(0, 16));
-  return `/#/${path}${query.size ? `?${query.toString()}` : ""}`;
 }
 
 export function createOwnedRouteResolver(scope: OwnerScope, sessions: Map<string, OwnedSession>) {
