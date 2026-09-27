@@ -103,6 +103,7 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
       record: returnTo.record,
       placement: returnTo.placement,
       sessionId: returnTo.sessionId,
+      returnTo: returnTo.destination === "chat" ? returnTo : undefined,
     }));
   };
   useEffect(() => {
@@ -159,7 +160,7 @@ function ReadyWorkspace({ state, refresh, signOut, conversationController }: {
                 ? targetSessionId(snapshot.route) ?? undefined : undefined}
               returnTo={snapshot.phase === "ready" && snapshot.route.destination === "chat"
                 ? snapshot.route.returnTo : undefined}
-              onReturn={returnTo ? returnToAssistant : undefined}
+              onReturn={returnTo && returnTo.destination !== "chat" ? returnToAssistant : undefined}
               scrollY={returnTo?.scrollY} selectedMessageId={returnTo?.selectionId} />}
             </WorkspaceFrame>}
         </View>
