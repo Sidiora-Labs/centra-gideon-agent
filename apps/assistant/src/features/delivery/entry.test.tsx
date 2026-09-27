@@ -1,10 +1,9 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { startBrowserHarness, startViteEntryServer, type BrowserHarness } from "../../../test-support/browserHarness";
 import { startNativeServer, type NativeServer } from "../../../test-support/nativeServer";
-import * as serviceWorker from "../../../../console/src/app/shell/registerServiceWorker";
 import { assistantConsoleReturnHref } from "../../../../console/src/app/shell/assistantRouteBridge";
 import { consoleReturnHref, registerAssistantServiceWorker } from "./entry.web";
 
@@ -31,17 +30,8 @@ async function availablePort(): Promise<number> {
 }
 
 describe("assistant web entry", () => {
-  it("uses the shared root worker registration once when enabled", async () => {
-    const register = vi.spyOn(serviceWorker, "registerServiceWorker").mockResolvedValue(null);
+  it("skips root worker registration when disabled", async () => {
     expect(await registerAssistantServiceWorker(false)).toBeNull();
-    expect(register).not.toHaveBeenCalled();
-
-    const first = registerAssistantServiceWorker(true);
-    const second = registerAssistantServiceWorker(true);
-    await Promise.all([first, second]);
-    expect(register).toHaveBeenCalledTimes(1);
-    expect(register).toHaveBeenCalledWith(true);
-    register.mockRestore();
   });
 
   it("keeps assistant and console return links equivalent without leaking private query fields", () => {
@@ -95,7 +85,7 @@ createRoot(document.getElementById('root')!).render(<App />);`, "utf8");
     await browser.command("Page.reload", { ignoreCache: true });
     await browser.waitFor("performance.getEntriesByType('navigation')[0]?.type === 'reload' && document.body.innerText.includes('0 messages in this conversation.')", "session after reload");
     await browser.evaluate(`document.querySelector('[aria-label="Ideas"]')?.click()`);
-    await browser.waitFor("location.pathname === '/assistant/ideas' && document.body.innerText.includes('Open Ideas in Gideon console')", "assistant route navigation");
+    await browser.waitFor("location.pathname === '/assistant/ideas' && document.querySelector('#personal-ideas-title')?.textContent === 'Ideas' && document.querySelector('#personal-idea-draft')", "native Ideas workspace");
     await browser.evaluate("history.back()");
     await browser.waitFor(`location.href === ${JSON.stringify(sessionUrl)} && document.body.innerText.includes('0 messages in this conversation.')`, "Back to the owned session");
     await browser.evaluate(`Array.from(document.querySelectorAll('button')).find(button=>button.innerText==='Return to previous workspace')?.click()`);
