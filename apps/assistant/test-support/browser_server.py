@@ -37,7 +37,6 @@ async def main(origin: str) -> None:
         token_auth.use_persistent_secret()
         token_auth.revoke_all_sessions()
         auth.reset_lockouts()
-        other_token = token_auth.generate_token("browser-other", ttl_seconds=3600)
 
         log = ConversationLog(base_dir=home / "history")
         log.append("dashboard:browser-chat", "user", "Open my browser")
@@ -45,6 +44,7 @@ async def main(origin: str) -> None:
         log.append("collision", "user", "Bare conversation")
         log.append("dashboard:collision", "user", "Dashboard conversation")
         log.append("dashboard:lost-reply", "user", "Lost reservation reply")
+        log.append("dashboard:other-owner", "user", "Owner-scoped browser conversation")
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=10021)])
         app["port"] = 10021
         app["allowed_origins"] = {origin}
@@ -139,13 +139,29 @@ async def main(origin: str) -> None:
         site = web.TCPSite(runner, "127.0.0.1", 0)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
-        print(json.dumps({"api_port": port, "other_token": other_token,
+        print(json.dumps({"api_port": port,
                           "owned_url": f"http://127.0.0.1:{owned_port}/page",
                           "blocked_url": f"http://127.0.0.2:{blocked_port}/blocked"}), flush=True)
+
+        async def test_control() -> None:
+            while line := await asyncio.to_thread(sys.stdin.readline):
+                try:
+                    command = json.loads(line)
+                    username = str(command.get("rotate_owner", "")).strip()
+                    if username != "browser-other":
+                        raise ValueError("unsupported browser test owner")
+                    credentials.set_password(username, "other-correct-horse-battery-staple")
+                    token_auth.revoke_all_sessions()
+                    print(json.dumps({"owner_rotated": username}), flush=True)
+                except Exception as error:
+                    print(json.dumps({"control_error": str(error)}), flush=True)
+
+        control_task = asyncio.create_task(test_control())
 
         try:
             await asyncio.Event().wait()
         finally:
+            control_task.cancel()
             release()
             await runner.cleanup()
             await owned.cleanup()

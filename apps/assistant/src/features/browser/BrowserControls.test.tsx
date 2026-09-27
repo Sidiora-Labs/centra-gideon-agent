@@ -13,6 +13,7 @@ let vite: ViteDevServer | undefined
 let socket: WebSocket | undefined
 let origin = ''
 let fixture: { api_port: number; owned_url: string; blocked_url: string };
+let rotateOwner: (username: string) => Promise<void> = async () => { throw new Error('Browser test server is not ready') };
 
 async function freePort(): Promise<number> {
   const server = createNetServer()
@@ -81,13 +82,50 @@ beforeAll(async () => {
   fixture = await new Promise<typeof fixture>((done, reject) => {
     let output = ''
     let errors = ''
+    let pendingRotation: { username: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
     const timeout = setTimeout(() => reject(new Error(`Browser server timed out: ${errors}`)), 20000)
     server.stdout.on('data', chunk => {
       output += String(chunk)
-      if (output.includes('\n')) { clearTimeout(timeout); done(JSON.parse(output.split('\n')[0])) }
+      const lines = output.split('\n')
+      output = lines.pop() || ''
+      for (const line of lines) {
+        if (!line) continue
+        try {
+          const message = JSON.parse(line) as typeof fixture & { owner_rotated?: string; control_error?: string }
+          if (message.api_port) { clearTimeout(timeout); done(message) }
+          else if (pendingRotation && message.owner_rotated === pendingRotation.username) {
+            clearTimeout(pendingRotation.timer)
+            pendingRotation.resolve()
+            pendingRotation = undefined
+          } else if (pendingRotation && message.control_error) {
+            clearTimeout(pendingRotation.timer)
+            pendingRotation.reject(new Error(message.control_error))
+            pendingRotation = undefined
+          }
+        } catch { /* Ignore non-JSON server diagnostics. */ }
+      }
     })
     server.stderr.on('data', chunk => { errors += String(chunk) })
-    server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Browser server exited ${code}: ${errors}`)) })
+    server.once('exit', code => {
+      clearTimeout(timeout)
+      reject(new Error(`Browser server exited ${code}: ${errors}`))
+      if (pendingRotation) {
+        clearTimeout(pendingRotation.timer)
+        pendingRotation.reject(new Error(`Browser server exited ${code}: ${errors}`))
+        pendingRotation = undefined
+      }
+    })
+    rotateOwner = username => {
+      if (pendingRotation) return Promise.reject(new Error('An owner rotation is already pending'))
+      return new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pendingRotation = undefined
+          reject(new Error(`Credential rotation timed out for ${username}`))
+        }, 15000)
+        pendingRotation = { username, resolve, reject, timer }
+        server.stdin.write(`${JSON.stringify({ rotate_owner: username })}\n`)
+      })
+    }
   })
   const cacheDir = await mkdtemp(join(tmpdir(), 'gideon-browser-controls-vite-'))
   directories.push(cacheDir)
@@ -109,10 +147,11 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import BrowserControls from '/src/features/browser/BrowserControls.web.tsx'
 import { BrowserClient } from '/src/features/browser/browserClient.ts'
-import { ownerScope, signInOwner } from '/src/shared/auth.web.tsx'
+import { ownerScope, readOwnerSession, signInOwner } from '/src/shared/auth.web.tsx'
 import { ShellThemeProvider } from '/src/shared/shell/shellTheme.web.ts'
 const root = createRoot(document.getElementById('root'))
 window.sessionWaiters = []
+window.sessionChanges = 0
 window.nextSession = (status, afterVersion) => new Promise((resolve, reject) => {
   const waiter = value => {
     if (value.status !== status || value.version <= afterVersion) return
@@ -127,15 +166,47 @@ window.nextSession = (status, afterVersion) => new Promise((resolve, reject) => 
   window.sessionWaiters.push(waiter)
 })
 window.signIn = async () => { window.scope = ownerScope(location.origin, await signInOwner('browser-owner', 'correct-horse-battery-staple')); return window.scope.ownerId }
-window.mount = async () => {
+window.mount = async (conversationId = 'browser-chat') => {
   window.client = new BrowserClient(window.scope)
-  const opened = await window.client.open('browser-chat')
+  const opened = await window.client.open(conversationId)
   if (opened.state !== 'ready') throw new Error(opened.message)
   window.session = opened.value
   root.render(React.createElement(ShellThemeProvider, { initialPreference: 'light' },
     React.createElement(BrowserControls, { client: window.client, session: opened.value,
-      onSessionChange: value => { window.session = value; window.sessionWaiters.forEach(waiter => waiter(value)) } })))
+      onSessionChange: value => { window.sessionChanges++; window.session = value; window.sessionWaiters.forEach(waiter => waiter(value)) } })))
   return opened.value
+}
+window.switchOwner = async () => {
+  const login = await signInOwner('browser-other', 'other-correct-horse-battery-staple')
+  const owner = await readOwnerSession()
+  if (login.user !== 'browser-other' || owner.user !== 'browser-other') throw new Error('The native login did not switch owners: ' + owner.user)
+  window.scope = ownerScope(location.origin, owner)
+  window.client = new BrowserClient(window.scope)
+  const opened = await window.client.open('dashboard:other-owner')
+  if (opened.state !== 'ready') throw new Error(opened.message)
+  window.session = opened.value
+  root.render(React.createElement(ShellThemeProvider, { initialPreference: 'light' },
+    React.createElement(BrowserControls, { client: window.client, session: opened.value,
+      onSessionChange: value => { window.sessionChanges++; window.session = value; window.sessionWaiters.forEach(waiter => waiter(value)) } })))
+  return { owner: owner.user, session: opened.value }
+}
+window.holdNextBrowserGet = () => {
+  const original = window.fetch.bind(window)
+  let entered
+  let release
+  const arrived = new Promise(resolve => { entered = resolve })
+  const blocked = new Promise(resolve => { release = resolve })
+  window.fetch = async (input, init) => {
+    const response = await original(input, init)
+    const address = typeof input === 'string' ? input : input.url
+    if (address.includes('/api/browser/sessions/') && (!init?.method || init.method === 'GET')) {
+      window.fetch = original
+      entered(response.status)
+      await blocked
+    }
+    return response
+  }
+  return { arrived, release }
 }
 window.click = async label => {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -245,4 +316,40 @@ describe('owned browser controls', () => {
     expect(disconnected.version).toBeGreaterThan(activeVersion)
     expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"]")?.textContent')).toContain('Connection unavailable')
   }, 120000)
+
+  it('discards a delayed authenticated response after a real owner and session change', async () => {
+    const evaluate = await evaluator(`${origin}/integration`)
+    await until(evaluate, 'window.loaded === true', true)
+    expect(await evaluate('window.signIn()')).toBe('browser-owner')
+    const original = await evaluate('window.mount("channel-thread")')
+    await until(evaluate, '!!document.querySelector("[aria-label=\\"Browser controls\\"]")', true)
+    await evaluate('window.click("Connect browser")')
+    await until(evaluate, 'window.session.status', 'active')
+    await evaluate('window.click("Take control")')
+    await until(evaluate, 'window.session.controlHolder', 'customer')
+    await evaluate(`window.setField('url', ${JSON.stringify(fixture.owned_url)}); window.setField('text', 'old-owner draft')`)
+    const oldOwnerState = await evaluate('window.session')
+
+    await evaluate('window.held = window.holdNextBrowserGet(); true')
+    await evaluate('window.click("Refresh state")')
+    expect(await evaluate('window.held.arrived')).toBe(200)
+    await rotateOwner('browser-other')
+    const switched = await evaluate('window.switchOwner()')
+    expect(switched.owner).toBe('browser-other')
+    const next = switched.session
+    expect(next.id).not.toBe(original.id)
+    expect(next.id).not.toBe(oldOwnerState.id)
+    expect(await evaluate('window.scope.ownerId')).toBe('browser-other')
+    await until(evaluate, 'document.querySelector("[aria-label=\\"Browser controls\\"] [role=status]")?.textContent.includes("Ready to connect")', true)
+    expect(await evaluate('document.getElementById("browser-text-" + window.session.id)')).toBeNull()
+    const changesBeforeRelease = await evaluate('window.sessionChanges')
+    await evaluate('window.held.release()')
+    await new Promise(done => setTimeout(done, 250))
+    expect(await evaluate('window.sessionChanges')).toBe(changesBeforeRelease)
+    expect(await evaluate('window.session.id')).toBe(next.id)
+    expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"] [role=status]")?.textContent'))
+      .toContain(`version ${next.version}`)
+    expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"] [role=alert]")?.textContent')).toBeUndefined()
+    expect(await evaluate('document.querySelector("[aria-label=\\"Browser controls\\"]")?.textContent')).not.toContain('old-owner draft')
+  }, 90000)
 })
