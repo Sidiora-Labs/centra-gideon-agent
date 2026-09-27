@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 
 import pytest
 from aiohttp import web
@@ -35,7 +36,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         "tags": ["idea-loom"],
         "prompt": "Choose one evidence-backed next step.",
         "help": "Use the original source when planning the task.",
-        "ideas": ["Build a careful study plan", "Keep the source attached"],
+        "ideas": ["Build a careful study plan", "Keep the source attached", "Recover a saved task"],
     }
     content = render(document)
     imported = ideas.import_list(
@@ -47,7 +48,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         }
     )
     original_hash = imported["hash"]
-    first_id, second_id = [item["id"] for item in imported["items"]]
+    first_id, second_id, third_id = [item["id"] for item in imported["items"]]
     store.update_item(first_id, content="Build a careful study plan with source notes")
 
     port = 18473
@@ -70,7 +71,7 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         )
         listed = await client.get("/api/assistant/ideas/decisions")
         assert listed.status == 200
-        assert (await listed.json()) == {"items": []}
+        assert (await listed.json()) == {"items": [], "pending": []}
 
         stale_body = {
             "source_kind": "knowledge-idea-list",
@@ -98,11 +99,29 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
             "edited_prompt": "Make the source-linked study plan",
             "request_id": "assistant-ideas-accept-001",
         }
-        accepted = await client.post(
-            f"/api/assistant/ideas/{first_id}/decision", json=accepted_body
+        native_create = registry.create_task
+
+        async def delayed_native_create(**fields):
+            await asyncio.sleep(0.05)
+            return await native_create(**fields)
+
+        monkeypatch.setattr(registry, "create_task", delayed_native_create)
+        concurrent = await asyncio.wait_for(
+            asyncio.gather(
+                client.post(f"/api/assistant/ideas/{first_id}/decision", json=accepted_body),
+                client.post(f"/api/assistant/ideas/{first_id}/decision", json=accepted_body),
+                client.get("/api/assistant/ideas/decisions"),
+            ),
+            timeout=5,
         )
-        assert accepted.status == 201
+        accepted, duplicate, concurrent_list = concurrent
+        assert accepted.status in (200, 201)
+        assert duplicate.status in (200, 201)
+        assert concurrent_list.status == 200
         accepted_record = await accepted.json()
+        duplicate_record = await duplicate.json()
+        assert duplicate_record["task_id"] == accepted_record["task_id"]
+        monkeypatch.setattr(registry, "create_task", native_create)
         assert accepted_record["decision"] == "accepted"
         assert accepted_record["source_evidence"] == "Build a careful study plan with source notes"
         task = await registry.get_task(accepted_record["task_id"], provider_name="native")
@@ -115,6 +134,8 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
                 "source_list_id": imported["id"],
                 "source_revision": current["hash"],
                 "excerpt": "Build a careful study plan with source notes",
+                "edited_prompt": accepted_body["edited_prompt"],
+                "request_id": accepted_body["request_id"],
             }
         ]
 
@@ -158,9 +179,104 @@ async def test_authenticated_idea_decisions_preserve_revision_and_link_one_nativ
         )
         assert dismissed.status == 201
         assert (await dismissed.json())["decision"] == "dismissed"
+
+        recovery_revision = ideas.get(imported["id"])["hash"]
+        recovery_body = {
+            **accepted_body,
+            "expected_revision": recovery_revision,
+            "request_id": "assistant-ideas-recover-001",
+            "edited_prompt": "Recover this source-linked task after an interrupted response",
+        }
+        records = app["assistant_idea_records"]
+        with records.transaction() as db:
+            records.stage(
+                db,
+                source_kind="knowledge-idea-list",
+                source_id=third_id,
+                source_list_id=imported["id"],
+                source_revision=recovery_revision,
+                source_title="Recover a saved task",
+                source_evidence="Recover a saved task",
+                decision="accepted",
+                edited_prompt=recovery_body["edited_prompt"],
+                request_id=recovery_body["request_id"],
+            )
+        app["assistant_idea_records"] = assistant_ideas.RecommendationRecords(tmp_path)
+        staged = await (await client.get("/api/assistant/ideas/decisions")).json()
+        assert staged["pending"] == [{
+            "source_kind": "knowledge-idea-list",
+            "source_id": third_id,
+            "source_list_id": imported["id"],
+            "source_revision": recovery_revision,
+            "source_title": "Recover a saved task",
+            "source_evidence": "Recover a saved task",
+            "decision": "accepted",
+            "edited_prompt": recovery_body["edited_prompt"],
+            "task_id": "",
+            "request_id": recovery_body["request_id"],
+            "created_at": staged["pending"][0]["created_at"],
+        }]
+        store.update_item(third_id, content="The saved task source changed before task creation")
+        stale_recovery = await client.post(
+            f"/api/assistant/ideas/{third_id}/decision", json=recovery_body
+        )
+        assert stale_recovery.status == 409
+        assert "source changed before a native task was created" in (await stale_recovery.json())["error"]["message"]
+        assert (await (await client.get("/api/assistant/ideas/decisions")).json())["pending"] == []
+        recovery_revision = ideas.get(imported["id"])["hash"]
+        recovery_body["expected_revision"] = recovery_revision
+        with records.transaction() as db:
+            records.stage(
+                db,
+                source_kind="knowledge-idea-list",
+                source_id=third_id,
+                source_list_id=imported["id"],
+                source_revision=recovery_revision,
+                source_title="Recover a saved task",
+                source_evidence="The saved task source changed before task creation",
+                decision="accepted",
+                edited_prompt=recovery_body["edited_prompt"],
+                request_id=recovery_body["request_id"],
+            )
+        recovery_db = sqlite_connection(records.path)
+        try:
+            pending = records.pending(
+                recovery_db,
+                "knowledge-idea-list",
+                imported["id"],
+                third_id,
+            )
+        finally:
+            recovery_db.close()
+        recovery_task = await native_create(
+            provider_name="native",
+            title=recovery_body["edited_prompt"],
+            description="Interrupted native task creation recovery",
+            labels=[assistant_ideas._intent_label(pending)],
+            evidence=[assistant_ideas._task_evidence(pending)],
+        )
+        app["assistant_idea_records"] = assistant_ideas.RecommendationRecords(tmp_path)
+        recovered = await client.post(
+            f"/api/assistant/ideas/{third_id}/decision", json=recovery_body
+        )
+        assert recovered.status == 201
+        recovered_record = await recovered.json()
+        assert recovered_record["task_id"] == recovery_task.id
+        tasks, total = await registry.list_all_tasks(provider_filter="native", limit=500)
+        assert total == 2
+        assert sum(assistant_ideas._intent_label(pending) in task.labels for task in tasks) == 1
         saved = await (await client.get("/api/assistant/ideas/decisions")).json()
         assert {row["decision"] for row in saved["items"]} == {"accepted", "dismissed"}
+        assert saved["pending"] == []
 
     token_auth.revoke_all_sessions()
     token_auth.use_persistent_secret()
     store.close()
+
+
+def sqlite_connection(path):
+    import sqlite3
+
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
