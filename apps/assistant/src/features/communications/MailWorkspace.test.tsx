@@ -663,6 +663,7 @@ asyncio.run(main(sys.argv[1]))
       import { createRoot } from 'react-dom/client'
       import App from '/App.tsx'
       import { parseShellRoute } from '../src/shared/shell/shellRoutes'
+      window.__mailAppDocumentMarker = String(performance.timeOrigin) + '-' + String(Math.random())
       window.__mailAppRoute = () => parseShellRoute(location.href, location.origin)
       createRoot(document.getElementById('root')!).render(React.createElement(App))
     `)
@@ -693,9 +694,23 @@ asyncio.run(main(sys.argv[1]))
       placement: { id: 'capabilities/communications/outbound', query: { account: startup.account_id } },
       returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 }, frames: 1, module: 1,
     })
+    const beforeReloadDocument = await evaluate<{ marker: string; timeOrigin: number }>(send,
+      `({marker:window.__mailAppDocumentMarker,timeOrigin:performance.timeOrigin})`)
+    expect(beforeReloadDocument.marker).toBeTruthy()
     await send('Page.reload', { ignoreCache: true })
-    await waitFor(send, `document.querySelector('[data-gideon-module="capabilities/communications/outbound"]') && document.querySelector('#mail-detail-title')?.innerText==='App native record' && document.querySelector('.gideon-workspace-frame')`)
+    await waitFor(send, `window.__mailAppDocumentMarker && window.__mailAppDocumentMarker!==${JSON.stringify(beforeReloadDocument.marker)} && performance.timeOrigin!==${beforeReloadDocument.timeOrigin} && document.querySelector('[data-gideon-module="capabilities/communications/outbound"]') && document.querySelector('#mail-detail-title')?.innerText==='App native record' && document.querySelector('.gideon-workspace-frame')`)
+    const afterReloadDocument = await evaluate<{ marker: string; timeOrigin: number }>(send,
+      `({marker:window.__mailAppDocumentMarker,timeOrigin:performance.timeOrigin})`)
+    expect(afterReloadDocument.marker).not.toBe(beforeReloadDocument.marker)
+    expect(afterReloadDocument.timeOrigin).not.toBe(beforeReloadDocument.timeOrigin)
     const reloadedState = await evaluate(send, `(()=>{const route=window.__mailAppRoute();return {record:route.record,placement:route.placement,returnTo:route.returnTo,frames:document.querySelectorAll('.gideon-workspace-frame').length,module:document.querySelectorAll('[data-gideon-module="capabilities/communications/outbound"]').length}})()`)
     expect(reloadedState).toEqual(recordState)
+    currentPhase = 'returning from the reloaded native Mail record to the source Chat composer'
+    await evaluate(send, `[...document.querySelectorAll('button')].find(button=>button.innerText.includes('Back to messages'))?.click()`)
+    await waitFor(send, `window.__mailAppRoute().destination==='chat' && document.querySelector('#gideon-message-composer')`)
+    const returnedState = await evaluate<{ route: { destination: string; returnTo?: { destination: string; selectionId?: string; scrollY?: number } }; composer: boolean }>(
+      send, `({route:window.__mailAppRoute(),composer:!!document.querySelector('#gideon-message-composer')})`)
+    expect(returnedState.route).toMatchObject({ destination: 'chat', returnTo: { destination: 'chat', selectionId: returnSelection, scrollY: 384 } })
+    expect(returnedState.composer).toBe(true)
   }, 60000)
 })
