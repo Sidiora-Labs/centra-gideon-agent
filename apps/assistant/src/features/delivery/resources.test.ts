@@ -69,15 +69,13 @@ describe('owner-scoped resource delivery', () => {
       retryHref: string
       download: { body: string; disposition: string; status: number }
       deniedStatus: number
+      deniedAuthRequired: string
     }>(`(async()=>{
       const delivery=await import('/src/features/delivery/resources.web.ts');
       const headers={'Content-Type':'application/json','X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'};
-      const createdResponse=await fetch('/api/artifacts?force=1',{method:'POST',credentials:'same-origin',headers,body:JSON.stringify({name:'Owned PDF resource',slug:'delivery-owned-pdf',kind:'pdf',content:''})});
-      if(!createdResponse.ok) throw Error('Native PDF metadata create failed: '+createdResponse.status+' '+await createdResponse.text());
-      const artifact=await createdResponse.json();
-      const pdf=new Uint8Array([37,80,68,70,45,49,46,52,10,37,71,105,100,101,111,110,10]);
-      const uploaded=await fetch(delivery.artifactHref(artifact.slug,true),{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/pdf','If-Match':String(artifact.version),'X-Gideon-API-Version':'1','X-Session-Key':'dashboard:ui'},body:pdf});
-      if(!uploaded.ok) throw Error('Native PDF write failed: '+uploaded.status+' '+await uploaded.text());
+      const detail=await fetch('/api/artifacts/delivery-owned-pdf',{credentials:'same-origin',headers});
+      if(!detail.ok) throw Error('Native PDF fixture detail failed: '+detail.status+' '+await detail.text());
+      const artifact=await detail.json();
       const raw=await delivery.openOwnedResource(delivery.artifactHref(artifact.slug,true));
       const bytes=Array.from(new Uint8Array(await raw.arrayBuffer()));
       const downloaded=await delivery.openOwnedResource(delivery.outboxDownloadHref('owned-download.txt'));
@@ -90,10 +88,10 @@ describe('owner-scoped resource delivery', () => {
       second.close();
       const href=delivery.outboxDownloadHref('sample report.pdf');
       await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin',headers});
-      let deniedStatus=0;
-      try { await delivery.openOwnedResource(delivery.artifactHref(artifact.slug,true)); }
-      catch(error) { deniedStatus=error.status||0; }
-      return {artifact,mime:raw.headers.get('Content-Type')||'',bytes,websocket:delivery.ownedWebSocketUrl(),ownerEvent:String(ownerEvent),retryHref:href,download,deniedStatus};
+      const denied=await fetch(delivery.artifactHref(artifact.slug,true),{credentials:'same-origin'});
+      const deniedStatus=denied.status;
+      const deniedAuthRequired=denied.headers.get('X-Auth-Required')||'';
+      return {artifact,mime:raw.headers.get('Content-Type')||'',bytes,websocket:delivery.ownedWebSocketUrl(),ownerEvent:String(ownerEvent),retryHref:href,download,deniedStatus,deniedAuthRequired};
     })()`)
     expect(result.artifact.slug).toBe('delivery-owned-pdf')
     expect(result.mime).toContain('application/pdf')
@@ -104,7 +102,8 @@ describe('owner-scoped resource delivery', () => {
     expect(result.download.status).toBe(200)
     expect(result.download.disposition).toMatch(/attachment/i)
     expect(result.download.body).toContain('Native owner-scoped download fixture')
-    expect(result.deniedStatus).toBe(401)
+    expect(result.deniedStatus).toBe(403)
+    expect(result.deniedAuthRequired).toBe('true')
   }, 60000)
 
   it('rejects foreign, malformed, and credential-bearing resource addresses', async () => {

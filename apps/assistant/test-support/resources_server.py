@@ -31,6 +31,8 @@ async def main(origin: str) -> None:
     from gideon.interfaces.dashboard.ws import api_ws
     from gideon.security.auth import credentials
     from gideon.workspace.artifacts.handlers import register_artifact_routes
+    from gideon.workspace.artifacts.native import NativeArtifactProvider
+    from gideon.workspace.artifacts import registry
 
     (home / "config.json").write_text(json.dumps({
         "auth": {"login_enabled": True},
@@ -45,6 +47,17 @@ async def main(origin: str) -> None:
     (outbox / "owned-download.txt").write_text(
         "Native owner-scoped download fixture.\n", encoding="utf-8"
     )
+
+    artifacts = NativeArtifactProvider(root=home / "artifacts")
+    artifacts.create_binary(
+        name="Owned PDF resource",
+        slug="delivery-owned-pdf",
+        data=b"%PDF-1.4\n%Gideon\n",
+        kind="pdf",
+        mime="application/pdf",
+        source="manual",
+    )
+    registry.register_provider(artifacts)
 
     config = AppConfig()
     state = ConsoleState(
