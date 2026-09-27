@@ -200,7 +200,7 @@ createRoot(document.getElementById('root')!).render(<Root />);
     expect(await browser.evaluate<string>("Array.from(document.querySelectorAll('.gideon-idea-decision textarea')).find(field=>field.value==='Restore the exact pending task prompt after reload')?.value || ''")).toBe('Restore the exact pending task prompt after reload')
     expect(await browser.evaluate<boolean>("Array.from(document.querySelectorAll('.gideon-idea-decision textarea')).some(field=>field.value==='Restore the exact pending task prompt after reload' && field.disabled)")).toBe(true)
     await browser.evaluate("Array.from(document.querySelectorAll('.gideon-idea-decision')).find(section=>section.innerText.includes('Retry acceptance'))?.querySelector('button')?.click()")
-    await browser.waitFor("Array.from(document.querySelectorAll('.gideon-idea-decision [role=status]')).some(item=>item.innerText.includes('Accepted and linked task'))",'recovered task created from restored intent')
+    await browser.waitFor("Array.from(document.querySelectorAll('.gideon-idea-decision')).some(section=>section.innerText.includes('Decision · accepted') && section.innerText.includes('Task linked:'))",'recovered task created from restored intent')
     const recoveredTaskId=await browser.evaluate<string>("Array.from(document.querySelectorAll('.gideon-idea-decision')).find(section=>section.innerText.includes('Decision · accepted') && section.innerText.includes('Task linked'))?.querySelector('code')?.innerText || ''")
     expect(recoveredTaskId).toBeTruthy()
     const resumedTask=await browser.evaluate<{tasks:Array<{id:string;title:string}>}>("fetch('/api/tasks?provider=native').then(response=>response.json())")
