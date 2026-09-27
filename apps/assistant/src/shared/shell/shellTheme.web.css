@@ -1,0 +1,41 @@
+[data-gideon-assistant], [data-gideon-assistant-overlay] {
+  color-scheme: light;
+  --gideon-focus: #1473c8;
+}
+[data-gideon-assistant][data-theme="dark"], [data-gideon-assistant-overlay][data-theme="dark"] {
+  color-scheme: dark;
+  --gideon-focus: #9bd5fc;
+}
+[data-gideon-assistant][data-direction="rtl"], [data-gideon-assistant-overlay][dir="rtl"] {
+  direction: rtl;
+}
+[data-gideon-assistant] :focus-visible, [data-gideon-assistant-overlay] :focus-visible {
+  outline: 3px solid var(--gideon-focus) !important;
+  outline-offset: 3px;
+}
+[data-gideon-assistant-overlay] {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: min(20px, 4vw);
+  box-sizing: border-box;
+}
+[data-gideon-assistant-overlay] [data-gideon-assistant-dialog] {
+  max-height: calc(100dvh - 2 * min(20px, 4vw));
+  overflow: auto;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  [data-gideon-assistant-overlay] { align-items: flex-end; padding: 0; }
+  [data-gideon-assistant-overlay] [data-gideon-assistant-dialog] { max-height: 100dvh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-gideon-assistant] *, [data-gideon-assistant-overlay] * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
