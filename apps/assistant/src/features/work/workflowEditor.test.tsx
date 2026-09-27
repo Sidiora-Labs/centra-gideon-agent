@@ -78,8 +78,9 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import WorkflowEditor from '/src/features/work/WorkflowEditor.web.tsx'
 const root = createRoot(document.getElementById('root'))
-const scope = { runtimeOrigin: location.origin, ownerId: 'native-owner', cacheKey: 'native-owner' }
+let scope = { runtimeOrigin: location.origin, ownerId: 'native-owner', cacheKey: 'native-owner' }
 window.renderEditor = () => root.render(React.createElement(WorkflowEditor, { scope }))
+window.switchOwner = () => { scope = { ...scope, ownerId: 'other-owner', cacheKey: 'other-owner' }; window.renderEditor() }
 window.loaded = true
 ` },
       configureServer(server) {
@@ -163,7 +164,7 @@ describe('native workflow definition editor', () => {
   it('edits and saves the real native DAG with keyboard-selectable ports and revision context', async () => {
     await resetEditor()
     await evaluate('window.renderEditor()')
-    await waitFor('document.querySelector("[aria-label=\\"Workflow graph\\"]")?.textContent.includes("Prepare input")')
+    await waitFor('!!document.querySelector("[aria-label=\\"Workflow graph\\"]")')
     expect(await evaluate('document.body.textContent.includes("Source revision: 1")')).toBe(true)
     const finish = Array.from(await evaluate('Array.from(document.querySelectorAll("[aria-label=\\"Workflow graph\\"] button"), b => b.textContent)') as string[])
     expect(finish.some(text => text.includes('Input port: seed'))).toBe(true)
@@ -206,6 +207,34 @@ describe('native workflow definition editor', () => {
     const now = await (await nativeFetch(`/api/workflows/${encodeURIComponent(workflowName)}`)).json() as
       { definition: { version: number } }
     expect(now.definition.version).toBe(revision + 1)
+  }, 30000)
+
+  it('masks owner state and cancels a stale save after its real revision preflight', async () => {
+    await resetEditor()
+    await evaluate('window.renderEditor()')
+    await waitFor('!!document.querySelector("[aria-label=\\"Workflow graph\\"]")')
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="Workflow description"]'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(input, 'Owner A draft must not cross scopes'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await fetch(`${api}/__test/arm`, { method: 'POST' })
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Save workflow').click()`)
+    expect((await (await fetch(`${api}/__test/wait`)).json() as { started: boolean }).started).toBe(true)
+    await evaluate('window.switchOwner()')
+    expect(await evaluate('!document.querySelector("[aria-label=\\"Workflow description\\"]") && !document.body.textContent.includes("Owner A draft must not cross scopes")')).toBe(true)
+    await fetch(`${api}/__test/release`, { method: 'POST' })
+    await new Promise(done => setTimeout(done, 250))
+    expect((await (await fetch(`${api}/__test/stats`)).json() as { save_writes: number }).save_writes).toBe(0)
+    await waitFor('!!document.querySelector("[aria-label=\\"Workflow graph\\"]")')
+    expect(await evaluate('!document.body.textContent.includes("Owner A draft must not cross scopes")')).toBe(true)
+
+    await evaluate(`(() => { const input = document.querySelector('[aria-label="Workflow description"]'); const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; setter.call(input, 'Selected workflow draft must be discarded'); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    await fetch(`${api}/__test/arm`, { method: 'POST' })
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Save workflow').click()`)
+    expect((await (await fetch(`${api}/__test/wait`)).json() as { started: boolean }).started).toBe(true)
+    await evaluate(`(() => { const select = document.querySelector('[aria-label="Workflow definition"]'); const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; setter.call(select, ''); select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await waitFor('!document.querySelector("[aria-label=\\"Workflow description\\"]")')
+    await fetch(`${api}/__test/release`, { method: 'POST' })
+    await new Promise(done => setTimeout(done, 250))
+    expect((await (await fetch(`${api}/__test/stats`)).json() as { save_writes: number }).save_writes).toBe(0)
+    expect(await evaluate('!document.body.textContent.includes("Selected workflow draft must be discarded")')).toBe(true)
   }, 30000)
 
   it('validates, publishes, and sends start through native workflow operations', async () => {
