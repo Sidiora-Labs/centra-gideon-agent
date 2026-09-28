@@ -720,6 +720,7 @@ export interface ChatSessionSummary {
   last_message?: string; prompt_preview?: string
   origin?: 'manual' | 'loop' | 'code' | 'campaign' | 'channel'
   source_id?: string; source_label?: string
+  created_by_app_name?: string; created_by_app_route?: string
   lifecycle?: 'active' | 'archived'
   last_activity_at?: number
   never_archive?: boolean
@@ -4170,6 +4171,7 @@ export const api = {
   dropSessionToColumn: (session: string, columnId: string) => post(`/api/chat/sessions/${encodeURIComponent(session)}/drop`, { column_id: columnId }),
   chatSessionDetail: (key: string) => get<{ key: string; title: string; messages: ChatHistoryMsg[]; running?: boolean; pending_approval?: boolean; agent?: string; model?: string; mode?: string; acp_provider?: string; acp_provider_agent?: string; reasoning_effort?: string; task_mode?: TaskMode; approval?: ApprovalMode; memory_mode?: string; queue?: { id: string; content: string }[]; side?: { open: boolean; messages: { role: string; content: string }[] } | null
     forked_from?: string; forked_from_title?: string
+    created_by_app_name?: string; created_by_app_route?: string
     natural_voice?: string; natural_voice_agent_default?: boolean
     natural_voice_effective?: boolean; natural_voice_source?: string }>(`/api/chat/sessions/${encodeURIComponent(key)}`),
   deleteChatSession: (key: string) => del(`/api/chat/sessions/${encodeURIComponent(key)}`),

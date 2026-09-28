@@ -9,6 +9,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
@@ -513,6 +515,50 @@ def _origin_label(origin: str, source_id: str) -> str:
     return source_id
 
 
+def _visible_app_origin_destinations() -> dict[str, tuple[str, str]]:
+    """Installed app names and existing destinations safe to expose in chat headers."""
+    try:
+        from gideon.extensions.apps.manager import list_apps
+
+        installed = list_apps()
+    except Exception:
+        logger.debug("chat app-origin lookup failed", exc_info=True)
+        return {}
+
+    visible: dict[str, tuple[str, str]] = {}
+    for app in installed:
+        if not isinstance(app, dict) or app.get("enabled") is not True:
+            continue
+        name = str(app.get("name") or "").strip()
+        manifest = app.get("manifest")
+        if not name or not isinstance(manifest, dict):
+            continue
+        display_name = str(manifest.get("displayName") or name).strip()
+        ui = manifest.get("ui")
+        pages = ui.get("pages") if isinstance(ui, dict) else None
+        has_openable_page = isinstance(pages, list) and any(
+            isinstance(page, dict) and page.get("route") and page.get("entryPoint")
+            for page in pages
+        )
+        destination = (
+            f"app/{quote(name, safe='')}"
+            if has_openable_page
+            else f"apps/manage?open={quote(name, safe='')}"
+        )
+        if display_name and destination:
+            visible[name] = (display_name, destination)
+    return visible
+
+
+def _app_origin_fields(app_name: Any, destinations: dict[str, tuple[str, str]]) -> dict[str, str]:
+    """Return the authorized name and destination together, or neither."""
+    name = app_name.strip() if isinstance(app_name, str) else ""
+    resolved = destinations.get(name)
+    if not resolved:
+        return {}
+    display_name, destination = resolved
+    return {"created_by_app_name": display_name, "created_by_app_route": destination}
+
 
 async def api_chat_sessions(request: web.Request) -> web.Response:
     """GET /api/chat/sessions — list all chat sessions.
@@ -539,6 +585,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
     out: list[dict] = []
     seen: set[str] = set()
     request_app = str(request.get("app", "") or "")
+    app_destinations = _visible_app_origin_destinations()
     for s in state._sessions.values():
         if request_app and getattr(s, "created_by_app", "") != request_app:
             continue
@@ -546,6 +593,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             seen.add(s.key)
             continue
         d = s.to_dict()
+        d.update(_app_origin_fields(getattr(s, "created_by_app", ""), app_destinations))
         link_thread = link_channel = None
         try:
             link_thread, link_channel = state.sessions.get_channel_link(s.key)
@@ -634,6 +682,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
                 ),
                 "never_archive": bool(meta.get("never_archive")),
             }
+            row.update(_app_origin_fields(meta.get("created_by_app", ""), app_destinations))
             if origin != "manual":
                 row["source_id"] = sid
                 row["source_label"] = _origin_label(origin, sid)
@@ -831,6 +880,10 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             if parent_meta:
                 forked_from_title = str(parent_meta.get("title") or "") or parent_key
 
+    app_origin = _app_origin_fields(
+        getattr(session, "created_by_app", ""), _visible_app_origin_destinations()
+    )
+
     return web.json_response(
         {
             "key": session.key,
@@ -887,6 +940,7 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             **_natural_voice_payload(session),
             "forked_from": forked_from,
             "forked_from_title": forked_from_title,
+            **app_origin,
             "pending_approval": any(
                 not f.done() for f in session._approval_futures.values()
             ),

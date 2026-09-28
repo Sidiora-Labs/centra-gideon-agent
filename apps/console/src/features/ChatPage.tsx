@@ -36,6 +36,7 @@ import { GideonMark } from '../shared/ui/GideonMark'
 import { ComposerStage } from '../shared/ui/ComposerStage'
 import { CollapseColumnButton, CollapsedBoardColumn, boardGridTemplate, useBoardCollapse } from '../shared/ui/BoardCollapse'
 import { PromptPalette } from './chat/PromptPalette'
+import { ChatContextLine } from './chat/ChatContextLine'
 import { SessionSkillsReview } from './chat/SessionSkillsReview'
 import { RoutingChip, type RoutingSuggestion } from './chat/RoutingChip'
 import { starterPrefill, type StarterPrefill } from './chat/starterPrefill'
@@ -506,6 +507,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const openFile = openFileRaw || null
   const setOpenFile = (p: string | null) => setOpenFileRaw(p || '')
   const [title, setTitle] = useState(seededDetail?.title || '')
+  const [appOrigin, setAppOrigin] = useState(() => seededDetail?.created_by_app_name?.trim() && seededDetail.created_by_app_route?.trim()
+    ? { key: sessionId ?? '', name: seededDetail.created_by_app_name, destination: seededDetail.created_by_app_route }
+    : null)
+  const visibleAppOrigin = appOrigin?.key === sessionId ? appOrigin : null
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
@@ -589,6 +594,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     api.chatSessionDetail(sessionId).then((d) => {
       if (!alive) return
       writeCachedDetail(sessionId, d)
+      setAppOrigin(d.created_by_app_name?.trim() && d.created_by_app_route?.trim()
+        ? { key: sessionId, name: d.created_by_app_name, destination: d.created_by_app_route }
+        : null)
       const hydrated = hydrateTurns(d.messages || [], d.running)
       setTurns((prev) => (hydrated.length >= prev.length ? hydrated : prev))
       setQueued(Array.isArray(d.queue) ? d.queue.filter((q) => q && q.id).map((q) => ({ id: q.id, content: q.content })) : [])
@@ -2202,6 +2210,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               <HeaderControl icon={History} label="Chat history" active={historyOpen} onClick={() => setHistoryOpen(!historyOpen)} />
             )}
           </HeaderActions>} />
+
+      {visibleAppOrigin && <div className="mx-auto flex w-full max-w-[1120px] shrink-0 px-l py-1" data-chat-header-context>
+        <ChatContextLine startedBy={visibleAppOrigin} navigate={navigate} />
+      </div>}
 
       {
 }
