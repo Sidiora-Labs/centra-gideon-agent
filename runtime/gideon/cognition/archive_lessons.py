@@ -22,7 +22,12 @@ class LessonResolution:
         self.scope_ref = scope_ref if self.scope is MemoryScope.WORKSPACE else None
         self.lower = rule.lower()
         self.words = archive._lesson_keywords(self.lower)
-        self.embedding = archive._try_embed(rule) if archive.embed_fn else None
+        embed_fn, self.fingerprint = archive._embedding_context()
+        self.embedding = (
+            archive._try_embed(rule)
+            if embed_fn is not None and self.fingerprint is not None
+            else None
+        )
         seed = (
             f"{self.scope_ref}\x00{rule}"
             if self.scope is MemoryScope.WORKSPACE
@@ -38,25 +43,38 @@ class LessonResolution:
 
     def flush(self):
         if self.pending:
-            for blob, key in self.pending:
+            for blob, key, fingerprint in self.pending:
                 self.store.db.execute(
-                    "UPDATE semantic_memory SET embedding = ? WHERE key = ?",
-                    (blob, key),
+                    "UPDATE semantic_memory SET embedding = ?, embedding_provider = ?, "
+                    "embedding_model = ? WHERE key = ?",
+                    (blob, *fingerprint, key),
                 )
             self.store.db.commit()
 
     def prior_embedding(self, row, text):
         blob = row.get("embedding")
-        if blob and isinstance(blob, bytes) and len(blob) >= 4:
+        if (
+            blob
+            and isinstance(blob, bytes)
+            and len(blob) >= 4
+            and (row.get("embedding_provider"), row.get("embedding_model"))
+            == self.fingerprint
+        ):
             try:
                 return list(struct.unpack(f"{len(blob) // 4}f", blob))
             except struct.error:
                 return None
-        if not self.store.embed_fn or self.attempts >= self.api._MAX_BACKFILLS_PER_CALL:
+        if (
+            self.fingerprint is None
+            or self.store._embedding_context()[0] is None
+            or self.attempts >= self.api._MAX_BACKFILLS_PER_CALL
+        ):
             return None
         vector = self.store._try_embed(text)
         if vector:
-            self.pending.append((struct.pack(f"{len(vector)}f", *vector), row["key"]))
+            self.pending.append(
+                (struct.pack(f"{len(vector)}f", *vector), row["key"], self.fingerprint)
+            )
         self.attempts += 1
         return vector
 
@@ -96,7 +114,9 @@ class LessonResolution:
             if len(self.rule) <= len(text):
                 return "covered"
             self.pending = [
-                (blob, owner) for blob, owner in self.pending if owner != key
+                (blob, owner, fingerprint)
+                for blob, owner, fingerprint in self.pending
+                if owner != key
             ]
             self.replace(key)
             return "replaced"
@@ -131,8 +151,9 @@ class LessonResolution:
         if self.embedding:
             encoded = struct.pack(f"{len(self.embedding)}f", *self.embedding)
             self.store.db.execute(
-                "UPDATE semantic_memory SET embedding = ? WHERE key = ?",
-                (encoded, self.key),
+                "UPDATE semantic_memory SET embedding = ?, embedding_provider = ?, "
+                "embedding_model = ? WHERE key = ?",
+                (encoded, *self.fingerprint, self.key),
             )
             self.store.db.commit()
         self.judge(value)

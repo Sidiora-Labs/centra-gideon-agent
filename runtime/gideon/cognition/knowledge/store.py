@@ -800,6 +800,8 @@ class KnowledgeStore:
         ("processing_error", "TEXT"),
         ("read_state", "TEXT DEFAULT 'unread'"),
         ("favorited", "INTEGER DEFAULT 0"),
+        ("embedding_provider", "TEXT NOT NULL DEFAULT ''"),
+        ("embedding_model", "TEXT NOT NULL DEFAULT ''"),
     )
 
     _NEW_CHUNK_COLUMNS = (
@@ -1682,19 +1684,25 @@ class KnowledgeStore:
         from gideon.cognition.knowledge.embedder import bytes_to_floats
 
         anchor = self.db.execute(
-            "SELECT item_type FROM items WHERE id = ?", (item_id,)
+            "SELECT item_type, embedding_provider, embedding_model FROM items WHERE id = ?",
+            (item_id,),
         ).fetchone()
         if anchor is None:
             return []
         item_type = anchor["item_type"] if not isinstance(anchor, tuple) else anchor[0]
+        provider = anchor["embedding_provider"] if not isinstance(anchor, tuple) else anchor[1]
+        model = anchor["embedding_model"] if not isinstance(anchor, tuple) else anchor[2]
+        if not provider or not model:
+            return []
         rows = self.db.execute(
             "SELECT id, title, file_path, summary, item_type, word_count, "
             "LENGTH(content) AS content_len, "
             "processing_status, created_at, embedding "
             "FROM items WHERE status = 'active' AND COALESCE(is_archived, 0) = 0 "
-            "AND item_type = ? AND embedding IS NOT NULL AND id != ? "
+            "AND item_type = ? AND embedding IS NOT NULL AND embedding_provider = ? "
+            "AND embedding_model = ? AND id != ? "
             "ORDER BY created_at DESC LIMIT ?",
-            (item_type, item_id, max(1, int(limit))),
+            (item_type, provider, model, item_id, max(1, int(limit))),
         ).fetchall()
         out: list[dict] = []
         for r in rows:
@@ -1751,7 +1759,8 @@ class KnowledgeStore:
 
         _COLS = (
             "id, title, file_path, summary, item_type, word_count, "
-            "LENGTH(content) AS content_len, processing_status, created_at, embedding"
+            "LENGTH(content) AS content_len, processing_status, created_at, embedding, "
+            "embedding_provider, embedding_model"
         )
         anchor_row = self.db.execute(
             f"SELECT {_COLS} FROM items WHERE id = ?", (item_id,)
@@ -1760,7 +1769,7 @@ class KnowledgeStore:
             return []
         anchor = dict(anchor_row)
         anchor["embedding"] = bytes_to_floats(anchor.get("embedding") or b"")
-        if not anchor["embedding"]:
+        if not anchor["embedding"] or not anchor.get("embedding_provider") or not anchor.get("embedding_model"):
             return []
         anchor_name = anchor.get("title") or anchor.get("file_path") or ""
 
@@ -1769,8 +1778,14 @@ class KnowledgeStore:
             for r in self.db.execute(
                 "SELECT id, title, file_path FROM items "
                 "WHERE status = 'active' AND COALESCE(is_archived, 0) = 0 "
-                "AND item_type = ? AND embedding IS NOT NULL AND id != ?",
-                (anchor["item_type"], item_id),
+                "AND item_type = ? AND embedding IS NOT NULL AND embedding_provider = ? "
+                "AND embedding_model = ? AND id != ?",
+                (
+                    anchor["item_type"],
+                    anchor["embedding_provider"],
+                    anchor["embedding_model"],
+                    item_id,
+                ),
             ).fetchall()
             if filename_similarity(r["title"] or r["file_path"] or "", anchor_name)
             >= FILENAME_SIM_MIN
@@ -3084,7 +3099,8 @@ class KnowledgeStore:
         is the re-index job's progress unit.
         """
         cur = self.db.execute(
-            "UPDATE items SET embedding = NULL WHERE embedding IS NOT NULL"
+            "UPDATE items SET embedding = NULL, embedding_provider = '', embedding_model = '' "
+            "WHERE embedding IS NOT NULL"
         )
         chunk_rows = self.db.execute(
             "SELECT id, item_id FROM chunks WHERE embedding IS NOT NULL"
@@ -3101,7 +3117,9 @@ class KnowledgeStore:
         self.db.commit()
         return cur.rowcount
 
-    def reembed_stale_chunks(self, embedder, *, limit: int = 100) -> dict[str, int]:
+    def reembed_stale_chunks(
+        self, embedder, *, limit: int = 100, on_progress=None
+    ) -> dict[str, int]:
         from gideon.cognition.knowledge.embed_batch import embed_texts
         from gideon.cognition.knowledge.embedder import floats_to_bytes
         from gideon.cognition.knowledge.pipeline.runner import (
@@ -3132,8 +3150,10 @@ class KnowledgeStore:
         )
         changed: set[str] = set()
         reembedded = 0
-        for row, vector in zip(rows, vectors):
+        for ordinal, (row, vector) in enumerate(zip(rows, vectors), 1):
             if not vector:
+                if on_progress is not None:
+                    on_progress(ordinal, len(rows))
                 continue
             self.db.execute(
                 "UPDATE chunks SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
@@ -3141,6 +3161,8 @@ class KnowledgeStore:
             )
             changed.add(row[1])
             reembedded += 1
+            if on_progress is not None:
+                on_progress(ordinal, len(rows))
         for item_id in changed:
             item_rows = self.db.execute(
                 f"SELECT {', '.join(_EXTERNAL_ROW_COLUMNS)} FROM chunks WHERE item_id = ? ORDER BY chunk_index",
@@ -3161,8 +3183,48 @@ class KnowledgeStore:
             "total": len(rows),
         }
 
-    def count_items_to_reembed(self) -> int:
-        """How many active items carry embeddable text (title or content)."""
+    def count_chunks_to_reembed(
+        self,
+        embedding_provider: str,
+        embedding_model: str,
+        embedding_dimension: int | None = None,
+    ) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) AS n FROM chunks c JOIN items i ON i.id = c.item_id "
+            "WHERE i.status = 'active' AND COALESCE(i.is_archived, 0) = 0 AND "
+            "(c.embedding IS NULL OR LENGTH(c.embedding) = 0 OR "
+            "COALESCE(c.embedding_provider, '') != ? OR COALESCE(c.embedding_model, '') != ? "
+            "OR (? > 0 AND LENGTH(c.embedding) != ?))",
+            (
+                embedding_provider,
+                embedding_model,
+                embedding_dimension or 0,
+                (embedding_dimension or 0) * 4,
+            ),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def count_items_to_reembed(
+        self,
+        embedding_provider: str | None = None,
+        embedding_model: str | None = None,
+        embedding_dimension: int | None = None,
+    ) -> int:
+        """Count active items, optionally only those outside one embedding space."""
+        if embedding_provider is not None and embedding_model is not None:
+            row = self.db.execute(
+                "SELECT COUNT(*) AS n FROM items WHERE status = 'active' "
+                "AND (COALESCE(title,'') != '' OR COALESCE(content,'') != '') "
+                "AND (embedding IS NULL OR embedding_provider != ? OR embedding_model != ? "
+                "OR (? > 0 AND LENGTH(embedding) != ?))",
+                (
+                    embedding_provider,
+                    embedding_model,
+                    embedding_dimension or 0,
+                    (embedding_dimension or 0) * 4,
+                ),
+            ).fetchone()
+            return int(row["n"]) if row else 0
         row = self.db.execute(
             "SELECT COUNT(*) AS n FROM items WHERE status = 'active'"
         ).fetchone()
@@ -3990,6 +4052,8 @@ class KnowledgeStore:
         *,
         only_missing: bool = False,
         limit: int | None = None,
+        embedding_fingerprint: tuple[str, str] | None = None,
+        embedding_dimension: int | None = None,
     ) -> dict:
         """Re-embed every active knowledge item with ``embedder`` (which exposes
         ``embed_for_item(title, summary)``, matching the ingestion pipeline).
@@ -4016,7 +4080,18 @@ class KnowledgeStore:
         """
         sql = "SELECT id, title, summary, content FROM items WHERE status = 'active'"
         params: tuple[Any, ...] = ()
-        if only_missing:
+        if embedding_fingerprint is not None:
+            sql += (
+                " AND (COALESCE(title,'') != '' OR COALESCE(content,'') != '') "
+                "AND (embedding IS NULL OR embedding_provider != ? OR embedding_model != ? "
+                "OR (? > 0 AND LENGTH(embedding) != ?))"
+            )
+            params = (
+                *embedding_fingerprint,
+                embedding_dimension or 0,
+                (embedding_dimension or 0) * 4,
+            )
+        elif only_missing:
             sql += " AND embedding IS NULL AND (COALESCE(title,'') != '' OR COALESCE(content,'') != '')"  # noqa: E501
         sql += " ORDER BY id"
         if limit is not None:
@@ -4064,10 +4139,16 @@ class KnowledgeStore:
                     vectors[i] = vec
             for r, vec in zip(group, vectors):
                 if vec:
-                    self.db.execute(
-                        "UPDATE items SET embedding = ? WHERE id = ?",
-                        (floats_to_bytes(vec), r["id"]),
-                    )
+                    if embedding_fingerprint is None:
+                        self.db.execute(
+                            "UPDATE items SET embedding = ? WHERE id = ?",
+                            (floats_to_bytes(vec), r["id"]),
+                        )
+                    else:
+                        self.db.execute(
+                            "UPDATE items SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
+                            (floats_to_bytes(vec), *embedding_fingerprint, r["id"]),
+                        )
                     reembedded += 1
                 else:
                     failed += 1

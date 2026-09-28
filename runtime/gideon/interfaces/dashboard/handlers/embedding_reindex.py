@@ -58,6 +58,42 @@ def _resolve_embed(app) -> tuple[object | None, object | None, str]:
     return (embedder if ready else None), (embed_fn if ready else None), model
 
 
+def start_reindex_for_current_binding(state):
+    """Start targeted backfill after a durable embedding binding change."""
+    embedder, embed_fn, model = _resolve_embed(None)
+    if embed_fn is None:
+        return None, "The selected embedding model is not ready for re-indexing."
+
+    from gideon.cognition.context import cached_memory_vector_stores
+    from gideon.interfaces.dashboard.handlers.memory import _get_provider
+
+    stores = [_get_provider(state)]
+    stores.extend(cached_memory_vector_stores())
+    unique: list[object] = []
+    paths: set[str] = set()
+    for store in stores:
+        if store is None:
+            continue
+        path = getattr(store, "_db_path", None)
+        key = str(path.resolve()) if path is not None else f"id:{id(store)}"
+        if key not in paths:
+            paths.add(key)
+            unique.append(store)
+
+    return _registry_for_state(state).start(
+        model=model,
+        knowledge_store=getattr(state, "knowledge_store", None),
+        vector_store=unique[0] if unique else None,
+        vector_stores=tuple(unique),
+        embedder=embedder,
+        embed_fn=embed_fn,
+    )
+
+
+def _registry_for_state(state):
+    return state.embedding_reindex()
+
+
 async def api_reindex_list(request: web.Request) -> web.Response:
     """GET /api/models/embedding/reindex — live + recently-finished jobs."""
     reg = _registry(request)
@@ -78,31 +114,13 @@ async def api_reindex_start(request: web.Request) -> web.Response:
     old vectors instead of wiping them with no way to rebuild).
     """
     state = request.app["state"]
-    embedder, embed_fn, model = _resolve_embed(request.app)
-    if embed_fn is None:
-        return web.json_response(
-            {
-                "error": "The selected embedding model is not available (download it "
-                "or check the provider connection before re-indexing).",
-                "code": "model_not_ready",
-            },
-            status=409,
-        )
-
-    from gideon.interfaces.dashboard.handlers.memory import _get_provider
-
-    vector_store = _get_provider(state)
-    knowledge_store = getattr(state, "knowledge_store", None)
-
-    job, error = _registry(request).start(
-        model=model,
-        knowledge_store=knowledge_store,
-        vector_store=vector_store,
-        embedder=embedder,
-        embed_fn=embed_fn,
-    )
+    job, error = start_reindex_for_current_binding(state)
     if error is not None:
-        return web.json_response({"error": error}, status=400)
+        status = 409 if "not ready" in error.lower() else 400
+        return web.json_response(
+            {"error": error, "code": "model_not_ready" if status == 409 else "reindex_unavailable"},
+            status=status,
+        )
     return web.json_response(job.to_dict(), status=202)
 
 
@@ -132,3 +150,42 @@ def register_embedding_reindex_routes(app: web.Application) -> None:
     app.router.add_get("/api/models/embedding/reindex", api_reindex_list)
     app.router.add_post("/api/models/embedding/reindex", api_reindex_start)
     app.router.add_get("/api/models/embedding/reindex/{id}/stream", api_reindex_stream)
+    app.on_startup.append(_recover_embedding_backfill)
+
+
+async def _recover_embedding_backfill(app: web.Application) -> None:
+    """Resume only persisted stale rows after startup, when a binding exists."""
+    from gideon.integrations.embedding_providers.registry import (
+        get_active_embedding_fingerprint,
+    )
+
+    fingerprint = get_active_embedding_fingerprint()
+    if fingerprint is None:
+        return
+    state = app["state"]
+    from gideon.cognition.context import cached_memory_vector_stores
+    from gideon.interfaces.dashboard.handlers.memory import _get_provider
+
+    stores = [_get_provider(state), *cached_memory_vector_stores()]
+    unique = []
+    paths = set()
+    for store in stores:
+        if store is None:
+            continue
+        path = getattr(store, "_db_path", None)
+        key = str(path.resolve()) if path is not None else f"id:{id(store)}"
+        if key not in paths:
+            paths.add(key)
+            unique.append(store)
+    stale = any(store.count_episodic_to_reembed(fingerprint) for store in unique)
+    knowledge = getattr(state, "knowledge_store", None)
+    if knowledge is not None:
+        stale = stale or bool(knowledge.count_items_to_reembed(*fingerprint))
+    if stale:
+        job, error = start_reindex_for_current_binding(state)
+        if error:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Embedding re-index recovery deferred: %s", error
+            )

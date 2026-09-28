@@ -104,6 +104,25 @@ def _active_embedding_spec() -> tuple[str, str] | None:
     return split_ref(first) if isinstance(first, str) else None
 
 
+def get_active_embedding_fingerprint() -> tuple[str, str] | None:
+    """Return the safe provider/model identity for the current embedding binding.
+
+    Resolve this on demand so a memory operation never treats a previous active
+    selection as the current vector space. The tuple contains only the configured
+    provider name and model reference; credentials and provider configuration are
+    deliberately excluded.
+    """
+    specification = _active_embedding_spec()
+    if not specification:
+        return None
+    provider, model = specification
+    if not isinstance(provider, str) or not provider.strip():
+        return None
+    if not isinstance(model, str) or not model.strip():
+        return None
+    return provider, model
+
+
 @dataclass(frozen=True)
 class _Selection:
     provider_name: str

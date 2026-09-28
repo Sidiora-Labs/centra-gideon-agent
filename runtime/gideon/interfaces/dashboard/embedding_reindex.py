@@ -117,6 +117,7 @@ class ReindexRegistry:
         vector_store: Any,
         embedder: Any,
         embed_fn: Any,
+        vector_stores: tuple[Any, ...] | list[Any] | None = None,
     ) -> tuple[ReindexJob | None, str | None]:
         """Begin a re-index (or return the in-flight one).
 
@@ -132,8 +133,9 @@ class ReindexRegistry:
         self._jobs[job.id] = job
         run = _Running(job=job)
         self._running[job.id] = run
+        stores = tuple(vector_stores) if vector_stores is not None else ((vector_store,) if vector_store is not None else ())
         run.task = asyncio.ensure_future(
-            self._drive(run, knowledge_store, vector_store, embedder, embed_fn)
+            self._drive(run, knowledge_store, stores, embedder, embed_fn)
         )
         return job, None
 
@@ -144,14 +146,36 @@ class ReindexRegistry:
         self,
         run: _Running,
         knowledge_store: Any,
-        vector_store: Any,
+        vector_stores: tuple[Any, ...],
         embedder: Any,
         embed_fn: Any,
     ) -> None:
         job = run.job
         try:
-            k_total = knowledge_store.count_items_to_reembed() if knowledge_store else 0
-            m_total = vector_store.count_episodic_to_reembed() if vector_store else 0
+            k_total = 0
+            if knowledge_store and embedder is not None:
+                from gideon.cognition.knowledge.pipeline.runner import (
+                    embedding_space_fingerprint,
+                )
+
+                dimension = getattr(embedder, "dim", None)
+                try:
+                    dimension = dimension() if callable(dimension) else dimension
+                except Exception:
+                    dimension = None
+
+                k_total = knowledge_store.count_items_to_reembed(
+                    *embedding_space_fingerprint(embedder), dimension
+                )
+                provider, model = embedding_space_fingerprint(embedder)
+                k_total += knowledge_store.count_chunks_to_reembed(
+                    provider, model, dimension
+                )
+            m_total = sum(
+                store.count_episodic_to_reembed()
+                for store in vector_stores
+                if store is not None
+            )
             job.total = k_total + m_total
             job.phase = "clearing"
             self._publish(job, "progress")
@@ -160,7 +184,7 @@ class ReindexRegistry:
                 self._reindex_sync,
                 run,
                 knowledge_store,
-                vector_store,
+                vector_stores,
                 embedder,
                 embed_fn,
             )
@@ -183,7 +207,7 @@ class ReindexRegistry:
         self,
         run: _Running,
         knowledge_store: Any,
-        vector_store: Any,
+        vector_stores: tuple[Any, ...],
         embedder: Any,
         embed_fn: Any,
     ) -> None:
@@ -192,8 +216,7 @@ class ReindexRegistry:
 
         def _progress(done_in_phase: int, base: int) -> None:
             job.done = base + done_in_phase
-            if job.done % 25 == 0:
-                self._publish(job, "progress")
+            self._publish(job, "progress")
 
         k_done = 0
         if knowledge_store and embedder is not None:
@@ -207,28 +230,56 @@ class ReindexRegistry:
                 active_dim = dim_fn() if callable(dim_fn) else None
             except Exception:
                 active_dim = None
+            fingerprint = (provider, model)
             before = knowledge_store.chunk_embedding_status(provider, model, active_dim)
             job.stale_index_reasons = list(before.get("reasons") or [])
             job.phase = "reindexing knowledge items and chunks"
             self._publish(job, "progress")
-            knowledge_store.clear_embeddings()
             res = knowledge_store.reembed_all(
-                embedder, on_progress=lambda d, _t: _progress(d, 0)
+                embedder,
+                on_progress=lambda d, _t: _progress(d, 0),
+                embedding_fingerprint=fingerprint,
+                embedding_dimension=active_dim,
             )
             job.knowledge = res.get("reembedded", 0)
-            after = knowledge_store.chunk_embedding_status(provider, model, active_dim)
-            job.knowledge_chunks = int(after.get("compatible", 0))
             k_done = res.get("total", 0)
+            chunk_offset = k_done
+            while True:
+                chunk_result = knowledge_store.reembed_stale_chunks(
+                    embedder,
+                    limit=100,
+                    on_progress=lambda d, _t: _progress(d, chunk_offset),
+                )
+                chunk_total = int(chunk_result.get("total", 0))
+                reembedded = int(chunk_result.get("reembedded", 0))
+                job.knowledge_chunks += reembedded
+                chunk_offset += chunk_total
+                if chunk_total == 0 or reembedded == 0:
+                    break
+            k_done = chunk_offset
+            remaining_items = knowledge_store.count_items_to_reembed(
+                provider, model, active_dim
+            )
+            remaining_chunks = knowledge_store.count_chunks_to_reembed(
+                provider, model, active_dim
+            )
+            if remaining_items or remaining_chunks:
+                raise RuntimeError(
+                    "embedding re-index left rows outside the active embedding space"
+                )
 
-        if vector_store is not None:
+        memory_offset = k_done
+        for store_index, vector_store in enumerate(vector_stores):
+            if vector_store is None:
+                continue
             job.phase = "reindexing memory"
             self._publish(job, "progress")
             vector_store.embed_fn = embed_fn
-            vector_store.clear_embeddings()
             res = vector_store.reembed_all(
-                on_progress=lambda d, _t: _progress(d, k_done)
+                on_progress=lambda d, _t: _progress(d, memory_offset)
             )
-            job.memory = res.get("reembedded", 0)
+            job.memory += res.get("reembedded", 0)
+            memory_offset += int(res.get("total", 0))
 
 
 CHUNK_BACKFILL_PASS = "chunk_backfill"

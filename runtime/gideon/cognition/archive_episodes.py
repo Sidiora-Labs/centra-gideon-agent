@@ -17,23 +17,50 @@ class EpisodeIndex:
         self.api = contract()
 
     def reset(self):
-        self.store._faiss_index = self.api.faiss.IndexFlatIP(self.store._embedding_dim)
-        self.store._faiss_id_map = []
+        index = self.api.faiss.IndexFlatIP(self.store._embedding_dim)
+        identities: list[str] = []
+        self.store._faiss_bundle = (
+            index,
+            identities,
+            self.store._embedding_dim,
+            self.store._embedding_context()[1],
+        )
+        self.store._faiss_index = index
+        self.store._faiss_id_map = identities
 
     def rebuild(self):
         api, store = self.api, self.store
         if not (api._HAS_FAISS and api._HAS_NUMPY):
             return 0
-        self.reset()
+        fingerprint = store._embedding_context()[1]
         records = store.db.execute(
-            "SELECT id, embedding FROM episodic_memories WHERE is_deleted = 0 AND embedding IS NOT NULL"
+            "SELECT id, embedding, embedding_provider, embedding_model FROM episodic_memories "
+            "WHERE is_deleted = 0 AND embedding IS NOT NULL"
         ).fetchall()
+        matching = [
+            record
+            for record in records
+            if fingerprint is not None
+            and (record["embedding_provider"], record["embedding_model"]) == fingerprint
+        ]
+        dimension = (
+            len(api.np.frombuffer(matching[0]["embedding"], dtype=api.np.float32))
+            if matching
+            else store._embedding_dim
+        )
+        store._embedding_dim = dimension
+        index = api.faiss.IndexFlatIP(dimension)
+        identities: list[str] = []
         mismatches = 0
         for record in records:
             vector = api.np.frombuffer(record["embedding"], dtype=api.np.float32)
-            if len(vector) == store._embedding_dim:
-                store._faiss_index.add(vector.reshape(1, -1))
-                store._faiss_id_map.append(record["id"])
+            if (
+                fingerprint is not None
+                and (record["embedding_provider"], record["embedding_model"]) == fingerprint
+                and len(vector) == dimension
+            ):
+                index.add(vector.reshape(1, -1))
+                identities.append(record["id"])
             else:
                 mismatches += 1
         if mismatches:
@@ -42,13 +69,17 @@ class EpisodeIndex:
                 mismatches,
                 store._embedding_dim,
             )
-        count = len(store._faiss_id_map)
+        count = len(identities)
+        store._faiss_bundle = (index, identities, store._embedding_dim, fingerprint)
+        store._faiss_index, store._faiss_id_map = index, identities
+        store._faiss_fingerprint = fingerprint
         api.logger.info("Built FAISS index with %d vectors", count)
         return count
 
     def clear(self):
         cursor = self.store.db.execute(
-            "UPDATE episodic_memories SET embedding = NULL WHERE embedding IS NOT NULL"
+            "UPDATE episodic_memories SET embedding = NULL, embedding_provider = NULL, embedding_model = NULL "
+            "WHERE embedding IS NOT NULL"
         )
         removed = cursor.rowcount
         self.store.db.commit()
@@ -75,38 +106,46 @@ class EpisodeIndex:
         store, api = self.store, self.api
         if not api._HAS_FAISS:
             return False
-        paths = (store._faiss_path, store._faiss_path.with_suffix(".ids.json"))
-        if all(path.exists() for path in paths):
-            try:
-                store._faiss_index = api.faiss.read_index(str(paths[0]))
-                store._faiss_id_map = json.loads(paths[1].read_text(encoding="utf-8"))
-                api.logger.info(
-                    "Loaded FAISS index: %d vectors", len(store._faiss_id_map)
-                )
-                return True
-            except Exception:
-                api.logger.warning("FAISS index corrupted, rebuilding", exc_info=True)
+        # A legacy persisted index has no model-space identity. Rebuild from the
+        # fingerprinted rows so index ids and the active dimension publish together.
         store.build_faiss_index()
         return False
 
     def reembed(self, progress):
         store, api = self.store, self.api
         totals = dict(reembedded=0, failed=0, total=0)
-        if store.embed_fn is None:
+        embed_fn, fingerprint = store._embedding_context()
+        if embed_fn is None:
             return totals
-        records = store.db.execute(
-            "SELECT id, text FROM episodic_memories WHERE is_deleted = 0 AND text IS NOT NULL AND text != ''"
-        ).fetchall()
+        if fingerprint is None:
+            records = store.db.execute(
+                "SELECT id, text, embedding_provider, embedding_model FROM episodic_memories "
+                "WHERE is_deleted = 0 AND text IS NOT NULL AND text != '' "
+                "AND (embedding IS NULL OR embedding_provider IS NULL OR embedding_model IS NULL)"
+            ).fetchall()
+        else:
+            records = store.db.execute(
+                "SELECT id, text, embedding_provider, embedding_model FROM episodic_memories "
+                "WHERE is_deleted = 0 AND text IS NOT NULL AND text != '' AND "
+                "(embedding IS NULL OR embedding_provider IS NULL OR embedding_model IS NULL "
+                "OR embedding_provider != ? OR embedding_model != ?)",
+                fingerprint,
+            ).fetchall()
         totals["total"] = len(records)
         for ordinal, record in enumerate(records, 1):
             vector = store._try_embed(record["text"])
             successful = False
             if vector:
                 try:
-                    blob = api.np.array(vector, dtype=api.np.float32).tobytes()
+                    blob = (
+                        api.np.array(vector, dtype=api.np.float32).tobytes()
+                        if api._HAS_NUMPY
+                        else struct.pack(f"{len(vector)}f", *vector)
+                    )
                     store.db.execute(
-                        "UPDATE episodic_memories SET embedding = ? WHERE id = ?",
-                        (blob, record["id"]),
+                        "UPDATE episodic_memories SET embedding = ?, embedding_provider = ?, "
+                        "embedding_model = ? WHERE id = ?",
+                        (blob, *(fingerprint or (None, None)), record["id"]),
                     )
                     successful = True
                 except Exception:
@@ -129,8 +168,16 @@ class EpisodeIndex:
         store, api = self.store, self.api
         if blob is None:
             return
+        fingerprint = store._embedding_context()[1]
+        bundle = store._faiss_bundle
+        if fingerprint is None or bundle is None or bundle[3] != fingerprint:
+            return
         width = len(blob) // 4
         if width != store._embedding_dim:
+            store.build_faiss_index()
+            bundle = store._faiss_bundle
+            if bundle is not None and bundle[3] == fingerprint:
+                return
             api.logger.warning(
                 "Skipping FAISS add for episodic %s: embedding is %d-dim but the index is "
                 "%d-dim. The memory itself is saved; run a re-embed to restore semantic "
@@ -141,11 +188,14 @@ class EpisodeIndex:
                 store._embedding_dim,
             )
             return
-        if store._faiss_index is None:
+        index, old_identities, dimension, _fingerprint = bundle
+        if index is None:
             return
         vector = api.np.frombuffer(blob, dtype=api.np.float32).reshape(1, -1)
-        store._faiss_index.add(vector)
-        store._faiss_id_map.append(identity)
+        index.add(vector)
+        identities = [*old_identities, identity]
+        store._faiss_bundle = (index, identities, dimension, fingerprint)
+        store._faiss_index, store._faiss_id_map = index, identities
         store._faiss_writes_since_save += 1
         if store._faiss_writes_since_save >= api._FAISS_SAVE_INTERVAL:
             store.save_faiss_index()
@@ -172,8 +222,17 @@ class EpisodeAppend:
 
     def duplicate(self, vector):
         store = self.store
-        index = store._faiss_index
-        if index is None or index.ntotal <= 0 or len(vector) != store._embedding_dim:
+        bundle = store._faiss_bundle
+        if bundle is None:
+            return False
+        index, identities, _dimension, fingerprint = bundle
+        if (
+            index is None
+            or fingerprint is None
+            or fingerprint != store._embedding_context()[1]
+            or index.ntotal <= 0
+            or len(vector) != store._embedding_dim
+        ):
             return False
         distances, addresses = index.search(vector.reshape(1, -1), 5)
         for similarity, address in zip(distances[0], addresses[0]):
@@ -181,7 +240,7 @@ class EpisodeAppend:
                 break
             if not float(similarity) > store._dedup_threshold:
                 continue
-            identity = store._faiss_id_map[int(address)]
+            identity = identities[int(address)]
             prior = store._get_episodic(identity)
             if prior and len(self.text) > len(prior["text"]) * 1.2:
                 store._delete_episodic_row(identity)
@@ -228,7 +287,8 @@ class EpisodeAppend:
                 "Episodic text-hash dedup: prefix matches id=%s", prior["id"]
             )
             return False
-        if embedding is None and store.embed_fn is not None:
+        embed_fn, fingerprint = store._embedding_context()
+        if embedding is None and embed_fn is not None:
             embedding = store._try_embed(text)
         blob = None
         if embedding is not None:
@@ -238,8 +298,8 @@ class EpisodeAppend:
         store._enforce_episodic_cap()
         identity, timestamp = str(api.uuid4()), api._now_iso()
         store.db.execute(
-            "INSERT INTO episodic_memories (id, conversation_id, text, embedding, tags, importance, created_at, is_deleted, contributor) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            "INSERT INTO episodic_memories (id, conversation_id, text, embedding, tags, importance, created_at, is_deleted, contributor, embedding_provider, embedding_model) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
             (
                 identity,
                 conversation,
@@ -249,6 +309,8 @@ class EpisodeAppend:
                 importance,
                 timestamp,
                 api.current_username() if contributor is None else contributor,
+                fingerprint[0] if fingerprint else None,
+                fingerprint[1] if fingerprint else None,
             ),
         )
         store.db.commit()
@@ -308,28 +370,40 @@ class EpisodeRecall:
 
     def search(self, embedding, text, limit, diversify, tags):
         api, store = self.api, self.store
+        fingerprint = store._embedding_context()[1]
+        bundle = store._faiss_bundle
+        compatible_index = (
+            bundle is not None
+            and fingerprint is not None
+            and bundle[3] == fingerprint
+        )
         indexed = (
             embedding is not None
             and api._HAS_NUMPY
             and api._HAS_FAISS
-            and store._faiss_index is not None
-            and store._faiss_index.ntotal > 0
+            and compatible_index
+            and bundle[0] is not None
+            and bundle[0].ntotal > 0
         )
         if indexed:
-            return self.indexed(embedding, text, limit, diversify, tags)
+            semantic = self.indexed(embedding, text, limit, diversify, tags)
+            return self.merge_keywords(semantic, text, limit, tags, diversify)
         if embedding is not None:
-            return store._sqlite_vector_search(
+            semantic = store._sqlite_vector_search(
                 embedding, text, limit, mmr=diversify, tag_filter=tags
             )
+            return self.merge_keywords(semantic, text, limit, tags, diversify)
         api.logger.debug("Episodic keyword fallback: query=%s…", text[:60])
         return store._fts5_episodic_search(text, limit, tag_filter=tags) if text else []
 
     def indexed(self, embedding, text, limit, diversify, tags):
         api, store = self.api, self.store
+        bundle = store._faiss_bundle
+        index, identities, _dimension, _fingerprint = bundle
         api.logger.debug(
             "Episodic FAISS search: query=%s… vectors=%d limit=%d",
             text[:60],
-            store._faiss_index.ntotal,
+            index.ntotal,
             limit,
         )
         vector = api.np.array(embedding, dtype=api.np.float32)
@@ -345,15 +419,17 @@ class EpisodeRecall:
                 store._embedding_dim,
             )
             return []
-        distances, addresses = store._faiss_index.search(
-            vector.reshape(1, -1), min(limit * 2, store._faiss_index.ntotal)
+        if bundle is None or bundle[3] != store._embedding_context()[1]:
+            return self.keywords(text, limit, tags)
+        distances, addresses = index.search(
+            vector.reshape(1, -1), min(limit * 2, index.ntotal)
         )
         now = api.datetime.now(tz=api.timezone.utc)
         candidates = []
         for similarity, address in zip(distances[0], addresses[0]):
             if address == -1:
                 break
-            row = store._get_episodic(store._faiss_id_map[int(address)])
+            row = store._get_episodic(identities[int(address)])
             if (
                 not row
                 or row["is_deleted"]
@@ -368,9 +444,12 @@ class EpisodeRecall:
         query = (
             [value / magnitude for value in embedding] if magnitude > 0 else embedding
         )
+        fingerprint = self.store._embedding_context()[1]
         rows = self.store.db.execute(
             "SELECT id, conversation_id, text, tags, importance, created_at, last_accessed_at, contributor, embedding "
-            "FROM episodic_memories WHERE is_deleted = 0 AND embedding IS NOT NULL"
+            "FROM episodic_memories WHERE is_deleted = 0 AND embedding IS NOT NULL "
+            "AND embedding_provider = ? AND embedding_model = ?",
+            fingerprint or ("", ""),
         ).fetchall()
         self.api.logger.debug(
             "Episodic SQLite vector search: query=%s… rows_with_emb=%d",
@@ -391,6 +470,19 @@ class EpisodeRecall:
             item.update(self.score(row, similarity, now))
             candidates.append(item)
         return self.finish(candidates, limit, diversify)
+
+    def merge_keywords(self, semantic, text, limit, tags, diversify):
+        if not text:
+            return semantic
+        seen = {item["id"] for item in semantic}
+        keywords = self.keywords(text, limit, tags)
+        for item in keywords:
+            if item["id"] in seen:
+                continue
+            item["score"] = 0.25
+            item["keyword_match"] = True
+            semantic.append(item)
+        return self.finish(semantic, limit, diversify)
 
     @staticmethod
     def tag_predicate(tags):
@@ -448,7 +540,7 @@ class EpisodeRecall:
         return list(map(dict, rows))
 
     def context(self, embedding, text, cap, citations):
-        if embedding is None and text and self.store.embed_fn is not None:
+        if embedding is None and text and self.store._embedding_context()[0] is not None:
             embedding = self.store._try_embed(text)
         rows = self.store.search_episodic(
             query_embedding=embedding, query_text=text, limit=self.store._episodic_limit

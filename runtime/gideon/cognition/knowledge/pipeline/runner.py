@@ -715,9 +715,10 @@ def _embed(store, item_id: str, embedder) -> str:
         )
         if not vec:
             return "skipped"
+        provider, model = embedding_space_fingerprint(embedder)
         store.db.execute(
-            "UPDATE items SET embedding = ? WHERE id = ?",
-            (floats_to_bytes(vec), item_id),
+            "UPDATE items SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
+            (floats_to_bytes(vec), provider, model, item_id),
         )
         store.db.commit()
         embed_item_chunks(store, item_id, item.get("content") or "", embedder)

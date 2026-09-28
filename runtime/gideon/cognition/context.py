@@ -33,6 +33,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _memory_stores: dict[str, MemoryJournal] = {}
+
+
+def cached_memory_vector_stores() -> tuple[object, ...]:
+    """Snapshot vector stores attached to live per-directory memory journals."""
+    stores: list[object] = []
+    seen: set[int] = set()
+    for journal in tuple(_memory_stores.values()):
+        vector_store = getattr(journal, "vector_store", None)
+        if vector_store is not None and id(vector_store) not in seen:
+            stores.append(vector_store)
+            seen.add(id(vector_store))
+    return tuple(stores)
 _MAX_CONTEXT_CHARS = 165_000
 _HISTORY_BUDGET_CHARS = 35_000
 _CROSS_TAB_BUDGET_CHARS = 6_000

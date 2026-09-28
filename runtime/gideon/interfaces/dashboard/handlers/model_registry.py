@@ -742,6 +742,31 @@ async def api_models_active_set(request: web.Request) -> web.Response:
     active[use_case] = [str(m) for m in models]
     save_active_models(active)
 
+    if use_case == "embedding":
+        state = request.app["state"]
+        try:
+            if active[use_case]:
+                from gideon.interfaces.dashboard.handlers.embedding_reindex import (
+                    start_reindex_for_current_binding,
+                )
+
+                job, error = start_reindex_for_current_binding(state)
+                if error:
+                    logger.info("Embedding binding saved; re-index deferred: %s", error)
+            else:
+                from gideon.cognition.context import cached_memory_vector_stores
+
+                journals = list(cached_memory_vector_stores())
+                context_builder = getattr(state, "context_builder", None)
+                journal = getattr(context_builder, "memory", None)
+                vector_store = getattr(journal, "vector_store", None)
+                if vector_store is not None:
+                    journals.append(vector_store)
+                for store in journals:
+                    store.embed_fn = None
+        except Exception:
+            logger.warning("Embedding binding saved; targeted re-index could not start", exc_info=True)
+
     _sel_log(
         "models.active_set",
         "ok",

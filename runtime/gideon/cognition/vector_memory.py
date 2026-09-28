@@ -351,6 +351,17 @@ def _migrate_v10(db: sqlite3.Connection) -> None:
     expansion.index("idx_semantic_holder", "semantic_memory", "holder")
 
 
+def _migrate_v11(db: sqlite3.Connection) -> None:
+    from gideon.cognition.archive_foundation import ColumnExpansion
+
+    expansion = ColumnExpansion(db, sqlite3, logger)
+    for table in ("semantic_memory", "episodic_memories"):
+        expansion.add(
+            table,
+            (("embedding_provider", "TEXT"), ("embedding_model", "TEXT")),
+        )
+
+
 _MIGRATIONS: list[tuple[int, str, "Callable[[sqlite3.Connection], None] | None"]] = [
     (1, _SCHEMA_V1, None),
     (2, "", _migrate_v2),
@@ -362,6 +373,7 @@ _MIGRATIONS: list[tuple[int, str, "Callable[[sqlite3.Connection], None] | None"]
     (8, "", _migrate_v8),
     (9, "", _migrate_v9),
     (10, "", _migrate_v10),
+    (11, "", _migrate_v11),
 ]
 
 _MAX_BACKFILLS_PER_CALL = 5
@@ -497,6 +509,8 @@ class SemanticArchive(MemoryProvider):
         self._embedding_dim = embedding_dim
         self._db: Any | None = None
         self._faiss_id_map: list[Any] = []
+        self._faiss_fingerprint: tuple[str, str] | None = None
+        self._faiss_bundle: tuple[Any, list[Any], int, tuple[str, str] | None] | None = None
         self._alias_generation: int = 0
         self.embed_fn: Callable[[str], Any] | None = None
         self.contradiction_judge: Any | None = None
@@ -513,12 +527,31 @@ class SemanticArchive(MemoryProvider):
     def capabilities(self) -> "MemoryCapabilities":
         from gideon.cognition.memory_record import MemoryCapabilities
 
+        embed_fn, _fingerprint = self._embedding_context()
+
         enabled = dict.fromkeys(
             ("transactional_batch", "event_log", "full_text_search"), True
         )
         return MemoryCapabilities(
-            vector=self.embed_fn is not None, entity_graph=self.graph_enabled, **enabled
+            vector=embed_fn is not None, entity_graph=self.graph_enabled, **enabled
         )
+
+    def _embedding_context(
+        self,
+    ) -> tuple[Callable[[str], Any] | None, tuple[str, str] | None]:
+        """Resolve the current registered model, retaining explicit standalone bindings."""
+        try:
+            from gideon.integrations.embedding_providers.registry import (
+                get_active_embed_fn,
+                get_active_embedding_fingerprint,
+            )
+
+            fingerprint = get_active_embedding_fingerprint()
+            if fingerprint is not None:
+                return get_active_embed_fn(), fingerprint
+        except Exception:
+            logger.debug("active embedding binding unavailable", exc_info=True)
+        return self.embed_fn, None
 
     @property
     def graph_enabled(self) -> bool:
@@ -646,15 +679,15 @@ class SemanticArchive(MemoryProvider):
         k: int = 8,
         kinds: "set[str] | None" = None,
     ) -> list[dict]:
+        embed_fn, _fingerprint = self._embedding_context()
         if embedding is None:
-            if self.embed_fn is None:
-                return []
-            if text:
+            if embed_fn is not None and text:
                 embedding = self._try_embed(text)
         return self.search_episodic(query_embedding=embedding, query_text=text, limit=k)
 
     def embed(self, text: str) -> "list[float] | None":
-        if self.embed_fn is not None:
+        embed_fn, _fingerprint = self._embedding_context()
+        if embed_fn is not None:
             return self._try_embed(text)
         return None
 
@@ -941,10 +974,23 @@ class SemanticArchive(MemoryProvider):
 
         return EpisodeIndex(self).clear()
 
-    def count_episodic_to_reembed(self) -> int:
+    def count_episodic_to_reembed(
+        self, fingerprint: tuple[str, str] | None = None
+    ) -> int:
+        if fingerprint is None:
+            fingerprint = self._embedding_context()[1]
+        if fingerprint is None:
+            row = self.db.execute(
+                "SELECT COUNT(*) AS n FROM episodic_memories "
+                "WHERE is_deleted = 0 AND text IS NOT NULL AND text != ''"
+            ).fetchone()
+            return 0 if row is None else int(row["n"])
         row = self.db.execute(
             "SELECT COUNT(*) AS n FROM episodic_memories "
-            "WHERE is_deleted = 0 AND text IS NOT NULL AND text != ''"
+            "WHERE is_deleted = 0 AND text IS NOT NULL AND text != '' AND "
+            "(embedding IS NULL OR embedding_provider IS NULL OR embedding_model IS NULL "
+            "OR embedding_provider != ? OR embedding_model != ?)",
+            fingerprint,
         ).fetchone()
         return 0 if row is None else int(row["n"])
 
@@ -1244,10 +1290,11 @@ class SemanticArchive(MemoryProvider):
         return ("pref.general", preference.group(1).strip()) if preference else None
 
     def _try_embed(self, text: str) -> list[float] | None:
-        if self.embed_fn is None:
+        embed_fn, _fingerprint = self._embedding_context()
+        if embed_fn is None:
             return None
         try:
-            vector = self.embed_fn(text)
+            vector = embed_fn(text)
             if not vector:
                 logger.debug("Embed returned None for: %s…", text[:50])
             else:
