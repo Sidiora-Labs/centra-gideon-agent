@@ -67,6 +67,25 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_SECS = 300.0
 
 
+def _workflow_stream_observation(action: str, call_id: str, *, event=None, completed=False,
+                                 provider="", model="", cost_usd=None,
+                                 cost_reported=None) -> None:
+    """Report guarded stream activity to a bound workflow step without affecting the call."""
+    try:
+        from gideon.automation.workflows import step_usage
+
+        if action == "start":
+            step_usage.guarded_call_started(call_id, provider, model)
+        elif action == "event":
+            step_usage.guarded_call_event(
+                call_id, event, cost_usd=cost_usd, cost_reported=cost_reported
+            )
+        else:
+            step_usage.guarded_call_ended(call_id, completed=completed)
+    except Exception:
+        logger.debug("workflow stream observation failed", exc_info=True)
+
+
 def _new_audit_id() -> str:
     return uuid.uuid4().hex[:16]
 
@@ -313,6 +332,9 @@ class ModelCallGuard(ModelProvider):
         started = now_ms()
         tokens_in = tokens_out = 0
         recorded = False
+        _workflow_stream_observation(
+            "start", audit_id, provider=self._provider_name, model=self._model
+        )
 
         try:
             while True:
@@ -351,6 +373,19 @@ class ModelCallGuard(ModelProvider):
                         dollars=dollars,
                     )
                     recorded = True
+                _workflow_stream_observation(
+                    "event",
+                    audit_id,
+                    event=event,
+                    cost_usd=(dollars if event.kind == EVENT_COMPLETE else None),
+                    cost_reported=(
+                        bool(getattr(event, "tool_meta", {}).get("usage_reported", False))
+                        or float(getattr(event, "cost_usd", 0.0) or 0.0) > 0.0
+                        or (event.kind == EVENT_COMPLETE and dollars > 0.0)
+                        if event.kind == EVENT_COMPLETE
+                        else None
+                    ),
+                )
                 yield event
         except TimeoutError:
             self._breaker.record_failure()
@@ -387,6 +422,8 @@ class ModelCallGuard(ModelProvider):
                     strategy,
                 )
             raise
+        finally:
+            _workflow_stream_observation("end", audit_id, completed=recorded)
 
         if not recorded:
             self._breaker.record_success()

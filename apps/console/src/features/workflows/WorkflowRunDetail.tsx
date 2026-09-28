@@ -1,3 +1,5 @@
+import { WorkflowRetryControl } from './WorkflowRetryControl'
+import { runEscalations } from './retryMeta'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ChevronDown, ChevronRight, FolderGit2, GitBranch, MessageSquarePlus, MessageSquareCode, Package, Pause, Pencil, Play, RotateCcw, ScanSearch, Scale, SkipForward, X } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -20,7 +22,7 @@ import { layoutRunDag } from './runDag'
 import { tokenForNode } from './surfacingMeta'
 import { cascadeConfirmation, revalidateNotice, revalidateSummary } from './revalidate'
 import { WorkflowAsk } from './WorkflowAsk'
-import { NodeInspectorDrawer } from './NodeInspectorDrawer'
+import { NodeInspectorDrawer, stepUsageSummary } from './NodeInspectorDrawer'
 import { SteeringPanel } from './SteeringPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OutboxPanel } from './OutboxPanel'
@@ -29,7 +31,7 @@ import { LedgerRailsPanel } from './LedgerRailsPanel'
 import { DeliverablePanel } from './DeliverablePanel'
 import { ReviewTriagePanel } from './ReviewTriagePanel'
 import { foldEvent, foldSnapshot } from './workflowFold'
-import { EscalationPanel, isEscalationRecord } from './EscalationPanel'
+import { EscalationPanel } from './EscalationPanel'
 
 function mergeCachedNodes(next: WorkflowRunDetailData, previous: WorkflowRunDetailData | null): WorkflowRunDetailData {
   if (!previous) return next
@@ -99,8 +101,9 @@ function cascadePreview(error: unknown): WorkflowCascadePreview | null {
   return preview && typeof preview === 'object' ? preview as WorkflowCascadePreview : null
 }
 
-export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspectorClose }: {
+export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspectorClose, onOpenRun }: {
   runId: string
+  onOpenRun?: (id: string) => void
   onBack: () => void
   initialInspectNodeId?: string
   onInspectorClose?: () => void
@@ -275,9 +278,10 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
     await act('Fork', async () => {
       const res = await api.forkWorkflowRun(runId, { note: 'branched from the run view' })
       notify(`Forked to ${res.child_run_id}. Not isolated: ${res.shared_axes.length} shared axes.`)
+      onOpenRun?.(res.child_run_id)
       return res
     })
-  }, [act, runId])
+  }, [act, runId, onOpenRun])
 
   const look = run ? runLook(run.status) : null
   const StatusIcon = look?.icon
@@ -430,9 +434,9 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
                 <QuietButton onClick={cancel} title="Cancel this run"><X size={13} /> Cancel</QuietButton>
               </>
             ) : (
-              <QuietButton onClick={fork} title="Branch a new run from this one; the original is untouched">
+              <>{onOpenRun && <WorkflowRetryControl run={run} onFresh={setRun} onOpenRun={onOpenRun} onError={message => { setActionError(message); notify(message, 'error') }} />}<QuietButton onClick={fork} title="Branch a new run from this one; the original is untouched">
                 <GitBranch size={13} /> Fork
-              </QuietButton>
+              </QuietButton></>
             )}
           </div>
         ) : undefined}
@@ -489,9 +493,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               </section>
             )}
 
-            {isEscalationRecord(run.attention) && (
-              <EscalationPanel escalation={run.attention} error={run.error} />
-            )}
+            {runEscalations(run).map((escalation, index) => <EscalationPanel key={index} escalation={escalation} error={run.error} />)}
 
             <div data-type="caption" className="flex flex-wrap items-center gap-l text-on-surface-low">
               <span>run <span className="font-mono">{run.run_id}</span></span>
@@ -548,7 +550,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
               {listedRows.map(({ node: n, depth, descendants, collapsible }) => {
                 const nl = nodeLook(n.state)
                 const NIcon = nl.icon
-                const canReenter = !isTerminal(run.status) && !!n.node_id
+                const canReenter = !isTerminal(run.status) && !isPrelaunch(run.status) && !!n.node_id
                 const isCollapsed = collapsed.has(n.instance_path)
                 const summary = collapsible ? summarize(descendants, nodes) : null
                 return (
@@ -601,6 +603,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
                       {n.failure?.remediation && (
                         <div data-type="caption" className="truncate text-on-surface-low">{n.failure.remediation}</div>
                       )}
+                      {n.attempts?.length ? <div data-type="caption" className="text-on-surface-low">{stepUsageSummary(n.attempts[n.attempts.length - 1])}</div> : null}
                     </div>
                     <span data-type="caption" className={`shrink-0 ${nl.tone}`}>{nl.label}</span>
                     {(canReenter || (isNodeTerminal(n.state) && !!n.node_id)) && (

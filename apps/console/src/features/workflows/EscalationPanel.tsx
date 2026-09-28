@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { escalationReasonSentence } from './escalationReasons'
 
@@ -9,6 +10,8 @@ interface EscalationAttempt {
 }
 
 export interface EscalationRecord {
+  node_id?: unknown
+  instance_path?: unknown
   kind?: unknown
   reason?: unknown
   detail?: unknown
@@ -20,11 +23,12 @@ export function isEscalationRecord(value: unknown): value is EscalationRecord {
 }
 
 export function EscalationPanel({ escalation, error = '' }: { escalation: EscalationRecord; error?: string }) {
+  const headingId = useId()
   const detail = typeof escalation.detail === 'string' ? escalation.detail.trim() : ''
   const attempts = Array.isArray(escalation.attempts) ? escalation.attempts as EscalationAttempt[] : []
   return (
-    <section id="escalation" aria-labelledby="escalation-heading" className="rounded-lg border border-warning/30 bg-warning/5 p-m">
-      <h2 id="escalation-heading" data-type="label-m" className="flex items-center gap-s text-warning">
+    <section aria-labelledby={headingId} className="rounded-lg border border-warning/30 bg-warning/5 p-m">
+      <h2 id={headingId} data-type="label-m" className="flex items-center gap-s text-warning">
         <AlertTriangle size={15} /> Escalation diagnosis
       </h2>
       <p data-type="body-s" className="mt-s text-on-surface">{escalationReasonSentence(escalation.reason)}</p>

@@ -117,6 +117,15 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
                 priced = False
         elif kind == STEP_FAILED:
             failures += 1
+            # Failed/retried attempts spend tokens too. Older rows have no token key and
+            # therefore do not change the aggregate; a present null remains unknown.
+            if "tokens" in rec and tokens is not None:
+                recorded_tokens = rec.get("tokens")
+                tokens = (
+                    tokens + int(recorded_tokens)
+                    if recorded_tokens is not None
+                    else None
+                )
         elif kind == STEP_CACHED:
             cached += 1
     return {

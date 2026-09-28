@@ -66,6 +66,7 @@ from gideon.automation.workflows.models import (
     valid_name,
     walk,
 )
+from gideon.automation.workflows.failure_taxonomy import with_breaker_window
 from gideon.automation.workflows.validator import validate_spec
 
 logger = logging.getLogger(__name__)
@@ -871,6 +872,7 @@ def status(run_id: str) -> dict[str, Any]:
         round_interrupted=bool((run.extra or {}).get("round_interrupted")),
         rounds=read_rounds(run_id),
         nodes=_nodes_of(run_id),
+        escalations=_escalations(run_id),
     )
 
 
@@ -1089,6 +1091,13 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
     node_events = [
         e for e in journal_mod.ledger(run_id) if e.get("instance_path") == target
     ]
+    terminal_attempts = [
+        e
+        for e in journal_mod.journal_records(run_id)
+        if e.get("instance_path") == target
+        and e.get("kind")
+        in {journal_mod.STEP_COMPLETED, journal_mod.STEP_FAILED, journal_mod.STEP_CANCELLED}
+    ]
 
     prompt_ref = ""
     for e in node_events:
@@ -1137,7 +1146,7 @@ def inspect_node(run_id: str, node_id: str) -> dict[str, Any]:
         resolved_prompt=resolved_prompt,
         resolved_inputs=resolved_inputs,
         output=output_field,
-        attempts=[e for e in node_events if e.get("kind") == journal_mod.STEP_ATTEMPT],
+        attempts=terminal_attempts,
         ledger_events=node_events,
         cached=any(e.get("kind") == journal_mod.STEP_CACHED for e in node_events),
     )
@@ -2577,6 +2586,17 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
         totals[group] = totals.get(group, 0) + 1
 
     out: list[dict[str, Any]] = []
+    terminal_rows: dict[str, list[dict[str, Any]]] = {}
+    for record in journal_mod.journal_records(run_id):
+        kind = str(record.get("kind", ""))
+        if kind not in {journal_mod.STEP_COMPLETED, journal_mod.STEP_FAILED, journal_mod.STEP_CANCELLED}:
+            continue
+        path = str(record.get("instance_path", "") or "")
+        if not path:
+            continue
+        attempt = dict(record)
+        attempt["attempt"] = int(record.get("attempt", int(record.get("retries", 0) or 0) + 1))
+        terminal_rows.setdefault(path, []).append(attempt)
     for path in sorted(instances):
         inst = instances[path]
         base = spec_path(path)
@@ -2586,8 +2606,21 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
             "state": inst.state.value,
             "attempt": inst.attempt,
             "degraded_reason": inst.degraded_reason,
-            "failure": inst.failure.to_dict() if inst.failure else None,
+            "failure": with_breaker_window(inst.failure).to_dict() if inst.failure else None,
+            "attempts": [
+                {
+                    key: record.get(key)
+                    for key in (
+                        "attempt", "kind", "tokens", "cost_usd", "model_calls_open",
+                        "model", "provider", "model_substituted", "failure",
+                    )
+                    if key in record
+                }
+                for record in terminal_rows.get(path, [])
+            ],
         }
+        if inst.model_substitutions:
+            row["model_substitutions"] = list(inst.model_substitutions)
         markers = list(re.finditer(r"[#@](\d+)(?=\.|$)", path))
         total = inst.item_total or totals.get(sibling_group(path), 0)
         if markers and (inst.item_total > 0 or total > 1):
@@ -2597,6 +2630,20 @@ def _nodes_of(run_id: str) -> list[dict[str, Any]]:
                 row["item_label"] = inst.item_label
         out.append(row)
     return out
+
+
+def _escalations(run_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "kind": "escalation",
+            "instance_path": str(record.get("instance_path", "") or ""),
+            "node_id": str(record.get("node_id", "") or ""),
+            "reason": str(record.get("reason", "") or ""),
+            "detail": str(record.get("detail", "") or ""),
+            "attempts": list(record.get("attempts", []) or []),
+        }
+        for record in journal_mod.journal_records(run_id, kinds={journal_mod.STEP_ESCALATED})
+    ]
 
 
 def _completion_summary(run: Any, status: RunStatus) -> str:

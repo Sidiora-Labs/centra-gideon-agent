@@ -92,7 +92,20 @@ from gideon.automation.workflows.engine import (
     dispatcher_commits_effects,
     parse_declared_output,
 )
-from gideon.automation.workflows.failure_taxonomy import classify_exception
+from gideon.automation.workflows.failure_taxonomy import (
+    classify_exception,
+    with_breaker_window,
+)
+from gideon.automation.workflows.liveness import last_heard
+from gideon.automation.workflows.step_usage import (
+    NOT_RECORDED,
+    NOTHING_SENT,
+    CallLog,
+    StepUsage,
+    bind_calls,
+    measured,
+    subagent_usage,
+)
 from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
     NodeResult,
@@ -230,6 +243,16 @@ class _InFlight:
     started: float
     last_progress: float
     cache_key: CacheKey
+    calls: CallLog = field(default_factory=CallLog)
+
+
+@dataclass(frozen=True)
+class _CancelledAttemptSnapshot:
+    path: str
+    node_id: str
+    epoch: int
+    attempt: int
+    usage: StepUsage
 
 
 _CONVERGENCE_LOG_MAX = 50
@@ -287,6 +310,7 @@ class RunController:
         self._compaction_saves: dict[str, list[float]] = {}
         self._seen: dict[str, longrun.SeenSet] = {}
         self._attempts: dict[str, list[Attempt]] = {}
+        self._cancel_usage_snapshot: list[_CancelledAttemptSnapshot] = []
         self._breakers: dict[str, BreakerState] = {}
         self._budget_warned = False
         self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
@@ -798,6 +822,42 @@ class RunController:
         lock is held and no node is mid-launch.
         """
         if store.cancel_requested(self.run.id):
+            self._cancel_usage_snapshot = [
+                _CancelledAttemptSnapshot(
+                    entry.ready.path,
+                    entry.ready.node.id,
+                    self._instance(entry.ready.path).epoch,
+                    self._instance(entry.ready.path).attempt,
+                    measured(entry.calls),
+                )
+                for entry in self._inflight.values()
+            ]
+            snapshotted = {record.path for record in self._cancel_usage_snapshot}
+            manager = self.services.subagents
+            get = getattr(manager, "get", None)
+            by_path = dict(_walk(self.root))
+            for path, inst in self.instances.items():
+                if (
+                    path in snapshotted
+                    or inst.state != InstanceState.RUNNING
+                    or not inst.subagent_id
+                ):
+                    continue
+                try:
+                    info = get(inst.subagent_id) if callable(get) else None
+                except Exception:
+                    info = None
+                usage = subagent_usage(info) if info is not None and getattr(info, "done", False) else NOT_RECORDED
+                node = by_path.get(spec_path(path))
+                self._cancel_usage_snapshot.append(
+                    _CancelledAttemptSnapshot(
+                        path,
+                        node.id if node else "",
+                        inst.epoch,
+                        inst.attempt,
+                        usage,
+                    )
+                )
             await self._cancel_inflight()
             await self._finish(RunStatus.CANCELLED)
             return True
@@ -1806,6 +1866,9 @@ class RunController:
                 inst.subagent_claim_holder = ""
             error = str(getattr(info, "error", "") or "")
             reaped = bool(getattr(info, "reaped", False))
+            usage = subagent_usage(info)
+            inst.tokens = usage.billable()
+            self.run.total_tokens += inst.tokens
             if error:
                 classified = classify_exception(RuntimeError(error))
                 failure = Failure(
@@ -1838,6 +1901,7 @@ class RunController:
                         node_id,
                         epoch=inst.epoch,
                         failure=failure,
+                        usage=usage,
                         attempt=inst.attempt,
                         retries_exhausted=False,
                     )
@@ -1862,6 +1926,7 @@ class RunController:
                     node_id,
                     epoch=inst.epoch,
                     failure=failure,
+                    usage=usage,
                     attempt=inst.attempt,
                     retries_exhausted=True,
                 )
@@ -1898,6 +1963,7 @@ class RunController:
                             node_id,
                             epoch=inst.epoch,
                             failure=failure,
+                            usage=usage,
                             attempt=inst.attempt,
                             retries_exhausted=True,
                         )
@@ -1916,6 +1982,11 @@ class RunController:
                             cache_key="",
                             state=inst.state,
                             retries=max(0, inst.attempt - 1),
+                            tokens=inst.tokens,
+                            model=usage.model,
+                            provider=usage.provider,
+                            cost_usd=usage.cost_usd,
+                            usage=usage,
                             degraded_reason="",
                             output_ref=ref,
                         )
@@ -1936,6 +2007,11 @@ class RunController:
                         cache_key="",
                         state=inst.state,
                         retries=max(0, inst.attempt - 1),
+                        tokens=inst.tokens,
+                        model=usage.model,
+                        provider=usage.provider,
+                        cost_usd=usage.cost_usd,
+                        usage=usage,
                         degraded_reason="",
                         output_ref=ref,
                     )
@@ -2590,9 +2666,11 @@ class RunController:
         )
 
         now = time.time()
-        task = asyncio.create_task(self._execute(item, ctx))
+        calls = CallLog()
+        task = asyncio.create_task(self._execute(item, ctx, calls))
         self._inflight[item.path] = _InFlight(
-            task=task, ready=item, started=now, last_progress=now, cache_key=key
+            task=task, ready=item, started=now, last_progress=now, cache_key=key,
+            calls=calls,
         )
 
     def _effect_key(self, item: ReadyNode, inst: NodeInstance) -> str:
@@ -2673,6 +2751,7 @@ class RunController:
                 item.node.id,
                 epoch=inst.epoch,
                 failure=inst.failure,
+                usage=NOTHING_SENT,
                 attempt=inst.attempt,
                 retries_exhausted=True,
             )
@@ -2710,6 +2789,7 @@ class RunController:
                 item.node.id,
                 epoch=inst.epoch,
                 failure=inst.failure,
+                usage=NOTHING_SENT,
                 attempt=inst.attempt,
                 retries_exhausted=True,
             )
@@ -2744,6 +2824,7 @@ class RunController:
                     item.node.id,
                     epoch=inst.epoch,
                     failure=inst.failure,
+                    usage=NOTHING_SENT,
                     attempt=inst.attempt,
                     retries_exhausted=True,
                 )
@@ -2827,7 +2908,9 @@ class RunController:
             self._worker_model_cache = resolve_axis_model(worker_uc)
         return self._worker_model_cache
 
-    async def _execute(self, item: ReadyNode, ctx: BindingContext) -> NodeResult:
+    async def _execute(
+        self, item: ReadyNode, ctx: BindingContext, calls: CallLog | None = None
+    ) -> NodeResult:
         """Run a dispatcher under the total-timeout knob.
 
         A timeout here is a REAL kill, not a decorative config value — the studied
@@ -2892,22 +2975,27 @@ class RunController:
             ),
             compaction_saves=self._compaction_saves.setdefault(node.id, []),
         )
-        if total and total > 0:
+        active_calls = calls or CallLog()
+        with bind_calls(active_calls):
             try:
-                result = await asyncio.wait_for(coro, timeout=total)
-            except asyncio.TimeoutError:
-                return NodeResult(
-                    state=InstanceState.FAILED,
-                    failure=Failure(
-                        failure_class=FailureClass.TIMEOUT,
-                        cause_plain=f"node exceeded timeout_total ({total}s)",
-                        remediation="raise workflows.default_node_timeout_total_secs, or "
-                        "split this node into smaller steps",
-                        recoverable=True,
-                    ),
-                )
-        else:
-            result = await coro
+                if total and total > 0:
+                    try:
+                        result = await asyncio.wait_for(coro, timeout=total)
+                    except asyncio.TimeoutError:
+                        return NodeResult(
+                            state=InstanceState.FAILED,
+                            failure=Failure(
+                                failure_class=FailureClass.TIMEOUT,
+                                cause_plain=f"node exceeded timeout_total ({total}s)",
+                                remediation="raise workflows.default_node_timeout_total_secs, or "
+                                "split this node into smaller steps",
+                                recoverable=True,
+                            ),
+                        )
+                else:
+                    result = await coro
+            finally:
+                active_calls.close()
         if before is not None:
             result = self._check_write_scope(node, result, before, allowed, watched)
         return self._check_success_when(node, result, ctx)
@@ -3136,7 +3224,7 @@ class RunController:
         now = time.time()
         for path, entry in list(self._inflight.items()):
             stall = self._node_stall_window(path)
-            if stall <= 0 or now - entry.last_progress < stall:
+            if stall <= 0 or now - last_heard(entry.last_progress, entry.calls) < stall:
                 continue
             entry.task.cancel()
             self._inflight.pop(path, None)
@@ -3152,11 +3240,16 @@ class RunController:
             inst.state = InstanceState.FAILED
             inst.failure = failure
             inst.completed_at = _now()
+            usage = measured(entry.calls)
+            with_breaker_window(failure, entry.calls.providers)
+            inst.tokens = usage.billable()
+            self.run.total_tokens += inst.tokens
             self.journal.step_failed(
                 path,
                 entry.ready.node.id,
                 epoch=inst.epoch,
                 failure=failure,
+                usage=usage,
                 attempt=inst.attempt,
                 retries_exhausted=True,
             )
@@ -3254,9 +3347,19 @@ class RunController:
 
         if result.state == InstanceState.FAILED:
             failure = result.failure or Failure()
-            record = attempt_from_failure(
-                inst.attempt, failure, tokens=result.tokens, duration_secs=duration
+            with_breaker_window(failure, entry.calls.providers)
+            usage = measured(
+                entry.calls,
+                estimate=result.tokens,
+                cost_estimate=result.cost_usd,
+                model=result.model,
+                provider=result.provider,
             )
+            record = attempt_from_failure(
+                inst.attempt, failure, tokens=usage.billable(result.tokens), duration_secs=duration
+            )
+            inst.tokens = usage.billable(result.tokens)
+            self.run.total_tokens += inst.tokens
             self._attempts.setdefault(item.path, []).append(record)
             if self._should_retry(item, inst, result):
                 if dispatcher_commits_effects(item.node):
@@ -3274,6 +3377,7 @@ class RunController:
                     item.node.id,
                     epoch=inst.epoch,
                     failure=failure,
+                    usage=usage,
                     attempt=inst.attempt,
                     retries_exhausted=False,
                 )
@@ -3283,7 +3387,14 @@ class RunController:
         inst.completed_at = _now()
         inst.degraded_reason = result.degraded_reason
         inst.failure = result.failure
-        inst.tokens = result.tokens
+        usage = measured(
+            entry.calls,
+            estimate=result.tokens,
+            cost_estimate=result.cost_usd,
+            model=result.model,
+            provider=result.provider,
+        )
+        inst.tokens = usage.billable(result.tokens)
         self._decline(inst, result.declined_edges)
 
         if item.node.kind == NodeKind.ACTION and result.state in SUCCESS_STATES:
@@ -3355,7 +3466,7 @@ class RunController:
             inst.output_ref = ref
             if item.node.id:
                 self._outputs[item.node.id] = preview
-            self.run.total_tokens += int(result.tokens)
+            self.run.total_tokens += inst.tokens
             self.journal.step_completed(
                 item.path,
                 item.node.id,
@@ -3363,11 +3474,12 @@ class RunController:
                 cache_key=entry.cache_key.to_str(),
                 state=result.state,
                 duration_secs=duration,
-                tokens=result.tokens,
+                tokens=inst.tokens,
                 retries=max(0, inst.attempt - 1),
-                model=result.model,
-                provider=result.provider,
-                cost_usd=result.cost_usd,
+                model=usage.model,
+                provider=usage.provider,
+                cost_usd=usage.cost_usd,
+                usage=usage,
                 degraded_reason=result.degraded_reason,
                 resolved_prompt_ref=self._store_prompt(
                     item.path, result.resolved_prompt
@@ -3385,6 +3497,7 @@ class RunController:
                 item.node.id,
                 epoch=inst.epoch,
                 failure=result.failure or Failure(),
+                usage=usage,
                 attempt=inst.attempt,
                 retries_exhausted=True,
                 signature={
@@ -4463,6 +4576,7 @@ class RunController:
                     cache_key="",
                     state=InstanceState.DONE,
                     output_ref=ref,
+                    usage=NOTHING_SENT,
                 )
                 self._publish(
                     "workflow_node_done",
@@ -4490,6 +4604,7 @@ class RunController:
                 node.id if node else "",
                 epoch=inst.epoch,
                 failure=failure,
+                usage=NOTHING_SENT,
                 attempt=inst.attempt,
                 retries_exhausted=True,
             )
@@ -4612,6 +4727,22 @@ class RunController:
 
     async def _finish(self, status: RunStatus, *, error: str = "") -> None:
         """Write the run's terminal status. The single terminal writer (WF2-R10)."""
+        if status == RunStatus.CANCELLED and self._cancel_usage_snapshot:
+            for snapshot in self._cancel_usage_snapshot:
+                inst = self.instances.get(snapshot.path)
+                if inst is None or inst.state != InstanceState.CANCELLED:
+                    continue
+                usage = snapshot.usage
+                inst.tokens = usage.billable()
+                self.run.total_tokens += inst.tokens
+                self.journal.step_cancelled(
+                    snapshot.path,
+                    snapshot.node_id,
+                    epoch=snapshot.epoch,
+                    attempt=snapshot.attempt,
+                    usage=usage,
+                )
+            self._cancel_usage_snapshot.clear()
         if status in (RunStatus.FAILED, RunStatus.ESCALATED) and not error:
             failed = [
                 (path, inst) for path, inst in self.instances.items()

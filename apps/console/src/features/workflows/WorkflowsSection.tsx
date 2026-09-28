@@ -13,6 +13,7 @@ export function WorkflowsSection(props: RouteProps) {
       <WorkflowRunDetail
         runId={parts[1]}
         onBack={back}
+        onOpenRun={id => navigate(`workflows/runs/${id}`)}
         initialInspectNodeId={query.node}
         onInspectorClose={() => setQuery({ node: null }, { replace: true })}
       />

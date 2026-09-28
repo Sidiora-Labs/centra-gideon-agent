@@ -225,6 +225,7 @@ class InstanceState(str, Enum):
     DONE = "done"
     DEGRADED = "degraded"
     FAILED = "failed"
+    DECLINED = "declined"
     SKIPPED = "skipped"
     NO_CHANGE = "no_change"
     SCOPE_VIOLATION = "scope_violation"
@@ -239,6 +240,7 @@ TERMINAL_STATES = frozenset(
         InstanceState.DONE,
         InstanceState.DEGRADED,
         InstanceState.FAILED,
+        InstanceState.DECLINED,
         InstanceState.SKIPPED,
         InstanceState.NO_CHANGE,
         InstanceState.SCOPE_VIOLATION,
@@ -288,17 +290,33 @@ class Failure:
     recoverable: bool = False
     terminal_reason: str = ""
     suggestion: str = ""
+    retry_at: float | None = None
+    providers: list[str] = field(default_factory=list)
 
     @property
     def retryable(self) -> bool:
         return self.failure_class in RETRYABLE_CLASSES
 
     def to_dict(self) -> dict[str, Any]:
-        return RecordCodecs.write("Failure", self)
+        result = RecordCodecs.write("Failure", self)
+        result["retry_at"] = self.retry_at
+        result["providers"] = list(self.providers)
+        return result
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Failure:
-        return RecordCodecs.failure(cls, d)
+        failure = RecordCodecs.failure(cls, d)
+        raw_retry = d.get("retry_at")
+        try:
+            failure.retry_at = float(raw_retry) if raw_retry is not None else None
+        except (TypeError, ValueError, OverflowError):
+            failure.retry_at = None
+        raw_providers = d.get("providers", [])
+        failure.providers = list(dict.fromkeys(
+            str(provider) for provider in raw_providers
+            if isinstance(provider, str) and provider
+        )) if isinstance(raw_providers, list) else []
+        return failure
 
 
 @dataclass
@@ -356,6 +374,7 @@ class RunStatus(str, Enum):
     NEEDS_INPUT = "needs_input"
     COMPLETE = "complete"
     FAILED = "failed"
+    DECLINED = "declined"
     CANCELLED = "cancelled"
     ESCALATED = "escalated"
 
@@ -367,6 +386,7 @@ RUN_PHASES: dict[RunStatus, LifecyclePhase] = {
     RunStatus.NEEDS_INPUT: LifecyclePhase.ATTENTION,
     RunStatus.COMPLETE: LifecyclePhase.ENDED,
     RunStatus.FAILED: LifecyclePhase.ENDED,
+    RunStatus.DECLINED: LifecyclePhase.ENDED,
     RunStatus.CANCELLED: LifecyclePhase.ENDED,
     RunStatus.ESCALATED: LifecyclePhase.ENDED,
 }

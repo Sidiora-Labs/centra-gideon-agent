@@ -59,6 +59,7 @@ from gideon.automation.workflows.engine_support import (
     resolve_use_case,
 )
 from gideon.automation.workflows.failure_taxonomy import (
+    classify_action_result,
     classify_exception as _classify_exception,
 )
 from gideon.automation.workflows.judge_contract import (
@@ -786,20 +787,10 @@ async def dispatch_action(
             )
 
     if not getattr(result, "success", False):
-        err = (
-            getattr(result, "error", "")
-            or getattr(result, "stderr", "")
-            or "action failed"
-        )
         return NodeResult(
             state=InstanceState.FAILED,
             output=output,
-            failure=Failure(
-                failure_class=FailureClass.TRANSIENT,
-                cause_plain=str(err)[:500],
-                remediation=_provider_fix(result),
-                recoverable=True,
-            ),
+            failure=classify_action_result(result),
         )
     if getattr(result, "outcome", "") == "launched":
         return NodeResult(

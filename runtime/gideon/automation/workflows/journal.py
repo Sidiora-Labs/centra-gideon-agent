@@ -112,6 +112,9 @@ from gideon.assurance.ledger import (
 )
 from gideon.automation.workflows import store
 from gideon.automation.workflows.models import Failure, InstanceState
+from gideon.automation.workflows.step_usage import StepUsage
+
+STEP_CANCELLED = "step_cancelled"
 
 
 def inputs_hash(resolved: dict[str, Any]) -> str:
@@ -194,10 +197,17 @@ class Journal(LedgerWriter):
         degraded_reason: str = "",
         resolved_prompt_ref: str = "",
         output_ref: str = "",
+        usage: StepUsage | None = None,
     ) -> None:
         """The ledger's primary record. Every field here is required by the flywheel's
         refiner (§5 Run Ledger) — `cost_usd` is backend-authoritative with a rate-table
         floor, never a frontend estimate."""
+        usage_fields = usage.fields() if usage is not None else {}
+        usage_extras = {
+            key: value
+            for key, value in usage_fields.items()
+            if key not in {"tokens", "model", "provider", "cost_usd"}
+        }
         self.write(
             STEP_COMPLETED,
             instance_path=path,
@@ -206,14 +216,15 @@ class Journal(LedgerWriter):
             cache_key=cache_key,
             state=state.value,
             duration_secs=round(float(duration_secs), 3),
-            tokens=int(tokens),
+            tokens=usage.tokens if usage is not None else int(tokens),
             retries=int(retries),
-            model=model,
-            provider=provider,
-            cost_usd=round(float(cost_usd), 6),
+            model=usage.model if usage is not None else model,
+            provider=usage.provider if usage is not None else provider,
+            cost_usd=(usage.cost_usd if usage is not None else round(float(cost_usd), 6)),
             degraded_reason=degraded_reason,
             resolved_prompt_ref=resolved_prompt_ref,
             output_ref=output_ref,
+            **usage_extras,
         )
 
     def step_failed(
@@ -226,7 +237,9 @@ class Journal(LedgerWriter):
         attempt: int = 0,
         retries_exhausted: bool = False,
         signature: dict[str, Any] | None = None,
+        usage: StepUsage | None = None,
     ) -> None:
+        usage_fields = usage.fields() if usage is not None else {}
         self.write(
             STEP_FAILED,
             instance_path=path,
@@ -237,6 +250,26 @@ class Journal(LedgerWriter):
             failure_signature=dict(signature or {}),
             attempt=int(attempt),
             retries_exhausted=bool(retries_exhausted),
+            **usage_fields,
+        )
+
+    def step_cancelled(
+        self,
+        path: str,
+        node_id: str,
+        *,
+        epoch: int,
+        attempt: int,
+        usage: StepUsage,
+    ) -> None:
+        """Record a terminal cancelled attempt without classifying it as a failure."""
+        self.write(
+            STEP_CANCELLED,
+            instance_path=path,
+            node_id=node_id,
+            epoch=epoch,
+            attempt=int(attempt),
+            **usage.fields(),
         )
 
     def step_skipped(

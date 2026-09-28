@@ -109,7 +109,18 @@ function toJson(v: unknown): string {
   try { return JSON.stringify(v, null, 2) } catch { return String(v) }
 }
 
-function NodeInspectBody({ data }: { data: NodeInspect }) {
+export function stepUsageSummary(usage: { tokens?: unknown; cost_usd?: unknown; model?: unknown; provider?: unknown; model_calls_open?: unknown }) {
+  const floor = typeof usage.model_calls_open === 'number' && usage.model_calls_open > 0
+  const fields: string[] = []
+  if ('tokens' in usage) fields.push(typeof usage.tokens === 'number' ? `${floor ? 'at least ' : ''}${usage.tokens.toLocaleString()} tokens` : 'tokens unknown')
+  if ('cost_usd' in usage) fields.push(typeof usage.cost_usd === 'number' ? `${floor ? 'at least ' : ''}$${usage.cost_usd.toFixed(6)}` : 'cost unknown')
+  if (typeof usage.model === 'string' && usage.model) fields.push(usage.model)
+  if (typeof usage.provider === 'string' && usage.provider) fields.push(usage.provider)
+  if (floor) fields.push(`${usage.model_calls_open} incomplete model ${usage.model_calls_open === 1 ? 'call' : 'calls'}`)
+  return fields.join(' · ')
+}
+
+export function NodeInspectBody({ data }: { data: NodeInspect }) {
   const promptRef = refOf(data.resolved_prompt)
   const outputRef = refOf(data.output)
   const inputKeys = Object.keys(data.resolved_inputs ?? {})
@@ -163,11 +174,12 @@ function NodeInspectBody({ data }: { data: NodeInspect }) {
           <ol data-testid="attempts" className="flex flex-col gap-xs">
             {data.attempts.map((a, i) => {
               const status = typeof a.status === 'string' ? a.status
-                : typeof a.state === 'string' ? a.state : 'attempt'
+                : typeof a.state === 'string' ? a.state : typeof a.kind === 'string' ? a.kind.replace(/^step_/, '') : 'attempt'
               return (
                 <li key={i} data-type="caption" className="flex items-center gap-s rounded-md bg-surface px-2.5 py-1.5">
-                  <span className="tabular-nums text-on-surface-low">#{i + 1}</span>
+                  <span className="tabular-nums text-on-surface-low">#{typeof a.attempt === 'number' ? a.attempt : i + 1}</span>
                   <span className="text-on-surface">{status}</span>
+                  {stepUsageSummary(a) && <span className="text-on-surface-low">{stepUsageSummary(a)}</span>}
                 </li>
               )
             })}

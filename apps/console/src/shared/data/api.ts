@@ -1130,11 +1130,22 @@ export interface WorkflowLedgerRow {
 }
 export type WorkflowRunStatus =
   'draft' | 'running' | 'paused' | 'needs_input' | 'complete' | 'failed' | 'cancelled' | 'declined' | 'escalated'
+export interface WorkflowStepUsage {
+  attempt?: number
+  status?: string
+  tokens?: number | null
+  cost_usd?: number | null
+  model?: string
+  provider?: string
+  model_calls_open?: number | null
+  model_substituted?: unknown[]
+}
 export interface WorkflowNodeState {
   instance_path: string; node_id: string; state: string; attempt?: number
   cached?: boolean
+  attempts?: WorkflowStepUsage[]
   degraded_reason?: string
-  failure?: { class?: string; cause_plain?: string; remediation?: string; terminal_reason?: string } | null
+  failure?: { class?: string; cause_plain?: string; remediation?: string; terminal_reason?: string; retryable?: boolean; retry_at?: number | null; providers?: string[] } | null
   item_index?: number; item_total?: number; item_label?: string
 }
 export interface WorkflowRunSummary {
@@ -1155,6 +1166,7 @@ export interface WorkflowRunDetailData {
   round_interrupted?: boolean
   rounds?: Array<{ iteration: number; at: string; allow_next: boolean; reason: string; completed_role?: string; next_role?: string; changed_paths: string[]; quarantined_paths: string[]; quarantine_evidence?: Array<{ path: string; content: string; truncated: boolean }>; handback?: boolean; verification: { exit_code?: number | null } }>
   nodes: WorkflowNodeState[]
+  escalations?: Array<Record<string, unknown>>
 }
 export interface WorkflowContinuation {
   resume_token: string; node_id: string; instance_path: string
