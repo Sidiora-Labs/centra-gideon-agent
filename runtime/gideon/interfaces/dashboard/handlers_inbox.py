@@ -24,6 +24,12 @@ from gideon.integrations.inbox import (
     validate_updatable_fields,
 )
 from gideon.security.sel import sel
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
+    redact_for_display,
+)
 
 if TYPE_CHECKING:
     from gideon.interfaces.dashboard.state import ConsoleState
@@ -34,7 +40,37 @@ _UPDATABLE_FIELDS = {"status", "draft", "classification", "confidence", "favorit
 
 
 def _owner_item(item, owner: str) -> dict:
-    return _redact_item(item.to_owner_dict(owner))
+    return _mask_inbox_projection(_redact_item(item.to_owner_dict(owner)))
+
+
+_OPAQUE_INBOX_FIELDS = frozenset(
+    {
+        "id",
+        "channel",
+        "thread_ts",
+        "sender_id",
+        "reply_target",
+        "source",
+        "status",
+        "owner",
+        "created_at",
+    }
+)
+
+
+def _mask_inbox_projection(value):
+    if isinstance(value, dict):
+        return {
+            key: item
+            if key in _OPAQUE_INBOX_FIELDS or key.endswith("_id") or key.endswith("_ts")
+            else _mask_inbox_projection(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_inbox_projection(item) for item in value]
+    if isinstance(value, str):
+        return redact_for_display(value)
+    return value
 
 
 def _get_inbox(state: "ConsoleState") -> tuple[InboxState, InboxStore]:
@@ -337,6 +373,11 @@ async def api_inbox_update(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
 
     updates = {k: v for k, v in body.items() if k in _UPDATABLE_FIELDS}
+    if isinstance(updates.get("draft"), str):
+        try:
+            updates["draft"] = keep_masked_spans(updates["draft"], item.draft or "")
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
     try:
         validate_updatable_fields(updates)
     except InboxFieldTypeError as exc:
@@ -582,6 +623,11 @@ async def api_inbox_send(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "this item's source does not support replies"}, status=400
         )
+
+    try:
+        text = keep_masked_spans(text, item.draft or "")
+    except MaskConflict:
+        return web.json_response({"error": MASK_CONFLICT}, status=409)
 
     if item.source == "native":
         delivered = False

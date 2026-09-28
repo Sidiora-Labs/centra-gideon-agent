@@ -17,7 +17,13 @@ from aiohttp import web
 from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import _is_restricted_session
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_values,
+    redact_for_display,
+    redact_values_for_display,
+)
 from gideon.security.sel import sel
 from gideon.workspace.artifacts import registry
 from gideon.workspace.artifacts.build import (
@@ -57,9 +63,19 @@ _UI_SESSION_KEY = "dashboard:ui"
 
 
 def _redact(text: str) -> str:
-    clean, _ = redact_exfiltration_urls(text or "")
-    clean, _ = redact_credentials(clean)
-    return clean
+    return redact_for_display(text or "")
+
+
+def _restore_artifact_fields(body: dict[str, Any], art: Artifact) -> dict[str, Any]:
+    stored = art.to_dict(persist=False)
+    fields = {
+        key: value
+        for key, value in body.items()
+        if key in {"name", "description", "collection", "tags", "content"}
+        and (key != "content" or isinstance(value, str))
+    }
+    restored = keep_masked_values(fields, stored)
+    return {**body, **restored}
 
 
 def _serialize(art: Artifact, *, include_content: bool = False) -> dict[str, Any]:
@@ -69,7 +85,17 @@ def _serialize(art: Artifact, *, include_content: bool = False) -> dict[str, Any
     d["description"] = _redact(d.get("description", ""))
     d["collection"] = _redact(d.get("collection", ""))
     d["tags"] = [_redact(t) for t in d.get("tags", [])]
+    d["events"] = redact_values_for_display(d.get("events", []))
     if include_content and d.get("content") is not None:
+        if art.source_path:
+            from gideon.workspace.artifacts import source_files
+
+            try:
+                _source_content, source_revision = source_files.read(art.source_path)
+            except ValueError:
+                pass
+            else:
+                d["source_revision"] = source_revision
         d["content"] = _redact(d["content"])
     else:
         d.pop("content", None)
@@ -121,6 +147,22 @@ async def api_artifacts_list(request: web.Request) -> web.Response:
     return web.json_response({"artifacts": [_serialize(a) for a in arts]})
 
 
+def _source_revision_error(source_path: str, claimed: str | None) -> str | None:
+    if not source_path:
+        return None
+    if not claimed:
+        return "source_revision is required; reload the file before saving an artifact"
+    from gideon.workspace.artifacts import source_files
+
+    try:
+        _content, current = source_files.read(source_path)
+    except ValueError as exc:
+        return str(exc)
+    if current != claimed:
+        return "source file changed; reload it before saving the artifact"
+    return None
+
+
 async def api_artifacts_create(request: web.Request) -> web.Response:
     """POST /api/artifacts — create (or bump an existing file-backed artifact)."""
     state = request.app["state"]
@@ -143,19 +185,45 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
     name = str(body.get("name", "")).strip()
     if not name:
         return web.json_response({"error": "name required"}, status=400)
-    content = str(body.get("content", ""))
-    source_path = str(body.get("source_path", "")).strip()
+    content = body.get("content")
+    if content is not None and not isinstance(content, str):
+        return web.json_response({"error": "content must be text or null"}, status=400)
+    source_path_value = body.get("source_path", "")
+    if source_path_value is not None and not isinstance(source_path_value, str):
+        return web.json_response({"error": "source_path must be text"}, status=400)
+    source_path = (source_path_value or "").strip()
+    source_revision = body.get("source_revision")
+    if source_revision is not None and not isinstance(source_revision, str):
+        return web.json_response({"error": "source_revision must be text"}, status=400)
     session_id = _session_key(request)
 
     if source_path:
-        existing = prov.find_by_source_path(source_path)
+        from gideon.workspace.artifacts import source_files
+
+        try:
+            source_path = source_files.admit(source_path)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if error := _source_revision_error(source_path, source_revision):
+            status = 428 if "required" in error else (409 if "changed" in error else 400)
+            return web.json_response({"error": error}, status=status)
+        try:
+            existing = prov.find_by_source_path(source_path)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
         if existing is not None:
+            if content is not None:
+                try:
+                    content = keep_masked_values(content, existing.content)
+                except MaskConflict:
+                    return web.json_response({"error": MASK_CONFLICT}, status=409)
             updated = prov.update(
                 existing.slug,
                 content=content,
                 snapshot=False,
                 actor="user",
                 session_id=session_id,
+                source_revision=source_revision,
             )
             _audit(request, "artifact.update", "ok", f"slug={existing.slug}")
             return web.json_response(
@@ -204,6 +272,7 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
             session_id=session_id,
             project_id=str(body.get("project_id", "")).strip(),
             collection=str(body.get("collection", "")).strip(),
+            source_revision=source_revision,
         )
     except (ValueError, PermissionError) as e:
         return web.json_response({"error": str(e)}, status=400)
@@ -333,6 +402,12 @@ async def api_artifact_update(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
+    existing = prov.get(slug)
+    if existing is not None:
+        try:
+            body = _restore_artifact_fields(body, existing)
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
     if body.get("event_type") == "reverted":
         try:
             from_version = int(body.get("from_version") or 0)
@@ -346,7 +421,11 @@ async def api_artifact_update(request: web.Request) -> web.Response:
             )
         try:
             art = prov.revert(
-                slug, from_version, actor="user", session_id=_session_key(request)
+                slug,
+                from_version,
+                actor="user",
+                session_id=_session_key(request),
+                source_revision=body.get("source_revision"),
             )
         except (ValueError, PermissionError, NotImplementedError) as e:
             return web.json_response({"error": str(e)}, status=400)
@@ -357,9 +436,15 @@ async def api_artifact_update(request: web.Request) -> web.Response:
         )
         return web.json_response(_serialize(art, include_content=True))
     try:
+        content = body.get("content")
+        if content is not None and not isinstance(content, str):
+            return web.json_response({"error": "content must be text or null"}, status=400)
+        source_revision = body.get("source_revision")
+        if source_revision is not None and not isinstance(source_revision, str):
+            return web.json_response({"error": "source_revision must be text"}, status=400)
         art = prov.update(
             slug,
-            content=body.get("content"),
+            content=content,
             snapshot=bool(body.get("snapshot", False)),
             event_type=body.get("event_type"),
             actor="user",
@@ -368,6 +453,7 @@ async def api_artifact_update(request: web.Request) -> web.Response:
             description=body.get("description"),
             tags=body.get("tags"),
             collection=body.get("collection"),
+            source_revision=source_revision,
         )
     except (ValueError, PermissionError) as e:
         return web.json_response({"error": str(e)}, status=400)
@@ -978,7 +1064,7 @@ async def api_artifact_extract(request: web.Request) -> web.Response:
                 status=400,
             )
     truncated = len(text) > _EXTRACT_PREVIEW_CHARS
-    body, _ = redact_credentials(text[:_EXTRACT_PREVIEW_CHARS])
+    body = redact_for_display(text[:_EXTRACT_PREVIEW_CHARS])
     return web.json_response({"slug": slug, "text": body, "truncated": truncated})
 
 
@@ -1101,7 +1187,9 @@ async def api_artifact_versions(request: web.Request) -> web.Response:
         versions = prov.list_versions(slug)
     except ValueError:
         return web.json_response({"error": "invalid slug"}, status=400)
-    return web.json_response({"slug": slug, "versions": versions})
+    return web.json_response(
+        {"slug": slug, "versions": redact_values_for_display(versions)}
+    )
 
 
 async def api_artifact_version_detail(request: web.Request) -> web.Response:
@@ -1141,7 +1229,9 @@ async def api_artifact_events(request: web.Request) -> web.Response:
         if d.get("session_id") == _UI_SESSION_KEY:
             d["session_id"] = ""
         events.append(d)
-    return web.json_response({"slug": slug, "events": events})
+    return web.json_response(
+        {"slug": slug, "events": redact_values_for_display(events)}
+    )
 
 
 async def api_artifact_record_event(request: web.Request) -> web.Response:

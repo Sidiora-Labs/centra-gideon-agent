@@ -36,10 +36,14 @@ from gideon.http_download import download_headers
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
     is_sensitive_path,
     is_system_path,
     redact_credentials,
     redact_exfiltration_urls,
+    redact_for_display,
 )
 
 logger = logging.getLogger(__name__)
@@ -919,69 +923,9 @@ def _dashboard_roots() -> list[tuple[str, str]]:
     user-facing-first (workspace) so the explorer can default to it.
     """
 
-    from gideon.core.config.loader import outbox_dir
+    from gideon.core.file_roots import dashboard_roots
 
-    candidates: list[tuple[str, str]] = []
-
-    def _add(label: str, path_factory) -> None:
-        try:
-            candidates.append((label, os.path.realpath(str(path_factory()))))
-        except Exception:
-            pass
-
-    try:
-        from gideon.core.config.loader import workspace_root
-
-        _add("Workspace", workspace_root)
-    except Exception:
-        pass
-    _add("Outbox", outbox_dir)
-    from gideon.core.config.loader import config_dir
-
-    _add("Uploads", lambda: os.path.join(config_dir(), "uploads"))
-
-    def _add_workspace_root(label: str, wsd: str) -> None:
-        real = os.path.realpath(os.path.expanduser(wsd))
-        if _is_system_root(real):
-            logger.warning(
-                "dashboard: refusing system-root workspace %r as a browsable root", real
-            )
-            return
-        candidates.append((label, real))
-
-    try:
-        from gideon.automation.loop import store as _loop_store
-
-        for _lp in _loop_store.list_all():
-            wsd = (_lp.workspace_dir or "").strip()
-            if wsd:
-                _add_workspace_root(f"Loop: {_lp.name[:24]}", wsd)
-    except Exception:
-        pass
-
-    try:
-        from gideon.cognition.projects import _store as _project_store
-
-        for _pj in _project_store().list_projects():
-            wsd = (_pj.workspace_dir or "").strip()
-            if wsd:
-                _add_workspace_root(f"Project: {_pj.name[:24]}", wsd)
-    except Exception:
-        pass
-
-    seen: set[str] = set()
-    roots: list[tuple[str, str]] = []
-    try:
-        active_home = os.path.realpath(str(config_dir()))
-    except Exception:
-        active_home = ""
-    for label, rp in candidates:
-        if active_home and (rp == active_home or active_home.startswith(rp.rstrip(os.sep) + os.sep)):
-            continue
-        if rp and rp not in seen:
-            seen.add(rp)
-            roots.append((label, rp))
-    return roots
+    return dashboard_roots()
 
 
 def _is_dashboard_root(path: str) -> bool:
@@ -1017,56 +961,14 @@ def _validate_dashboard_path(raw: str, *, read_only: bool = False) -> str | None
     Returns the canonical path or ``None`` if rejected.
     """
 
-    from gideon.engine.hooks import validate_file_path  # noqa: F811
+    from gideon.core.file_roots import admit, dashboard_roots
 
-    canonical = validate_file_path(raw)
-    if canonical is None:
-        return None
-
-    roots = [rp for _label, rp in _dashboard_roots()]
+    roots = [rp for _label, rp in dashboard_roots()]
     if read_only:
         from gideon.core.outside_home import allowed_paths
 
         roots.extend(rp for _label, rp in allowed_paths())
-
-    inside_allowlist = False
-    for root in roots:
-        if not root:
-            continue
-        if canonical == root or canonical.startswith(root + os.sep):
-            inside_allowlist = True
-            break
-    if not inside_allowlist:
-        return None
-
-    from gideon.security.security import (
-        HOME_SECRET_FILE_BASENAMES,
-        OWN_SECRET_BASENAMES,
-    )
-
-    blocked_basenames = set(OWN_SECRET_BASENAMES) | set(HOME_SECRET_FILE_BASENAMES)
-    if len(os.path.basename(canonical).encode("utf-8")) > MAX_NAME_BYTES:
-        return None
-    blocked_suffixes = (".key", ".pem", ".secret")
-    base_cf = os.path.basename(canonical).casefold()
-    if base_cf in {name.casefold() for name in blocked_basenames}:
-        return None
-    if any(base_cf.endswith(suffix.casefold()) for suffix in blocked_suffixes):
-        return None
-
-    try:
-        target_st = os.stat(canonical)
-    except OSError:
-        return canonical
-    parent = os.path.dirname(canonical)
-    for blocked in blocked_basenames:
-        try:
-            cand_st = os.stat(os.path.join(parent, blocked))
-        except OSError:
-            continue
-        if cand_st.st_ino == target_st.st_ino and cand_st.st_dev == target_st.st_dev:
-            return None
-    return canonical
+    return admit(raw, roots)
 
 
 def _resolve_relative_path(raw_path: str) -> str:
@@ -1313,9 +1215,7 @@ async def api_file_read(request: web.Request) -> web.Response:
             return web.Response(
                 text="", content_type="text/plain", headers={"X-Binary": "true"}
             )
-        content = raw.decode("utf-8", errors="replace")
-        content, _ = redact_exfiltration_urls(content)
-        content, _ = redact_credentials(content)
+        content = redact_for_display(raw.decode("utf-8", errors="replace"))
         _sel().log_tool_invocation(
             session_key="dashboard",
             tool_name="file_read",
@@ -1470,6 +1370,7 @@ async def api_file_write(request: web.Request) -> web.Response:
             resources=body.get("path", ""),
         )
         return web.json_response({"error": "invalid or forbidden path"}, status=400)
+    content = body.get("content", "")
     async with _file_write_lock:
         if not os.path.isfile(path):
             _sel().log_tool_invocation(
@@ -1494,6 +1395,16 @@ async def api_file_write(request: web.Request) -> web.Response:
                     )
                     return web.json_response({"error": "file changed since read"}, status=409)
 
+            if "[REDACTED:" in content:
+                try:
+                    with open(path, "r", encoding="utf-8") as source:
+                        stored_content = source.read()
+                    content = keep_masked_spans(content, stored_content)
+                except MaskConflict:
+                    return web.json_response({"error": MASK_CONFLICT}, status=409)
+                except (OSError, UnicodeError):
+                    return web.json_response({"error": MASK_CONFLICT}, status=409)
+
             tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
             try:
                 try:
@@ -1501,7 +1412,7 @@ async def api_file_write(request: web.Request) -> web.Response:
                 except OSError:
                     pass
                 with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                    f.write(body.get("content", ""))
+                    f.write(content)
                 os.replace(tmp_path, path)
             except Exception:
                 try:
@@ -1520,7 +1431,7 @@ async def api_file_write(request: web.Request) -> web.Response:
                     if os.path.realpath(path) == os.path.realpath(str(heartbeat_path())):
                         record_owner_file_added_tasks(
                             before_content,
-                            body.get("content", ""),
+                            content,
                             principal=of_request(request),
                         )
                 except Exception:
@@ -1530,7 +1441,7 @@ async def api_file_write(request: web.Request) -> web.Response:
             _sel().log_tool_invocation(
                 session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
             )
-            return web.json_response({"ok": True, "validator": hashlib.sha256(body["content"].encode("utf-8")).hexdigest()})
+            return web.json_response({"ok": True, "validator": hashlib.sha256(content.encode("utf-8")).hexdigest()})
         except Exception:
             logging.getLogger(__name__).exception("file_write failed for %s", path)
             _sel().log_tool_invocation(

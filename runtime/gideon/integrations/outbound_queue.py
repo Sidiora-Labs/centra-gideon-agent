@@ -38,7 +38,11 @@ class _Send:
 class QueuedDelivery:
     def __init__(self, provider: str, delivery: Any, *, capacity: int = 100) -> None:
         self.provider = provider
-        self.delivery = delivery
+        # Apply masking at the common queue boundary so transports registered via
+        # channel_transports and the legacy channel registry share one send path.
+        from gideon.integrations.channel_delivery import MaskedDelivery
+
+        self.delivery = delivery if isinstance(delivery, MaskedDelivery) else MaskedDelivery(delivery)
         self._queue: asyncio.Queue[_Send] = asyncio.Queue(maxsize=capacity)
         self._worker: asyncio.Task[None] | None = None
         self._active: asyncio.Future[Any] | None = None

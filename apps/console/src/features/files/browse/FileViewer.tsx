@@ -19,8 +19,8 @@ export interface FileViewerHandle { save: () => void }
 
 interface ViewerProps {
   entry: FsEntry
-  onSaved: (content?: string) => void
-  onSaveAsArtifact: (entry: FsEntry, content: string) => void
+  onSaved: (content?: string, sourceRevision?: string) => void
+  onSaveAsArtifact: (entry: FsEntry, content: string, sourceRevision?: string) => void
   onDirtyChange?: (dirty: boolean) => void
   draftStore?: Map<string, { draft: string; base: string; warned?: boolean }>
   compact?: boolean
@@ -43,6 +43,7 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
   onMissingRef.current = onMissing
 
   const [content, setContent] = useState<string | null>(null)
+  const [sourceRevision, setSourceRevision] = useState<string | undefined>()
   const [contentPath, setContentPath] = useState(isBinaryType ? entry.path : '')
   const [draft, setDraft] = useState('')
   const [truncated, setTruncated] = useState(false)
@@ -55,12 +56,12 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
   useEffect(() => {
     if (isBinaryType) { setContent(null); setContentPath(entry.path); setLoading(false); return }
     let alive = true
-    setContent(null); setLoading(true); setErr(''); setDetectedBinary(false)
+    setContent(null); setSourceRevision(undefined); setLoading(true); setErr(''); setDetectedBinary(false)
     api.fileRead(entry.path, true).then((r) => {
       if (!alive) return
       if (r.binary) { setDetectedBinary(true); setContent(''); setContentPath(entry.path); setDraft(''); setLoading(false); return }
       const cached = draftStore?.get(entry.path)
-      setContent(r.content); setContentPath(entry.path); setDraft(cached ? cached.draft : r.content); setTruncated(r.truncated); setLoading(false)
+      setContent(r.content); setSourceRevision(r.source_revision); setContentPath(entry.path); setDraft(cached ? cached.draft : r.content); setTruncated(r.truncated); setLoading(false)
       if (cached) setDiskChanged(cached.warned || cached.base !== r.content)
       else setDiskChanged(false)
     }).catch((e) => {
@@ -85,7 +86,10 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
 
   const onSurfaceSave = async (next: string) => {
     setErr('')
-    try { await api.fileWrite(entry.path, next); setContent(next); setDiskChanged(false); onSaved(next) }
+    try {
+      const saved = await api.fileWrite(entry.path, next)
+      setContent(next); setSourceRevision(saved.validator); setDiskChanged(false); onSaved(next, saved.validator)
+    }
     catch (e) { setErr(String((e as Error).message || e)); throw e }
   }
   const confirmSave = async () => {
@@ -143,8 +147,8 @@ export const FileViewer = forwardRef<FileViewerHandle, ViewerProps>(function Fil
     <>
       {!noText && !truncated && content !== null && (
         compact
-          ? <SquareIconButton icon={BookmarkPlus} iconSize={13} label="Save as a versioned artifact" onClick={() => onSaveAsArtifact(entry, draft)} />
-          : <QuietButton onClick={() => onSaveAsArtifact(entry, draft)} title="Save as a versioned artifact">
+          ? <SquareIconButton icon={BookmarkPlus} iconSize={13} label="Save as a versioned artifact" onClick={() => onSaveAsArtifact(entry, draft, sourceRevision)} />
+          : <QuietButton onClick={() => onSaveAsArtifact(entry, draft, sourceRevision)} title="Save as a versioned artifact">
               <BookmarkPlus size={13} /> Artifact
             </QuietButton>
       )}

@@ -177,6 +177,10 @@ def _list_tools() -> list[dict[str, Any]]:
                 "properties": {
                     "slug": {"type": "string"},
                     "content": {"type": "string"},
+                    "source_revision": {
+                        "type": "string",
+                        "description": "Revision returned by artifact_get; required to write through a file-backed artifact.",
+                    },
                     "content_file": {
                         "type": "string",
                         "description": "Absolute path to read new content from",
@@ -530,7 +534,12 @@ def _read_artifact_content(args: dict[str, Any]) -> tuple[str | None, str | None
         except UnicodeDecodeError:
             return None, "content_file must be UTF-8 text"
     if "content" in args:
-        return str(args["content"]), None
+        content = args["content"]
+        if content is None:
+            return None, None
+        if not isinstance(content, str):
+            return None, "content must be text or null"
+        return content, None
     return None, None
 
 
@@ -597,7 +606,13 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
     """
     import json as _json
 
-    from gideon.security.security import redact
+    from gideon.security.security import (
+        MASK_CONFLICT,
+        MaskConflict,
+        keep_masked_values,
+        redact_for_display,
+        redact_values_for_display,
+    )
     from gideon.security.sel import sel
     from gideon.workspace.artifacts import registry
 
@@ -634,7 +649,7 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 if similar is not None:
                     _audit("deduped", similar.slug)
                     return (
-                        f"An artifact named '{similar.name}' already exists "
+                        f"An artifact named '{redact_for_display(similar.name)}' already exists "
                         f"(slug: {similar.slug}). To revise it, call artifact_update with "
                         f"slug='{similar.slug}'. To save a NEW separate artifact anyway, "
                         f"call artifact_save again with force=true."
@@ -653,7 +668,7 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 project_id=_current_project_id(),
             )
             _audit("success", art.slug)
-            return f"Saved artifact '{art.name}' (slug: {art.slug}, version {art.version})."
+            return f"Saved artifact '{redact_for_display(art.name)}' (slug: {art.slug}, version {art.version})."
 
         if name == "artifact_get":
             got = prov.get(args["slug"], version=args.get("version"))
@@ -661,13 +676,50 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 _audit("not_found", args["slug"])
                 return f"Artifact not found: {args['slug']}"
             _audit("success", got.slug)
-            return redact(got.content or "")
+            content = redact_for_display(got.content or "")
+            if got.source_path and args.get("version") is None:
+                from gideon.workspace.artifacts import source_files
+
+                try:
+                    _source_content, source_revision = source_files.read(got.source_path)
+                except ValueError:
+                    _audit("denied", got.slug, "artifact source no longer admitted")
+                    return "Error: artifact source is no longer admitted"
+                return _json.dumps({"content": content, "source_revision": source_revision})
+            return content
 
         if name == "artifact_update":
             content, err = _read_artifact_content(args)
             if err:
                 _audit("denied", args.get("slug", ""), err)
                 return f"Error: {err}"
+            stored = prov.get(args["slug"])
+            if stored is not None:
+                submitted = {
+                    key: value
+                    for key, value in {
+                        "content": content,
+                        "description": args.get("description"),
+                        "tags": args.get("tags"),
+                        "collection": args.get("collection"),
+                    }.items()
+                    if value is not None
+                }
+                try:
+                    submitted = keep_masked_values(
+                        submitted,
+                        {
+                            "content": stored.content,
+                            "description": stored.description,
+                            "tags": stored.tags,
+                            "collection": stored.collection,
+                        },
+                    )
+                except MaskConflict:
+                    _audit("conflict", args["slug"], MASK_CONFLICT)
+                    return f"Error: {MASK_CONFLICT}"
+                content = submitted.get("content")
+                args = {**args, **submitted}
             upd = prov.update(
                 args["slug"],
                 content=content,
@@ -677,12 +729,13 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 collection=args.get("collection"),
                 actor="agent",
                 session_id=sk,
+                source_revision=args.get("source_revision"),
             )
             if upd is None:
                 _audit("not_found", args["slug"])
                 return f"Artifact not found: {args['slug']}"
             _audit("success", upd.slug)
-            return f"Updated artifact '{upd.name}' → version {upd.version}."
+            return f"Updated artifact '{redact_for_display(upd.name)}' → version {upd.version}."
 
         if name == "artifact_list":
             arts = prov.list(
@@ -697,14 +750,14 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             rows = [
                 {
                     "slug": a.slug,
-                    "name": redact(a.name),
+                    "name": redact_for_display(a.name),
                     "kind": a.kind,
                     "version": a.version,
-                    "tags": a.tags,
+                    "tags": redact_values_for_display(a.tags),
                 }
                 for a in arts
             ]
-            return _json.dumps(rows, indent=2)
+            return _json.dumps(redact_values_for_display(rows), indent=2)
 
         if name == "artifact_versions":
             versions = prov.list_versions(args["slug"])

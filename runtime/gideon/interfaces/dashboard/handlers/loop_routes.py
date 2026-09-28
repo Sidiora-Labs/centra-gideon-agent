@@ -19,6 +19,15 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_values,
+    keep_masked_spans,
+    redact_for_display,
+    redact_values_for_display,
+)
+
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop import kinds, manager, store, validation
 from gideon.automation.loop.loop import ACTION_SOURCE_STATES, KINDS, Loop, LoopStatus
@@ -32,6 +41,31 @@ logger = logging.getLogger(__name__)
 
 def _as_list(v) -> list:
     return v if isinstance(v, list) else []
+
+
+_OPAQUE_PROJECTION_FIELDS = frozenset(
+    {"id", "project_id", "path", "workspace_dir", "files_dir", "artifact_path"}
+)
+
+
+def _mask_projection(value: Any) -> Any:
+    """Redact structured loop prose while retaining IDs and filesystem paths."""
+    if isinstance(value, dict):
+        return {
+            key: item
+            if key in _OPAQUE_PROJECTION_FIELDS or key.endswith("_id") or key.endswith("_path")
+            else _mask_projection(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_projection(item) for item in value]
+    if isinstance(value, str):
+        return redact_for_display(value)
+    return value
+
+
+def _mask_loop_projection(loop: dict[str, Any]) -> dict[str, Any]:
+    return _mask_projection(loop)
 
 
 async def _json_body(request: web.Request) -> dict | web.Response:
@@ -386,7 +420,7 @@ async def api_loop_create(request: web.Request) -> web.Response:
         )
     loop = _build_loop_from_body(body)
     created = store.create(loop)
-    return web.json_response(store.get_redacted(created.id), status=201)
+    return web.json_response(_mask_loop_projection(store.get_redacted(created.id)), status=201)
 
 
 async def api_loop_list(request: web.Request) -> web.Response:
@@ -394,7 +428,11 @@ async def api_loop_list(request: web.Request) -> web.Response:
     project_id = request.query.get("project_id", "").strip()
     kind = request.query.get("kind", "").strip().lower()
     return web.json_response(
-        {"loops": store.list_redacted(project_id=project_id, kind=kind)}
+        {
+            "loops": _mask_projection(
+                store.list_redacted(project_id=project_id, kind=kind)
+            )
+        }
     )
 
 
@@ -422,7 +460,7 @@ async def api_loop_get(request: web.Request) -> web.Response:
         view = {**view, "spend": loop_spend(cid)}
     except Exception:
         logger.warning("loop spend read failed for %s", cid, exc_info=True)
-    return web.json_response(view)
+    return web.json_response(_mask_loop_projection(view))
 
 
 async def api_loop_report(request: web.Request) -> web.Response:
@@ -434,7 +472,10 @@ async def api_loop_report(request: web.Request) -> web.Response:
     if store.get(cid) is None:
         return web.json_response({"error": "Not found"}, status=404)
     return web.json_response(
-        {"report": store.read_deliverable(cid), "log": store.read_log(cid)}
+        {
+            "report": redact_for_display(store.read_deliverable(cid)),
+            "log": redact_for_display(store.read_log(cid)),
+        }
     )
 
 
@@ -508,6 +549,17 @@ async def api_loop_update(request: web.Request) -> web.Response:
     existing = store.get(cid)
     if existing is None:
         return web.json_response({"error": "Not found"}, status=404)
+    try:
+        stored_projection = existing.to_dict()
+        inverse_projection = {
+            key: value
+            for key, value in body.items()
+            if key in {"name", "task", "summary", "success_criteria", "kind_config", "plan"}
+        }
+        restored = keep_masked_values(inverse_projection, stored_projection)
+        body = {**body, **restored}
+    except MaskConflict:
+        return web.json_response({"error": MASK_CONFLICT}, status=409)
     if set(body) - {"name"}:
         edit_errs = validation.spec_edit_errors(
             body, kind=existing.kind, existing_kind_config=existing.kind_config or {}
@@ -523,14 +575,14 @@ async def api_loop_update(request: web.Request) -> web.Response:
         if set(body) <= {"name"}:
             renamed = store.rename(cid, str(body.get("name", "")))
             return (
-                web.json_response(store.get_redacted(cid))
+                web.json_response(_mask_loop_projection(store.get_redacted(cid)))
                 if renamed
                 else web.json_response({"error": "Not found"}, status=404)
             )
         if set(body) == {"workspace_dir"}:
             rebound = store.rebind_workspace(cid, str(body.get("workspace_dir", "")))
             if rebound is not None:
-                return web.json_response(store.get_redacted(cid))
+                return web.json_response(_mask_loop_projection(store.get_redacted(cid)))
             return web.json_response(
                 {
                     "error": "Workspace can't be changed while the loop is running or finished."
@@ -540,7 +592,7 @@ async def api_loop_update(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "Loop spec is frozen (already started)"}, status=409
         )
-    return web.json_response(store.get_redacted(cid))
+    return web.json_response(_mask_loop_projection(store.get_redacted(cid)))
 
 
 async def api_loop_action(request: web.Request) -> web.Response:
@@ -582,7 +634,7 @@ async def api_loop_action(request: web.Request) -> web.Response:
             await manager.pause(state, svc, cid)
         elif action == "stop":
             await manager.stop(state, svc, cid)
-        return web.json_response(store.get_redacted(cid))
+        return web.json_response(_mask_loop_projection(store.get_redacted(cid)))
 
 
 async def _reap_loop_sessions(state, loop_id: str) -> None:
@@ -693,6 +745,7 @@ async def api_loop_stream(request: web.Request) -> web.StreamResponse:
     view = store.get_redacted(cid)
     if view is None:
         return web.json_response({"error": "Not found"}, status=404)
+    view = _mask_loop_projection(view)
     from gideon.interfaces.dashboard.sse import stream_response
 
     registry = request.app["state"].loop_sse()
@@ -942,7 +995,7 @@ async def api_loop_plan_session(request: web.Request) -> web.Response:
     session = loop_files.read_plan_session(cid)
     return web.json_response(
         {
-            "session": session.to_dict() if session else None,
+            "session": _mask_projection(session.to_dict()) if session else None,
             "planner": _planner_status(request, cid, session),
         }
     )
@@ -1053,10 +1106,16 @@ async def api_loop_plan_edit(request: web.Request) -> web.Response:
     session = loop_files.read_plan_session(cid)
     if session is None:
         return web.json_response({"error": "No planning session"}, status=404)
+    step = next((item for item in session.steps if item.id == step_id), None)
+    stored_markdown = str((step.artifact or {}).get("markdown") or "") if step else ""
+    try:
+        markdown = keep_masked_spans(markdown, stored_markdown)
+    except MaskConflict:
+        return web.json_response({"error": MASK_CONFLICT}, status=409)
     if not PS.edit_artifact(session, step_id, markdown):
         return web.json_response({"error": "Step not awaiting review"}, status=409)
     loop_files.write_plan_session(session)
-    return web.json_response({"ok": True, "session": session.to_dict()})
+    return web.json_response({"ok": True, "session": _mask_projection(session.to_dict())})
 
 
 async def api_design_default_tokens(request: web.Request) -> web.Response:

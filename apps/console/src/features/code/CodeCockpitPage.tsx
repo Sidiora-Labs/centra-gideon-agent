@@ -1834,12 +1834,12 @@ function CenterEditor({ ws, showTerm, onCloseTerm, running, runCmd }: { ws: stri
   const collapsedLeft = Object.entries(collapsedPanels).filter(([, v]) => v.side === 'left')
   const collapsedRight = Object.entries(collapsedPanels).filter(([, v]) => v.side === 'right')
   const reopenPanel = (key: string) => window.dispatchEvent(new CustomEvent('ne:code-expand-panel', { detail: key }))
-  const saveFileAsArtifact = useCallback((entry: FsEntry, content: string) => {
+  const saveFileAsArtifact = useCallback((entry: FsEntry, content: string, sourceRevision?: string) => {
     const base = entry.name || entry.path.split('/').pop() || 'file'
     const ext = base.includes('.') ? base.split('.').pop()!.toLowerCase() : ''
     const kind = ext === 'md' ? 'markdown' : ext === 'json' ? 'json'
       : ext === 'svg' ? 'svg' : 'text'
-    api.createArtifact({ name: base, content, source: 'manual', source_path: entry.path, kind })
+    api.createArtifact({ name: base, content, source: 'manual', source_path: entry.path, source_revision: sourceRevision, kind })
       .then(() => window.dispatchEvent(new CustomEvent('ne:code-toast', { detail: { kind: 'ok', text: `Saved “${base}” as an artifact.` } })))
       .catch((e) => window.dispatchEvent(new CustomEvent('ne:code-toast', { detail: { kind: 'error', text: `Couldn't save artifact: ${(e as Error).message || 'unknown error'}` } })))
   }, [])

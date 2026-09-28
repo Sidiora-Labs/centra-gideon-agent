@@ -789,8 +789,15 @@ class NativeBuiltinToolProvider(ToolProvider):
     async def _t_write_file(self, a: dict) -> ToolResult:
         if reason := self._owner_only_path_reason(str(a["path"])):
             return ToolResult(success=False, error=reason)
+        if "content" not in a or a["content"] is None:
+            return ToolResult(
+                success=False,
+                error="content is required; pass explicit text (an empty string clears the file)",
+            )
+        if not isinstance(a["content"], str):
+            return ToolResult(success=False, error="content must be text")
         path = self._resolve(str(a["path"]))
-        content = str(a.get("content", ""))
+        content = a["content"]
         self._checkpoint_pre_edit(path)
 
         def persist() -> ToolResult:

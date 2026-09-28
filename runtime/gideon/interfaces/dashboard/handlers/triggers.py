@@ -32,7 +32,14 @@ from gideon.core.config import loader as config_loader
 from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
+    keep_masked_values,
+    redact_for_display,
+    redact_values_for_display,
+)
 
 
 def config_dir():
@@ -72,19 +79,22 @@ def _serialize_event(t) -> dict[str, Any]:
         "enabled": t.enabled,
         "source": t.source,
         "pattern": t.pattern,
-        "key_glob": t.key_glob,
-        "content_re": t.content_re,
-        "sender_glob": t.sender_glob,
-        "address_glob": t.address_glob,
-        "event_glob": t.event_glob,
+        "key_glob": _redact(t.key_glob),
+        "content_re": _redact(t.content_re),
+        "sender_glob": _redact(t.sender_glob),
+        "address_glob": _redact(t.address_glob),
+        "event_glob": _redact(t.event_glob),
         "max_fires": t.max_fires,
         "fire_count": t.fire_count,
         "last_run_ts": last_run_ts,
         "last_run_status": t.last_status or None,
-        "action": {"provider": t.action_provider, "config": t.action_config},
+        "action": redact_values_for_display(
+            {"provider": t.action_provider, "config": t.action_config}
+        ),
         "state": t.state,
         "health": _event_health(t),
         "last_error": _redact(t.park_reason or t.last_error),
+        "broken": [_redact(message) for message in getattr(t, "_issues", [])],
     }
 
 
@@ -136,7 +146,7 @@ def _sel():
 
 
 def _redact(s: str) -> str:
-    return redact_credentials(redact_exfiltration_urls(s or "")[0])[0]
+    return redact_for_display(s or "")
 
 
 def _split_id(trigger_id: str) -> tuple[str, str]:
@@ -392,8 +402,8 @@ def _attribution(trigger: Any, *, owner: str) -> dict[str, Any]:
 def _issue_messages(row: Any) -> tuple[list[str], list[str]]:
     """Return the one wire representation of a loaded trigger's issues."""
     return (
-        [issue.message for issue in row.errors],
-        [issue.message for issue in row.warnings],
+        [_redact(issue.message) for issue in row.errors],
+        [_redact(issue.message) for issue in row.warnings],
     )
 
 
@@ -417,14 +427,14 @@ def _serialize_store(
         "store_kind": trigger.kind,
         "id": f"{_STORE}:{trigger.id}",
         "raw_id": trigger.id,
-        "name": trigger.name,
+        "name": _redact(trigger.name),
         "enabled": trigger.enabled,
         "created_by": trigger.created_by,
-        "spec": dict(trigger.spec or {}),
-        "action": dict(trigger.workflow or {}),
+        "spec": redact_values_for_display(dict(trigger.spec or {})),
+        "action": redact_values_for_display(dict(trigger.workflow or {})),
         "delivery": trigger.delivery,
         "failure_delivery": trigger.failure_delivery,
-        "failure_policy": dict(trigger.failure_policy or {}),
+        "failure_policy": redact_values_for_display(dict(trigger.failure_policy or {})),
         "silent": trigger.delivery == "none",
         "health": trigger.health_status,
         "state": trigger.state,
@@ -509,14 +519,20 @@ def _schedule_row_for(
     for key in ("message", "last_error", "schedule"):
         if projected.get(key):
             projected[key] = _redact(str(projected[key]))
+    for key in ("action", "failure_policy"):
+        if isinstance(projected.get(key), (dict, list)):
+            projected[key] = redact_values_for_display(projected[key])
+    for key in ("agent", "model", "script", "command"):
+        if isinstance(projected.get(key), str):
+            projected[key] = _redact(projected[key])
     policy = trigger.failure_policy if isinstance(trigger.failure_policy, dict) else {}
     projected["failure_delivery"] = str(trigger.failure_delivery or "")
     projected["dedupe_hash"] = policy.get("dedupe_hash") is True
-    projected["broken"] = list(issues or [])
-    projected["warnings"] = list(warnings or [])
+    projected["broken"] = [_redact(value) for value in issues or []]
+    projected["warnings"] = [_redact(value) for value in warnings or []]
     projected["delivery"] = trigger.delivery
     projected["failure_delivery"] = trigger.failure_delivery
-    projected["failure_policy"] = dict(trigger.failure_policy or {})
+    projected["failure_policy"] = redact_values_for_display(dict(trigger.failure_policy or {}))
     projected.update(_attribution(trigger, owner=owner))
     return projected
 
@@ -556,11 +572,13 @@ def _serialize_lifecycle(hook, used_by: list[str]) -> dict[str, Any]:
         "kind": _LIFECYCLE,
         "id": f"{_LIFECYCLE}:{hook.id}",
         "raw_id": hook.id,
-        "name": hook.name,
+        "name": _redact(hook.name),
         "enabled": hook.enabled,
-        "action": {"provider": hook.provider, "config": hook.provider_config},
+        "action": redact_values_for_display(
+            {"provider": hook.provider, "config": hook.provider_config}
+        ),
         "event": hook.event,
-        "matcher": hook.matcher,
+        "matcher": _redact(hook.matcher),
         "timeout": hook.timeout,
         "last_run": hook.last_run,
         "last_status": hook.last_status,
@@ -1118,6 +1136,16 @@ def _update_event(raw: str, body: dict) -> web.Response:
     ):
         return web.json_response({"error": "action must contain an object config"}, status=400)
     action = raw_action if isinstance(raw_action, dict) else {}
+    try:
+        for field in ("key_glob", "content_re", "sender_glob", "address_glob", "event_glob"):
+            if field in body and isinstance(body[field], str):
+                body[field] = keep_masked_spans(body[field], str(getattr(trigger, field) or ""))
+        if isinstance(action.get("config"), dict):
+            action["config"] = keep_masked_values(
+                action["config"], trigger.action_config or {}
+            )
+    except MaskConflict:
+        return web.json_response({"error": MASK_CONFLICT}, status=409)
     refusal = _provider_refusal(
         {"provider": action.get("provider") or trigger.action_provider}
     )
@@ -1204,6 +1232,18 @@ async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Re
     current = _hook_store(state).get(raw)
     if current is None:
         return web.json_response({"error": "not found"}, status=404)
+    try:
+        for field in ("name", "matcher"):
+            if field in patch and isinstance(patch[field], str):
+                patch[field] = keep_masked_spans(
+                    patch[field], str(getattr(current, field) or "")
+                )
+        if "provider_config" in patch:
+            patch["provider_config"] = keep_masked_values(
+                patch["provider_config"], current.provider_config or {}
+            )
+    except MaskConflict:
+        return web.json_response({"error": MASK_CONFLICT}, status=409)
     refusal = _provider_refusal({"provider": patch.get("provider", current.provider)})
     if refusal is not None:
         return refusal
@@ -1275,6 +1315,25 @@ async def _update_schedule(
     store = _trigger_store()
     row = store.get(raw)
     if row is not None:
+        try:
+            if "name" in kwargs:
+                kwargs["name"] = keep_masked_spans(
+                    str(kwargs["name"]), str(row.trigger.name or "")
+                )
+            if "action" in kwargs and isinstance(kwargs["action"], dict):
+                workflow = row.trigger.workflow if isinstance(row.trigger.workflow, dict) else {}
+                stored_action = workflow.get("inline", workflow)
+                kwargs["action"] = keep_masked_values(kwargs["action"], stored_action)
+            if "failure_policy" in body:
+                body = {
+                    **body,
+                    "failure_policy": keep_masked_values(
+                        body["failure_policy"], row.trigger.failure_policy or {}
+                    ),
+                }
+                kwargs["failure_policy"] = body["failure_policy"]
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         from gideon.automation.triggers import tools as _tools
         from gideon.automation.triggers.schedule_view import channel_of
 
@@ -2139,10 +2198,7 @@ async def api_trigger_to_chat(request: web.Request) -> web.Response:
 
 
 def _redact_run(run: dict[str, Any], *, job_name: str | None = None) -> dict[str, Any]:
-    out = dict(run)
-    for key in ("summary", "trace", "error"):
-        if out.get(key):
-            out[key] = _redact(out[key])
+    out = redact_values_for_display(dict(run))
     if job_name is not None:
         out["job_name"] = _redact(job_name)
     return out

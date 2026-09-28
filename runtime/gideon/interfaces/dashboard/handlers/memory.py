@@ -19,7 +19,13 @@ from gideon.interfaces.dashboard.handlers._shared import (
     _is_restricted_session,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
+    keep_masked_values,
+    redact_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +61,15 @@ async def api_memory_preferences(request: web.Request) -> web.Response:
                 {"error": "JSON body must be an object"}, status=400
             )
         content = body.get("content", "")
+        if not isinstance(content, str):
+            return web.json_response({"error": "content must be text"}, status=400)
+        try:
+            content = keep_masked_spans(content, mem.read_preferences() or "")
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         mem.write_preferences(content)
         return web.json_response({"ok": True})
-    return web.json_response({"content": mem.read_preferences()})
+    return web.json_response({"content": redact_for_display(mem.read_preferences() or "")})
 
 
 async def api_memory_projects(request: web.Request) -> web.Response:
@@ -74,9 +86,15 @@ async def api_memory_projects(request: web.Request) -> web.Response:
                 {"error": "JSON body must be an object"}, status=400
             )
         content = body.get("content", "")
+        if not isinstance(content, str):
+            return web.json_response({"error": "content must be text"}, status=400)
+        try:
+            content = keep_masked_spans(content, mem.read_projects() or "")
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         mem.write_projects(content)
         return web.json_response({"ok": True})
-    return web.json_response({"content": mem.read_projects()})
+    return web.json_response({"content": redact_for_display(mem.read_projects() or "")})
 
 
 async def api_memory_history(request: web.Request) -> web.Response:
@@ -93,10 +111,16 @@ async def api_memory_history(request: web.Request) -> web.Response:
                 {"error": "JSON body must be an object"}, status=400
             )
         content = body.get("content", "")
+        if not isinstance(content, str):
+            return web.json_response({"error": "content must be text"}, status=400)
+        try:
+            content = keep_masked_spans(content, mem.read_recent_history() or "")
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         today_path = mem._today_history_file()
         atomic_write(today_path, content)
         return web.json_response({"ok": True})
-    return web.json_response({"content": mem.read_recent_history()})
+    return web.json_response({"content": redact_for_display(mem.read_recent_history() or "")})
 
 
 _SETTINGS_FIELDS: tuple[str, ...] = (
@@ -225,9 +249,7 @@ def _redact_memory_field(val: object) -> object:
     if isinstance(val, (bytes, memoryview)):
         return None
     if isinstance(val, str):
-        val, _ = redact_exfiltration_urls(val)
-        val, _ = redact_credentials(val)
-        return val
+        return redact_for_display(val)
     if isinstance(val, list):
         return [_redact_memory_field(item) for item in val]
     if isinstance(val, dict):
@@ -391,6 +413,25 @@ async def api_memory_semantic_write(request: web.Request) -> web.Response:
     source = body.get("source", "user_explicit")
     if not key or value is None:
         return web.json_response({"error": "key and value required"}, status=400)
+    existing = None
+    for row in svc.get_all_semantic():
+        if redact_for_display(str(row.get("key") or "")) == str(key):
+            if existing is not None:
+                return web.json_response({"error": MASK_CONFLICT}, status=409)
+            existing = row
+    if isinstance(key, str) and "[REDACTED:" in key:
+        if existing is None:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
+        try:
+            key = keep_masked_spans(key, str(existing.get("key") or ""))
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
+    if existing is not None:
+        try:
+            stored_value = json.loads(existing.get("value_json") or "null")
+            value = keep_masked_values(value, stored_value)
+        except (json.JSONDecodeError, MaskConflict):
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
     err = svc.set_semantic(key, value, confidence, source)
     if err is not None:
         code, message = err
@@ -403,8 +444,7 @@ async def api_memory_semantic_write(request: web.Request) -> web.Response:
             resources=f"{code.value}:{key}",
         )
         status = 409 if code == SemanticRejectCode.CONFLICT else 422
-        msg, _ = redact_exfiltration_urls(message)
-        msg, _ = redact_credentials(msg)
+        msg = redact_for_display(message)
         return web.json_response({"error": msg}, status=status)
     sk = request.headers.get("X-Session-Key", "")
     _sel().log_api_access(
@@ -592,7 +632,9 @@ async def api_memory_events(request: web.Request) -> web.Response:
         offset = int(request.query.get("offset", "0"))
     except (ValueError, TypeError):
         return web.json_response({"error": "limit/offset must be integers"}, status=400)
-    return web.json_response({"events": svc.get_events(limit=limit, offset=offset)})
+    return web.json_response(
+        {"events": _redact_memory_field(svc.get_events(limit=limit, offset=offset))}
+    )
 
 
 async def api_memory_lint(request: web.Request) -> web.Response:
@@ -603,7 +645,7 @@ async def api_memory_lint(request: web.Request) -> web.Response:
     """
     svc = _get_service(request.app["state"])
     report = await asyncio.get_event_loop().run_in_executor(None, svc.lint)
-    return web.json_response(report)
+    return web.json_response(_redact_memory_field(report))
 
 
 async def api_memory_event_undo(request: web.Request) -> web.Response:
@@ -628,8 +670,8 @@ async def api_memory_event_undo(request: web.Request) -> web.Response:
     except Exception:
         logger.debug("SEL audit failed for memory undo", exc_info=True)
     if not ok:
-        return web.json_response({"error": message}, status=400)
-    return web.json_response({"ok": True, "message": message})
+        return web.json_response({"error": redact_for_display(message)}, status=400)
+    return web.json_response({"ok": True, "message": redact_for_display(message)})
 
 
 _migrate_lock: asyncio.Lock | None = None
@@ -745,7 +787,12 @@ async def api_memory_recall(request: web.Request) -> web.Response:
             )
     text = "\n\n".join(parts) if parts else "No matching memory found."
     return web.json_response(
-        {"result": text, "query": query, "deep": deep, "ranking": ranking}
+        {
+            "result": redact_for_display(text),
+            "query": redact_for_display(query),
+            "deep": deep,
+            "ranking": ranking,
+        }
     )
 
 
@@ -967,8 +1014,8 @@ async def api_memory_context_preview(request: web.Request) -> web.Response:
     episodic_ctx = store.get_episodic_context(query_text=query) if query else ""
     return web.json_response(
         {
-            "semantic_context": semantic_ctx,
-            "episodic_context": episodic_ctx,
+            "semantic_context": _redact_memory_field(semantic_ctx),
+            "episodic_context": _redact_memory_field(episodic_ctx),
         }
     )
 
@@ -1020,7 +1067,7 @@ async def api_memory_observability(request: web.Request) -> web.Response:
         {
             "stats": stats,
             "rejections": rejections,
-            "context_preview": preview,
+            "context_preview": _redact_memory_field(preview),
         }
     )
 
@@ -1225,6 +1272,9 @@ async def api_memory_entities(request: web.Request) -> web.Response:
         loop.run_in_executor(None, svc.graph_entities),
         loop.run_in_executor(None, svc.graph_summary),
     )
+    for entity in entities:
+        entity["name"] = _redact_memory_field(entity.get("name"))
+        entity["aliases"] = _redact_memory_field(entity.get("aliases", []))
     return web.json_response(
         {"entities": entities, "summary": summary, "enabled": svc.has_graph}
     )
@@ -1475,13 +1525,16 @@ async def api_memory_slot_append(request: web.Request) -> web.Response:
         lines = await loop.run_in_executor(None, lambda: svc.slot_append(name, text))
     except SlotCapExceeded as exc:
         return web.json_response(
-            {"error": exc.proposal.message, "proposal": exc.proposal.to_dict()},
+            {
+                "error": redact_for_display(exc.proposal.message),
+                "proposal": _redact_memory_field(exc.proposal.to_dict()),
+            },
             status=409,
         )
     _sel().log_tool_invocation(
         session_key="dashboard", tool_name="memory_slot_append", outcome="success"
     )
-    return web.json_response({"ok": True, "lines": lines})
+    return web.json_response({"ok": True, "lines": _redact_memory_field(lines)})
 
 
 async def api_memory_slot_line_retire(request: web.Request) -> web.Response:
@@ -1503,6 +1556,21 @@ async def api_memory_slot_line_retire(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "slot name and text are required"}, status=400
         )
+    slots = await asyncio.get_event_loop().run_in_executor(None, svc.slots)
+    stored_matches = [
+        str(line.get("text") or "")
+        for slot in slots
+        if slot.get("name") == name
+        for line in slot.get("lines", [])
+        if redact_for_display(str(line.get("text") or "")) == text
+    ]
+    if "[REDACTED:" in text:
+        if len(stored_matches) != 1:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
+        try:
+            text = keep_masked_spans(text, stored_matches[0])
+        except MaskConflict:
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(None, lambda: svc.slot_tombstone(name, text))
     if not ok:

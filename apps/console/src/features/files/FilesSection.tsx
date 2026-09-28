@@ -72,7 +72,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
   const [rootDrop, setRootDrop] = useState(false)
   const rootUploadInput = useRef<HTMLInputElement>(null)
   const previewedRoot = useRef(new Set<string>())
-  const [artModal, setArtModal] = useState<{ entry: FsEntry; content: string; name: string } | null>(null)
+  const [artModal, setArtModal] = useState<{ entry: FsEntry; content: string; name: string; sourceRevision?: string } | null>(null)
 
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [explorerOpen, setExplorerOpen] = useState(true)
@@ -143,11 +143,11 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
     return () => window.removeEventListener('keydown', onKey)
   }, [fileTabs.activePath])
 
-  const saveAsArtifact = (entry: FsEntry, content: string) => setArtModal({ entry, content, name: baseName(entry.path) })
+  const saveAsArtifact = (entry: FsEntry, content: string, sourceRevision?: string) => setArtModal({ entry, content, name: baseName(entry.path), sourceRevision })
   const confirmArtifact = async () => {
     if (!artModal || !artModal.name.trim()) return
     try {
-      const created = await api.createArtifact({ name: artModal.name.trim(), content: artModal.content, source: 'manual', source_path: artModal.entry.path, kind: guessKind(artModal.entry.name) })
+      const created = await api.createArtifact({ name: artModal.name.trim(), content: artModal.content, source: 'manual', source_path: artModal.entry.path, source_revision: artModal.sourceRevision, kind: guessKind(artModal.entry.name) })
       setArtModal(null); await loadArtifacts()
       navigate(`artifacts/${created.slug}`)
     } catch (e) { notify(`Could not save artifact: ${(e as Error).message}`, 'error') }

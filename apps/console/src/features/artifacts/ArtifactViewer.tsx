@@ -116,14 +116,14 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
   const onSave = async (draft: string) => {
     if (!art) return
     try {
-      await api.updateArtifact(slug, { content: draft, snapshot: false, event_type: 'edited' })
+      await api.updateArtifact(slug, { content: draft, snapshot: false, event_type: 'edited', source_revision: art.source_revision })
       await reload(); onChanged()
     } catch (e) { notify(`Could not save artifact: ${(e as Error).message}`, 'error'); throw e }
   }
   const snapshot = async (draft: string) => {
     if (!art) return
     try {
-      await api.updateArtifact(slug, { content: draft, snapshot: true, event_type: 'iterated' })
+      await api.updateArtifact(slug, { content: draft, snapshot: true, event_type: 'iterated', source_revision: art.source_revision })
       await reload(); onChanged()
     } catch (e) { notify(`Could not snapshot artifact: ${(e as Error).message}`, 'error'); throw e }
   }
@@ -148,7 +148,7 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
     if (!art || selVersion === null) return
     setBusy(true)
     try {
-      await api.updateArtifact(slug, { event_type: 'reverted', from_version: selVersion })
+      await api.updateArtifact(slug, { event_type: 'reverted', from_version: selVersion, source_revision: art.source_revision })
       await reload(); onChanged()
     } catch (e) { notify(`Could not revert: ${(e as Error).message}`, 'error') }
     finally { setBusy(false) }

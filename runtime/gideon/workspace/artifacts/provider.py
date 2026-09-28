@@ -91,7 +91,7 @@ class ArtifactProvider(ABC):
         self,
         *,
         name: str,
-        content: str,
+        content: str | None = None,
         kind: str = "widget",
         source: str = "chat",
         slug: str | None = None,
@@ -104,6 +104,7 @@ class ArtifactProvider(ABC):
         collection: str = "",
         event_metadata: dict | None = None,
         readonly: bool = False,
+        source_revision: str | None = None,
     ) -> Artifact: ...
 
     @abstractmethod
@@ -122,6 +123,7 @@ class ArtifactProvider(ABC):
         collection: str | None = None,
         event_metadata: dict | None = None,
         expect_updated_at: str | None = None,
+        source_revision: str | None = None,
     ) -> Artifact | None: ...
 
     def revert(
@@ -131,6 +133,7 @@ class ArtifactProvider(ABC):
         *,
         actor: str | None = None,
         session_id: str | None = None,
+        source_revision: str | None = None,
     ) -> Artifact | None:
         """Restore a historical version's body as a new current version.
 

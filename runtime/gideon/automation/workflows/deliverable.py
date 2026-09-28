@@ -362,10 +362,9 @@ def _clip_blobs(text: str) -> tuple[str, int]:
 
 
 def _redact(text: str) -> str:
-    from gideon.assurance.ledger import redact
+    from gideon.security.security import redact_for_display
 
-    result = redact(text)
-    return result if isinstance(result, str) else text
+    return redact_for_display(text)
 
 
 def instructed_by_spec(spec: Any, name: str) -> bool | None:

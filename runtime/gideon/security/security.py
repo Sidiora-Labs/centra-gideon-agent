@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs
 
 from gideon.security.sel import SecurityEvent, SecurityEventLog
@@ -763,6 +764,85 @@ def restore_masked_spans(submitted: str, stored: str) -> str | None:
         return queue.pop(0) if queue else m.group(0)
 
     return _MASK_RE.sub(_take, submitted)
+
+
+MASK_CONFLICT = (
+    "The stored copy of this content no longer lines up with the redacted version you edited, "
+    "so the hidden value behind a [REDACTED: …] marker cannot be recovered. Nothing was saved. "
+    "Re-open it to load the current version, or replace the marker with the value you want "
+    "stored."
+)
+
+
+class MaskConflict(ValueError):
+    """A save echoed a display mask whose stored value can no longer be located."""
+
+    def __init__(self) -> None:
+        super().__init__(MASK_CONFLICT)
+
+
+def redact_values_for_display(value: Any) -> Any:
+    """Recursively apply the display mask to string leaves in JSON-shaped values."""
+    if isinstance(value, str):
+        return redact_for_display(value)
+    if isinstance(value, dict):
+        return {key: redact_values_for_display(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_values_for_display(item) for item in value]
+    return value
+
+
+def keep_masked_spans(submitted: str, stored: str) -> str:
+    """Restore echoed display masks from the stored text or fail closed."""
+    restored = restore_masked_spans(submitted, stored)
+    if restored is None:
+        raise MaskConflict()
+    return restored
+
+
+def keep_masked_values(submitted: Any, stored: Any) -> Any:
+    """Restore masks recursively, matching moved list entries only when unambiguous."""
+    if isinstance(submitted, str):
+        return keep_masked_spans(submitted, stored) if isinstance(stored, str) else submitted
+    if isinstance(submitted, dict):
+        base = stored if isinstance(stored, dict) else {}
+        return {
+            key: keep_masked_values(value, base.get(key))
+            for key, value in submitted.items()
+        }
+    if isinstance(submitted, list):
+        items = stored if isinstance(stored, list) else []
+        used: set[int] = set()
+        kept: list[Any] = []
+        for index, value in enumerate(submitted):
+            if isinstance(value, str) and _MASK_RE.search(value):
+                candidates: list[tuple[int, str]] = []
+                for candidate_index, original in enumerate(items):
+                    if candidate_index in used or not isinstance(original, str):
+                        continue
+                    if redact_for_display(original) == value:
+                        candidates.append((candidate_index, original))
+                        continue
+                    restored = restore_masked_spans(value, original)
+                    if (
+                        restored is not None
+                        and restored != value
+                        and redact_for_display(original) != original
+                    ):
+                        candidates.append((candidate_index, restored))
+                if len(candidates) > 1:
+                    raise MaskConflict()
+                if candidates:
+                    candidate_index, restored = candidates[0]
+                    used.add(candidate_index)
+                    kept.append(restored)
+                    continue
+                raise MaskConflict()
+            kept.append(
+                keep_masked_values(value, items[index] if index < len(items) else None)
+            )
+        return kept
+    return submitted
 
 
 SUSPICIOUS_BASH_PATTERNS: list[str] = [

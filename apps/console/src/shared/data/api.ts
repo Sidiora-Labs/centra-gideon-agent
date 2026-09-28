@@ -631,7 +631,6 @@ export interface AppSummary {
   native?: boolean
   updateAvailable?: boolean
   latestVersion?: string
-  restartRequired?: boolean; restartReason?: string; uiRevision?: string
   quality?: AppQualityWire
   hooks?: AppHookSummary[]
 }
@@ -3404,6 +3403,7 @@ export interface Artifact {
   created_at: string; updated_at: string
   content?: string | null; events: ArtifactEvent[]
   source_path: string; live_dirty?: boolean; project_id?: string
+  source_revision?: string
   collection?: string
   readonly: boolean
 }
@@ -3413,6 +3413,7 @@ export interface ArtifactUpdate {
   snapshot?: boolean
   event_type?: ArtifactEventType
   from_version?: number
+  source_revision?: string
   name?: string
   description?: string
   tags?: string[]
@@ -5087,9 +5088,15 @@ export const api = {
   fileRead: (path: string, resolve = false) => fetch(`/api/file-read?path=${encodeURIComponent(path)}${resolve ? '&resolve=1' : ''}`, { headers: { ...SK } }).then(async (r) => {
     if (!r.ok) throw await apiError(r)
 
-    return { content: await r.text(), truncated: r.headers.get('X-Truncated') === 'true', binary: r.headers.get('X-Binary') === 'true' }
+    const truncated = r.headers.get('X-Truncated') === 'true'
+    return {
+      content: await r.text(),
+      truncated,
+      binary: r.headers.get('X-Binary') === 'true',
+      source_revision: truncated ? undefined : r.headers.get('X-Content-Validator') ?? undefined,
+    }
   }),
-  fileWrite: (path: string, content: string) => post<{ ok: boolean }>('/api/file-write', { path, content }),
+  fileWrite: (path: string, content: string) => post<{ ok: boolean; validator?: string }>('/api/file-write', { path, content }),
   fileCreate: (parent: string, name: string, kind: 'file' | 'dir', content?: string) =>
     post<{ ok: boolean; path: string; is_dir: boolean }>('/api/file-create', { path: parent, name, kind, content }),
   fileMove: (src: string, dest: string) => post<{ ok: boolean; path: string }>('/api/file-move', { src, dest }),
@@ -5276,7 +5283,7 @@ export const api = {
     ),
   artifactExists: (slug: string) =>
     get<{ exists: boolean }>(`/api/artifacts/${encodeURIComponent(slug)}?probe=1`).then((d) => d.exists),
-  createArtifact: (body: { name: string; content: string; kind?: string; source?: string; source_path?: string; description?: string; tags?: string[]; slug?: string; project_id?: string }) =>
+  createArtifact: (body: { name: string; content: string; kind?: string; source?: string; source_path?: string; source_revision?: string; description?: string; tags?: string[]; slug?: string; project_id?: string }) =>
     post<Artifact>('/api/artifacts', body),
   updateArtifact: (slug: string, body: ArtifactUpdate) => patch<Artifact>(`/api/artifacts/${encodeURIComponent(slug)}`, body),
   deleteArtifact: (slug: string) => del(`/api/artifacts/${encodeURIComponent(slug)}`),

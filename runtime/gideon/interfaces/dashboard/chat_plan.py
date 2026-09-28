@@ -52,6 +52,12 @@ from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_utils import _history_key_for, apply_task_mode
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
+    redact_for_display,
+)
 from gideon.security.sel import sel
 
 
@@ -69,6 +75,25 @@ logger = logging.getLogger(__name__)
 PLAN_STEP_KIND = "chat_plan"
 
 _DIR_NAME = "chat_plans"
+_OPAQUE_PLAN_FIELDS = frozenset(
+    {"id", "project_id", "path", "workspace_dir", "files_dir", "artifact_path"}
+)
+
+
+def _mask_plan_projection(value: Any) -> Any:
+    """Mask plan prose without rewriting chat, step, or filesystem identifiers."""
+    if isinstance(value, dict):
+        return {
+            key: item
+            if key in _OPAQUE_PLAN_FIELDS or key.endswith("_id") or key.endswith("_path")
+            else _mask_plan_projection(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_plan_projection(item) for item in value]
+    if isinstance(value, str):
+        return redact_for_display(value)
+    return value
 
 
 def _path(chat_key: str) -> Path:
@@ -273,7 +298,7 @@ async def api_chat_plan_session(request: web.Request) -> web.Response:
     sess, binding = read(chat.key)
     return web.json_response(
         {
-            "session": sess.to_dict() if sess else None,
+            "session": _mask_plan_projection(sess.to_dict()) if sess else None,
             "binding": binding,
             "awaiting_step_id": awaiting_review(chat.key),
             "task_mode": getattr(chat, "_task_mode", "agent") or "agent",
@@ -321,7 +346,7 @@ async def api_chat_plan_activate(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            "session": sess.to_dict(),
+            "session": _mask_plan_projection(sess.to_dict()),
             "binding": binding,
             "parked": was_running,
         }
@@ -353,14 +378,20 @@ async def api_chat_plan_edit(request: web.Request) -> web.Response:
         return json_error(
             "plan_session_missing", message="This chat has no plan session", status=404
         )
-    if not PS.edit_artifact(sess, step_id, str(body["markdown"])):
+    step = next((item for item in sess.steps if item.id == step_id), None)
+    stored_markdown = str((step.artifact or {}).get("markdown") or "") if step else ""
+    try:
+        markdown = keep_masked_spans(str(body["markdown"]), stored_markdown)
+    except MaskConflict:
+        return json_error("mask_conflict", message=MASK_CONFLICT, status=409)
+    if not PS.edit_artifact(sess, step_id, markdown):
         return json_error(
             "step_not_awaiting_review",
             message="That step is not awaiting review",
             status=409,
         )
     write(sess, binding)
-    return web.json_response({"ok": True, "session": sess.to_dict()})
+    return web.json_response({"ok": True, "session": _mask_plan_projection(sess.to_dict())})
 
 
 async def api_chat_plan_comment(request: web.Request) -> web.Response:

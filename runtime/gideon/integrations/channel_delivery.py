@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import is_dataclass, replace
 import logging
+from copy import copy
 from threading import RLock
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from gideon.integrations.outbound_queue import QueuedDelivery
+from gideon.security.security import redact_for_display, redact_values_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +206,188 @@ _REGISTRY_LOCK = RLock()
 _PROVIDER_SUFFIXES = ("_runtime", "_channel", "_delivery")
 
 
+_TEXT_ARGUMENTS: dict[str, dict[str, int | None]] = {
+    "deliver_text": {"text": 1},
+    "deliver_rich": {"fallback_text": 2},
+    "deliver_cron_result": {"job_name": 1, "text": 3},
+    "deliver_notification": {"title": 1, "text": 2},
+    "deliver_chat_mirror": {"text": 1},
+    "deliver_subagent_reply": {"text": 1},
+    "upload_attachment": {"title": None, "initial_comment": None},
+    "start_stream": {"initial_text": 2},
+    "append_stream_task": {"title": 3},
+    "send": {},
+}
+
+_RICH_TEXT_FIELDS = frozenset(
+    {
+        "text",
+        "title",
+        "description",
+        "caption",
+        "fallback",
+        "fallback_text",
+        "initial_comment",
+        "alt_text",
+        "label",
+        "header",
+        "footer",
+        "markdown",
+        "content",
+        "body",
+        "summary",
+    }
+)
+_OPAQUE_TEXT_FIELDS = frozenset(
+    {
+        "id",
+        "request_id",
+        "tool_call_id",
+        "user_id",
+        "channel",
+        "channel_id",
+        "thread_ts",
+        "stream_ts",
+        "task_id",
+        "action_id",
+        "callback_data",
+        "value",
+        "path",
+        "file_path",
+        "filename",
+    }
+)
+
+
+def _mask_rich_value(value: Any) -> Any:
+    """Mask visible rich-payload text while preserving opaque routing and button values."""
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key in _OPAQUE_TEXT_FIELDS or key.endswith("_id"):
+                out[key] = item
+            elif isinstance(item, str) and key in _RICH_TEXT_FIELDS:
+                out[key] = redact_for_display(item)
+            else:
+                out[key] = _mask_rich_value(item)
+        return out
+    if isinstance(value, list):
+        return [_mask_rich_value(item) for item in value]
+    return value
+
+
+def _mask_approval(event: Any) -> Any:
+    """Copy an approval brief and mask its display text without changing response IDs."""
+    if isinstance(event, dict):
+        masked = dict(event)
+        for field in ("title", "text", "tool_purpose"):
+            if isinstance(masked.get(field), str):
+                masked[field] = redact_for_display(masked[field])
+        for field in ("tool_input", "tool_input_obj", "tool_meta"):
+            if field in masked:
+                masked[field] = redact_values_for_display(masked[field])
+        return masked
+
+    changes: dict[str, Any] = {}
+    for field in ("title", "text", "tool_purpose"):
+        value = getattr(event, field, None)
+        if isinstance(value, str):
+            changes[field] = redact_for_display(value)
+    for field in ("tool_input", "tool_input_obj", "tool_meta"):
+        if hasattr(event, field):
+            changes[field] = redact_values_for_display(getattr(event, field))
+    if not changes:
+        return event
+    if is_dataclass(event):
+        return replace(event, **changes)
+    masked = copy(event)
+    for field, value in changes.items():
+        try:
+            setattr(masked, field, value)
+        except (AttributeError, TypeError):
+            raise TypeError("approval event cannot be safely masked")
+    return masked
+
+
+def _mask_outbound_message(message: Any) -> Any:
+    """Mask canonical transport text without changing its routing identity."""
+    if isinstance(message, dict):
+        masked = dict(message)
+        if isinstance(masked.get("text"), str):
+            masked["text"] = redact_for_display(masked["text"])
+        if "metadata" in masked:
+            masked["metadata"] = _mask_rich_value(masked["metadata"])
+        return masked
+    changes: dict[str, Any] = {}
+    text = getattr(message, "text", None)
+    if isinstance(text, str):
+        changes["text"] = redact_for_display(text)
+    if hasattr(message, "metadata"):
+        changes["metadata"] = _mask_rich_value(getattr(message, "metadata"))
+    if not changes:
+        raise TypeError("channel send message has no maskable text field")
+    if is_dataclass(message):
+        return replace(message, **changes)
+    masked = copy(message)
+    for field, value in changes.items():
+        try:
+            setattr(masked, field, value)
+        except (AttributeError, TypeError):
+            raise TypeError("channel send message cannot be safely masked")
+    return masked
+
+
+def _mask_call(name: str, method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    if name == "send":
+        positional = list(args)
+        keyword = dict(kwargs)
+        if positional:
+            positional[0] = _mask_outbound_message(positional[0])
+        elif "message" in keyword:
+            keyword["message"] = _mask_outbound_message(keyword["message"])
+        else:
+            raise TypeError("channel send message is required")
+        return method(*positional, **keyword)
+    if name == "request_approval":
+        if args:
+            args = (_mask_approval(args[0]), *args[1:])
+        elif "event" in kwargs:
+            kwargs = {**kwargs, "event": _mask_approval(kwargs["event"])}
+        return method(*args, **kwargs)
+
+    positional = list(args)
+    keyword = dict(kwargs)
+    if name == "deliver_rich":
+        if len(positional) > 1:
+            positional[1] = _mask_rich_value(positional[1])
+        elif "payload" in keyword:
+            keyword["payload"] = _mask_rich_value(keyword["payload"])
+
+    for field, position in _TEXT_ARGUMENTS.get(name, {}).items():
+        if position is not None and len(positional) > position:
+            positional[position] = redact_for_display(positional[position]) if isinstance(positional[position], str) else positional[position]
+        elif field in keyword and isinstance(keyword[field], str):
+            keyword[field] = redact_for_display(keyword[field])
+    return method(*positional, **keyword)
+
+
+class MaskedDelivery:
+    """A registration-boundary view that masks customer text before any channel call."""
+
+    def __init__(self, inner: ChannelDelivery) -> None:
+        self.inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self.inner, name)
+        if name not in _TEXT_ARGUMENTS and name != "request_approval":
+            return attribute
+
+        def masked(*args: Any, **kwargs: Any) -> Any:
+            return _mask_call(name, attribute, *args, **kwargs)
+
+        return masked
+
+
 def provider_of(delivery: Any) -> str:
     """Derive a compatibility namespace when the transport supplies no key."""
     implementation = type(delivery)
@@ -215,6 +400,8 @@ def provider_of(delivery: Any) -> str:
 def register(delivery: ChannelDelivery | None, provider: str = "") -> str:
     """Publish one provider change, or clear all providers during shutdown."""
     global _REGISTRY, _QUEUES
+    if isinstance(delivery, MaskedDelivery):
+        delivery = delivery.inner
     key = provider or (provider_of(delivery) if delivery is not None else "")
     with _REGISTRY_LOCK:
         updated = dict(_REGISTRY)

@@ -15,7 +15,14 @@ from gideon.interfaces.dashboard.handlers._shared import (
     _list_marketplace_skills,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.security.security import redact_for_display, restore_masked_spans
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_values,
+    redact_for_display,
+    redact_values_for_display,
+    restore_masked_spans,
+)
 from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 
 logger = logging.getLogger(__name__)
@@ -39,18 +46,18 @@ def _provider_prompt_to_listing(tpl: "Any") -> dict[str, Any]:
         "name": tpl.name,
         "fullName": tpl.name,
         "kind": tpl.kind,
-        "title": tpl.title,
-        "description": tpl.description,
+        "title": redact_for_display(tpl.title),
+        "description": redact_for_display(tpl.description),
         "path": "",
         "package": "",
         "source": tpl.source,
-        "variables": [v.to_dict() for v in tpl.variables],
-        "tags": list(tpl.tags),
+        "variables": redact_values_for_display([v.to_dict() for v in tpl.variables]),
+        "tags": redact_values_for_display(list(tpl.tags)),
         "updated_at": getattr(tpl, "updated_at", 0.0),
     }
     spec = getattr(tpl, "launch_spec", None)
     if spec:
-        out["launch_spec"] = dict(spec)
+        out["launch_spec"] = redact_values_for_display(dict(spec))
     return out
 
 
@@ -58,11 +65,11 @@ def _snippet_to_listing(snip: "Any") -> dict[str, Any]:
     """Adapter: format a PromptSnippet into the listing shape."""
     return {
         "name": snip.name,
-        "title": snip.title,
-        "description": snip.description,
+        "title": redact_for_display(snip.title),
+        "description": redact_for_display(snip.description),
         "source": snip.source,
-        "variables": [v.to_dict() for v in snip.variables],
-        "tags": list(snip.tags),
+        "variables": redact_values_for_display([v.to_dict() for v in snip.variables]),
+        "tags": redact_values_for_display(list(snip.tags)),
         "updated_at": getattr(snip, "updated_at", 0.0),
     }
 
@@ -211,33 +218,57 @@ async def api_prompt_detail(request: web.Request) -> web.Response:
     )
 
 
-_MASK_CONFLICT = (
-    "The stored copy of this content no longer lines up with the redacted version you edited, "
-    "so the hidden value behind a [REDACTED: …] marker cannot be recovered. Nothing was saved. "
-    "Re-open it to load the current version, or replace the marker with the value you want "
-    "stored."
-)
-
-
 def _restore_masked_content(
-    body: dict[str, Any], stored_content: str
+    body: dict[str, Any], stored_content: Any
 ) -> dict[str, Any] | None:
-    """Return `body` with any echoed-back redaction mask in `content` restored from the store.
+    """Return `body` with echoed-back masks restored from the stored projection.
 
     A write path that accepts a string the server itself generated as a mask overwrites the
     real content with the mask. Both save handlers route their body through here so neither can
     regress independently; a body with no `content` key is passed through untouched (a partial
     update is not an attempt to rewrite the body).
     """
-    submitted = body.get("content")
-    if not isinstance(submitted, str):
-        return body
-    restored = restore_masked_spans(submitted, stored_content)
-    if restored is None:
+    stored = (
+        {"content": stored_content}
+        if isinstance(stored_content, str)
+        else stored_content
+    )
+    try:
+        restored = keep_masked_values(body, stored)
+    except MaskConflict:
         return None
-    if restored == submitted:
-        return body
-    return {**body, "content": restored}
+    if (
+        "content" in body
+        and isinstance(body["content"], str)
+        and isinstance(stored, dict)
+        and isinstance(stored.get("content"), str)
+    ):
+        content = restore_masked_spans(body["content"], stored["content"])
+        if content is None:
+            return None
+        restored["content"] = content
+    return restored
+
+
+def _stored_prompt_values(tpl: Any) -> dict[str, Any]:
+    return {
+        "title": tpl.title,
+        "description": tpl.description,
+        "content": tpl.content,
+        "variables": [v.to_dict() for v in tpl.variables],
+        "tags": list(tpl.tags),
+        "launch_spec": dict(getattr(tpl, "launch_spec", None) or {}),
+    }
+
+
+def _stored_snippet_values(snip: Any) -> dict[str, Any]:
+    return {
+        "title": snip.title,
+        "description": snip.description,
+        "content": snip.content,
+        "variables": [v.to_dict() for v in snip.variables],
+        "tags": list(snip.tags),
+    }
 
 
 def _build_prompt_template(body: dict[str, Any], default_name: str = "") -> Any:
@@ -285,7 +316,8 @@ async def api_prompt_create(request: web.Request) -> web.Response:
         msg = str(exc)
         status = 409 if "already exists" in msg else 400
         return web.json_response({"error": msg}, status=status)
-    return web.json_response({"ok": True, "name": tpl.name, "prompt": tpl.to_dict()})
+    prompt = {**_provider_prompt_to_listing(tpl), "content": redact_for_display(tpl.content)}
+    return web.json_response({"ok": True, "name": tpl.name, "prompt": prompt})
 
 
 async def api_prompt_save(request: web.Request) -> web.Response:
@@ -304,9 +336,9 @@ async def api_prompt_save(request: web.Request) -> web.Response:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
     stored = provider.get_prompt(bare)
     if stored is not None:
-        merged = _restore_masked_content(body, stored.content)
+        merged = _restore_masked_content(body, _stored_prompt_values(stored))
         if merged is None:
-            return web.json_response({"error": _MASK_CONFLICT}, status=409)
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         body = merged
     try:
         tpl = _build_prompt_template(body, default_name=bare)
@@ -315,7 +347,8 @@ async def api_prompt_save(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
-    return web.json_response({"ok": True, "prompt": tpl.to_dict()})
+    prompt = {**_provider_prompt_to_listing(tpl), "content": redact_for_display(tpl.content)}
+    return web.json_response({"ok": True, "prompt": prompt})
 
 
 async def api_prompt_delete(request: web.Request) -> web.Response:
@@ -770,7 +803,8 @@ async def api_snippet_create(request: web.Request) -> web.Response:
         msg = str(exc)
         status = 409 if "already exists" in msg else 400
         return web.json_response({"error": msg}, status=status)
-    return web.json_response({"ok": True, "name": snip.name, "snippet": snip.to_dict()})
+    snippet = {**_snippet_to_listing(snip), "content": redact_for_display(snip.content)}
+    return web.json_response({"ok": True, "name": snip.name, "snippet": snippet})
 
 
 async def api_snippet_save(request: web.Request) -> web.Response:
@@ -787,9 +821,9 @@ async def api_snippet_save(request: web.Request) -> web.Response:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
     stored_snip = provider.get_snippet(bare)
     if stored_snip is not None:
-        merged = _restore_masked_content(body, stored_snip.content)
+        merged = _restore_masked_content(body, _stored_snippet_values(stored_snip))
         if merged is None:
-            return web.json_response({"error": _MASK_CONFLICT}, status=409)
+            return web.json_response({"error": MASK_CONFLICT}, status=409)
         body = merged
     try:
         snip = _build_snippet(body, default_name=bare)
@@ -798,7 +832,8 @@ async def api_snippet_save(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
-    return web.json_response({"ok": True, "snippet": snip.to_dict()})
+    snippet = {**_snippet_to_listing(snip), "content": redact_for_display(snip.content)}
+    return web.json_response({"ok": True, "snippet": snippet})
 
 
 async def api_snippet_delete(request: web.Request) -> web.Response:

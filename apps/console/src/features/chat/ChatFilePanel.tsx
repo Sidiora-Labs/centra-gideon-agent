@@ -34,7 +34,7 @@ export function ChatFilePanel({ path, onClose, commentTarget, contextTurns = [] 
   const { width, fitWidth: dockW, onHandleDown, onHandleKey, min, max } = useResizablePanel(
     'chat-file', { def: DEFAULT_W, min: MIN_W, max: MAX_W, side: 'right' })
   const [expanded, setExpanded] = useState(false)
-  const [artModal, setArtModal] = useState<{ entry: FsEntry; content: string; name: string } | null>(null)
+  const [artModal, setArtModal] = useState<{ entry: FsEntry; content: string; name: string; sourceRevision?: string } | null>(null)
   const viewerRef = useRef<FileViewerHandle>(null)
   const entry: FsEntry = { name: baseName(path), path, is_dir: false }
 
@@ -46,11 +46,11 @@ export function ChatFilePanel({ path, onClose, commentTarget, contextTurns = [] 
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
   }, [expanded, onClose])
 
-  const saveAsArtifact = (e: FsEntry, content: string) => setArtModal({ entry: e, content, name: baseName(e.path) })
+  const saveAsArtifact = (e: FsEntry, content: string, sourceRevision?: string) => setArtModal({ entry: e, content, name: baseName(e.path), sourceRevision })
   const confirmArtifact = async () => {
     if (!artModal || !artModal.name.trim()) return
     try {
-      await api.createArtifact({ name: artModal.name.trim(), content: artModal.content, source: 'manual', source_path: artModal.entry.path, kind: guessKind(artModal.entry.name) })
+      await api.createArtifact({ name: artModal.name.trim(), content: artModal.content, source: 'manual', source_path: artModal.entry.path, source_revision: artModal.sourceRevision, kind: guessKind(artModal.entry.name) })
       setArtModal(null)
     } catch (e) { notify(`Could not save artifact: ${(e as Error).message}`, 'error') }
   }

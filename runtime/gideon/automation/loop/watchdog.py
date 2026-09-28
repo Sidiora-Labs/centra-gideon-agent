@@ -745,15 +745,16 @@ class LoopWatchdog:
             deliverable = self._deliverable_file(loop)
             if deliverable is None:
                 return
-            content = deliverable.read_text(encoding="utf-8", errors="replace")
+            from gideon.workspace.artifacts import registry as artifact_registry
+            from gideon.workspace.artifacts import source_files
+
+            source_path = source_files.admit(str(deliverable.resolve()))
+            content, source_revision = source_files.read(source_path)
             if not content.strip():
                 return
-            from gideon.workspace.artifacts import registry as artifact_registry
-
             prov = artifact_registry.get_provider()
             if prov is None:
                 return
-            source_path = str(deliverable.resolve())
             name = (
                 f"{loop.name} — deliverable"
                 if loop.name
@@ -767,6 +768,7 @@ class LoopWatchdog:
                     snapshot=True,
                     event_type="iterated",
                     actor="agent",
+                    source_revision=source_revision,
                 )
                 return
             prov.create(
@@ -775,6 +777,7 @@ class LoopWatchdog:
                 kind="markdown",
                 source="cron",
                 source_path=source_path,
+                source_revision=source_revision,
                 actor="agent",
                 description=(loop.task[:280] if loop.task else ""),
                 tags=["loop", f"loop:{loop_id}", loop.kind],

@@ -17,13 +17,30 @@ from gideon.core.cancellation import run_with_timeout
 from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.security import (
+    redact_credentials,
+    redact_exfiltration_urls,
+    redact_values_for_display,
+)
 from gideon.security.sel import sel
 
 logger = logging.getLogger(__name__)
 
 _VALID_MCP_NAME_RE = re.compile(r"^[@a-zA-Z0-9][@a-zA-Z0-9/_.-]*$")
 _MAX_MCP_NAME_LEN = 128
+
+
+def _redact_mcp_projection(value: Any) -> Any:
+    """Mask displayed MCP content while keeping server and credential references stable."""
+    if isinstance(value, list):
+        return [_redact_mcp_projection(item) for item in value]
+    if not isinstance(value, dict):
+        return redact_values_for_display(value)
+    redacted = redact_values_for_display(value)
+    for key in ("name", "header_credentials"):
+        if key in value:
+            redacted[key] = value[key]
+    return redacted
 
 
 def _is_valid_mcp_name(name: str) -> bool:
@@ -464,8 +481,8 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
             err, _ = redact_credentials(err)
             err, _ = redact_exfiltration_urls(err)
             d["error"] = err
-        result.append(d)
-    return web.json_response(result)
+        result.append(_redact_mcp_projection(d))
+    return web.json_response(_redact_mcp_projection(result))
 
 
 async def api_mcp_active(request: web.Request) -> web.Response:
@@ -549,7 +566,7 @@ async def api_mcp_probe(request: web.Request) -> web.Response:
         d["enabled"] = not (isinstance(spec, dict) and spec.get("disabled"))
         if isinstance(spec, dict) and spec.get("disabledTools"):
             d["disabledTools"] = spec["disabledTools"]
-        result.append(d)
+        result.append(_redact_mcp_projection(d))
     _mcp_probe_cache[:] = result
     _mcp_probe_ts = time.time()
     return web.json_response(result)
@@ -591,7 +608,7 @@ async def api_mcp_probe_one(request: web.Request) -> web.Response:
     if not replaced:
         _mcp_probe_cache.append(d)
     _mcp_probe_ts = time.time()
-    return web.json_response(d)
+    return web.json_response(_redact_mcp_projection(d))
 
 
 async def api_mcp_probe_cached(request: web.Request) -> web.Response:
@@ -604,7 +621,7 @@ async def api_mcp_probe_cached(request: web.Request) -> web.Response:
         task = asyncio.create_task(_bg_mcp_probe())
         state._background_tasks.add(task)
         task.add_done_callback(state._background_tasks.discard)
-    return web.json_response(_mcp_probe_cache)
+    return web.json_response(_redact_mcp_projection(_mcp_probe_cache))
 
 
 async def api_mcp_pool_stats(request: web.Request) -> web.Response:
@@ -636,7 +653,7 @@ async def api_mcp_importable(request: web.Request) -> web.Response:
     except Exception as exc:
         logger.warning("discover_importable_servers failed: %s", exc)
         servers = []
-    return web.json_response({"servers": servers})
+    return web.json_response({"servers": _redact_mcp_projection(servers)})
 
 
 async def api_mcp_sync(request: web.Request) -> web.Response:

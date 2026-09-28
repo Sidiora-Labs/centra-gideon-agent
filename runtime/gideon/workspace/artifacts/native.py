@@ -51,6 +51,7 @@ from gideon.workspace.artifacts.models import (
     slugify,
 )
 from gideon.workspace.artifacts.provider import ArtifactProvider
+from gideon.workspace.artifacts import source_files
 
 
 def config_dir() -> Path:
@@ -208,23 +209,14 @@ class NativeArtifactProvider(ArtifactProvider):
         if not source_path:
             return None
         try:
-            p = Path(source_path)
-            if not p.is_absolute():
-                return None
-            resolved = p.resolve()
-        except (OSError, ValueError):
-            return None
-        if is_sensitive_path(str(resolved)):
-            return None
-        if not resolved.is_file():
-            return None
-        try:
-            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-                return f.read(MAX_CONTENT_BYTES + 1)[:MAX_CONTENT_BYTES]
+            content, _source_revision = source_files.read(source_path)
+            return content
         except (OSError, ValueError):
             return None
 
-    def _try_write_source_path(self, source_path: str, content: str) -> bool:
+    def _try_write_source_path(
+        self, source_path: str, content: str, source_revision: str | None
+    ) -> bool:
         """Write back to a file-backed artifact's source path.
 
         Refuses to CREATE a non-existent file (the Save-as-artifact flow always
@@ -233,17 +225,12 @@ class NativeArtifactProvider(ArtifactProvider):
         """
         if not source_path:
             return False
-        try:
-            p = Path(source_path)
-            if not p.is_absolute():
-                return False
-            resolved = p.resolve()
-        except (OSError, ValueError):
-            return False
-        if is_sensitive_path(str(resolved)):
-            return False
-        if not resolved.is_file():
-            return False
+        if not source_revision:
+            raise ValueError("source_revision is required before writing a file-backed artifact")
+        resolved = source_files.admit(source_path)
+        current, revision = source_files.read(resolved)
+        if revision != source_revision:
+            raise ValueError("source file changed; reload it before saving")
         try:
             atomic_write(resolved, content[:MAX_CONTENT_BYTES])
             return True
@@ -453,7 +440,8 @@ class NativeArtifactProvider(ArtifactProvider):
     def find_by_source_path(self, source_path: str) -> Artifact | None:
         if not source_path:
             return None
-        for art in self.list(source_path=source_path):
+        canonical = source_files.admit(source_path)
+        for art in self.list(source_path=canonical):
             return art
         return None
 
@@ -648,6 +636,7 @@ class NativeArtifactProvider(ArtifactProvider):
         *,
         actor: str | None = None,
         session_id: str | None = None,
+        source_revision: str | None = None,
     ) -> Artifact | None:
         """Restore a historical version's body as a NEW current version.
 
@@ -679,11 +668,11 @@ class NativeArtifactProvider(ArtifactProvider):
                 content = self._version_content(slug, from_version)
                 if content is None:
                     return None
+                if art.source_path:
+                    self._try_write_source_path(art.source_path, content, source_revision)
                 art.version += 1
                 d = self._artifact_dir(slug)
                 self._write_text(d / "current.html", content)
-                if art.source_path:
-                    self._try_write_source_path(art.source_path, content)
                 self._snapshot_version(slug, art.version, content)
             ev = ArtifactEvent(
                 ts=_now(),
@@ -704,7 +693,7 @@ class NativeArtifactProvider(ArtifactProvider):
         self,
         *,
         name: str,
-        content: str,
+        content: str | None = None,
         kind: str = "widget",
         source: str = "chat",
         slug: str | None = None,
@@ -717,11 +706,27 @@ class NativeArtifactProvider(ArtifactProvider):
         collection: str = "",
         event_metadata: dict | None = None,
         readonly: bool = False,
+        source_revision: str | None = None,
     ) -> Artifact:
         name = (name or "").strip()[:MAX_NAME_LEN] or "Untitled"
         if is_binary_kind(kind):
             raise ValueError(f"kind {kind!r} is binary — use create_binary()")
+        if source_path:
+            source_path = source_files.admit(source_path)
+            if not source_revision:
+                raise ValueError("source_revision is required when creating from a source file")
+            source_content, current_revision = source_files.read(source_path)
+            if current_revision != source_revision:
+                raise ValueError("source file changed; reload it before creating the artifact")
+            artifact_content = source_content if content is None else content
+        else:
+            artifact_content = content if content is not None else ""
         with self._lock:
+            if source_path and content is not None:
+                _current_content, latest_revision = source_files.read(source_path)
+                if latest_revision != source_revision:
+                    raise ValueError("source file changed; reload it before creating the artifact")
+                self._try_write_source_path(source_path, artifact_content, source_revision)
             base = (
                 slug.strip() if slug and is_valid_slug(slug.strip()) else slugify(name)
             )
@@ -761,12 +766,10 @@ class NativeArtifactProvider(ArtifactProvider):
             )
             d = self._artifact_dir(final_slug)
             d.mkdir(parents=True, exist_ok=True)
-            self._write_text(d / "current.html", content or "")
-            self._snapshot_version(final_slug, 1, content or "")
-            if source_path:
-                self._try_write_source_path(source_path, content or "")
+            self._write_text(d / "current.html", artifact_content)
+            self._snapshot_version(final_slug, 1, artifact_content)
             self._write_meta(art)
-            art.content = (content or "")[:MAX_CONTENT_BYTES]
+            art.content = artifact_content[:MAX_CONTENT_BYTES]
         changes.emit(changes.UPSERT, art.slug)
         return art
 
@@ -785,6 +788,7 @@ class NativeArtifactProvider(ArtifactProvider):
         collection: str | None = None,
         event_metadata: dict | None = None,
         expect_updated_at: str | None = None,
+        source_revision: str | None = None,
     ) -> Artifact | None:
         if event_type == "reverted":
             raise ValueError("use revert() to restore a version, not update()")
@@ -816,9 +820,9 @@ class NativeArtifactProvider(ArtifactProvider):
             if content is not None:
                 d = self._artifact_dir(slug)
                 content_changed = content != (self._current_content(slug) or "")
-                self._write_text(d / "current.html", content)
                 if art.source_path:
-                    self._try_write_source_path(art.source_path, content)
+                    self._try_write_source_path(art.source_path, content, source_revision)
+                self._write_text(d / "current.html", content)
 
             cut_version = False
             if snapshot:
