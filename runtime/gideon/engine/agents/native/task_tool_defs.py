@@ -35,8 +35,28 @@ def task_tool_definitions(provider: str, s: dict[str, Any]) -> list[ToolDefiniti
                     "task_list_id": {"type": "string"},
                     "labels": {"type": "array", "items": {"type": "string"}},
                     "due": {"type": "string"},
-                    "exit_criteria": {"type": "array", "items": {"type": "object"}},
-                    "action_plan": {"type": "array", "items": {"type": "object"}},
+                    "exit_criteria": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string"},
+                                "met": {"type": "boolean"},
+                            },
+                            "required": ["description"],
+                        },
+                    },
+                    "action_plan": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "completed": {"type": "boolean"},
+                            },
+                            "required": ["content"],
+                        },
+                    },
                     "depends_on": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["title"],
@@ -97,8 +117,26 @@ def task_tool_definitions(provider: str, s: dict[str, Any]) -> list[ToolDefiniti
                     "task_list_id": {"type": "string"},
                     "labels": {"type": "array", "items": {"type": "string"}},
                     "due": {"type": "string"},
-                    "exit_criteria": {"type": "array", "items": {"type": "object"}},
-                    "action_plan": {"type": "array", "items": {"type": "object"}},
+                    "exit_criteria": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string"},
+                                "met": {"type": "boolean"},
+                            },
+                        },
+                    },
+                    "action_plan": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "completed": {"type": "boolean"},
+                            },
+                        },
+                    },
                     "depends_on": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["id"],

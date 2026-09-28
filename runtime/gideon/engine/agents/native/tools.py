@@ -27,11 +27,29 @@ def _object_schema() -> dict:
 
 
 def tool_definitions_to_openai_schema(tools: list[ToolDefinition]) -> list[dict]:
+    from gideon.integrations.tool_providers.portable_schema import (
+        offered_tool_definitions,
+        provider_tool_name_map,
+    )
+
+    last_definition = {
+        definition.name: index for index, definition in enumerate(tools)
+    }
+    tools = [
+        definition
+        for index, definition in enumerate(tools)
+        if last_definition[definition.name] == index
+    ]
+    tools = offered_tool_definitions(
+        tools,
+        provider="native",
+    )
+    wire_names = provider_tool_name_map(definition.name for definition in tools)
     return [
         {
             "type": "function",
             "function": {
-                "name": definition.name,
+                "name": wire_names.get(definition.name, definition.name),
                 "description": definition.description or "",
                 "parameters": definition.parameters or _object_schema(),
             },

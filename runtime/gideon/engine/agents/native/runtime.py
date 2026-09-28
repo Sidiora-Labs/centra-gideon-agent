@@ -149,6 +149,18 @@ def build_sanitized_index(
     )
 
 
+def build_provider_tool_name_index(names: Iterable[str]) -> dict[str, str]:
+    """Resolve portable provider aliases back to canonical tool identities."""
+    from gideon.integrations.tool_providers.portable_schema import (
+        provider_tool_name_map,
+    )
+
+    return {
+        wire: canonical
+        for canonical, wire in provider_tool_name_map(names).items()
+    }
+
+
 HookFire = Callable[[str, str | None], Awaitable[list[str]]]
 
 _MAX_STEERS_PER_TURN = 4
@@ -258,9 +270,8 @@ def _discovery_tools() -> tuple[ToolDefinition, ...]:
             "groups",
             {
                 "groups": {
-                    "type": "object",
-                    "description": "Group names mapped to active booleans; omitted groups deactivate.",
-                    "additionalProperties": {"type": "boolean"},
+                    "type": "string",
+                    "description": "JSON object mapping group names to active booleans; omitted groups deactivate.",
                 }
             },
             "Replace the active tool groups with the complete requested state. Supply groups as "
@@ -453,6 +464,23 @@ class _ModelExchange:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                from gideon.integrations.tool_providers.portable_schema import (
+                    ToolSchemaRejected,
+                    schema_rejection_can_turn_off,
+                    tools_named_in_rejection,
+                )
+
+                rejected = tools_named_in_rejection(str(error), tools or [])
+                if rejected:
+                    canonical = [runtime._resolve_name(name) for name in rejected]
+                    raise ToolSchemaRejected(
+                        canonical,
+                        can_turn_off=schema_rejection_can_turn_off(
+                            canonical,
+                            provider_by_name=runtime._provider_of,
+                            known_tool_names=runtime._tool_index,
+                        ),
+                    ) from error
                 failure = _inference_failure_mode(error)
                 runtime._audit_inference_attempt(
                     failure,
@@ -583,6 +611,7 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_schema: list[dict] = []
         self._tool_index: dict[str, ToolProvider] = {}
         self._tool_sanitized_index: dict[str, str] = {}
+        self._tool_wire_to_canonical: dict[str, str] = {}
         self._tool_retriever: ToolRetriever | None = None
         self._tool_search_def: ToolDefinition | None = None
         self._tool_schema_def: ToolDefinition | None = None
@@ -598,6 +627,7 @@ class NativeAgentRuntime(AgentProvider):
             self._tool_schema = []
             self._tool_index = {}
             self._tool_sanitized_index = {}
+            self._tool_wire_to_canonical = {}
             self._groups = []
             self._active_defs = []
             self._group_of_name = {}
@@ -611,6 +641,9 @@ class NativeAgentRuntime(AgentProvider):
         )
         self._tool_defs = inventory.definitions
         self._tool_index = inventory.providers
+        self._tool_wire_to_canonical = build_provider_tool_name_index(
+            self._tool_index
+        )
         self._provider_of = inventory.owners
         self._groups = groups.partition(self._tool_defs, provider_of=self._provider_of)
         self._active_groups = (
@@ -687,6 +720,11 @@ class NativeAgentRuntime(AgentProvider):
 
     def _reset_tools(self, args: dict) -> str:
         requested = args.get("groups")
+        if isinstance(requested, str):
+            try:
+                requested = json.loads(requested)
+            except (TypeError, ValueError):
+                requested = None
         if not isinstance(requested, dict):
             return (
                 "Error: `groups` must be an object mapping group name → true/false, "
@@ -1254,11 +1292,12 @@ class NativeAgentRuntime(AgentProvider):
         return await self._invoke(tool_name, args, meta_sink=meta)
 
     def _resolve_name(self, name: str) -> str:
-        return (
-            self._tool_sanitized_index.get(name, name)
-            if name not in self._tool_index and name not in self._META_TOOLS
-            else name
-        )
+        canonical = self._tool_wire_to_canonical.get(name)
+        if canonical is not None:
+            return canonical
+        if name in self._tool_index or name in self._META_TOOLS:
+            return name
+        return self._tool_sanitized_index.get(name, name)
 
     def _search_tools(self, args: dict) -> str:
         retriever = self._tool_retriever
