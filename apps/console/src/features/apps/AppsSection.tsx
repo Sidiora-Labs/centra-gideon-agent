@@ -34,7 +34,7 @@ import {
   api, type AppSummary, type AppDepClassification, type AppCatalogEntry, type AppCatalog,
 } from '../../shared/data/api'
 import {
-  useGuardedInstall, guardedFromApp, isBlockingResult, terminalRefusalReason,
+  useGuardedInstall, guardedFromApp, guardedFromPreview, isBlockingResult, terminalRefusalReason,
   type GuardedResult, type GuardedInstall,
 } from '../../shared/data/useGuardedInstall'
 import { catalogApps } from '../../shared/data/appCatalog'
@@ -48,7 +48,7 @@ import { AppConfigFields, useAppConfig } from './appConfigForm'
 import { ChannelPairingStatus } from './ChannelPairingStatus'
 import { isInNav, setInNav } from './navApps'
 import { PageTitle } from '../../shared/ui/PageTitle'
-import { ScanReport, ConsentModal, PermissionList, PermissionConsent, CronConsentList } from './installConsent'
+import { ScanReport, ConsentModal, DisclosureReview, PermissionList, PermissionConsent, CronConsentList } from './installConsent'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 interface PendingInstall {
@@ -600,11 +600,13 @@ export function StoreView({ catalog, indexing = false, catalogError, result, tot
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [pending, setPending] = useState<PendingInstall | null>(null)
-  const guarded = useGuardedInstall((confirm) =>
-    api.installApp(pendingRef.current?.source ?? '', confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => api.previewApp(pendingRef.current?.entry?.name ?? '', pendingRef.current?.source ?? '', pendingRef.current?.entry?.listedBy).then(guardedFromPreview),
+    (digest, registry, reviewedName) => api.commitApp(reviewedName || pendingRef.current?.entry?.name || '', pendingRef.current?.source ?? '', digest, registry ?? pendingRef.current?.entry?.listedBy).then(guardedFromApp))
   const pendingRef = useRef<PendingInstall | null>(null)
 
   async function installFrom(source: string, label: string, entry?: AppCatalogEntry) {
+    if (entry?.installable === false) { setPending({ source, label, entry }); guarded.reset(); return }
     setBusy(label); guarded.reset()
     pendingRef.current = { source, label, entry }
     const r = await guarded.install()
@@ -684,8 +686,9 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
   const [newSource, setNewSource] = useState('')
   const [newLocal, setNewLocal] = useState('')
   const [pending, setPending] = useState<PendingInstall | null>(null)
-  const guarded = useGuardedInstall((confirm) =>
-    api.installApp(pendingRef.current?.source ?? '', confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => api.previewApp(pendingRef.current?.entry?.name ?? '', pendingRef.current?.source ?? '', pendingRef.current?.entry?.listedBy).then(guardedFromPreview),
+    (digest, registry, reviewedName) => api.commitApp(reviewedName || pendingRef.current?.entry?.name || '', pendingRef.current?.source ?? '', digest, registry ?? pendingRef.current?.entry?.listedBy).then(guardedFromApp))
   const pendingRef = useRef<PendingInstall | null>(null)
 
   function entryForSource(source: string): AppCatalogEntry | undefined {
@@ -693,8 +696,9 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
   }
 
   async function installFrom(source: string, label: string) {
-    setBusy(label); setErr(null); guarded.reset()
     const entry = entryForSource(source)
+    if (entry?.installable === false) { setPending({ source, label, entry }); guarded.reset(); return }
+    setBusy(label); setErr(null); guarded.reset()
     pendingRef.current = { source, label, entry }
     const r = await guarded.install()
     setBusy(null)
@@ -878,7 +882,7 @@ export function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
       ]
     : [
       { icon: <Blocks size={15} />, label: 'Details', onSelect: onOpen },
-      { icon: <Download size={15} />, label: 'Install', onSelect: onInstall, disabled: busy },
+      { icon: <Download size={15} />, label: 'Install', onSelect: onInstall, disabled: busy || item.installable === false },
     ]
   const hero = item.heroUrl
   const stop = (e: React.MouseEvent) => e.stopPropagation()
@@ -960,6 +964,7 @@ export function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
         {
 }
         <RegistryProvenanceLine registry={item.registry} />
+        {item.installable === false && <p data-type="label-s" className="text-danger">{item.refused || 'This app is not available to install.'}</p>}
         <QualityBadges quality={item.quality} />
 
         { }
@@ -979,7 +984,7 @@ export function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
               <span onClick={stop}><Button variant="primary" size="sm" onClick={() => onAction(app, 'toggle')}><Power size={14} /> Activate</Button></span>
             )
           ) : (
-            <span onClick={stop}><Button variant="secondary" size="sm" loading={busy} onClick={onInstall}><Download size={14} /> Install
+            <span onClick={stop}><Button variant="secondary" size="sm" loading={busy} disabled={item.installable === false} onClick={onInstall}><Download size={14} /> Install
             </Button></span>
           )}
         </div>
@@ -1001,8 +1006,9 @@ const PROVIDER_ENTITY_LABEL: Record<string, string> = {
 
 function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstalled: () => void }) {
   const [source, setSource] = useState('')
-  const guarded = useGuardedInstall((confirm) =>
-    api.installApp(source.trim(), confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => api.previewApp('', source.trim()).then(guardedFromPreview),
+    (digest, registry, reviewedName) => api.commitApp(reviewedName || '', source.trim(), digest, registry).then(guardedFromApp))
 
   async function doInstall(confirm: boolean) {
     if (!source.trim()) return
@@ -1020,6 +1026,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
         <TextInput value={source} onChange={(v) => { setSource(v); guarded.reset() }} autoFocus name="app-install-source"
           placeholder="/path/to/app  or  https://github.com/owner/app.git" />
 
+        {guarded.blocked?.review && <DisclosureReview review={guarded.blocked.review} previous={guarded.blocked.previousReview} />}
         {guarded.blocked?.scan && <ScanReport scan={guarded.blocked.scan} />}
         <GuardedFailure guarded={guarded} />
 
@@ -1041,8 +1048,9 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
 
 function UpdateModal({ name, onClose, onUpdated }: { name: string; onClose: () => void; onUpdated: () => void }) {
   const [source, setSource] = useState('')
-  const guarded = useGuardedInstall((confirm) =>
-    api.updateApp(name, source.trim(), confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => api.previewApp(name, source.trim()).then(guardedFromPreview),
+    (digest, registry) => api.commitAppUpdate(name, source.trim(), digest, registry).then(guardedFromApp))
 
   async function doUpdate(confirm: boolean) {
     if (!source.trim()) return
@@ -1059,6 +1067,7 @@ function UpdateModal({ name, onClose, onUpdated }: { name: string; onClose: () =
         <label data-type="body-s" className="text-on-surface-low">New source — local path or git URL (data is preserved)</label>
         <TextInput value={source} onChange={(v) => { setSource(v); guarded.reset() }} autoFocus name="app-install-source"
           placeholder="/path/to/app  or  https://github.com/owner/app.git" />
+        {guarded.blocked?.review && <DisclosureReview review={guarded.blocked.review} previous={guarded.blocked.previousReview} />}
         {guarded.blocked?.scan && <ScanReport scan={guarded.blocked.scan} />}
         <GuardedFailure guarded={guarded} />
         <div className="flex justify-end gap-2 pt-s">
@@ -1250,9 +1259,12 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
   const providerLabel = item.isProvider
     ? `${PROVIDER_ENTITY_LABEL[item.providerType] ?? item.providerType} provider` : ''
   const [consent, setConsent] = useState<GuardedResult | null>(null)
-  const guarded = useGuardedInstall((confirm) => api.installApp(item.pointer || item.source, confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => api.previewApp(item.name, item.pointer || item.source, item.listedBy).then(guardedFromPreview),
+    (digest, registry, reviewedName) => api.commitApp(reviewedName || item.name, item.pointer || item.source, digest, registry ?? item.listedBy).then(guardedFromApp))
 
   async function install(confirm: boolean) {
+    if (item.installable === false) return
     const r = confirm ? await guarded.confirmInstall() : await guarded.install()
     if (r?.ok) { onInstalled(); return }
     if (isBlockingResult(r)) setConsent(r)
@@ -1311,9 +1323,10 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
         </div>
       </div>
 
+      {item.installable === false && <p role="status" data-type="body-s" className="text-danger">{item.refused || "This app is not available to install."}</p>}
       <GuardedFailure guarded={guarded} />
       <div>
-        <Button variant="primary" size="sm" loading={guarded.busy} onClick={() => install(false)}><Download size={15} /> Install
+        <Button variant="primary" size="sm" loading={guarded.busy} disabled={item.installable === false} onClick={() => install(false)}><Download size={15} /> Install
         </Button>
       </div>
 

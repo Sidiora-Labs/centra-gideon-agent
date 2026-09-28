@@ -654,6 +654,9 @@ export interface RegistryProvenance {
 }
 export interface AppCatalogEntry {
   registry?: RegistryProvenance | null
+  installable?: boolean
+  refused?: string
+  listedBy?: string
   name: string; displayName: string; description: string; version: string
   icon: string; heroUrl?: string; author: string
   source: string; sourceKind: 'bundled' | 'native' | 'first-party' | 'local' | 'git'
@@ -686,8 +689,34 @@ export interface AppScanReport {
   verdict: string; findings: AppScanFinding[]; tier?: string
   signature?: AppSignature | null
 }
+export interface AppDisclosure {
+  permissions: Record<string, unknown>
+  crons: Array<{ name: string; every?: number; cron_expr?: string; cadence?: string; agent?: string; message?: string; scheduled: boolean }>
+  pythonDependencies: Array<{ spec: string; coreOwned: boolean }>
+  hasUI: boolean; uiComponents: string
+  hasBackend: boolean; backendSandbox: string
+  providers: Array<{ type: string; implementation: string; execution: string }>
+  onInstall: string; onUpdate: string; onEnable: string; onDisable: string; onUninstall: string
+  hooks: AppHookSummary[]
+  cliSetup: string; cliDoctor: string
+  sources: Array<{ name: string; script: string }>
+  mcpServers: Array<{ name: string; launches: string }>
+  skills: string[]
+  runsAsYou: string
+}
+export interface AppPreviewResult {
+  ok: boolean; name: string; error?: string | { code?: string; message?: string }; needs_consent: boolean
+  review_digest?: string; review?: AppDisclosure
+  registry?: string | null
+  previous_review?: AppDisclosure | null
+  scan: AppScanReport | null
+  needs_client_install?: boolean
+  client_install?: { shell?: string; postInstall?: string } | null
+  fix_prompt?: string
+  hooks?: AppHookSummary[]
+}
 export interface AppInstallResult {
-  ok: boolean; name: string; error: string; needs_consent: boolean
+  ok: boolean; name: string; error: string | { code?: string; message?: string }; needs_consent: boolean
   scan: AppScanReport | null
   needs_client_install?: boolean
   client_install?: { shell?: string; postInstall?: string } | null
@@ -698,6 +727,10 @@ export interface AppInstallResult {
   log_excerpt?: string
   fix_prompt?: string
   hooks?: AppHookSummary[]
+  review_digest?: string
+  review?: AppDisclosure
+  previous_review?: AppDisclosure | null
+  registry?: string | null
 }
 export interface SkillInstallResult {
   ok?: boolean; path?: string; error?: string
@@ -5354,6 +5387,12 @@ export const api = {
   apps: () => get<{ apps: (AppSummary & { platform?: boolean })[] }>('/api/apps')
     .then((d) => d.apps.map((a) => (a.native ?? a.platform) ? { ...a, native: true } : a)),
   app: (name: string) => get<AppDetail>(`/api/apps/${encodeURIComponent(name)}`),
+  previewApp: (name: string, source: string, registry?: string | null) =>
+    _installReq('/api/apps/preview', { name, source, ...(registry !== undefined ? { registry } : {}) }) as Promise<AppPreviewResult>,
+  commitApp: (name: string, source: string, reviewDigest: string, registry?: string | null) =>
+    _installReq('/api/apps', { name, source, review_digest: reviewDigest, ...(registry !== undefined ? { registry } : {}) }),
+  commitAppUpdate: (name: string, source: string, reviewDigest: string, registry?: string | null) =>
+    _installReq(`/api/apps/${encodeURIComponent(name)}/update`, { name, source, review_digest: reviewDigest, ...(registry !== undefined ? { registry } : {}) }),
   installApp: (source: string, confirm = false) => _installReq('/api/apps', { source, confirm }),
   updateApp: (name: string, source: string, confirm = false) =>
     _installReq(`/api/apps/${encodeURIComponent(name)}/update`, { source, confirm }),

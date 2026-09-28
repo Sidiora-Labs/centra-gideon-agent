@@ -63,6 +63,8 @@ class GuardDecision:
     reason: str = ""
     risk_level: str = "safe"
     recovery_hints: list[str] = field(default_factory=list)
+    category: str = ""
+    address: str = ""
 
 
 def classify_host(ip_str: str) -> IpVerdict:
@@ -129,7 +131,9 @@ def _resolve(host: str) -> list[str]:
     return out
 
 
-def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecision:
+def evaluate(
+    url: str, policy: EgressPolicy, *, resolver=_resolve, resolve: bool = True
+) -> GuardDecision:
     """Evaluate a URL against a policy. Pure aside from the DNS resolve (injectable).
 
     Returns a :class:`GuardDecision`. On allow, ``pinned_ips`` carries the validated
@@ -171,6 +175,7 @@ def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecis
             url=url,
             host=host,
             reason=f"host {host!r} is on the egress deny list",
+            category="deny_list",
             risk_level="destructive",
         )
     operator_allowed = host_matches(host, policy.allow_hosts)
@@ -193,13 +198,20 @@ def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecis
         )
 
     try:
-        ips = resolver(host)
+        literal = str(ipaddress.ip_address(host))
+    except ValueError:
+        literal = ""
+    if not resolve and not literal:
+        return GuardDecision(allow=True, url=url, host=host)
+    try:
+        ips = [literal] if literal else resolver(host)
     except socket.gaierror:
         return GuardDecision(
             allow=False,
             url=url,
             host=host,
             reason=f"host {host!r} is not resolvable",
+            category="unresolvable",
             risk_level="caution",
             recovery_hints=[
                 "Check the hostname; the fetch fails closed on an unresolvable host."
@@ -211,6 +223,7 @@ def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecis
             url=url,
             host=host,
             reason=f"host {host!r} resolved to no addresses",
+            category="unresolvable",
             risk_level="caution",
         )
 
@@ -224,6 +237,8 @@ def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecis
     if metadata_hits:
         return GuardDecision(
             allow=False,
+            category="metadata",
+            address=metadata_hits[0].ip,
             url=url,
             host=host,
             reason=(
@@ -263,6 +278,8 @@ def evaluate(url: str, policy: EgressPolicy, *, resolver=_resolve) -> GuardDecis
         if bad:
             return GuardDecision(
                 allow=False,
+                category=bad[0].category,
+                address=bad[0].ip,
                 url=url,
                 host=host,
                 reason=(

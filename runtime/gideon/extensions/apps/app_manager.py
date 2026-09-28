@@ -108,6 +108,9 @@ class InstallResult:
     client_install: dict[str, Any] | None = None
     log_excerpt: str = ""
     hooks: list[dict[str, str]] = field(default_factory=list)
+    review_digest: str = ""
+    review: dict[str, Any] | None = None
+    previous_review: dict[str, Any] | None = None
 
     @property
     def fix_prompt(self) -> str:
@@ -151,6 +154,9 @@ class InstallResult:
             "log_excerpt": self.log_excerpt,
             "fix_prompt": self.fix_prompt,
             "hooks": self.hooks,
+            "review_digest": self.review_digest,
+            "review": self.review,
+            "previous_review": self.previous_review,
         }
 
 
@@ -611,6 +617,56 @@ def _remove_app_skills(manifest: AppManifest, name: str) -> None:
         logger.debug("app %s: skill remove failed", name, exc_info=True)
 
 
+def preview(
+    source: str | Path, *, name: str = "", action: str = "install",
+    origin: str = "local", caller: str = "dashboard",
+) -> InstallResult:
+    """Stage an app and return the disclosure bound to the exact staged bytes."""
+    src = Path(source)
+    if not src.is_dir():
+        return InstallResult(ok=False, error=f"source is not a directory: {source}")
+    staged_root = Path(tempfile.mkdtemp(prefix="review-", dir=_quarantine_dir()))
+    staged = staged_root / "bundle"
+    try:
+        survey_app_tree(src).copy_to(staged)
+        manifest = _load_staged_manifest(staged, action=action)
+        from gideon.extensions.apps import disclosure
+        review = disclosure.describe(manifest)
+        previous = _manifest_of(name) if action == "update" and name else None
+        previous_review = disclosure.describe(previous) if previous else None
+        signature, tier = _signature_gate(staged, origin)
+        report = default_scanner.scan(staged, tier)
+        report.signature = signature
+        if signature.is_invalid or report.verdict is Verdict.DANGEROUS:
+            return InstallResult(ok=False, name=manifest.name, scan=report,
+                error="Review refused by signature or security scan",
+                review=review, previous_review=previous_review,
+                review_digest=disclosure.bundle_digest(staged))
+        import sys as _sys
+        platform_cfg = manifest.platform
+        if platform_cfg is not None and (
+            platform_cfg.installMode == "client"
+            or not platform_cfg.supports_platform(_sys.platform)
+        ):
+            ci = platform_cfg.clientInstall.to_dict()
+            return InstallResult(ok=False, name=manifest.name, scan=report,
+                needs_client_install=True, client_install=ci or {},
+                error=(f"'{manifest.name}' installs on your local machine, not this server"
+                       if platform_cfg.installMode == "client"
+                       else f"'{manifest.name}' does not support this server's platform ({_sys.platform})"),
+                review=review, previous_review=previous_review,
+                review_digest=disclosure.bundle_digest(staged))
+        changed = action == "install" or disclosure.changed(previous_review, review)
+        return InstallResult(ok=False, name=manifest.name, scan=report,
+            needs_consent=changed or report.verdict is Verdict.WARNING,
+            error="", review=review, previous_review=previous_review,
+            review_digest=disclosure.bundle_digest(staged))
+    except (AppLifecycleError, UnsafeBundleError, OSError) as exc:
+        return InstallResult(ok=False, name=name, error=str(exc))
+    finally:
+        shutil.rmtree(staged_root, ignore_errors=True)
+
+
 def install(
     source: str | Path,
     *,
@@ -618,6 +674,7 @@ def install(
     confirm: bool = False,
     caller: str = "app_manager",
     source_ref: str | None = None,
+    review_digest: str | None = None,
 ) -> InstallResult:
     """Install an app from a local directory ``source`` (path/git → A4 fetch).
 
@@ -651,6 +708,13 @@ def install(
         _audit("install", "error", str(source), caller=caller, error=str(exc))
         return InstallResult(ok=False, error=str(exc))
     name = manifest.name
+    from gideon.extensions.apps import disclosure
+    current_review = disclosure.describe(manifest)
+    current_digest = disclosure.bundle_digest(staged)
+    if review_digest is not None and review_digest != current_digest:
+        return InstallResult(ok=False, name=name, needs_consent=True,
+                             error="The staged app changed after review. Review it again.",
+                             review=current_review, review_digest=current_digest)
 
     try:
         signature, tier = _signature_gate(staged, origin)
@@ -1071,6 +1135,7 @@ def update(
     origin: str = "local",
     confirm: bool = False,
     caller: str = "app_manager",
+    review_digest: str | None = None,
 ) -> InstallResult:
     """Atomically update an installed app to new code at ``source`` (A2).
 
@@ -1105,6 +1170,16 @@ def update(
         )
 
     live = app_dir(name)
+    from gideon.extensions.apps import disclosure
+    current_review = disclosure.describe(manifest)
+    previous_manifest = _manifest_of(name)
+    previous_review = disclosure.describe(previous_manifest) if previous_manifest else None
+    current_digest = disclosure.bundle_digest(staged)
+    if review_digest is not None and review_digest != current_digest:
+        return InstallResult(ok=False, name=name, needs_consent=True,
+                             error="The staged app changed after review. Review it again.",
+                             review=current_review, previous_review=previous_review,
+                             review_digest=current_digest)
     rollback = _rollback_dir(name)
     try:
         if manifest.name != name:

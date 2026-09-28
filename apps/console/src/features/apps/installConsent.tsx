@@ -5,7 +5,7 @@ import { ShieldAlert, ShieldCheck, ShieldQuestion, BadgeCheck, AlertTriangle, Te
 import { Button } from '../../shared/ui/Button'
 import { Modal } from '../../shared/ui/Modal'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
-import type { AppSummary, AppInstallResult, AppCronSummary, AppScanReport } from '../../shared/data/api'
+import type { AppSummary, AppInstallResult, AppCronSummary, AppDisclosure, AppScanReport } from '../../shared/data/api'
 import { terminalRefusalReason, type GuardedResult } from '../../shared/data/useGuardedInstall'
 import { copyText } from '../../app/shell/clipboard'
 
@@ -117,34 +117,74 @@ export function ConsentModal({ label, result, busy, permissions, crons, hooks, a
     )
   }
   const refusal = terminalRefusalReason(result)
+  const cannotInstall = !!refusal
+  const reviewedPermissions = result.review?.permissions as AppSummary['permissions'] | undefined
+  const clean = result.scan?.verdict === 'clean'
   return (
     <Modal title={`Install ${label}`} icon={<ShieldAlert size={18} />} onClose={onClose}>
       <div className="flex flex-col gap-m p-l" style={{ minWidth: 420 }}>
         <p data-type="body-s" className="text-on-surface-low">
-          {refusal
-            || 'The security scanner raised warnings. Review the findings — you can install anyway if you trust the source.'}
+          {refusal || (clean ? 'Review what this app will be able to do before installing.'
+              : 'The security scanner raised warnings. Review the findings before installing.')}
         </p>
+        {result.review && <DisclosureReview review={result.review} previous={result.previousReview} />}
         {result.scan && <ScanReport scan={result.scan} />}
         {
 }
-        <PermissionConsent permissions={permissions} appUI={appUI} />
-        {!!(hooks ?? result.hooks)?.length && <div data-type="body-s" className="text-on-surface-low">
+        <PermissionConsent permissions={reviewedPermissions ?? permissions} appUI={result.review ? { hasUI: result.review.hasUI, uiComponents: result.review.uiComponents } : appUI} />
+        {!result.review && !!(hooks ?? result.hooks)?.length && <div data-type="body-s" className="text-on-surface-low">
           <div data-type="label-m" className="text-on-surface">Lifecycle hooks</div>
           {(hooks ?? result.hooks ?? []).map((hook) => <div key={hook.name}>{hook.name} · {hook.event} via {hook.provider}</div>)}
         </div>}
-        {(crons ?? []).length > 0 && <CronConsentList crons={crons!} />}
+        {!result.review && (crons ?? []).length > 0 && <CronConsentList crons={crons!} />}
         <div className="flex justify-end gap-2 pt-s">
           {
 }
-          <Button variant="ghost" onClick={onClose}>{refusal ? 'Done' : 'Cancel'}</Button>
-          {!refusal && (
-            <Button variant="primary" loading={busy} onClick={onConfirm}><ShieldAlert size={16} /> Install anyway
+          <Button variant="ghost" onClick={onClose}>{cannotInstall ? 'Done' : 'Cancel'}</Button>
+          {!cannotInstall && (
+            <Button variant="primary" loading={busy} onClick={onConfirm}>{clean ? 'Install' : <><ShieldAlert size={16} /> Install anyway</>}
             </Button>
           )}
         </div>
       </div>
     </Modal>
   )
+}
+
+export function DisclosureReview({ review, previous }: { review: AppDisclosure; previous?: AppDisclosure | null }) {
+  const rowsFor = (item: AppDisclosure): Array<[string, string[]]> => [
+    ['Gateway permissions', Object.entries(item.permissions ?? {}).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}`)],
+    ['Python packages', (item.pythonDependencies ?? []).map((dependency) => `${dependency.spec}${dependency.coreOwned ? ' (already provided)' : ''}`)],
+    ['Backend', item.hasBackend ? [`Runs an app backend${item.backendSandbox ? ` (${item.backendSandbox} sandbox)` : ''}`] : []],
+    ['Providers', (item.providers ?? []).map((provider) => `${provider.type}: ${provider.implementation} (${provider.execution})`)],
+    ['Scheduled jobs', (item.crons ?? []).map((cron) => `${cron.name}${cron.cadence ? ` · ${cron.cadence}` : ''}${cron.scheduled ? '' : ' · not scheduled'}`)],
+    ['Lifecycle commands', [item.onInstall, item.onUpdate, item.onEnable, item.onDisable, item.onUninstall].filter(Boolean)],
+    ['Hooks', (item.hooks ?? []).map((hook) => `${hook.name} · ${hook.event} via ${hook.provider}`)],
+    ['MCP connections', (item.mcpServers ?? []).map((server) => `${server.name}: ${server.launches}`)],
+    ['Connector scripts', (item.sources ?? []).map((source) => `${source.name}: ${source.script}`)],
+    ['CLI commands', [item.cliSetup && `Setup: ${item.cliSetup}`, item.cliDoctor && `Diagnostics: ${item.cliDoctor}`].filter(Boolean)],
+    ['Skills', item.skills ?? []],
+  ]
+  const sections = rowsFor(review)
+  const previousSections = previous ? rowsFor(previous) : []
+  const changed = !!previous && JSON.stringify(previous) !== JSON.stringify(review)
+  const changes = sections.filter(([title, current]) => JSON.stringify(current) !== JSON.stringify(previousSections.find(([oldTitle]) => oldTitle === title)?.[1] ?? []))
+  return <section className="rounded-md border border-outline-variant bg-surface-high p-m" data-testid="app-disclosure-review">
+    <div data-type="label-m" className="mb-2 text-on-surface">What this app adds</div>
+    {previous && changed && <div className="mb-2 rounded-md border border-warn/40 p-s" data-testid="app-disclosure-changes">
+      <p data-type="label-s" className="mb-1 text-warn">This update changes reviewed permissions or behavior</p>
+      {changes.map(([title, current]) => <div key={title} data-type="body-s" className="mb-1 last:mb-0 text-on-surface-low">
+        <strong className="text-on-surface">{title}</strong>
+        <div>Before: {previousSections.find(([oldTitle]) => oldTitle === title)?.[1].join('; ') || 'None declared'}</div>
+        <div>After: {current.join('; ') || 'None declared'}</div>
+      </div>)}
+    </div>}
+    {review.runsAsYou && <p data-type="body-s" className="mb-2 text-on-surface-low">{review.runsAsYou}</p>}
+    {sections.map(([title, items]) => items.length > 0 && <div key={title} className="mb-2 last:mb-0">
+      <div data-type="label-s" className="text-on-surface">{title}</div>
+      <ul data-type="body-s" className="text-on-surface-low">{items.map((item, index) => <li key={`${title}-${index}`}>• {item}</li>)}</ul>
+    </div>)}
+  </section>
 }
 
 function ClientInstallCommand({ label, cmd }: { label: string; cmd: string }) {

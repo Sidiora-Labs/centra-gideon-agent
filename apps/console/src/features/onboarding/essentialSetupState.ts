@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { api, type AppCatalogEntry, type ChatModelOption, type ModelProviderType, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
-import { guardedFromApp, useGuardedInstall } from '../../shared/data/useGuardedInstall'
+import { guardedFromApp, guardedFromPreview, useGuardedInstall } from '../../shared/data/useGuardedInstall'
 import { catalogApps } from '../../shared/data/appCatalog'
 
 export type EssentialLane = 'model' | 'search' | 'speech' | 'channel'
@@ -37,7 +37,17 @@ export function useEssentialSetup(readiness: OnboardingState | null, onProgress:
   } as SetupState)
   const pendingRef = useRef<AppCatalogEntry | null>(null)
   const active = useRef(false)
-  const guarded = useGuardedInstall(confirm => api.installApp(pendingRef.current?.pointer || pendingRef.current?.source || '', confirm).then(guardedFromApp))
+  const guarded = useGuardedInstall(
+    () => {
+      const pending = pendingRef.current
+      return api.previewApp(pending?.name ?? '', pending?.pointer || pending?.source || '', pending?.listedBy).then(guardedFromPreview)
+    },
+    (reviewDigest, registry, reviewedName) => {
+      const pending = pendingRef.current
+      if (!pending) return Promise.resolve({ ok: false, needsConsent: false, scan: null, error: 'Choose an app to review first.' })
+      return api.commitApp(reviewedName || pending.name, pending.pointer || pending.source || '', reviewDigest, registry ?? pending.listedBy).then(guardedFromApp)
+    },
+  )
   useEffect(() => {
     if (state.phase !== 'pick' || readiness?.has_model_provider || !providerTypes?.length || !catalog) return
     const listed = new Set(catalogApps(catalog).map((entry) => entry.name))
@@ -50,7 +60,7 @@ export function useEssentialSetup(readiness: OnboardingState | null, onProgress:
     onProgress({ essentials: progress[lane] })
   }
   const attempt = async (entry: AppCatalogEntry, confirm: boolean) => {
-    if (active.current) return
+    if (active.current || entry.installable === false) return
     active.current = true
     pendingRef.current = entry
     try {

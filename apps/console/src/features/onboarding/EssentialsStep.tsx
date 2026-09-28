@@ -119,6 +119,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
                 variants={{ animate: { transition: stagger(0.04) } }}>
                 {shown.map((e) => (
                   <AppCard key={e.name} entry={e} open={open === e.name} installed={!!installed[e.name]}
+                    installable={e.installable !== false} refused={e.refused}
                     busy={guarded.busy && pendingRef.current?.name === e.name}
                     error={pendingRef.current?.name === e.name ? guarded.error : null}
                     onToggle={() => toggle(e.name)}
@@ -156,8 +157,9 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
   )
 }
 
-function AppCard({ entry, open, installed, busy, error, onToggle, onInstall }: {
+function AppCard({ entry, open, installed, installable, refused, busy, error, onToggle, onInstall }: {
   entry: AppCatalogEntry; open: boolean; installed: boolean; busy: boolean
+  installable: boolean; refused?: string
   error: string | null; onToggle: () => void; onInstall: () => void
 }) {
   const label = entry.displayName || entry.name
@@ -173,8 +175,8 @@ function AppCard({ entry, open, installed, busy, error, onToggle, onInstall }: {
       {(entry.crons ?? []).length > 0 && <CronConsentList crons={entry.crons!} />}
       <p className="flex items-start gap-s text-on-surface-low" data-type="body-s"><ShieldCheck size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
         <span>Installing fetches this app behind the security scanner — a dangerous verdict is always refused.</span></p>
-      {error && <p role="alert" className="text-[0.8125rem] text-danger">{error}</p>}
-      <div className="flex justify-end"><Button variant="primary" size="sm" loading={busy} onClick={onInstall}><Download size={15} aria-hidden="true" /> Install {label}</Button></div>
+      {(refused || error) && <p role="alert" className="text-[0.8125rem] text-danger">{refused || error}</p>}
+      <div className="flex justify-end"><Button variant="primary" size="sm" loading={busy} disabled={!installable} disabledReason={!installable ? (refused || 'This app is unavailable to install.') : undefined} onClick={onInstall}><Download size={15} aria-hidden="true" /> {installable ? `Install ${label}` : 'Unavailable'}</Button></div>
     </div>}
   </motion.article>
 }

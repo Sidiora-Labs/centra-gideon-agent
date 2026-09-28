@@ -129,6 +129,12 @@ FETCH_ACTION = EgressPolicy(
     timeout_s=20.0,
 )
 
+LISTING = EgressPolicy(
+    name="listing", allow_schemes=("https",), deny_hosts=METADATA_SERVICE_HOSTS,
+    timeout_s=120.0,
+)
+
+
 _PROFILES: dict[str, EgressPolicy] = {
     p.name: p
     for p in (
@@ -142,6 +148,7 @@ _PROFILES: dict[str, EgressPolicy] = {
         SYNC,
         BROWSE,
         FETCH_ACTION,
+        LISTING,
     )
 }
 
@@ -335,3 +342,9 @@ def sync_egress_policy(endpoint: str) -> EgressPolicy:
     return layered.with_overrides(
         allow_only=True, allow_hosts=(host,), deny_hosts=denies
     )
+
+
+def listing_egress_policy(source_host: str = "") -> EgressPolicy:
+    policy = egress_policy_for(LISTING)
+    hosts = tuple(dict.fromkeys((*policy.allow_hosts, source_host.lower().strip())))
+    return policy.with_overrides(allow_hosts=tuple(h for h in hosts if h))

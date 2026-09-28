@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gideon.extensions.apps.manager import APP_MANIFEST_FILENAME
+from gideon.security.net.policy import EgressPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,14 @@ _MULTI_APP_PREVIEW = 5
 
 class SourceError(Exception):
     """The install source could not be resolved (bad path / clone failed)."""
+
+    code = "app_source_invalid"
+
+
+class SourceRefused(SourceError):
+    """A registry listing names a destination that cannot be fetched."""
+
+    code = "app_listing_refused"
 
 
 @dataclass
@@ -90,7 +99,7 @@ def _multi_app_hint(url: str, apps: list[str]) -> str:
     )
 
 
-def resolve(source: str) -> ResolvedSource:
+def resolve(source: str, *, registry: str | None = None) -> ResolvedSource:
     """Resolve an install source string to a local directory.
 
     A local directory path resolves in place (no cleanup). A git URL is
@@ -99,7 +108,9 @@ def resolve(source: str) -> ResolvedSource:
     multi-app git repo — a multi-app repo given WITHOUT that suffix raises
     with the ``#app`` form and the app names it found. Raises
     :class:`SourceError` on a missing path or a failed clone."""
-    s = str(source).strip()
+    if not isinstance(source, str) or (registry is not None and not isinstance(registry, str)):
+        raise SourceError("source and registry must be strings")
+    s = source.strip()
     if not s:
         raise SourceError("empty install source")
 
@@ -109,8 +120,9 @@ def resolve(source: str) -> ResolvedSource:
         base, subdir = s.rsplit("#", 1)
         subdir = subdir.strip("/") or None
 
+    policy = _listing_fetch_policy(s, base, registry)
     if _looks_like_git_url(base):
-        resolved = _clone_git(base)
+        resolved = _clone_git(base, policy=policy)
         if subdir:
             target = _confined_subdirectory(resolved.path, subdir)
             if target is None:
@@ -135,28 +147,61 @@ def resolve(source: str) -> ResolvedSource:
     return ResolvedSource(path=path, origin="local", cleanup=False)
 
 
-def _clone_git(url: str) -> ResolvedSource:
+def _listing_fetch_policy(source: str, base: str, registry: str | None) -> EgressPolicy | None:
+    from gideon.extensions.apps import catalog
+    from gideon.security.net.git import preflight
+
+    listed_by = (registry or "").strip() or catalog.listing_source_for(source)
+    if listed_by is None:
+        return None
+    reason = catalog.listing_repo_refusal(base)
+    if reason:
+        raise SourceRefused(reason)
+    policy = catalog.listing_policy(listed_by)
+    decision = preflight(base, policy)
+    if decision.allow:
+        return policy
+    if decision.category == "unresolvable":
+        raise SourceError(catalog.listing_unreachable(decision.host, "it does not resolve"))
+    raise SourceRefused(catalog.listing_address_refusal(decision) or "This app's download address is not permitted.")
+
+
+def _clone_git(url: str, *, policy: EgressPolicy | None = None) -> ResolvedSource:
+    from gideon.security.net.git import GitEgressRefused, GitHostUnreachable, run_git_guarded
+
     tmp = Path(tempfile.mkdtemp(prefix="gideon-app-clone-"))
+    clone = ["clone", "--depth", "1", "--", url, str(tmp)]
     try:
-        proc = subprocess.run(
-            ["git", "clone", "--depth", "1", "--", url, str(tmp)],
-            capture_output=True,
-            text=True,
-            timeout=_CLONE_TIMEOUT,
-        )
+        if policy is None:
+            proc = subprocess.run(
+                ["git", *clone], capture_output=True, text=True, timeout=_CLONE_TIMEOUT
+            )
+        else:
+            proc = run_git_guarded(clone, policy=policy, timeout=_CLONE_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
         _rmtree(tmp)
         raise SourceError(f"git clone timed out after {_CLONE_TIMEOUT}s") from exc
-    except FileNotFoundError as exc:
+    except GitEgressRefused as exc:
         _rmtree(tmp)
-        raise SourceError("git is not available to clone the app source") from exc
+        from gideon.extensions.apps.catalog import listing_fetch_refusal
+
+        raise SourceRefused(listing_fetch_refusal(url, exc.refusal)) from exc
+    except GitHostUnreachable as exc:
+        _rmtree(tmp)
+        from gideon.extensions.apps.catalog import listing_unreachable
+
+        raise SourceError(listing_unreachable(exc.host, exc.reason)) from exc
+    except OSError as exc:
+        _rmtree(tmp)
+        raise SourceError("git could not start to clone the app source") from exc
     if proc.returncode != 0:
         _rmtree(tmp)
+        if policy is not None:
+            raise SourceError("The app repository could not be downloaded.")
         tail = (proc.stderr or proc.stdout or "").strip()[-300:]
         raise SourceError(f"git clone failed: {tail}")
     _rmtree(tmp / ".git")
     return ResolvedSource(path=tmp, origin="external", cleanup=True)
-
 
 def _confined_subdirectory(root: Path, subdir: str) -> Path | None:
     """Resolve a URL-selected app folder without following any clone symlink."""

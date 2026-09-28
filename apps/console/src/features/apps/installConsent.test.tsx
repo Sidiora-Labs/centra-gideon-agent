@@ -103,6 +103,42 @@ describe('the unsigned note agrees with the verdict beside it', () => {
 })
 
 describe('the consent modal discloses the grants, not only the scan', () => {
+  it('shows the staged review and asks for one clean-install confirmation', () => {
+    const review = {
+      permissions: { api: ['/api/knowledge'] }, crons: [{ name: 'digest', cadence: 'Every 60 seconds', scheduled: true }],
+      pythonDependencies: [{ spec: 'sample-lib>=2', coreOwned: false }], hasUI: false, uiComponents: '',
+      hasBackend: true, backendSandbox: 'strict', providers: [{ type: 'search', implementation: 'SearchProvider', execution: 'in-process' }],
+      onInstall: 'setup.sh', onUpdate: '', onEnable: '', onDisable: '', onUninstall: '', hooks: [],
+      cliSetup: '', cliDoctor: '', sources: [], mcpServers: [{ name: 'notes', launches: 'notes-server --safe' }],
+      skills: [], runsAsYou: 'This app loads declared Python packages into the gateway.',
+    } as NonNullable<GuardedResult['review']>
+    const { container } = render(<ConsentModal label="demo-app" busy={false} permissions={undefined} crons={undefined}
+      onConfirm={() => {}} onClose={() => {}}
+      result={guarded({ needsConsent: true, scan: scan({ verdict: 'clean' }), review, reviewDigest: 'digest' })} />)
+    const text = (container.ownerDocument.body.textContent || '').replace(/\s+/g, ' ')
+    expect(text).toMatch(/sample-lib>=2/)
+    expect(text).toMatch(/strict sandbox/)
+    expect(text).toMatch(/notes-server --safe/)
+    expect(text).toMatch(/setup.sh/)
+    expect(footerButtons()).toContain('Install')
+    expect(footerButtons().some((name) => /Install anyway/.test(name))).toBe(false)
+  })
+
+  it('shows before and after values when an update changes grants', () => {
+    const review = {
+      permissions: { api: ['/api/knowledge'] }, crons: [], pythonDependencies: [], hasUI: false, uiComponents: '',
+      hasBackend: false, backendSandbox: '', providers: [], onInstall: '', onUpdate: '', onEnable: '', onDisable: '', onUninstall: '',
+      hooks: [], cliSetup: '', cliDoctor: '', sources: [], mcpServers: [], skills: [], runsAsYou: '',
+    } as NonNullable<GuardedResult['review']>
+    const previous = { ...review, permissions: {} }
+    render(<ConsentModal label="demo-app" busy={false} permissions={undefined} crons={undefined}
+      onConfirm={() => {}} onClose={() => {}}
+      result={guarded({ needsConsent: true, scan: scan({ verdict: 'clean' }), review, previousReview: previous, reviewDigest: 'digest' })} />)
+    const changes = screen.getByTestId('app-disclosure-changes').textContent || ''
+    expect(changes).toContain('Before: None declared')
+    expect(changes).toContain('After: api: /api/knowledge')
+  })
+
   it('renders the enforced permissions and the scheduled jobs beside the findings', () => {
     const { container } = render(<ConsentModal label="demo-app" busy={false}
       permissions={{ api: ['/api/knowledge'], cron: true, network: true }}

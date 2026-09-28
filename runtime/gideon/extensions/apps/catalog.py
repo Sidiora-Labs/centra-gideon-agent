@@ -19,6 +19,7 @@ gate + lifecycle are unchanged.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
@@ -26,6 +27,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
@@ -136,6 +138,9 @@ class CatalogEntry:
     quality: dict[str, Any] = field(default_factory=dict)
     coreCompatibility: dict[str, Any] = field(default_factory=dict)  # noqa: N815
     registry: dict[str, str] | None = None
+    installable: bool = True
+    refused: str = ""
+    listedBy: str = ""  # noqa: N815
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -212,6 +217,9 @@ def resolve_catalog_entries(entries: list[CatalogEntry]) -> list[CatalogEntry]:
         current = winners.get(entry.name)
         if current is None:
             winners[entry.name] = entry
+        elif bool(entry.refused) != bool(current.refused):
+            if not entry.refused:
+                winners[entry.name] = entry
         elif precedence_rank(entry.sourceKind) < precedence_rank(current.sourceKind):
             winners[entry.name] = entry
     return list(winners.values())
@@ -223,6 +231,17 @@ _registry_cache: dict[str, tuple[float, list["RegistryPointer"]]] = {}
 _REGISTRY_RETRY_INITIAL_SECS = 30.0
 _REGISTRY_RETRY_MAX_SECS = 300.0
 _registry_retry: dict[str, tuple[float, float]] = {}
+
+_LISTING_RULE = "Listings can download only from public HTTPS addresses on port 443."
+_PLACES = {
+    "loopback": "this computer",
+    "unspecified": "this computer",
+    "private": "a private network",
+    "link_local": "a link-local address",
+    "multicast": "a multicast address",
+    "reserved": "a reserved address",
+}
+_OWNER_CAN_ALLOW = frozenset({"loopback", "unspecified", "private"})
 
 _GIT_SCAN_TTL_SECS = 300.0
 _git_scan_cache: dict[str, tuple[float, list["CatalogEntry"]]] = {}
@@ -393,13 +412,24 @@ def _fetch_registry_index(
     return pointers or None
 
 
-def _pointer_to_entry(source: str, p: RegistryPointer, *, is_git: bool) -> CatalogEntry:
+def _pointer_to_entry(
+    source: str, p: RegistryPointer, *, is_git: bool, policy: Any = None
+) -> CatalogEntry:
     """Build a Store card from a registry pointer. The install POINTER is the repo the
     pointer names (falling back to the source itself), with a ``#subdirectory`` suffix
     when the app lives in a subdir — the exact string install hands to source.resolve.
     """
     repo = p.repo or source
     pointer = repo + (f"#{p.subdirectory}" if p.subdirectory else "")
+    refused = ""
+    if p.repo:
+        refused = listing_repo_refusal(p.repo)
+        if not refused:
+            from gideon.security.net.guard import evaluate
+
+            refused = listing_address_refusal(
+                evaluate(p.repo, policy or listing_policy(source), resolve=False)
+            )
     return CatalogEntry(
         name=p.name,
         displayName=p.displayName or p.name,
@@ -411,6 +441,9 @@ def _pointer_to_entry(source: str, p: RegistryPointer, *, is_git: bool) -> Catal
         sourceKind="git" if is_git else "local",
         tags=list(p.tags),
         pointer=pointer,
+        installable=not refused,
+        refused=refused,
+        listedBy=source if p.repo else "",
         registry={
             "maintainer": p.maintainer,
             "lastValidated": p.lastValidated,
@@ -434,11 +467,13 @@ def _scan_registries(*, now: float) -> list[CatalogEntry]:
     """
     out: list[CatalogEntry] = []
     for url in list_git_sources():
+        policy = listing_policy(url)
         for p in _fetch_registry_index(url, is_git=True, now=now) or []:
-            out.append(_pointer_to_entry(url, p, is_git=True))
+            out.append(_pointer_to_entry(url, p, is_git=True, policy=policy))
     for root in list_local_sources():
+        policy = listing_policy(root)
         for p in _fetch_registry_index(root, is_git=False, now=now) or []:
-            out.append(_pointer_to_entry(root, p, is_git=False))
+            out.append(_pointer_to_entry(root, p, is_git=False, policy=policy))
     return out
 
 
@@ -723,6 +758,122 @@ def _read_user_sources() -> list[str]:
 _GIT_SOURCE_SCHEMES: frozenset[str] = frozenset({"https", "http", "ssh", "git", "file"})
 
 _SCP_LIKE_REMOTE_RE = re.compile(r"^[A-Za-z0-9._~-]+@[A-Za-z0-9.-]+:(?!//).+")
+
+
+def _shown(value: str) -> str:
+    value = "".join(char for char in value if char.isprintable())
+    return value[:160] + ("…" if len(value) > 160 else "")
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def listing_repo_refusal(repo: str) -> str:
+    """Return a safe explanation when a listing repository is not an HTTPS URL."""
+    if any(char.isspace() or not char.isprintable() for char in repo):
+        return f"Not installable: the listed download address is malformed. {_LISTING_RULE}"
+    if _SCP_LIKE_REMOTE_RE.match(repo):
+        return f"Not installable: the listed download address is not HTTPS. {_LISTING_RULE}"
+    try:
+        parts = urlsplit(repo)
+        port = parts.port
+    except ValueError:
+        return f"Not installable: the listed download address is malformed. {_LISTING_RULE}"
+    if parts.scheme in ("", "file"):
+        return f"Not installable: the listing points to a local folder. {_LISTING_RULE}"
+    if parts.scheme.lower() != "https":
+        return f"Not installable: the listed download address is not HTTPS. {_LISTING_RULE}"
+    if parts.username is not None or parts.password is not None:
+        return f"Not installable: the listed download address contains credentials. {_LISTING_RULE}"
+    if not parts.hostname:
+        return f"Not installable: the listed download address has no host. {_LISTING_RULE}"
+    if port is not None:
+        return f"Not installable: the listed download address specifies a port. {_LISTING_RULE}"
+    return ""
+
+
+def _place(host: str, address: str, category: str) -> str:
+    place = "the cloud metadata service" if category == "metadata" else _PLACES.get(category, "a non-public address")
+    shown_host = _shown(host)
+    if _is_ip_literal(shown_host) or not address:
+        return f"{place} ({shown_host})"
+    return f"{place} ({shown_host}, resolved to {address})"
+
+
+def listing_address_refusal(decision: Any) -> str:
+    """Return the card reason for a syntactically forbidden listing destination."""
+    category = getattr(decision, "category", "") or "policy"
+    if decision.allow or category == "unresolvable":
+        return ""
+    host = _shown(decision.host)
+    if category == "deny_list":
+        return f"Not installable: this listing downloads from {host}, which is denied by network policy."
+    if category == "malformed":
+        return f"Not installable: the listed download address is malformed. {_LISTING_RULE}"
+    reason = f"Not installable: this listing downloads from {_place(host, decision.address, category)}. {_LISTING_RULE}"
+    if category in _OWNER_CAN_ALLOW:
+        reason += " An owner may allow this host in network egress settings."
+    return reason
+
+
+def listing_fetch_refusal(url: str, refusal: Any) -> str:
+    """Return a safe explanation for a destination refused by the guarded git tunnel."""
+    host = _shown(refusal.host)
+    if refusal.category == "port":
+        return f"Not installed: the download redirected to {host} on a port other than 443."
+    if refusal.category == "method":
+        return f"Not installed: the download redirected to a non-HTTPS address at {host}. {_LISTING_RULE}"
+    if refusal.category == "deny_list":
+        return f"Not installed: the download reached {host}, which is denied by network policy."
+    original_host = (urlsplit(url).hostname or "").lower()
+    place = _place(refusal.host, refusal.address, refusal.category)
+    if refusal.host.lower() != original_host:
+        return f"Not installed: the download redirected to {place}. {_LISTING_RULE}"
+    return f"Not installed: the download destination {place} is not allowed. {_LISTING_RULE}"
+
+
+def listing_unreachable(host: str, reason: str) -> str:
+    """Return a bounded, credential-free message for an unreachable listing host."""
+    del reason
+    return f"Could not reach {_shown(host)} to download this app. Check the address and try again."
+
+
+def _git_remote_host(url: str) -> str:
+    if match := _SCP_LIKE_REMOTE_RE.match(url):
+        return match.group(0).split("@", 1)[1].split(":", 1)[0].lower()
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    return (parts.hostname or "").lower() if parts.scheme else ""
+
+
+def listing_policy(registry: str) -> Any:
+    """Build the listing egress policy, trusting the configured registry host only."""
+    from gideon.security.net.policy import listing_egress_policy
+
+    configured = {_git_source_key(source) for source in list_git_sources()}
+    trusted_host = _git_remote_host(registry) if _git_source_key(registry) in configured else ""
+    return listing_egress_policy(trusted_host)
+
+
+def _install_pointer(source: str, pointer: "RegistryPointer") -> str:
+    repo = pointer.repo or source
+    return repo + (f"#{pointer.subdirectory}" if pointer.subdirectory else "")
+
+
+def listing_source_for(install_source: str) -> str | None:
+    """Find the configured registry index that explicitly listed an install URL."""
+    for source, (_at, pointers) in list(_registry_cache.items()):
+        for pointer in pointers:
+            if pointer.repo and _install_pointer(source, pointer) == install_source:
+                return source
+    return None
 
 
 def _validate_git_source(url: str) -> str:
