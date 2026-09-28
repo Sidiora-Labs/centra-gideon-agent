@@ -41,6 +41,7 @@ GATE_OUTCOMES: dict[str, str] = {
 @dataclass
 class FireContext:
     trigger_id: str
+    trigger: Any = None
     payload_text: str = ""
     gates: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] | None = None
@@ -242,6 +243,15 @@ class GateWalk:
         return None
 
     def check_capability(self) -> FireDecision | None:
+        if self.context.trigger is not None:
+            from gideon.automation.triggers.grants import is_granted, required_provider
+
+            provider = required_provider(self.context.trigger)
+            if provider and not is_granted(self.context.trigger):
+                return self.deny(
+                    "capability",
+                    "owner review and an exact action grant are required before this trigger can fire",
+                )
         if not self.context.requested:
             return None
         from gideon.automation.triggers.screen import (

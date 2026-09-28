@@ -232,6 +232,7 @@ class TickPass:
 
         return firepath.FireContext(
             trigger_id=trigger.id,
+            trigger=trigger,
             gates=trigger.gates or {},
             capabilities=trigger.capabilities,
             holder=f"tick:{int(self.now)}",

@@ -90,7 +90,20 @@ SPEC_KEYS: dict[str, frozenset[str]] = {
             "delete_after_run",
         }
     ),
-    "event": frozenset({"source", "pattern", "blocking", "agent_scope"}),
+    "event": frozenset(
+        {
+            "source",
+            "pattern",
+            "blocking",
+            "agent_scope",
+            "key_glob",
+            "content_re",
+            "sender_glob",
+            "address_glob",
+            "event_glob",
+            "max_fires",
+        }
+    ),
     "run_completed": frozenset({"source_trigger", "source_def"}),
     "idle": frozenset(
         {
@@ -572,6 +585,51 @@ class _SpecContract:
             )
         if kind == "event":
             report.extend(_agent_scope_issues(self.spec))
+            if str(spec.get("source") or "") not in {"memory", "inbox", "app"}:
+                report.add("spec.source", "event source must be memory, inbox, or app", "error")
+            event_patterns = {
+                "MemoryUpdate",
+                "MemoryKeyPattern",
+                "ContentMatch",
+                "InboxMessage",
+                "InboxSender",
+                "InboxAddress",
+                "AppEvent",
+            }
+            pattern = str(spec.get("pattern") or "MemoryUpdate")
+            if pattern not in event_patterns:
+                report.add("spec.pattern", f"unknown event pattern {pattern!r}", "error")
+            for field_name in (
+                "key_glob",
+                "content_re",
+                "sender_glob",
+                "address_glob",
+                "event_glob",
+            ):
+                value = spec.get(field_name, "")
+                if value and not isinstance(value, str):
+                    report.add(
+                        f"spec.{field_name}",
+                        f"{field_name} must be text",
+                        "error",
+                    )
+            try:
+                max_fires = int(spec.get("max_fires", 0) or 0)
+                if max_fires < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                report.add("spec.max_fires", "max_fires must be a non-negative integer", "error")
+            content_re = spec.get("content_re")
+            if isinstance(content_re, str) and content_re:
+                if len(content_re) > 512:
+                    report.add("spec.content_re", "content_re exceeds 512 characters", "error")
+                else:
+                    try:
+                        import re
+
+                        re.compile(content_re)
+                    except re.error:
+                        report.add("spec.content_re", "content_re is not a valid regular expression", "error")
         return report.items
 
 

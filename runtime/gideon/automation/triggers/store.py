@@ -233,6 +233,21 @@ class TriggerStore(TriggerStoreProvider):
         if routed is not None:
             return routed
         with self._mutation() as changes:
+            from gideon.automation.triggers.grants import narrow
+
+            previous = next(
+                (
+                    LoadedTrigger.parse(record).trigger
+                    for record in changes.rows
+                    if RecordMutation.identity(record) == trigger.id
+                ),
+                None,
+            )
+            if previous is None:
+                from gideon.automation.triggers.models import Trigger
+
+                previous = Trigger(id=trigger.id, name=trigger.name, kind=trigger.kind)
+            narrow(trigger, previous)
             changes.replace(trigger)
         return trigger
 
@@ -243,6 +258,12 @@ class TriggerStore(TriggerStoreProvider):
         if routed is not None:
             return routed
         with self._mutation() as changes:
+            from gideon.automation.triggers import grants
+
+            try:
+                grants.revoke(trigger_id)
+            except OSError:
+                logger.warning("could not revoke trigger grant for %s", trigger_id)
             removed = changes.remove(trigger_id)
         return removed
 

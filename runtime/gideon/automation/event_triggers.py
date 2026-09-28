@@ -118,6 +118,12 @@ def fires_automatically(trigger: EventTrigger) -> bool:
     return bool(trigger.enabled and trigger.state == TriggerState.ACTIVE.value)
 
 
+def _timestamp(value: Any) -> float:
+    from gideon.automation.triggers.service import to_epoch
+
+    return to_epoch(value)
+
+
 def catastrophic_regex_hint(pattern: str) -> str:
     hazard = _CATASTROPHIC_RE.search(pattern) if pattern else None
     if hazard is None:
@@ -239,6 +245,108 @@ class EventTriggerStore:
         selected.last_status = status
         selected.last_error = error[:200]
         self.save(rows)
+
+
+class CanonicalEventStore:
+    """Compatibility projection over event-kind rows in the trigger document."""
+
+    def __init__(self, base_dir: Path | None = None):
+        from gideon.automation.triggers.store import TriggerStore
+
+        self._store = TriggerStore(base_dir=base_dir)
+
+    @staticmethod
+    def _view(trigger: Any) -> EventTrigger:
+        return EventTriggerEngine._event_view(trigger)
+
+    def load(self) -> list[EventTrigger]:
+        events = []
+        for row in self._store.load():
+            if row.trigger.kind != "event":
+                continue
+            view = self._view(row.trigger)
+            view._trigger = row.trigger
+            view._issues = [issue.message for issue in row.errors]
+            from gideon.automation.triggers.grants import action_revision
+
+            view._action_revision = action_revision(row.trigger)
+            events.append(view)
+        return events
+
+    def upsert(self, event: EventTrigger) -> None:
+        from gideon.automation.triggers.grants import is_granted, required_provider
+        from gideon.automation.triggers.models import Trigger, TriggerState
+
+        previous_row = self._store.get(event.id)
+        previous = previous_row.trigger if previous_row is not None else None
+        current = Trigger(
+            id=event.id,
+            name=event.id,
+            kind="event",
+            enabled=bool(event.enabled),
+            created_by=(previous.created_by if previous is not None else "user"),
+            author=(previous.author if previous is not None else ""),
+            origin_harness=(previous.origin_harness if previous is not None else ""),
+            spec={
+                "source": event.source,
+                "pattern": event.pattern,
+                "key_glob": event.key_glob,
+                "content_re": event.content_re,
+                "sender_glob": event.sender_glob,
+                "address_glob": event.address_glob,
+                "event_glob": event.event_glob,
+                "max_fires": event.max_fires,
+            },
+            gates={"debounce_secs": event.debounce_secs},
+            capabilities=dict(previous.capabilities if previous is not None else {}),
+            workflow={"inline": {"provider": event.action_provider, "config": dict(event.action_config or {})}},
+            run_count=event.fire_count,
+            last_fired_at=_utc_iso(event.last_fired_at),
+            last_error_summary=event.last_error,
+            state=event.state or TriggerState.ACTIVE.value,
+        )
+        if previous is not None and previous.enabled and required_provider(current) and not is_granted(current):
+            current.enabled = False
+            current.state = TriggerState.PAUSED.value
+        self._store.upsert(current)
+        saved = self._store.get(event.id)
+        if saved is not None and saved.trigger.enabled and required_provider(saved.trigger) and not is_granted(saved.trigger):
+            saved.trigger.enabled = False
+            saved.trigger.state = TriggerState.PAUSED.value
+            self._store.upsert(saved.trigger)
+
+    def delete(self, trigger_id: str) -> bool:
+        row = self._store.get(trigger_id)
+        return bool(row is not None and row.trigger.kind == "event" and self._store.delete(trigger_id))
+
+    def record_fire(self, trigger_id: str, *, now: float) -> None:
+        row = self._store.get(trigger_id)
+        if row is None or row.trigger.kind != "event":
+            return
+        row.trigger.run_count = int(row.trigger.run_count or 0) + 1
+        row.trigger.last_fired_at = _utc_iso(now)
+        maximum = int((row.trigger.spec or {}).get("max_fires") or 0)
+        if maximum and row.trigger.run_count >= maximum:
+            row.trigger.enabled = False
+        self._store.upsert(row.trigger)
+
+    def record_outcome(self, trigger_id: str, *, status: str, error: str = "") -> None:
+        from gideon.automation.triggers.models import TriggerHealth
+
+        row = self._store.get(trigger_id)
+        if row is None or row.trigger.kind != "event":
+            return
+        row.trigger.health_status = TriggerHealth.OK.value if status == "success" else TriggerHealth.FAILING.value
+        row.trigger.last_error_summary = error[:200]
+        self._store.upsert(row.trigger)
+
+
+def _utc_iso(stamp: float) -> str:
+    if stamp <= 0:
+        return ""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
 
 
 @dataclass
@@ -425,18 +533,97 @@ def get_engine() -> EventTriggerEngine:
 
 
 class EventTriggerEngine:
-    def __init__(self, store: EventTriggerStore | None = None):
+    def __init__(self, store: Any | None = None):
         self._store = store
         self._fire_times: list[float] = []
 
-    def _get_store(self) -> EventTriggerStore:
+    def _get_store(self) -> Any:
         if self._store is not None:
             return self._store
         from gideon.core.config.loader import config_dir
+        from gideon.automation.triggers.store import TriggerStore
 
-        store = EventTriggerStore(config_dir().joinpath("event_triggers.json"))
+        store = TriggerStore(base_dir=config_dir())
         self._store = store
         return store
+
+    @staticmethod
+    def _event_view(trigger: Any) -> EventTrigger:
+        spec = trigger.spec if isinstance(getattr(trigger, "spec", None), dict) else {}
+        gates = trigger.gates if isinstance(getattr(trigger, "gates", None), dict) else {}
+        workflow = trigger.workflow if isinstance(getattr(trigger, "workflow", None), dict) else {}
+        action = workflow.get("inline") if isinstance(workflow.get("inline"), dict) else workflow
+        return EventTrigger(
+            id=trigger.id,
+            pattern=str(spec.get("pattern") or MEMORY_UPDATE),
+            source=str(spec.get("source") or SOURCE_MEMORY),
+            action_provider=str(action.get("provider") or "notify"),
+            action_config=dict(action.get("config") or {}),
+            key_glob=str(spec.get("key_glob") or ""),
+            content_re=str(spec.get("content_re") or ""),
+            sender_glob=str(spec.get("sender_glob") or ""),
+            address_glob=str(spec.get("address_glob") or ""),
+            event_glob=str(spec.get("event_glob") or ""),
+            enabled=bool(trigger.enabled),
+            state=str(getattr(trigger, "state", "active") or "active"),
+            max_fires=int(spec.get("max_fires") or 0),
+            fire_count=int(getattr(trigger, "run_count", 0) or 0),
+            debounce_secs=float(gates.get("debounce_secs", _DEFAULT_DEBOUNCE_SECS) or 0),
+            last_fired_at=_timestamp(getattr(trigger, "last_fired_at", "")),
+        )
+
+    def _load_events(self) -> list[EventTrigger]:
+        store = self._get_store()
+        from gideon.automation.triggers.store import TriggerStore
+
+        if isinstance(store, TriggerStore):
+            from gideon.automation.triggers.grants import action_revision
+
+            events = []
+            for row in store.load():
+                if row.trigger.kind != "event" or not row.ok:
+                    continue
+                event = self._event_view(row.trigger)
+                event._action_revision = action_revision(row.trigger)
+                events.append(event)
+            return events
+        return list(store.load())
+
+    def _record_fire(self, trigger_id: str, *, now: float) -> None:
+        from gideon.automation.triggers.store import TriggerStore
+        from gideon.automation.triggers.service import to_iso
+
+        store = self._get_store()
+        if not isinstance(store, TriggerStore):
+            store.record_fire(trigger_id, now=now)
+            return
+        row = store.get(trigger_id)
+        if row is None or row.trigger.kind != "event":
+            return
+        trigger = row.trigger
+        trigger.run_count = int(trigger.run_count or 0) + 1
+        trigger.last_fired_at = to_iso(now)
+        maximum = int((trigger.spec or {}).get("max_fires") or 0)
+        if maximum and trigger.run_count >= maximum:
+            trigger.enabled = False
+        store.upsert(trigger)
+
+    def _record_outcome(self, trigger_id: str, *, status: str, error: str = "") -> None:
+        from gideon.automation.triggers.models import TriggerHealth
+        from gideon.automation.triggers.store import TriggerStore
+
+        store = self._get_store()
+        if not isinstance(store, TriggerStore):
+            store.record_outcome(trigger_id, status=status, error=error)
+            return
+        row = store.get(trigger_id)
+        if row is None or row.trigger.kind != "event":
+            return
+        row.trigger.health_status = (
+            TriggerHealth.OK.value if status == "success" else TriggerHealth.FAILING.value
+        )
+        row.trigger.last_error_summary = error[:200]
+        store.upsert(row.trigger)
 
     def on_event(
         self,
@@ -450,7 +637,7 @@ class EventTriggerEngine:
     ) -> None:
         occurrence = EventOccurrence(source, event_type, key, value, meta)
         try:
-            subscriptions = self._get_store().load()
+            subscriptions = self._load_events()
         except Exception:
             return
         for trigger in subscriptions:
@@ -492,7 +679,7 @@ class EventTriggerEngine:
     ) -> None:
         occurrence = EventOccurrence(source, event_type, key, value, meta)
         try:
-            self._get_store().record_fire(t.id, now=now)
+            self._record_fire(t.id, now=now)
         except Exception:
             logger.debug("event-trigger record_fire failed", exc_info=True)
         try:
@@ -500,7 +687,9 @@ class EventTriggerEngine:
         except RuntimeError:
             self._spool(t, now=now, **occurrence.parameters())
         else:
-            active_loop.create_task(self._fire(t, **occurrence.parameters()))
+            active_loop.create_task(
+                self._fire(t, fired_at=now, **occurrence.parameters())
+            )
 
     def _spool(
         self,
@@ -539,22 +728,76 @@ class EventTriggerEngine:
         key: str,
         value: str,
         meta: dict | None = None,
+        fired_at: float = 0.0,
     ) -> None:
         occurrence = EventOccurrence(source, event_type, key, value, meta)
         try:
-            result = await execute_event_action(t, **occurrence.parameters())
+            store = self._get_store()
+            from gideon.automation.triggers.firepath import FireContext, evaluate
+            from gideon.automation.triggers.grants import action_revision, is_granted, required_provider
+            from gideon.automation.triggers.screen import requested_capabilities
+            from gideon.automation.triggers.store import TriggerStore
+
+            if not isinstance(store, TriggerStore):
+                result = await execute_event_action(t, **occurrence.parameters())
+            else:
+                row = store.get(t.id)
+                if row is None or row.trigger.kind != "event" or not row.ok:
+                    self._record_outcome(t.id, status="failure", error="current trigger is unavailable")
+                    return
+                current = row.trigger
+                if action_revision(current) != getattr(t, "_action_revision", ""):
+                    self._record_outcome(t.id, status="failure", error="trigger action changed before dispatch")
+                    return
+                provider_name = required_provider(current)
+                if provider_name and not is_granted(current):
+                    self._record_outcome(t.id, status="failure", error="owner action grant is missing")
+                    return
+                payload = dict(occurrence.parameters(), trigger_id=t.id)
+                payload["value"] = _fence_fragment(
+                    occurrence.value,
+                    2000,
+                    source=f"trigger:{t.id}:{source}.{event_type}",
+                    source_type=f"event:{source}.{event_type}",
+                    source_id=key,
+                )
+                context = FireContext(
+                    trigger_id=t.id,
+                    trigger=current,
+                    payload_text=occurrence.value,
+                    gates=current.gates or {},
+                    capabilities=current.capabilities,
+                    requested=requested_capabilities(current),
+                    holder=f"event:{t.id}",
+                    now=fired_at,
+                )
+                decision = await evaluate(context)
+                if not decision.allowed:
+                    self._record_outcome(t.id, status="failure", error=decision.reason)
+                    return
+                from gideon.automation.triggers.claims import write_claim, release_claim
+                from gideon.interfaces.dashboard.handlers.triggers import _dispatch_store_action
+
+                write_claim(decision.claim, base_dir=store.base_dir)
+                try:
+                    ran, note = await _dispatch_store_action(
+                        current, payload, event=f"{source}.{event_type}"
+                    )
+                finally:
+                    release_claim(t.id, base_dir=store.base_dir)
+                result = FireOutcome(ran, "" if ran else note)
         except Exception as failure:
             from gideon.integrations.action_providers import provider_failure
 
             detail = provider_failure(t.action_provider, failure).render()
             logger.warning("event-trigger action failed for %s — %s", t.id, detail)
-            self._get_store().record_outcome(t.id, status="failure", error=detail)
+            self._record_outcome(t.id, status="failure", error=detail)
         else:
             if not result.ran:
                 logger.debug("event-trigger %s did not run: %s", t.id, result.reason)
             outcome = result.to_dict()
             succeeded = result.ran and outcome.get("success", True)
-            self._get_store().record_outcome(
+            self._record_outcome(
                 t.id,
                 status="success" if succeeded else "failure",
                 error="" if succeeded else str(outcome.get("error") or result.reason or "action failed"),
