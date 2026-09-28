@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -315,11 +316,13 @@ class RunController:
         self._budget_warned = False
         self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
         queued = self.run.extra.get("workflow_queued_mutations", [])
-        self._pending_mutations: list[tuple[list[dict[str, Any]], str]] = [
-            (list(item.get("ops") or []), str(item.get("actor") or "user"))
+        self._pending_mutations: list[tuple[list[dict[str, Any]], str, dict[str, Any] | None]] = [
+            (list(item.get("ops") or []), str(item.get("actor") or "user"), None)
             for item in queued
             if isinstance(item, dict) and isinstance(item.get("ops"), list)
         ]
+        # Current-process owner proof is deliberately never restored from the durable queue.
+        self._pending_owner_reentry: dict[str, dict[str, Any]] = {}
         self._allow_memory = gate_policy.AllowMemory()
         self._event_holds: dict[str, gate_policy.HoldState] = {}
         self._event_seq = 0
@@ -1499,6 +1502,7 @@ class RunController:
         actor: str = "user",
         confirm: bool = False,
         expect_version: int | None = None,
+        owner_reentry: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Validate a batch and QUEUE it; the tick loop applies it.
 
@@ -1540,7 +1544,7 @@ class RunController:
             }
 
         projected = copy.deepcopy(self.spec)
-        for queued_ops, _queued_actor in self._pending_mutations:
+        for queued_ops, _queued_actor, _queued_reentry in self._pending_mutations:
             previous = mutations.prepare_batch(
                 queued_ops, projected, self.instances, effects=self._effects
             )
@@ -1568,7 +1572,26 @@ class RunController:
                 }
             ]
             return body
-        self._pending_mutations.append(([op.to_dict() for op in result.ops], actor))
+        reentry = None
+        if owner_reentry is not None:
+            from gideon.security.approval_answer import OWNER
+
+            ops = [op for op in result.ops if op.kind == mutations.OpKind.REWIND]
+            if (
+                len(ops) == 1
+                and owner_reentry.get("principal") is not None
+                and owner_reentry["principal"].kind == OWNER
+                and owner_reentry.get("origin_kind") == "workflow"
+                and owner_reentry.get("origin_id") == self.run.id
+                and owner_reentry.get("node_id") == ops[0].node_id
+                and owner_reentry.get("note_id")
+                and owner_reentry.get("fingerprint")
+            ):
+                reentry = {
+                    **owner_reentry,
+                    "mutation_id": uuid.uuid4().hex,
+                }
+        self._pending_mutations.append(([op.to_dict() for op in result.ops], actor, reentry))
         self._persist_pending_mutations()
         body["queued"] = True
         if self.run.status in (RunStatus.NEEDS_INPUT, RunStatus.PAUSED):
@@ -1577,7 +1600,7 @@ class RunController:
 
     def _persist_pending_mutations(self) -> None:
         self.run.extra["workflow_queued_mutations"] = [
-            {"ops": ops, "actor": actor} for ops, actor in self._pending_mutations
+            {"ops": ops, "actor": actor} for ops, actor, _reentry in self._pending_mutations
         ]
         self._save_run()
 
@@ -1592,7 +1615,7 @@ class RunController:
         if not self._pending_mutations:
             return
         while self._pending_mutations:
-            ops, actor = self._pending_mutations[0]
+            ops, actor, reentry = self._pending_mutations[0]
             try:
                 Node.from_dict(self.spec.get("root") or {})
             except ValueError:
@@ -1618,6 +1641,24 @@ class RunController:
                 )
             else:
                 self._commit_mutation(result, actor)
+                if reentry is not None:
+                    targets = [
+                        (path, node)
+                        for path, node in _walk(self.root)
+                        if node.id == str(reentry.get("node_id") or "")
+                    ]
+                    if len(targets) == 1:
+                        target = targets[0]
+                        path, node = target
+                        inst = self.instances.get(path)
+                        if inst is not None and inst.state == InstanceState.PENDING:
+                            self._pending_owner_reentry[path] = {
+                                **reentry,
+                                "instance_path": path,
+                                "node_id": node.id,
+                                "epoch": inst.epoch,
+                                "attempt": inst.attempt + 1,
+                            }
             self._pending_mutations.pop(0)
             self._persist_pending_mutations()
 
@@ -2667,7 +2708,33 @@ class RunController:
 
         now = time.time()
         calls = CallLog()
-        task = asyncio.create_task(self._execute(item, ctx, calls))
+        reentry = self._pending_owner_reentry.get(item.path)
+        reentry_matches = bool(
+            reentry
+            and reentry.get("epoch") == inst.epoch
+            and reentry.get("attempt") == inst.attempt
+            and reentry.get("node_id") == item.node.id
+        )
+        if reentry_matches:
+            from gideon.interfaces.dashboard.auto_denials import owner_reentry_attempt
+
+            state = getattr(self.services, "attention_state", None)
+            execution_attempt = (
+                f"{reentry['mutation_id']}:{item.path}:{inst.epoch}:{inst.attempt}"
+            )
+            with owner_reentry_attempt(
+                state,
+                str(reentry["note_id"]),
+                reentry["principal"],
+                origin_kind=str(reentry["origin_kind"]),
+                origin_id=str(reentry["origin_id"]),
+                attempt_id=execution_attempt,
+                node_id=str(reentry["node_id"]),
+            ) as active_reentry:
+                task = asyncio.create_task(self._execute(item, ctx, calls))
+            self._pending_owner_reentry.pop(item.path, None)
+        else:
+            task = asyncio.create_task(self._execute(item, ctx, calls))
         self._inflight[item.path] = _InFlight(
             task=task, ready=item, started=now, last_progress=now, cache_key=key,
             calls=calls,

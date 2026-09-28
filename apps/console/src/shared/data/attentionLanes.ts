@@ -1,4 +1,4 @@
-import type { ChatSession, InboxItem, InboxItemKind, InboxItemStatus, Loop, PendingApproval } from './api'
+import type { ChatSession, InboxItem, InboxItemKind, InboxItemStatus, Loop, PendingApproval, WorkflowRunSummary } from './api'
 
 export const LANES = ['needs-approval', 'your-turn', 'working', 'idle'] as const
 export type Lane = (typeof LANES)[number]
@@ -13,6 +13,9 @@ export type ApprovalInput = Pick<PendingApproval, 'id' | 'source' | 'tool' | 'to
 export type ActivityInput = Pick<ChatSession, 'key' | 'title' | 'running' | 'stopping' | 'pending_approval'>
 
 export type LoopInput = Pick<Loop, 'run_id' | 'name' | 'task' | 'status' | 'started_at' | 'created_at'>
+export type WorkflowInput = Pick<WorkflowRunSummary, 'id' | 'workflow_name' | 'status' | 'created_at' | 'started_at'> & {
+  parent_run_id?: string | null
+}
 
 export interface LaneCard {
   key: string
@@ -119,6 +122,7 @@ export function toLanes(
   approvals: ApprovalInput[],
   activity: ActivityInput[] = [],
   loops: LoopInput[] = [],
+  workflows: WorkflowInput[] = [],
 ): Record<Lane, LaneCard[]> {
   const out = emptyLanes()
 
@@ -177,8 +181,45 @@ export function toLanes(
     })
   }
 
-  for (const loop of Array.isArray(loops) ? loops : []) {
+  const validLoops = Array.isArray(loops) ? loops : []
+  const validWorkflows = Array.isArray(workflows) ? workflows : []
+  const loopsByRun = new Map<string, LoopInput>()
+  for (const loop of validLoops) {
+    if (typeof loop?.run_id === 'string' && loop.run_id !== '') loopsByRun.set(loop.run_id, loop)
+  }
+  const childrenByParent = new Map<string, string[]>()
+  for (const run of validWorkflows) {
+    const parent = typeof run?.parent_run_id === 'string' ? run.parent_run_id : ''
+    if (!parent || run.status === 'complete' || run.status === 'failed' || run.status === 'cancelled' || run.status === 'declined' || run.status === 'escalated') continue
+    const children = childrenByParent.get(parent) ?? []
+    children.push(run.id)
+    childrenByParent.set(parent, children)
+  }
+
+  const workflowSeen = new Set<string>()
+  for (const run of validWorkflows) {
+    if (!run || typeof run.id !== 'string' || run.id === '' || run.parent_run_id) continue
+    const loop = loopsByRun.get(run.id)
+    const status = loop?.status ?? run.status
+    if (status !== 'running' && status !== 'paused' && status !== 'needs_input') continue
+    if (status === 'needs_input' && items.some((item) => item.refs?.workflow === run.id && item.item_kind === 'needs_input' && isOpenStatus(item.status))) continue
+    const lane: Lane = status === 'running' ? 'working' : status === 'paused' ? 'idle' : 'your-turn'
+    out[lane].push({
+      key: `workflow:${run.id}`,
+      lane,
+      origin: 'workflow',
+      id: run.id,
+      title: firstLine(loop?.name) || firstLine(loop?.task) || firstLine(run.workflow_name) || run.id,
+      subtitle: status,
+      at: loop?.started_at ?? loop?.created_at ?? workflowTime(run.started_at || run.created_at),
+      refs: { workflow: run.id, children: childrenByParent.get(run.id) ?? [] },
+    })
+    workflowSeen.add(run.id)
+  }
+
+  for (const loop of validLoops) {
     if (!loop || typeof loop.run_id !== 'string' || loop.run_id === '') continue
+    if (workflowSeen.has(loop.run_id)) continue
     if (loop.status !== 'running' && loop.status !== 'paused') continue
     const lane = loop.status === 'running' ? 'working' : 'idle'
     out[lane].push({
@@ -189,10 +230,17 @@ export function toLanes(
       title: firstLine(loop.name) || firstLine(loop.task) || loop.run_id,
       subtitle: loop.status,
       at: loop.started_at ?? loop.created_at,
-      refs: { workflow: loop.run_id },
+      refs: { workflow: loop.run_id, children: childrenByParent.get(loop.run_id) ?? [] },
     })
+    workflowSeen.add(loop.run_id)
   }
 
   for (const lane of LANES) sortLane(lane, out[lane])
   return out
+}
+
+function workflowTime(value: string | null | undefined): number | null {
+  if (typeof value !== 'string' || value === '') return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed / 1000 : null
 }

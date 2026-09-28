@@ -1,11 +1,12 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, X } from 'lucide-react'
-import { api, type ChatSessionSummary, type InboxItem, type Loop, type PendingApproval } from '../../shared/data/api'
+import { api, type ChatSessionSummary, type InboxItem, type Loop, type PendingApproval, type WorkflowRunSummary } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
+import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { Button } from '../../shared/ui/Button'
 import { TextLink } from '../../shared/ui/TextLink'
-import { LANES, toLanes, type Lane, type LaneCard } from '../../shared/data/attentionLanes'
+import { LANES, toLanes, type Lane, type LaneCard, type WorkflowInput } from '../../shared/data/attentionLanes'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 
@@ -42,6 +43,7 @@ interface Attention {
   approvals: PendingApproval[]
   activity: SessionActivity[]
   loops: Loop[]
+  workflows: WorkflowInput[]
 }
 
 export interface SessionActivity {
@@ -64,13 +66,14 @@ function activityOf(s: ChatSessionSummary): SessionActivity {
 }
 
 async function readAttention(): Promise<Attention> {
-  const [items, approvals, sessions, loops] = await Promise.all([
+  const [items, approvals, sessions, loops, runData] = await Promise.all([
     api.inboxOpen(),
     api.approvals(),
     api.chatSessions(),
         api.uLoops(),
+    api.workflowRuns({ limit: 200 }),
   ])
-  return { items, approvals, activity: sessions.map(activityOf), loops }
+  return { items, approvals, activity: sessions.map(activityOf), loops, workflows: runData.runs as (WorkflowRunSummary & { parent_run_id?: string | null })[] }
 }
 
 export interface CardQuestion {
@@ -112,12 +115,24 @@ function failureText(verb: string, err: unknown): string {
 export function MissionControl() {
   const { data, error, loading, refresh } = useQuery<Attention>(ATTENTION_KEY, readAttention)
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({})
+  const listingRefresh = useRef<number | undefined>(undefined)
+  const onMessage = useCallback((message: WsMessage) => {
+    if (message.type !== 'workflow_runs') return
+    if (listingRefresh.current !== undefined) window.clearTimeout(listingRefresh.current)
+    listingRefresh.current = window.setTimeout(() => {
+      listingRefresh.current = undefined
+      refresh()
+    }, 400)
+  }, [refresh])
+  useChatSocket(onMessage)
+  useEffect(() => () => { if (listingRefresh.current !== undefined) window.clearTimeout(listingRefresh.current) }, [])
 
   const items = data?.items ?? []
   const approvals = data?.approvals ?? []
   const activity = data?.activity ?? []
   const loops = data?.loops ?? []
-  const lanes = useMemo(() => toLanes(items, approvals, activity, loops), [items, approvals, activity, loops])
+  const workflows = data?.workflows ?? []
+  const lanes = useMemo(() => toLanes(items, approvals, activity, loops, workflows), [items, approvals, activity, loops, workflows])
   const cards = useMemo(() => {
     const inboxById = new Map(items.map(item => [item.id, item]))
     const approvalsById = new Map(approvals.map(approval => [approval.id, approval]))

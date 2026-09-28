@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Send, MessageCircleQuestion, Coffee } from 'lucide-react'
-import { api, type Loop } from '../../../shared/data/api'
+import { api, type Loop, type WorkflowRunSummary } from '../../../shared/data/api'
 import { loopRoute } from '../../../shared/data/loopKind'
 import { useDashboardLive } from '../DashboardLive'
 import { loopStatusLabel, loopStatusColor, effectiveLoopStatus, ACTIVE_LOOP_STATUSES } from '../../../shared/data/loopStatus'
@@ -18,13 +18,20 @@ function pendingText(l: Loop): string | null {
 }
 
 export function ActiveWork({ navigate }: RouteProps) {
-  const { loops, read } = useDashboardLive()
+  const { loops, workflows, read } = useDashboardLive()
   const active = loops
     .filter((l) => ACTIVE_LOOP_STATUSES.has(l.status))
     .sort((a, b) => (b.started_at ?? b.created_at) - (a.started_at ?? a.created_at))
+  const loopRuns = new Set(active.map((loop) => loop.run_id).filter((id): id is string => Boolean(id)))
+  const runs = workflows
+    .filter((run) => {
+      const parent = (run as WorkflowRunSummary & { parent_run_id?: string | null }).parent_run_id
+      return !parent && !loopRuns.has(run.id) && (run.status === 'running' || run.status === 'paused')
+    })
+    .sort((a, b) => Date.parse(b.started_at || b.created_at) - Date.parse(a.started_at || a.created_at))
 
-  if (active.length === 0) {
-    if (!read.loops) return <ListSkeleton rows={2} what="active work" />
+  if (active.length === 0 && runs.length === 0) {
+    if (!read.loops || !read.workflows) return <ListSkeleton rows={2} what="active work" />
     return <SlotEmptyState icon={Coffee}>No active work. Loops you launch appear here as they run.</SlotEmptyState>
   }
 
@@ -32,6 +39,22 @@ export function ActiveWork({ navigate }: RouteProps) {
     <div className="flex flex-col gap-s pt-xs">
       <AnimatePresence initial={false}>
         {active.map((l) => <ActiveRow key={l.id} loop={l} navigate={navigate} />)}
+        {runs.map((run) => {
+          const childCount = workflows.filter((candidate) =>
+            (candidate as WorkflowRunSummary & { parent_run_id?: string | null }).parent_run_id === run.id
+            && (candidate.status === 'running' || candidate.status === 'paused'),
+          ).length
+          return <button key={run.id} type="button" onClick={() => navigate(`workflows/runs/${encodeURIComponent(run.id)}`)}
+            className="flex min-w-0 items-center gap-s rounded-lg bg-surface-low p-m text-left">
+            <StatusDot color={run.status === 'running' ? 'var(--color-info)' : 'var(--color-on-surface-low)'} pulse={run.status === 'running'} />
+            <span className="min-w-0 flex-1">
+              <span data-type="title-m" className="block truncate text-on-surface">{run.workflow_name}</span>
+              <span data-type="body-m" className="block truncate text-on-surface-low">
+                {run.status}{childCount ? ` · ${childCount} sub-run${childCount === 1 ? '' : 's'}` : ''}
+              </span>
+            </span>
+          </button>
+        })}
       </AnimatePresence>
     </div>
   )

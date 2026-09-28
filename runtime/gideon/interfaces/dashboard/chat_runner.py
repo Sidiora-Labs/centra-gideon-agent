@@ -736,7 +736,6 @@ def _permission_policy_denial(session: _ChatSession, event: Any) -> tuple[str, s
     return reason, f"task_mode:{getattr(session, '_task_mode', 'agent')}"
 
 
-
 def _truncate_snapshot(text: str) -> str:
     if len(text) > _MAX_FILE_SNAPSHOT:
         return text[:_MAX_FILE_SNAPSHOT] + "\n… [truncated]"
@@ -1862,6 +1861,14 @@ async def run_chat(
     still a contract — the door's injected `turn_runner` calls it by that shape —
     while `_prompt_depth` stays private as this function's own recursion counter.
     """
+    _retry_user_message = next(
+        (
+            row
+            for row in reversed(session.messages)
+            if row.get("role") == "user" and row.get("content") == message
+        ),
+        None,
+    )
     _in_flight_text = message
     _prior_history_key = _history_key_for(session.key)
     _prior_transcript = (
@@ -2950,6 +2957,21 @@ async def run_chat(
                 _orig_len = _payload["original_length"]
                 _recovery = _payload["recovery_hints"]
                 _tmeta = event.tool_meta or {}
+                if (
+                    _tmeta.get("auto_denied") is True
+                    and _tmeta.get("auto_denied_reason") == "unattended"
+                ):
+                    from gideon.interfaces.dashboard.auto_denials import record_auto_denial
+
+                    record_auto_denial(
+                        state,
+                        session=session.key,
+                        call_id=str(event.tool_call_id or ""),
+                        tool=str(event.title or "a tool"),
+                        fingerprint=str(_tmeta.get("call_fingerprint") or ""),
+                        reason="unattended",
+                        source=session.key,
+                    )
                 _tool_ok = _tmeta.get("ok")
                 _agent_error = _payload.get("agent_error")
                 unasked_outcome = str(_tmeta.get("unasked_outcome") or "")
@@ -3105,6 +3127,43 @@ async def run_chat(
                 except Exception:
                     logger.debug("PostToolUse hook error", exc_info=True)
             elif event.kind == EVENT_PERMISSION_REQUEST:
+                from gideon.interfaces.dashboard.auto_denials import (
+                    call_fingerprint,
+                    record_auto_denial,
+                    unanswered_for_chat,
+                )
+
+                _call_fingerprint = call_fingerprint(event.title, event.tool_input)
+                _retry_note_id = ""
+                _retry_origin = None
+                _retry_meta = (
+                    _retry_user_message.get("meta")
+                    if isinstance(_retry_user_message, dict)
+                    else None
+                )
+                _retry_marker = (
+                    _retry_meta.get("_auto_denied_retry")
+                    if isinstance(_retry_meta, dict)
+                    else None
+                )
+                if (
+                    isinstance(_retry_marker, dict)
+                    and _retry_marker.get("fingerprint") == _call_fingerprint
+                ):
+                    _note_id = str(_retry_marker.get("note_id") or "")
+                    _unanswered = unanswered_for_chat(state, _note_id, session.key)
+                    if _unanswered is not None and _unanswered[1] == _call_fingerprint:
+                        _retry_note_id = _note_id
+                        _retry_meta.pop("_auto_denied_retry", None)
+                        session._dirty = True
+                if not _retry_note_id:
+                    from gideon.interfaces.dashboard.auto_denials import bind_current_reentry_call
+
+                    _retry_origin = bind_current_reentry_call(
+                        state, _call_fingerprint, session=session.key
+                    )
+                    if _retry_origin is not None:
+                        _retry_note_id = _retry_origin.note_id
                 if event.tool_call_id:
                     _gated_tool_calls.add(event.tool_call_id)
                     _ungated_candidates.pop(event.tool_call_id, None)
@@ -3526,6 +3585,15 @@ async def run_chat(
                     continue
                 if _unattended_turn:
                     await client.reject_tool(event.request_id)
+                    record_auto_denial(
+                        state,
+                        session=session.key,
+                        call_id=str(event.tool_call_id or event.request_id or ""),
+                        tool=str(event.title or "a tool"),
+                        fingerprint=_call_fingerprint,
+                        reason="unattended",
+                        source=session.key,
+                    )
                     _ff_title, _ = redact_exfiltration_urls(event.title)
                     _ff_title, _ = redact_credentials(_ff_title)
                     session.append(
@@ -3597,6 +3665,12 @@ async def run_chat(
                         "tool_kind": event.tool_kind or "",
                         "risk": effective_risk,
                         "can_revise": perm_meta["can_revise"],
+                        "_call_fingerprint": _call_fingerprint,
+                        "_auto_denied_note_id": _retry_note_id,
+                        "_auto_denied_origin_kind": getattr(_retry_origin, "origin_kind", ""),
+                        "_auto_denied_origin_id": getattr(_retry_origin, "origin_id", ""),
+                        "_auto_denied_attempt_id": getattr(_retry_origin, "attempt_id", ""),
+                        "_auto_denied_node_id": getattr(_retry_origin, "node_id", ""),
                     },
                 )
                 loop = asyncio.get_running_loop()
@@ -3624,6 +3698,9 @@ async def run_chat(
                         approval_answered = True
                 except asyncio.TimeoutError:
                     outcome = "rejected"
+                    state.end_approval(
+                        f"{session.key}:{event.request_id}", outcome="expired"
+                    )
                 finally:
                     session._approval_futures.pop(str(event.request_id), None)
                     if mirrored_item:
@@ -3855,6 +3932,12 @@ async def run_chat(
                         },
                     )
             elif event.kind == EVENT_COMPLETE:
+                if isinstance(_retry_user_message, dict):
+                    _retry_meta = _retry_user_message.get("meta")
+                    if isinstance(_retry_meta, dict) and _retry_meta.pop(
+                        "_auto_denied_retry", None
+                    ) is not None:
+                        session._dirty = True
                 _turn_context_usage = getattr(event, "context_usage", None)
                 if (
                     event.input_tokens

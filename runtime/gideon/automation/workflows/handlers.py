@@ -1375,6 +1375,47 @@ async def _reentry(request: web.Request, operation: str, fn: Any) -> web.Respons
             status=400,
         )
     kwargs: dict[str, Any] = {"supervisor": _supervisor(request)}
+    retry_note_id = str(body.get("_auto_denied_retry_note_id", "") or "")
+    if retry_note_id:
+        if fn is not service.rewind_run:
+            return json_error(
+                "denied_call_origin_mismatch",
+                message="an unanswered call can only retry its exact workflow step",
+                status=409,
+            )
+        from gideon.security.approval_answer import OWNER, of_request
+
+        principal = of_request(request)
+        if principal.kind != OWNER:
+            return json_error(
+                "approval_owner_only",
+                message="only the authenticated owner can retry this call",
+                status=403,
+            )
+        from gideon.interfaces.dashboard.auto_denials import unanswered_note
+
+        denial = unanswered_note(request.app.get("state"), retry_note_id)
+        refs = denial.refs if denial is not None and isinstance(denial.refs, dict) else {}
+        fingerprint = refs.get("call_fingerprint")
+        if (
+            refs.get("run") != run_id
+            or refs.get("node") != node_id
+            or not isinstance(fingerprint, str)
+            or len(fingerprint) != 64
+        ):
+            return json_error(
+                "denied_call_origin_mismatch",
+                message="the recorded call does not belong to this live workflow step",
+                status=409,
+            )
+        kwargs["owner_reentry"] = {
+            "note_id": retry_note_id,
+            "fingerprint": fingerprint,
+            "principal": principal,
+            "origin_kind": "workflow",
+            "origin_id": run_id,
+            "node_id": node_id,
+        }
     if fn is service.rewind_run:
         kwargs["redo_effects"] = bool(body.get("redo_effects"))
         kwargs["force"] = bool(body.get("force"))

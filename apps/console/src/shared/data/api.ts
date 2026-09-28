@@ -4614,7 +4614,7 @@ export const api = {
   deleteEventTrigger: (id: string) => del(`/api/triggers/event:${encodeURIComponent(id)}`),
   toggleEventTrigger: (id: string, enabled?: boolean) =>
     post<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}/toggle`, enabled === undefined ? {} : { enabled }),
-  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
+  runEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string>; _auto_denied_retry_note_id?: string }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, body ?? {}),
   dryRunEventTrigger: (id: string, body?: { key?: string; value?: string; event_type?: string; meta?: Record<string, string> }) =>
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/run`, { ...(body ?? {}), dry_run: true }),
@@ -4629,8 +4629,8 @@ export const api = {
   updateSchedule: (id: string, body: Record<string, unknown>, basedOn?: string) =>
     put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/schedule:${encodeURIComponent(id)}`, _scheduleBodyToWire(body), basedOn),
   deleteSchedule: (id: string) => del(`/api/triggers/schedule:${encodeURIComponent(id)}`),
-  runSchedule: (id: string, dryRun = false) =>
-    post<TriggerRunResult>(`/api/triggers/schedule:${encodeURIComponent(id)}/run`, dryRun ? { dry_run: true } : undefined),
+  runSchedule: (id: string, dryRun = false, retryNoteId = '') =>
+    post<TriggerRunResult>(`/api/triggers/schedule:${encodeURIComponent(id)}/run`, dryRun ? { dry_run: true } : retryNoteId ? { _auto_denied_retry_note_id: retryNoteId } : undefined),
   enableSchedule: (id: string, enabled: boolean) => post(`/api/triggers/schedule:${encodeURIComponent(id)}/toggle`, { enabled }),
   scheduleToChat: (id: string) => post<{ ok: boolean; session: string }>(`/api/triggers/schedule:${encodeURIComponent(id)}/to-chat`),
   triggerHistory: (triggerId: string, limit = 10, offset = 0) =>
@@ -4890,8 +4890,8 @@ export const api = {
     delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
   }, basedOn?: string) => put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/store:${encodeURIComponent(rawId)}`, body, basedOn),
   deleteStoreTrigger: (rawId: string) => del(`/api/triggers/store:${encodeURIComponent(rawId)}`),
-  runStoreTrigger: (rawId: string, dryRun = false) =>
-    post<TriggerRunResult>(`/api/triggers/store:${encodeURIComponent(rawId)}/run`, dryRun ? { dry_run: true } : {}),
+  runStoreTrigger: (rawId: string, dryRun = false, retryNoteId = '') =>
+    post<TriggerRunResult>(`/api/triggers/store:${encodeURIComponent(rawId)}/run`, dryRun ? { dry_run: true } : retryNoteId ? { _auto_denied_retry_note_id: retryNoteId } : {}),
   viewRender: (surface: string) =>
     post<{ refreshed: string[]; served_cache: { trigger_id: string; reason: string }[] }>(
       '/api/triggers/view/render', { surface }),
@@ -5466,7 +5466,7 @@ export const api = {
     post<WorkflowTriageResult>(`/api/workflows/runs/${encodeURIComponent(id)}/review/triage`, body),
   resumeWorkflowRun: (id: string, body: { answer?: unknown; resume_token?: string; always_allow?: boolean; round_resume?: boolean; round_budget?: { max_tokens: number; max_cost: number } }) =>
     post<{ ok?: boolean; approved?: boolean; node_id?: string; resumed?: boolean }>(`/api/workflows/runs/${encodeURIComponent(id)}/resume`, body),
-  rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean; confirm_cascade?: boolean }) =>
+  rewindWorkflowRun: (id: string, body: { node_id: string; redo_effects?: boolean; force?: boolean; confirm_cascade?: boolean; _auto_denied_retry_note_id?: string }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/rewind`, body),
   workflowRunFrom: (id: string, body: { node_id: string; confirm_cascade?: boolean }) =>
     post<{ ok?: boolean; preview: WorkflowCascadePreview }>(`/api/workflows/runs/${encodeURIComponent(id)}/run-from`, body),

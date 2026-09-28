@@ -159,8 +159,13 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
     user_meta = body.get("meta")
     if not isinstance(user_meta, dict):
         user_meta = None
+    retry_note_id = ""
     client_ts = ""
     if user_meta:
+        raw_retry_note_id = user_meta.pop("_auto_denied_retry_note_id", "")
+        user_meta.pop("_auto_denied_retry", None)
+        if isinstance(raw_retry_note_id, str) and len(raw_retry_note_id) <= 200:
+            retry_note_id = raw_retry_note_id.strip()
         _raw_ts = user_meta.pop("client_ts", "")
         if isinstance(_raw_ts, str) and _raw_ts:
             try:
@@ -251,6 +256,11 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         session.natural_voice = normalize_conversation_choice(body.get("natural_voice"))
 
     if session.running:
+        if retry_note_id:
+            return web.json_response(
+                {"error": {"code": "retry_session_running", "message": "Wait for the current turn to finish before retrying this recorded call."}},
+                status=409,
+            )
         if message:
             _cr = await _maybe_cancel_and_replace(state, session, message)
             if _cr is not None:
@@ -290,6 +300,31 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
 
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
+
+    if retry_note_id:
+        from gideon.security.approval_answer import OWNER, of_request
+
+        principal = of_request(request)
+        if principal.kind != OWNER:
+            return web.json_response(
+                {"error": {"code": "owner_required", "message": "Only the authenticated owner can retry this recorded call."}},
+                status=403,
+            )
+        from gideon.interfaces.dashboard.auto_denials import unanswered_for_chat
+
+        denied = unanswered_for_chat(state, retry_note_id, session.key)
+        if denied is None:
+            return web.json_response(
+                {"error": {"code": "denial_note_unavailable", "message": "This unanswered-call note is no longer available for this chat."}},
+                status=409,
+            )
+        user_meta = {
+            **(user_meta or {}),
+            "_auto_denied_retry": {
+                "note_id": retry_note_id,
+                "fingerprint": denied[1],
+            },
+        }
 
     ws_mode = request.query.get("ws") == "1"
 

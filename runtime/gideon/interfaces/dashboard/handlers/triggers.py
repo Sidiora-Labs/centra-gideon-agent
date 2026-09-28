@@ -2162,6 +2162,7 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
 
     dry_run = request.query.get("dry_run", "") in ("1", "true", "yes")
+    body: Any = {}
     if not dry_run:
         try:
             body = await read_json_body(request)
@@ -2176,6 +2177,37 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": result.ok, "result": result.data, "text": result.text}
         )
+
+    retry_note_id = ""
+    retry_principal = None
+    retry_state = None
+    if isinstance(body, dict) and "_auto_denied_retry_note_id" in body:
+        retry_note_id = body.get("_auto_denied_retry_note_id")
+        if (
+            not isinstance(retry_note_id, str)
+            or not retry_note_id
+            or retry_note_id != retry_note_id.strip()
+        ):
+            return web.json_response(
+                {"error": "a valid unanswered-call note is required"}, status=400
+            )
+        from gideon.security.approval_answer import OWNER, of_request
+
+        retry_principal = of_request(request)
+        if retry_principal.kind != OWNER or not retry_principal.name:
+            return web.json_response({"error": "owner required"}, status=403)
+        retry_state = request.app.get("state")
+        if retry_state is None:
+            return web.json_response({"error": "trigger runtime unavailable"}, status=503)
+        from gideon.interfaces.dashboard.auto_denials import unanswered_note
+
+        note = unanswered_note(retry_state, retry_note_id)
+        refs = note.refs if note is not None and isinstance(note.refs, dict) else {}
+        if refs.get("trigger") != str(getattr(row.trigger, "id", "") or ""):
+            return web.json_response(
+                {"error": "the unanswered call is not open for this trigger"},
+                status=409,
+            )
 
     if row.errors:
         return web.json_response(
@@ -2199,7 +2231,11 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
     previous_runs, _total = await _runs_store().list_for_job(raw, 0, 1)
     previous = previous_runs[0] if previous_runs and isinstance(previous_runs[0], dict) else {}
     ran, note = await _dispatch_store_action(
-        row.trigger, {"trigger_id": raw, "manual": True}
+        row.trigger,
+        {"trigger_id": raw, "manual": True},
+        reentry_note_id=retry_note_id,
+        reentry_principal=retry_principal,
+        reentry_state=retry_state,
     )
     runs, _total = await _runs_store().list_for_job(raw, 0, 1)
     recorded = runs[0] if runs and isinstance(runs[0], dict) else {}
@@ -2221,7 +2257,13 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
 
 
 async def _dispatch_store_action(
-    trigger: Any, payload: dict[str, Any], *, event: str = "manual.run"
+    trigger: Any,
+    payload: dict[str, Any],
+    *,
+    event: str = "manual.run",
+    reentry_note_id: str = "",
+    reentry_principal: Any = None,
+    reentry_state: Any = None,
 ) -> tuple[bool, str]:
     """Run a store trigger's declared action through the action-provider registry.
 
@@ -2251,6 +2293,7 @@ async def _dispatch_store_action(
     this bug hide behind a 200 for a whole release.
     """
     import time
+    import uuid
 
     from gideon.integrations.action_providers import ActionContext, get_action_provider
     from gideon.integrations.action_providers.registry import (
@@ -2271,20 +2314,48 @@ async def _dispatch_store_action(
         return False, f"unknown action provider {provider_name!r}"
     # recorded NOTHING — no `ExecutionJournal` row, no `last_run_ts` stamp. So the action ran while
     # `_record_manual_run` reuses the SAME `ExecutionJournal` ledger and the SAME
-    ctx = ActionContext(event=event, context="", payload=payload)
+    trigger_id = str(getattr(trigger, "id", "") or "")
+    ctx = ActionContext(
+        event=event,
+        context=trigger_id if provider_name == "run-workflow" else "",
+        payload=payload,
+    )
     started = time.time()
-    try:
-        from gideon.integrations.action_providers.command_lifecycle import action_timeout
+    attempt_id = f"manual-{uuid.uuid4().hex}"
+    if reentry_note_id:
+        from gideon.interfaces.dashboard.auto_denials import owner_reentry_attempt
 
-        config = action.get("config") or {}
-        timeout = action_timeout(config, {"bash": 300}.get(provider_name, 30))
-        result = await provider.execute(config, ctx, timeout=timeout)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - a failed manual run is RECORDED, not raised (#308)
-        await _record_manual_run(trigger, started=started, exc=exc)
-        return False, f"failed: {type(exc).__name__}: {exc}"
-    await _record_manual_run(trigger, started=started, result=result)
+        reentry_context = owner_reentry_attempt(
+            reentry_state,
+            reentry_note_id,
+            reentry_principal,
+            origin_kind="trigger",
+            origin_id=trigger_id,
+            attempt_id=attempt_id,
+        )
+    else:
+        from contextlib import nullcontext
+
+        reentry_context = nullcontext(None)
+    with reentry_context as reentry:
+        if reentry_note_id and reentry is None:
+            return False, "the unanswered call is no longer open for this trigger"
+        try:
+            from gideon.integrations.action_providers.command_lifecycle import action_timeout
+
+            config = action.get("config") or {}
+            timeout = action_timeout(config, {"bash": 300}.get(provider_name, 30))
+            result = await provider.execute(config, ctx, timeout=timeout)
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - a failed manual run is RECORDED, not raised (#308)
+            await _record_manual_run(
+                trigger, started=started, exc=exc, run_id=attempt_id
+            )
+            return False, f"failed: {type(exc).__name__}: {exc}"
+        await _record_manual_run(
+            trigger, started=started, result=result, run_id=attempt_id
+        )
     if result is not None and not bool(getattr(result, "success", True)):
         note = str(getattr(result, "error", "") or "") or "the action reported failure"
         return False, f"failed: {note}"
@@ -2297,6 +2368,7 @@ async def _record_manual_run(
     started: float,
     result: Any = None,
     exc: BaseException | None = None,
+    run_id: str | None = None,
 ) -> None:
     """Append a MANUAL run record and advance the trigger's last-run stamp (#308).
 
@@ -2356,7 +2428,7 @@ async def _record_manual_run(
         summary = action_summary(status, result, error)
         trace = str(getattr(result, "stdout", "") or "") if result is not None else ""
 
-        run_id = f"manual-{int(finished * 1000)}"
+        run_id = run_id or f"manual-{int(finished * 1000)}"
         await _runs_store().append(
             ExecutionRecord(
                 run_id=run_id,
@@ -2475,6 +2547,11 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
     event_type = str(body.get("event_type") or "MemoryUpdate")
     occurrence = EventOccurrence(trigger.source, event_type, key, value, meta)
     if body.get("dry_run") is True:
+        if "_auto_denied_retry_note_id" in body:
+            return web.json_response(
+                {"error": "an unanswered-call note cannot be used for a dry run"},
+                status=400,
+            )
         matches = occurrence.accepts(trigger)
         return web.json_response({
             "ok": True,
@@ -2505,6 +2582,36 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
     decision = await evaluate(context)
     if not decision.allowed:
         return web.json_response({"ok": False, "result": {"ran": False, "reason": _redact(decision.reason)}})
+    retry_note_id = ""
+    retry_principal = None
+    retry_state = None
+    if "_auto_denied_retry_note_id" in body:
+        retry_note_id = body.get("_auto_denied_retry_note_id")
+        if (
+            not isinstance(retry_note_id, str)
+            or not retry_note_id
+            or retry_note_id != retry_note_id.strip()
+        ):
+            return web.json_response(
+                {"error": "a valid unanswered-call note is required"}, status=400
+            )
+        from gideon.security.approval_answer import OWNER, of_request
+
+        retry_principal = of_request(request)
+        if retry_principal.kind != OWNER or not retry_principal.name:
+            return web.json_response({"error": "owner required"}, status=403)
+        retry_state = request.app.get("state")
+        if retry_state is None:
+            return web.json_response({"error": "trigger runtime unavailable"}, status=503)
+        from gideon.interfaces.dashboard.auto_denials import unanswered_note
+
+        note = unanswered_note(retry_state, retry_note_id)
+        refs = note.refs if note is not None and isinstance(note.refs, dict) else {}
+        if refs.get("trigger") != canonical.id:
+            return web.json_response(
+                {"error": "the unanswered call is not open for this trigger"},
+                status=409,
+            )
     from gideon.automation.triggers.claims import release_claim, write_claim
     from gideon.interfaces.dashboard.handlers.triggers import _dispatch_store_action
 
@@ -2526,7 +2633,12 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
     }
     try:
         ran, reason = await _dispatch_store_action(
-            canonical, payload, event=f"{occurrence.source}.{occurrence.event_type}"
+            canonical,
+            payload,
+            event=f"{occurrence.source}.{occurrence.event_type}",
+            reentry_note_id=retry_note_id,
+            reentry_principal=retry_principal,
+            reentry_state=retry_state,
         )
     finally:
         release_claim(canonical.id, base_dir=event_store._store.base_dir)

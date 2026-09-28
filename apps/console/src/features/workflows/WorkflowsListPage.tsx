@@ -11,6 +11,7 @@ import { PresetEmptyState } from '../../shared/ui/PresetEmptyState'
 import { api, ApiError, type WorkflowDef, type WorkflowDefSummary, type WorkflowSurfacingFinding, type WorkflowSurfacingRow } from '../../shared/data/api'
 import { useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
+import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { confirm, confirmDelete, promptForm, promptInput } from '../../shared/ui/dialog'
 import { notify } from '../../app/shell/appSdk'
 import { fmtElapsed, isTerminal, runLook } from './workflowMeta'
@@ -39,6 +40,18 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
     useQuery('workflows:runs', () => api.workflowRuns({ limit: 100 }).then((r) => r.runs))
   const surfacingQ = useQuery('workflows:surfacing', () => api.workflowSurfacing()
     .catch(() => ({ defs: [] as WorkflowSurfacingRow[], total: 0, findings: [] as WorkflowSurfacingFinding[] })))
+
+  const runRefresh = useRef<number | undefined>(undefined)
+  const onMessage = useCallback((message: WsMessage) => {
+    if (message.type !== 'workflow_runs') return
+    if (runRefresh.current !== undefined) window.clearTimeout(runRefresh.current)
+    runRefresh.current = window.setTimeout(() => {
+      runRefresh.current = undefined
+      invalidateKeys('workflows:runs')
+    }, 400)
+  }, [])
+  useChatSocket(onMessage)
+  useEffect(() => () => { if (runRefresh.current !== undefined) window.clearTimeout(runRefresh.current) }, [])
 
   const defs = defsData ?? []
   const runs = runsData ?? []

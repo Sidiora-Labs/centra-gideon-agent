@@ -31,6 +31,12 @@ class DashboardApprovalState:
         request_id = str(data.get("id") or "")
         if not session or not request_id:
             return
+        call_fingerprint = str(data.pop("_call_fingerprint", "") or "")
+        retry_note_id = str(data.pop("_auto_denied_note_id", "") or "")
+        retry_origin_kind = str(data.pop("_auto_denied_origin_kind", "") or "")
+        retry_origin_id = str(data.pop("_auto_denied_origin_id", "") or "")
+        retry_attempt_id = str(data.pop("_auto_denied_attempt_id", "") or "")
+        retry_node_id = str(data.pop("_auto_denied_node_id", "") or "")
         approval_id = chat_approval_id(session, request_id)
         if approval_id in self._pending_approvals:
             return
@@ -50,6 +56,12 @@ class DashboardApprovalState:
             "asked_by": self.approval_asked_by(request_id, session_obj),
             "created_by_app": app_name,
             "ts": float(data.get("ts") or time.time()),
+            "_call_fingerprint": call_fingerprint,
+            "_auto_denied_note_id": retry_note_id,
+            "_auto_denied_origin_kind": retry_origin_kind,
+            "_auto_denied_origin_id": retry_origin_id,
+            "_auto_denied_attempt_id": retry_attempt_id,
+            "_auto_denied_node_id": retry_node_id,
         }
         self._hold_approval(entry, broadcast=False)
         data["approval_id"] = approval_id
@@ -145,6 +157,21 @@ class DashboardApprovalState:
                 )
             except Exception:
                 self._log.debug("approval ending audit failed", exc_info=True)
+        if outcome == "expired":
+            try:
+                from gideon.interfaces.dashboard.auto_denials import record_auto_denial
+
+                record_auto_denial(
+                    self,
+                    session=str(entry.get("session") or ""),
+                    call_id=str(entry.get("request_id") or approval_id),
+                    tool=str(entry.get("tool") or "a tool"),
+                    fingerprint=str(entry.get("_call_fingerprint") or ""),
+                    reason="expired",
+                    source=str(entry.get("source") or ""),
+                )
+            except Exception:
+                self._log.debug("expired approval denial row failed", exc_info=True)
         self._audit_and_broadcast_approval(
             str(entry.get("session") or ""), approval_id, outcome,
             decided_by=decided_by, entry=entry,
@@ -260,6 +287,9 @@ class DashboardApprovalState:
             return False
         fut = asyncio.get_running_loop().create_future()
         self._approval_futures[approval_id] = fut
+        from gideon.interfaces.dashboard.auto_denials import call_fingerprint
+
+        raw_call_fingerprint = call_fingerprint(tool, tool_input)
         safe_tool, _ = self._redact_approval_text(tool)
         safe_input, _ = self._redact_approval_text(tool_input)
         safe_purpose, _ = self._redact_approval_text(tool_purpose)
@@ -268,6 +298,7 @@ class DashboardApprovalState:
             "tool": safe_tool, "tool_input": safe_input, "tool_purpose": safe_purpose,
             "session": session, "asked_by": asked_by or self._approval_requester(source, session),
             "ts": time.time(),
+            "_call_fingerprint": raw_call_fingerprint,
         }
         self._hold_approval(entry)
         from gideon.automation.triggers.lifecycle_fire import approval_request_payload
@@ -344,6 +375,23 @@ class DashboardApprovalState:
         outcome = "approved" if response.startswith("approved") else "rejected"
         decided_by = "you" if principal.kind == OWNER else principal.label
         if entry is not None:
+            note_id = str(entry.get("_auto_denied_note_id") or "")
+            fingerprint = str(entry.get("_call_fingerprint") or "")
+            if note_id and fingerprint:
+                from gideon.interfaces.dashboard.auto_denials import settle_answered_call
+
+                settle_answered_call(
+                    self,
+                    note_id=note_id,
+                    session=session.key,
+                    fingerprint=fingerprint,
+                    outcome=outcome,
+                    principal=principal,
+                    origin_kind=str(entry.get("_auto_denied_origin_kind") or ""),
+                    origin_id=str(entry.get("_auto_denied_origin_id") or ""),
+                    attempt_id=str(entry.get("_auto_denied_attempt_id") or ""),
+                    node_id=str(entry.get("_auto_denied_node_id") or ""),
+                )
             self.withdraw_approval(registry_id, outcome=outcome, decided_by=decided_by)
         self.push_sessions_update()
         return True
@@ -368,6 +416,23 @@ class DashboardApprovalState:
             return False
         fut.set_result(approved)
         decided_by = "you" if principal.kind == OWNER else principal.label
+        note_id = str(entry.get("_auto_denied_note_id") or "")
+        fingerprint = str(entry.get("_call_fingerprint") or "")
+        if note_id and fingerprint:
+            from gideon.interfaces.dashboard.auto_denials import settle_answered_call
+
+            settle_answered_call(
+                self,
+                note_id=note_id,
+                session=str(entry.get("session") or ""),
+                fingerprint=fingerprint,
+                outcome="approved" if approved else "rejected",
+                principal=principal,
+                origin_kind=str(entry.get("_auto_denied_origin_kind") or ""),
+                origin_id=str(entry.get("_auto_denied_origin_id") or ""),
+                attempt_id=str(entry.get("_auto_denied_attempt_id") or ""),
+                node_id=str(entry.get("_auto_denied_node_id") or ""),
+            )
         self.withdraw_approval(
             approval_id,
             outcome="approved" if approved else "rejected",

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import json
 import logging
 import re
 import time
@@ -1345,6 +1347,21 @@ class NativeAgentRuntime(AgentProvider):
                     prep.tool_name,
                 )
                 metadata["ok"] = False
+                metadata["auto_denied"] = True
+                metadata["auto_denied_reason"] = "unattended"
+                try:
+                    canonical_call = json.dumps(
+                        {"tool": prep.tool_name, "input": prep.args},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    )
+                    metadata["call_fingerprint"] = hashlib.sha256(
+                        canonical_call.encode("utf-8")
+                    ).hexdigest()
+                except (TypeError, ValueError):
+                    metadata["call_fingerprint"] = ""
             else:
                 request = prep.call.tool_call_id or prep.tool_name
                 future = self._approval.register(request)

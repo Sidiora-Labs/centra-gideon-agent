@@ -63,6 +63,7 @@ async def _deliver_named_channel(
             destination, title, _channel_notification_text(title, body, note)
         )
 
+
 async def _deliver_owner_channel_dm(
     title: str, body: str, note: dict[str, Any]
 ) -> None:
@@ -82,6 +83,7 @@ async def _deliver_owner_channel_dm(
             destination, title, _channel_notification_text(title, body, note)
         )
 
+
 def _channel_notification_text(title: str, body: str, note: dict[str, Any]) -> str:
     from gideon.security.security import redact_for_display
 
@@ -90,6 +92,7 @@ def _channel_notification_text(title: str, body: str, note: dict[str, Any]) -> s
     if link:
         parts.append(link)
     return "\n".join(part for part in parts if part)
+
 
 def _log_channel_send_failure(task: Any) -> None:
     if task.cancelled():
@@ -1124,6 +1127,18 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         fut: asyncio.Future[bool] = loop.create_future()
         self._approval_futures[approval_id] = fut
         revision = uuid.uuid4().hex
+        retry_binding = None
+        raw_call_fingerprint = ""
+        try:
+            from gideon.interfaces.dashboard.auto_denials import (
+                bind_current_reentry_call,
+                call_fingerprint,
+            )
+
+            raw_call_fingerprint = call_fingerprint(tool, tool_input)
+            retry_binding = bind_current_reentry_call(self, raw_call_fingerprint, session=session)
+        except Exception:
+            logger.debug("could not bind workflow/trigger denial retry", exc_info=True)
 
         safe_tool, _ = redact_exfiltration_urls(tool)
         safe_tool, _ = redact_credentials(safe_tool)
@@ -1144,6 +1159,19 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             "ts": time.time(),
         }
         self._hold_approval(pending)
+        if raw_call_fingerprint:
+            pending["_call_fingerprint"] = raw_call_fingerprint
+        if retry_binding is not None:
+            pending.update(
+                {
+                    "_call_fingerprint": retry_binding.fingerprint,
+                    "_auto_denied_note_id": retry_binding.note_id,
+                    "_auto_denied_origin_kind": retry_binding.origin_kind,
+                    "_auto_denied_origin_id": retry_binding.origin_id,
+                    "_auto_denied_attempt_id": retry_binding.attempt_id,
+                    "_auto_denied_node_id": retry_binding.node_id,
+                }
+            )
         from gideon.automation.triggers.lifecycle_fire import approval_request_payload
         from gideon.automation.triggers.lifecycle_fire import fire as _fire_lifecycle
 
@@ -1513,6 +1541,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             task.add_done_callback(_log_channel_send_failure)
         except RuntimeError:
             logger.warning("scheduled channel delivery requires the active event loop")
+
     def _schedule_owner_channel_dm(
         self, title: str, body: str, note: dict[str, Any]
     ) -> None:

@@ -5,15 +5,15 @@ import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 import { api, isFeatureOff } from '../../shared/data/api'
 import type {
   PendingApproval, DashboardStatus, InboxItem, SkillProposal,
-  Loop, TaskItem, ScheduleRun, NotificationItem, SystemInfo, DiscoverResponse, DoctorReport,
+  Loop, WorkflowRunSummary, TaskItem, ScheduleRun, NotificationItem, SystemInfo, DiscoverResponse, DoctorReport,
 } from '../../shared/data/api'
 
 
 export type ReadSlice =
-  | 'approvals' | 'inbox' | 'proposals' | 'loops' | 'tasks' | 'notifications' | 'schedule'
+  | 'approvals' | 'inbox' | 'proposals' | 'loops' | 'workflows' | 'tasks' | 'notifications' | 'schedule'
 
 const NOTHING_READ: Record<ReadSlice, boolean> = {
-  approvals: false, inbox: false, proposals: false, loops: false, tasks: false,
+  approvals: false, inbox: false, proposals: false, loops: false, workflows: false, tasks: false,
   notifications: false, schedule: false,
 }
 
@@ -25,8 +25,10 @@ export interface DashboardLiveData {
   inboxErr: unknown
   proposalsErr: unknown
   loops: Loop[]
+  workflows: WorkflowRunSummary[]
   tasks: TaskItem[]
   loopsErr: unknown
+  workflowsErr: unknown
   tasksErr: unknown
   notificationsErr: unknown
   schedule: ScheduleRun[]
@@ -66,6 +68,7 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
   const [inboxErr, setInboxErr] = useState<unknown>(null)
   const [proposalsErr, setProposalsErr] = useState<unknown>(null)
   const [loops, setLoops] = useState<Loop[]>([])
+  const [workflows, setWorkflows] = useState<WorkflowRunSummary[]>([])
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [schedule, setSchedule] = useState<ScheduleRun[]>([])
   const [scheduleDidIds, setScheduleDidIds] = useState<string[]>([])
@@ -73,6 +76,7 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loopsErr, setLoopsErr] = useState<unknown>(null)
+  const [workflowsErr, setWorkflowsErr] = useState<unknown>(null)
   const [tasksErr, setTasksErr] = useState<unknown>(null)
   const [notificationsErr, setNotificationsErr] = useState<unknown>(null)
   const [system, setSystem] = useState<SystemInfo | null>(null)
@@ -104,6 +108,10 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
       .finally(() => markRead('proposals'))
   }, [markRead])
   const loadLoops = useCallback(() => { api.uLoops().then((d) => { guard(setLoops)(d); guard(setLoopsErr)(null) }).catch((e) => guard(setLoopsErr)(e)).finally(() => markRead('loops')) }, [markRead])
+  const loadWorkflows = useCallback(() => {
+    api.workflowRuns({ limit: 200 }).then((d) => { guard(setWorkflows)(d.runs); guard(setWorkflowsErr)(null) })
+      .catch((e) => guard(setWorkflowsErr)(e)).finally(() => markRead('workflows'))
+  }, [markRead])
   const loadTasks = useCallback(() => { api.readyTasks().then((d) => { guard(setTasks)(d); guard(setTasksErr)(null) }).catch((e) => guard(setTasksErr)(e)).finally(() => markRead('tasks')) }, [markRead])
   const loadSchedule = useCallback(() => {
     api.triggersHistory(12).then((d) => {
@@ -138,22 +146,23 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
   }, [loadDiscover])
 
   const refreshAll = useCallback(() => {
-    loadApprovals(); loadInbox(); loadProposals(); loadLoops()
+    loadApprovals(); loadInbox(); loadProposals(); loadLoops(); loadWorkflows()
     loadTasks(); loadSchedule(); loadStatus(); loadNotifications(); loadSystem(); loadDiscover(); loadDoctor()
-  }, [loadApprovals, loadInbox, loadProposals, loadLoops, loadTasks, loadSchedule, loadStatus, loadNotifications, loadSystem, loadDiscover, loadDoctor])
+  }, [loadApprovals, loadInbox, loadProposals, loadLoops, loadWorkflows, loadTasks, loadSchedule, loadStatus, loadNotifications, loadSystem, loadDiscover, loadDoctor])
 
   const workDebounce = useRef<number | undefined>(undefined)
   const refreshWork = useCallback(() => {
     if (workDebounce.current) clearTimeout(workDebounce.current)
-    workDebounce.current = window.setTimeout(() => { loadLoops(); loadStatus() }, 600)
-  }, [loadLoops, loadStatus])
+    workDebounce.current = window.setTimeout(() => { loadLoops(); loadWorkflows(); loadStatus() }, 600)
+  }, [loadLoops, loadWorkflows, loadStatus])
   useEffect(() => () => { if (workDebounce.current) clearTimeout(workDebounce.current) }, [])
 
   const onMessage = useCallback((m: WsMessage) => {
     const t = m.type
-    if (t === 'approval') loadApprovals()
+    if (t === 'approval' || t === 'approval_resolved') loadApprovals()
     else if (t.startsWith('inbox')) loadInbox()
     else if (t.startsWith('notification')) loadNotifications()
+    else if (t === 'workflow_runs') refreshWork()
     else if (t === 'update_progress' || t === 'chat_status' || t === 'sessions' || t.startsWith('subagent')) {
       refreshWork()
     }
@@ -166,13 +175,13 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
   )
 
   useEffect(() => { refreshAll() }, [refreshAll])
-  useVisiblePoll(() => { loadApprovals(); loadInbox(); loadProposals(); loadLoops(); loadTasks(); loadSystem() }, FAST_POLL)
+  useVisiblePoll(() => { loadProposals(); loadTasks(); loadSystem() }, FAST_POLL)
   useVisiblePoll(() => { loadSchedule(); loadStatus(); loadNotifications(); loadDiscover(); loadDoctor() }, SLOW_POLL)
 
   const value: DashboardLiveData = {
     approvals, inbox, proposals, approvalsErr, inboxErr, proposalsErr,
-    loopsErr, tasksErr, notificationsErr, read,
-    loops, tasks, schedule, scheduleDidIds, scheduleSuppressed,
+    loopsErr, workflowsErr, tasksErr, notificationsErr, read,
+    loops, workflows, tasks, schedule, scheduleDidIds, scheduleSuppressed,
     status, notifications, system,
     discover, discoverErr, doctor, doctorErr,
     retryApprovals: loadApprovals, retryInbox: loadInbox, retryProposals: loadProposals,

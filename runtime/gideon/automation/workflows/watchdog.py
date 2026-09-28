@@ -70,12 +70,14 @@ class _RunEventRelay:
             broadcast = getattr(state, "_broadcast", None)
             if callable(broadcast) and event == "workflow_run_update":
                 _, separator, identity = key.partition(":")
+                run_id = identity if separator else key
                 broadcast(
                     {
                         "type": "workflow_run_update",
-                        "run_id": identity if separator else key,
+                        "run_id": run_id,
                     }
                 )
+                broadcast({"type": "workflow_runs", "run_id": run_id})
         except Exception:
             logger.debug("workflow ws broadcast failed", exc_info=True)
 

@@ -2330,7 +2330,13 @@ def _reentry(
     redo_effects: bool = False,
     force: bool = False,
     confirm_cascade: bool = False,
+    owner_reentry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if owner_reentry is not None and op != "rewind":
+        return _service_failure(
+            "WF_MUT_INVALID",
+            "an unanswered call can only re-enter through its exact workflow step",
+        )
     if store.get(run_id) is None:
         return _run_not_found(run_id)
     controller = _live(run_id, supervisor)
@@ -2343,6 +2349,7 @@ def _reentry(
         [{"op": op, "node_id": node_id, "redo_effects": redo_effects, "force": force}],
         actor="chat",
         confirm=confirm_cascade,
+        owner_reentry=owner_reentry,
     )
 
 

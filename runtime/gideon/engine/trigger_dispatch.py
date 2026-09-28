@@ -246,7 +246,11 @@ class TriggerDispatch:
             self.logger.warning("trigger %s: %s", self.trigger.id, error)
             self.runtime._push_trigger_refresh()
             return
-        context = ActionContext(event=self.event, context="", payload=self.payload)
+        context = ActionContext(
+            event=self.event,
+            context=str(self.trigger.id) if action.name == "run-workflow" else "",
+            payload=self.payload,
+        )
         route = await self.authorize(action, config, context)
         if route is not None:
             await self.execute(action, config, context, route)

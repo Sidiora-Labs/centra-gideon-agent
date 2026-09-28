@@ -13,6 +13,7 @@ import { api, ApiError, type InboxItem, type InboxClassification, type SkillProp
 import { classMeta, confMeta, statusMeta, kindMeta, channelLabel, sourceLabel, relPast, CLASSIFICATIONS, NON_CHANNEL_ITEM_KINDS, refTarget, refLabel } from './inboxMeta'
 import { WorkflowGateActions } from './WorkflowGateActions'
 import { TriggerParkActions } from './TriggerParkActions'
+import { DeniedCallRerun } from './DeniedCallRerun'
 import { invalidateKeys } from '../../shared/data/data'
 import { TextLink } from '../../shared/ui/TextLink'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
@@ -69,6 +70,8 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
       </div>
 
       <div data-type="body-m" className="rounded-xl border border-outline/25 bg-surface-container p-m text-on-surface leading-relaxed"><Markdown>{item.message}</Markdown></div>
+
+      {item.refs?.auto_denied && <DeniedCallRerun item={item} onChanged={onChanged} navigate={navigate} />}
 
       {(item.thread_context?.length ?? 0) > 0 && (
         <Section label={`Thread context · ${item.thread_context!.length}`}>
