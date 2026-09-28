@@ -131,13 +131,12 @@ class OpenAIImageProvider(ImageGenProvider):
         return models
 
     def _default_model(self, model: str) -> str:
-        selected = model or self._catalog_default()
-        if selected:
-            return selected
-        raise ImageGenError(
-            f"No image model selected for {self._provider_name!r}, and this endpoint "
-            f"has no contributed default — pin one in Settings → Models (Image · Generation)."
-        )
+        from gideon.integrations.llm.registry import ProviderResolutionError, require_model
+
+        try:
+            return require_model(model)
+        except ProviderResolutionError as error:
+            raise ImageGenError(str(error)) from error
 
     async def _dispatch(
         self,

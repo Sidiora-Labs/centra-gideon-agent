@@ -697,6 +697,16 @@ async def api_models_active_set(request: web.Request) -> web.Response:
             status=400,
         )
 
+    from gideon.extensions.providers.use_cases import model_ref_problem
+
+    for model_ref in models:
+        problem = model_ref_problem(model_ref)
+        if problem:
+            return web.json_response(
+                {"error": {"code": "model_ref_names_no_model", "message": problem}},
+                status=400,
+            )
+
     try:
         from gideon.extensions.providers.use_cases import (
             _known_provider_names,
@@ -779,6 +789,8 @@ async def api_models_chat(request: web.Request) -> web.Response:
     all_models: list[dict[str, Any]] = []
 
     def _add(pname: str, mid: str) -> None:
+        if not isinstance(mid, str) or not mid.strip():
+            return
         all_models.append(
             {
                 "name": f"{pname}/{mid}" if pname else mid,

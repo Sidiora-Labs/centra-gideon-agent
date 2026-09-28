@@ -16,6 +16,7 @@ from gideon.integrations.llm.catalog import ModelCatalog
 logger = logging.getLogger(__name__)
 ProviderFactory = Callable[..., ModelProvider]
 CatalogFactory = Callable[..., ModelCatalog]
+ReadinessProbe = Callable[..., "tuple[str, str] | None"]
 _Value = TypeVar("_Value")
 
 
@@ -102,14 +103,19 @@ class ProviderRegistry:
         self._capabilities: dict[str, ProviderCapability] = {}
         self._entries: dict[str, ProviderEntry] = {}
         self._catalog_factories: dict[str, CatalogFactory] = {}
+        self._readiness: dict[str, ReadinessProbe] = {}
 
-    def register_type(self, cap: ProviderCapability, factory: ProviderFactory) -> None:
+    def register_type(
+        self, cap: ProviderCapability, factory: ProviderFactory, *, readiness: ReadinessProbe | None = None
+    ) -> None:
         if cap.type in self._factories:
             raise ProviderResolutionError(
                 f"provider type {cap.type!r} is already registered"
             )
         self._factories.update({cap.type: factory})
         self._capabilities.update({cap.type: cap})
+        if readiness is not None:
+            self._readiness[cap.type] = readiness
 
     def register_entry(self, entry: ProviderEntry) -> None:
         if entry.name not in self._entries:
@@ -129,6 +135,22 @@ class ProviderRegistry:
 
     def capability_of(self, type_: str) -> ProviderCapability:
         return _required(self._capabilities, type_, "type")
+
+    def not_ready(self, entry: ProviderEntry, *, implicit: bool) -> tuple[str, str] | None:
+        if entry.type not in self._factories:
+            return (
+                f"The provider type for “{entry.name}” is not available",
+                "install or enable its provider app, or choose another model in Settings → Models",
+            )
+        probe = self._readiness.get(entry.type)
+        if probe is None:
+            return None
+        try:
+            verdict = probe(entry, implicit=implicit)
+        except Exception:
+            logger.warning("Provider readiness probe failed for %r", entry.type, exc_info=True)
+            return None
+        return verdict if isinstance(verdict, tuple) and len(verdict) == 2 else None
 
     def build(
         self, name: str, *, session_key: str | None = None, **kwargs: object

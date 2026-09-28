@@ -761,71 +761,87 @@ def resolve_provider_for_use_case(
     )
 
 
-def can_resolve_use_case(use_case: str) -> bool:
-    """Cheaply report whether a ModelProvider for ``use_case`` is resolvable
-    *right now*, without building one.
-
-    This is the single source of truth behind both the onboarding ``needs_model``
-    signal and the background-session spawn guard — so the dashboard's "add a
-    model" nudge and what the bridge can actually resolve never disagree (the
-    coarse capability-only probe they used before could diverge from real
-    resolution; see F1).
-
-    Resolution for chat-class use cases succeeds when EITHER an active model is
-    selected for the use case (Settings → Models) OR a configured provider
-    (config.json ``providers[]`` → ``default_registry``) declares the matching
-    capability. The native default agent inferences through a ModelProvider too,
-    so "no model" ⇒ chat cannot run regardless of the agent-runtime kind. We
-    deliberately do NOT instantiate a provider here (no subprocess/socket side
-    effects) — this runs on a hot GET.
-    """
+def _entry_capabilities(registry: Any, entry: Any) -> frozenset:
+    if entry.declared_capabilities:
+        return frozenset(entry.declared_capabilities)
     try:
-        from gideon.extensions.providers.use_cases import (
-            VALID_USE_CASES,
-            active_model_refs,
-            parent_capability,
-        )
+        return frozenset(registry.capability_of(entry.type).capabilities)
     except Exception:
-        return False
+        return frozenset()
+
+
+def _ref_problem(registry: Any, entries: dict[str, Any], ref: str) -> tuple[str, str] | None:
+    from dataclasses import replace
+    from gideon.extensions.providers.use_cases import split_ref
+
+    parsed = split_ref(ref)
+    if parsed is None or parsed[0] not in entries:
+        return None
+    return registry.not_ready(replace(entries[parsed[0]], model=parsed[1]), implicit=False)
+
+
+def model_chosen(use_case: str) -> bool:
+    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.integrations.llm.registry import get_default_registry
+
+    if active_model_refs(use_case):
+        return True
+    target = _capability_enum(parent_capability(use_case))
+    registry = get_default_registry()
+    return target is not None and any(
+        entry.type != "acp_agent" and bool(entry.own_model)
+        and target in _entry_capabilities(registry, entry)
+        for entry in registry.list_entries()
+    )
+
+
+def use_case_problem(use_case: str) -> tuple[str, str] | None:
+    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.integrations.llm.registry import get_default_registry, no_model_chosen
+
+    registry = get_default_registry()
+    entries = {entry.name: entry for entry in registry.list_entries()}
+    refs = active_model_refs(use_case)
+    if refs:
+        problems = [_ref_problem(registry, entries, ref) for ref in refs]
+        return problems[0] if all(problem is not None for problem in problems) else None
+    target = _capability_enum(parent_capability(use_case))
+    first_problem = None
+    for entry in entries.values():
+        if entry.type == "acp_agent" or target not in _entry_capabilities(registry, entry):
+            continue
+        problem = registry.not_ready(entry, implicit=True)
+        if problem is None and entry.own_model:
+            return None
+        first_problem = first_problem or problem or no_model_chosen(entry.name)
+    return first_problem
+
+
+def can_resolve_use_case(use_case: str) -> bool:
+    """Probe the binding and optional provider readiness without constructing a client."""
+    from gideon.extensions.providers.use_cases import (
+        VALID_USE_CASES, active_model_refs, parent_capability,
+    )
+    from gideon.integrations.llm.registry import get_default_registry
+
     if use_case not in VALID_USE_CASES:
         return False
-
     try:
+        registry = get_default_registry()
+        entries = {entry.name: entry for entry in registry.list_entries()}
         refs = active_model_refs(use_case)
         if refs:
-            from gideon.extensions.providers.use_cases import split_ref
-            return any(
-                bool((split_ref(ref) or ("", str(ref)))[1].strip())
-                for ref in refs
-            )
+            return any(_ref_problem(registry, entries, ref) is None for ref in refs)
+        target = _capability_enum(parent_capability(use_case))
+        return target is not None and any(
+            entry.type != "acp_agent" and bool(entry.own_model)
+            and target in _entry_capabilities(registry, entry)
+            and registry.not_ready(entry, implicit=True) is None
+            for entry in entries.values()
+        )
     except Exception:
-        logger.debug("can_resolve: active-model probe failed", exc_info=True)
-
-    capability = parent_capability(use_case)
-
-    try:
-        import gideon.integrations.llm.acp_agent  # noqa: F401
-        from gideon.integrations.llm.registry import get_default_registry
-
-        target_cap = _capability_enum(capability)
-        if target_cap is None:
-            return False
-
-        registry = get_default_registry()
-        for entry in registry.list_entries():
-            if entry.type == "acp_agent":
-                continue
-            caps = entry.declared_capabilities
-            if not caps:
-                try:
-                    caps = registry.capability_of(entry.type).capabilities
-                except Exception:
-                    caps = frozenset()
-            if target_cap in caps and entry.own_model:
-                return True
-    except Exception:
-        logger.debug("can_resolve: registry probe failed", exc_info=True)
-    return False
+        logger.debug("Provider readiness could not be read", exc_info=True)
+        return False
 
 
 def _resolve_from_config_registry(
@@ -920,6 +936,15 @@ def _resolve_from_config_registry(
         if target_cap not in caps:
             continue
         if provider_hint and entry.name != provider_hint:
+            continue
+        from dataclasses import replace
+
+        selected_entry = replace(entry, model=model_override) if model_override else entry
+        problem = registry.not_ready(selected_entry, implicit=not bool(provider_hint))
+        if problem is not None:
+            if provider_hint:
+                why, fix = problem
+                raise ProviderResolutionError(f"WHY: {why}\nFIX: {fix}")
             continue
         if model_override or entry.own_model or provider_hint:
             candidate = entry

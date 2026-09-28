@@ -52,15 +52,14 @@ class OpenAISttProvider(SttProvider):
         return False
 
     def _job(self, audio_path: str, model: str, language: str, credential: str):
-        selected = model or self._default_model()
+        selected = model if isinstance(model, str) and model.strip() else ""
         if selected:
             primary_language = language.split("-")[0] if language else ""
             return TranscriptionJob(
                 audio_path, selected, primary_language, credential, self._endpoint
             )
         logger.error(
-            "No STT model selected for %r (this endpoint has no contributed "
-            "default); pin one in Settings → Models.",
+            "No STT model selected for %r; pin one in Settings → Models.",
             self._provider_name,
         )
         return None
@@ -68,6 +67,11 @@ class OpenAISttProvider(SttProvider):
     async def transcribe(
         self, audio_path: str, model: str = "", language: str = ""
     ) -> str | None:
+        if not isinstance(model, str) or not model.strip():
+            from gideon.integrations.llm.registry import NO_MODEL_NAMED
+
+            logger.error(NO_MODEL_NAMED)
+            return None
         try:
             sdk = importlib.import_module("openai")
         except ImportError:

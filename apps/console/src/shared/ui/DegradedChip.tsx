@@ -32,7 +32,7 @@ function DegradedPanel({ state, close, trigger, id }: {
             <span data-type="body-s" className="text-on-surface">{surfaceLabel(surface.surface)}</span>
             {surface.backlog > 0 && <span data-type="caption" className="shrink-0 text-on-surface-low">{surface.backlog} queued</span>}
           </div>
-          {missing && <div data-type="caption" className="mt-0.5 text-on-surface-var">No model for {missing}</div>}
+          {(surface.problem || missing) && <div data-type="caption" className="mt-0.5 text-on-surface-var">{surface.problem || `No model chosen for ${missing}.`}</div>}
           <div data-type="caption" className="mt-0.5 text-on-surface-low">{surface.floor}</div>
         </div>
       })}</div>

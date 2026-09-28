@@ -234,6 +234,8 @@ export interface DoctorReport {
 export interface DegradedSurface {
   surface: string
   available: boolean
+  model_chosen?: boolean
+  problem?: string | null
   floor: string
   backlog: number
   use_cases: string[]

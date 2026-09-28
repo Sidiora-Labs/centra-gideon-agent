@@ -82,11 +82,14 @@ def get_contract(surface: str) -> Optional[DegradedContract]:
 
 
 _last_available: dict[str, bool] = {}
+_announced_down: dict[str, bool] = {}
+USE_CASE_NAMES = {"chat": "Chat", "background": "Background", "reasoning": "Reasoning", "embedding": "Embedding", "stt": "Speech-to-text"}
 
 
 def reset_transition_state() -> None:
     """Clear the transition baseline (test isolation)."""
     _last_available.clear()
+    _announced_down.clear()
 
 
 def _available(contract: DegradedContract) -> bool:
@@ -115,6 +118,33 @@ def _backlog(contract: DegradedContract) -> int:
         return 0
 
 
+def _model_chosen(contract: DegradedContract) -> bool:
+    from gideon.extensions.providers.provider_bridge import model_chosen
+
+    return all(model_chosen(use_case) for use_case in contract.use_cases)
+
+
+def _sentence(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def _problem(contract: DegradedContract, chosen: bool) -> str:
+    from gideon.extensions.providers.provider_bridge import use_case_problem
+
+    needs = " and ".join(USE_CASE_NAMES.get(uc, uc) for uc in contract.use_cases)
+    if not chosen:
+        return f"No model chosen for {needs}."
+    for use_case in contract.use_cases:
+        problem = use_case_problem(use_case)
+        if problem:
+            return " ".join(_sentence(part) for part in problem if part)
+    return f"The {needs} model chosen cannot answer now."
+
+
 def evaluate(*, notify: bool = False, state: object = None) -> list[dict]:
     """Evaluate every contract → a list of ``{surface, available, floor, backlog,
     use_cases}`` rows (the ``GET /api/resilience/degraded`` payload).
@@ -128,6 +158,8 @@ def evaluate(*, notify: bool = False, state: object = None) -> list[dict]:
     for contract in _CONTRACTS.values():
         available = _available(contract)
         backlog = _backlog(contract)
+        chosen = True if available else _model_chosen(contract)
+        problem = None if available else _problem(contract, chosen)
         rows.append(
             {
                 "surface": contract.surface,
@@ -135,44 +167,45 @@ def evaluate(*, notify: bool = False, state: object = None) -> list[dict]:
                 "floor": contract.floor,
                 "backlog": backlog,
                 "use_cases": list(contract.use_cases),
+                "model_chosen": chosen,
+                "problem": problem,
             }
         )
         if notify:
-            _maybe_notify(contract, available, backlog, state)
+            _maybe_notify(contract, available, backlog, state, chosen=chosen, problem=problem)
     return rows
 
 
 def _maybe_notify(
-    contract: DegradedContract, available: bool, backlog: int, state: object
+    contract: DegradedContract, available: bool, backlog: int, state: object,
+    *, chosen: bool, problem: Optional[str],
 ) -> None:
     prev = _last_available.get(contract.surface)
     _last_available[contract.surface] = available
     if prev is None or prev == available:
         return
-    drained: Optional[int] = None
-    if available and contract.drain is not None:
-        drained = _fire_drain(contract, state)
+    drained = _fire_drain(contract, state) if available and contract.drain is not None else None
     notify_fn = getattr(state, "notify", None)
     if not callable(notify_fn):
         return
+    label = USE_CASE_NAMES.get(contract.surface, contract.surface)
+    needs = " and ".join(USE_CASE_NAMES.get(uc, uc) for uc in contract.use_cases)
     try:
         if not available:
             notify_fn(
-                "warning",
-                f"{contract.surface} degraded",
-                f"No model for {', '.join(contract.use_cases)} — {contract.floor}",
+                "warning" if chosen else "info",
+                f"{label} degraded" if chosen else f"Choose a model for {label}",
+                f"{problem} {contract.floor}",
             )
-        else:
-            if drained:
-                tail = f" · {drained} item(s) re-enriched"
-            elif backlog:
-                tail = f" · {backlog} item(s) awaiting re-enrichment"
-            else:
-                tail = ""
+            _announced_down[contract.surface] = chosen
+        elif contract.surface in _announced_down:
+            was_chosen = _announced_down.pop(contract.surface)
+            tail = f" · {drained} item(s) re-enriched" if drained else (
+                f" · {backlog} item(s) awaiting re-enrichment" if backlog else ""
+            )
             notify_fn(
-                "info",
-                f"{contract.surface} recovered",
-                f"Model available again for {', '.join(contract.use_cases)}{tail}.",
+                "info", f"{label} recovered" if was_chosen else f"{label} is ready",
+                f"A {needs} model is available again{tail}." if was_chosen else f"A {needs} model is chosen{tail}.",
             )
     except Exception:
         logger.debug("degraded: notify failed for %s", contract.surface, exc_info=True)

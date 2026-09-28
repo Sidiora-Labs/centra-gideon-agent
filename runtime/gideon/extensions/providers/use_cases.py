@@ -173,6 +173,19 @@ def _known_provider_names() -> set[str] | None:
     return names | bundled
 
 
+def model_ref_problem(ref: object) -> str | None:
+    if not isinstance(ref, str):
+        return 'Each model in the chain is a "provider:model" string that names a model.'
+    if not ref.strip():
+        return "One of the models in the chain is empty."
+    provider, separator, model = ref.partition(":")
+    if separator and not model.strip():
+        return f'“{ref}” names the provider {provider} and no model.'
+    if separator and not provider.strip():
+        return "A model reference must name its provider."
+    return None
+
+
 def _prune_removed_providers(active: dict[str, list[str]]) -> dict[str, list[str]]:
     """Drop active-model refs whose provider is no longer configured.
 
@@ -218,10 +231,8 @@ def load_active_models() -> dict[str, list[str]]:
         return {}
     normalized: dict[str, list[str]] = {}
     for uc, refs in data.items():
-        if isinstance(refs, str):
-            normalized[uc] = [refs]
-        else:
-            normalized[uc] = refs
+        chain = [refs] if isinstance(refs, str) else refs
+        normalized[uc] = [ref for ref in chain if model_ref_problem(ref) is None] if isinstance(chain, list) else []
     return _prune_removed_providers(normalized)
 
 

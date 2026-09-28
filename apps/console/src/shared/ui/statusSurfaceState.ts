@@ -40,14 +40,15 @@ export function missingModelLabel(value: string) {
 }
 export function degradedPresentation(state: DegradedReading) {
   const down = state.surfaces?.filter(surface => !surface.available) ?? []
+  const unavailable = down.filter(surface => surface.model_chosen !== false)
   const unknown = state.surfaces === null && state.failed
-  const setup = !unknown && state.provider === false && down.length > 0
+  const setup = !unknown && down.length > 0 && down.every(surface => surface.model_chosen === false || (surface.model_chosen === undefined && state.provider === false))
   const summary = unknown ? 'Status unknown' : setup ? 'Set up a model'
-    : down.length === 1 ? `${surfaceLabel(down[0].surface)} degraded` : `${down.length} degraded`
+    : unavailable.length === 1 ? `${surfaceLabel(unavailable[0].surface)} degraded` : `${unavailable.length} degraded`
   const detail = unknown
     ? 'Status unknown — the degraded-surfaces check could not be read, so this may be hiding a surface running without a model'
     : setup ? 'No model provider is configured yet — click to see what unlocks once you bind one'
-      : `${summary} — ${down.length} surface${down.length === 1 ? '' : 's'} running without a model, click for detail`
+      : `${summary} — ${unavailable.length} surface${unavailable.length === 1 ? '' : 's'} cannot use their chosen model, click for detail`
   return { down, unknown, setup, summary, detail, visible: unknown || down.length > 0 }
 }
 

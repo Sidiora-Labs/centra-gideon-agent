@@ -188,7 +188,7 @@ def test_first_evaluation_is_silent_baseline(monkeypatch):
     assert state.notes == []
 
 
-def test_down_then_recovery_emits_warning_then_info(monkeypatch):
+def test_clearing_then_choosing_a_model_emits_info(monkeypatch):
     available = {"value": True}
     monkeypatch.setattr(
         "gideon.extensions.providers.provider_bridge.can_resolve_use_case",
@@ -206,12 +206,12 @@ def test_down_then_recovery_emits_warning_then_info(monkeypatch):
     available["value"] = False
     degraded.evaluate(notify=True, state=state)
     assert len(flap()) == 1
-    assert flap()[0][0] == "warning" and "t_flap" in flap()[0][1]
+    assert flap()[0][0] == "info" and "Choose a model" in flap()[0][1]
 
     available["value"] = True
     degraded.evaluate(notify=True, state=state)
     assert len(flap()) == 2
-    assert flap()[1][0] == "info" and "recovered" in flap()[1][1]
+    assert flap()[1][0] == "info" and "is ready" in flap()[1][1]
 
 
 def test_no_change_emits_nothing(monkeypatch):
@@ -331,9 +331,8 @@ def test_going_down_and_holding_steady_never_fire_the_drain(home, monkeypatch):
     assert calls == []
 
 
-def test_a_raising_drain_never_breaks_the_recovery(home, monkeypatch):
-    """A broken drain must not turn a RECOVERY into an error — the notification the user
-    was waiting for still has to arrive."""
+def test_a_raising_drain_does_not_announce_unreported_recovery(home, monkeypatch):
+    """A drain failure is contained; a silent baseline does not imply a prior notice."""
 
     async def _boom(state=None) -> int:
         raise RuntimeError("drain exploded")
@@ -349,20 +348,22 @@ def test_a_raising_drain_never_breaks_the_recovery(home, monkeypatch):
 
     degraded.evaluate(notify=True, state=state)
 
-    assert any("t_boom recovered" == title for _kind, title, _body in state.notes)
+    assert state.notes == []
 
 
 def _recovered_body(state, surface: str) -> str:
     return next(
-        body for _kind, title, body in state.notes if title == f"{surface} recovered"
+        body for _kind, title, body in state.notes if title in {f"{surface} recovered", f"{surface} is ready"}
     )
 
 
 def _recover(monkeypatch, contract) -> "_RecordingState":
-    available = {"value": False}
+    available = {"value": True}
     _flip(monkeypatch, available)
     degraded.register_contract(contract)
     state = _RecordingState()
+    degraded.evaluate(notify=True, state=state)
+    available["value"] = False
     degraded.evaluate(notify=True, state=state)
     available["value"] = True
     degraded.evaluate(notify=True, state=state)

@@ -62,14 +62,13 @@ class OpenAITtsProvider(TtsProvider):
     ) -> dict[str, Any] | None:
         if not text.strip():
             return None
-        selected = voice or self._default_model()
+        selected = voice if isinstance(voice, str) and voice.strip() else ""
         if selected:
             return speech_payload(
                 text, selected, speech_voice or _DEFAULT_SPEECH_VOICE, speed
             )
         logger.error(
-            "No TTS model selected for %r (this endpoint has no contributed "
-            "default); pin one in Settings → Models.",
+            "No TTS model selected for %r; pin one in Settings → Models.",
             self._provider_name,
         )
         return None
@@ -84,6 +83,9 @@ class OpenAITtsProvider(TtsProvider):
         speed: float = 1.0,
         **opts: Any,
     ) -> str | None:
+        request = self._request(text, voice, speech_voice, speed)
+        if request is None:
+            return None
         try:
             sdk = importlib.import_module("openai")
         except ImportError:
@@ -96,9 +98,6 @@ class OpenAITtsProvider(TtsProvider):
         credential = self._resolve_api_key()
         if not credential:
             logger.error("No API key for remote TTS provider %r", self._provider_name)
-            return None
-        request = self._request(text, voice, speech_voice, speed)
-        if request is None:
             return None
         destination = AudioDestination.allocate(output_path)
         exchange = SpeechExchange(credential, self._endpoint, request, destination)
