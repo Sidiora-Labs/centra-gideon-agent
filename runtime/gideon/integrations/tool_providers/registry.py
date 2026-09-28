@@ -175,10 +175,108 @@ class ToolCatalog:
     refusals: list[dict[str, Any]]
 
 
+class ConfiguredMcpToolProvider(ToolProvider):
+    """Expose one configured MCP server through the canonical tool catalog."""
+
+    def __init__(self, server: str) -> None:
+        self.server = server
+
+    @property
+    def name(self) -> str:
+        return self.server
+
+    @property
+    def display_name(self) -> str:
+        return f"MCP: {self.server}"
+
+    async def list_tools(self) -> list[ToolDefinition]:
+        from gideon.integrations.mcp_client import get_mcp_client_registry
+        from gideon.engine.task_modes import infer_risk_from_name
+
+        registry = get_mcp_client_registry()
+        if registry is None:
+            return []
+        spec = registry._specs.get(self.server)
+        if not isinstance(spec, dict):
+            return []
+        conn = registry.get(self.server)
+        if conn is None:
+            return []
+        disabled = spec.get("disabledTools", [])
+        disabled_names = {name for name in disabled if isinstance(name, str)} if isinstance(disabled, list) else set()
+        try:
+            advertised = await conn.list_tools()
+        except Exception:
+            logger.debug("MCP server %s could not list agent tools", self.server, exc_info=True)
+            return []
+
+        counts: dict[str, int] = {}
+        for item in advertised:
+            name = getattr(item, "name", None)
+            if isinstance(name, str) and name.strip() and not any(ord(char) < 32 for char in name):
+                counts[name] = counts.get(name, 0) + 1
+        definitions: list[ToolDefinition] = []
+        for item in advertised:
+            tool_name = getattr(item, "name", None)
+            if (
+                not isinstance(tool_name, str)
+                or not tool_name.strip()
+                or any(ord(char) < 32 for char in tool_name)
+                or counts.get(tool_name) != 1
+                or tool_name in disabled_names
+            ):
+                continue
+            raw_schema = getattr(item, "input_schema", None)
+            definitions.append(
+                ToolDefinition(
+                    name=f"mcp/{self.server}/{tool_name}",
+                    description=str(getattr(item, "description", "") or ""),
+                    provider=self.server,
+                    parameters=raw_schema if isinstance(raw_schema, dict) else raw_schema,
+                    requires_approval=True,
+                    risk_level=infer_risk_from_name(tool_name),
+                )
+            )
+        from gideon.integrations.tool_providers.portable_schema import offered_tool_definitions
+
+        return offered_tool_definitions(definitions, provider=self.server)
+
+    async def invoke(self, tool_name: str, arguments: dict[str, Any]):
+        from gideon.integrations.mcp_client import get_mcp_client_registry
+        from gideon.integrations.mcp_core import get_current_session_key
+        from gideon.integrations.tool_providers.base import ToolResult
+
+        prefix = f"mcp/{self.server}/"
+        if not isinstance(tool_name, str) or not tool_name.startswith(prefix):
+            return ToolResult(False, error="MCP tool is not owned by this server")
+        raw_name = tool_name[len(prefix):]
+        if not raw_name:
+            return ToolResult(False, error="MCP tool name is required")
+        registry = get_mcp_client_registry()
+        if registry is None:
+            return ToolResult(False, error="MCP support is unavailable")
+        spec = registry._specs.get(self.server)
+        if not isinstance(spec, dict):
+            return ToolResult(False, error="MCP server is not configured or enabled")
+        disabled = spec.get("disabledTools", [])
+        if isinstance(disabled, list) and raw_name in disabled:
+            return ToolResult(False, error="MCP tool is disabled")
+        session_key = get_current_session_key()
+        conn = registry.get(self.server, str(session_key or ""))
+        if conn is None:
+            return ToolResult(False, error="MCP server is not configured or enabled")
+        try:
+            success, output = await conn.call_tool(raw_name, arguments)
+            return ToolResult(bool(success), output=output if success else "", error="" if success else output)
+        except Exception as exc:
+            return ToolResult(False, error=str(exc)[:300])
+
+
 _providers: dict[str, ToolProvider] = {}
 _registrations: dict[int, ProviderRegistration] = {}
 _ownership_refusals: list[dict[str, Any]] = []
 _catalog_lock = asyncio.Lock()
+_mcp_provider_instances: dict[str, ConfiguredMcpToolProvider] = {}
 
 
 def register_provider(
@@ -280,7 +378,42 @@ def get_provider(name: str) -> ToolProvider | None:
     return candidates[0].provider if candidates else _providers.get(name)
 
 
+def _sync_mcp_server_providers() -> None:
+    """Register the configured MCP servers as trusted, canonical tool owners."""
+    try:
+        from gideon.integrations.mcp_client import get_mcp_client_registry
+
+        client_registry = get_mcp_client_registry()
+        desired = (
+            {
+                name
+                for name in client_registry._specs
+                if isinstance(name, str) and name and "/" not in name
+            }
+            if client_registry is not None
+            else set()
+        )
+    except Exception:
+        logger.debug("MCP tool provider synchronization failed", exc_info=True)
+        desired = set()
+
+    for server in set(_mcp_provider_instances) - desired:
+        unregister_provider(
+            server, owner_type="mcp", owner=server, instance_id=server
+        )
+        _mcp_provider_instances.pop(server, None)
+    for server in sorted(desired):
+        provider = _mcp_provider_instances.get(server)
+        if provider is None:
+            provider = ConfiguredMcpToolProvider(server)
+            _mcp_provider_instances[server] = provider
+        register_provider(
+            provider, owner_type="mcp", owner=server, instance_id=server
+        )
+
+
 def list_providers() -> list[ToolProvider]:
+    _sync_mcp_server_providers()
     return [
         record.provider
         for record in sorted(
@@ -328,6 +461,7 @@ async def resolve_tool_catalog(
     Core providers are ordered before apps; apps are ordered by stable app and
     instance identity, so restart order cannot alter the winner.
     """
+    _sync_mcp_server_providers()
     async with _catalog_lock:
         selected = (
             [record.provider for record in _registrations.values()]

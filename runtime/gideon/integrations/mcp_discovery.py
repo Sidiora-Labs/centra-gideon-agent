@@ -712,6 +712,82 @@ def _wait_for_owner(server: McpServerInfo) -> McpServerInfo:
     return server
 
 
+async def agent_callable_status(
+    servers: list[McpServerInfo],
+) -> dict[str, dict[str, Any]]:
+    """Project whether configured MCP tools survive the agent's real catalog policy."""
+    from gideon.integrations.tool_providers.registry import (
+        ConfiguredMcpToolProvider,
+        get_ownership_refusals,
+        list_providers,
+        resolve_tool_catalog,
+    )
+    from gideon.integrations.tool_providers import tool_prefs
+
+    providers = list_providers()
+    server_providers = {
+        provider.name: provider
+        for provider in providers
+        if isinstance(provider, ConfiguredMcpToolProvider)
+    }
+    catalog = await resolve_tool_catalog(providers)
+    disabled = tool_prefs.load_disabled()
+    disabled_providers = tool_prefs.load_disabled_providers()
+    callable_counts: dict[str, int] = {}
+    for definition in catalog.definitions:
+        provider = catalog.providers.get(definition.name)
+        server = getattr(provider, "name", "")
+        if server not in server_providers or server in disabled_providers:
+            continue
+        if tool_prefs.is_disabled(
+            definition.provider or server,
+            definition.name,
+            disabled,
+            disabled_providers,
+        ):
+            continue
+        callable_counts[server] = callable_counts.get(server, 0) + 1
+
+    refusals = get_ownership_refusals()
+    status: dict[str, dict[str, Any]] = {}
+    for server in servers:
+        health_status = server.status
+        health_error = server.error
+        count = callable_counts.get(server.name, 0)
+        if server.status == "disabled":
+            reason = "MCP server is disabled."
+            projected_status = "disabled"
+        elif not _server_allowed(server):
+            reason = server.error or "MCP owner approval is required."
+            projected_status = server.status or "waiting"
+        elif count:
+            reason = ""
+            projected_status = "ready"
+        else:
+            refused = next(
+                (item for item in refusals if item.get("provider") == server.name),
+                None,
+            )
+            if refused:
+                reason = "MCP tools were refused by canonical ownership policy."
+            elif server.name not in server_providers:
+                reason = "MCP server is not present on the configured agent surface."
+            elif health_status == "error":
+                reason = "The connection is unavailable, so no agent-callable tool is exposed."
+            else:
+                reason = "No enabled portable tools are present on the agent-callable surface."
+            projected_status = "unserved"
+        status[server.name] = {
+            "status": projected_status,
+            "healthStatus": health_status,
+            "healthError": health_error,
+            "agentCallable": count > 0,
+            "agentCallableToolCount": count,
+            "unservedReason": reason,
+        }
+    return status
+
+
 async def probe_one(name: str) -> McpServerInfo | None:
     """Probe a SINGLE configured MCP server by name — backs per-provider reconnect
     so a user can recover one timed-out server without re-probing the whole fleet

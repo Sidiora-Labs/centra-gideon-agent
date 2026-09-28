@@ -43,9 +43,13 @@ interface Group {
 
 function serverHealth(s: McpServer): { state: string; tone: string; detail?: string } {
   if (!s.enabled) return { state: 'disabled', tone: 'var(--color-on-surface-low)' }
-  if (s.status === 'ready' || s.status === 'ok' || s.status === 'connected') return { state: 'ready', tone: 'var(--color-ok)' }
+  if (s.status === 'ready') return { state: 'ready', tone: 'var(--color-ok)' }
   if (s.status === 'error') return { state: 'error', tone: 'var(--color-danger)', detail: s.error }
-  return { state: s.status || 'unknown', tone: 'var(--color-warn)', detail: s.error }
+  return { state: s.status || 'unknown', tone: 'var(--color-warn)', detail: s.unservedReason || s.error }
+}
+
+function connectionHealth(s: McpServer): string {
+  return s.healthStatus || (s.status === 'unserved' ? 'unknown' : s.status || 'unknown')
 }
 
 interface ToolsIndexData {
@@ -313,7 +317,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
         <span data-type="caption" className="text-on-surface-low uppercase tracking-wide">{g.label}</span>
         {g.kind === 'native'
           ? badge && <span data-type="caption" title={badge.title} className="rounded-pill bg-surface-high px-2 h-5 inline-flex items-center text-on-surface-low">{badge.label}</span>
-          : health && <span data-type="caption" className="inline-flex items-center gap-1" style={{ color: health.tone }} title={health.detail}><Circle size={7} fill="currentColor" stroke="none" /> {health.state}</span>}
+          : health && <><span data-type="caption" className="inline-flex items-center gap-1" style={{ color: health.tone }} title={health.detail}><Circle size={7} fill="currentColor" stroke="none" /> {health.state}</span><span data-type="caption" className="text-on-surface-low">{uiText("Connection: {p0}", [connectionHealth(g.server!)])}</span></>}
         <span data-type="caption" className="text-on-surface-low">· {g.tools.length}</span>
         {
 }
@@ -366,7 +370,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
       {g.kind === 'mcp' && g.tools.length === 0 ? (
         <div data-type="body-s" className="rounded-lg bg-surface-container px-m py-3 text-on-surface-low flex items-center gap-s">
           <Plug size={14} />
-          {!g.server?.enabled ? 'Server disabled.' : health?.state === 'error' ? `Not responding — ${g.server?.error || 'no tools available'}.` : 'No tools exposed yet.'}
+          {!g.server?.enabled ? 'Server disabled.' : g.server?.unservedReason ? `Not agent-callable — ${g.server.unservedReason}` : health?.state === 'error' ? `Not responding — ${g.server?.error || 'no tools available'}.` : 'No tools exposed yet.'}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-s sm:grid-cols-2">

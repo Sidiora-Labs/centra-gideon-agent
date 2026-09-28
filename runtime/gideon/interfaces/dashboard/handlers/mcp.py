@@ -261,6 +261,26 @@ def _purge_unused_mcp_credentials(name: str, spec: dict[str, Any] | None) -> Non
 
 
 _mcp_probe_cache: list[dict] = []
+
+
+async def _attach_agent_callable_projection(
+    rows: list[dict[str, Any]], servers: list[Any]
+) -> None:
+    from gideon.integrations.mcp_discovery import agent_callable_status
+
+    projections = await agent_callable_status(servers)
+    for row in rows:
+        projection = projections.get(str(row.get("name") or ""))
+        if projection is None:
+            continue
+        row.update(projection)
+        if row.get("enabled") is False:
+            row.update(
+                status="disabled",
+                agentCallable=False,
+                agentCallableToolCount=0,
+                unservedReason="MCP server is disabled.",
+            )
 _mcp_probe_ts: float = 0.0
 _MCP_PROBE_CACHE_SECS = 600
 _mcp_probe_in_progress = False
@@ -457,6 +477,7 @@ async def _bg_mcp_probe() -> None:
             if isinstance(spec, dict) and spec.get("disabledTools"):
                 d["disabledTools"] = spec["disabledTools"]
             result.append(d)
+        await _attach_agent_callable_projection(result, all_servers)
         _mcp_probe_cache[:] = result
         _mcp_probe_ts = time.time()
         logger.info("MCP probe complete: %d servers", len(result))
@@ -522,6 +543,7 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
             err, _ = redact_exfiltration_urls(err)
             d["error"] = err
         result.append(_redact_mcp_projection(d))
+    await _attach_agent_callable_projection(result, servers)
     return web.json_response(_redact_mcp_projection(result))
 
 
@@ -607,6 +629,7 @@ async def api_mcp_probe(request: web.Request) -> web.Response:
         if isinstance(spec, dict) and spec.get("disabledTools"):
             d["disabledTools"] = spec["disabledTools"]
         result.append(_redact_mcp_projection(d))
+    await _attach_agent_callable_projection(result, servers)
     _mcp_probe_cache[:] = result
     _mcp_probe_ts = time.time()
     return web.json_response(result)
@@ -639,6 +662,7 @@ async def api_mcp_probe_one(request: web.Request) -> web.Response:
             d["disabledTools"] = spec["disabledTools"]
     except (FileNotFoundError, json.JSONDecodeError):
         pass
+    await _attach_agent_callable_projection([d], [info])
     replaced = False
     for i, row in enumerate(_mcp_probe_cache):
         if row.get("name") == name:
@@ -661,7 +685,12 @@ async def api_mcp_probe_cached(request: web.Request) -> web.Response:
         task = asyncio.create_task(_bg_mcp_probe())
         state._background_tasks.add(task)
         task.add_done_callback(state._background_tasks.discard)
-    return web.json_response(_redact_mcp_projection(_mcp_probe_cache))
+    rows = [dict(row) for row in _mcp_probe_cache]
+    if rows:
+        from gideon.integrations.mcp_discovery import list_servers
+
+        await _attach_agent_callable_projection(rows, list_servers())
+    return web.json_response(_redact_mcp_projection(rows))
 
 
 async def api_mcp_pool_stats(request: web.Request) -> web.Response:

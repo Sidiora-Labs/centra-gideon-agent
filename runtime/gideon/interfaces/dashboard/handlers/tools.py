@@ -203,48 +203,11 @@ async def api_tools_list(request: web.Request) -> web.Response:
                 t.parameters,
                 t.requires_approval,
                 getattr(t, "risk_level", "safe"),
+                default_tier="" if t.name.startswith("mcp/") else "builtin",
             )
     except Exception as exc:
         logger.warning("Failed to list tools from registry", exc_info=True)
         record_failure("tool-registry", str(exc))
-
-    from gideon.engine.task_modes import infer_risk_from_name
-
-    try:
-        from gideon.integrations.mcp_client import get_mcp_client_registry
-
-        registry = get_mcp_client_registry()
-        if registry is not None:
-            conns = list(registry.items())
-
-            async def _list_one(name: str, conn) -> tuple[str, list]:
-                try:
-                    tools = await asyncio.wait_for(
-                        conn.list_tools(), timeout=_MCP_LIST_TIMEOUT_SECS
-                    )
-                    return name, list(tools)
-                except (asyncio.TimeoutError, Exception):  # noqa: BLE001
-                    logger.debug(
-                        "MCP server '%s' tool listing skipped (slow/unreachable)",
-                        name,
-                        exc_info=True,
-                    )
-                    return name, []
-
-            results = await asyncio.gather(*(_list_one(n, c) for n, c in conns))
-            for server_name, tools in results:
-                for tool in tools:
-                    _add(
-                        f"mcp/{server_name}/{tool.name}",
-                        tool.description,
-                        server_name,
-                        tool.input_schema,
-                        risk_level=infer_risk_from_name(tool.name),
-                        default_tier="",
-                    )
-    except Exception as exc:
-        logger.warning("Failed to list tools from MCP client registry", exc_info=True)
-        record_failure("mcp", str(exc))
 
     return web.json_response({"tools": tools_out, "load_failures": get_load_failures()})
 
@@ -415,7 +378,19 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
 
     caller = request.headers.get("X-Session-Key", "") or "internal"
     try:
-        result = await provider.invoke(tool_name, arguments)
+        if tool_name.startswith("mcp/"):
+            from gideon.integrations.mcp_core import (
+                reset_current_session_key,
+                set_current_session_key,
+            )
+
+            session_token = set_current_session_key(caller)
+            try:
+                result = await provider.invoke(tool_name, arguments)
+            finally:
+                reset_current_session_key(session_token)
+        else:
+            result = await provider.invoke(tool_name, arguments)
     except Exception as exc:
         _sel().log_tool_invocation(
             session_key=caller,

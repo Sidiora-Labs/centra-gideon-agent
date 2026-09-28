@@ -1551,6 +1551,7 @@ export interface AlwaysOnResponse {
 }
 export interface McpServer {
   name: string; command?: string; args?: string[]; status: string; tools: Array<string | { name: string; description?: string }>
+  healthStatus?: string; healthError?: string; agentCallable?: boolean; agentCallableToolCount?: number; unservedReason?: string
   error?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
   url?: string; transport?: string; env?: string[]; headers?: string[]; header_credentials?: string[]; oauth?: string[]
   allowed?: boolean; allowRevision?: string; allowQuestion?: string
