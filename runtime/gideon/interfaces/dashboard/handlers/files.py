@@ -432,16 +432,6 @@ async def api_channel_upload_file(request: web.Request) -> web.Response:
 
     state: ConsoleState = request.app["state"]
     delivery = state.channel_delivery
-    if not delivery:
-        _sel().log_tool_invocation(
-            session_key="api",
-            source="api",
-            tool_name="notify_attachment",
-            tool_kind="channel",
-            outcome="skipped",
-            error="no_channel_delivery",
-        )
-        return web.json_response({"ok": True, "skipped": "no_channel"})
     try:
         body = await read_json_body(request)
     except (json.JSONDecodeError, ValueError):
@@ -561,9 +551,57 @@ async def api_channel_upload_file(request: web.Request) -> web.Response:
             {"error": relayed_failure_copy(redact_err)}, status=500
         )
     channel = ""
+    if not thread_ts:
+        from gideon.integrations.channel_delivery import reach_owner
+        from gideon.workspace import notification_kinds
+
+        async def send(_provider, owner_delivery, destination):
+            receipt = await owner_delivery.upload_attachment(
+                destination,
+                str(resolved),
+                filename=filename,
+                title=filename,
+            )
+            return bool(receipt)
+
+        async def inbox_fallback(reason: str) -> None:
+            state.notify(
+                notification_kinds.WARNING,
+                "Attachment delivery failed",
+                "No connected channel could deliver the requested attachment.",
+                meta={"channel_delivery": "failed", "reason": reason},
+            )
+
+        result = await reach_owner(send, inbox_fallback=inbox_fallback)
+        if result.delivered:
+            _sel().log_tool_invocation(
+                session_key="api",
+                source="api",
+                tool_name="notify_attachment",
+                tool_kind="channel",
+                outcome="completed",
+                downstream_service="channel",
+                resources=f"provider={result.provider} file={file_path}",
+            )
+            return web.json_response({"ok": True})
+        if result.reason == "inbox fallback":
+            return web.json_response({"ok": True, "inbox_fallback": True})
+        _sel().log_tool_invocation(
+            session_key="api",
+            source="api",
+            tool_name="notify_attachment",
+            tool_kind="channel",
+            outcome="skipped",
+            error="no_channel",
+        )
+        return web.json_response({"ok": True, "skipped": "no_channel"})
+
     try:
-        creds = AppConfig.load().load_credentials()
-        owner_id = creds.get("GIDEON_OWNER_ID", "")
+        from gideon.core.config.credentials import owner_id_for
+        from gideon.integrations.channel_delivery import provider_for_delivery
+
+        provider = provider_for_delivery(delivery)
+        owner_id = owner_id_for(provider) if provider else ""
         if owner_id:
             channel = await delivery.open_dm(owner_id)
     except Exception:

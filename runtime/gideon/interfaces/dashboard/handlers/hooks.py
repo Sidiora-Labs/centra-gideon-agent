@@ -484,18 +484,23 @@ async def _run_hook_agent(
         name_safe, _ = redact_exfiltration_urls(name)
         name_safe, _ = redact_credentials(name_safe)
         title = f"🪝 {name_safe}"
+        from gideon.integrations.channel_delivery import reach_owner
+
+        async def send(_provider, delivery, channel):
+            receipt = await delivery.deliver_text(channel, f"*{title}*\n{result_text[:3000]}")
+            return bool(receipt)
+
+        try:
+            outcome = await reach_owner(send)
+        except Exception:
+            logger.exception("Hook agent: channel delivery failed")
+            outcome = None
+        meta = {"session_key": session_key}
+        if outcome and outcome.connected_channels and not outcome.delivered:
+            meta.update({"channel_delivery": "failed", "reason": outcome.reason})
         state.notify(
             notification_kinds.HOOK,
             title,
             result_text[:2000],
-            meta={"session_key": session_key},
+            meta=meta,
         )
-        if state.channel_delivery and state.owner_id:
-            try:
-                channel = await state.channel_delivery.open_dm(state.owner_id)
-                if channel:
-                    await state.channel_delivery.deliver_text(
-                        channel, f"*{title}*\n{result_text[:3000]}"
-                    )
-            except Exception:
-                logger.exception("Hook agent: channel delivery failed")

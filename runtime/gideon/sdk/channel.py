@@ -34,7 +34,11 @@ from gideon.cognition.doc_parser import extract_text, is_parseable_document
 from gideon.cognition.history import ConversationLog, HistoryConsolidator
 from gideon.cognition.memory_service import MemoryService
 from gideon.core.atomic_write import atomic_write
-from gideon.core.config.credentials import save_credential
+from gideon.core.config.credentials import (
+    owner_id_credential,
+    owner_id_for,
+    save_credential,
+)
 from gideon.core.config.loader import (
     CRED_OWNER_ID,
     CRED_SLACK_APP_TOKEN,
@@ -86,17 +90,22 @@ from gideon.integrations.channel_transports.base import (
 )
 from gideon.integrations.channel_trust import (
     CANNED_PAIRING_REPLY,
+    CANNED_OWNER_PAIRED_REPLY,
     TrustVerdict,
     allow_sender,
     apply_trust_action,
+    cancel_owner_pairing,
     create_pairing_code,
+    create_owner_pairing_code,
     deny_sender,
     fence_channel_content,
     guard_inbound,
     is_allowed_sender,
     is_tracked_channel,
     note_unknown_sender,
+    owner_pairing_status,
     redeem_pairing_code,
+    redeem_owner_pairing_code,
     track,
     trust_policies,
     untrack,
@@ -132,6 +141,8 @@ from gideon.interfaces.dashboard.token_auth import (
     LINK_WINDOW_SECS,
     MAX_SESSION_TTL_SECS,
     generate_token,
+    owner_sign_in_token,
+    NOT_THE_OWNER_SENTENCE,
     parse_duration,
 )
 from gideon.operations.stats import Stats
@@ -155,9 +166,13 @@ __all__ = [
     "AppConfig",
     "BACKGROUND_KEY",
     "CANNED_PAIRING_REPLY",
+    "CANNED_OWNER_PAIRED_REPLY",
+    "NOT_THE_OWNER_SENTENCE",
     "CRED_OWNER_ID",
     "CRED_SLACK_APP_TOKEN",
     "CRED_SLACK_BOT_TOKEN",
+    "owner_id_credential",
+    "owner_id_for",
     "CapturingState",
     "ChannelCapabilities",
     "ChannelContractError",
@@ -210,6 +225,10 @@ __all__ = [
     "config_dir",
     "config_path",
     "create_pairing_code",
+    "create_owner_pairing_code",
+    "cancel_owner_pairing",
+    "owner_pairing_status",
+    "owner_sign_in_token",
     "dashboard_origin",
     "delete_all_automations",
     "delete_automation",
@@ -240,6 +259,7 @@ __all__ = [
     "redact_exfiltration_urls",
     "register_transport",
     "redeem_pairing_code",
+    "redeem_owner_pairing_code",
     "render_use_case_prompt",
     "resolve_bind_host",
     "resolve_dashboard_host",

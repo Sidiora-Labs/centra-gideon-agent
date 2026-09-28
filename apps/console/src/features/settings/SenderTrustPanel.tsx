@@ -8,6 +8,7 @@ import { useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup } from './settingsUI'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton, ListRow, LoadError } from '../../shared/ui/ListScaffold'
+import { ChannelOwnerSection } from './ChannelOwnerSection'
 
 const CACHE_KEY = 'settings:sender-trust'
 
@@ -91,6 +92,8 @@ export function SenderTrustPanel() {
         title="Sender trust"
         hint="Who is allowed to talk to your agent through a messaging channel — and the switch that cuts one off. Access is granted by a pairing code or by your Allow on an unknown-sender notification; this page is where you review and revoke it."
       />
+
+      <ChannelOwnerSection />
 
       {providers.length === 0 ? (
         <EmptyState

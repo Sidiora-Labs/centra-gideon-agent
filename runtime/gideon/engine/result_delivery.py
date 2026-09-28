@@ -137,12 +137,27 @@ class ResultDelivery:
                 await delivery.deliver_notification(
                     channel, self.notice.title, self.notice.result, thread
                 )
-            elif self.runtime._owner_id:
-                channel = await delivery.open_dm(self.runtime._owner_id)
-                if channel:
-                    await delivery.deliver_notification(
-                        channel, self.notice.title, self.notice.result
+            else:
+                from gideon.integrations.channel_delivery import reach_owner
+
+                async def send(_provider, owner_delivery, destination):
+                    receipt = await owner_delivery.deliver_notification(
+                        destination, self.notice.title, self.notice.result
                     )
+                    return bool(receipt)
+
+                state = self.runtime.dashboard_state
+
+                async def inbox_fallback(reason: str) -> None:
+                    if state is not None:
+                        state.notify(
+                            notification_kinds.HEARTBEAT,
+                            self.notice.title,
+                            self.notice.body,
+                            meta={"channel_delivery": "failed", "reason": reason},
+                        )
+
+                await reach_owner(send, inbox_fallback=inbox_fallback)
         except Exception:
             self.logger.exception("Heartbeat channel delivery failed")
 

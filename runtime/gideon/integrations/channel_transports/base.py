@@ -62,6 +62,7 @@ class ChannelCapabilities:
     rich_text: bool = False
     typing_indicator: bool = False
     max_text_len: int = 0
+    owner_pairing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {

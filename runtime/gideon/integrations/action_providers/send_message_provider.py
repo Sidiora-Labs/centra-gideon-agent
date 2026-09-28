@@ -106,6 +106,25 @@ class SendMessageActionProvider(ActionProvider):
             (action_config.get("user") or "").strip(),
         )
         state = services.state
+        if not request.channel and not request.user:
+            from gideon.integrations.channel_delivery import reach_owner
+
+            async def send(_provider, delivery, destination):
+                rendered = (
+                    "\n".join((f"*{request.title}*", request.text))
+                    if request.title
+                    else request.text
+                )
+                receipt = await delivery.deliver_text(destination, rendered)
+                return bool(receipt)
+
+            async def inbox_fallback(_reason: str) -> None:
+                request.notify(state)
+
+            result = await reach_owner(send, inbox_fallback=inbox_fallback)
+            if result.delivered or result.reason == "inbox fallback":
+                return ActionResult(True, stdout="delivered to the owner")
+            return ActionResult(False, error=f"send-message: {result.reason}")
         target = getattr(state, "channel_delivery", None)
         return (
             request.notify(state)

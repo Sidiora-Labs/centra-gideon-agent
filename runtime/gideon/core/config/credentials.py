@@ -284,6 +284,34 @@ def get_credential(key: str) -> str:
     return _keychain_get(key) or _dotenv_credentials().get(key, "")
 
 
+def owner_id_credential(provider: str) -> str:
+    """Return the credential key for one channel's owner identity.
+
+    Provider names are part of the environment/credential key, so accept only the
+    same portable characters used by registered transport names.
+    """
+    raw = str(provider or "").strip()
+    if not raw or any(
+        not (char.isascii() and (char.isalnum() or char in "-_"))
+        for char in raw
+    ):
+        raise ValueError("provider must contain only letters, digits, hyphens, or underscores")
+    normalized = "_".join(f"{byte:02X}" for byte in raw.encode("ascii"))
+    return f"GIDEON_OWNER_ID_{normalized}"
+
+
+def owner_id_for(provider: str) -> str:
+    """Read a channel-specific owner id, falling back to the legacy shared key."""
+    key = owner_id_credential(provider)
+    value = os.environ.get(key, "").strip() or get_credential(key).strip()
+    if value:
+        return value
+    return (
+        os.environ.get(_loader.CRED_OWNER_ID, "").strip()
+        or get_credential(_loader.CRED_OWNER_ID).strip()
+    )
+
+
 def put_secret_value(key: str, value: str) -> None:
     """Store an owner-scoped config secret without projecting it into the environment."""
     if credential_backend() == "keychain" and _keychain_save(key, value):

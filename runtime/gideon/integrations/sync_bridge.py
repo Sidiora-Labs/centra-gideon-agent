@@ -83,6 +83,7 @@ async def handoff_to_channel(
     title: str = "",
     channel: str | None = None,
     sessions: object | None = None,
+    provider: str = "",
 ) -> str | None:
     """Hand off a dashboard session to a new channel DM thread.
 
@@ -113,11 +114,28 @@ async def handoff_to_channel(
     preview, _ = redact_exfiltration_urls(preview)
 
     try:
-        target_channel = channel or await delivery.open_dm(owner_id)
-        thread_ts = await delivery.deliver_text(
-            target_channel,
-            f"📲 *{title}*\n>{preview}\n\n_Reply to continue this session._",
-        )
+        message = f"📲 *{title}*\n>{preview}\n\n_Reply to continue this session._"
+        if channel:
+            target_channel = channel
+            thread_ts = await delivery.deliver_text(target_channel, message)
+        else:
+            from gideon.integrations.channel_delivery import reach_owner
+
+            selected: dict[str, str] = {}
+
+            async def send(_provider, owner_delivery, destination):
+                thread = await owner_delivery.deliver_text(destination, message)
+                if not thread:
+                    return False
+                selected["channel"] = destination
+                selected["thread"] = thread
+                return True
+
+            result = await reach_owner(send, only=(provider,) if provider else ())
+            if not result.delivered:
+                return None
+            target_channel = selected["channel"]
+            thread_ts = selected["thread"]
 
         if sessions and hasattr(sessions, "set_channel_link"):
             try:

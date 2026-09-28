@@ -908,6 +908,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_PLATFORM,
         merge=MERGE_LWW,
         help="per-entity user settings",
+        derived_within=("channel_owner_pairing.json",),
     ),
     StateEntry(
         id="dashboard_views",

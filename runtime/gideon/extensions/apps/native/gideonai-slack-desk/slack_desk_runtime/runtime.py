@@ -23,7 +23,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gideon.sdk.channel import CRED_OWNER_ID
+from gideon.sdk.channel import owner_id_for
 
 from slack_desk_runtime.client import RealSlackDeskClient
 
@@ -44,7 +44,7 @@ class SlackDeskRuntime:
         cfg = services.config
 
         creds = cfg.load_credentials()
-        self._owner_id: str = creds.get(CRED_OWNER_ID, "") or services.owner_id
+        self._owner_id: str = owner_id_for("slack") or services.owner_id
 
         # Slack behavioral config comes from the app's OWN store (SlackDeskSettings) —
         # core AppConfig defines no Slack config. get_settings() caches one live

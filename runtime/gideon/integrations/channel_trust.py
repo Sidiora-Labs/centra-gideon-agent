@@ -17,6 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 _ENTITY = "channel_trust"
+_OWNER_PAIRING_ENTITY = "channel_owner_pairing"
 PAIRING_CODE_TTL_SECS = 600
 PAIRING_CODE_DIGITS = 8
 DM_POLICIES: tuple[str, ...] = ("pairing", "owner_only", "open")
@@ -24,11 +25,15 @@ GROUP_POLICIES: tuple[str, ...] = ("tracked_only", "off")
 DEFAULT_DM_POLICY = "pairing"
 DEFAULT_GROUP_POLICY = "tracked_only"
 UNKNOWN_SENDER_RENOTIFY_SECS = 24 * 3600
+OWNER_PAIRING_MAX_ATTEMPTS = 5
+_OWNER_PAIRING_EPOCH = secrets.token_hex(16)
+_OWNER_PAIRING_SECRET = secrets.token_bytes(32)
 CANNED_PAIRING_REPLY = (
     "I don't recognize you yet. Ask my owner for an 8-digit pairing code "
     "(they can run `gideon pair <provider>`), then send it here to start talking."
 )
 CANNED_PAIRED_REPLY = "Paired — you can talk to me now."
+CANNED_OWNER_PAIRED_REPLY = "This channel is now paired as the owner. Ask for the dashboard sign-in link when you need it."
 _STORE_LOCK = threading.RLock()
 
 
@@ -82,6 +87,31 @@ def _write_store(data: dict[str, Any]) -> None:
 
     with _STORE_LOCK:
         _save_entity_settings(_ENTITY, data)
+
+
+def _owner_pairing_record(provider: str) -> dict[str, Any]:
+    from gideon.extensions.providers.entity_routes import _load_entity_settings
+
+    with _STORE_LOCK:
+        store = _load_entity_settings(_OWNER_PAIRING_ENTITY)
+        if not isinstance(store, dict):
+            return {}
+        record = store.get(provider)
+        return copy.deepcopy(record) if isinstance(record, dict) else {}
+
+
+def _save_owner_pairing_record(provider: str, record: dict[str, Any]) -> None:
+    from gideon.extensions.providers.entity_routes import (
+        _load_entity_settings,
+        _save_entity_settings,
+    )
+
+    with _STORE_LOCK:
+        store = _load_entity_settings(_OWNER_PAIRING_ENTITY)
+        if store is None:
+            raise OSError("owner pairing state is unreadable")
+        store[provider] = copy.deepcopy(record)
+        _save_entity_settings(_OWNER_PAIRING_ENTITY, store)
 
 
 def _provider_record(store: dict[str, Any], provider: str) -> dict[str, Any]:
@@ -227,11 +257,17 @@ def _directory_projection(
 def provider_trust(provider: str) -> dict[str, Any]:
     record = _provider_record(_read_store(), provider)
     code = record["pairing"]
+    from gideon.core.config.credentials import owner_id_for
+
+    owner_id = owner_id_for(provider)
+    senders = record["allowed_senders"]
+    if owner_id:
+        senders = {key: value for key, value in senders.items() if key != owner_id}
     return {
         "provider": provider,
         "policies": dict(record["policies"]),
         "allowed_senders": _directory_projection(
-            record["allowed_senders"], "sender_id", ("name", "added_at", "via")
+            senders, "sender_id", ("name", "added_at", "via")
         ),
         "tracked_channels": _directory_projection(
             record["tracked_channels"], "channel_id", ("name", "added_at")
@@ -310,6 +346,109 @@ def redeem_pairing_code(provider: str, sender_id: str, code: str) -> bool:
     return accepted
 
 
+def owner_pairing_code_outstanding(provider: str) -> bool:
+    ticket = _owner_pairing_record(provider)
+    return bool(ticket.get("code_hash")) and ticket.get("epoch") == _OWNER_PAIRING_EPOCH
+
+
+def create_owner_pairing_code(provider: str) -> str:
+    """Create a short-lived, single-use code that binds this channel's owner."""
+    code = str(secrets.randbelow(10**PAIRING_CODE_DIGITS)).zfill(PAIRING_CODE_DIGITS)
+    issued = _now()
+    _save_owner_pairing_record(provider, {
+            "code_hash": hmac.new(_OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256).hexdigest(),
+            "epoch": _OWNER_PAIRING_EPOCH,
+            "created_at": _iso(issued),
+            "expires_at": _iso(issued + timedelta(seconds=PAIRING_CODE_TTL_SECS)),
+            "attempts": 0,
+            "ended": "",
+        })
+    _emit_sel("owner_pairing_code_created", "created", provider)
+    return code
+
+
+def owner_pairing_status(provider: str) -> dict[str, Any]:
+    ticket = _owner_pairing_record(provider)
+    active = bool(ticket.get("code_hash")) and ticket.get("epoch") == _OWNER_PAIRING_EPOCH
+    ended = str(ticket.get("ended") or "")
+    if ticket.get("code_hash") and not active:
+        ended = "expired"
+    if active:
+        try:
+            active = _now() <= datetime.fromisoformat(str(ticket.get("expires_at") or ""))
+        except (TypeError, ValueError):
+            active = False
+        if not active:
+            ended = "expired"
+    attempts = int(ticket.get("attempts") or 0)
+    return {
+        "active": active,
+        "created_at": str(ticket.get("created_at") or ""),
+        "expires_at": str(ticket.get("expires_at") or ""),
+        "attempts_left": max(0, OWNER_PAIRING_MAX_ATTEMPTS - attempts) if active else 0,
+        "ended": ended,
+    }
+
+
+def cancel_owner_pairing(provider: str) -> bool:
+    ticket = _owner_pairing_record(provider)
+    if not ticket.get("code_hash"):
+        return False
+    _save_owner_pairing_record(provider, {"ended": "cancelled"})
+    _emit_sel("owner_pairing_cancelled", "cancelled", provider)
+    return True
+
+
+def redeem_owner_pairing_code(
+    provider: str, sender_id: str, code: str, name: str = ""
+) -> bool:
+    """Bind an owner only from a transport-declared direct-message path."""
+    from gideon.core.config.credentials import owner_id_credential, save_credential
+    from gideon.integrations.channel_transports import get_transport
+
+    transport = get_transport(provider)
+    capability = getattr(transport, "capabilities", lambda: None)() if transport else None
+    if (
+        not sender_id
+        or transport is None
+        or not bool(getattr(capability, "inbound", False))
+        or not bool(getattr(capability, "owner_pairing", False))
+        or not _looks_like_a_pairing_code(code)
+    ):
+        return False
+    accepted = False
+    with _STORE_LOCK:
+        ticket = _owner_pairing_record(provider)
+        digest = str(ticket.get("code_hash") or "")
+        try:
+            unexpired = _now() <= datetime.fromisoformat(str(ticket.get("expires_at") or ""))
+        except (ValueError, TypeError):
+            unexpired = False
+        valid_epoch = ticket.get("epoch") == _OWNER_PAIRING_EPOCH
+        if not digest or not unexpired or not valid_epoch:
+            if digest:
+                _save_owner_pairing_record(provider, {"ended": "expired"})
+        else:
+            expected = hmac.new(_OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(digest, expected):
+                save_credential(owner_id_credential(provider), sender_id)
+                _save_owner_pairing_record(
+                    provider, {"ended": "paired", "paired_at": _iso(_now())}
+                )
+                accepted = True
+            else:
+                attempts = int(ticket.get("attempts") or 0) + 1
+                if attempts >= OWNER_PAIRING_MAX_ATTEMPTS:
+                    ticket = {"ended": "too_many_attempts", "attempts": attempts}
+                else:
+                    ticket["attempts"] = attempts
+                _save_owner_pairing_record(provider, ticket)
+    _emit_sel("owner_paired" if accepted else "owner_pairing_attempt", "paired" if accepted else "refused", provider)
+    return accepted
+
+
+
+
 def fence_channel_content(text: str, provider: str, sender_id: str) -> str:
     from gideon.security.security import fence_untrusted
 
@@ -373,9 +512,15 @@ class _InboundContext:
         return trust_policies(self.provider).get(self.scope, default)
 
     def known_verdict(self, policy: str, text: str) -> TrustVerdict | None:
+        from gideon.core.config.credentials import owner_id_for
+
         decision = None
         if self.is_dm:
-            if policy == "open" or is_allowed_sender(self.provider, self.sender_id):
+            if (
+                policy == "open"
+                or is_allowed_sender(self.provider, self.sender_id)
+                or self.sender_id == owner_id_for(self.provider)
+            ):
                 decision = TrustVerdict(True, "allowed")
         elif policy == "off":
             decision = TrustVerdict(False, "group_policy_off")
@@ -422,6 +567,7 @@ def report_inbound_verdict(
     repeated = level > logging.DEBUG and _visible_line_is_deduped(
         "|".join((provider, context.scope, context.subject, verdict.reason))
     )
+    reported_sender = "<paired-owner>" if verdict.meta.get("owner_paired") else sender_id
     logger.log(
         logging.DEBUG if repeated else level,
         "channel inbound %s: provider=%s scope=%s reason=%s policy=%s sender=%s channel=%s%s%s",
@@ -430,7 +576,7 @@ def report_inbound_verdict(
         context.scope,
         verdict.reason or "-",
         policy or "-",
-        sender_id or "-",
+        reported_sender or "-",
         channel_id or "-",
         context.remedy(policy, verdict.allowed),
         " (repeat inside the renotify window)" if repeated else "",
@@ -515,9 +661,21 @@ def guard_inbound(
 ) -> TrustVerdict:
     context = _InboundContext(provider, sender_id, channel_id, is_dm)
     policy = context.policy()
+    candidate = (text or "").strip()
+    if (
+        is_dm
+        and _looks_like_a_pairing_code(candidate)
+        and owner_pairing_code_outstanding(provider)
+    ):
+        if redeem_owner_pairing_code(provider, sender_id, candidate, sender_name):
+            return TrustVerdict(
+                False,
+                "owner_paired",
+                canned_reply=CANNED_OWNER_PAIRED_REPLY,
+                meta={"owner_paired": True},
+            )
     decision = context.known_verdict(policy, text)
     if decision is None:
-        candidate = (text or "").strip()
         eligible = (
             policy == "pairing"
             and _looks_like_a_pairing_code(candidate)

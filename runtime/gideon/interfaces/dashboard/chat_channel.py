@@ -4,10 +4,13 @@ import logging
 
 from aiohttp import web
 
-from gideon.core.http_request import read_json_body
+from gideon.core.http_request import RequestValidationError, read_json_body
 from gideon.integrations.sync_bridge import handoff_to_channel
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
-from gideon.interfaces.dashboard.chat_utils import _history_key_for
+from gideon.interfaces.dashboard.chat_utils import (
+    _history_key_for,
+    persisted_history_key,
+)
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import redact_and_truncate
 from gideon.security.sel import sel
@@ -26,10 +29,6 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     delivery = state.channel_delivery
     if not delivery:
         return web.json_response({"error": "Channel not connected"}, status=503)
-    owner_id = getattr(state, "owner_id", None)
-    if not owner_id:
-        return web.json_response({"error": "owner not configured"}, status=500)
-
     session_key = _history_key_for(name)
 
     existing_ts, existing_chan = state.sessions.get_channel_link(session_key)
@@ -51,17 +50,38 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
             }
         )
 
-    body = await read_json_body(request)
+    try:
+        body = await read_json_body(request)
+    except RequestValidationError:
+        return web.json_response({"error": "invalid handoff destination"}, status=400)
     raw_channel = body.get("channel", "")
-    if not raw_channel or raw_channel == "dm":
-        target_channel = await delivery.open_dm(owner_id)
-    else:
-        target_channel = raw_channel
-
     title = redact_and_truncate(session.title or name, max_chars=200)
-    thread_ts = await delivery.deliver_text(
-        target_channel, f"\U0001f9f5 *{title}*\nSession linked from dashboard."
-    )
+    opening = f"\U0001f9f5 *{title}*\nSession linked from dashboard."
+    selected: dict[str, object] = {}
+    if raw_channel and raw_channel != "dm":
+        target_channel = raw_channel
+        thread_ts = await delivery.deliver_text(target_channel, opening)
+    else:
+        from gideon.integrations.channel_delivery import reach_owner
+
+        async def send(provider, owner_delivery, destination):
+            thread = await owner_delivery.deliver_text(destination, opening)
+            if not thread:
+                return False
+            selected.update(
+                provider=provider, delivery=owner_delivery,
+                channel=destination, thread=thread,
+            )
+            return True
+
+        result = await reach_owner(send)
+        if not result.delivered:
+            return web.json_response(
+                {"error": result.reason or "owner channel unavailable"}, status=503
+            )
+        delivery = selected["delivery"]
+        target_channel = str(selected["channel"])
+        thread_ts = str(selected["thread"])
     if not thread_ts:
         return web.json_response({"error": "failed to create thread"}, status=500)
 
@@ -118,32 +138,69 @@ async def api_chat_session_handoff(request: web.Request) -> web.Response:
     session = state.get_session(name) or state._sessions.get(name)
     if not session:
         return web.json_response({"error": "not found"}, status=404)
-    if not state.channel_delivery:
-        return web.json_response({"error": "Channel not connected"}, status=503)
     if not state.conversation_log:
         return web.json_response({"error": "no conversation log"}, status=500)
+
+    body = await read_json_body(request)
+    provider = body.get("provider", "")
+    channel = None
+    if "channel" in body:
+        channel = body.get("channel")
+    if not isinstance(provider, str) or (
+        channel is not None and not isinstance(channel, str)
+    ):
+        return web.json_response({"error": "invalid handoff destination"}, status=400)
+    provider = provider.strip()
+    channel = channel.strip() if isinstance(channel, str) else None
+
+    if channel and not provider:
+        return web.json_response(
+            {"error": "provider required for channel destination"}, status=400
+        )
+
+    if provider:
+        delivery = state.delivery_for(provider)
+        if delivery is None:
+            return web.json_response({"error": "channel unavailable"}, status=404)
+        if channel:
+            if not delivery.is_tracked_channel(channel):
+                return web.json_response(
+                    {"error": "channel destination is not authorized"}, status=403
+                )
+        else:
+            from gideon.core.config.credentials import owner_id_for
+
+            if not owner_id_for(provider):
+                return web.json_response({"error": "owner destination unavailable"}, status=503)
+    else:
+        delivery = state.channel_delivery
+        if not delivery:
+            return web.json_response({"error": "Channel not connected"}, status=503)
+        from gideon.integrations.channel_delivery import provider_for_delivery
+
+        provider = provider_for_delivery(delivery)
+        if not provider:
+            return web.json_response({"error": "channel unavailable"}, status=503)
+        from gideon.core.config.credentials import owner_id_for
+
+        if not owner_id_for(provider):
+            return web.json_response({"error": "owner destination unavailable"}, status=503)
 
     try:
         save_session_to_history(state, session)
     except Exception:
-        pass
+        return web.json_response({"error": "handoff failed"}, status=500)
 
-    channel = None
-    try:
-        body = await read_json_body(request)
-        channel = body.get("channel")
-    except Exception:
-        pass
-
-    history_key = _history_key_for(session.key)
+    history_key = persisted_history_key(state.conversation_log, session.key)
     thread_ts = await handoff_to_channel(
-        state.channel_delivery,
-        state.owner_id,
+        delivery,
+        "",
         state.conversation_log,
         history_key,
         title=session.title if session._titled else "",
         channel=channel,
         sessions=state.sessions,
+        provider=provider,
     )
     if not thread_ts:
         return web.json_response({"error": "handoff failed"}, status=500)

@@ -589,6 +589,24 @@ def generate_token(
     return f"{encoded_payload}.{signature}"
 
 
+NOT_THE_OWNER_SENTENCE = "Only this channel's owner can open the dashboard sign-in link."
+
+
+def owner_sign_in_token(provider: str, user_id: str, ttl_seconds: int = 3600) -> str:
+    """Mint a local dashboard token only for the owner paired to this provider."""
+    from gideon.core.config.credentials import owner_id_for
+
+    owner_id = owner_id_for(provider)
+    if not owner_id or not user_id or not hmac.compare_digest(owner_id, user_id):
+        raise ValueError(NOT_THE_OWNER_SENTENCE)
+    return generate_token(
+        user_id,
+        ttl_seconds,
+        kind="browser",
+        label=f"{provider} owner sign-in",
+    )
+
+
 def validate_token(
     token: str, *, use_session_exp: bool = False
 ) -> tuple[bool, str, str]:

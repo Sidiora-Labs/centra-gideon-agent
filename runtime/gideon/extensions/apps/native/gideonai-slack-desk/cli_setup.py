@@ -11,9 +11,10 @@ slash-command name). Core config.json holds no Slack config.
 """
 
 from gideon.sdk.channel import (
-    CRED_OWNER_ID,
     CRED_SLACK_APP_TOKEN,
     CRED_SLACK_BOT_TOKEN,
+    owner_id_credential,
+    owner_id_for,
 )
 from gideon.sdk.cli import SetupContext
 
@@ -47,7 +48,8 @@ def _setup_tokens(ctx: SetupContext) -> None:
 
     cur_app = ctx.get_credential(CRED_SLACK_APP_TOKEN)
     cur_bot = ctx.get_credential(CRED_SLACK_BOT_TOKEN)
-    cur_owner = ctx.get_credential(CRED_OWNER_ID)
+    owner_key = owner_id_credential("slack")
+    cur_owner = owner_id_for("slack")
 
     hint_app = f" [{_mask(cur_app)}]" if cur_app else ""
     hint_bot = f" [{_mask(cur_bot)}]" if cur_bot else ""
@@ -64,7 +66,7 @@ def _setup_tokens(ctx: SetupContext) -> None:
     ctx.save_credential(CRED_SLACK_APP_TOKEN, app_token)
     ctx.save_credential(CRED_SLACK_BOT_TOKEN, bot_token)
     if owner_id:
-        ctx.save_credential(CRED_OWNER_ID, owner_id)
+        ctx.save_credential(owner_key, owner_id)
     ctx.print("  ✅ Credentials saved.\n")
 
 

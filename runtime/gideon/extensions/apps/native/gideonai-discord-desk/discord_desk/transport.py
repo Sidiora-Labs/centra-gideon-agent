@@ -111,6 +111,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
             inbound=True, threads=True, attachments=True, reactions=True,
             edits=True, rich_text=True, typing_indicator=True,
             max_text_len=DISCORD_DESK_MAX_TEXT,
+            owner_pairing=True,
         )
 
     async def connect(self) -> bool:
@@ -169,11 +170,11 @@ class DiscordDeskTransport(ChannelTransportProvider):
 
     @staticmethod
     def _resolve_owner_id(services: Any) -> str:
-        from gideon.sdk.channel import CRED_OWNER_ID
+        from gideon.sdk.channel import owner_id_for
 
         try:
             creds = services.config.load_credentials()
-            return creds.get(CRED_OWNER_ID, "") or getattr(services, "owner_id", "")
+            return owner_id_for("discord") or getattr(services, "owner_id", "")
         except Exception:
             return getattr(services, "owner_id", "")
 

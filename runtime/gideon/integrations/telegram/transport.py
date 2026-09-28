@@ -207,6 +207,7 @@ class TelegramTransport(ChannelTransportProvider):
             rich_text=True,
             typing_indicator=True,
             max_text_len=4096,
+            owner_pairing=True,
         )
 
     async def connect(self):

@@ -661,22 +661,20 @@ async def api_send_message(request: web.Request) -> web.Response:
                 safe_name, _ = redact_credentials(safe_name)
                 title = f"⏰ {safe_name}"
                 text += "\n\n_(session closed — delivered as notification)_"
-            state.notify(notification_kinds.AGENT, title, text)
-            if state.channel_delivery:
+            if target_channel or target_user:
                 try:
+                    delivery = state.channel_delivery
                     if target_channel:
                         channel = target_channel
                     elif target_user:
-                        channel = await state.channel_delivery.open_dm(target_user)
-                    elif state.owner_id:
-                        channel = await state.channel_delivery.open_dm(state.owner_id)
+                        channel = await delivery.open_dm(target_user) if delivery else ""
                     else:
                         channel = ""
 
-                    if channel:
+                    if channel and delivery:
                         channel_attempted = True
                         if blocks:
-                            channel_ts = await state.channel_delivery.deliver_rich(
+                            channel_ts = await delivery.deliver_rich(
                                 channel,
                                 blocks,
                                 text,
@@ -686,7 +684,7 @@ async def api_send_message(request: web.Request) -> web.Response:
                                 reply_broadcast=reply_broadcast,
                             )
                         else:
-                            channel_ts = await state.channel_delivery.deliver_text(
+                            channel_ts = await delivery.deliver_text(
                                 channel,
                                 text,
                                 thread_ts=thread_ts,
@@ -699,6 +697,70 @@ async def api_send_message(request: web.Request) -> web.Response:
                     channel_attempted = True
                     channel_error = str(exc)
                     logger.exception("send_message: channel delivery failed")
+            elif thread_ts:
+                try:
+                    delivery = state.channel_delivery
+                    if delivery:
+                        from gideon.core.config.credentials import owner_id_for
+                        from gideon.integrations.channel_delivery import provider_for_delivery
+
+                        provider = provider_for_delivery(delivery)
+                        owner_id = owner_id_for(provider) if provider else ""
+                        channel = await delivery.open_dm(owner_id) if owner_id else ""
+                        if channel:
+                            channel_attempted = True
+                            send = delivery.deliver_rich if blocks else delivery.deliver_text
+                            if blocks:
+                                channel_ts = await send(
+                                    channel, blocks, text, thread_ts=thread_ts,
+                                    unfurl_links=unfurl_links,
+                                    unfurl_media=unfurl_media,
+                                    reply_broadcast=reply_broadcast,
+                                )
+                            else:
+                                channel_ts = await send(
+                                    channel, text, thread_ts=thread_ts,
+                                    unfurl_links=unfurl_links,
+                                    unfurl_media=unfurl_media,
+                                    reply_broadcast=reply_broadcast,
+                                )
+                            sent_channel = True
+                except Exception as exc:
+                    channel_attempted = True
+                    channel_error = str(exc)
+                    logger.exception("send_message: channel delivery failed")
+            else:
+                from gideon.integrations.channel_delivery import reach_owner
+
+                async def owner_send(_provider, delivery, channel):
+                    nonlocal channel_ts
+                    if blocks:
+                        channel_ts = await delivery.deliver_rich(
+                            channel, blocks, text,
+                            unfurl_links=unfurl_links,
+                            unfurl_media=unfurl_media,
+                            reply_broadcast=reply_broadcast,
+                        )
+                    else:
+                        channel_ts = await delivery.deliver_text(
+                            channel, text,
+                            unfurl_links=unfurl_links,
+                            unfurl_media=unfurl_media,
+                            reply_broadcast=reply_broadcast,
+                        )
+                    return bool(channel_ts)
+
+                result = await reach_owner(owner_send)
+                channel_attempted = result.connected_channels > 0
+                sent_channel = result.delivered
+                if not result.delivered:
+                    channel_error = result.reason
+            note_meta = None
+            if not target_channel and not target_user and channel_attempted and not sent_channel:
+                safe_reason, _ = redact_credentials(channel_error)
+                safe_reason, _ = redact_exfiltration_urls(safe_reason)
+                note_meta = {"channel_delivery": "failed", "reason": safe_reason}
+            state.notify(notification_kinds.AGENT, title, text, meta=note_meta)
     finally:
         try:
             thread_hint = " threaded=1" if thread_ts else ""

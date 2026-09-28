@@ -25,7 +25,7 @@ from gideon.sdk.channel import (
     resolve_bind_host,
     resolve_dashboard_host,
 )
-from gideon.sdk.channel import generate_token
+from gideon.sdk.channel import owner_sign_in_token
 from gideon.sdk.channel import sel
 from slack_desk_runtime.handler import is_tracked_channel
 
@@ -146,12 +146,21 @@ async def send_dashboard_link(
     from gideon.sdk.channel import LINK_WINDOW_SECS, MAX_SESSION_TTL_SECS
 
     session_ttl = min(ttl, MAX_SESSION_TTL_SECS)
+    try:
+        token = owner_sign_in_token("slack", user_id, session_ttl)
+    except ValueError:
+        sel().log_api_access(
+            caller="slack",
+            operation="slack.dashboard_token",
+            outcome="denied",
+            error="requester is not the paired channel owner",
+        )
+        return ""
     cfg = AppConfig.load()
     configured_host, port = parse_dashboard_url(cfg.dashboard.url)
     local_only = is_local_bind(resolve_bind_host())
     host = resolve_dashboard_host(local_only, configured_host)
 
-    token = generate_token(user_id, session_ttl)
     origin = dashboard_origin(cfg.dashboard.url)
     url = f"{origin}/?token={token}" if origin else f"http://{host}:{port}/?token={token}"
 
@@ -171,7 +180,7 @@ async def send_dashboard_link(
             f"⏱ Click within {link_mins}m · session lasts {session_mins}m",
         )
         sel().log_api_access(
-            caller=user_id,
+            caller="slack",
             operation="slack.dashboard_token",
             outcome="ok",
             resources=f"ttl={session_ttl}",
@@ -179,14 +188,14 @@ async def send_dashboard_link(
     except Exception:
         try:
             sel().log_api_access(
-                caller=user_id,
+                caller="slack",
                 operation="slack.dashboard_token",
                 outcome="error",
                 resources=f"ttl={session_ttl}",
             )
         except Exception:
             pass
-        logger.exception("Failed to DM dashboard link to %s", user_id)
+        logger.exception("Failed to DM dashboard link to the paired owner")
         return ""
 
     return url

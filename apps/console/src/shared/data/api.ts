@@ -504,6 +504,13 @@ export interface ChannelTrust {
   default_dm_policy: string
   default_group_policy: string
 }
+export interface ChannelOwnerState {
+  provider: string
+  supported: boolean
+  owner_configured: boolean
+  pairing: { active: boolean; created_at: string; expires_at: string; attempts_left: number; ended: string }
+}
+
 export interface SpawnMemoryReceipt { status: 'pending' | 'recorded' | 'no_contribution' | 'unavailable'; count: number; run_id?: string; conversation_id?: string; parent_session?: string; agent?: string; source?: 'delegated_result' }
 export interface SpawnedAgent { id: string; task: string; done: boolean; parent?: string; agent?: string; started?: number; result?: string; error?: string; turns?: number; last_tool?: string; elapsed?: number; memory_receipt?: SpawnMemoryReceipt }
 export interface SpawnControl { model: string; effort: string; models: string[]; efforts: Array<{ value: string; label: string }> }
@@ -4129,6 +4136,9 @@ export const api = {
   testChannel: (name: string) => post<{ ok: boolean; health?: ChannelHealth; detail?: string }>(`/api/channels/${encodeURIComponent(name)}/test`),
 
   channelTrust: () => get<ChannelTrust>('/api/channels/trust'),
+  channelOwner: (provider: string) => get<ChannelOwnerState>(`/api/channels/${encodeURIComponent(provider)}/owner`),
+  createChannelOwnerPairing: (provider: string) => post<{ ok: boolean; provider: string; code: string; expires_in: number }>(`/api/channels/${encodeURIComponent(provider)}/owner/pairing`),
+  cancelChannelOwnerPairing: (provider: string) => del(`/api/channels/${encodeURIComponent(provider)}/owner/pairing`),
   revokeChannelSender: (provider: string, senderId: string) =>
     del(`/api/channels/trust/${encodeURIComponent(provider)}/senders/${encodeURIComponent(senderId)}`),
 

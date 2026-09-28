@@ -136,11 +136,16 @@ class ExportResult:
         return sum(s.rows for s in self.shards)
 
 
-def _json_rows_from_entity_dir(root: Path) -> list[dict]:
+def _json_rows_from_entity_dir(root: Path, *, entry_path: str = "") -> list[dict]:
     """One row per entity JSON file, id = filename stem, sorted by id."""
     rows: list[dict] = []
     for path in sorted(root.rglob("*.json")):
         rel = path.relative_to(root).as_posix()
+        if entry_path:
+            from gideon.workspace.portability import _is_derived_within
+
+            if _is_derived_within(entry_path, rel):
+                continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -451,7 +456,7 @@ def export_shards(
                         if staged is not None:
                             result.databases.append(staged)
                 elif entry.kind == inv.KIND_JSON_ENTITY_DIR:
-                    rows = _json_rows_from_entity_dir(src) if src.is_dir() else []
+                    rows = _json_rows_from_entity_dir(src, entry_path=entry.path) if src.is_dir() else []
                     if entry.tombstones and src.is_dir():
                         from gideon.operations.durability.tombstones import merge_into_rows
 
@@ -741,7 +746,16 @@ def import_shards(shard_dir: Path, *, entries: list[str] | None = None) -> Impor
         if wanted is not None and entry_id not in wanted:
             continue
         try:
-            result.rows.setdefault(entry_id, []).extend(_rows_of_shard(shard_dir, rel))
+            rows = _rows_of_shard(shard_dir, rel)
+            entry = next((item for item in inv.all_entries() if item.id == entry_id), None)
+            if entry is not None and entry.kind == inv.KIND_JSON_ENTITY_DIR and entry.derived_within:
+                from gideon.workspace.portability import _is_derived_within
+
+                rows = [
+                    row for row in rows
+                    if not _is_derived_within(entry.path, str(row.get("id", "")) + ".json")
+                ]
+            result.rows.setdefault(entry_id, []).extend(rows)
         except (OSError, json.JSONDecodeError) as exc:
             result.problems.append(f"{rel}: unreadable during import ({exc})")
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import is_dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 import logging
 from copy import copy
 from threading import RLock
@@ -440,14 +440,96 @@ def raw_delivery_for(provider: str) -> ChannelDelivery | None:
     return _REGISTRY.get(provider) if provider else None
 
 
+def provider_for_delivery(delivery: Any) -> str:
+    """Return the registered provider owning a resolved delivery handle."""
+    return next(
+        (provider for provider, candidate in _QUEUES.items() if candidate is delivery),
+        "",
+    )
+
+
+@dataclass(frozen=True)
+class OwnerReachResult:
+    delivered: bool
+    provider: str = ""
+    reason: str = ""
+    connected_channels: int = 0
+    attempted_channels: tuple[str, ...] = ()
+    failures: tuple[str, ...] = ()
+
+
+async def reach_owner(
+    send: Callable[[str, ChannelDelivery, str], Any],
+    *,
+    only: tuple[str, ...] = (),
+    inbox_fallback: Callable[[str], Any] | None = None,
+) -> OwnerReachResult:
+    """Try connected channels in stable order using each channel's own owner id.
+
+    Inbox fallback runs only when at least one channel is connected and every
+    eligible channel failed. A deployment with no connected channels stays quiet.
+    """
+    from gideon.core.config.credentials import owner_id_for
+    from gideon.integrations.channel_transports import get_transport
+
+    snapshot = _QUEUES
+    candidates = [name for name in sorted(snapshot) if not only or name in only]
+    connected = 0
+    attempted: list[str] = []
+    reasons: list[str] = []
+    for provider in candidates:
+        transport = get_transport(provider)
+        if transport is not None and not transport.connected:
+            continue
+        connected += 1
+        owner_id = owner_id_for(provider)
+        if not owner_id:
+            reasons.append(f"{provider}: owner not configured")
+            continue
+        delivery = snapshot[provider]
+        attempted.append(provider)
+        try:
+            destination = await delivery.open_dm(owner_id)
+            if not destination:
+                reasons.append(f"{provider}: owner destination unavailable")
+                continue
+            if await send(provider, delivery, destination):
+                return OwnerReachResult(
+                    True, provider, "delivered", connected, tuple(attempted),
+                    tuple(reasons),
+                )
+            reasons.append(f"{provider}: delivery refused")
+        except Exception:
+            logger.info("owner delivery failed for provider=%s", provider)
+            reasons.append(f"{provider}: delivery failed")
+    if connected == 0:
+        return OwnerReachResult(False, reason="no connected channels", connected_channels=0)
+    reason = "; ".join(reasons) or "no owner channel could deliver"
+    if inbox_fallback is not None:
+        try:
+            await inbox_fallback(reason)
+            return OwnerReachResult(
+                False, reason="inbox fallback", connected_channels=connected,
+                attempted_channels=tuple(attempted), failures=tuple(reasons),
+            )
+        except Exception:
+            logger.info("owner delivery inbox fallback failed")
+            reason = "channel delivery and inbox fallback failed"
+    return OwnerReachResult(
+        False, reason=reason, connected_channels=connected,
+        attempted_channels=tuple(attempted), failures=tuple(reasons),
+    )
+
+
 def owner_reachable() -> ChannelDelivery | None:
-    """Choose the alphabetically first connected provider for owner-directed work."""
+    """Return a connected channel with its own owner configured, in stable order."""
+    from gideon.core.config.credentials import owner_id_for
     from gideon.integrations.channel_transports import get_transport
 
     snapshot = _QUEUES
     for provider in sorted(snapshot):
         transport = get_transport(provider)
-        if transport is None or transport.connected:
+        if (transport is None or transport.connected) and owner_id_for(provider):
             return snapshot[provider]
     return None
 

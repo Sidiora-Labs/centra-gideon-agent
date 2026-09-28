@@ -15,7 +15,7 @@ a bot with a valid token that was never invited, or invited without Send Message
 looks identical to a broken token from the dashboard.
 """
 
-from gideon.sdk.channel import CRED_OWNER_ID
+from gideon.sdk.channel import owner_id_credential, owner_id_for
 from gideon.sdk.cli import SetupContext
 
 from discord_desk.settings import (
@@ -96,7 +96,8 @@ def _setup_credentials(ctx: SetupContext) -> bool:
         return False
 
     cur_token = ctx.get_credential(CRED_BOT_TOKEN)
-    cur_owner = ctx.get_credential(CRED_OWNER_ID)
+    owner_key = owner_id_credential("discord")
+    cur_owner = owner_id_for("discord")
     cur_app_id = ctx.settings.load(_APP).get("application_id") or ""
     hint_token = f" [{_mask(cur_token)}]" if cur_token else ""
     hint_owner = f" [{cur_owner}]" if cur_owner else ""
@@ -112,7 +113,7 @@ def _setup_credentials(ctx: SetupContext) -> bool:
 
     ctx.save_credential(CRED_BOT_TOKEN, token)
     if owner_id:
-        ctx.save_credential(CRED_OWNER_ID, owner_id)
+        ctx.save_credential(owner_key, owner_id)
     if app_id:
         ctx.settings.update(_APP, {"application_id": app_id})
     ctx.print("  ✅ Credentials saved.\n")
