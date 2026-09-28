@@ -1520,6 +1520,16 @@ INVENTORY: tuple[StateEntry, ...] = (
         help="callbacks an agent registered so an outside system can hand it results later",
     ),
     StateEntry(
+        id="trigger_review_queue",
+        kind=KIND_JSON_FILE,
+        path="trigger-review.json",
+        domain=DOMAIN_AUTOMATION,
+        merge=MERGE_REPLACE_ONLY,
+        secret=True,
+        derived=True,
+        help="machine-local owner review and execution authority for interrupted triggers",
+    ),
+    StateEntry(
         id="routing_stats",
         kind=KIND_JSON_FILE,
         path="routing_stats.json",

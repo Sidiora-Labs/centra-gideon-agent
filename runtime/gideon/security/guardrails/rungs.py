@@ -227,6 +227,7 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
             "run-prompt",
             "invoke-agent",
             "run-workflow",
+            "heartbeat-tasks",
             "second-opinion",
             "selfqa-commit-watch",
         ),

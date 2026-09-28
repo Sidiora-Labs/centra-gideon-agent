@@ -93,6 +93,7 @@ WRITE_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
         "run-prompt",
         "invoke-agent",
         "run-workflow",
+        "heartbeat-tasks",
         "knowledge-persist",
         "knowledge-consolidate",
         "artifact-update",

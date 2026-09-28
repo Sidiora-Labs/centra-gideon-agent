@@ -18,12 +18,18 @@ logger = logging.getLogger(__name__)
 
 SCHEDULE_STATUS_TO_OUTCOME: dict[str, str] = {
     "success": Outcome.RAN.value,
+    "ran_late": Outcome.RAN_LATE.value,
     "failure": Outcome.FAILED.value,
     "timeout": Outcome.FAILED.value,
     "launched": Outcome.DEFERRED.value,
     "queued": Outcome.DEFERRED.value,
     "blocked_injection": Outcome.BLOCKED_INJECTION.value,
     "needs_input": Outcome.SKIPPED_BUDGET.value,
+    "waiting": Outcome.DEFERRED.value,
+    "interrupted": Outcome.FAILED.value,
+    "interrupted_retried": Outcome.RAN.value,
+    "interrupted_dismissed": Outcome.SKIPPED_MISSED.value,
+    "skipped_noop": Outcome.SKIPPED_NOOP.value,
     **{value: value for value in sorted(INERT_OUTCOMES)},
 }
 
@@ -111,6 +117,16 @@ class ScheduleProjection:
         )
         if status == "timeout":
             return f"timed out: {reason}" if reason else "timed out"
+        if status == "waiting":
+            return reason or "waiting for an owner decision"
+        if status == "interrupted":
+            return reason or "interrupted during restart; no automatic retry was made"
+        if status == "interrupted_retried":
+            return reason or "owner chose to run the interrupted automation again"
+        if status == "interrupted_dismissed":
+            return reason or "owner dismissed the interrupted automation"
+        if status == "skipped_noop":
+            return reason or "no owner-approved heartbeat tasks were pending"
         if reason:
             return reason
         explanations = {

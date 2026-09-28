@@ -5,6 +5,7 @@ import { Field, TextArea } from '../../shared/ui/forms'
 import { InlineError } from '../../shared/ui/InlineError'
 import { buildArgs, schemaProps, SchemaField, SchemaFieldDisclosure } from '../tools/schema'
 import { usePromptWidgets } from '../tools/usePromptWidgets'
+import { useWorkflowWidgets } from '../workflows/workflowWidgets'
 import { actionIcon } from './triggerMeta'
 
 export function ActionConfig({ providers, provider, config, onProvider, onConfig, vars, loadError, onRetryProviders }: {
@@ -25,7 +26,9 @@ export function ActionConfig({ providers, provider, config, onProvider, onConfig
 
   const setField = (k: string, v: unknown) => onConfig({ ...config, [k]: v })
 
-  const { prompts, widgets } = usePromptWidgets(props.map(([, schema]) => schema))
+  const { prompts, widgets: promptWidgets } = usePromptWidgets(props.map(([, schema]) => schema))
+  const { widgets: workflowWidgets } = useWorkflowWidgets(provider === 'run-workflow', String(config.workflow ?? ''))
+  const widgets = { ...promptWidgets, ...workflowWidgets }
 
   return (
     <div className="flex flex-col gap-l">

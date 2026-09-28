@@ -1068,7 +1068,7 @@ export interface WorkflowSurfacingRow {
 }
 export interface WorkflowSurfacingFinding { name: string; code: string; detail: string }
 export interface WorkflowInputParam {
-  type?: string; required?: boolean; default?: unknown; help?: string
+  type?: string; required?: boolean; default?: unknown; help?: string; description?: string
 }
 export interface WorkflowDef {
   name: string; description?: string; version?: number; source?: string; provenance?: string
@@ -1646,6 +1646,23 @@ export interface LifecycleEventInfo { event: string; label: string; desc: string
 export interface AppSourceEvent { event: string; source_event: string }
 export interface AppSourceInfo { app: string; label: string; events: AppSourceEvent[] }
 export interface TriggerVariables { schedule: string[]; lifecycle: LifecycleEventInfo[]; app_sources: AppSourceInfo[] }
+export interface TriggerReviewCard {
+  id: string
+  trigger_id: string
+  trigger_name: string
+  reason: 'missed' | 'interrupted'
+  missed_count: number
+  latest_missed_at: number
+  run_id?: string
+  action_revision: string
+  action: { provider: string; config: Record<string, unknown> }
+}
+export type TriggerReviewDecision = 'run_now' | 'dismiss'
+export interface TriggerReviewResult {
+  ok: boolean
+  outcome: 'ran_late' | 'interrupted_retried' | 'dismissed'
+  result?: unknown
+}
 export interface TriggerRunResult { ok: boolean; name?: string; result?: unknown; refused?: string; running?: boolean }
 export interface LearningRow {
   id: string; kind: string; title: string; provenance: string
@@ -4781,6 +4798,8 @@ export const api = {
   toggleHook: (id: string) => post(`/api/triggers/lifecycle:${encodeURIComponent(id)}/toggle`, {}),
   testHook: (id: string, context?: string) => post<{ ok: boolean; result: { stdout: string; stderr: string; exit_code: number; error: string; duration_ms: number } }>(`/api/triggers/lifecycle:${encodeURIComponent(id)}/test`, { context: context ?? 'test' }),
 
+  triggerReview: () => get<{ cards: TriggerReviewCard[] }>('/api/triggers/review'),
+  decideTriggerReview: (body: { trigger_id: string; review_id: string; decision: TriggerReviewDecision; expected_revision: string }) => post<TriggerReviewResult>('/api/triggers/review', body),
   storeTriggers: () => get<{ triggers: Trigger[] }>('/api/triggers?type=store').then((d) => d.triggers),
   toggleStoreTrigger: (rawId: string, enabled: boolean) =>
     post(`/api/triggers/store:${encodeURIComponent(rawId)}/toggle`, { enabled }),

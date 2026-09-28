@@ -174,6 +174,25 @@ class RunWorkflowActionProvider(ActionProvider):
     def supports_dry_run(self) -> bool:
         return True
 
+    async def config_problem(self, action_config: dict[str, Any]) -> str:
+        """Return a current-definition validation error suitable for the authoring form."""
+        config = action_config if isinstance(action_config, dict) else {}
+        name = str(config.get("workflow", "") or "").strip()
+        if not name:
+            return "choose a workflow definition"
+        try:
+            engine = _WorkflowEngine.load()
+        except Exception as error:
+            return f"workflow engine unavailable: {error}"
+        definition = await _load_def(engine.definitions, name)
+        if definition is None:
+            return f"unknown workflow {name!r}; choose a saved definition"
+        spec = _spec_of(definition)
+        if not isinstance(spec, dict) or not spec.get("root"):
+            return f"workflow {name!r} has no usable spec"
+        _, problem = _validated_inputs(spec, config.get("inputs", {}))
+        return f"workflow {name!r}: {problem}" if problem else ""
+
     async def execute(
         self, action_config: dict[str, Any], ctx: ActionContext, timeout: int = 30
     ) -> ActionResult:
@@ -217,11 +236,49 @@ class RunWorkflowActionProvider(ActionProvider):
                 error=f"workflow {name!r} has no usable spec",
                 stderr="the definition carries no root node",
             )
+        inputs, input_problem = _validated_inputs(spec, config.get("inputs", {}))
+        if input_problem:
+            return ActionResult(
+                False,
+                error=f"workflow {name!r}: {input_problem}",
+                stderr="the trigger's inputs no longer start this workflow; edit the trigger",
+            )
+        request = _WorkflowStart(
+            name,
+            {**config, "inputs": inputs},
+            str(getattr(ctx, "context", "") or ""),
+        )
         plan = _OverlapPlan.prepare(engine, name, definition)
         immediate = plan.without_start(request, clock)
         if immediate is not None:
             return immediate
         return await plan.commit(request, spec, clock)
+
+
+def _validated_inputs(
+    spec: dict[str, Any], supplied: Any
+) -> tuple[dict[str, Any], str]:
+    """Reuse workflow start's typed required/default contract at authoring and fire time."""
+    from gideon.automation.workflows.service import (
+        _coerce_declared_inputs,
+        _missing_required_inputs,
+        _with_declared_defaults,
+    )
+
+    if supplied is None:
+        provided: dict[str, Any] = {}
+    elif isinstance(supplied, dict):
+        provided = dict(supplied)
+    else:
+        return {}, "inputs must be an object"
+    missing = _missing_required_inputs(spec, provided)
+    if missing:
+        return {}, f"missing required input(s): {', '.join(missing)}"
+    defaulted = _with_declared_defaults(spec, provided)
+    normalized, invalid = _coerce_declared_inputs(spec, defaulted)
+    if invalid:
+        return {}, "; ".join(invalid)
+    return normalized, ""
 
 
 async def _load_def(defs_mod: Any, name: str) -> Any | None:

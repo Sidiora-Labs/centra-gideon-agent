@@ -298,8 +298,6 @@ class HeartbeatService:
         )
 
     async def _beat(self) -> None:
-        if not self._processing:
-            await self._process_heartbeat_file()
         if self._consolidator:
             self._consolidator.check_idle_sessions()
         for action in self._actions():
@@ -350,29 +348,38 @@ class HeartbeatService:
         assert self._on_task is not None
         return await self._on_task(task_text, deliver)
 
-    async def _process_heartbeat_file(self) -> None:
+    async def run_tasks(self) -> dict[str, int]:
+        """Run the owner-authorized HEARTBEAT.md task pass from its visible trigger."""
         from gideon.workspace.capabilities.identity.continuity import (
             heartbeat_turns_paused,
         )
 
         if heartbeat_turns_paused():
-            return
+            return {"processed": 0, "completed": 0, "retained": 0}
         document = _TaskDocument.open(heartbeat_path())
         if not document.entries or not self._on_task:
-            return
+            return {"processed": 0, "completed": 0, "retained": 0}
         keys = _task_keys(document.entries)
+        authorized = [
+            _HEARTBEAT_GRANTS.holds(key, _task_content(entry))
+            for entry, key in zip(document.entries, keys)
+        ]
+        processed = sum(authorized)
+        if not processed:
+            return {"processed": 0, "completed": 0, "retained": len(document.entries)}
         self._processing = True
         try:
-            logger.info("Heartbeat: %d task(s) found", len(document.entries))
+            logger.info("Heartbeat tasks: %d owner-approved task(s) found", processed)
             outcomes = await asyncio.gather(
                 *(
                     self._run_one_task(entry.text, entry.destination)
-                    if _HEARTBEAT_GRANTS.holds(key, _task_content(entry))
+                    if allowed
                     else asyncio.sleep(0, result=_KEEP_SENTINEL)
-                    for entry, key in zip(document.entries, keys)
+                    for entry, key, allowed in zip(document.entries, keys, authorized)
                 ),
                 return_exceptions=True,
             )
+            completed = 0
             for entry, key, outcome in zip(document.entries, keys, outcomes):
                 if (
                     not isinstance(outcome, BaseException)
@@ -381,11 +388,21 @@ class HeartbeatService:
                 ):
                     try:
                         _HEARTBEAT_GRANTS.revoke(key)
+                        completed += 1
                     except OSError:
                         logger.warning("completed heartbeat grant could not be cleared")
             document.settle(outcomes)
+            return {
+                "processed": processed,
+                "completed": completed,
+                "retained": max(0, len(document.entries) - completed),
+            }
         finally:
             self._processing = False
+
+    async def _process_heartbeat_file(self) -> None:
+        """Compatibility entrypoint; ordinary timer beats no longer execute user tasks."""
+        await self.run_tasks()
 
 
 def _should_keep(result: str | None) -> bool:

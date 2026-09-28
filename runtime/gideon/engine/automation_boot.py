@@ -41,6 +41,11 @@ RECONCILERS = (
         "identity-report trigger reconcile failed",
     ),
     (
+        "gideon.integrations.action_providers.heartbeat_tasks_provider",
+        "reconcile_heartbeat_tasks_trigger",
+        "heartbeat-tasks trigger reconcile failed",
+    ),
+    (
         "gideon.integrations.action_providers.remediation_provider",
         "reconcile_remediation_trigger",
         "self-remediation trigger reconcile failed",
@@ -100,7 +105,7 @@ class AutomationBoot:
         interrupted: list[str] = []
         observed_at = time.time()
         base_dir = getattr(store, "base_dir", self.home())
-        journal = ExecutionJournal(self.home())
+        journal = ExecutionJournal(base_dir)
         for trigger_id in claims.running_ids(now=observed_at, base_dir=base_dir):
             try:
                 stored = store.get(trigger_id)
@@ -137,7 +142,7 @@ class AutomationBoot:
                         duration_ms=int(
                             max(0.0, observed_at - claim.claimed_at) * 1000
                         ),
-                        status="failure",
+                        status="interrupted",
                         error=reason,
                     )
                 )
@@ -156,6 +161,11 @@ class AutomationBoot:
 
             interrupted = await self.recover_interrupted(store)
             report = boot(store)
+            from gideon.automation.triggers.review import TriggerReviewStore
+
+            TriggerReviewStore(getattr(store, "base_dir", self.home())).add_boot_observations(
+                store, report, interrupted, now=time.time()
+            )
             rearmed = len(report.get("rearmed") or [])
             total = int(report.get("total", 0) or 0)
             missed = len((report.get("review") or {}).get("rows") or [])

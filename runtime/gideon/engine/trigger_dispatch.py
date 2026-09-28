@@ -32,7 +32,9 @@ class TriggerAction:
 
     @property
     def timeout(self) -> int:
-        return {"bash": 300}.get(self.name, 30)
+        from gideon.integrations.action_providers.command_lifecycle import action_timeout
+
+        return action_timeout(self.config, {"bash": 300}.get(self.name, 30))
 
 
 @contextmanager

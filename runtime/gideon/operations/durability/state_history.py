@@ -82,6 +82,7 @@ SECRET_EXCLUDE: tuple[str, ...] = (
     "grants/",
     "hooks/",
     "trigger_parks/",
+    "trigger-review.json",
     "trigger-spool.jsonl",
     "trigger-spool-hold.json",
     "*.db",

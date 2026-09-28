@@ -227,6 +227,16 @@ class SupervisorAssembly:
 
     def start(self) -> None:
         runtime = self.runtime
+        try:
+            from gideon.integrations.action_providers.services import (
+                get_action_services,
+            )
+
+            action_services = get_action_services()
+            if action_services is not None:
+                action_services.heartbeat = runtime.heartbeat_svc
+        except Exception:
+            self.logger.debug("could not attach heartbeat to action services")
         if runtime.dashboard_state is not None:
             from gideon.automation.loop.watchdog import LoopWatchdog
 

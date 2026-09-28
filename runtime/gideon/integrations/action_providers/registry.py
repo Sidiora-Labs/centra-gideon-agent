@@ -43,6 +43,10 @@ _BUILTIN_GROUPS = (
     ("inbox-op", (("inbox_op_provider", "InboxOpActionProvider"),)),
     ("run-prompt", (("run_prompt_provider", "RunPromptActionProvider"),)),
     ("run-workflow", (("run_workflow_provider", "RunWorkflowActionProvider"),)),
+    (
+        "heartbeat-tasks",
+        (("heartbeat_tasks_provider", "HeartbeatTasksActionProvider"),),
+    ),
     ("call-app-route", (("call_app_route_provider", "CallAppRouteActionProvider"),)),
     (
         "artifact-update",

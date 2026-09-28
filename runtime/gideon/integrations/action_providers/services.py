@@ -32,6 +32,7 @@ class ActionServices:
     spawn_background: Callable[[Awaitable[Any]], Any]
     subagents: "DelegationSupervisor | None" = None
     workflows: Any = None
+    heartbeat: Any = None
 
 
 _services: "ActionServices | None" = None

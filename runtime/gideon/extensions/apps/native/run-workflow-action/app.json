@@ -1,0 +1,57 @@
+{
+  "name": "run-workflow-action",
+  "version": "1.0.0",
+  "displayName": "Run Workflow",
+  "description": "Start a saved workflow from an automation trigger with its declared inputs.",
+  "icon": "Workflow",
+  "author": "Gideon",
+  "tags": ["action", "bundled", "native"],
+  "provider": {
+    "type": "action",
+    "entity": "workflow",
+    "implementation": "gideon.integrations.action_providers.run_workflow_provider:create_provider",
+    "capabilities": ["execute"],
+    "settingsSchema": {
+      "type": "object",
+      "required": ["workflow"],
+      "properties": {
+        "workflow": {
+          "type": "string",
+          "x-meta": {
+            "label": "Workflow",
+            "widget": "workflow",
+            "help": "Choose a saved workflow definition."
+          }
+        },
+        "inputs": {
+          "type": "object",
+          "default": {},
+          "x-meta": {
+            "label": "Workflow inputs",
+            "widget": "workflow-inputs",
+            "help": "Values are checked against the selected definition when saved and again when the trigger fires."
+          }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["background", "blocking"],
+          "default": "background",
+          "x-meta": {"label": "Run mode", "tags": ["advanced"]}
+        },
+        "project_id": {
+          "type": "string",
+          "x-meta": {"label": "Project", "tags": ["advanced"]}
+        },
+        "idempotency_key": {
+          "type": "string",
+          "x-meta": {"label": "Idempotency key", "tags": ["advanced"]}
+        },
+        "dry_run": {
+          "type": "boolean",
+          "x-meta": {"label": "Preview only", "tags": ["advanced"]}
+        }
+      }
+    }
+  },
+  "native": true
+}

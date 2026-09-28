@@ -15,6 +15,33 @@ def trigger_id(trigger: Any) -> str:
     return str(getattr(trigger, "id", "") or "")
 
 
+def status_for_result(
+    result: Any, error: BaseException | None = None, *, waiting: bool | None = None
+) -> str:
+    """Project provider results onto the shared persisted automation status vocabulary."""
+    if waiting is None:
+        try:
+            from gideon.automation.triggers.parks import parked
+
+            waiting = parked(result)
+        except Exception:
+            waiting = False
+    if waiting:
+        return "waiting"
+    if error is not None or (
+        result is not None and not bool(getattr(result, "success", True))
+    ):
+        return "failure"
+    outcome = str(getattr(result, "outcome", "") or "").strip().lower()
+    if outcome in {"launched", "queued", "interrupted", "skipped_noop"}:
+        return outcome
+    if outcome in {"skip", "noop", "no_op"}:
+        return "skipped_noop"
+    if outcome in {"waiting", "needs_input"}:
+        return "waiting"
+    return "success"
+
+
 @dataclass(frozen=True)
 class MissedRuns:
     total: int
@@ -252,6 +279,7 @@ class FireLedger:
             from gideon.automation.triggers import parks
 
             waiting = parks.parked(result)
+            status = status_for_result(result, error, waiting=waiting)
             journal = self.journal_type(config_dir())
             now = time.time()
             await journal.append(
@@ -261,13 +289,7 @@ class FireLedger:
                     trigger=outcome.exit_type,
                     started_at=now,
                     finished_at=now,
-                    status=(
-                        "waiting"
-                        if waiting
-                        else "success"
-                        if outcome.exit_type == autopause.ExitType.OK.value
-                        else "failure"
-                    ),
+                    status=status,
                     summary=parks.waiting_line(result) if waiting else "",
                     error=outcome.exception_text[:200],
                 )

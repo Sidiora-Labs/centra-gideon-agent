@@ -1,3 +1,4 @@
+import { TriggerReview } from './TriggerReview'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Plus, Zap, Clock, Pencil, CalendarDays, ChevronDown, ChevronRight, Users, ShieldOff, Trash2, FlaskConical, Play } from 'lucide-react'
@@ -147,6 +148,7 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
         )
       }
     >
+      <TriggerReview onOpenTrigger={id => setQuery({ open: id, edit: null, view: 'list' })} onChanged={() => { loadSchedules(); loadHooks(); loadStores() }} />
       {view === 'week' ? (
         <WeekGridView onOpenTrigger={(id) => setQuery({ open: id, edit: null, view: 'list' })} />
       ) : (
