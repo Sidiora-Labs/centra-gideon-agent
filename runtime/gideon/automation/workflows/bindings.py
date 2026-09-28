@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -21,8 +22,9 @@ class BindingError(Exception):
     where. The engine turns this into a typed node failure — never an empty string.
     """
 
-    def __init__(self, message: str, expr: str = "") -> None:
+    def __init__(self, message: str, expr: str = "", remediation: str = "") -> None:
         self.expr = expr
+        self.remediation = remediation
         super().__init__(f"{message} (in {{{{{expr}}}}})" if expr else message)
 
 
@@ -270,6 +272,8 @@ PIPES: dict[str, Any] = {
     "source_refs": _pipe_source_refs,
 }
 
+_PIPE_SIGNATURES = {name: inspect.signature(fn) for name, fn in PIPES.items()}
+
 _EXPLICIT_VIEW_PIPES = frozenset(
     {"full", "window", "significant", "unseen", "fenced_sources", "source_refs"}
 )
@@ -277,6 +281,63 @@ _EXPLICIT_VIEW_PIPES = frozenset(
 
 def _parse_pipe_args(raw: str) -> list[Any]:
     return PipeArguments(raw).values()
+
+
+def _not_a_literal(token: str) -> BindingError:
+    if token.replace(" ", "") == "[]":
+        remediation = (
+            "for an empty list when the value is null, use `| filter` instead: it turns null "
+            "into [] (and drops empty entries from a list)"
+        )
+    else:
+        remediation = "quote it if it is text — an argument can never name a variable"
+    return BindingError(
+        f"pipe argument {token!r} is not a literal — a pipe argument is a quoted string, "
+        "a number, true, false or null",
+        remediation=remediation,
+    )
+
+
+def _arity(name: str) -> str:
+    positional = [
+        parameter
+        for parameter in list(_PIPE_SIGNATURES[name].parameters.values())[1:]
+        if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    required = sum(parameter.default is parameter.empty for parameter in positional)
+    count = len(positional)
+    if not count:
+        return "no arguments"
+    noun = "argument" if count == 1 else "arguments"
+    if required == count:
+        return f"exactly {count} {noun}"
+    if not required:
+        return f"at most {count} {noun}"
+    return f"{required} to {count} arguments"
+
+
+def parse_pipe(raw_pipe: str) -> tuple[str, list[Any]]:
+    """Parse and validate the exact pipe call accepted by runtime resolution."""
+    match = _PIPE_RE.match(raw_pipe)
+    if not match:
+        raise BindingError(
+            f"malformed pipe {raw_pipe!r}",
+            remediation="write a pipe as `name` or `name(<literal>, …)`, e.g. `| truncate(4000)`",
+        )
+    name, argument_source = match.group(1), match.group(2) or ""
+    if name not in PIPES:
+        raise BindingError(
+            f"unknown pipe {name!r}",
+            remediation="the pipes are: " + ", ".join(sorted(PIPES)),
+        )
+    args = _parse_pipe_args(argument_source)
+    try:
+        _PIPE_SIGNATURES[name].bind(None, *args)
+    except TypeError as exc:
+        raise BindingError(
+            f"bad arguments for pipe {name!r}", remediation=f"`{name}` takes {_arity(name)}"
+        ) from exc
+    return name, args
 
 
 def _split_args(raw: str) -> list[str]:
@@ -468,9 +529,7 @@ class PipeArguments:
                 try:
                     return float(token)
                 except ValueError as exc:
-                    raise BindingError(
-                        f"pipe argument {token!r} is not a literal"
-                    ) from exc
+                    raise _not_a_literal(token) from exc
 
         return [decode(token) for part in self.tokens() if (token := part.strip())]
 
@@ -482,6 +541,8 @@ class BindingPath:
     def read(self, root: Any) -> Any:
         value = root
         for segment in filter(None, self.path.split(".")):
+            if value is None:
+                return None
             if isinstance(value, dict):
                 next_value = value.get(segment, _MISSING)
             elif isinstance(value, list) and segment.isdigit():
@@ -542,24 +603,22 @@ class BindingPlan:
 
     def apply(self, value: Any, pipes: list[str]) -> Any:
         for pipe in pipes:
-            call = _PIPE_RE.match(pipe)
-            if call is None:
-                raise BindingError(f"malformed pipe {pipe!r}", self.expression)
-            name, arguments = call.group(1), call.group(2) or ""
-            handler = PIPES.get(name)
-            if handler is None:
-                raise BindingError(f"unknown pipe {name!r}", self.expression)
+            try:
+                name, args = parse_pipe(pipe)
+            except BindingError as exc:
+                raise BindingError(str(exc), self.expression, exc.remediation) from exc
             try:
                 value = (
                     _pipe_unseen(value, _seen=self.context.seen_filter)
                     if name == "unseen"
-                    else handler(value, *_parse_pipe_args(arguments))
+                    else PIPES[name](value, *args)
                 )
             except BindingError as exc:
-                raise BindingError(str(exc), self.expression) from exc
+                raise BindingError(str(exc), self.expression, exc.remediation) from exc
             except TypeError as exc:
                 raise BindingError(
-                    f"bad arguments for pipe {name!r}", self.expression
+                    f"bad arguments for pipe {name!r}", self.expression,
+                    f"`{name}` takes {_arity(name)}",
                 ) from exc
         return value
 

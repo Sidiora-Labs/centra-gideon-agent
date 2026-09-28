@@ -8,7 +8,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from gideon.automation.workflows.bindings import BindingError, node_deps, refs_in
+from gideon.automation.workflows.bindings import (
+    PIPES,
+    BindingError,
+    node_deps,
+    parse_pipe,
+    refs_in,
+)
 from gideon.automation.workflows.models import (
     LLM_KINDS,
     GateKind,
@@ -588,12 +594,22 @@ def _validate_bindings(
             segments = expression.split("|")
             pipe_names = []
             for segment in segments[1:]:
-                name = segment.strip().split("(", 1)[0].strip()
-                from gideon.automation.workflows.bindings import PIPES
-
+                raw_pipe = segment.strip()
+                name = raw_pipe.split("(", 1)[0].strip()
                 pipe_names.append(name)
                 if name and name not in PIPES:
                     _add(res, "WF_UNKNOWN_PIPE", f"unknown pipe {name!r}", path)
+                    continue
+                try:
+                    parse_pipe(raw_pipe)
+                except BindingError as error:
+                    fix = f" — {error.remediation}" if error.remediation else ""
+                    _add(
+                        res,
+                        "WF_BAD_PIPE",
+                        f"{error} (in {{{{{expression}}}}}){fix}",
+                        path,
+                    )
             head = segments[0].strip()
             root = head.split(".")[0].strip()
             if (

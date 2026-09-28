@@ -87,9 +87,9 @@ from gideon.automation.workflows.effects import (
     run_teardown,
 )
 from gideon.automation.workflows.engine import (
-    check_declared_schema,
     dispatch,
     dispatcher_commits_effects,
+    parse_declared_output,
 )
 from gideon.automation.workflows.failure_taxonomy import classify_exception
 from gideon.automation.workflows.engine_support import (
@@ -305,18 +305,35 @@ class RunController:
     def _load_outputs(self) -> None:
         """Rehydrate node-id → output for binding resolution.
 
-        Only SUCCESS states contribute. A failed node's partial output must not resolve
-        as if it were a real answer — that is how a downstream prompt ends up confidently
-        summarizing an error message.
+        Successful states contribute their saved output. A failed node's partial output
+        must not resolve as if it were a real answer; an explicitly tolerated failure
+        contributes a present null so nullable consumers can continue without losing the
+        failure state or its diagnostics.
         """
         by_path = {path: node for path, node in _walk(self.root)}
         for path, inst in self.instances.items():
-            if inst.state not in SUCCESS_STATES:
-                continue
             node = by_path.get(spec_path(path))
             if node is None or not node.id:
                 continue
-            self._outputs[node.id] = store.read_output(self.run.id, path)
+            if inst.state in SUCCESS_STATES:
+                self._outputs[node.id] = store.read_output(self.run.id, path)
+            else:
+                self._publish_nullable_failure_output(node, inst.state)
+
+    def _publish_nullable_failure_output(
+        self, node: Node, state: InstanceState
+    ) -> None:
+        """Expose only explicit `allow_failure` failures as a present null binding.
+
+        The node instance remains failed, with its failure record and any partial output
+        stored for diagnostics. Null is the binding value, never a success-shaped result.
+        """
+        if (
+            state == InstanceState.FAILED
+            and (node.config or {}).get("allow_failure") is True
+            and node.id
+        ):
+            self._outputs[node.id] = None
 
     async def start(self) -> None:
         """Launch the tick loop as a background task.
@@ -1597,33 +1614,80 @@ class RunController:
                     attempt=inst.attempt,
                     retries_exhausted=True,
                 )
+                if node_id:
+                    self._outputs.pop(node_id, None)
+                self._publish_nullable_failure_output(node, inst.state)
             else:
                 raw_result = str(getattr(info, "result", "") or "")
                 schema = (node.config or {}).get("schema") if node else None
-                mismatch = (
-                    check_declared_schema(raw_result, schema)
-                    if isinstance(schema, dict)
-                    else ""
-                )
-                inst.state = InstanceState.DEGRADED if mismatch else InstanceState.DONE
-                inst.degraded_reason = f"Output schema mismatch: {mismatch}" if mismatch else ""
                 inst.completed_at = _now()
-                ref, preview = self.journal.store_output(
-                    path, {"result": raw_result}
-                )
-                inst.output_ref = ref
-                if node_id:
-                    self._outputs[node_id] = preview
-                self.journal.step_completed(
-                    path,
-                    node_id,
-                    epoch=inst.epoch,
-                    cache_key="",
-                    state=inst.state,
-                    retries=max(0, inst.attempt - 1),
-                    degraded_reason=inst.degraded_reason,
-                    output_ref=ref,
-                )
+                if isinstance(schema, dict):
+                    output, mismatch = parse_declared_output(raw_result, schema)
+                    if mismatch:
+                        failure = Failure(
+                            failure_class=FailureClass.PROTOCOL,
+                            cause_plain=(
+                                "subagent output did not match the declared schema: "
+                                f"{mismatch}"
+                            ),
+                            remediation=(
+                                "return only JSON matching the declared output schema; revise "
+                                "the stage prompt or provider configuration and retry"
+                            ),
+                        )
+                        inst.state = InstanceState.FAILED
+                        inst.failure = failure
+                        inst.degraded_reason = ""
+                        inst.output_ref = ""
+                        if node_id:
+                            self._outputs.pop(node_id, None)
+                        self._publish_nullable_failure_output(node, inst.state)
+                        self.journal.step_failed(
+                            path,
+                            node_id,
+                            epoch=inst.epoch,
+                            failure=failure,
+                            attempt=inst.attempt,
+                            retries_exhausted=True,
+                        )
+                    else:
+                        inst.state = InstanceState.DONE
+                        inst.failure = None
+                        inst.degraded_reason = ""
+                        ref, preview = self.journal.store_output(path, output)
+                        inst.output_ref = ref
+                        if node_id:
+                            self._outputs[node_id] = preview
+                        self.journal.step_completed(
+                            path,
+                            node_id,
+                            epoch=inst.epoch,
+                            cache_key="",
+                            state=inst.state,
+                            retries=max(0, inst.attempt - 1),
+                            degraded_reason="",
+                            output_ref=ref,
+                        )
+                else:
+                    inst.state = InstanceState.DONE
+                    inst.failure = None
+                    inst.degraded_reason = ""
+                    ref, preview = self.journal.store_output(
+                        path, {"result": raw_result}
+                    )
+                    inst.output_ref = ref
+                    if node_id:
+                        self._outputs[node_id] = preview
+                    self.journal.step_completed(
+                        path,
+                        node_id,
+                        epoch=inst.epoch,
+                        cache_key="",
+                        state=inst.state,
+                        retries=max(0, inst.attempt - 1),
+                        degraded_reason="",
+                        output_ref=ref,
+                    )
             self._publish(
                 "workflow_node_done",
                 {
@@ -3062,6 +3126,7 @@ class RunController:
                     "input_hash": entry.cache_key.inputs_hash,
                 },
             )
+            self._publish_nullable_failure_output(item.node, inst.state)
             self._escalate(
                 item.path,
                 item.node.id,

@@ -33,6 +33,8 @@ from gideon.automation.workflows.engine import (
     dispatch_transform,
     dispatch_visualize,
     dispatch_wait,
+    parse_declared_output,
+    with_declared_schema_prompt,
 )
 from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
@@ -63,6 +65,63 @@ def _n(d: dict) -> Node:
 
 def _ctx(**kw) -> BindingContext:
     return BindingContext(**kw)
+
+
+def test_declared_schema_prompt_exposes_every_exact_output_key() -> None:
+    prompt = with_declared_schema_prompt(
+        "Choose applicable lenses.",
+        {
+            "decisions": "boolean",
+            "references": "boolean",
+            "facts": "boolean",
+            "summary": "boolean",
+            "tasks": "boolean",
+        },
+    )
+
+    assert "Choose applicable lenses." in prompt
+    assert '"decisions": "boolean"' in prompt
+    assert '"references": "boolean"' in prompt
+    assert '"facts": "boolean"' in prompt
+    assert '"summary": "boolean"' in prompt
+    assert '"tasks": "boolean"' in prompt
+    assert '"decisions": false' in prompt
+
+
+def test_declared_output_parser_returns_only_a_schema_valid_json_value() -> None:
+    schema = {
+        "items": [{"title": "string", "body": "string", "evidence": "string"}]
+    }
+    raw = '```json\n{"items":[{"title":"Decision","body":"Ship","evidence":"line 3"}]}\n```'
+
+    output, mismatch = parse_declared_output(raw, schema)
+
+    assert mismatch == ""
+    assert output == {
+        "items": [
+            {"title": "Decision", "body": "Ship", "evidence": "line 3"}
+        ]
+    }
+
+
+def test_declared_output_parser_rejects_prose_and_missing_fields() -> None:
+    schema = {"decisions": "boolean", "tasks": "boolean"}
+
+    _prose, prose_error = parse_declared_output("The extraction is complete.", schema)
+    _missing, schema_error = parse_declared_output('{"decisions":true}', schema)
+
+    assert "valid JSON" in prose_error
+    assert "output.tasks is missing" == schema_error
+
+
+def test_declared_output_parser_checks_fields_inside_schema_arrays() -> None:
+    schema = {"items": [{"title": "string", "body": "string", "evidence": "string"}]}
+
+    _output, mismatch = parse_declared_output(
+        '{"items":[{"title":"Decision","body":"Ship"}]}', schema
+    )
+
+    assert mismatch == "output.items[0].evidence is missing"
 
 
 class TestTransform:

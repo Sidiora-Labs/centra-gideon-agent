@@ -28,6 +28,7 @@ keeps a template portable across a user's provider setup.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -119,7 +120,7 @@ async def dispatch_transform(node: Node, ctx: BindingContext) -> NodeResult:
         return _fail(
             FailureClass.USER,
             f"transform binding failed: {exc}",
-            "check the referenced node id and field exist",
+            exc.remediation or "check the referenced node id and field exist",
         )
     contract = (node.config or {}).get("output_contract")
     if isinstance(contract, dict):
@@ -131,6 +132,64 @@ async def dispatch_transform(node: Node, ctx: BindingContext) -> NodeResult:
                 "adjust the transform expression or relax the contract",
             )
     return NodeResult(state=InstanceState.DONE, output=value)
+
+
+def _schema_example(schema: Any) -> Any:
+    """Build a small JSON example from the workflow schema dialect."""
+    if isinstance(schema, str):
+        return {
+            "string": "string",
+            "text": "string",
+            "boolean": False,
+            "bool": False,
+            "integer": 0,
+            "number": 0,
+            "array": [],
+            "object": {},
+            "null": None,
+        }.get(schema.lower(), "string")
+    if isinstance(schema, list):
+        return [_schema_example(schema[0])] if schema else []
+    if not isinstance(schema, dict):
+        return None
+    declared_type = str(schema.get("type", "")).lower()
+    if declared_type == "object" or "properties" in schema:
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return {}
+        required = schema.get("required")
+        keys = required if isinstance(required, list) else list(properties)
+        return {
+            key: _schema_example(properties[key])
+            for key in keys
+            if key in properties
+        }
+    if declared_type == "array" or "items" in schema and "type" in schema:
+        return [_schema_example(schema.get("items"))]
+    if declared_type == "boolean":
+        return False
+    if declared_type in {"integer", "number"}:
+        return 0
+    if declared_type == "string":
+        return "string"
+    if declared_type == "null":
+        return None
+    # Workflow shorthand treats an object map as required properties. In this dialect a list
+    # denotes the element schema for an array property (for example `items: [{title: string}]`).
+    return {key: _schema_example(value) for key, value in schema.items()}
+
+
+def with_declared_schema_prompt(prompt: str, schema: dict[str, Any]) -> str:
+    """Make the declared output shape visible to both infer and stage model calls."""
+    example = json.dumps(_schema_example(schema), ensure_ascii=False, indent=2)
+    declared = json.dumps(schema, ensure_ascii=False, indent=2)
+    return (
+        f"{prompt.rstrip()}\n\n"
+        "Output contract: return only one JSON value matching this schema. Do not add "
+        "prose or Markdown fences. Arrays may be empty when there are no matching items.\n"
+        f"Schema:\n```json\n{declared}\n```\n"
+        f"Example shape (string and number values are placeholders):\n```json\n{example}\n```"
+    )
 
 
 async def dispatch_infer(
@@ -161,6 +220,10 @@ async def dispatch_infer(
             "infer node has an empty prompt after binding",
             "check the prompt template and its bindings",
         )
+
+    declared_schema = cfg.get("schema")
+    if isinstance(declared_schema, dict):
+        prompt = with_declared_schema_prompt(prompt, declared_schema)
 
     use_case = resolve_use_case(node, tiers)
     fn = completion
@@ -195,7 +258,23 @@ async def dispatch_infer(
         )
 
     output: Any = text
-    if want_json:
+    if isinstance(declared_schema, dict):
+        output, mismatch = parse_declared_output(text, declared_schema)
+        if mismatch:
+            return NodeResult(
+                state=InstanceState.FAILED,
+                failure=Failure(
+                    failure_class=FailureClass.PROTOCOL,
+                    cause_plain=f"model output did not match the declared schema: {mismatch}",
+                    remediation=(
+                        "return only JSON matching the declared output schema; revise the prompt "
+                        "or provider configuration and retry"
+                    ),
+                ),
+                resolved_prompt=sent_prompt,
+                tokens=_estimate_tokens(prompt, text),
+            )
+    elif want_json:
         parsed = _parse_json_loose(text)
         if parsed is None:
             return NodeResult(
@@ -209,18 +288,11 @@ async def dispatch_infer(
                 resolved_prompt=sent_prompt,
             )
         output = parsed
-    declared_schema = cfg.get("schema")
-    mismatch = (
-        check_declared_schema(output, declared_schema)
-        if isinstance(declared_schema, dict)
-        else ""
-    )
     return NodeResult(
-        state=InstanceState.DEGRADED if mismatch else InstanceState.DONE,
+        state=InstanceState.DONE,
         output=output,
         resolved_prompt=sent_prompt,
         tokens=_estimate_tokens(prompt, text),
-        degraded_reason=f"Output schema mismatch: {mismatch}" if mismatch else "",
     )
 
 
@@ -336,6 +408,10 @@ async def dispatch_stage(
             "stage node has an empty prompt after binding",
             "check the prompt template and its bindings",
         )
+
+    schema = cfg.get("schema")
+    if isinstance(schema, dict):
+        prompt = with_declared_schema_prompt(prompt, schema)
 
     skip, skip_why = _restriction_skip(cfg, run_id)
     if skip:
@@ -551,7 +627,7 @@ async def dispatch_subworkflow(
             return _fail(
                 FailureClass.USER,
                 f"subworkflow input {key!r} did not resolve: {exc}",
-                "check the referenced node id and field exist",
+                exc.remediation or "check the referenced node id and field exist",
             )
 
     parent = store.get(run_id) if run_id else None
@@ -1773,6 +1849,15 @@ def check_declared_schema(value: Any, schema: dict[str, Any]) -> str:
         value = parsed
 
     def check(actual: Any, declared: Any, path: str) -> str:
+        if isinstance(declared, list):
+            if not isinstance(actual, list):
+                return f"{path} should be array, got {type(actual).__name__}"
+            if declared:
+                for index, child in enumerate(actual):
+                    problem = check(child, declared[0], f"{path}[{index}]")
+                    if problem:
+                        return problem
+            return ""
         if isinstance(declared, str):
             expected = declared.lower()
         elif isinstance(declared, dict) and isinstance(declared.get("type"), str):
@@ -1814,6 +1899,26 @@ def check_declared_schema(value: Any, schema: dict[str, Any]) -> str:
         return ""
 
     return check(value, schema, "output")
+
+
+def parse_declared_output(value: Any, schema: dict[str, Any]) -> tuple[Any, str]:
+    """Parse one JSON value and validate it against a declared workflow schema."""
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            if lines:
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return None, "expected one valid JSON value matching the declared schema"
+        value = parsed
+    mismatch = check_declared_schema(value, schema)
+    return value, mismatch
 
 
 def _parse_json_loose(text: Any) -> Any:
