@@ -81,6 +81,7 @@ class ProbeResult:
     detail: str = ""
     evidence: dict[str, Any] = field(default_factory=dict)
     fix_id: Optional[str] = None
+    remedy: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -90,6 +91,12 @@ class ProbeResult:
         }
         if self.fix_id:
             d["fix_id"] = self.fix_id
+        if not self.ok and not self.fix_id:
+            d["remedy"] = self.remedy or (
+                "Review this check's details, correct the underlying condition, then rerun Doctor."
+            )
+        elif self.remedy:
+            d["remedy"] = self.remedy
         return d
 
 
@@ -163,7 +170,11 @@ async def _safe_run(probe: Probe, ctx: DoctorContext) -> ProbeResult:
             evidence={"error": _mask(str(exc))},
         )
     return ProbeResult(
-        ok=res.ok, detail=_mask(res.detail), evidence=res.evidence, fix_id=res.fix_id
+        ok=res.ok,
+        detail=_mask(res.detail),
+        evidence=res.evidence,
+        fix_id=res.fix_id,
+        remedy=res.remedy,
     )
 
 

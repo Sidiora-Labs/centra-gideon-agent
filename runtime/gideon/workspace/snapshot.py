@@ -122,7 +122,9 @@ def _declared_db_paths() -> tuple[str, ...]:
     try:
         from gideon.operations.durability import inventory as inv
 
-        return tuple(e.path for e in inv.sqlite_entries())
+        return tuple(
+            e.path for e in inv.backup_entries() if e.kind == inv.KIND_SQLITE
+        )
     except Exception:  # noqa: BLE001 — snapshot must work even if this import breaks
         return ("memory.db", "memory_index.db")
 
@@ -177,10 +179,11 @@ def _everything_paths(pc: Path) -> list[str]:
     out: list[str] = []
     for entry in inv.backup_entries():
         top = entry.path.split("/", 1)[0]
-        if top in already or entry.path in out:
+        if top in already:
             continue
-        if (pc / entry.path).exists():
-            out.append(entry.path)
+        for rel in inv.paths_for(pc, entry):
+            if rel not in out:
+                out.append(rel)
     return out
 
 
@@ -325,8 +328,9 @@ def _extra_restore_paths(snap: Path) -> list[str]:
         top = entry.path.split("/", 1)[0]
         if top in already or top in secret or entry.path in secret or entry.path in out:
             continue
-        if (snap / entry.path).exists():
-            out.append(entry.path)
+        for rel in inv.paths_for(snap, entry):
+            if rel not in out:
+                out.append(rel)
     return out
 
 
@@ -654,25 +658,24 @@ def _domain_counts(stage: Path) -> dict[str, dict[str, int]]:
             pass
 
     for entry in inv.backup_entries():
-        staged = stage / entry.path
-        if not staged.exists():
-            continue
-        bucket = _bucket(entry.domain)
-        if entry.kind == inv.KIND_SQLITE and staged.is_file():
-            bucket["rows"] += _sqlite_row_total(staged)
-        elif entry.kind == inv.KIND_JSONL_APPEND:
-            files = [staged] if staged.is_file() else sorted(staged.rglob("*.jsonl"))
-            for fpath in files:
-                try:
-                    bucket["rows"] += sum(
-                        1
-                        for line in fpath.read_text(encoding="utf-8").splitlines()
-                        if line.strip()
-                    )
-                except (OSError, UnicodeDecodeError):
-                    continue
-        elif entry.kind == inv.KIND_JSON_ENTITY_DIR and staged.is_dir():
-            bucket["rows"] += sum(1 for _ in staged.rglob("*.json"))
+        for rel in inv.paths_for(stage, entry):
+            staged = stage / rel
+            bucket = _bucket(entry.domain)
+            if entry.kind == inv.KIND_SQLITE and staged.is_file():
+                bucket["rows"] += _sqlite_row_total(staged)
+            elif entry.kind == inv.KIND_JSONL_APPEND:
+                files = [staged] if staged.is_file() else sorted(staged.rglob("*.jsonl"))
+                for fpath in files:
+                    try:
+                        bucket["rows"] += sum(
+                            1
+                            for line in fpath.read_text(encoding="utf-8").splitlines()
+                            if line.strip()
+                        )
+                    except (OSError, UnicodeDecodeError):
+                        continue
+            elif entry.kind == inv.KIND_JSON_ENTITY_DIR and staged.is_dir():
+                bucket["rows"] += sum(1 for _ in staged.rglob("*.json"))
     return out
 
 

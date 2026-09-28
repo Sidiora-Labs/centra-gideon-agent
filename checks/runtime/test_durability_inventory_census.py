@@ -63,6 +63,86 @@ def _censused() -> tuple[dict[str, set[str]], set[str]]:
     return resolved, unresolved
 
 
+_BLIND_BY_DESIGN: dict[str, tuple[frozenset[str], str]] = {
+    "raw": (
+        frozenset({"cognition/memory_vault.py"}),
+        "a configured vault location read from the user's config",
+    ),
+    "task_leases": (
+        frozenset({"automation/workflows/pool.py"}),
+        "per-task lease files whose names are workflow task identifiers",
+    ),
+    "loop": (
+        frozenset(
+            {
+                "automation/loop/files.py",
+                "automation/loop/lifecycle.py",
+                "automation/loop/store.py",
+            }
+        ),
+        "loop-owned state beneath one dynamically selected loop id",
+    ),
+    "app_messages": (
+        frozenset({"extensions/apps/app_events.py", "extensions/apps/messaging.py"}),
+        "broker-owned per-app message queues",
+    ),
+    "f": (
+        frozenset(
+            {
+                "extensions/apps/native/gideonai-slack-desk/slack_desk_runtime/handler.py",
+                "interfaces/dashboard/chat_runner.py",
+            }
+        ),
+        "per-session process and file paths derived from runtime session state",
+    ),
+    "model_calls": (
+        frozenset({"assurance/evals/child.py"}),
+        "the local append-only model-call audit stream",
+    ),
+    "rel": (
+        frozenset({"cognition/knowledge/vault.py"}),
+        "a relative vault path read from the knowledge record",
+    ),
+    "usage": (
+        frozenset({"interfaces/cli/run.py"}),
+        "the usage ledger's declared subdirectory and file",
+    ),
+    "project_dir": (
+        frozenset({"interfaces/cli/main.py"}),
+        "the configured project directory pointer",
+    ),
+    "chat_plans": (
+        frozenset({"interfaces/dashboard/chat_plan.py"}),
+        "per-chat plan filenames derived from a validated chat key",
+    ),
+    "name": (
+        frozenset({"interfaces/dashboard/chat_runner.py"}),
+        "the session name supplied by the live request",
+    ),
+    "self": (
+        frozenset({"interfaces/dashboard/state.py"}),
+        "the dashboard's fixed file constants accessed through the state object",
+    ),
+    "trigger": (
+        frozenset({"interfaces/dashboard/handlers/research_reports.py"}),
+        "the selected trigger's report claim directory",
+    ),
+}
+
+
+def _blind_sites() -> dict[str, frozenset[str]]:
+    sites: dict[str, set[str]] = {}
+    for path in _SRC.rglob("*.py"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in (*_USE.finditer(text), *_JOIN.finditer(text)):
+            ident = match.group(2)
+            if ident and not re.search(
+                rf'^{re.escape(ident)}\s*[:=][^=]*?"([^\"]+)"', text, re.M
+            ):
+                sites.setdefault(ident, set()).add(path.relative_to(_SRC).as_posix())
+    return {name: frozenset(modules) for name, modules in sites.items()}
+
+
 _NOT_STATE = frozenset(
     {
         "agent_pids.txt",
@@ -124,7 +204,7 @@ def test_auth_is_declared_as_a_secret_store():
 
 
 def test_the_fourteen_durable_debt_stores_are_declared_and_snapshot_reachable(tmp_path):
-    from gideon.workspace.snapshot import _everything_paths
+    from gideon.workspace.snapshot import CORE_FILES, _everything_paths
 
     expected = {
         "chat_plans",
@@ -152,7 +232,10 @@ def test_the_fourteen_durable_debt_stores_are_declared_and_snapshot_reachable(tm
             target.write_text("{}", encoding="utf-8")
         else:
             target.mkdir(parents=True, exist_ok=True)
-    assert expected == set(_everything_paths(tmp_path))
+    # `digest_queue.jsonl` belongs to the notifications component; every other expected
+    # path must be reachable through the manifest-derived `everything` projection.
+    core = {path for files in CORE_FILES.values() for path in files}
+    assert expected <= core | set(_everything_paths(tmp_path))
 
 
 def test_provider_credentials_survive_snapshot_restore(tmp_path, monkeypatch):
@@ -189,6 +272,7 @@ def test_every_censused_location_is_declared_or_pinned():
         name
         for name in resolved
         if name.split("/", 1)[0] not in declared
+        and not inv.is_ignored(name)
         and name not in _NOT_STATE
         and name not in _UNDECLARED_DEBT
     )
@@ -226,3 +310,42 @@ def test_the_blind_spot_is_bounded():
         "more home paths are now built from runtime values than when this was measured, so the "
         f"census covers proportionally less: {sorted(unresolved)}"
     )
+    actual = _blind_sites()
+    expected = {name: modules for name, (modules, _reason) in _BLIND_BY_DESIGN.items()}
+    assert actual == expected, {
+        "new_or_moved": {name: sorted(modules) for name, modules in actual.items() if expected.get(name) != modules},
+        "no_longer_blind": sorted(set(expected) - set(actual)),
+    }
+
+
+def test_rotated_security_archives_and_power_week_stores_are_manifested():
+    expected = {
+        "security_events.20260925T100000Z.bak.jsonl": "security_events_archive",
+        "routing_stats.json": "routing_stats",
+        "trigger-idle/idle-nudge-me.json": "trigger_idle_state",
+        "capture/session.jsonl": "captured_turns",
+        "webhook_callbacks.json": "webhook_callbacks",
+        "experiments/campaigns.sqlite3": "experiments_campaigns",
+        "experiments/machines.json": "experiments_machines",
+        "memory/extraction_shutdown.json": "memory_extraction_shutdown",
+        "proactive/decisions.sqlite3": "proactive_decisions",
+        "reference-repositories.json": "reference_repositories",
+        "mcp-oauth/server-reference.json": "mcp_oauth_state",
+        "browser/customer_sessions.sqlite3": "browser_customer_sessions",
+        "browser/profiles/cookies.json": "browser_profiles",
+    }
+    for path, entry_id in expected.items():
+        claim = inv.claim_for(path)
+        assert claim is not None and claim.id == entry_id, path
+
+    for pattern in (".outside-home-settled.json", ".shard-state.json", "pre-restore-*", "tmp"):
+        assert pattern in inv.IGNORED
+    assert {".env", ".env.pre-keychain", "credentials", "credentials.json", ".local_secret"} <= set(
+        inv.secret_paths()
+    )
+    browser_sessions = inv.by_id("browser_customer_sessions")
+    assert browser_sessions is not None and browser_sessions.derived
+    assert "browser/customer_sessions.sqlite3" not in {
+        entry.path for entry in inv.backup_entries()
+    }
+    assert "browser/profiles" in inv.secret_paths()

@@ -1449,10 +1449,121 @@ INVENTORY: tuple[StateEntry, ...] = (
         derived=True,
         help="per-request inbound trace (local; security events also go to the SEL)",
     ),
+    StateEntry(
+        id="webhook_callbacks",
+        kind=KIND_JSON_FILE,
+        path="webhook_callbacks.json",
+        domain=DOMAIN_AUTOMATION,
+        merge=MERGE_REPLACE_ONLY,
+        help="callbacks an agent registered so an outside system can hand it results later",
+    ),
+    StateEntry(
+        id="routing_stats",
+        kind=KIND_JSON_FILE,
+        path="routing_stats.json",
+        domain=DOMAIN_PLATFORM,
+        merge=MERGE_REPLACE_ONLY,
+        help="aggregated model-routing outcomes and quality measurements",
+    ),
+    StateEntry(
+        id="trigger_idle_state",
+        kind=KIND_JSON_ENTITY_DIR,
+        path="trigger-idle",
+        domain=DOMAIN_AUTOMATION,
+        merge=MERGE_UNION_BY_ID,
+        help="persisted idle-trigger timing and delivery state",
+    ),
+    StateEntry(
+        id="captured_turns",
+        kind=KIND_TREE,
+        path="capture",
+        domain=DOMAIN_WORK,
+        merge=MERGE_APPEND_DEDUP,
+        help="locally captured inbound coding-agent turns",
+    ),
+    StateEntry(
+        id="security_events_archive",
+        kind=KIND_TREE,
+        path="security_events.*.bak.jsonl",
+        domain=DOMAIN_SECURITY,
+        merge=MERGE_APPEND_DEDUP,
+        help="rotated security event log chains retained for recovery and audit",
+    ),
+    StateEntry(
+        id="experiments_campaigns",
+        kind=KIND_SQLITE,
+        path="experiments/campaigns.sqlite3",
+        domain=DOMAIN_WORK,
+        merge=MERGE_REPLACE_ONLY,
+        help="user-authored evaluation campaigns",
+    ),
+    StateEntry(
+        id="experiments_machines",
+        kind=KIND_JSON_FILE,
+        path="experiments/machines.json",
+        domain=DOMAIN_PLATFORM,
+        merge=MERGE_REPLACE_ONLY,
+        derived=True,
+        help="machine-specific evaluation host and SSH locator registry",
+    ),
+    StateEntry(
+        id="memory_extraction_shutdown",
+        kind=KIND_JSON_FILE,
+        path="memory/extraction_shutdown.json",
+        domain=DOMAIN_MEMORY,
+        merge=MERGE_REPLACE_ONLY,
+        derived=True,
+        help="derived memory extraction shutdown status",
+    ),
+    StateEntry(
+        id="proactive_decisions",
+        kind=KIND_SQLITE,
+        path="proactive/decisions.sqlite3",
+        domain=DOMAIN_AUTOMATION,
+        merge=MERGE_REPLACE_ONLY,
+        help="durable proactive decision records",
+    ),
+    StateEntry(
+        id="reference_repositories",
+        kind=KIND_JSON_FILE,
+        path="reference-repositories.json",
+        domain=DOMAIN_WORK,
+        merge=MERGE_REPLACE_ONLY,
+        help="reviewed reference repository cursors",
+    ),
+    StateEntry(
+        id="mcp_oauth_state",
+        kind=KIND_TREE,
+        path="mcp-oauth",
+        domain=DOMAIN_SECURITY,
+        merge=MERGE_REPLACE_ONLY,
+        secret=True,
+        help="per-server OAuth references and private client state",
+    ),
+    StateEntry(
+        id="browser_customer_sessions",
+        kind=KIND_SQLITE,
+        path="browser/customer_sessions.sqlite3",
+        domain=DOMAIN_PLATFORM,
+        merge=MERGE_REPLACE_ONLY,
+        derived=True,
+        help="machine-local browser customer session control state",
+    ),
+    StateEntry(
+        id="browser_profiles",
+        kind=KIND_TREE,
+        path="browser/profiles",
+        domain=DOMAIN_SECURITY,
+        merge=MERGE_REPLACE_ONLY,
+        secret=True,
+        help="browser profiles containing local credentials and cookies",
+    ),
 )
 
 
 IGNORED: tuple[str, ...] = (
+    "app-python",
+    "tmp",
     "desktop-private",
     "snapshots",
     "outbox",
@@ -1483,6 +1594,9 @@ IGNORED: tuple[str, ...] = (
     "update_releases.json",
     "fixture.yaml",
     "gateway.runtime.json",
+    ".outside-home-settled.json",
+    ".shard-state.json",
+    "pre-restore-*",
 )
 
 
@@ -1564,11 +1678,24 @@ def claim_for(rel: str) -> StateEntry | None:
         ep = _parts(entry.path)
         if (
             len(ep) <= len(parts)
-            and tuple(parts[: len(ep)]) == ep
+            and all(fnmatch.fnmatch(part, pattern) for part, pattern in zip(parts, ep))
             and len(ep) > best_depth
         ):
             best, best_depth = entry, len(ep)
     return best
+
+
+def paths_for(home: Path, entry: StateEntry) -> tuple[str, ...]:
+    """Resolve a manifest path (including a bounded filename glob) under ``home``."""
+    if not any(char in entry.path for char in "*?["):
+        return (entry.path,) if (home / entry.path).exists() else ()
+    return tuple(
+        sorted(
+            path.relative_to(home).as_posix()
+            for path in home.glob(entry.path)
+            if not path.is_symlink()
+        )
+    )
 
 
 @dataclass
@@ -1601,11 +1728,11 @@ def audit_home(home: Path) -> AuditResult:
         return result
     for child in sorted(home.iterdir()):
         rel = child.name
-        if is_ignored(rel):
-            result.ignored += 1
-            continue
         if claim_for(rel) is not None:
             result.claimed += 1
+            continue
+        if is_ignored(rel):
+            result.ignored += 1
             continue
         if child.is_dir() and any(e.path.startswith(rel + "/") for e in INVENTORY):
             result.claimed += 1

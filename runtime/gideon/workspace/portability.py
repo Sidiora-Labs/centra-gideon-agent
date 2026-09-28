@@ -27,6 +27,7 @@ nothing to verify them against, which is stated rather than silently assumed.
 """
 
 import hashlib
+import fnmatch
 import io
 import json
 import logging
@@ -215,9 +216,12 @@ def domain_of(rel: str) -> str:
 
     best_len, best = -1, ""
     for entry in inv.INVENTORY:
-        if (rel == entry.path or rel.startswith(entry.path + "/")) and len(
+        if (
+            (fnmatch.fnmatch(rel, entry.path) if any(c in entry.path for c in "*?[") else (rel == entry.path or rel.startswith(entry.path + "/")))
+            and len(
             entry.path
-        ) > best_len:
+            ) > best_len
+        ):
             best_len, best = len(entry.path), entry.domain
     return best or _UNDECLARED_LITERAL_DOMAINS.get(rel, "platform")
 
@@ -350,8 +354,9 @@ def _remaining_export_paths(
         top = entry.path.split("/", 1)[0]
         if top in already or top in out:
             continue
-        if (pc / entry.path).exists():
-            out.append(entry.path)
+        for rel in inv.paths_for(pc, entry):
+            if rel not in out:
+                out.append(rel)
     return out
 
 

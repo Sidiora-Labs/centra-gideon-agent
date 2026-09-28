@@ -41,6 +41,8 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +71,7 @@ _DEFAULT_TARGET_SCORE = 90.0
 _MIN_SCHEDULABLE_PENALTY = 100.0 - _DEFAULT_TARGET_SCORE
 
 HEALTHY_SCORE = 95.0
+NOTHING_FIXABLE = "nothing_fixable"
 
 
 def _doctor_dir() -> Path:
@@ -216,6 +219,48 @@ def measure_deficits() -> list[Deficit]:
     except Exception:
         logger.debug("deficit: skill-integrity measure failed", exc_info=True)
 
+    try:
+        from gideon.operations.resilience.doctor import run_doctor
+
+        def _run_doctor():
+            return asyncio.run(run_doctor())
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            report = _run_doctor()
+        else:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                report = pool.submit(_run_doctor).result()
+        rows = [
+            probe
+            for capability in report.get("capabilities", {}).values()
+            for probe in capability.get("probes", [])
+            if not probe.get("ok", True)
+        ]
+        for row in rows:
+            probe_id = str(row.get("id") or "unknown")
+            out.append(
+                Deficit(
+                    key=f"check:{probe_id}",
+                    count=1,
+                    weight=15.0,
+                    max_penalty=15.0,
+                    reachable=False,
+                )
+            )
+    except Exception:
+        logger.warning("deficit: Doctor checks could not be measured", exc_info=True)
+        out.append(
+            Deficit(
+                key="check:doctor.unavailable",
+                count=1,
+                weight=15.0,
+                max_penalty=15.0,
+                reachable=False,
+            )
+        )
+
     return out
 
 
@@ -250,10 +295,12 @@ def _count_tampered_skills() -> int:
 
 
 def health_score(deficits: list[Deficit]) -> float:
-    """``100 − Σ penalties`` over REACHABLE deficits (an unreachable deficit is at its
-    floor — it doesn't count against a score the engine can't improve). Clamped 0-100.
+    """``100 − Σ penalties`` across measured deficits, including Doctor failures.
+
+    ``reachable`` controls whether a remediation job can run; it must not hide an
+    unfixable health failure from the score shown to the operator.
     """
-    total = sum(d.penalty for d in deficits if d.reachable)
+    total = sum(d.penalty for d in deficits)
     return max(0.0, min(100.0, 100.0 - total))
 
 
@@ -459,7 +506,7 @@ def run_remediation(
             break
 
     if not result.stopped_reason:
-        result.stopped_reason = "plan exhausted"
+        result.stopped_reason = NOTHING_FIXABLE if not plan else "plan exhausted"
     if not dry_run:
         _save_job_state(state)
         _write_ledger(result, now=now)

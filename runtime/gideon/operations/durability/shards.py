@@ -417,60 +417,64 @@ def export_shards(
         for entry in inv.export_entries():
             if wanted is not None and entry.id not in wanted:
                 continue
-            src = home / entry.path
-            if not src.exists():
-                continue
-            result.entries += 1
-
-            if entry.kind == inv.KIND_SQLITE:
-                copy = _consistent_db_copy(src, workdir)
-                if copy is None:
-                    result.skipped[entry.id] = "database unreadable"
-                    continue
-                tables = _sqlite_tables(copy)
-                if not tables:
-                    result.skipped[entry.id] = "no tables"
-                    continue
-                for table in tables:
-                    rows = _sqlite_rows(copy, table)
-                    result.shards.extend(
-                        _write_shard(out_dir, f"{entry.id}/{table}.jsonl", rows)
-                    )
-                if include_databases:
-                    staged = _stage_db_copy(out_dir, entry.id, copy)
-                    if staged is not None:
-                        result.databases.append(staged)
-            elif entry.kind == inv.KIND_JSON_ENTITY_DIR:
-                rows = _json_rows_from_entity_dir(src) if src.is_dir() else []
-                if entry.tombstones and src.is_dir():
-                    from gideon.operations.durability.tombstones import merge_into_rows
-
-                    rows = merge_into_rows(src, rows)
-                result.shards.extend(
-                    _write_shard(out_dir, f"{entry.id}/entities.jsonl", rows)
+            for rel in inv.paths_for(home, entry):
+                src = home / rel
+                path_id = (
+                    entry.id
+                    if rel == entry.path
+                    else f"{entry.id}/{Path(rel).name}"
                 )
-            elif entry.kind == inv.KIND_JSON_FILE:
-                rows = _json_rows_from_file(src) if src.is_file() else []
-                result.shards.extend(
-                    _write_shard(out_dir, f"{entry.id}/value.jsonl", rows)
-                )
-            elif entry.kind == inv.KIND_JSONL_APPEND:
-                files = [src] if src.is_file() else sorted(src.rglob("*.jsonl"))
-                buckets: dict[str, list[dict]] = {}
-                for path in files:
-                    for year, rows in _jsonl_rows_by_year(path).items():
-                        buckets.setdefault(year, []).extend(rows)
-                for year in sorted(buckets):
+                result.entries += 1
+
+                if entry.kind == inv.KIND_SQLITE:
+                    copy = _consistent_db_copy(src, workdir)
+                    if copy is None:
+                        result.skipped[path_id] = "database unreadable"
+                        continue
+                    tables = _sqlite_tables(copy)
+                    if not tables:
+                        result.skipped[path_id] = "no tables"
+                        continue
+                    for table in tables:
+                        rows = _sqlite_rows(copy, table)
+                        result.shards.extend(
+                            _write_shard(out_dir, f"{path_id}/{table}.jsonl", rows)
+                        )
+                    if include_databases:
+                        staged = _stage_db_copy(out_dir, path_id, copy)
+                        if staged is not None:
+                            result.databases.append(staged)
+                elif entry.kind == inv.KIND_JSON_ENTITY_DIR:
+                    rows = _json_rows_from_entity_dir(src) if src.is_dir() else []
+                    if entry.tombstones and src.is_dir():
+                        from gideon.operations.durability.tombstones import merge_into_rows
+
+                        rows = merge_into_rows(src, rows)
                     result.shards.extend(
-                        _write_shard(out_dir, f"{entry.id}/{year}.jsonl", buckets[year])
+                        _write_shard(out_dir, f"{path_id}/entities.jsonl", rows)
                     )
-            else:
-                if src.is_symlink():
-                    continue
-                elif src.is_dir():
-                    result.blobs += _export_blobs(out_dir / entry.id, src)
+                elif entry.kind == inv.KIND_JSON_FILE:
+                    rows = _json_rows_from_file(src) if src.is_file() else []
+                    result.shards.extend(
+                        _write_shard(out_dir, f"{path_id}/value.jsonl", rows)
+                    )
+                elif entry.kind == inv.KIND_JSONL_APPEND:
+                    files = [src] if src.is_file() else sorted(src.rglob("*.jsonl"))
+                    buckets: dict[str, list[dict]] = {}
+                    for path in files:
+                        for year, rows in _jsonl_rows_by_year(path).items():
+                            buckets.setdefault(year, []).extend(rows)
+                    for year in sorted(buckets):
+                        result.shards.extend(
+                            _write_shard(out_dir, f"{path_id}/{year}.jsonl", buckets[year])
+                        )
                 else:
-                    result.blobs += _export_blob(out_dir / entry.id, src)
+                    if src.is_symlink():
+                        continue
+                    elif src.is_dir():
+                        result.blobs += _export_blobs(out_dir / path_id, src)
+                    else:
+                        result.blobs += _export_blob(out_dir / path_id, src)
 
     result.shards.sort(key=lambda s: s.path)
     if entries is not None:
@@ -770,10 +774,15 @@ def dirty_entries(home: Path, state_path: Path) -> list[str]:
     current: dict[str, str] = {}
     dirty: list[str] = []
     for entry in inv.export_entries():
-        src = home / entry.path
-        if not src.exists():
+        paths = inv.paths_for(home, entry)
+        if not paths:
             continue
-        fingerprint = _fingerprint(src)
+        fingerprints = [
+            (rel, _fingerprint(home / rel)) for rel in paths
+        ]
+        fingerprint = hashlib.sha256(
+            json.dumps(fingerprints, sort_keys=True).encode("utf-8")
+        ).hexdigest()
         current[entry.id] = fingerprint
         if previous.get(entry.id) != fingerprint:
             dirty.append(entry.id)
