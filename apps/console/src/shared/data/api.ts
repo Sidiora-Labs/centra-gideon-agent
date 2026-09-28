@@ -4092,6 +4092,7 @@ export const api = {
     get<{ models: LocalModel[] }>(`/api/models/local/${encodeURIComponent(provider)}/search?q=${encodeURIComponent(q)}`).then((d) => d.models ?? []),
   dashboardConfig: () => get<DashboardConfig>('/api/dashboard/config'),
   saveDashboardConfig: (body: Partial<DashboardConfig>) => put<{ ok: boolean }>('/api/dashboard/config', body),
+  keepOrDefaultDashboardName: () => put<{ ok: boolean; identity: { user_name: string; username: string } }>('/api/dashboard/config', { operation: 'keep_or_default_name' }),
 
   screenShareState: (session: string) =>
     get<{ enabled: boolean; delivery: 'native' | 'described' | 'none'; reason: string; staged: boolean }>(`/api/chat/screen-frame?session=${encodeURIComponent(session)}`),

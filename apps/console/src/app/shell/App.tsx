@@ -159,7 +159,7 @@ function AppInner() {
   useNotificationToasts()
   useEffect(() => { armCueAudio() }, [])
   useEffect(() => installPushCuePlayback(), [])
-  const { onboarded, loaded } = useIdentity()
+  const { onboarded, loaded, identityError, retryIdentity } = useIdentity()
   const isMobile = useIsMobile()
   const rail = useShellNavigation(isMobile, navigate)
   const railCollapsed = rail.collapsed
@@ -235,6 +235,13 @@ function AppInner() {
   const embedRef = useRef(query.embed === '1')
   if (query.embed === '1') embedRef.current = true
 
+  if (identityError) return <main role="alert" className="grid min-h-full place-items-center p-l" style={{ background: 'var(--color-canvas)' }}>
+    <section className="flex max-w-md flex-col items-center gap-m text-center">
+      <h1 data-type="headline-m" className="text-on-surface">Couldn't load your account</h1>
+      <p className="text-on-surface-low">{identityError}</p>
+      <button type="button" onClick={() => void retryIdentity()} className="rounded-lg px-l py-m text-on-primary" style={{ background: 'var(--color-primary)' }}>Retry</button>
+    </section>
+  </main>
   if (!loaded) return <div data-visual-state="waiting" className="grid h-full place-items-center" style={{ background: 'var(--color-canvas)' }}><Loader2 size={22} className="animate-spin text-on-surface-low" /></div>
   if (route === 'onboarding' || !onboarded) return <Onboarding query={query} setQuery={setQuery} />
 

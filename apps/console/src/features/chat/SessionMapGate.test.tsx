@@ -47,13 +47,13 @@ describe('Session Map gate semantics', () => {
       const status = within(rail).getByRole('status', { name: 'Session map position' })
       expect(status).toHaveAttribute('aria-live', 'polite')
       expect(status).toHaveAttribute('aria-atomic', 'true')
-      expect(status).toHaveTextContent(`Message 1 of ${turns.length}`)
+      expect(status).toHaveTextContent(`Message 1 of ${turn + 1}`)
       const markers = rail.querySelectorAll('[data-session-marker]')
-      expect(markers).toHaveLength(turns.length)
+      expect(markers).toHaveLength(turn + 1)
       expect(rail.querySelectorAll('[data-current="true"]')).toHaveLength(1)
       expect(markers[0]).toHaveAttribute('data-current', 'true')
       expect(markers[0]).toHaveAttribute('aria-current', 'location')
-      expect(markers[turns.length - 1]).toHaveAttribute('data-current', 'false')
+      if (markers.length > 1) expect(markers[markers.length - 1]).toHaveAttribute('data-current', 'false')
     }
   })
 

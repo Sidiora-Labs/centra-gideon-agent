@@ -35,7 +35,7 @@ const steps: Record<StepId, { icon: LucideIcon; subtitle: string }> = {
   ready: { icon: Sparkles, subtitle: '' },
 }
 export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'query' | 'setQuery'>>) {
-  const { setName } = useIdentity()
+  const { setName, keepOrDefaultName } = useIdentity()
   const [state, dispatch] = useReducer(setupReducer, query.step, restoreSetup)
   const [saveError, setSaveError] = useState('')
   const [finishing, setFinishing] = useState(false)
@@ -82,8 +82,13 @@ export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'q
     if (finishing) return
     setFinishing(true); setSaveError('')
     try {
-      await api.saveOnboardingState({ step: 'done' })
-      await setName(state.name || DEFAULT_USER_NAME, state.name ? handleDraft ?? suggestHandle(state.name) : undefined)
+      if (state.name.trim()) {
+        await api.saveOnboardingState({ step: 'done' })
+        await setName(state.name, handleDraft ?? suggestHandle(state.name))
+      } else {
+        await keepOrDefaultName()
+        await api.saveOnboardingState({ step: 'done' })
+      }
       clearSetup()
       setNavMode(state.showEverything ? 'expert' : 'starter')
     } catch (error) {

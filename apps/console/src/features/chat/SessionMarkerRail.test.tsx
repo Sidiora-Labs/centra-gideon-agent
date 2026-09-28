@@ -9,9 +9,12 @@ import { AppearanceProvider } from '../../app/shell/appearance'
 import { ThemeProvider } from '../../app/shell/theme'
 
 const turns: Pick<ChatTurn, 'role' | 'segments'>[] = [
-  { role: 'user', segments: [{ kind: 'text', text: 'Run it' }] },
+  { role: 'user', segments: [{ kind: 'text', text: 'Question one' }] },
   { role: 'assistant', segments: [{ kind: 'tool', id: '1', tool: 'shell', done: true, ok: false }, { kind: 'error', text: 'Failed' }] },
-  { role: 'assistant', segments: [{ kind: 'text', text: 'Finished' }] },
+  { role: 'assistant', segments: [{ kind: 'text', text: 'Finished one' }] },
+  { role: 'user', segments: [{ kind: 'text', text: 'Question two' }] },
+  { role: 'assistant', segments: [{ kind: 'tool', id: '2', tool: 'shell', done: true }] },
+  { role: 'user', segments: [{ kind: 'text', text: 'Question three' }] },
 ]
 
 class TestHighlight {
@@ -59,17 +62,15 @@ describe('SessionMarkerRail', () => {
     const markers = container.querySelectorAll<HTMLButtonElement>('[data-session-marker]')
     expect(markers).toHaveLength(3)
     expect(markers[0].className).toContain('size-8')
-    expect(within(container).getByRole('button', { name: 'Jump to message 2, Assistant: tool, error, completion' })).toBeTruthy()
-    expect(container.querySelectorAll('[data-mark="tool"]')).toHaveLength(1)
-    expect(container.querySelectorAll('[data-mark="error"]')).toHaveLength(1)
-    expect(container.querySelectorAll('[data-mark="completion"]')).toHaveLength(3)
+    expect(within(container).getByRole('button', { name: 'Jump to message 2, You: Question two' })).toBeTruthy()
+    expect([...markers].filter((marker) => marker.tabIndex === 0)).toHaveLength(1)
   })
 
   it('supports the complete keyboard walkthrough', () => {
     const { container, nodes } = setup()
-    const first = within(container).getByRole('button', { name: 'Jump to message 1, You: completion' })
-    const second = within(container).getByRole('button', { name: 'Jump to message 2, Assistant: tool, error, completion' })
-    const third = within(container).getByRole('button', { name: 'Jump to message 3, Assistant: completion' })
+    const first = within(container).getByRole('button', { name: 'Jump to message 1, You: Question one' })
+    const second = within(container).getByRole('button', { name: 'Jump to message 2, You: Question two' })
+    const third = within(container).getByRole('button', { name: 'Jump to message 3, You: Question three' })
 
     fireEvent.click(first)
     expect(nodes[0].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
@@ -77,11 +78,11 @@ describe('SessionMarkerRail', () => {
     first.focus()
     fireEvent.keyDown(first, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(second)
-    expect(nodes[1].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+    expect(nodes[3].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
 
     fireEvent.keyDown(second, { key: 'End' })
     expect(document.activeElement).toBe(third)
-    expect(nodes[2].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+    expect(nodes[5].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
 
     fireEvent.keyDown(third, { key: 'Home' })
     expect(document.activeElement).toBe(first)
@@ -97,7 +98,7 @@ describe('SessionMarkerRail', () => {
 
     expect(current?.className).toContain('bg-primary')
     expect(current?.className).toContain('ring-primary')
-    expect(history?.className).toContain('bg-outline')
+    expect(history?.className).toContain('bg-on-surface-low')
     expect(history?.className).not.toMatch(/\/\d+/)
   })
 
@@ -111,8 +112,8 @@ describe('SessionMarkerRail', () => {
     </></AppearanceProvider></ThemeProvider>)
 
     expect(queryByRole('tab', { name: 'Index' })).toBeNull()
-    fireEvent.click(getByRole('button', { name: 'Jump to message 3, Assistant: completion' }))
-    expect(onJumpTo.mock.calls).toEqual([[2]])
+    fireEvent.click(getByRole('button', { name: 'Jump to message 3, You: Question three' }))
+    expect(onJumpTo.mock.calls).toEqual([[5]])
   })
 
   it('renders one accessible return-to-newest control only when needed', () => {
@@ -132,8 +133,8 @@ describe('SessionMarkerRail', () => {
     const { container, nodes } = setup(false)
     fireEvent.click(within(container).getByRole('button', { name: 'Open session map' }))
     const drawer = within(container).getByRole('dialog', { name: 'Session map drawer' })
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Jump to message 3, Assistant: completion' }))
-    expect(nodes[2].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Jump to message 3, You: Question three' }))
+    expect(nodes[5].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
     expect(within(container).queryByRole('dialog', { name: 'Session map drawer' })).toBeNull()
   })
 
