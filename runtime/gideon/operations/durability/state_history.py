@@ -78,6 +78,7 @@ SECRET_EXCLUDE: tuple[str, ...] = (
     ".local_secret",
     "session_key",
     "sessions.json",
+    "inbound_tokens.json",
     "*.db",
     "*.db-wal",
     "*.db-shm",

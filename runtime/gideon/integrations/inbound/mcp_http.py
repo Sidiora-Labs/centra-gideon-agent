@@ -194,8 +194,8 @@ async def handle_mcp(request: web.Request) -> web.Response:
         client_id = client.client_id
     elif not auth.verify_bearer(SURFACE, presented):
         return _refuse(
-            json_error("unauthorized", status=401, headers=_NO_STORE),
-            refused=client_reason or "bad or missing bearer token",
+            json_error("unauthorized", message=auth.bearer_refusal(SURFACE, presented), status=401, headers=_NO_STORE),
+            refused=client_reason if client_reason not in {"bearer token matches no registered client", "no bearer token presented"} else auth.bearer_refusal(SURFACE, presented),
         )
 
     peer_fallback = request.headers.get("Host", "") + "|" + (request.remote or "")

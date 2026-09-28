@@ -42,9 +42,20 @@ def _surface_rows() -> list[dict]:
         logger.debug("external-access: config unreadable", exc_info=True)
         return []
     rows: list[dict] = []
+    from gideon.integrations.inbound import tokens as token_lifetimes
+
     for surface in auth.surfaces():
         surface_cfg = getattr(ea, surface, None)
         problem = auth.token_problem(surface)
+        configured = auth.load_surface_token(surface)
+        try:
+            lifetime = (
+                token_lifetimes.surface_token(surface, configured)
+                if configured
+                else None
+            )
+        except token_lifetimes.RegistryUnavailable:
+            lifetime = None
         rows.append(
             {
                 "surface": surface,
@@ -52,6 +63,9 @@ def _surface_rows() -> list[dict]:
                 "allow_remote": bool(getattr(surface_cfg, "allow_remote", False)),
                 "token_configured": problem is None,
                 "token_problem": problem or "",
+                "token_issued_at": float(lifetime["issued_at"]) if lifetime else 0.0,
+                "token_expires_at": float(lifetime["expires_at"]) if lifetime else 0.0,
+                "token_state": str(lifetime["state"]) if lifetime else "unconfigured",
                 "loopback_only": surface == auth.BRIDGE_SURFACE,
             }
         )
@@ -111,6 +125,8 @@ def _client_rows() -> list[dict]:
                 "rate_overrides": dict(client.rate_overrides),
                 "disabled": bool(client.disabled),
                 "created_at": client.created_at,
+                "expires_at": float(client.expires_at or 0.0),
+                "token_state": clients_mod_state(client),
                 "last_seen_at": client.last_seen_at,
                 "requests_seen": counts.get(client.client_id, 0),
                 "refusals_seen": refusals.get(client.client_id, 0),
@@ -118,6 +134,13 @@ def _client_rows() -> list[dict]:
         )
     out.sort(key=lambda r: (r["label"].lower(), r["client_id"]))
     return out
+
+
+def clients_mod_state(client) -> str:
+    from gideon.integrations.inbound import tokens
+
+    state, _row = tokens.validate_client(client)
+    return state
 
 
 async def api_external_access(request: web.Request) -> web.Response:
@@ -146,6 +169,12 @@ async def api_external_access(request: web.Request) -> web.Response:
         incident = bool(incident_active())
     except Exception:  # noqa: BLE001
         incident = True
+    from gideon.integrations.inbound import tokens as token_lifetimes
+
+    try:
+        integration_tokens = _integration_token_rows()
+    except token_lifetimes.RegistryUnavailable:
+        return json_error("integration_token_registry_unavailable", status=503)
     return web.json_response(
         {
             "enabled": master,
@@ -154,8 +183,21 @@ async def api_external_access(request: web.Request) -> web.Response:
             "caps": caps,
             "surfaces": _surface_rows(),
             "clients": _client_rows(),
+            "integration_tokens": integration_tokens,
         }
     )
+
+
+def _integration_token_rows() -> list[dict]:
+    from gideon.integrations.inbound import tokens
+    from gideon.integrations.inbound import clients
+    from gideon.integrations.inbound import auth
+
+    for surface in auth.surfaces():
+        current = auth.load_surface_token(surface)
+        if current:
+            auth.token_problem(surface)
+    return tokens.surface_rows() + tokens.client_rows(clients.load_clients())
 
 
 async def api_external_access_client(request: web.Request) -> web.Response:
@@ -219,7 +261,13 @@ async def api_external_access_client(request: web.Request) -> web.Response:
                 ),
                 status=400,
             )
-    client, token = clients_mod.create_client(
+    ttl = str(body.get("ttl", "90d") or "90d")
+    if clients_mod_ttl_invalid(ttl):
+        return json_error(
+            "invalid_request", message="ttl must be a positive duration no longer than 90d", status=400
+        )
+    try:
+        client, token = clients_mod.create_client(
         label,
         surfaces=requested,
         agent=str(body.get("agent", "") or ""),
@@ -227,19 +275,29 @@ async def api_external_access_client(request: web.Request) -> web.Response:
         scope=scope if isinstance(scope, dict) else None,
         upstream=upstream,
         rate_overrides=rate_overrides if isinstance(rate_overrides, dict) else None,
-    )
+        ttl=ttl,
+        )
+    except ValueError as exc:
+        return json_error("invalid_request", message=str(exc), status=400)
     return web.json_response(
         {
             "ok": True,
             "client_id": client.client_id,
             "label": client.label,
             "surfaces": list(client.surfaces),
+            "expires_at": client.expires_at,
             "token": token,
             "token_notice": (
                 "Copy this now — it is stored only as a hash and cannot be shown again."
             ),
         }
     )
+
+
+def clients_mod_ttl_invalid(ttl: str) -> bool:
+    from gideon.integrations.inbound import tokens
+
+    return tokens.parse_ttl(ttl) is None
 
 
 async def api_external_access_client_toggle(request: web.Request) -> web.Response:

@@ -205,9 +205,9 @@ def _admit(
     if client is None and not auth.verify_bearer(SURFACE, presented):
         return (
             _refuse(
-                json_error("unauthorized", status=401, headers=_NO_STORE),
+                json_error("unauthorized", message=auth.bearer_refusal(SURFACE, presented), status=401, headers=_NO_STORE),
                 route=route,
-                refused=client_reason or "bad or missing bearer token",
+                refused=client_reason if client_reason not in {"bearer token matches no registered client", "no bearer token presented"} else auth.bearer_refusal(SURFACE, presented),
             ),
             "",
             caps_mod.DEFAULT_CAPS,

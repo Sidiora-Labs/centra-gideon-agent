@@ -76,6 +76,7 @@ from gideon.http_errors import json_error
 from gideon.integrations.inbound.audit import audit
 from gideon.integrations.inbound.auth import (
     BRIDGE_SURFACE,
+    bearer_refusal,
     peer_allowed,
     token_env_key,
     verify_bearer,
@@ -446,15 +447,16 @@ def _admit(
     )
     client, client_reason = lookup_by_token(presented, BRIDGE_SURFACE)
     if client is None and not verify_bearer(BRIDGE_SURFACE, presented):
+        refusal = bearer_refusal(BRIDGE_SURFACE, presented)
         audit(
             BRIDGE_SURFACE,
             route=route,
             status=401,
-            refused=client_reason or "bad bearer",
+            refused=refusal if client_reason in {"bearer token matches no registered client", "no bearer token presented"} else client_reason,
         )
         return (
-            json_error("unauthorized", status=401),
-            client_reason or "bad bearer",
+            json_error("unauthorized", message=refusal, status=401),
+            refusal if client_reason in {"bearer token matches no registered client", "no bearer token presented"} else client_reason,
             None,
         )
     return None, "", client

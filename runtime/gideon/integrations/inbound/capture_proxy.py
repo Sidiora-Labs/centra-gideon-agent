@@ -187,8 +187,9 @@ def _admit(request: web.Request, route: str) -> tuple[web.Response | None, str, 
     surface_ok = auth.verify_bearer(CAPTURE_SURFACE, presented)
     client, _why = _lookup_client(presented)
     if not surface_ok and client is None:
-        audit(CAPTURE_SURFACE, route=route, status=401, refused="bad bearer")
-        return json_error("unauthorized", status=401), "bad bearer", ""
+        refusal = auth.bearer_refusal(CAPTURE_SURFACE, presented)
+        audit(CAPTURE_SURFACE, route=route, status=401, refused=refusal)
+        return json_error("unauthorized", message=refusal, status=401), refusal, ""
     return None, "", getattr(client, "client_id", "") or CAPTURE_SURFACE
 
 

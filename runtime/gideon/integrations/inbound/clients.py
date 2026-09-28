@@ -75,6 +75,7 @@ class InboundClient:
     disabled: bool = False
     created_at: str = ""
     last_seen_at: str = ""
+    expires_at: float = 0.0
 
     def may_use(self, surface: str) -> bool:
         """Whether this client is bound to ``surface``.
@@ -131,6 +132,7 @@ def load_clients() -> dict[str, InboundClient]:
                 disabled=bool(row.get("disabled", False)),
                 created_at=str(row.get("created_at", "") or ""),
                 last_seen_at=str(row.get("last_seen_at", "") or ""),
+                expires_at=float(row.get("expires_at") or 0.0),
             )
         except Exception:  # noqa: BLE001 — one bad row must not hide the others
             logger.debug(
@@ -168,6 +170,7 @@ def create_client(
     scope: dict[str, Any] | None = None,
     upstream: str = "",
     rate_overrides: dict[str, Any] | None = None,
+    ttl: str = "90d",
 ) -> tuple[InboundClient, str]:
     """Register a client and return ``(record, token)``.
 
@@ -181,7 +184,14 @@ def create_client(
     Validation belongs to the operator-facing route, which refuses an unknown name up
     front the same way it refuses an unknown surface.
     """
+    from gideon.integrations.inbound import tokens as token_lifetimes
+
+    ttl_secs = token_lifetimes.parse_ttl(ttl)
+    if ttl_secs is None:
+        raise ValueError("integration token lifetime must be between 1m and 90d")
     token = secrets.token_urlsafe(48)
+    created_at = _now()
+    expires_at = time.time() + ttl_secs
     client = InboundClient(
         client_id=secrets.token_hex(8),
         label=label,
@@ -193,7 +203,11 @@ def create_client(
         upstream=upstream,
         rate_overrides=dict(rate_overrides or {}),
         disabled=False,
-        created_at=_now(),
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    client.expires_at = token_lifetimes.record_client(
+        client.token_hash, client.client_id, client.label, client.surfaces, ttl, now=time.time()
     )
     clients = load_clients()
     clients[client.client_id] = client
@@ -209,6 +223,9 @@ def revoke_client(client_id: str) -> bool:
     clients = load_clients()
     if client_id not in clients:
         return False
+    from gideon.integrations.inbound import tokens as token_lifetimes
+
+    token_lifetimes.revoke_client_token(clients[client_id].token_hash)
     del clients[client_id]
     save_clients(clients)
     _sel_event("inbound_client_revoked", client_id, "record deleted")
@@ -250,6 +267,13 @@ def lookup_by_token(token: str, surface: str) -> tuple[InboundClient | None, str
             matched = client
     if matched is None:
         return None, "bearer token matches no registered client"
+    from gideon.integrations.inbound import tokens as token_lifetimes
+
+    token_state, token_record = token_lifetimes.validate_client(matched)
+    if token_state != token_lifetimes.LIVE:
+        if token_record is not None:
+            return None, token_lifetimes.client_sentence(token_record, token_state)
+        return None, "integration token registry unavailable; request refused"
     if matched.disabled:
         return None, f"client {matched.client_id} is disabled"
     if not matched.may_use(surface):

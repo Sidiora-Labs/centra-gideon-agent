@@ -1442,6 +1442,16 @@ INVENTORY: tuple[StateEntry, ...] = (
         help="inbound access clients: labels, bindings and token hashes (never tokens)",
     ),
     StateEntry(
+        id="inbound_tokens",
+        kind=KIND_JSON_FILE,
+        path="inbound_tokens.json",
+        domain=DOMAIN_SECURITY,
+        merge=MERGE_REPLACE_ONLY,
+        secret=True,
+        derived=True,
+        help="machine-local inbound token lifecycle authority",
+    ),
+    StateEntry(
         id="inbound_audit",
         kind=KIND_JSONL_APPEND,
         path="inbound_audit.jsonl",

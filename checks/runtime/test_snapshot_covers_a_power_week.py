@@ -150,3 +150,56 @@ def test_transcript_summaries_are_rebuilt_instead_of_backed_up(tmp_path, monkeyp
         assert zipped.read(members["sessions/durable-session.jsonl"]) == transcript
     assert summary.is_file()
     assert (home / "sessions" / "durable-session.jsonl").read_bytes() == transcript
+
+
+def test_inbound_token_authority_is_not_portable_or_restored(tmp_path, monkeypatch):
+    from gideon.integrations.inbound.tokens import issue_surface_token, registry_path
+    from gideon.operations.durability import state_history
+    from gideon.workspace.portability import create_export_zip
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    monkeypatch.setenv("GIDEON_WORKSPACE", str(home / "workspace"))
+    issue_surface_token("telegram", "first-surface-token", now=1000000)
+    path = registry_path()
+    assert path == home / "inbound_tokens.json"
+    old_bytes = path.read_bytes()
+    issue_surface_token("telegram", "replacement-surface-token", now=1000010)
+    current_bytes = path.read_bytes()
+    assert current_bytes != old_bytes
+    assert path.stat().st_mode & 0o777 == 0o600
+    lock = home / ".inbound_tokens.json.lock"
+    assert lock.is_file()
+    assert inventory.is_ignored(lock.name)
+    entry = next(row for row in inventory.INVENTORY if row.id == "inbound_tokens")
+    assert entry.secret and entry.derived
+    assert entry not in inventory.backup_entries()
+    assert entry not in inventory.export_entries()
+    history = state_history.HistoryRoot("state", "State", home, ("inbound_tokens.json",))
+    exclusions = state_history._exclude_lines(history)
+    assert exclusions.index("inbound_tokens.json") > exclusions.index("!/inbound_tokens.json")
+    assert "*.lock" in exclusions
+    out = tmp_path / "snapshots"
+    assert snapshot_main([str(out)]) == 0
+    (archive,) = out.glob("gideon-snapshot-*.tar.gz")
+    legacy = tmp_path / "legacy-authority.tar.gz"
+    with tarfile.open(archive) as tar, tarfile.open(legacy, "w:gz") as older:
+        members = tar.getmembers()
+        prefix = members[0].name.split("/", 1)[0]
+        for member in members:
+            assert not member.name.endswith(("/inbound_tokens.json", "/.inbound_tokens.json.lock"))
+            older.addfile(member, tar.extractfile(member) if member.isfile() else None)
+        for name, body in (("inbound_tokens.json", old_bytes), (".inbound_tokens.json.lock", b"")):
+            member = tarfile.TarInfo(prefix + "/" + name)
+            member.size = len(body)
+            member.mode = 0o600
+            older.addfile(member, io.BytesIO(body))
+    export, _ = create_export_zip()
+    with zipfile.ZipFile(io.BytesIO(export)) as zipped:
+        assert not any(name.endswith(("/inbound_tokens.json", "/.inbound_tokens.json.lock"))
+                       for name in zipped.namelist())
+    assert restore_main([str(legacy), "--force", "--components", "everything"]) == 0
+    assert path.read_bytes() == current_bytes
+    assert lock.is_file()

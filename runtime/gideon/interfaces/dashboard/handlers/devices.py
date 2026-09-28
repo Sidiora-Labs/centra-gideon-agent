@@ -467,6 +467,22 @@ async def api_devices_list(request: web.Request) -> web.Response:
             previous["last_seen"] = max(float(previous["last_seen"]), last_seen)
             previous["expires_at"] = max(float(previous["expires_at"]), record.expiry)
     rows = list(by_id.values())
+    from gideon.integrations.inbound import auth as inbound_auth
+    from gideon.integrations.inbound import clients as inbound_clients
+    from gideon.integrations.inbound import tokens as inbound_tokens
+
+    # Record a configured legacy/environment token on first observation, then expose
+    # lifecycle metadata only. The registry itself contains digest keys; responses do not.
+    try:
+        for surface in inbound_auth.surfaces():
+            configured = inbound_auth.load_surface_token(surface)
+            if configured:
+                inbound_tokens.surface_token(surface, configured)
+        rows.extend(inbound_tokens.surface_rows())
+        rows.extend(inbound_tokens.client_rows(inbound_clients.load_clients()))
+    except inbound_tokens.RegistryUnavailable:
+        _audit("devices_listed", "denied", error="integration token registry unavailable")
+        return json_error("integration_token_registry_unavailable", status=503)
     rows.sort(key=lambda r: float(r["minted_at"] or 0.0), reverse=True)
     _audit("devices_listed", "ok", resources=f"devices={len(rows)}")
     return web.json_response({"devices": rows})
@@ -486,6 +502,29 @@ async def api_devices_revoke(request: web.Request) -> web.Response:
         return json_error(ERR_ORIGIN, status=403)
 
     device_id = request.match_info.get("id", "")
+    if device_id.startswith("integration-client-"):
+        client_id = device_id.removeprefix("integration-client-")
+        from gideon.integrations.inbound import clients as inbound_clients
+
+        if not inbound_clients.revoke_client(client_id):
+            return json_error(ERR_UNKNOWN_DEVICE, status=404)
+        _audit("integration_token_revoked", "ok", resources=f"client={client_id}")
+        return web.json_response({"ok": True, "revoked": 1})
+    if device_id.startswith("integration-surface-"):
+        parts = device_id.split("-")
+        if len(parts) < 4:
+            return json_error(ERR_UNKNOWN_DEVICE, status=404)
+        surface, issued = parts[2], parts[3]
+        try:
+            issued_at = float(issued)
+        except ValueError:
+            return json_error(ERR_UNKNOWN_DEVICE, status=404)
+        from gideon.integrations.inbound import tokens as inbound_tokens
+
+        if not inbound_tokens.revoke_surface_id(surface, issued_at):
+            return json_error(ERR_UNKNOWN_DEVICE, status=404)
+        _audit("integration_token_revoked", "ok", resources=f"surface={surface}")
+        return web.json_response({"ok": True, "revoked": 1})
     nonces = nonces_for_session(device_id)
     if not nonces:
         _audit(

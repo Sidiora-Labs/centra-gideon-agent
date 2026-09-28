@@ -216,10 +216,11 @@ def _admit(
     surface_ok = auth.verify_bearer(OPENAI_SURFACE, presented)
     client = _lookup_client(presented)
     if not surface_ok and client is None:
-        audit(OPENAI_SURFACE, route=route, status=401, refused="bad bearer")
+        refusal = auth.bearer_refusal(OPENAI_SURFACE, presented)
+        audit(OPENAI_SURFACE, route=route, status=401, refused=refusal)
         return (
             openai_error(
-                "Incorrect API key provided.",
+                refusal,
                 code="unauthorized",
                 type_="invalid_request_error",
                 status=401,

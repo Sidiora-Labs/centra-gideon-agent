@@ -1,7 +1,7 @@
 """Auth modes and configuration for the Gideon gateway.
 
-This module defines the four supported authentication modes
-(``none``, ``local_token``, ``api_key``, ``oauth2``) and the
+This module defines the two supported authentication modes
+(``none`` and ``local_token``) and the
 ``AuthConfig`` dataclass that the gateway's middleware dispatches on.
 
 The ``effective_bind`` helper enforces the loopback invariant: when the
@@ -24,12 +24,14 @@ class AuthMode(str, Enum):
 
     NONE = "none"
     LOCAL_TOKEN = "local_token"
+    # Retained as rejected compatibility spellings for middleware callers that
+    # still mention these values. They are not selectable runtime modes.
     API_KEY = "api_key"
     OAUTH2 = "oauth2"
 
 
 AUTHORABLE_AUTH_MODES = frozenset({AuthMode.NONE, AuthMode.LOCAL_TOKEN})
-_UNAUTHORABLE_REQUESTS = frozenset({AuthMode.API_KEY.value, AuthMode.OAUTH2.value})
+_SUPPORTED = frozenset({AuthMode.NONE, AuthMode.LOCAL_TOKEN})
 
 
 @dataclass(frozen=True)
@@ -52,8 +54,16 @@ class AuthConfig:
     requested_mode: str = ""
 
     def __post_init__(self) -> None:
-        if not self.requested_mode:
-            object.__setattr__(self, "requested_mode", self.mode.value)
+        if self.mode not in _SUPPORTED:
+            raise ValueError(
+                f"unsupported GIDEON_AUTH_MODE {self.mode.value!r}; supported modes: none, local_token"
+            )
+        requested = (self.requested_mode or self.mode.value).strip().lower()
+        if requested not in {mode.value for mode in _SUPPORTED}:
+            raise ValueError(
+                f"unsupported GIDEON_AUTH_MODE {requested!r}; supported modes: none, local_token"
+            )
+        object.__setattr__(self, "requested_mode", requested)
 
     @property
     def actual_mode(self) -> str:
@@ -67,11 +77,8 @@ class AuthConfig:
 
     @property
     def fell_back_from_unauthorable_mode(self) -> bool:
-        """Whether a recognized but unselectable mode fell back to local tokens."""
-        return (
-            self.requested_mode in _UNAUTHORABLE_REQUESTS
-            and self.mode == AuthMode.LOCAL_TOKEN
-        )
+        """Compatibility diagnostic; unsupported modes now fail during parsing."""
+        return False
 
     def mode_state(self) -> str:
         """Return a stable diagnostic summary of requested and effective auth."""
@@ -92,9 +99,17 @@ class AuthConfig:
 
         raw = (os.environ.get("GIDEON_AUTH_MODE") or "").strip().lower()
         requested_mode = raw or AuthMode.LOCAL_TOKEN.value
-        if raw == "none":
-            return cls(mode=AuthMode.NONE, requested_mode=requested_mode)
-        return cls(requested_mode=requested_mode)
+        try:
+            mode = AuthMode(requested_mode)
+        except ValueError as exc:
+            raise ValueError(
+                f"unsupported GIDEON_AUTH_MODE {requested_mode!r}; supported modes: none, local_token"
+            ) from exc
+        if mode not in _SUPPORTED:
+            raise ValueError(
+                f"unsupported GIDEON_AUTH_MODE {requested_mode!r}; supported modes: none, local_token"
+            )
+        return cls(mode=mode, requested_mode=requested_mode)
 
 
 def effective_bind(auth_cfg: AuthConfig) -> str:

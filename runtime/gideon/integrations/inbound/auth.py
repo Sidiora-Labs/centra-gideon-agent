@@ -83,6 +83,9 @@ def create_surface_token(surface: str) -> str:
     from gideon.core.config.credentials import save_credential
 
     save_credential(token_env_key(surface), token)
+    from gideon.integrations.inbound import tokens
+
+    tokens.issue_surface_token(surface, token)
     return token
 
 
@@ -141,6 +144,14 @@ def token_problem(surface: str) -> str | None:
         return f"token shorter than {MIN_TOKEN_BYTES} bytes"
     if token in _forbidden_token_values(surface):
         return "token must not equal the dashboard/internal secret or another surface's token"
+    from gideon.integrations.inbound import tokens
+
+    try:
+        record = tokens.surface_token(surface, token)
+    except tokens.RegistryUnavailable:
+        return "integration token registry unavailable (fail-closed)"
+    if record["state"] != tokens.LIVE:
+        return tokens.refusal(surface, token) or f"integration token {record['state']}"
     return None
 
 
@@ -151,7 +162,21 @@ def verify_bearer(surface: str, presented: str) -> bool:
     expected = load_surface_token(surface) or ""
     if not presented:
         return False
-    return hmac.compare_digest(presented, expected)
+    if not hmac.compare_digest(presented, expected):
+        return False
+    from gideon.integrations.inbound import tokens
+
+    return tokens.surface_usable(surface, presented)
+
+
+def bearer_refusal(surface: str, presented: str) -> str:
+    """Explain only a lifecycle refusal that belongs to a known token digest."""
+    from gideon.integrations.inbound import tokens
+
+    try:
+        return tokens.refusal(surface, presented) or "bad or missing bearer token"
+    except Exception:  # noqa: BLE001 — unknown values keep the uniform refusal
+        return "bad or missing bearer token"
 
 
 def _peer_host(request) -> str:
