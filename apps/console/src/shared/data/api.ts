@@ -632,6 +632,8 @@ export interface AppSummary {
   native?: boolean
   updateAvailable?: boolean
   latestVersion?: string
+  latestSource?: string
+  updateSource?: string
   quality?: AppQualityWire
   hooks?: AppHookSummary[]
 }

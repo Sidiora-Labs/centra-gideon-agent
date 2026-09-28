@@ -228,6 +228,7 @@ def resolve_catalog_entries(entries: list[CatalogEntry]) -> list[CatalogEntry]:
 _REGISTRY_FILENAME = "app-registry.json"
 _REGISTRY_TTL_SECS = 3600.0
 _registry_cache: dict[str, tuple[float, list["RegistryPointer"]]] = {}
+_registry_offer_cache: dict[str, list[tuple[str, str, str]]] = {}
 _REGISTRY_RETRY_INITIAL_SECS = 30.0
 _REGISTRY_RETRY_MAX_SECS = 300.0
 _registry_retry: dict[str, tuple[float, float]] = {}
@@ -245,6 +246,7 @@ _OWNER_CAN_ALLOW = frozenset({"loopback", "unspecified", "private"})
 
 _GIT_SCAN_TTL_SECS = 300.0
 _git_scan_cache: dict[str, tuple[float, list["CatalogEntry"]]] = {}
+_git_root_versions: dict[str, str] = {}
 _git_scan_failed: set[str] = set()
 _catalog_build_lock = threading.Lock()
 
@@ -466,14 +468,23 @@ def _scan_registries(*, now: float) -> list[CatalogEntry]:
     separate jobs now: this one lists everything it can see, and the resolver decides.
     """
     out: list[CatalogEntry] = []
+    offers: dict[str, list[tuple[str, str, str]]] = {}
     for url in list_git_sources():
         policy = listing_policy(url)
         for p in _fetch_registry_index(url, is_git=True, now=now) or []:
-            out.append(_pointer_to_entry(url, p, is_git=True, policy=policy))
+            entry = _pointer_to_entry(url, p, is_git=True, policy=policy)
+            out.append(entry)
+            if entry.installable and entry.version:
+                offers.setdefault(url, []).append((entry.pointer, entry.version, entry.listedBy))
     for root in list_local_sources():
         policy = listing_policy(root)
         for p in _fetch_registry_index(root, is_git=False, now=now) or []:
-            out.append(_pointer_to_entry(root, p, is_git=False, policy=policy))
+            entry = _pointer_to_entry(root, p, is_git=False, policy=policy)
+            out.append(entry)
+            if entry.installable and entry.version:
+                offers.setdefault(root, []).append((entry.pointer, entry.version, entry.listedBy))
+    _registry_offer_cache.clear()
+    _registry_offer_cache.update(offers)
     return out
 
 
@@ -501,6 +512,7 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
         return cached[1]
 
     entries: list[CatalogEntry] = []
+    _git_root_versions.pop(url, None)
     tmp = tempfile.mkdtemp(prefix="gideon-gitscan-")
     try:
         proc = subprocess.run(
@@ -530,6 +542,10 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
             return []
 
         if (root / "app.json").is_file():
+            try:
+                _git_root_versions[url] = AppManifest.from_json_file(root / "app.json").version
+            except Exception:
+                logger.debug("git scan: bad root manifest in %s", url, exc_info=True)
             _git_scan_cache[url] = (now, [])
             return []
 
@@ -871,7 +887,7 @@ def listing_source_for(install_source: str) -> str | None:
     """Find the configured registry index that explicitly listed an install URL."""
     for source, (_at, pointers) in list(_registry_cache.items()):
         for pointer in pointers:
-            if pointer.repo and _install_pointer(source, pointer) == install_source:
+            if _install_pointer(source, pointer) == install_source:
                 return source
     return None
 
@@ -1277,8 +1293,8 @@ def available_bundled() -> list[CatalogEntry]:
 _APP_UPDATES_ENTITY = "app_updates"
 
 
-def _latest_local_versions() -> dict[str, str]:
-    """``{app_name: highest version}`` discoverable across the configured LOCAL sources.
+def _latest_local_versions() -> dict[str, tuple[str, str]]:
+    """``{app_name: (highest version, source directory)}`` across local sources.
 
     Unlike ``_scan_local_sources`` (which OMITS installed apps, since it feeds the Store's
     "available to install" list), this includes every app a local source declares — because
@@ -1286,7 +1302,7 @@ def _latest_local_versions() -> dict[str, str]:
     carries. On-disk manifest reads only; a bad manifest is skipped, never fatal."""
     from pathlib import Path
 
-    latest: dict[str, str] = {}
+    latest: dict[str, tuple[str, str]] = {}
     for root in list_local_sources():
         base = Path(root).expanduser()
         if not base.is_dir():
@@ -1305,19 +1321,71 @@ def _latest_local_versions() -> dict[str, str]:
             if not m.name or not m.version:
                 continue
             current = latest.get(m.name)
-            if current is None or version_tuple(m.version) > version_tuple(current):
-                latest[m.name] = m.version
+            if current is None or version_tuple(m.version) > version_tuple(current[0]):
+                latest[m.name] = (m.version, str(entry))
     return latest
 
 
+def _pointer_key(repository: str, subdirectory: str) -> tuple[str, str]:
+    """Normalize repository spellings while keeping multi-app paths distinct."""
+    return _git_source_key(repository), subdirectory.strip("/")
+
+
+def _offered_versions() -> dict[tuple[str, str], tuple[str, str]]:
+    """Versions available through the most recent Store discovery, without I/O.
+
+    A removed source is excluded immediately even while its old cache entry remains.
+    """
+    from gideon.extensions.apps.source import git_pointer
+
+    configured = {
+        _git_source_key(value) for value in [*list_git_sources(), *list_local_sources()]
+    }
+    offered: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def note(pointer: str, version: str) -> None:
+        parsed = git_pointer(pointer)
+        if parsed is None or not version:
+            return
+        key = _pointer_key(*parsed)
+        current = offered.get(key)
+        if current is None or version_tuple(version) > version_tuple(current[0]):
+            offered[key] = (version, pointer)
+
+    for source, pointers in list(_registry_offer_cache.items()):
+        if _git_source_key(source) in configured:
+            for pointer, version, _listed_by in pointers:
+                note(pointer, version)
+    for source, (_at, entries) in list(_git_scan_cache.items()):
+        if _git_source_key(source) in configured:
+            for item in entries:
+                note(item.pointer, item.version)
+    for source, version in list(_git_root_versions.items()):
+        if _git_source_key(source) in configured:
+            note(source, version)
+    return offered
+
+
+def update_source_for(app: dict[str, Any]) -> str:
+    """Return the existing editable source for an installed non-bundled app."""
+    from gideon.extensions.apps.source import git_pointer
+
+    source = str(app.get("source") or "").strip()
+    if not source or str(app.get("origin") or "") == "builtin":
+        return ""
+    if git_pointer(source) is not None:
+        return source
+    return source if Path(source).expanduser().is_dir() else ""
+
+
 def updates_available() -> list[dict[str, Any]]:
-    """Installed apps whose local source now offers a NEWER version.
+    """Installed apps whose local or last Store-discovered source offers a newer version.
 
     Compares each installed app's on-disk version against the highest version the configured
     local sources declare for that app, using the single app-version comparator
     (``manifest.version_tuple``). Returns one entry per out-of-date app::
 
-        {"name", "displayName", "installedVersion", "latestVersion", "source"}
+        {"name", "displayName", "installedVersion", "latestVersion", "latestSource", "updateSource"}
 
     Pure + cheap (on-disk reads, no network, no side effects) — safe to call on the
     ``/api/apps`` read path. An app with no newer version, or with no source-side manifest,
@@ -1325,24 +1393,43 @@ def updates_available() -> list[dict[str, Any]]:
     from gideon.extensions.apps.manager import list_apps
 
     latest = _latest_local_versions()
+    offered = _offered_versions()
     out: list[dict[str, Any]] = []
     for app in list_apps():
         name = app.get("name", "")
         installed_version = str(app.get("version", ""))
-        latest_version = latest.get(name)
-        if not name or not latest_version:
+        if not name:
             continue
-        if version_tuple(latest_version) > version_tuple(installed_version):
-            manifest = app.get("manifest") or {}
-            out.append(
-                {
-                    "name": name,
-                    "displayName": manifest.get("displayName") or name,
-                    "installedVersion": installed_version,
-                    "latestVersion": latest_version,
-                    "source": app.get("source", ""),
-                }
-            )
+        manifest = app.get("manifest") or {}
+        source = str(app.get("source") or "").strip()
+        source_pointer = None
+        if str(app.get("origin") or "") != "builtin":
+            from gideon.extensions.apps.source import git_pointer
+
+            source_pointer = git_pointer(source)
+        candidates: list[tuple[str, str]] = []
+        local = latest.get(name)
+        if local is not None:
+            candidates.append(local)
+        if source_pointer is not None:
+            cached = offered.get(_pointer_key(*source_pointer))
+            if cached is not None:
+                candidates.append(cached)
+        if not candidates:
+            continue
+        latest_version, latest_source = max(candidates, key=lambda item: version_tuple(item[0]))
+        if version_tuple(latest_version) <= version_tuple(installed_version):
+            continue
+        out.append(
+            {
+                "name": name,
+                "displayName": manifest.get("displayName") or name,
+                "installedVersion": installed_version,
+                "latestVersion": latest_version,
+                "latestSource": latest_source,
+                "updateSource": latest_source or update_source_for(app),
+            }
+        )
     return out
 
 

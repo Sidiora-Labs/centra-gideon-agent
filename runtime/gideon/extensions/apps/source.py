@@ -65,6 +65,22 @@ def _looks_like_git_url(source: str) -> bool:
     ) or s.endswith(".git")
 
 
+def git_pointer(source: str) -> tuple[str, str] | None:
+    """Return the repository and app subdirectory named by a git install source.
+
+    Store pointers use ``repository#subdirectory``; plain repository URLs name
+    the root app. Local filesystem paths have no git pointer.
+    """
+    value = str(source).strip()
+    base = value
+    subdirectory = ""
+    if "#" in value and _looks_like_git_url(value.split("#", 1)[0]):
+        base, subdirectory = value.rsplit("#", 1)
+    if not _looks_like_git_url(base):
+        return None
+    return base, subdirectory.strip("/")
+
+
 def _subdir_app_names(root: Path) -> list[str]:
     """The immediate subdirectories of a clone that hold an ``app.json`` — i.e. the
     installable apps of a multi-app repository (the published apps repo's shape)."""
@@ -114,11 +130,9 @@ def resolve(source: str, *, registry: str | None = None) -> ResolvedSource:
     if not s:
         raise SourceError("empty install source")
 
-    subdir: str | None = None
-    base = s
-    if "#" in s and _looks_like_git_url(s.split("#", 1)[0]):
-        base, subdir = s.rsplit("#", 1)
-        subdir = subdir.strip("/") or None
+    pointer = git_pointer(s)
+    base, subdir_value = pointer if pointer is not None else (s, "")
+    subdir = subdir_value or None
 
     policy = _listing_fetch_policy(s, base, registry)
     if _looks_like_git_url(base):

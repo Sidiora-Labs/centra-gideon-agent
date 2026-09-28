@@ -66,6 +66,12 @@ export interface StoreItem extends AppCatalogEntry {
   origin?: string
   updateAvailable?: boolean
   latestVersion?: string
+  latestSource?: string
+  updateSource?: string
+}
+
+export function appUpdateSource(app: Pick<AppSummary, 'latestSource' | 'updateSource'>): string {
+  return app.latestSource || app.updateSource || ''
 }
 
 function installedToStoreItem(a: AppSummary): StoreItem {
@@ -76,6 +82,7 @@ function installedToStoreItem(a: AppSummary): StoreItem {
     installed: true, enabled: a.enabled, hasUI: a.hasUI,
     native: !!a.native, hasConfig: a.hasConfig, origin: a.origin,
     updateAvailable: !!a.updateAvailable, latestVersion: a.latestVersion,
+    latestSource: a.latestSource, updateSource: a.updateSource,
     quality: a.quality,
   }
 }
@@ -130,7 +137,7 @@ function SourceDivider({ label, count }: { label: string; count: number }) {
 type AppActionKind = 'open' | 'toggle' | 'configure' | 'update' | 'uninstall' | 'force-uninstall'
 type DispatchAppAction = (app: { name: string; displayName: string; enabled: boolean; hasUI: boolean }, action: AppActionKind) => void
 
-function useAppActions(nav: (p: string) => void, reload: () => void) {
+function useAppActions(nav: (p: string) => void, reload: () => void, apps: AppSummary[]) {
   const [busyName, setBusyName] = useState<string | null>(null)
   const [configFor, setConfigFor] = useState<{ name: string; displayName: string } | null>(null)
   const [updateFor, setUpdateFor] = useState<string | null>(null)
@@ -141,7 +148,8 @@ function useAppActions(nav: (p: string) => void, reload: () => void) {
     switch (action) {
       case 'open': nav(`app/${encodeURIComponent(app.name)}`); return
       case 'configure': setConfigFor(app); return
-      case 'update': setUpdateFor(app.name); return
+      case 'update':
+        setUpdateFor(app.name); return
       case 'uninstall': setRemoveFor(app.name); return
       case 'force-uninstall': setUninstallFor(app.name); return
       case 'toggle': {
@@ -155,7 +163,9 @@ function useAppActions(nav: (p: string) => void, reload: () => void) {
 
   const modals = (
     <>
-      {updateFor && <UpdateModal name={updateFor} onClose={() => setUpdateFor(null)}
+      {updateFor && <UpdateModal name={updateFor}
+        initialSource={appUpdateSource(apps.find((app) => app.name === updateFor) ?? {})}
+        onClose={() => setUpdateFor(null)}
         onUpdated={() => { setUpdateFor(null); reload() }} />}
       {configFor && <ConfigModal name={configFor.name} displayName={configFor.displayName} onClose={() => setConfigFor(null)} />}
       {removeFor && <RemoveAppModal name={removeFor} onClose={() => setRemoveFor(null)}
@@ -385,7 +395,7 @@ export function AppsSection({ query, setQuery, navigate }: Pick<RouteProps, 'que
   const open = apps?.find((a) => a.name === openName) ?? null
   const openStore = open ? null : (storeUniverse.find((e) => e.name === openName) ?? null)
 
-  const appActions = useAppActions(nav, reload)
+  const appActions = useAppActions(nav, reload, apps ?? [])
 
   const cnt = <T,>(xs: T[], p: (x: T) => boolean) => xs.filter(p).length
   const libSections: FilterSectionDef[] = useMemo(() => {
@@ -1046,8 +1056,8 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   )
 }
 
-function UpdateModal({ name, onClose, onUpdated }: { name: string; onClose: () => void; onUpdated: () => void }) {
-  const [source, setSource] = useState('')
+function UpdateModal({ name, initialSource, onClose, onUpdated }: { name: string; initialSource: string; onClose: () => void; onUpdated: () => void }) {
+  const [source, setSource] = useState(initialSource)
   const guarded = useGuardedInstall(
     () => api.previewApp(name, source.trim()).then(guardedFromPreview),
     (digest, registry) => api.commitAppUpdate(name, source.trim(), digest, registry).then(guardedFromApp))
@@ -1242,7 +1252,7 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
         </>)}
       </div>
 
-      {updateOpen && <UpdateModal name={app.name} onClose={() => setUpdateOpen(false)}
+      {updateOpen && <UpdateModal name={app.name} initialSource={appUpdateSource(app)} onClose={() => setUpdateOpen(false)}
         onUpdated={() => { setUpdateOpen(false); onChanged() }} />}
       {configOpen && <ConfigModal name={app.name} displayName={app.displayName} onClose={() => setConfigOpen(false)} />}
       {confirmRemove && <RemoveAppModal name={app.name}

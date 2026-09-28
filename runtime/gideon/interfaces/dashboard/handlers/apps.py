@@ -229,6 +229,7 @@ async def api_apps_list(request: web.Request) -> web.Response:
         resolve_hero_url,
         source_kind_for_origin,
         surface_app_updates,
+        update_source_for,
     )
     from gideon.extensions.apps.manager import app_dir, list_apps
 
@@ -308,6 +309,8 @@ async def api_apps_list(request: web.Request) -> web.Response:
                 "updatedAt": app.get("updatedAt", ""),
                 "updateAvailable": name in updates_by_name,
                 "latestVersion": updates_by_name.get(name, {}).get("latestVersion", ""),
+                "latestSource": updates_by_name.get(name, {}).get("latestSource", ""),
+                "updateSource": updates_by_name.get(name, {}).get("latestSource") or update_source_for(app),
                 **_app_status(name),
             }
         )
