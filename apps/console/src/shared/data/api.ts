@@ -3077,6 +3077,9 @@ export interface ProviderModels {
   host_fit?: HostModelFit
 }
 export interface AvailableModelsResponse { providers: ProviderModels[]; fit?: HostModelFit }
+export type OnboardingModelCheck =
+  | { ok: true; source: 'binding' | 'fallback'; bound: string[]; provider: string; model: string; local: boolean }
+  | { ok: false; code: string; what: string; why: string; fix: string }
 export interface ProviderTestResult { ok: boolean; status?: string; message: string }
 export interface LocalModelTokenStatus {
   configured: boolean
@@ -4300,6 +4303,7 @@ export const api = {
   onboardingImportJob: () => get<{ job: OnboardingImportJob | null }>('/api/onboarding/import/job'),
   stopOnboardingImport: () => requestJson<{ job: OnboardingImportJob }>('/api/onboarding/import/job', 'DELETE'),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
+  onboardingModelCheck: () => get<OnboardingModelCheck>('/api/onboarding/model-check'),
   activeModels: () => get<{ use_cases: Record<string, string[]>; revisions: Record<string, string> }>('/api/models/active'),
   setActiveModel: (useCase: string, models: string[], basedOn?: string) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }, basedOn),
   startEmbeddingReindex: () => post<ReindexJob>('/api/models/embedding/reindex'),

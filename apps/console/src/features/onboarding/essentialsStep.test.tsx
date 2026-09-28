@@ -28,7 +28,7 @@ vi.mock('../../shared/data/api', () => ({
 }))
 vi.mock('../../app/shell/appSdk', () => ({ launchChat: vi.fn(), notify: vi.fn() }))
 
-import { EssentialsStep, laneOf, candidatesByLane } from './EssentialsStep'
+import { EssentialsStep, laneOf, candidatesByLane, emptyEssentialGuidance, CATALOG_FAILURE_GUIDANCE } from './EssentialsStep'
 import { invalidateKeys } from '../../shared/data/data'
 
 function entry(over: Partial<AppCatalogEntry> & { name: string }): AppCatalogEntry {
@@ -322,10 +322,20 @@ describe('a failed catalog fetch says so', () => {
     expect(screen.getByRole('button', { name: /Retry|Try again/i })).toBeTruthy()
   })
 
-  it('names the first-party source mechanism when a lane is genuinely empty', async () => {
-    appCatalog.mockResolvedValue({ bundled: [], gitSources: [], localApps: [OPENAI], remoteApps: [], gitApps: [] })
-    renderStep()
-    expect(await screen.findByText(/No web search app is available/)).toBeTruthy()
-    expect(screen.getAllByText(/first-party source/)[0]).toBeTruthy()
+  it('empty guidance names the offline download only when the offer is visible', () => {
+    expect(emptyEssentialGuidance('model', true)).toContain('Download the small offline model above')
+    expect(emptyEssentialGuidance('model', false)).not.toMatch(/download|offline/i)
+    expect(emptyEssentialGuidance('model', false)).toContain('Settings → Models')
+  })
+
+  it('empty guidance gives available actions without repository implementation language', () => {
+    for (const lane of ['search', 'speech', 'channel'] as const) {
+      const copy = emptyEssentialGuidance(lane, false)
+      expect(copy).toContain('Store')
+      expect(copy).toContain('Settings or Connections')
+      expect(copy).not.toMatch(/first.party|repository|workspace|dev tree/i)
+    }
+    expect(CATALOG_FAILURE_GUIDANCE).toContain('Retry')
+    expect(CATALOG_FAILURE_GUIDANCE).not.toMatch(/first.party|repository|workspace|dev tree/i)
   })
 })

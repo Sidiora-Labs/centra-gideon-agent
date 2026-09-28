@@ -37,6 +37,8 @@ const steps: Record<StepId, { icon: LucideIcon; subtitle: string }> = {
 export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'query' | 'setQuery'>>) {
   const { setName, keepOrDefaultName } = useIdentity()
   const [state, dispatch] = useReducer(setupReducer, query.step, restoreSetup)
+  const [readinessError, setReadinessError] = useState('')
+  const [readAttempt, setReadAttempt] = useState(0)
   const [saveError, setSaveError] = useState('')
   const [finishing, setFinishing] = useState(false)
   const [handleDraft, setHandleDraft] = useState<string | null>(null)
@@ -57,14 +59,17 @@ export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'q
   useEffect(() => {
     let active = true
     const load = async () => {
-      let readiness
-      try { readiness = await api.onboarding() }
-      catch { readiness = { needs_model: true, has_model_provider: false, has_chat_binding: false } }
-      if (active) dispatch({ type: 'loaded', value: readiness })
+      setReadinessError('')
+      try {
+        const readiness = await api.onboarding()
+        if (active) dispatch({ type: 'loaded', value: readiness })
+      } catch (error) {
+        if (active) setReadinessError(error instanceof Error ? error.message : 'The gateway did not answer')
+      }
     }
     void load()
     return () => { active = false }
-  }, [])
+  }, [readAttempt])
   const commitName = () => {
     if (!state.draft.trim()) return
     dispatch({ type: 'name' })
@@ -104,10 +109,14 @@ export function Onboarding({ query = {}, setQuery }: Partial<Pick<RouteProps, 'q
   const content: Record<StepId, ReactNode> = {
     name: <NameStep handle={handle} changeHandle={setHandleDraft} value={state.draft} change={(value) => dispatch({ type: 'draft', value })} submit={commitName} />,
     import: <ImportStep onDone={(summary) => advance('import', summary)} onSkip={() => advance('import', 'Skipped')} />,
-    essentials: state.readiness ? <EssentialsStep readiness={state.readiness} onProgress={progress} onDone={(summary) => advance('essentials', summary)} onSkip={() => advance('essentials', 'Set up later')} />
+    essentials: readinessError ? <div role="alert" className="grid gap-s" data-testid="onboarding-readiness-error">
+      <p>Could not load your setup state: {readinessError}</p>
+      <Button variant="secondary" onClick={() => setReadAttempt(value => value + 1)}>Retry setup read</Button>
+      <TextLink onClick={() => advance('essentials', 'Set up later')}>Set up later</TextLink>
+    </div> : state.readiness ? <EssentialsStep readiness={state.readiness} onProgress={progress} onDone={(summary) => advance('essentials', summary)} onSkip={() => advance('essentials', 'Set up later')} />
       : <div role="status" aria-busy="true" className="flex items-center gap-s py-s"><LoadingStatus what="what's already set up" /><Loader2 size={18} className="animate-spin text-on-surface-low" aria-hidden="true" /></div>,
     try: <TryOneStep onProgress={progress} onDone={(summary) => advance('try', summary)} onSkip={() => advance('try', 'Skipped')} onExitTo={exitTo} />,
-    ready: <ReadyScreen name={state.name} model={state.model} tried={state.tried} showEverything={state.showEverything}
+    ready: <ReadyScreen readinessUnknown={Boolean(readinessError)} name={state.name} model={state.model} tried={state.tried} showEverything={state.showEverything}
       setDisclosure={(value) => dispatch({ type: 'disclosure', value })} tour={tour} exitTo={exitTo} />,
   }
   return <div data-onboarding-scroll className="fixed inset-0 z-[var(--z-modal)] h-dvh min-h-0 overflow-y-auto overscroll-contain bg-canvas">
@@ -157,8 +166,8 @@ export function NameStep({ value, change, handle, changeHandle, submit }: {
     <p id="attribution-hint" className="text-on-surface-low">Labels tasks and comments you create. Leave empty for no attribution; you can change it in Settings.</p>
   </form>
 }
-function ReadyScreen({ name, model, tried, showEverything, setDisclosure, tour, exitTo }: {
-  name: string; model: string; tried: string; showEverything: boolean; setDisclosure: (value: boolean) => void; tour: () => void; exitTo: (path: string) => void
+function ReadyScreen({ readinessUnknown, name, model, tried, showEverything, setDisclosure, tour, exitTo }: {
+  readinessUnknown: boolean; name: string; model: string; tried: string; showEverything: boolean; setDisclosure: (value: boolean) => void; tour: () => void; exitTo: (path: string) => void
 }) {
   const [autonomy, setAutonomy] = useState<{ autoUpdate: boolean; registryEnabled: boolean } | 'failed' | null>(null)
   useEffect(() => {
@@ -176,8 +185,8 @@ function ReadyScreen({ name, model, tried, showEverything, setDisclosure, tour, 
   const chatReady = Boolean(model && model !== 'Set up later'), trialDone = Boolean(tried && tried !== 'Skipped')
   const recap = [
     { ok: true, text: `Hello, ${firstNameOf(name)}` },
-    { ok: chatReady, text: chatReady ? `Chat model: ${model}` : 'Chat model — set up later in Settings' },
-    { ok: trialDone, text: trialDone ? `First success: ${tried}` : 'Nothing tried yet — the cards are in Discover' },
+    { ok: chatReady && !readinessUnknown, text: readinessUnknown ? 'Chat model — could not read whether one is set up' : chatReady ? `Chat model: ${model}` : 'Chat model — set up later in Settings' },
+    { ok: trialDone && !readinessUnknown, text: readinessUnknown ? 'First success — could not read what was tried' : trialDone ? `First success: ${tried}` : 'Nothing tried yet — the cards are in Discover' },
   ]
   const pointers: Array<{ icon: LucideIcon; title: string; body: string; control: ReactNode }> = [
     { icon: Inbox, title: 'Work comes back to you in the Inbox', body: 'Approvals, reminders and finished runs queue up there instead of chasing you across the app.',

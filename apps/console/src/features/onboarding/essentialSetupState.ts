@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { api, type AppCatalogEntry, type ChatModelOption, type ModelProviderType, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { api, type AppCatalogEntry, type ChatModelOption, type ModelProviderType, type OnboardingState, type OnboardingStatePatch, type OnboardingModelCheck } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { guardedFromApp, guardedFromPreview, useGuardedInstall } from '../../shared/data/useGuardedInstall'
 import { catalogApps } from '../../shared/data/appCatalog'
@@ -33,8 +33,17 @@ export function useEssentialSetup(readiness: OnboardingState | null, onProgress:
   const { data: providerTypes } = useQuery('onboarding:provider-types', () => api.modelProviderTypes())
   const [state, change] = useReducer((state: SetupState, patch: Partial<SetupState>) => ({ ...state, ...patch }), {
     installed: {}, open: '', expanded: {}, modelApp: '', boundLabel: readiness?.active_chat_model ?? '',
-    phase: readiness && !readiness.needs_model ? 'done' : readiness?.has_model_provider ? 'bind' : 'pick',
+    phase: readiness?.has_model_provider ? 'bind' : 'pick',
   } as SetupState)
+  const [modelVerdict, setModelVerdict] = useState<ChatModelVerdict | null>(null)
+  const verify = useCallback(async () => {
+    setModelVerdict(null)
+    const result = await checkChatModel()
+    setModelVerdict(result)
+    if (result.kind === 'ok') change({ phase: 'done', boundLabel: result.model })
+    else change({ phase: readiness?.has_model_provider ? 'bind' : 'pick' })
+  }, [])
+  useEffect(() => { void verify() }, [verify])
   const pendingRef = useRef<AppCatalogEntry | null>(null)
   const active = useRef(false)
   const guarded = useGuardedInstall(
@@ -76,7 +85,7 @@ export function useEssentialSetup(readiness: OnboardingState | null, onProgress:
     confirmInstall: () => { if (pendingRef.current) return attempt(pendingRef.current, true) },
     toggle: (name: string) => { change({ open: state.open === name ? '' : name }); guarded.reset() },
     expand: (lane: EssentialLane) => change({ expanded: { ...state.expanded, [lane]: true } }),
-    configured: () => change({ phase: 'bind' }), bound: (label: string) => change({ phase: 'done', boundLabel: label }),
+    configured: () => change({ phase: 'bind' }), bound: (_label: string) => { void verify() }, modelVerdict, verify,
   }
 }
 export function setupErrorText(error: unknown): string {
@@ -128,9 +137,32 @@ export function useChatModelBinding(onBound: (label: string) => void) {
     active.current = true; setBinding(model.name); setFailed('')
     try {
       const reference = model.provider ? `${model.provider}:${model.model_id}` : model.model_id
-      await api.setActiveModel('chat', [reference]); onBound(reference)
+      const current = await api.activeModels()
+      await api.setActiveModel('chat', [reference], current.revisions.chat); onBound(reference)
     } catch (failure) { setBinding(''); setFailed(setupErrorText(failure) || 'Could not bind that model.') }
     finally { active.current = false }
   }
   return { models, error, refresh, binding, failed, bind }
+}
+
+export type ChatModelVerdict =
+  | { kind: 'ok'; model: string }
+  | { kind: 'refused'; message: string }
+  | { kind: 'unknown'; message: string }
+
+export function modelCheckVerdict(check: OnboardingModelCheck): ChatModelVerdict {
+  if (check.ok) return { kind: 'ok', model: `${check.provider}:${check.model}` }
+  return { kind: check.code === 'read_failed' ? 'unknown' : 'refused', message: `${check.what}. ${check.why}. ${check.fix}` }
+}
+
+export async function checkChatModel(): Promise<ChatModelVerdict> {
+  try {
+    const result = await api.onboardingModelCheck()
+    if (!result.ok) return modelCheckVerdict(result)
+    if (!result.local) {
+      const probe = await api.testModelProvider(result.provider)
+      if (!probe.ok) return { kind: 'refused', message: probe.message || 'The selected provider did not answer its connection test.' }
+    }
+    return modelCheckVerdict(result)
+  } catch (error) { return { kind: 'unknown', message: setupErrorText(error) || 'The chat model check could not run. Retry.' } }
 }

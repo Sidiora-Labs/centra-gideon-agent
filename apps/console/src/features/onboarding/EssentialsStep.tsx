@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Search, Mic, MessagesSquare, Download, Check, Loader2, ShieldCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -11,9 +10,9 @@ import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/instal
 import { SchemaField } from '../settings/ModelBackends'
 import { SchemaFieldDisclosure } from '../tools/schema'
 import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
-import { useModelDownloads } from '../settings/useModelDownloads'
+import { BundledModelOffer, smallestLocalChatModel } from './BundledModelOffer'
 import { useQuery } from '../../shared/data/data'
-import { api, type AvailableModel } from '../../shared/data/api'
+import { api } from '../../shared/data/api'
 
 type LaneId = EssentialLane
 
@@ -41,6 +40,12 @@ export const laneOf = essentialLane
 
 export const candidatesByLane = essentialCandidates
 
+export const CATALOG_FAILURE_GUIDANCE = 'Retry to load your app sources, or continue setup later. Browse or add a source in the Store; model connections can be configured later in Settings.'
+export function emptyEssentialGuidance(lane: EssentialLane, offeredOffline: boolean): string {
+  if (lane === 'model') return `${offeredOffline ? 'Download the small offline model above or connect a local model' : 'Connect a local model'}, add an app source in the Store, or continue setup and choose a model later in Settings → Models.`
+  return 'Browse the Store or add an app source. You can continue setup and configure this later in Settings or Connections.'
+}
+
 const LANE_PREVIEW = 4
 
 export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
@@ -54,17 +59,18 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
   onProgress: (patch: OnboardingStatePatch) => void
 }) {
   const { catalog, catalogError, refresh, providerTypes, lanes, installed, open, expanded, modelApp, phase, boundLabel,
-    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound, selectInstalledProvider } = useEssentialSetup(readiness, onProgress)
+    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound, selectInstalledProvider, modelVerdict, verify } = useEssentialSetup(readiness, onProgress)
 
-  const modelReady = phase === 'done'
+  const modelReady = phase === 'done' && modelVerdict?.kind === 'ok'
+  const { data: localModels } = useQuery('onboarding:local-chat-catalog', () => api.modelsAvailable())
+  const offeredOffline = Boolean(smallestLocalChatModel(localModels ?? []))
 
   if (catalog === undefined && catalogError) {
     return (
       <div className="flex flex-col gap-m">
         <LoadError what="app catalog" error={catalogError} onRetry={refresh} />
         <p className="text-on-surface-low text-[0.8125rem]">
-          Apps are listed from the first-party source — the workspace apps directory in a dev
-          tree, otherwise the published apps repository. You can set this up later in the Store.
+          {CATALOG_FAILURE_GUIDANCE}
         </p>
         <TextLink onClick={onSkip}>Set up later</TextLink>
       </div>
@@ -99,6 +105,13 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
             </div>
             <p className="text-on-surface-low text-[0.8125rem]">{lane.blurb}</p>
 
+            {isModel && <BundledModelOffer onReady={verify} />}
+            {isModel && !modelVerdict && <p role="status">Checking the resolved chat model…</p>}
+            {isModel && modelVerdict && modelVerdict.kind !== 'ok' && <div role="alert" className="grid gap-s text-danger">
+              <p>{modelVerdict.kind === 'unknown' ? 'Could not read model readiness: ' : 'The chat model is not ready: '}{modelVerdict.message}</p>
+              <Button variant="secondary" size="sm" onClick={() => void verify()}>Retry model check</Button>
+            </div>}
+
             {isModel && phase === 'pick' && providerTypes?.filter((type) => type.capabilities?.includes('chat')).map((type) => (
               <Button key={type.type} variant="secondary" size="sm" onClick={() => selectInstalledProvider(type.app)}>
                 Configure installed {type.label}
@@ -110,9 +123,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
                 onBound={bound} onConfigured={configured} />
             ) : items.length === 0 ? (
               <p className="text-on-surface-low text-[0.8125rem]">
-                No {lane.title.toLowerCase()} app is available from the first-party source
-                (the workspace apps directory in a dev tree, otherwise the published apps
-                repository). Add a source in the Store later.
+                No {lane.title.toLowerCase()} app is available from your app sources. {emptyEssentialGuidance(lane.id, offeredOffline)}
               </p>
             ) : (
               <motion.div className="flex flex-col gap-1.5" initial="initial" animate="animate"
@@ -248,7 +259,6 @@ function BindModel({ onBound }: { onBound: (label: string) => void }) {
     return (
       <div className="flex flex-col gap-s">
         <p className="text-on-surface-low text-[0.8125rem]">No chat-capable models were discovered for this provider.</p>
-        <LocalFirstModel onReady={refresh} />
         <div><Button variant="secondary" size="sm" onClick={refresh}>Check again</Button></div>
       </div>
     )
@@ -274,28 +284,4 @@ function BindModel({ onBound }: { onBound: (label: string) => void }) {
       </motion.div>
     </div>
   )
-}
-
-function LocalFirstModel({ onReady }: { onReady: () => void }) {
-  const { data, error, refresh } = useQuery('onboarding:local-chat-catalog', () => api.modelsAvailable())
-  const choices = (data ?? []).flatMap((provider) => provider.local ? provider.models.filter((model) => model.capabilities.includes('chat') && !model.downloaded && !model.gated && model.fit !== 'red') : [])
-    .sort((a, b) => (a.size_mb ?? Infinity) - (b.size_mb ?? Infinity))
-  const model = choices[0]
-  if (error && !data) return <LoadError what="local model catalog" error={error} onRetry={refresh} />
-  if (!model) return null
-  return <StarterDownload model={model} onReady={() => { refresh(); onReady() }} />
-}
-
-function StarterDownload({ model, onReady }: { model: AvailableModel; onReady: () => void }) {
-  const { jobs, start } = useModelDownloads(model.provider, onReady)
-  const [error, setError] = useState('')
-  const job = jobs[model.name]
-  return <div className="grid gap-s rounded-lg border border-outline-variant p-m">
-    <p className="text-on-surface text-[0.8125rem]">Start locally with {model.name}</p>
-    <p className="text-on-surface-low text-[0.75rem]">{model.size_mb ? `${Math.round(model.size_mb)} MB · ` : ''}Downloads to this device. When it finishes, choose it for chat above.</p>
-    {job && ['queued', 'running'].includes(job.state)
-      ? <p role="status" className="text-on-surface-low">{job.state === 'queued' ? 'Download queued' : `Downloading ${Math.round(job.progress * 100)}%`}</p>
-      : <Button variant="secondary" size="sm" onClick={() => void start(model.name).catch((failure) => setError(setupErrorText(failure)))}>Download {model.name}</Button>}
-    {error && <p role="alert" className="text-danger">{error}</p>}
-  </div>
 }

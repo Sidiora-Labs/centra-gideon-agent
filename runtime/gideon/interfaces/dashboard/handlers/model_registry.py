@@ -893,12 +893,53 @@ async def api_models_chat(request: web.Request) -> web.Response:
     return web.json_response(all_models)
 
 
+async def api_onboarding_model_check(request: web.Request) -> web.Response:
+    from gideon.extensions.providers.provider_bridge import ProviderResolutionError, resolve_provider_for_use_case
+    from gideon.extensions.providers.use_cases import active_models_path, active_model_refs
+    from gideon.integrations.local_models.registry import get_provider
+    from gideon.security.security import redact_field
+
+    provider = None
+    try:
+        path = active_models_path()
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("The model binding record is not an object")
+        bound = active_model_refs("chat")
+        provider = resolve_provider_for_use_case("chat")
+        served = str(getattr(provider, "served_model_ref", "") or getattr(getattr(provider, "_model", None), "served_model_ref", "") or "")
+        entry, separator, model = served.partition(":")
+        if not separator or not entry or not model:
+            raise ValueError("The resolved chat model did not report its bound identity")
+        local = get_provider(entry)
+        if local is not None:
+            models = await asyncio.wait_for(local.list_models(), timeout=30)
+            selected = next((row for row in models if row.name == model), None)
+            if selected is None or not selected.downloaded or selected.integrity == "truncated":
+                return web.json_response({"ok": False, "code": "model_not_downloaded", "what": "The selected local chat model is not ready", "why": f"{model} is missing or incomplete on this device", "fix": "Download or repair this model in Settings → Models, then retry"})
+        return web.json_response({"ok": True, "source": "binding" if bound else "fallback", "bound": bound, "provider": entry, "model": model, "local": local is not None})
+    except ProviderResolutionError as exc:
+        error = getattr(exc, "agent_error", None)
+        detail = error.to_dict() if error is not None else {"code": "model_unresolved", "what": "The chat model could not be built", "why": str(exc), "fix": "Choose or repair a chat model in Settings → Models"}
+        return web.json_response({"ok": False, **{key: redact_field(value) for key, value in detail.items() if isinstance(value, str)}})
+    except Exception as exc:
+        return web.json_response({"ok": False, "code": "read_failed", "what": "The chat model check could not run", "why": redact_field(str(exc) or type(exc).__name__), "fix": "Retry the check; if it keeps failing, repair the model configuration in Settings"})
+    finally:
+        if provider is not None:
+            try:
+                await provider.shutdown()
+            except Exception:
+                logger.debug("Onboarding model check teardown failed", exc_info=True)
+
+
 def register_model_registry_routes(app: web.Application) -> None:
     """Register model registry routes.
 
     Local-model download/delete/search is served generically by the local-model
     routes (``/api/models/downloads`` + ``/api/models/local/{provider}/…``); no
     per-kind catalog/delete routes live here anymore."""
+    app.router.add_get("/api/onboarding/model-check", api_onboarding_model_check)
     app.router.add_get("/api/models/available", api_models_available)
     app.router.add_get("/api/models/local/availability", api_local_models_availability)
     app.router.add_get("/api/models/local/health", api_local_models_health)
