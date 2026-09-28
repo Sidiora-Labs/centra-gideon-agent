@@ -236,6 +236,62 @@ def _derived_ignore(entry_path: str, root: Path):
     return _ignore
 
 
+def _left_out_of_restore(entry_path: str, rel: str) -> bool:
+    """Whether a restore must leave a derived path inside this inventory entry behind."""
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace.portability import _is_derived_within
+
+    if not _is_derived_within(entry_path, rel):
+        return False
+    owner = inv.claim_for(f"{entry_path}/{rel}")
+    return owner is None or owner.path == entry_path
+
+
+def _restore_ignore(entry_path: str, root: Path):
+    """A copytree ignore that applies derived-within policy to old archives too."""
+    if not _derived_within(entry_path):
+        return None
+
+    def _ignore(directory: str, contents: list[str]) -> set[str]:
+        base = Path(directory).relative_to(root)
+        return {
+            name
+            for name in contents
+            if _left_out_of_restore(entry_path, (base / name).as_posix())
+        }
+
+    return _ignore
+
+
+def _apps_missing_engines(snap: Path, components: list[str] | None) -> list[tuple[str, str]]:
+    """Return restored sidecar apps that need their machine engine installed again."""
+    if not _store_selected(components, "apps") or not (snap / "apps").is_dir():
+        return []
+
+    try:
+        from gideon.extensions.apps.manager import APP_MANIFEST_FILENAME, app_dir
+        from gideon.extensions.apps.manifest import AppManifest
+        from gideon.integrations.local_models.sidecar import SidecarInstall
+
+        missing: list[tuple[str, str]] = []
+        for archived in sorted((snap / "apps").iterdir()):
+            if archived.name.startswith(".") or not (archived / APP_MANIFEST_FILENAME).is_file():
+                continue
+            install = SidecarInstall.for_app(archived.name)
+            if install is None or install.installed:
+                continue
+            manifest = AppManifest.from_json_file(
+                app_dir(archived.name) / APP_MANIFEST_FILENAME
+            )
+            missing.append((archived.name, manifest.displayName or archived.name))
+        return missing
+    except Exception:  # noqa: BLE001 — a post-restore note must never fail a restore
+        import logging
+
+        logging.getLogger(__name__).debug("app engine census failed", exc_info=True)
+        return []
+
+
 def _projects_component_paths(base: Path) -> list[str]:
     """Home-relative per-project paths the named `projects` component covers.
 
@@ -403,11 +459,16 @@ def _copytree_safe(src: Path, dst: Path, **kwargs) -> None:
     shutil.copytree(str(src), str(dst), ignore=_ignore_symlinks, **kwargs)
 
 
-def _copy_tree_no_overwrite(src: Path, dst: Path) -> None:
+def _copy_tree_no_overwrite(
+    src: Path, dst: Path, *, entry_path: str = ""
+) -> None:
     for item in src.rglob("*"):
         if item.is_symlink():
             continue
-        target = dst / item.relative_to(src)
+        rel = item.relative_to(src)
+        if entry_path and _left_out_of_restore(entry_path, rel.as_posix()):
+            continue
+        target = dst / rel
         if item.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         elif item.is_file() and not target.exists():
@@ -1478,7 +1539,7 @@ def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> None:
                 (backup / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(live), str(backup / rel))
             if src.is_dir():
-                _copytree_safe(src, live)
+                _copytree_safe(src, live, ignore=_restore_ignore(rel, src))
             elif src.is_file():
                 live.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(src), str(live))
@@ -1781,7 +1842,7 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
             dst = pc / rel
             if src.is_dir():
                 dst.mkdir(parents=True, exist_ok=True)
-                _copy_tree_no_overwrite(src, dst)
+                _copy_tree_no_overwrite(src, dst, entry_path=rel)
                 restored.append(rel)
             elif src.is_file() and not dst.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -1978,6 +2039,7 @@ def restore_main(
             _do_replace(snap, pc, components)
         else:
             _do_merge(snap, pc, components)
+        missing_engine_apps = _apps_missing_engines(snap, components)
 
     if _want(components, "memory") and (pc / "memory.db").is_file():
         try:
@@ -2004,6 +2066,13 @@ def restore_main(
 
     comp_str = ",".join(components) if components else "all"
     _audit("state_restored", f"mode={mode} components={comp_str} from={snap_path.name}")
+
+    if missing_engine_apps:
+        for app_name, display_name in missing_engine_apps:
+            print(
+                f"⚠️  {display_name} has no app engine here. Reinstall engine with "
+                f"POST /api/models/sidecar/{app_name}/install."
+            )
 
     print("\n⚠️  Restart gideon gateway to pick up changes: gideon restart")
     return 0

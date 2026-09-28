@@ -737,6 +737,32 @@ def _strip_excluded_from_staged(snap: Path) -> list[str]:
         else:
             target.unlink(missing_ok=True)
         removed.append(rel)
+    from gideon.operations.durability import inventory as inv
+    from gideon.workspace.snapshot import _left_out_of_restore
+
+    for entry in inv.export_entries():
+        root = snap / entry.path
+        if not root.is_dir() or root.is_symlink():
+            continue
+        for directory, dirs, files in os.walk(root, topdown=True, followlinks=False):
+            base = Path(directory)
+            for name in list(dirs):
+                path = base / name
+                if path.is_symlink():
+                    continue
+                rel = path.relative_to(root).as_posix()
+                if _left_out_of_restore(entry.path, rel):
+                    shutil.rmtree(path, ignore_errors=True)
+                    dirs.remove(name)
+                    removed.append(f"{entry.path}/{rel}")
+            for name in files:
+                path = base / name
+                if path.is_symlink():
+                    continue
+                rel = path.relative_to(root).as_posix()
+                if _left_out_of_restore(entry.path, rel):
+                    path.unlink(missing_ok=True)
+                    removed.append(f"{entry.path}/{rel}")
     for fpath in sorted(snap.rglob("*")):
         if not fpath.exists() or fpath.is_dir():
             continue
@@ -904,7 +930,7 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 sp, dp = snap / entry, pc / entry
                 if sp.is_dir():
                     dp.mkdir(parents=True, exist_ok=True)
-                    _copy_tree_no_overwrite(sp, dp)
+                    _copy_tree_no_overwrite(sp, dp, entry_path=entry)
                     imported_stores += 1
                 elif sp.is_file() and not dp.exists():
                     dp.parent.mkdir(parents=True, exist_ok=True)

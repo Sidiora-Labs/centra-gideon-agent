@@ -871,6 +871,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_PLATFORM,
         merge=MERGE_UNION_BY_ID,
         help="installed app copies (their data/ holds real state)",
+        derived_within=("*/venv",),
     ),
     StateEntry(
         id="extensions",

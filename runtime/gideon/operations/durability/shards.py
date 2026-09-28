@@ -315,12 +315,18 @@ def _write_shard(root: Path, rel: str, rows: list[dict]) -> list[ShardFile]:
     return written
 
 
-def _export_blobs(root: Path, src_dir: Path) -> int:
+def _export_blobs(root: Path, src_dir: Path, *, entry_path: str = "") -> int:
     """Content-addressed blob dir for binary originals, deduplicated by sha256."""
+    from gideon.workspace.portability import _is_derived_within
+
     count = 0
     blob_root = root / "blobs"
     for path in sorted(src_dir.rglob("*")):
         if not path.is_file() or path.is_symlink():
+            continue
+        if entry_path and _is_derived_within(
+            entry_path, path.relative_to(src_dir).as_posix()
+        ):
             continue
         try:
             data = path.read_bytes()
@@ -472,7 +478,9 @@ def export_shards(
                     if src.is_symlink():
                         continue
                     elif src.is_dir():
-                        result.blobs += _export_blobs(out_dir / path_id, src)
+                        result.blobs += _export_blobs(
+                            out_dir / path_id, src, entry_path=entry.path
+                        )
                     else:
                         result.blobs += _export_blob(out_dir / path_id, src)
 
