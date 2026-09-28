@@ -244,7 +244,12 @@ def _load_mcp_json_by_source() -> dict[str, dict[str, Any]]:
         if not p.is_file():
             continue
         try:
-            data = json.loads(safe_read_file(str(p)))
+            if scope == SCOPE_GIDEON and p == _mcp_sources()[0][0]:
+                from gideon.extensions.providers.mcp_instances import _load
+
+                data = _load()
+            else:
+                data = json.loads(safe_read_file(str(p)))
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to load MCP config from %s: %s", p, exc)
             continue
@@ -434,8 +439,13 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
                 "clientInfo": {"name": "gideon-probe", "version": "1.0.0"},
             },
         }
+        headers = dict(server.headers)
+        if server.source in {"mcp.json", "agent"}:
+            from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+
+            headers = resolve_server_credentials(server.name, {"headers": headers}).get("headers", {})
         hdrs = {
-            **server.headers,
+            **headers,
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
@@ -535,11 +545,16 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
     try:
         from gideon.security.sandbox import build_child_env
 
-        extra_env = {k: v for k, v in server.env.items() if k != "PATH"}
+        server_env = dict(server.env)
+        if server.source in {"mcp.json", "agent"}:
+            from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+
+            server_env = resolve_server_credentials(server.name, {"env": server_env}).get("env", {})
+        extra_env = {k: v for k, v in server_env.items() if k != "PATH"}
         env = build_child_env(site=f"mcp-probe:{server.name}", extra=extra_env)
         env["PATH"] = augmented_path(os.environ.get("PATH", ""))
-        if "PATH" in server.env:
-            env["PATH"] = server.env["PATH"] + os.pathsep + env["PATH"]
+        if "PATH" in server_env:
+            env["PATH"] = server_env["PATH"] + os.pathsep + env["PATH"]
 
         resolved = shutil.which(server.command, path=env.get("PATH"))
         if not resolved:
@@ -793,15 +808,24 @@ def discover_importable_servers() -> list[dict[str, Any]]:
             if not (spec.get("command") or spec.get("url")):
                 continue
             seen.add(name)
+            from gideon.cognition.onboarding_import.floors import strip_secrets
+
+            safe_env, skipped = strip_secrets(spec.get("env", {}))
+            headers = spec.get("headers", {})
+            if isinstance(headers, dict):
+                skipped += len(headers)
+            else:
+                headers = {}
             out.append(
                 {
                     "name": name,
                     "backend": backend,
                     "command": spec.get("command", ""),
                     "args": spec.get("args", []),
-                    "env": spec.get("env", {}),
+                    "env": safe_env if isinstance(safe_env, dict) else {},
                     "url": spec.get("url", ""),
-                    "headers": spec.get("headers", {}),
+                    "headers": {},
+                    "secrets_skipped": skipped,
                 }
             )
     return out

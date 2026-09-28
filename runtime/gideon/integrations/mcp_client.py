@@ -311,19 +311,22 @@ class McpServerConn:
 
     async def _open_transport(self, stack: Any):
         """Enter the right transport context for this server's spec."""
-        url = self.spec.get("url") or self.spec.get("endpoint")
+        from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+
+        spec = resolve_server_credentials(self.name, self.spec)
+        url = spec.get("url") or spec.get("endpoint")
         if url:
-            headers = self.spec.get("headers") or {}
+            headers = spec.get("headers") or {}
             if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
                 raise ValueError("MCP headers must be a string mapping")
             auth = None
-            if self.spec.get("oauth") is not None:
+            if spec.get("oauth") is not None:
                 from gideon.integrations.mcp_oauth import oauth_provider
 
                 if not str(url).startswith("https://"):
                     raise ValueError("MCP OAuth requires HTTPS")
-                auth = oauth_provider(self.name, str(url), self.spec)
-            transport = (self.spec.get("transport") or "").lower()
+                auth = oauth_provider(self.name, str(url), spec)
+            transport = (spec.get("transport") or "").lower()
             if transport in ("http", "streamable-http", "streamable_http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
@@ -342,17 +345,17 @@ class McpServerConn:
 
         from gideon.core.env import augmented_path
 
-        command = self.spec.get("command", "")
+        command = spec.get("command", "")
         if not command:
             raise ValueError("server spec has neither 'url' nor 'command'")
         env = dict(os.environ)
         env["PATH"] = augmented_path(env.get("PATH", ""))
-        env.update(self.spec.get("env") or {})
-        cwd = self.spec.get("cwd") or None
+        env.update(spec.get("env") or {})
+        cwd = spec.get("cwd") or None
         from gideon.security.sandbox import PROFILE_TOOL, spawn_shim_argv
 
         wrapped = spawn_shim_argv(
-            [command, *(self.spec.get("args") or [])], PROFILE_TOOL
+            [command, *(spec.get("args") or [])], PROFILE_TOOL
         )
         params = StdioServerParameters(
             command=wrapped[0],
@@ -664,18 +667,9 @@ def _gideon_mcp_specs() -> dict[str, dict[str, Any]]:
     This is the single store the native client spawns from — the one the MCP
     Tools provider card writes and ``/api/mcp/apply`` imports into.
     """
-    import json
+    from gideon.extensions.providers.mcp_instances import _load
 
-    from gideon.core.config.loader import config_dir
-
-    path = config_dir() / "mcp.json"
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
-        return {}
+    data = _load()
     servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
     return (
         {k: v for k, v in servers.items() if isinstance(v, dict)}

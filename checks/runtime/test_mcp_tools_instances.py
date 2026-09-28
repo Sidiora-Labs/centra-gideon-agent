@@ -18,13 +18,11 @@ from gideon.extensions.providers import mcp_instances as mi
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setattr(mi, "_mcp_json_path", lambda: tmp_path / "mcp.json")
-
-    def _fake_save(data):
-        (tmp_path / "mcp.json").write_text(json.dumps(data), encoding="utf-8")
-
-    monkeypatch.setattr(mi, "_save", _fake_save)
-    return tmp_path
+    home = tmp_path / "gideon-home"
+    home.mkdir()
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
+    return home
 
 
 def _read(tmp_path) -> dict:
@@ -107,7 +105,8 @@ def test_update_preserves_env(_home):
     )
     spec = _read(_home)["mcpServers"]["s"]
     assert spec["args"] == ["new"]
-    assert spec["env"] == {"API_KEY": "secret"}
+    assert spec["env"]["API_KEY"].startswith("{{secret:GIDEON_SECRET_MCP_")
+    assert mi.resolve_server_credentials("s", spec)["env"] == {"API_KEY": "secret"}
 
 
 def test_update_toggle_enabled(_home):

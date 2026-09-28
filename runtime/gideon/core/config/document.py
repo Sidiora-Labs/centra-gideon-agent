@@ -14,7 +14,7 @@ CREDENTIAL_MASK = "[REDACTED: credential]"
 _CREDENTIAL_FIELD = re.compile(
     r"(?:^|_)(?:api_?key|secret(?:_key)?|access_token|refresh_token|session_token|"
     r"bot_token|app_token|password|passwd|credential|private_key|bearer_token|"
-    r"signing_key|webhook_secret)(?:$|_)",
+    r"signing_key|webhook_secret|webhook_token)(?:$|_)",
     re.IGNORECASE,
 )
 

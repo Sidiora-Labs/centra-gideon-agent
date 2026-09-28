@@ -61,6 +61,8 @@ def _migrate_legacy_mcp_json() -> None:
     (canonical wins on a name clash), then the legacy file is emptied so it can
     never re-diverge. No-op when the legacy file is absent/empty."""
     legacy = _legacy_mcp_json()
+    staged: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    canonical_written = False
     try:
         if not legacy.is_file():
             return
@@ -74,13 +76,21 @@ def _migrate_legacy_mcp_json() -> None:
         moved = 0
         for name, spec in lservers.items():
             if name not in cservers:
-                cservers[name] = spec
+                if isinstance(spec, dict):
+                    prepared = _store_mcp_spec(name, spec)
+                    cservers[name] = prepared
+                    staged.append((name, spec, prepared))
+                else:
+                    cservers[name] = spec
                 moved += 1
         if moved:
             from gideon.engine.agent import _atomic_json_write
 
             canon.parent.mkdir(parents=True, exist_ok=True)
             _atomic_json_write(canon, cdata)
+            canonical_written = True
+            for name, _original, prepared in staged:
+                _purge_unused_mcp_credentials(name, prepared)
             logger.info(
                 "mcp: migrated %d server(s) from legacy settings/mcp.json", moved
             )
@@ -88,6 +98,9 @@ def _migrate_legacy_mcp_json() -> None:
 
         _atomic_json_write(legacy, {"mcpServers": {}})
     except Exception:
+        if not canonical_written:
+            for name, original, _prepared in staged:
+                _purge_unused_mcp_credentials(name, original)
         logger.debug("mcp: legacy migration skipped", exc_info=True)
 
 
@@ -169,6 +182,37 @@ def _write_mcp_json(data: dict) -> None:
     _atomic_json_write(_GLOBAL_MCP_JSON, data)
 
 
+def _purge_mcp_credentials(name: str, spec: dict[str, Any] | None = None) -> None:
+    from gideon.core.config.secret_refs import SecretOwner, purge
+    from gideon.integrations.mcp_oauth import purge_server
+
+    url = str((spec or {}).get("url") or (spec or {}).get("endpoint") or "")
+    purge([SecretOwner("MCP", name).prefix, SecretOwner("MCP_OAUTH", name).prefix])
+    purge_server(name, url)
+
+
+def _mcp_auth_values(spec: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        return {}
+    return {
+        **(spec.get("env") if isinstance(spec.get("env"), dict) else {}),
+        **(spec.get("headers") if isinstance(spec.get("headers"), dict) else {}),
+        **(spec.get("oauth") if isinstance(spec.get("oauth"), dict) else {}),
+    }
+
+
+def _store_mcp_spec(name: str, spec: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    from gideon.extensions.providers.mcp_instances import store_server_credentials
+
+    return store_server_credentials(name, spec, previous=previous)
+
+
+def _purge_unused_mcp_credentials(name: str, spec: dict[str, Any] | None) -> None:
+    from gideon.core.config.secret_refs import SecretOwner, purge_unused
+
+    purge_unused(SecretOwner("MCP", name), _mcp_auth_values(spec))
+
+
 _mcp_probe_cache: list[dict] = []
 _mcp_probe_ts: float = 0.0
 _MCP_PROBE_CACHE_SECS = 600
@@ -203,10 +247,12 @@ def _sync_mcp_to_agent(name: str, enabled: bool, *, remove: bool = False) -> Non
         mcp_servers = cfg.setdefault("mcpServers", {})
         tool_ref = f"@{name}"
         changed = False
+        source_spec = None
         if name not in mcp_servers:
-            spec = _find_server_spec_anywhere(name)
-            if spec:
-                mcp_servers[name] = spec
+            source_spec = _find_server_spec_anywhere(name)
+            if source_spec:
+                stored_spec = _store_mcp_spec(name, source_spec)
+                mcp_servers[name] = stored_spec
                 changed = True
             else:
                 return
@@ -241,7 +287,11 @@ def _sync_mcp_to_agent(name: str, enabled: bool, *, remove: bool = False) -> Non
         from gideon.engine.agent import _atomic_json_write
 
         _atomic_json_write(path, cfg)
+        if enabled and not remove and name in cfg.get("mcpServers", {}):
+            _purge_unused_mcp_credentials(name, cfg["mcpServers"][name])
     except OSError as exc:
+        if enabled and not remove:
+            _purge_unused_mcp_credentials(name, source_spec)
         logger.warning("Cannot write agent config %s: %s", path, exc)
 
 
@@ -259,6 +309,7 @@ def _sync_mcp_to_agent_batch(names: list[str], enabled: bool) -> None:
         return
 
     changed = False
+    staged_specs: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     if enabled:
         mcp_servers = cfg.setdefault("mcpServers", {})
         try:
@@ -270,7 +321,10 @@ def _sync_mcp_to_agent_batch(names: list[str], enabled: bool) -> None:
                 spec = gdata.get("mcpServers", {}).get(name, {})
                 if not isinstance(spec, dict) or not spec:
                     continue
-                mcp_servers[name] = {k: v for k, v in spec.items() if k != "disabled"}
+                candidate = {k: v for k, v in spec.items() if k != "disabled"}
+                stored_spec = _store_mcp_spec(name, candidate)
+                mcp_servers[name] = stored_spec
+                staged_specs[name] = (candidate, stored_spec)
                 changed = True
             tool_ref = f"@{name}"
             for key in ("tools", "allowedTools"):
@@ -306,7 +360,11 @@ def _sync_mcp_to_agent_batch(names: list[str], enabled: bool) -> None:
         from gideon.engine.agent import _atomic_json_write
 
         _atomic_json_write(path, cfg)
+        for name, (_candidate, stored_spec) in staged_specs.items():
+            _purge_unused_mcp_credentials(name, stored_spec)
     except OSError as exc:
+        for name, (candidate, _stored_spec) in staged_specs.items():
+            _purge_unused_mcp_credentials(name, candidate)
         logger.warning("Cannot write agent config %s: %s", path, exc)
 
 
@@ -873,7 +931,8 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
             data = json.loads(_GLOBAL_MCP_JSON.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             data = {"mcpServers": {}}
-        removed = data.get("mcpServers", {}).pop(name, None) is not None
+        removed_spec = data.get("mcpServers", {}).pop(name, None)
+        removed = removed_spec is not None
         if removed:
             _write_mcp_json(data)
             logger.info("MCP remove: removed %s from global mcp.json", name)
@@ -886,6 +945,9 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
 
         async with _get_config_lock():
             _sync_mcp_to_agent(name, False, remove=True)
+
+    if removed:
+        _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
 
     return web.json_response({"ok": True, "name": name, "removed": removed})
 
@@ -933,17 +995,22 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
                 )
         async with _get_mcp_lock():
             removed = False
+            removed_spec = None
             for store in (_canonical_mcp_json(), _GLOBAL_MCP_JSON):
                 try:
                     data = json.loads(store.read_text(encoding="utf-8"))
                 except (FileNotFoundError, json.JSONDecodeError):
                     continue
-                if data.get("mcpServers", {}).pop(name, None) is not None:
+                candidate = data.get("mcpServers", {}).pop(name, None)
+                if candidate is not None:
                     _atomic_write(store, data)
                     removed = True
+                    removed_spec = candidate
         in_agent = _server_in_agent_config(name)
         _sync_mcp_to_agent(name, False, remove=True)
         removed = removed or in_agent
+        if removed:
+            _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
         sel().log_api_access(
             caller="dashboard",
             operation="mcp_server_remove",
@@ -963,19 +1030,44 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
     command = body.get("command", "")
-    if not command:
-        return web.json_response({"error": "command is required"}, status=400)
+    url = body.get("url", body.get("endpoint", ""))
+    if bool(command) == bool(url):
+        return web.json_response({"error": "specify exactly one command or remote URL"}, status=400)
 
-    entry: dict[str, Any] = {"command": command}
-    if body.get("args"):
-        entry["args"] = body["args"]
-    if body.get("env"):
-        entry["env"] = body["env"]
+    entry: dict[str, Any] = {"url": url} if url else {"command": command}
+    for field in ("args", "env", "headers", "oauth", "transport"):
+        if field in body:
+            entry[field] = body[field]
+
+    from gideon.extensions.providers.mcp_instances import store_server_credentials
+    from gideon.core.config.secret_refs import SecretOwner, purge_unused
 
     async with _get_mcp_lock():
         data = _load_json_for_update(_canonical_mcp_json())
-        data.setdefault("mcpServers", {})[name] = entry
-        _atomic_write(_canonical_mcp_json(), data)
+        servers = data.setdefault("mcpServers", {})
+        previous = servers.get(name)
+        previous = previous if isinstance(previous, dict) else {}
+        for field in ("env", "headers", "oauth"):
+            if field not in body and field in previous:
+                entry[field] = previous[field]
+        try:
+            entry = store_server_credentials(name, entry, previous=previous)
+            servers[name] = entry
+            _atomic_write(_canonical_mcp_json(), data)
+        except (OSError, ValueError) as exc:
+            retained = {
+                **(previous.get("env") if isinstance(previous.get("env"), dict) else {}),
+                **(previous.get("headers") if isinstance(previous.get("headers"), dict) else {}),
+                **(previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {}),
+            }
+            purge_unused(SecretOwner("MCP", name), retained)
+            return web.json_response({"error": str(exc)}, status=400 if isinstance(exc, ValueError) else 500)
+        retained = {
+            **(entry.get("env") if isinstance(entry.get("env"), dict) else {}),
+            **(entry.get("headers") if isinstance(entry.get("headers"), dict) else {}),
+            **(entry.get("oauth") if isinstance(entry.get("oauth"), dict) else {}),
+        }
+        purge_unused(SecretOwner("MCP", name), retained)
 
     _sync_mcp_to_agent(name, True)
 
@@ -1126,7 +1218,32 @@ def _set_gideon_entry(name: str, *, enabled: bool, spec: dict | None = None) -> 
             existing["disabled"] = True
             action = "disabled"
 
-    _atomic_write(_canonical_mcp_json(), data)
+    entry = servers.get(name)
+    if isinstance(entry, dict):
+        from gideon.core.config.secret_refs import SecretOwner, purge_unused
+        from gideon.extensions.providers.mcp_instances import store_server_credentials
+
+        previous = existing if isinstance(existing, dict) else {}
+        try:
+            prepared = store_server_credentials(name, entry, previous=previous)
+            servers[name] = prepared
+            _atomic_write(_canonical_mcp_json(), data)
+        except Exception:
+            retained = {
+                **(previous.get("env") if isinstance(previous.get("env"), dict) else {}),
+                **(previous.get("headers") if isinstance(previous.get("headers"), dict) else {}),
+                **(previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {}),
+            }
+            purge_unused(SecretOwner("MCP", name), retained)
+            raise
+        retained = {
+            **(prepared.get("env") if isinstance(prepared.get("env"), dict) else {}),
+            **(prepared.get("headers") if isinstance(prepared.get("headers"), dict) else {}),
+            **(prepared.get("oauth") if isinstance(prepared.get("oauth"), dict) else {}),
+        }
+        purge_unused(SecretOwner("MCP", name), retained)
+    else:
+        _atomic_write(_canonical_mcp_json(), data)
     return action
 
 
@@ -1140,8 +1257,9 @@ def _remove_gideon_entry(name: str) -> bool:
     servers = data.get("mcpServers", {})
     if name not in servers:
         return False
-    del servers[name]
+    spec = servers.pop(name)
     _atomic_write(_canonical_mcp_json(), data)
+    _purge_mcp_credentials(name, spec if isinstance(spec, dict) else None)
     return True
 
 
@@ -1199,7 +1317,13 @@ def _set_scope_entry(
             spec = _find_server_spec_anywhere(name)
         if spec is None:
             return "missing_spec"
-        servers[name] = {k: v for k, v in spec.items() if k != "disabled"}
+        from gideon.cognition.onboarding_import.floors import strip_secrets
+
+        safe_spec, _ = strip_secrets(spec)
+        if not isinstance(safe_spec, dict):
+            return "missing_spec"
+        safe_spec.pop("headers", None)
+        servers[name] = {k: v for k, v in safe_spec.items() if k != "disabled"}
         _atomic_write(path, data)
         return "added"
     if not present:
@@ -1233,6 +1357,7 @@ def _set_tool_overrides(name: str, tool_overrides: dict[str, bool]) -> list[str]
         base = _find_server_spec_anywhere(name) or {}
         entry = {k: v for k, v in base.items() if k != "disabled"}
         servers[name] = entry
+    previous = dict(entry)
 
     disabled = list(entry.get("disabledTools") or [])
     changed: list[str] = []
@@ -1250,7 +1375,16 @@ def _set_tool_overrides(name: str, tool_overrides: dict[str, bool]) -> list[str]
         entry.pop("disabledTools", None)
 
     if changed:
-        _atomic_write(_canonical_mcp_json(), data)
+        from gideon.core.config.secret_refs import SecretOwner, purge_unused
+
+        try:
+            prepared = _store_mcp_spec(name, entry, previous)
+            servers[name] = prepared
+            _atomic_write(_canonical_mcp_json(), data)
+        except Exception:
+            purge_unused(SecretOwner("MCP", name), _mcp_auth_values(previous))
+            raise
+        purge_unused(SecretOwner("MCP", name), _mcp_auth_values(prepared))
     return changed
 
 

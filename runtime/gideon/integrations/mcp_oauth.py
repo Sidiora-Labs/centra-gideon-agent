@@ -16,8 +16,15 @@ from urllib.parse import parse_qs, urlsplit
 from gideon.core.config.loader import config_dir
 
 
+def _owner(name: str):
+    from gideon.core.config.secret_refs import SecretOwner
+
+    return SecretOwner("MCP_OAUTH", name)
+
+
 class McpOAuthStorage:
     def __init__(self, name: str, url: str) -> None:
+        self.name = name
         digest = hashlib.sha256(f"{name}\0{url}".encode()).hexdigest()
         self.path = config_dir() / "mcp-oauth" / f"{digest}.json"
 
@@ -30,18 +37,58 @@ class McpOAuthStorage:
         if metadata.st_mode & 0o077:
             directory.chmod(0o700)
 
-    def _read(self) -> dict[str, Any]:
+    def _read_references(self) -> dict[str, Any]:
         try:
             self._private_directory()
             metadata = self.path.lstat()
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
                 raise PermissionError("MCP OAuth token file is not private")
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            data = data if isinstance(data, dict) else {}
         except (FileNotFoundError, ValueError):
             return {}
 
-    def _write(self, data: dict[str, Any]) -> None:
+        # Migrate the old token/client documents once; callers only ever receive
+        # the resolved payload, while this portable file retains references.
+        from gideon.core.config.secret_refs import purge_unused, store
+
+        values: dict[str, str] = {}
+        previous: dict[str, str] = {}
+        for field in ("tokens", "client_info"):
+            value = data.get(field)
+            if isinstance(value, dict):
+                values[field] = json.dumps(value, separators=(",", ":"))
+            elif isinstance(value, str):
+                previous[field] = value
+                values[field] = value
+        if not values:
+            return data
+        references = store(values, owner=_owner(self.name), declared=set(values), previous=previous)
+        if references != previous:
+            try:
+                self._write_references(references)
+            except Exception:
+                purge_unused(_owner(self.name), previous)
+                raise
+            purge_unused(_owner(self.name), references)
+        return references
+
+    def _read(self) -> dict[str, Any]:
+        from gideon.core.config.secret_refs import resolve
+
+        refs = self._read_references()
+        resolved = resolve(refs, owner=_owner(self.name))
+        result = {}
+        for field in ("tokens", "client_info"):
+            value = resolved.get(field)
+            if isinstance(value, str):
+                try:
+                    result[field] = json.loads(value)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("MCP OAuth credential record is malformed") from exc
+        return result
+
+    def _write_references(self, data: dict[str, Any]) -> None:
         self._private_directory()
         if self.path.exists() or self.path.is_symlink():
             metadata = self.path.lstat()
@@ -57,6 +104,23 @@ class McpOAuthStorage:
             os.replace(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
+
+    def _write(self, data: dict[str, Any]) -> None:
+        from gideon.core.config.secret_refs import purge_unused, store
+
+        old = self._read_references()
+        values = {
+            field: json.dumps(data[field], separators=(",", ":"))
+            for field in ("tokens", "client_info")
+            if isinstance(data.get(field), dict)
+        }
+        refs = store(values, owner=_owner(self.name), declared=set(values), previous=old)
+        try:
+            self._write_references(refs)
+        except Exception:
+            purge_unused(_owner(self.name), old)
+            raise
+        purge_unused(_owner(self.name), refs)
 
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
@@ -79,6 +143,19 @@ class McpOAuthStorage:
         data = self._read()
         data["client_info"] = client_info.model_dump(mode="json")
         self._write(data)
+
+
+def purge_server(name: str, url: str) -> None:
+    """Remove this server's legacy private OAuth cache after owner deletion."""
+    digest = hashlib.sha256(f"{name}\0{url}".encode()).hexdigest()
+    path = config_dir() / "mcp-oauth" / f"{digest}.json"
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    from gideon.core.config.secret_refs import purge
+
+    purge([_owner(name).prefix])
 
 
 def oauth_provider(name: str, url: str, spec: dict[str, Any], *, redirect_handler=None, callback_handler=None):

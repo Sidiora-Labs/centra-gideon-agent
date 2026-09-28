@@ -39,6 +39,7 @@ import json
 import logging
 import re
 import sys
+from dataclasses import replace
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -173,7 +174,23 @@ def mcp_config_path() -> Path:
 
 
 def _write_mcp_server(item: ImportItem) -> WriteResult:
-    return DocumentCommit.server(sys.modules[__name__], item)
+    from gideon.core.config.secret_refs import SecretOwner, purge_unused
+    from gideon.extensions.providers.mcp_instances import store_server_credentials
+
+    safe_item = replace(item, payload=store_server_credentials(item.key, item.payload))
+    result = DocumentCommit.server(sys.modules[__name__], safe_item)
+    try:
+        config = json.loads(mcp_config_path().read_text(encoding="utf-8"))
+        stored = (config.get("mcpServers") or {}).get(item.key, {})
+    except (OSError, ValueError):
+        stored = {}
+    retained = {
+        **(stored.get("env") if isinstance(stored, dict) and isinstance(stored.get("env"), dict) else {}),
+        **(stored.get("headers") if isinstance(stored, dict) and isinstance(stored.get("headers"), dict) else {}),
+        **(stored.get("oauth") if isinstance(stored, dict) and isinstance(stored.get("oauth"), dict) else {}),
+    }
+    purge_unused(SecretOwner("MCP", item.key), retained)
+    return result
 
 
 def imported_skills_dir(source: str) -> Path:

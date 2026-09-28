@@ -48,6 +48,11 @@ _SECRET_KEY_RE = re.compile(
 )
 
 
+def credential_field(name: object) -> bool:
+    """Shared credential-name classifier for imported and native MCP records."""
+    return bool(_SECRET_KEY_RE.search(str(name)))
+
+
 def refuses(path: Path | str) -> bool:
     """True when this path must not be opened at all (floor 1)."""
     candidate = Path(path)
