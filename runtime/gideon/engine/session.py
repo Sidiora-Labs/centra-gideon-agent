@@ -93,6 +93,19 @@ def _process_live(provider: ModelProvider) -> bool:
     return probe() if probe is not None else provider.is_alive()
 
 
+def _factory_resolution_basis(
+    factory: ProviderFactory | None, key: str, context: dict[str, str]
+) -> str | None:
+    resolver = getattr(factory, "resolution_basis", None)
+    if not callable(resolver):
+        return None
+    try:
+        return str(resolver(session_key=key, **context))
+    except Exception:
+        logger.debug("Model resolution basis unavailable for %s", key, exc_info=True)
+        return None
+
+
 async def _fire_session_end(key: str, reason: str, session: "_Session") -> None:
     from gideon.automation.triggers.lifecycle_fire import fire, session_end_payload
 
@@ -138,6 +151,8 @@ class _Session:
     semaphore: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
     approval_policy: str = ""
     agent: str = ""
+    model_resolution_basis: str | None = None
+    resolution_context: dict[str, str] = field(default_factory=dict)
     queue: deque[tuple[str, str, dict]] = field(default_factory=deque)
     steers: deque[str] = field(default_factory=deque)
     steer_drains: bool = False
@@ -380,8 +395,21 @@ class ConversationDirectory:
             return
         async with self._lock:
             if BACKGROUND_KEY not in self._sessions:
+                context = {
+                    "agent": "gideon-lite",
+                    "model_override": "",
+                    "model_axis": "background",
+                    "provider_kind": "",
+                }
                 self._sessions[BACKGROUND_KEY] = _Session(
-                    provider, generation=self._factory_generation, is_new=False
+                    provider,
+                    generation=self._factory_generation,
+                    is_new=False,
+                    agent="gideon-lite",
+                    model_resolution_basis=getattr(
+                        provider, "_model_resolution_basis", None
+                    ),
+                    resolution_context=context,
                 )
                 return
             await provider.shutdown()
@@ -554,7 +582,28 @@ class ConversationDirectory:
         while (entry := self._claim_from_pool(agent)) is not None:
             provider, born = entry
             probe = getattr(provider, "is_process_alive", None)
-            if not self._expired_pool_entry(born) and probe is not None and probe():
+            stored_basis = getattr(provider, "_model_resolution_basis", None)
+            stored_context = getattr(provider, "_model_resolution_context", None)
+            current_basis = (
+                _factory_resolution_basis(
+                    self._provider_factory,
+                    "",
+                    stored_context if isinstance(stored_context, dict) else {},
+                )
+                if stored_basis is not None
+                else None
+            )
+            basis_current = (
+                stored_basis is None
+                or current_basis is None
+                or stored_basis == current_basis
+            )
+            if (
+                basis_current
+                and not self._expired_pool_entry(born)
+                and probe is not None
+                and probe()
+            ):
                 return provider
             rejected = True
             await self._close_quietly(provider, kill_on_cancel=True)
@@ -777,6 +826,7 @@ class ConversationDirectory:
         model: str | None = None,
         cwd: str | None = None,
         extra_env: dict[str, str] | None = None,
+        _resolution_context: dict[str, str] | None = None,
         **extra_factory_kwargs: Any,
     ) -> tuple[ModelProvider, bool, bool]:
         """Acquire a turn lease; its owner must call ``release`` when the turn ends."""
@@ -785,11 +835,45 @@ class ConversationDirectory:
         reuse = None
         stale = None
         stale_entry = None
+        resolution_context: dict[str, str] = dict(_resolution_context or {})
         try:
             async with self._lock:
                 entry = self._sessions.get(key) if key not in self._compacting else None
                 if entry is not None:
-                    if entry.generation != self._factory_generation:
+                    resolution_context = dict(entry.resolution_context)
+                if agent is not None or "agent" not in resolution_context:
+                    resolution_context["agent"] = str(agent or "")
+                if model is not None or "model_override" not in resolution_context:
+                    resolution_context["model_override"] = str(model or "")
+                for option in ("model_axis", "provider_kind"):
+                    if option in extra_factory_kwargs:
+                        resolution_context[option] = str(
+                            extra_factory_kwargs.get(option) or ""
+                        )
+                    else:
+                        resolution_context.setdefault(option, "")
+                if key == BACKGROUND_KEY and not resolution_context.get("model_axis"):
+                    resolution_context["model_axis"] = "background"
+                    if not resolution_context.get("agent"):
+                        resolution_context["agent"] = "gideon-lite"
+
+                # Reuse the exact binding context for callers that omit optional
+                # fields on follow-up/background acquisitions.
+                agent = resolution_context.get("agent") or None
+                model = resolution_context.get("model_override") or None
+                for option in ("model_axis", "provider_kind"):
+                    if resolution_context.get(option):
+                        extra_factory_kwargs.setdefault(option, resolution_context[option])
+                if entry is not None:
+                    current_basis = _factory_resolution_basis(
+                        self._provider_factory, key, resolution_context
+                    )
+                    basis_changed = (
+                        entry.model_resolution_basis is not None
+                        and current_basis is not None
+                        and entry.model_resolution_basis != current_basis
+                    )
+                    if entry.generation != self._factory_generation or basis_changed:
                         stale_entry = entry
                     elif _process_live(entry.provider):
                         reuse = entry, entry.touch()
@@ -823,11 +907,33 @@ class ConversationDirectory:
             return await self.get_or_create(
                 key, agent=agent, channel_id=channel_id,
                 approval_policy=approval_policy, model=model, cwd=cwd,
-                extra_env=extra_env, **extra_factory_kwargs,
+                extra_env=extra_env, _resolution_context=resolution_context,
+                **extra_factory_kwargs,
             )
         if reuse is not None:
             entry, initial = reuse
             await entry.semaphore.acquire()
+            current_basis = _factory_resolution_basis(
+                self._provider_factory, key, resolution_context
+            )
+            if (
+                entry.model_resolution_basis is not None
+                and current_basis is not None
+                and entry.model_resolution_basis != current_basis
+            ):
+                entry.semaphore.release()
+                return await self.get_or_create(
+                    key,
+                    agent=agent,
+                    channel_id=channel_id,
+                    approval_policy=approval_policy,
+                    model=model,
+                    cwd=cwd,
+                    extra_env=extra_env,
+                    _resolution_context=resolution_context,
+                    **extra_factory_kwargs,
+                )
+            entry.resolution_context = resolution_context
             return entry.provider, initial, False
         if factory is None:
             raise RuntimeError("No provider factory configured")
@@ -853,6 +959,13 @@ class ConversationDirectory:
                         is_new=False,
                         approval_policy=approval_policy,
                         agent=agent or "",
+                        model_resolution_basis=getattr(
+                            provider, "_model_resolution_basis", None
+                        )
+                        or _factory_resolution_basis(
+                            factory, key, resolution_context
+                        ),
+                        resolution_context=resolution_context,
                     )
                     self._sessions[key] = entry
                     self._remember_provider(key, provider)

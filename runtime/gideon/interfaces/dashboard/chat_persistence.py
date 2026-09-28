@@ -401,7 +401,9 @@ def _rehydrate_session_from_history(
         if _model_matches_provider(normalized):
             session.model = normalized
         else:
-            session.model = _active_provider_model()
+            # A stale saved selection is not a user pin. Keep the chat on its
+            # binding so future model rebinding remains authoritative.
+            session.model = ""
     elif session.agent:
         try:
             pc = _restore_cfg.agents.get(session.agent) if _restore_cfg else None
@@ -591,7 +593,9 @@ def restore_recent_sessions(
             if _model_matches_provider(normalized):
                 session.model = normalized
             else:
-                session.model = _active_provider_model()
+                # Do not turn the first configured provider into an implicit
+                # per-session pin while restoring history.
+                session.model = ""
         elif session.agent:
             try:
                 pc = _restore_cfg.agents.get(session.agent) if _restore_cfg else None

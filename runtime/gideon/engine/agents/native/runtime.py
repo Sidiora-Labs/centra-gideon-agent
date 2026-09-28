@@ -613,6 +613,8 @@ class NativeAgentRuntime(AgentProvider):
             or getattr(definition, "model", "")
             or getattr(model_provider, "_model", "")
         )
+        self._model_resolution_basis: str | None = None
+        self._model_resolution_context: dict[str, str] = {}
         self._announce_failover = False
         self._substitution_announced = False
         self._turn_output_visible = False
@@ -1734,6 +1736,15 @@ class NativeAgentRuntime(AgentProvider):
 
     def is_alive(self) -> bool:
         return True
+
+    def set_model_resolution_basis(
+        self, basis: str, context: dict[str, str]
+    ) -> None:
+        """Attach non-secret binding identity for the session lease."""
+        self._model_resolution_basis = str(basis)
+        self._model_resolution_context = {
+            str(key): str(value or "") for key, value in context.items()
+        }
 
     def stage_image_part(self, data_url: str) -> bool:
         if (

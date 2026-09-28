@@ -16,9 +16,11 @@ a callable matching the factory signature::
 """
 
 import json
+import hashlib
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from gideon.core.errors import AgentError
 from gideon.extensions.providers.failure_copy import provider_load_error
@@ -32,6 +34,170 @@ _CAPABILITY_TO_ENUM = {
     "image_modality": "vision",
     "video_modality": "vision",
 }
+
+_RESOLUTION_OPTION_KEYS = frozenset(
+    {
+        "api_type",
+        "api_version",
+        "base_url",
+        "context_window",
+        "default_model",
+        "deployment",
+        "endpoint",
+        "max_retries",
+        "max_tokens",
+        "model_name",
+        "organization",
+        "project",
+        "region",
+        "temperature",
+        "timeout_secs",
+        "top_p",
+    }
+)
+
+
+def _safe_endpoint(value: object) -> tuple[str, str, int | None, str] | str:
+    """Keep endpoint identity while excluding URL userinfo and query values."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        host = parsed.hostname or ""
+        port = parsed.port
+        if parsed.username or parsed.password:
+            # Credentials in userinfo are deliberately not part of the basis.
+            pass
+        if not parsed.scheme or not host:
+            return "configured-invalid-endpoint"
+        return (parsed.scheme.lower(), host.lower(), port, parsed.path.rstrip("/"))
+    except (ValueError, TypeError):
+        return "configured-invalid-endpoint"
+
+
+def _resolution_entry(entry: Any, registry: Any) -> tuple:
+    """A non-secret signature for provider selection and request configuration."""
+    options = getattr(entry, "options", {})
+    if not isinstance(options, dict):
+        options = {}
+    safe_options = []
+    for key in sorted(_RESOLUTION_OPTION_KEYS):
+        if key not in options:
+            continue
+        value = options[key]
+        if key in {"base_url", "endpoint"}:
+            safe = _safe_endpoint(value)
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            safe = value
+        else:
+            # Do not stringify opaque option objects; they may carry credentials.
+            safe = "configured"
+        safe_options.append((key, safe))
+    try:
+        capabilities = tuple(
+            sorted(
+                str(getattr(cap, "value", cap))
+                for cap in _entry_capabilities(registry, entry)
+            )
+        )
+    except Exception:
+        capabilities = ()
+    return (
+        str(getattr(entry, "name", "")),
+        str(getattr(entry, "type", "")),
+        str(getattr(entry, "own_model", "") or ""),
+        capabilities,
+        bool(getattr(registry, "_factories", {}).get(getattr(entry, "type", ""))),
+        tuple(safe_options),
+    )
+
+
+def model_resolution_basis(
+    use_case: str,
+    *,
+    model_override: str | None = None,
+    agent: str | None = None,
+    provider_kind: str = "",
+) -> str:
+    """Opaque fingerprint of the current non-secret resolution inputs.
+
+    The fingerprint is process-local comparison data. It intentionally excludes
+    credentials and secret-bearing options; endpoint userinfo and query values are
+    discarded before hashing.
+    """
+    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.integrations.llm.registry import get_default_registry
+
+    registry = get_default_registry()
+    try:
+        entries = list(registry.list_entries())
+    except Exception:
+        entries = []
+    by_name = {str(getattr(entry, "name", "")): entry for entry in entries}
+    profile_model = ""
+    profile_provider = ""
+    default_agent = ""
+    try:
+        from gideon.core.config.loader import AppConfig
+
+        config = AppConfig.load()
+        default_agent = str(getattr(config, "default_agent", "") or "")
+        selected_agent = agent or default_agent
+        profile = (config.agents or {}).get(selected_agent) if selected_agent else None
+        profile_model = str(getattr(profile, "model", "") or "")
+        profile_provider = str(getattr(profile, "provider", "") or "")
+    except Exception:
+        selected_agent = agent or ""
+
+    kind = str(provider_kind or profile_provider or "")
+    refs = list(active_model_refs(use_case))
+    if kind.startswith("acp"):
+        runtime_name = kind.split(":", 1)[1] if ":" in kind else ""
+        selected = by_name.get(runtime_name) if runtime_name else None
+        candidates = (
+            [(runtime_name, _resolution_entry(selected, registry))]
+            if selected is not None
+            else [
+                (str(entry.name), _resolution_entry(entry, registry))
+                for entry in entries
+                if entry.type == "acp_agent"
+            ]
+        )
+        refs_for_basis: tuple[str, ...] = ()
+    else:
+        from gideon.extensions.providers.use_cases import split_ref
+
+        parsed_refs = []
+        for ref in refs:
+            parsed = split_ref(ref)
+            name = parsed[0] if parsed else ""
+            entry = by_name.get(name) if name else None
+            parsed_refs.append(
+                (str(ref), _resolution_entry(entry, registry) if entry else None)
+            )
+        if not refs:
+            target = _capability_enum(parent_capability(use_case))
+            for entry in entries:
+                if entry.type == "acp_agent" or target not in _entry_capabilities(registry, entry):
+                    continue
+                parsed_refs.append((str(entry.name), _resolution_entry(entry, registry)))
+        candidates = parsed_refs
+        refs_for_basis = tuple(str(ref) for ref in refs)
+
+    basis = {
+        "use_case": use_case,
+        "refs": refs_for_basis,
+        "override": str(model_override or ""),
+        "agent": str(selected_agent or ""),
+        "agent_model": profile_model,
+        "agent_provider": profile_provider,
+        "default_agent": default_agent,
+        "provider_kind": kind,
+        "candidates": candidates,
+    }
+    encoded = json.dumps(basis, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _log_chain_skip(use_case: str, ref: str, reason: str) -> None:
@@ -1110,6 +1276,31 @@ def create_provider_factory(default_use_case: str = "chat") -> ProviderFactory:
                 cwd=None, channel_id=None, **kwargs) -> ModelProvider
     """
 
+    def _resolution_basis(
+        session_key: str | None = None,
+        agent: str | None = None,
+        model_override: str | None = None,
+        cwd: str | None = None,
+        channel_id: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        del session_key, cwd, channel_id
+        from gideon.extensions.providers.use_cases import CHAT_SUBCATEGORIES
+
+        model_axis = str(kwargs.get("model_axis") or "")
+        use_case = (
+            model_axis
+            if default_use_case == "chat" and model_axis in CHAT_SUBCATEGORIES
+            else default_use_case
+        )
+        kind = str(kwargs.get("provider_kind") or _agent_provider_kind(agent))
+        return model_resolution_basis(
+            use_case,
+            model_override=model_override,
+            agent=agent,
+            provider_kind=kind,
+        )
+
     def _factory(
         session_key: str | None = None,
         agent: str | None = None,
@@ -1118,7 +1309,15 @@ def create_provider_factory(default_use_case: str = "chat") -> ProviderFactory:
         channel_id: str | None = None,
         **kwargs: Any,
     ) -> ModelProvider:
-        return resolve_provider_for_use_case(
+        basis = _resolution_basis(
+            session_key=session_key,
+            agent=agent,
+            model_override=model_override,
+            cwd=cwd,
+            channel_id=channel_id,
+            **kwargs,
+        )
+        provider = resolve_provider_for_use_case(
             default_use_case,
             session_key=session_key,
             agent=agent,
@@ -1127,5 +1326,25 @@ def create_provider_factory(default_use_case: str = "chat") -> ProviderFactory:
             channel_id=channel_id,
             **kwargs,
         )
+        context = {
+            key: str(value or "")
+            for key, value in (
+                ("agent", agent),
+                ("model_override", model_override),
+                ("model_axis", kwargs.get("model_axis")),
+                ("provider_kind", kwargs.get("provider_kind")),
+            )
+        }
+        try:
+            setter = getattr(provider, "set_model_resolution_basis", None)
+            if callable(setter):
+                setter(basis, context)
+            else:
+                provider._model_resolution_basis = basis
+                provider._model_resolution_context = context
+        except Exception:
+            logger.debug("Provider does not expose model resolution identity", exc_info=True)
+        return provider
 
+    _factory.resolution_basis = _resolution_basis  # type: ignore[attr-defined]
     return _factory
