@@ -10,8 +10,8 @@ other SSH files (keys, config, etc.), using platform-native isolation:
 - **macOS**: ``sandbox-exec`` with a Seatbelt profile that denies reads
 
 The parent Gideon process is completely unaffected — isolation applies
-only to the spawned child.  Falls back gracefully to no sandbox when the
-OS mechanism is unavailable (logged as warning).
+only to the spawned child. Child execution is refused when OS protection
+for owner state is unavailable.
 
 Config: ``"sandbox": "auto" | "off"`` in ``~/.gideon/config.json``.
 ``"auto"`` (default) uses namespace sandbox on Linux, seatbelt on macOS.
@@ -480,9 +480,17 @@ def _build_launcher_script(sandbox_level: str = "strict") -> str:
     The child retains the real UID/GID — no UID 0, no UID 65534.
     """
     home = str(Path.home())
+    from gideon.security.owner_only import prepare_owner_only_paths
+
+    owner_root, owner_hooks, owner_grants = prepare_owner_only_paths()
+    owner_chain = [
+        str(path) for path in reversed(owner_root.parents) if path != Path("/")
+    ] + [str(owner_root)]
     uid = os.getuid()
     gid = os.getgid()
-    if sandbox_level == "standard":
+    if sandbox_level == "owner":
+        dirs, files, expose_files = [], [], []
+    elif sandbox_level == "standard":
         dirs = _STANDARD_DIRS
     elif sandbox_level == "cc":
         dirs = _CC_DIRS
@@ -493,6 +501,8 @@ def _build_launcher_script(sandbox_level: str = "strict") -> str:
     env_prefixes = list(_SENSITIVE_ENV_PREFIXES)
     if sandbox_level in ("cc", "strict"):
         env_prefixes = env_prefixes + list(_AGENT_DENIED_ENV_KEYS)
+    if sandbox_level == "owner":
+        env_prefixes = []
     hide_ssh = sandbox_level == "strict"
     dirs_json = json.dumps([os.path.join(home, d) for d in dirs])
     files_json = json.dumps([os.path.join(home, f) for f in files])
@@ -502,6 +512,10 @@ def _build_launcher_script(sandbox_level: str = "strict") -> str:
     env_prefixes_json = json.dumps(env_prefixes)
     ssh_dir = json.dumps(os.path.join(home, ".ssh"))
     ssh_known_hosts = json.dumps(os.path.join(home, ".ssh", "known_hosts"))
+    owner_root_json = json.dumps(str(owner_root))
+    owner_hooks_json = json.dumps(str(owner_hooks))
+    owner_grants_json = json.dumps(str(owner_grants))
+    owner_chain_json = json.dumps(owner_chain)
     strict_host_key_opt = (
         " -o StrictHostKeyChecking=accept-new" if _ssh_supports_accept_new() else ""
     )
@@ -522,6 +536,13 @@ _CLONE_NEWNS   = 0x00020000
 _MS_BIND       = 4096
 _MS_REC        = 16384
 _MS_PRIVATE    = 1 << 18
+_MS_REMOUNT    = 32
+_MS_RDONLY     = 1
+_MS_NOSUID     = 2
+_MS_NODEV      = 4
+_MS_NOEXEC     = 8
+_PR_SET_NO_NEW_PRIVS = 38
+_CAP_VERSION = 0x20080522
 
 _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 _libc.mount.argtypes = [
@@ -532,6 +553,32 @@ _libc.mount.restype = ctypes.c_int
 _libc.unshare.argtypes = [ctypes.c_int]
 _libc.unshare.restype = ctypes.c_int
 
+def _mount_checked(source, target, filesystem, flags, data=None):
+    if _libc.mount(source, target, filesystem, flags, data) != 0:
+        sys.exit("sandbox: owner-state fence failed")
+
+def _owner_fence():
+    for path in OWNER_CHAIN:
+        encoded = os.fsencode(path)
+        _mount_checked(encoded, encoded, None, _MS_BIND | _MS_REC)
+    hooks = os.fsencode(OWNER_HOOKS)
+    _mount_checked(hooks, hooks, None, _MS_BIND | _MS_REC)
+    _mount_checked(None, hooks, None, _MS_BIND | _MS_REMOUNT | _MS_RDONLY | _MS_REC)
+    grants = os.fsencode(OWNER_GRANTS)
+    _mount_checked(b"tmpfs", grants, b"tmpfs", _MS_RDONLY | _MS_NOSUID | _MS_NODEV | _MS_NOEXEC, b"mode=0555,size=4096")
+
+def _drop_mount_privileges():
+    class Header(ctypes.Structure):
+        _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+    class Capability(ctypes.Structure):
+        _fields_ = [("effective", ctypes.c_uint32), ("permitted", ctypes.c_uint32), ("inheritable", ctypes.c_uint32)]
+    header = Header(_CAP_VERSION, 0)
+    data = (Capability * 2)()
+    if _libc.capset(ctypes.byref(header), data) != 0:
+        sys.exit("sandbox: owner-state capability drop failed")
+    if _libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        sys.exit("sandbox: owner-state privilege lock failed")
+
 REAL_UID = {uid}
 REAL_GID = {gid}
 SENSITIVE_DIRS = {dirs_json}
@@ -541,6 +588,10 @@ ENV_PREFIXES = {env_prefixes_json}
 SSH_DIR = {ssh_dir}
 SSH_KNOWN_HOSTS = {ssh_known_hosts}
 HIDE_SSH = {hide_ssh}
+OWNER_ROOT = {owner_root_json}
+OWNER_HOOKS = {owner_hooks_json}
+OWNER_GRANTS = {owner_grants_json}
+OWNER_CHAIN = {owner_chain_json}
 RUNTIME_DIRS = [f"/run/user/{{REAL_UID}}", "/dev/shm"]
 SCRATCH_PREFIX = "gideon_sb_"
 
@@ -667,7 +718,8 @@ def main():
             sys.exit(f"sandbox: unshare(NEWNS) failed: errno {{ctypes.get_errno()}}")
 
         # Private mount propagation
-        _libc.mount(None, b"/", None, _MS_REC | _MS_PRIVATE, None)
+        _mount_checked(None, b"/", None, _MS_REC | _MS_PRIVATE)
+        _owner_fence()
 
         # Pick a tmpfs-backed source dir for bind-mount empty files/dirs. Same-fs
         # binds (e.g. /tmp on ext4 over ~/.gideon/.env on ext4) can corrupt the
@@ -744,6 +796,7 @@ def main():
                 "{strict_host_key_opt}"
             )
 
+        _drop_mount_privileges()
         os.execvp(argv[0], argv)
 
 if __name__ == "__main__":
@@ -800,7 +853,15 @@ _SEATBELT_PROFILE = """\
 def _build_seatbelt_profile(sandbox_level: str = "strict") -> str:
     """Build a Seatbelt .sb profile denying reads of sensitive dirs."""
     home = str(Path.home())
-    if sandbox_level == "standard":
+    from gideon.security.owner_only import prepare_owner_only_paths
+
+    owner_root, owner_hooks, owner_grants = prepare_owner_only_paths()
+    owner_chain = [
+        path for path in reversed(owner_root.parents) if path != Path("/")
+    ] + [owner_root]
+    if sandbox_level == "owner":
+        dirs, files, expose_files = [], [], []
+    elif sandbox_level == "standard":
         dirs = _STANDARD_DIRS
     elif sandbox_level == "cc":
         dirs = [d for d in _CC_DIRS if d != ".aws"]
@@ -828,6 +889,15 @@ def _build_seatbelt_profile(sandbox_level: str = "strict") -> str:
         target = os.path.join(home, f)
         escaped = target.replace('"', '\\"')
         rules.append(f'(deny file-read* (literal "{escaped}"))')
+
+    grants_escaped = str(owner_grants).replace('"', '\\"')
+    hooks_escaped = str(owner_hooks).replace('"', '\\"')
+    rules.append(f'(deny file-read* (subpath "{grants_escaped}"))')
+    rules.append(f'(deny file-write* (subpath "{grants_escaped}"))')
+    rules.append(f'(deny file-write* (subpath "{hooks_escaped}"))')
+    for ancestor in owner_chain:
+        escaped = str(ancestor).replace('"', '\\"')
+        rules.append(f'(deny file-write* (literal "{escaped}"))')
 
     if sandbox_level == "strict":
         ssh_dir = os.path.join(home, ".ssh")
@@ -860,7 +930,7 @@ def sandbox_exec_argv(
     fd, path = _sandbox_temp_file(suffix=".sb", prefix="gideon_sandbox_")
     os.write(fd, profile.encode())
     os.close(fd)
-    prefixes = list(_SENSITIVE_ENV_PREFIXES)
+    prefixes = [] if sandbox_level == "owner" else list(_SENSITIVE_ENV_PREFIXES)
     if sandbox_level in ("cc", "strict"):
         prefixes.extend(_AGENT_DENIED_ENV_KEYS)
     unset_args: list[str] = []
@@ -916,7 +986,7 @@ def wrap_argv(
         argv: Original command + args.
         mode: ``"auto"``/``"standard"`` (expose .aws/.ssh/.kube),
               ``"cc"`` (hide .aws but expose .aws/config for credential_process),
-              ``"strict"`` (hide everything), ``"off"`` (no sandbox).
+              ``"strict"`` (hide everything), ``"off"`` (owner-state protection only).
 
     Returns:
         (wrapped_argv, cleanup_path_or_None).
@@ -942,16 +1012,17 @@ def wrap_argv(
                 raise PermissionError(reason)
 
     if mode == "off":
-        return argv, None
-
-    if mode == "strict":
+        sandbox_level = "owner"
+        backend = detect_backend(config_mode="auto")
+    elif mode == "strict":
         sandbox_level = "strict"
+        backend = detect_backend(config_mode=mode)
     elif mode == "cc":
         sandbox_level = "cc"
+        backend = detect_backend(config_mode=mode)
     else:
         sandbox_level = "standard"
-
-    backend = detect_backend(config_mode=mode)
+        backend = detect_backend(config_mode=mode)
 
     if backend == "namespace":
         wrapped = namespace_argv(argv, sandbox_level)
@@ -959,11 +1030,7 @@ def wrap_argv(
     if backend == "sandbox-exec":
         return sandbox_exec_argv(argv, sandbox_level)
 
-    if backend == "none":
-        if not getattr(wrap_argv, "_warned", False):
-            logger.warning("No OS-level sandbox available — app-level checks only")
-            wrap_argv._warned = True  # type: ignore[attr-defined]
-    return argv, None
+    raise PermissionError("owner-state OS isolation is unavailable")
 
 
 _SHIM_MODULE = "gideon.engine._spawn_exec_shim"

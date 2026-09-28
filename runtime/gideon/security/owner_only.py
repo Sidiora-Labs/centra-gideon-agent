@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import stat
 from pathlib import Path
 
 OWNER_ONLY_HOME_NAMES: tuple[str, ...] = ("hooks", "grants")
@@ -33,6 +34,27 @@ def gideon_home(home: str | os.PathLike[str] | None = None) -> Path:
 def owner_only_paths(home: str | os.PathLike[str] | None = None) -> tuple[Path, ...]:
     root = gideon_home(home)
     return tuple(root / name for name in OWNER_ONLY_HOME_NAMES)
+
+
+def prepare_owner_only_paths(
+    home: str | os.PathLike[str] | None = None,
+) -> tuple[Path, ...]:
+    """Create and validate the owner-state mountpoints before a child is spawned."""
+    root = gideon_home(home)
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    root_info = root.lstat()
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise PermissionError(OWNER_ONLY_OPERATION_MESSAGE)
+    paths = owner_only_paths(root)
+    for path in paths:
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError(OWNER_ONLY_OPERATION_MESSAGE)
+    return (root, *paths)
 
 
 def owner_only_path_reason(
