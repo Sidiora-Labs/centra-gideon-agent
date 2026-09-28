@@ -259,15 +259,15 @@ async def api_auth_logout(request: web.Request) -> web.Response:
         return json_error(ERR_ORIGIN, status=403)
 
     port = _cookie_port(request)
-    token = request.cookies.get(f"gideon_token_{port}", "") or request.query.get(
-        "token", ""
-    )
+    nonce = str(request.get("session_nonce") or "")
     revoked = False
-    if token:
+    if nonce:
         try:
-            from gideon.interfaces.dashboard.token_auth import revoke_token
+            from gideon.interfaces.dashboard.session_store import forget_session
+            from gideon.interfaces.dashboard.token_auth import revoke_nonce
 
-            revoked = revoke_token(token)
+            revoked = revoke_nonce(nonce)
+            forget_session(nonce)
         except Exception:  # noqa: BLE001
             logger.warning("could not revoke the session on logout", exc_info=True)
 

@@ -303,15 +303,8 @@ def test_probe_short_circuits_a_refused_connection(monkeypatch):
     assert len(attempts) == 1, "a refused connection should not be retried"
 
 
-def test_token_goes_in_the_query_string():
-    """``token_auth`` reads primary owner auth from ``?token=`` or the cookie ONLY.
-
-    Its ``Authorization: Bearer`` branch narrows an ALREADY-authenticated request to an
-    app scope; it never authenticates. Measured: a Bearer-only request to
-    ``/api/chat/sessions`` answered ``403 {"error": "Token required"}``.
-    """
-    assert cli_run._authed("/api/chat", "T") == "/api/chat?token=T"
-    assert cli_run._authed("/api/chat?ws=1", "T") == "/api/chat?ws=1&token=T"
+def test_cli_owner_session_uses_one_bearer_header():
+    assert cli_run._bearer_headers("session") == {"Authorization": "Bearer session"}
 
 
 def test_streaming_json_emits_only_the_three_named_frames(capsys):

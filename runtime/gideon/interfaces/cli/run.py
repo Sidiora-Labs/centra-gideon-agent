@@ -336,26 +336,19 @@ def grant_notice(session_key: str, task_mode: str) -> str:
     )
 
 
-def _authed(path: str, token: str) -> str:
-    """Append ``token=`` to ``path``'s query string.
-
-    The token MUST ride the query string. ``token_auth`` reads primary owner auth from
-    ``?token=`` or the ``gideon_token_<port>`` cookie ONLY — its ``Authorization: Bearer``
-    branch is the app-token NARROWING path (it adopts an ``app`` claim for an
-    already-authenticated owner) and never authenticates on its own. Measured: sending
-    the readiness token as a Bearer header returned ``403 {"error": "Token required"}``.
-    """
-    return f"{path}{'&' if '?' in path else '?'}token={token}"
+def _bearer_headers(token: str) -> dict[str, str]:
+    """Carry the owner session in an authorization header, never in a request URL."""
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _api(port: int, token: str, path: str, body: dict | None = None) -> dict:
     """One loopback API call. Returns the decoded JSON object."""
     data = json.dumps(body or {}).encode() if body is not None else None
     req = urllib.request.Request(
-        f"http://127.0.0.1:{port}{_authed(path, token)}",
+        f"http://127.0.0.1:{port}{path}",
         data=data,
         method="POST" if data is not None else "GET",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_bearer_headers(token)},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
@@ -432,10 +425,12 @@ async def _consume(
 
     base = f"http://127.0.0.1:{port}"
     async with aiohttp.ClientSession() as http:
-        async with http.ws_connect(base + _authed("/api/ws", token)) as ws:
+        headers = _bearer_headers(token)
+        async with http.ws_connect(base + "/api/ws", headers=headers) as ws:
             resp = await http.post(
-                base + _authed("/api/chat?ws=1", token),
+                base + "/api/chat?ws=1",
                 json={"message": prompt, "session": collector.session_key},
+                headers=headers,
             )
             async with resp:
                 if resp.status != 200:

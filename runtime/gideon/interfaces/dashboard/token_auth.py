@@ -28,6 +28,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote
 
@@ -44,6 +45,9 @@ _HANDLER_AUTH_ROUTES = frozenset(
         ("POST", "/api/capabilities/creative/commission-feedback/receive"),
     }
 )
+
+ERR_BEARER_INVALID = "auth_bearer_invalid"
+ERR_CREDENTIAL_CONFLICT = "auth_credential_conflict"
 
 _SECRET: bytes | None = None
 _EPHEMERAL_SECRET: bytes | None = None
@@ -557,7 +561,7 @@ def validate_token(
     except Exception:
         return False, "", "invalid encoding"
     expected = _sign(payload_bytes)
-    if not hmac.compare_digest(sig, expected):
+    if not hmac.compare_digest(sig.encode("utf-8"), expected.encode("ascii")):
         return False, "", "invalid signature"
     try:
         data = json.loads(payload_bytes)
@@ -833,6 +837,39 @@ def parse_config_duration(s: str, *, default_secs: int) -> int:
     return min(secs, MAX_SESSION_TTL_SECS)
 
 
+@dataclass(frozen=True)
+class _RequestCredentials:
+    token: str = ""
+    source: str = ""
+    user_id: str = ""
+    app: str = ""
+    error: str = ""
+
+    @property
+    def valid(self) -> bool:
+        return bool(self.token) and not self.error
+
+
+def _bearer_credential(request: web.Request) -> tuple[bool, str]:
+    """Return whether a Bearer was presented and its single credential, if well formed."""
+    raw = request.headers.get("Authorization")
+    if not isinstance(raw, str):
+        return False, ""
+    scheme, _, credential = raw.strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return False, ""
+    credential = credential.strip()
+    if not credential or any(ch.isspace() or ch == "," for ch in credential):
+        return True, ""
+    return True, credential
+
+
+def _adopt_credentials(request: web.Request, credentials: _RequestCredentials) -> None:
+    request["user"] = credentials.user_id
+    request["app"] = credentials.app
+    request["session_nonce"] = token_nonce(credentials.token)
+
+
 def token_auth_middleware(
     *,
     internal_paths: frozenset[str] = frozenset(),
@@ -912,20 +949,52 @@ def token_auth_middleware(
         )
         return forwarded if is_proxy else raw
 
-    def _extract_and_validate_token(
-        request: web.Request, _port: int
-    ) -> tuple[bool, str, str]:
-        """Extract token from query param or cookie and validate it.
+    def _select_credentials(request: web.Request, _port: int) -> _RequestCredentials:
+        """Choose and validate one owner session across query, header and cookie carriers."""
+        query_token = request.query.get("token") or ""
+        cookie_token = request.cookies.get(f"gideon_token_{_port}", "")
+        bearer_present, bearer = _bearer_credential(request)
+        bearer_check = (
+            validate_token_with_app(bearer, use_session_exp=True) if bearer else None
+        )
+        owner_bearer = bool(bearer_check and bearer_check[0] and not bearer_check[3])
 
-        Used by internal-path browser auth (no secret header).  The main
-        auth flow has its own extraction with IP-binding and from_cookie
-        tracking that this helper intentionally does not replicate.
-        """
-        cookie_name = f"gideon_token_{_port}"
-        token = request.query.get("token") or request.cookies.get(cookie_name, "")
-        if not token:
-            return False, "", "no token"
-        return validate_token(token, use_session_exp=True)
+        if query_token:
+            if owner_bearer and not hmac.compare_digest(
+                query_token.encode("utf-8"), bearer.encode("utf-8")
+            ):
+                return _RequestCredentials(error=ERR_CREDENTIAL_CONFLICT)
+            token, source = query_token, "query"
+        elif owner_bearer:
+            token, source = bearer, "header"
+        elif cookie_token:
+            token, source = cookie_token, "cookie"
+        elif bearer_present:
+            return _RequestCredentials(error=ERR_BEARER_INVALID, source="header")
+        else:
+            return _RequestCredentials(error="Token required", source="none")
+
+        if source == "header" and bearer_check is not None:
+            valid, user_id, reason, app_name = bearer_check
+        else:
+            valid, user_id, reason, app_name = validate_token_with_app(
+                token, use_session_exp=source != "query"
+            )
+        if not valid:
+            error = ERR_BEARER_INVALID if source == "header" else reason
+            return _RequestCredentials(error=error, source=source)
+
+        if not app_name:
+            layered_token = (bearer if source != "header" else "") or request.query.get(
+                "app_token", ""
+            )
+            if layered_token and layered_token != token:
+                app_valid, app_user, _, layered_app = validate_token_with_app(
+                    layered_token
+                )
+                if app_valid and layered_app and app_user == user_id:
+                    app_name = layered_app
+        return _RequestCredentials(token, source, user_id, app_name)
 
     @web.middleware
     async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
@@ -999,8 +1068,8 @@ def token_auth_middleware(
                 )
                 _log_auth(request, "internal", "denied", "wrong secret")
                 return _deny(request, "Forbidden")
-            _valid, _uid, _reason = _extract_and_validate_token(request, port)
-            if not _valid:
+            credentials = _select_credentials(request, port)
+            if not credentials.valid:
                 _sel = _sel_fn()
                 _sel.log_api_access(
                     caller=request.remote or "",
@@ -1008,12 +1077,13 @@ def token_auth_middleware(
                     outcome="denied",
                     source="token_auth",
                     resources=path,
-                    error=f"cookie auth failed: {_reason}",
+                    error=credentials.error,
                 )
                 _log_auth(
-                    request, "internal", "denied", f"cookie auth failed: {_reason}"
+                    request, "internal", "denied", credentials.error
                 )
-                return _deny(request, "Forbidden")
+                return _deny(request, credentials.error)
+            _adopt_credentials(request, credentials)
             _sel = _sel_fn()
             _sel.log_api_access(
                 caller=request.remote or "",
@@ -1021,9 +1091,15 @@ def token_auth_middleware(
                 outcome="granted",
                 source="token_auth",
                 resources=path,
-                error="cookie auth (no secret header)",
+                error=f"carrier={credentials.source}",
             )
-            _log_auth(request, "internal", "granted", f"cookie auth for {_uid}")
+            _log_auth(
+                request,
+                credentials.user_id,
+                "granted",
+                "session authenticated",
+                carrier=credentials.source,
+            )
             return await handler(request)  # type: ignore[operator]
         elif _matches_internal:
             if _matches_mixed:
@@ -1047,8 +1123,8 @@ def token_auth_middleware(
                             "wrong secret (non-loopback mixed)",
                         )
                         return _deny(request, "Forbidden")
-                _valid, _uid, _reason = _extract_and_validate_token(request, port)
-                if not _valid:
+                credentials = _select_credentials(request, port)
+                if not credentials.valid:
                     _sel = _sel_fn()
                     _sel.log_api_access(
                         caller=request.remote or "",
@@ -1056,15 +1132,16 @@ def token_auth_middleware(
                         outcome="denied",
                         source="token_auth",
                         resources=path,
-                        error=f"mixed non-loopback cookie auth failed: {_reason}",
+                        error=credentials.error,
                     )
                     _log_auth(
                         request,
                         "internal",
                         "denied",
-                        f"mixed non-loopback cookie auth failed: {_reason}",
+                        credentials.error,
                     )
-                    return _deny(request, "Forbidden")
+                    return _deny(request, credentials.error)
+                _adopt_credentials(request, credentials)
                 _sel = _sel_fn()
                 _sel.log_api_access(
                     caller=request.remote or "",
@@ -1072,13 +1149,14 @@ def token_auth_middleware(
                     outcome="granted",
                     source="token_auth",
                     resources=path,
-                    error="mixed non-loopback cookie auth",
+                    error=f"carrier={credentials.source}",
                 )
                 _log_auth(
                     request,
                     "internal",
                     "granted",
-                    f"mixed non-loopback cookie auth for {_uid}",
+                    "session authenticated",
+                    carrier=credentials.source,
                 )
                 return await handler(request)  # type: ignore[operator]
             else:
@@ -1102,32 +1180,32 @@ def token_auth_middleware(
             return await handler(request)  # type: ignore[operator]
         if _uses_handler_auth(request):
             return await handler(request)  # type: ignore[operator]
+        credentials = _select_credentials(request, port)
+        if not credentials.valid:
+            _log_auth(
+                request, "", "denied", credentials.error, carrier=credentials.source
+            )
+            return _deny(request, credentials.error)
+        token = credentials.token
+        user_id = credentials.user_id
+        app_name = credentials.app
+        from_query = credentials.source == "query"
         cookie_name = f"gideon_token_{port}"
-        token = request.query.get("token") or ""
-        from_cookie = False
-        if not token:
-            token = request.cookies.get(cookie_name, "")
-            from_cookie = bool(token)
-
-        if not token:
-            _log_auth(request, "", "denied", "Token required")
-            return _deny(request, "Token required")
-
-        valid, user_id, reason, app_name = validate_token_with_app(
-            token, use_session_exp=from_cookie
-        )
-        if not valid:
-            _log_auth(request, "", "denied", reason)
-            return _deny(request, reason)
 
         client_ip = _resolved_client_ip(request)
 
-        if not from_cookie and not check_token_ip(token, client_ip):
-            _log_auth(request, user_id, "denied", "IP mismatch")
+        if from_query and not check_token_ip(token, client_ip):
+            _log_auth(
+                request,
+                user_id,
+                "denied",
+                "IP mismatch",
+                carrier=credentials.source,
+            )
             return _deny(request, "IP mismatch")
 
         session_exp = 0.0
-        if not from_cookie:
+        if from_query:
             try:
                 payload_bytes = _b64url_decode(token.split(".")[0])
                 data = json.loads(payload_bytes)
@@ -1136,25 +1214,11 @@ def token_auth_middleware(
                 pass
             bind_token_ip(token, client_ip, session_exp)
 
-        request["user"] = user_id
-        request["app"] = app_name
-        request["session_nonce"] = token_nonce(token)
-
-        if not app_name:
-            app_token = ""
-            _auth = request.headers.get("Authorization", "")
-            if _auth.startswith("Bearer "):
-                app_token = _auth[7:].strip()
-            if not app_token:
-                app_token = request.query.get("app_token", "")
-            if app_token and app_token != token:
-                a_valid, a_user, _reason, a_app = validate_token_with_app(app_token)
-                if a_valid and a_app and a_user == user_id:
-                    request["app"] = a_app
+        _adopt_credentials(request, credentials)
 
         resp = await handler(request)  # type: ignore[operator]
 
-        if not from_cookie:
+        if from_query:
             cookie_max_age = MAX_SESSION_TTL_SECS
             if session_exp:
                 remaining = int(session_exp - time.time())
@@ -1171,7 +1235,7 @@ def token_auth_middleware(
             )
             resp.set_cookie("gideon_token", "", max_age=0, path="/")
 
-        _log_auth(request, user_id, "ok", "")
+        _log_auth(request, user_id, "ok", "", carrier=credentials.source)
         return resp  # type: ignore[return-value]
 
     middleware._is_token_auth = True  # type: ignore[attr-defined]  # sentinel for server.py security gate  # noqa: E501
@@ -1363,13 +1427,15 @@ def _deny(request: web.Request, reason: str) -> web.Response:
     )
 
 
-def _log_auth(request: web.Request, user_id: str, outcome: str, error: str) -> None:
+def _log_auth(
+    request: web.Request, user_id: str, outcome: str, error: str, *, carrier: str = ""
+) -> None:
     try:
         _sel_fn().log_api_access(
             caller=user_id or request.remote or "unknown",
             operation="dashboard.token_auth",
             outcome=outcome,
-            resources=request.path,
+            resources=f"{request.path};carrier={carrier}" if carrier else request.path,
             error=error,
         )
     except Exception:
