@@ -4162,7 +4162,7 @@ export const api = {
   untrackChannel: (provider: string, channelId: string) =>
     del(`/api/channels/trust/${encodeURIComponent(provider)}/channels/${encodeURIComponent(channelId)}`),
   createChannelPairing: (provider: string) =>
-    post<{ ok: boolean; provider: string; code: string; expires_in: number }>(`/api/channels/trust/${encodeURIComponent(provider)}/pairing`),
+    post<{ code: string; expires_in: number }>(`/api/channels/trust/${encodeURIComponent(provider)}/pairing`),
   cancelChannelPairing: (provider: string) =>
     del(`/api/channels/trust/${encodeURIComponent(provider)}/pairing`),
 

@@ -90,3 +90,28 @@ cause = "Consuming the pending state before rejecting the issuer removes the ent
 prevention = "On issuer rejection, remove and cancel the exact attempt's callback future and authorization task together with its consumed state."
 source = ["runtime/gideon/integrations/mcp_oauth.py"]
 evidence = ["checks/runtime/test_mcp_oauth_tenant_isolation.py"]
+[[gotcha]]
+id = "document-read-before-await"
+status = "resolved"
+symptom = "A slow edit request can overwrite a newer save even when it supplies a revision."
+cause = "Reading the stored document before awaiting the request body makes the later revision check compare against an obsolete snapshot."
+prevention = "Read the current document after body parsing and enforce the final write with the store's atomic expected-value check. Keep whole-document field and tag updates in the same conditional write."
+source = ["runtime/gideon/interfaces/dashboard/handlers/knowledge.py", "runtime/gideon/cognition/knowledge/store.py"]
+evidence = ["checks/runtime/test_stale_write_documents.py"]
+
+[[gotcha]]
+id = "task-revision-precision"
+status = "resolved"
+symptom = "Two immediate task edits can reuse one revision and let a stale editor save."
+cause = "Second-precision timestamps cannot distinguish writes within the same second."
+prevention = "Generate updated_at through the monotonic microsecond helper inside the task mutation lock, including checklist and reconciled writes."
+source = ["runtime/gideon/engine/tasks/native.py"]
+evidence = ["checks/runtime/test_stale_write_work_items.py"]
+
+[[gotcha]]
+id = "cached-file-authority"
+status = "resolved"
+symptom = "Reopening a cached dirty file draft prevents saving despite a retained revision and validator."
+cause = "The editor's validator lookup is populated only from the latest read, leaving the cached draft's original revision without its raw-byte validator."
+prevention = "Restore the cached revision-to-validator pair alongside the draft. Keep that original pair distinct from the latest read until an explicit rebase or successful save."
+source = ["apps/console/src/features/files/browse/FileViewer.tsx", "apps/console/src/shared/ui/content/contentSurfaceState.ts"]
