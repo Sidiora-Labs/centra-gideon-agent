@@ -948,23 +948,9 @@ class RuntimeCoordinator:
         await RuntimeUpdates(self, build_frontend_async, logger).apply()
 
     async def _start_channel_inbound(self) -> None:
-        from gideon.engine.lifecycle import StartupStage, advance
-        from gideon.integrations.channel_transports import (
-            get_transport,
-            list_transports,
-        )
+        from gideon.integrations.channel_transports import bind_inbound
 
-        receivers = [get_transport(name) for name in list_transports()]
-        stages = (
-            StartupStage(
-                f"channel:{receiver.name}",
-                functools.partial(receiver.start_inbound, self),
-                optional=True,
-            )
-            for receiver in receivers
-            if receiver is not None
-        )
-        await advance(stages)
+        await bind_inbound(self)
 
     async def run(self) -> None:
         from gideon.engine.lifecycle import RuntimeProcess

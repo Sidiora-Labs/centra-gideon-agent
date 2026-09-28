@@ -18,6 +18,12 @@ from gideon.extensions.apps.manifest import AppManifest, ProviderConfig
 logger = logging.getLogger(__name__)
 
 
+def _request_channel_reconcile() -> None:
+    from gideon.integrations.channel_transports import request_reconcile
+
+    request_reconcile()
+
+
 @dataclass
 class RegisteredProvider:
     """Runtime state for ONE provider an extension contributes.
@@ -82,6 +88,7 @@ class ProviderRegistry:
         self._extensions[manifest.name] = primary
         if enabled:
             self.enable(manifest.name)
+        _request_channel_reconcile()
 
     def _enable_one(self, ext: RegisteredProvider) -> bool:
         """Enable a single provider record (one entry in an app's chain)."""
@@ -114,6 +121,7 @@ class ProviderRegistry:
             logger.warning("Cannot enable unknown extension: %s", name)
             return False
         results = [self._enable_one(rec) for rec in primary.chain()]
+        _request_channel_reconcile()
         return all(results)
 
     def _disable_one(self, ext: RegisteredProvider) -> None:
@@ -138,6 +146,7 @@ class ProviderRegistry:
             return True
         for rec in primary.chain():
             self._disable_one(rec)
+        _request_channel_reconcile()
         return True
 
     def deregister(self, name: str) -> bool:
@@ -151,6 +160,7 @@ class ProviderRegistry:
             return False
         self.disable(name)
         del self._extensions[name]
+        _request_channel_reconcile()
         logger.info("Deregistered extension %s", name)
         return True
 

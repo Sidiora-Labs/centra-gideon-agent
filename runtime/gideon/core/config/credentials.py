@@ -274,6 +274,10 @@ def save_credential(key: str, value: str) -> None:
     stored = credential_backend() == "keychain" and _keychain_save(key, value)
     if not stored:
         _dotenv_save_credential(key, value)
+    if not is_config_secret_reference_key(key):
+        from gideon.integrations.channel_transports import request_reconcile
+
+        request_reconcile()
 
 
 def get_credential(key: str) -> str:

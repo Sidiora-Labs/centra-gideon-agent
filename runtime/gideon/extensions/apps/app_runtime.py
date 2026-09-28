@@ -81,6 +81,9 @@ def load(*manifests: AppManifest) -> None:
             _register_mcp(manifest)
             _start_backend(manifest)
             _start_workers(manifest)
+        from gideon.integrations.channel_transports import request_reconcile
+
+        request_reconcile()
     except Exception:
         for manifest in reversed(loaded or list(manifests)):
             try:
@@ -157,6 +160,13 @@ def unload(name: str, manifest: AppManifest | None, *, forget: bool = False) -> 
         registry.deregister(name)
     else:
         registry.disable(name)
+    from gideon.integrations.channel_transports import (
+        request_reconcile,
+        settle_from_thread,
+    )
+
+    request_reconcile()
+    settle_from_thread()
     if manifest is not None:
         _remove_app_prompts(manifest, name)
         _remove_app_skills(manifest, name)

@@ -58,6 +58,16 @@ class ProviderSettings:
         owner = app_owner(extension_name)
         stored = store(logical, owner=owner, previous=previous)
         atomic_write(path, json.dumps(stored, indent=2) + "\n", mode=0o600)
+        from gideon.extensions.providers.registry import get_provider_registry
+
+        extension = get_provider_registry().get(extension_name)
+        if extension is not None and any(
+            provider.provider_config.type == "channel"
+            for provider in extension.chain()
+        ):
+            from gideon.integrations.channel_transports import request_reconcile
+
+            request_reconcile()
         from gideon.core.config.secret_refs import purge_unused
         purge_unused(owner, stored)
 

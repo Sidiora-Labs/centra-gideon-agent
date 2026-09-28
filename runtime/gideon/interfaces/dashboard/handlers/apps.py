@@ -811,20 +811,12 @@ async def api_app_config_put(request: web.Request) -> web.Response:
         registry = get_provider_registry()
         extension = registry.get(name)
         if extension is not None and extension.enabled:
-            current = extension.provider_instance
-            services = getattr(current, "services", None)
-            if current is not None:
-                await current.disconnect()
             registry.disable(name)
             if not registry.enable(name):
                 return web.json_response({"error": extension.error or "Channel could not restart"}, status=500)
-            updated = registry.get(name)
-            if services is not None and updated is not None and updated.provider_instance is not None:
-                try:
-                    await updated.provider_instance.start_inbound(services)
-                except Exception as exc:
-                    logger.exception("Could not start pairing channel %s after configuration", name)
-                    return web.json_response({"error": str(exc)}, status=500)
+    from gideon.integrations.channel_transports import request_reconcile
+
+    request_reconcile()
     _sel_log("apps.config", "ok", name, request)
     masked, secret_set = mask_secrets(saved, schema)
     return web.json_response(

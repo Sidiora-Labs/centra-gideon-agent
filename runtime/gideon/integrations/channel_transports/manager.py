@@ -6,7 +6,15 @@ from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gideon.integrations.channel_transports import get_transport, list_transports, queued_transport
+from gideon.integrations.channel_transports import (
+    _safe_detail,
+    _safe_value,
+    channel_health,
+    get_transport,
+    list_transports,
+    queued_transport,
+    settled,
+)
 from gideon.integrations.channel_transports.base import (
     ChannelTransportProvider,
     OutboundMessage,
@@ -24,10 +32,7 @@ class _TransportProbe:
 
     async def describe(self) -> dict[str, Any]:
         description = self.transport.info()
-        try:
-            health = await self.transport.health()
-        except Exception as error:
-            health = dict(state="error", detail=str(error)[:200])
+        health = await channel_health(self.transport)
         description.update(health=health)
         return description
 
@@ -37,14 +42,25 @@ class _TransportProbe:
         else:
             await self.transport.disconnect()
             outcome = True
-        return dict(ok=outcome, health=await self.transport.health())
+        return dict(ok=outcome, health=await channel_health(self.transport))
 
     async def check(self) -> dict[str, Any]:
         try:
             result = await self.transport.test()
         except Exception as error:
-            result = dict(ok=False, detail=str(error)[:200])
-        return result
+            result = dict(ok=False, detail=_safe_detail(error))
+        status = await channel_health(self.transport)
+        if result.get("ok") and status.get("state") != "ready":
+            probe = str(result.get("detail") or "").rstrip(".")
+            detail = str(status.get("detail") or status.get("state") or "")
+            result = {
+                **result,
+                "ok": False,
+                "detail": f"{probe}, but {detail}" if probe else detail,
+            }
+        elif "detail" in result:
+            result = {**result, "detail": _safe_detail(result["detail"])}
+        return _safe_value(result)
 
 
 class ChannelManager:
@@ -60,6 +76,7 @@ class ChannelManager:
         return selected
 
     async def list(self) -> list[dict[str, Any]]:
+        await settled()
         descriptions = []
         for name in list_transports():
             description = await self.get(name)
@@ -68,6 +85,7 @@ class ChannelManager:
         return descriptions
 
     async def get(self, name: str) -> dict[str, Any] | None:
+        await settled()
         selected = self._resolve(name)
         return None if selected is None else await _TransportProbe(selected).describe()
 

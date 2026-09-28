@@ -140,7 +140,7 @@ def reap_backends() -> None:
 
 
 async def retire(runtime: RuntimeCoordinator) -> None:
-    from gideon.integrations.channel_transports import get_transport, list_transports
+    from gideon.integrations.channel_transports import unbind_inbound
 
     gateway_base.unpublish()
     reap_backends()
@@ -186,10 +186,7 @@ async def retire(runtime: RuntimeCoordinator) -> None:
         if surface is not None:
             await surface.close_all_ws()
         closing.append(runtime._dashboard_runner.cleanup())
-    for name in list_transports():
-        transport = get_transport(name)
-        if transport is not None:
-            closing.append(transport.stop_inbound())
+    closing.append(unbind_inbound())
     await settle(closing)
 
 
