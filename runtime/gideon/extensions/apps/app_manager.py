@@ -102,6 +102,8 @@ class InstallResult:
     needs_consent: bool = False
     restart_required: bool = False
     restart_packages: list[str] = field(default_factory=list)
+    restart_reason: str = ""
+    ui_revision: str = ""
     needs_client_install: bool = False
     client_install: dict[str, Any] | None = None
     log_excerpt: str = ""
@@ -141,6 +143,8 @@ class InstallResult:
             "needs_consent": self.needs_consent,
             "restart_required": self.restart_required,
             "restart_packages": self.restart_packages,
+            "restart_reason": self.restart_reason,
+            "ui_revision": self.ui_revision,
             "needs_client_install": self.needs_client_install,
             "client_install": self.client_install,
             "scan": self.scan.to_dict() if self.scan else None,
@@ -751,6 +755,10 @@ def install(
                 error=str(exc),
                 log_excerpt=exc.log_excerpt,
             )
+        if restart_packages:
+            from gideon.extensions.apps.app_runtime import note_restart
+
+            note_restart(name, [f"Python packages replaced: {', '.join(restart_packages)}"])
         shutil.move(str(staged), str(dest))
 
         data_fact, parked = _restore_preserved_data(name, dest)
@@ -791,21 +799,15 @@ def install(
             tier=tier.value,
         )
         _write_installed(name, meta)
-        if manifest.all_providers():
-            try:
-                _provider_registry().register(manifest, enabled=True)
-            except Exception:
-                logger.exception("app %s: provider registration failed", name)
-        _seed_app_prompts(manifest, name)
-        _seed_app_skills(manifest, name, origin=meta.origin)
         try:
             from gideon.extensions.apps import dependency_ledger
 
             dependency_ledger.record_install(manifest)
         except Exception:
             logger.debug("app %s: dependency-ledger record failed", name, exc_info=True)
-        _register_mcp(manifest)
-        _start_backend(manifest)
+        from gideon.extensions.apps import app_runtime
+
+        app_runtime.load(manifest)
         if parked is not None:
             shutil.rmtree(parked, ignore_errors=True)
         _audit(
@@ -818,8 +820,11 @@ def install(
             ),
         )
         return InstallResult(
-            ok=True, name=name, scan=report, restart_required=bool(restart_packages),
+            ok=True, name=name, scan=report,
+            restart_required=bool(restart_packages or app_runtime.restart_reason(name)),
             restart_packages=restart_packages,
+            restart_reason=app_runtime.restart_reason(name),
+            ui_revision=app_runtime.ui_revision(name),
         )
     except AppLifecycleError as exc:
         _audit("install", "error", name, caller=caller, error=str(exc))
@@ -1169,6 +1174,10 @@ def update(
                 error=str(exc),
                 log_excerpt=exc.log_excerpt,
             )
+        if restart_packages:
+            from gideon.extensions.apps.app_runtime import note_restart
+
+            note_restart(name, [f"Python packages replaced: {', '.join(restart_packages)}"])
 
         old_data = live / _APP_DATA_DIRNAME
         if old_data.is_dir():
@@ -1181,13 +1190,11 @@ def update(
             shutil.copy2(old_meta_file, staged / INSTALLED_META_FILENAME)
 
         old_manifest = _manifest_of(name)
-        _stop_backend(name)
-        _deregister_mcp(name)
-        if old_manifest is not None and old_manifest.all_providers():
-            _provider_registry().disable(name)
-        if old_manifest is not None:
-            _remove_app_prompts(old_manifest, name)
-            _remove_app_skills(old_manifest, name)
+        old_meta = _read_installed(name)
+        old_enabled = bool(old_meta and old_meta.enabled)
+        from gideon.extensions.apps import app_runtime
+
+        app_runtime.unload(name, old_manifest)
 
         if rollback.exists():
             shutil.rmtree(rollback, ignore_errors=True)
@@ -1205,13 +1212,10 @@ def update(
             shutil.rmtree(live, ignore_errors=True)
             if rollback.exists():
                 shutil.move(str(rollback), str(live))
-            if old_manifest is not None and old_manifest.all_providers():
-                _provider_registry().register(old_manifest, enabled=True)
-            if old_manifest is not None:
-                _register_mcp(old_manifest)
-                _start_backend(old_manifest)
-                _seed_app_prompts(old_manifest, name)
-                _seed_app_skills(old_manifest, name)
+            if old_manifest is not None and old_enabled:
+                app_runtime.load(old_manifest)
+            elif old_manifest is not None:
+                app_runtime.record(old_manifest)
             _audit("update", "error", name, caller=caller, error=str(exc))
             return InstallResult(
                 ok=False,
@@ -1228,13 +1232,15 @@ def update(
             meta.updatedAt = _now_iso()
             meta.tier = tier.value
             _write_installed(name, meta)
-        if manifest.all_providers():
-            _provider_registry().register(manifest, enabled=bool(meta and meta.enabled))
         if meta is None or meta.enabled:
-            _seed_app_prompts(manifest, name)
-            _seed_app_skills(manifest, name)
-            _register_mcp(manifest)
-            _start_backend(manifest)
+            app_runtime.load(manifest)
+        else:
+            app_runtime.record(manifest)
+        if any((live / "ui").rglob("*.js")) or any((live / "ui").rglob("*.mjs")):
+            app_runtime.note_restart(
+                name,
+                ["The browser can retain nested app UI modules; reload the console to refresh them."],
+            )
         _audit(
             "update",
             "ok",
@@ -1243,8 +1249,11 @@ def update(
             detail=_scan_detail(report, consent=confirm),
         )
         return InstallResult(
-            ok=True, name=name, scan=report, restart_required=bool(restart_packages),
+            ok=True, name=name, scan=report,
+            restart_required=bool(restart_packages or app_runtime.restart_reason(name)),
             restart_packages=restart_packages,
+            restart_reason=app_runtime.restart_reason(name),
+            ui_revision=app_runtime.ui_revision(name),
         )
     except AppLifecycleError as exc:
         _audit("update", "error", name, caller=caller, error=str(exc))
@@ -1399,45 +1408,10 @@ def seed_builtin_apps() -> list[str]:
 
 
 def start_enabled_app_backends() -> list[str]:
-    """Launch the backend subprocess for every enabled installed app that
-    declares one (called once at gateway startup). Backends are subprocesses —
-    they don't survive a gateway restart, so an enabled app would otherwise show
-    'backend down' until manually re-enabled. Returns the names started.
+    """Compatibility entry point routed through the canonical app runtime owner."""
+    from gideon.extensions.apps.app_runtime import start_installed
 
-    Gated by ``GIDEON_SKIP_APP_BACKENDS`` (set by the test suite): a test
-    that exercises the extension loader must not spawn — or reap — the real
-    user's app backends."""
-    import os
-
-    from gideon.extensions.apps.manager import list_apps
-
-    if os.environ.get("GIDEON_SKIP_APP_BACKENDS"):
-        return []
-
-    started: list[str] = []
-    for app_info in list_apps():
-        if not app_info.get("enabled", False):
-            continue
-        manifest_data = app_info.get("manifest", {})
-        if not manifest_data.get("backend", {}).get("entryPoint"):
-            continue
-        name = app_info.get("name", "")
-        try:
-            manifest = AppManifest.from_dict(manifest_data)
-            compat = manifest.core_compatibility()
-            if not compat.admits:
-                logger.warning("app %s: backend not started — %s", name, compat.reason)
-                continue
-            from gideon.extensions.apps.backend_runtime import get_backend_supervisor
-
-            sup = get_backend_supervisor()
-            entry = (app_dir(name) / manifest.backend.entryPoint).resolve()
-            sup.reap_orphans(name, entry)
-            if sup.start(manifest) is not None:
-                started.append(name)
-        except Exception:
-            logger.warning("app %s: startup backend launch failed", name, exc_info=True)
-    return started
+    return start_installed(gateway=True)
 
 
 def recover_interrupted_updates() -> list[str]:
@@ -1505,14 +1479,10 @@ def enable(name: str, *, caller: str = "app_manager") -> bool:
     meta.enabled = True
     meta.updatedAt = _now_iso()
     _write_installed(name, meta)
-    if manifest is not None and manifest.all_providers():
-        _provider_registry().enable(name)
     if manifest is not None:
-        _seed_app_prompts(manifest, name)
-        _seed_app_skills(manifest, name, origin=meta.origin)
-        _register_mcp(manifest)
-        _register_proposal_kinds(manifest, name)
-        _start_backend(manifest)
+        from gideon.extensions.apps import app_runtime
+
+        app_runtime.load(manifest)
     _audit("enable", "ok", name, caller=caller)
     return True
 
@@ -1537,15 +1507,10 @@ def disable(name: str, *, caller: str = "app_manager") -> bool:
         _audit("disable", "refused_native", name, caller=caller)
         return False
     manifest = _manifest_of(name)
-    _stop_backend(name)
-    _stop_worker(name)
-    _deregister_mcp(name)
-    if manifest is not None and manifest.all_providers():
-        _provider_registry().disable(name)
+    from gideon.extensions.apps import app_runtime
+
+    app_runtime.unload(name, manifest)
     if manifest is not None:
-        _remove_app_prompts(manifest, name)
-        _remove_app_skills(manifest, name)
-        _deregister_proposal_kinds(manifest, name)
         try:
             _run_hook(
                 manifest.setup.onDisable,
@@ -1788,13 +1753,10 @@ def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
         _audit("force_uninstall", "refused_native", name, caller=caller)
         return False
     manifest = _manifest_of(name)
-    _stop_backend(name)
-    _stop_worker(name)
-    _deregister_mcp(name)
+    from gideon.extensions.apps import app_runtime
+
+    app_runtime.unload(name, manifest, forget=True)
     if manifest is not None:
-        _remove_app_prompts(manifest, name)
-        _remove_app_skills(manifest, name)
-        _deregister_proposal_kinds(manifest, name)
         try:
             _run_hook(
                 manifest.setup.onUninstall,
@@ -1806,8 +1768,6 @@ def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
             logger.warning(
                 "app %s onUninstall hook failed (removing anyway): %s", name, exc
             )
-    if manifest is not None and manifest.all_providers():
-        _provider_registry().deregister(name)
     if manifest is not None:
         try:
             from gideon.extensions.apps import dependency_ledger

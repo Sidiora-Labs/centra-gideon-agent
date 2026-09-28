@@ -293,7 +293,21 @@ class WorkerSupervisor:
 
     def __init__(self) -> None:
         self._workers: dict[tuple[str, str], SupervisedWorker] = {}
+        self._held: set[str] = set()
         self._lock = threading.RLock()
+
+    def hold(self, app: str) -> None:
+        with self._lock:
+            self._held.add(app)
+        self.stop(app)
+
+    def release(self, app: str) -> None:
+        with self._lock:
+            self._held.discard(app)
+
+    def is_held(self, app: str) -> bool:
+        with self._lock:
+            return app in self._held
 
     def get(self, app: str, worker: str) -> SupervisedWorker | None:
         """The record for one worker, whatever state it is in.
@@ -324,6 +338,8 @@ class WorkerSupervisor:
         worker, or declared workers without holding ``backgroundTasks``.
         """
         app = manifest.name
+        if self.is_held(app):
+            return []
         started: list[SupervisedWorker] = []
         for spec in _declared_workers(manifest):
             rec = self._start_one(app, spec)
@@ -333,6 +349,8 @@ class WorkerSupervisor:
 
     def _start_one(self, app: str, spec: "WorkerSpec") -> SupervisedWorker | None:
         with self._lock:
+            if app in self._held:
+                return None
             key = (app, spec.name)
             rec = self._workers.get(key)
             if rec is not None and rec.state is WorkerState.RUNNING and rec.is_alive():
@@ -592,6 +610,9 @@ class WorkerSupervisor:
         for info in list_apps():
             app = str(info.get("name", ""))
             if not app:
+                continue
+            if self.is_held(app):
+                self.stop(app)
                 continue
             if not info.get("enabled", False):
                 self.stop(app)

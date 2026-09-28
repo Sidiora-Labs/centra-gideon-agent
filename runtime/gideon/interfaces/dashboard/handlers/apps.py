@@ -188,11 +188,15 @@ def _reconcile_app_crons(request: web.Request) -> None:
 def _app_status(name: str) -> dict[str, Any]:
     """Runtime status for an app: enabled + backend running/port."""
     from gideon.extensions.apps.backend_runtime import get_backend_supervisor
+    from gideon.extensions.apps.app_runtime import restart_reason, ui_revision
 
     rb = get_backend_supervisor().get(name)
     return {
         "backendRunning": rb is not None,
         "backendPort": rb.port if rb else None,
+        "restartRequired": bool(restart_reason(name)),
+        "restartReason": restart_reason(name),
+        "uiRevision": ui_revision(name),
     }
 
 
@@ -326,6 +330,9 @@ async def api_apps_list(request: web.Request) -> web.Response:
                     "heroUrl": "",
                     "hasBackend": False,
                     "hasUI": False,
+                    "restartRequired": False,
+                    "restartReason": "",
+                    "uiRevision": "",
                     "uiPages": [],
                     "isProvider": True,
                     "providerType": "tool",
@@ -376,7 +383,7 @@ async def api_apps_list(request: web.Request) -> web.Response:
             "apps list: bundled provider extensions append skipped", exc_info=True
         )
 
-    return web.json_response({"apps": out})
+    return web.json_response({"apps": out}, headers={"Cache-Control": "no-store"})
 
 
 async def api_app_catalog(request: web.Request) -> web.Response:
@@ -488,7 +495,8 @@ async def api_app_get(request: web.Request) -> web.Response:
             "configSchema": schema,
             "_secret_set": secret_set,
             **_app_status(name),
-        }
+        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1144,4 +1152,11 @@ async def api_app_ui_asset(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "not found"}, status=404)
 
     ctype = _UI_CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
-    return web.FileResponse(target, headers={"Content-Type": ctype})
+    return web.FileResponse(
+        target,
+        headers={
+            "Content-Type": ctype,
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )

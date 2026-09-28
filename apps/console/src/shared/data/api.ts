@@ -625,9 +625,11 @@ export interface AppSummary {
   tags: string[]
   installedAt?: string; updatedAt?: string
   backendRunning: boolean; backendPort: number | null
+  restartRequired?: boolean; restartReason?: string; uiRevision?: string
   native?: boolean
   updateAvailable?: boolean
   latestVersion?: string
+  restartRequired?: boolean; restartReason?: string; uiRevision?: string
   quality?: AppQualityWire
   hooks?: AppHookSummary[]
 }
@@ -689,6 +691,8 @@ export interface AppInstallResult {
   client_install?: { shell?: string; postInstall?: string } | null
   restart_required?: boolean
   restart_packages?: string[]
+  restart_reason?: string
+  ui_revision?: string
   log_excerpt?: string
   fix_prompt?: string
   hooks?: AppHookSummary[]

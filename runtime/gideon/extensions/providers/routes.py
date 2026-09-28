@@ -241,7 +241,13 @@ async def handle_enable(request: web.Request) -> web.Response:
     if not ext:
         return web.json_response({"error": f"Extension {name!r} not found"}, status=404)
 
-    success = registry.enable(name)
+    app_name = _installed_app_for_provider(ext)
+    if app_name is not None:
+        from gideon.extensions.apps.app_manager import enable as enable_app
+
+        success = enable_app(app_name, caller=request.get("user", "provider-route"))
+    else:
+        success = registry.enable(name)
     if not success:
         return web.json_response(
             {"error": f"Failed to enable: {ext.error}"}, status=500
@@ -257,5 +263,38 @@ async def handle_disable(request: web.Request) -> web.Response:
     if not ext:
         return web.json_response({"error": f"Extension {name!r} not found"}, status=404)
 
-    registry.disable(name)
+    app_name = _installed_app_for_provider(ext)
+    if app_name is not None:
+        from gideon.extensions.apps.app_manager import disable as disable_app
+
+        if not disable_app(app_name, caller=request.get("user", "provider-route")):
+            return web.json_response({"error": f"Failed to disable {name!r}"}, status=400)
+    else:
+        registry.disable(name)
     return web.json_response({"name": name, "enabled": False})
+
+
+def _installed_app_for_provider(ext):
+    """Resolve a registered provider back to an installed manifest before lifecycle delegation."""
+    manifest = getattr(ext, "manifest", None)
+    app_name = str(getattr(manifest, "name", "") or "")
+    if not app_name or ext.name != app_name or not getattr(manifest, "all_providers", None):
+        return None
+    try:
+        from gideon.extensions.apps.app_manager import _manifest_of
+        from gideon.extensions.apps.manager import _read_installed
+
+        installed = _read_installed(app_name)
+        current = _manifest_of(app_name)
+        if installed is None or current is None or current.name != app_name:
+            return None
+        if not any(
+            cfg.type == ext.provider_config.type
+            and cfg.implementation == ext.provider_config.implementation
+            for cfg in current.all_providers()
+        ):
+            return None
+        return app_name
+    except Exception:
+        logger.debug("provider %s app lifecycle mapping failed", ext.name, exc_info=True)
+        return None

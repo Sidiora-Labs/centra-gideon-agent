@@ -1128,6 +1128,9 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
           <div data-type="label-s" className="mt-1 text-on-surface-low">
             v{app.version}{installedOrigin ? ` · ${installedOrigin.label}` : ''}
           </div>
+          {app.restartRequired && <div role="status" className="mt-2 rounded-md border border-outline-variant bg-surface-high p-s text-on-surface-low" data-type="label-s">
+            <span className="text-on-surface">{app.restartReason?.startsWith('The browser can retain nested app UI modules') ? 'Reload required.' : 'Restart required.'}</span>{app.restartReason ? ` ${app.restartReason}` : ''}
+          </div>}
           {
 }
           <div className="mt-2"><QualityBadges quality={app.quality} /></div>

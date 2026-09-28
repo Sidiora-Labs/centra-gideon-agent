@@ -280,7 +280,7 @@ def _seed_promptonly_installed_apps() -> None:
             )
 
 
-def register_extension_providers() -> None:
+def register_extension_providers(*, include_installed_apps: bool = True) -> None:
     """Discover + register every native and installed provider extension IN THIS PROCESS.
 
     This is the in-process half of gateway startup (:func:`load_all_extensions`): it
@@ -321,17 +321,10 @@ def register_extension_providers() -> None:
         _seed_extension_skills(manifest, enabled=True, origin="builtin")
         logger.debug("Registered bundled extension: %s", manifest.name)
 
-    for manifest, enabled in discover_installed_extensions():
-        registry.register(manifest, enabled=enabled)
-        _seed_extension_prompts(manifest, enabled=enabled)
-        _seed_extension_skills(
-            manifest, enabled=enabled, origin=_installed_origin(manifest.name)
-        )
-        logger.debug(
-            "Registered installed extension: %s (enabled=%s)", manifest.name, enabled
-        )
+    if include_installed_apps:
+        from gideon.extensions.apps import app_runtime
 
-    _seed_promptonly_installed_apps()
+        app_runtime.start_installed(gateway=False)
 
     try:
         from gideon.integrations.tool_providers.app_routes import (
@@ -359,7 +352,7 @@ def bootstrap_cli_providers() -> None:
 
     Idempotent and safe to call once at the start of a provider-dependent command.
     """
-    register_extension_providers()
+    register_extension_providers(include_installed_apps=False)
     try:
         from gideon.extensions.providers.use_cases import migrate_legacy_bindings
 
@@ -404,11 +397,16 @@ def load_all_extensions() -> None:
     register_extension_providers()
 
     try:
-        from gideon.extensions.apps.app_manager import start_enabled_app_backends
+        import os
 
-        started = start_enabled_app_backends()
+        from gideon.extensions.apps import app_runtime
+
+        if os.environ.get("GIDEON_SKIP_APP_BACKENDS"):
+            started = app_runtime.start_installed(gateway=False)
+        else:
+            started = app_runtime.start_installed(gateway=True)
         if started:
-            logger.info("Started enabled app backends: %s", started)
+            logger.info("Loaded enabled installed apps: %s", started)
         from gideon.extensions.apps.backend_runtime import start_backend_watchdog
 
         start_backend_watchdog()

@@ -9,6 +9,10 @@ import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 
 interface UIPageDecl { route?: string; label?: string; entryPoint?: string; mountFunction?: string }
 
+export function appUiAssetUrl(name: string, entryPoint: string, revision: string): string {
+  return `/apps/${encodeURIComponent(name)}/ui/${entryPoint}?v=${encodeURIComponent(revision)}`
+}
+
 export function AppHostPage({ sub, navigate }: Pick<RouteProps, 'sub' | 'navigate'>) {
   const name = sub.split('/')[0]
   const { data, error, refresh } = useQuery(`app-host:${name}`, () => api.app(name), { persist: false })
@@ -41,7 +45,7 @@ export function AppHostPage({ sub, navigate }: Pick<RouteProps, 'sub' | 'navigat
   const permissions = (manifest.permissions ?? {}) as AppPermissions
   const uiCapabilities = (manifest.uiCapabilities ?? []) as string[]
   const ctx: AppContext = { name, permissions, uiCapabilities, enabled: data.installed.enabled !== false }
-  const src = `/apps/${encodeURIComponent(name)}/ui/${page.entryPoint}`
+  const src = appUiAssetUrl(name, page.entryPoint, data.uiRevision || '')
   const title = page.label || (manifest.displayName as string) || name
   const icon = (page as { icon?: string }).icon || (manifest.icon as string) || ''
   return <AppFrame app={ctx} title={title} icon={icon} src={src} mountFunction={page.mountFunction || 'mount'} />

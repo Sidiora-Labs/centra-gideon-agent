@@ -177,7 +177,21 @@ class BackendSupervisor:
 
     def __init__(self) -> None:
         self._procs: dict[str, RunningBackend] = {}
+        self._held: set[str] = set()
         self._lock = threading.Lock()
+
+    def hold(self, name: str) -> None:
+        with self._lock:
+            self._held.add(name)
+        self.stop(name)
+
+    def release(self, name: str) -> None:
+        with self._lock:
+            self._held.discard(name)
+
+    def is_held(self, name: str) -> bool:
+        with self._lock:
+            return name in self._held
 
     def get(self, name: str) -> RunningBackend | None:
         with self._lock:
@@ -200,6 +214,8 @@ class BackendSupervisor:
             return None
         name = manifest.name
         with self._lock:
+            if name in self._held:
+                return None
             existing = self._procs.get(name)
             if existing and existing.is_alive():
                 return existing
@@ -487,6 +503,8 @@ def _check_and_revive() -> None:
         if not manifest_data.get("backend", {}).get("entryPoint"):
             continue
         name = app_info.get("name", "")
+        if sup.is_held(name):
+            continue
         rb = sup.get(name)
         if rb is not None:
             continue
