@@ -5155,7 +5155,7 @@ export const api = {
   memoryEpisodic: (opts: { offset?: number; limit?: number; tags?: string } = {}) =>
     get<{ entries: EpisodicEntry[] }>(`/api/memory/episodic?limit=${opts.limit ?? 50}&offset=${opts.offset ?? 0}${opts.tags ? `&tags=${encodeURIComponent(opts.tags)}` : ''}`).then((d) => d.entries),
   searchEpisodic: (q: string, tags?: string) =>
-    get<{ entries: EpisodicEntry[] }>(`/api/memory/episodic/search?q=${encodeURIComponent(q)}${tags ? `&tags=${encodeURIComponent(tags)}` : ''}`).then((d) => d.entries),
+    get<{ results: EpisodicEntry[] }>(`/api/memory/episodic/search?q=${encodeURIComponent(q)}${tags ? `&tags=${encodeURIComponent(tags)}` : ''}`).then((d) => d.results),
   deleteEpisodic: (id: string) => del(`/api/memory/episodic/${encodeURIComponent(id)}`),
   memoryEvents: (opts: { offset?: number; limit?: number } = {}) =>
     get<{ events: MemoryEvent[] }>(`/api/memory/events?limit=${opts.limit ?? 50}&offset=${opts.offset ?? 0}`).then((d) => d.events),

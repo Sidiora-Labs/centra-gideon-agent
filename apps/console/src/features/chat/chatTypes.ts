@@ -217,7 +217,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
 
 export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
   const meta = message.meta
@@ -292,6 +292,11 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       at.visibleIndex = visible
       if (m.ts && !Number.isNaN(new Date(m.ts).getTime())) at.ts = m.ts
       at.segments.push({ kind: 'text', text: m.content })
+      const telemetryLine = m.meta?.turn_telemetry?.line
+      if (typeof telemetryLine === 'string' && telemetryLine.trim()
+        && !at.segments.some((segment) => segment.kind === 'activity' && segment.activityKind === 'stats' && segment.text === telemetryLine)) {
+        at.segments.push({ kind: 'activity', text: telemetryLine, activityKind: 'stats' })
+      }
       if (m.meta?.summary) at.summary = m.meta.summary
       if (Array.isArray(m.meta?.memory_citations) && m.meta!.memory_citations.length) {
         at.citations = m.meta!.memory_citations

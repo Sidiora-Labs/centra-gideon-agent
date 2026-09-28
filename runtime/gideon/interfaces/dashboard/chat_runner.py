@@ -4105,12 +4105,7 @@ async def run_chat(
             from gideon.operations.pricing import cache_savings_usd
             from gideon.operations.stats import cache_hit_pct
 
-            state.broadcast_ws(
-                "activity_event",
-                {
-                    "session": session.key,
-                    "kind": "stats",
-                    "text": _turn_complete_line(
+            telemetry_line = _turn_complete_line(
                         events=_turn_event_count,
                         tool_calls=_turn_tool_call_count,
                         context_pct=pct,
@@ -4132,8 +4127,18 @@ async def run_chat(
                             input_tokens=_turn_input_tokens,
                             output_tokens=_turn_output_tokens,
                         ),
-                    ),
-                },
+                    )
+            from gideon.engine.session_map import stamp_turn_telemetry
+
+            if stamp_turn_telemetry(session.messages, telemetry_line):
+                session._dirty = True
+                try:
+                    save_session_to_history(state, session, force=True)
+                except Exception:
+                    logger.warning("Could not persist turn telemetry for %s", session.key, exc_info=True)
+            state.broadcast_ws(
+                "activity_event",
+                {"session": session.key, "kind": "stats", "text": telemetry_line},
             )
         _stop_text = redact_exfiltration_urls(assistant_text[:500])[0]
         _stop_text = redact_credentials(_stop_text)[0]

@@ -57,6 +57,40 @@ def read_transcript(session_id: str) -> list[dict]:
     return list(_transcript_objects(document))
 
 
+TURN_TELEMETRY_KEY = "turn_telemetry"
+
+
+def stamp_turn_telemetry(messages: list[dict], line: str) -> bool:
+    text = (line or "").strip()
+    if not text:
+        return False
+    latest_user = next(
+        (index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
+        -1,
+    )
+    if latest_user < 0:
+        return False
+    assistant = next(
+        (
+            messages[index]
+            for index in range(len(messages) - 1, latest_user, -1)
+            if messages[index].get("role") == "assistant"
+        ),
+        None,
+    )
+    if assistant is None:
+        return False
+    metadata = assistant.get("meta")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    existing = metadata.get(TURN_TELEMETRY_KEY)
+    if isinstance(existing, dict) and isinstance(existing.get("line"), str) and existing["line"].strip():
+        return False
+    metadata[TURN_TELEMETRY_KEY] = {"line": text}
+    assistant["meta"] = metadata
+    return True
+
+
 class _SessionLinks:
     def __init__(self):
         self.entries: dict[str, dict] = {}

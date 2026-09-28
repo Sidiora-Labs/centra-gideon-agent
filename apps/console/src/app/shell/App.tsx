@@ -362,7 +362,7 @@ function AppInner() {
         </ErrorBoundary>
       </main>
       <VoiceControls open={voiceOpen} onClose={() => setVoiceOpen(false)} items={[...navItems, { id: 'capabilities', label: 'Capabilities', icon: Sparkles }]} navigate={navigate} currentRoute={[route, sub].filter(Boolean).join('/')} />
-      <CommandPalette commands={commands} open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette commands={commands} open={paletteOpen} onOpenChange={setPaletteOpen} navigate={navigate} />
       {
 }
       <ProductTour route={rendered} navigate={navigate} />

@@ -479,8 +479,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [historyOpen, setHistoryOpen] = useQueryFlag(query, setQuery, 'history')
   const [historySearchMode, setHistorySearchMode] = useState(false)
   const turnNodes = useRef<Map<number, HTMLDivElement>>(new Map())
-  const [findOpen, setFindOpen] = useState(false)
-  useEffect(() => { setFindOpen(false) }, [sessionId])
+  const initialFindQuery = (query.find ?? '').slice(0, 200)
+  const [findOpen, setFindOpen] = useState(Boolean(initialFindQuery))
+  useEffect(() => { setFindOpen(Boolean(initialFindQuery)) }, [sessionId, initialFindQuery])
+  const closeFind = () => { setFindOpen(false); setQuery({ find: null }, { replace: true }) }
   const [followups, setFollowups] = useState<string[]>([])
   useEffect(() => { setFollowups([]) }, [sessionId])
   const [checkWorkOffer, setCheckWorkOffer] = useState<{ label: string; prompt: string } | null>(null)
@@ -2475,7 +2477,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                   <ThreadTranscript viewportRef={scrollRef} components={{ UserMessage: AuiUserTurn, AssistantMessage: AuiAssistantTurn }}
                     beforeMessages={<>
                       <ConversationMapAui side="right" className="max-md:hidden"/>
-                      {findOpen && <ThreadConversationSearch turns={turns} nodeOf={nodeForTurn} onClose={() => setFindOpen(false)}/>}
+                      {findOpen && <ThreadConversationSearch turns={turns} nodeOf={nodeForTurn} initialQuery={initialFindQuery} onClose={closeFind}/>}
                       <SelectionQuote scrollRef={scrollRef} onQuote={quoteToComposer} attributionFor={attributionForNode}/>
                     </>}
                     afterMessages={<div className="mx-auto flex w-full flex-col gap-2xl px-l pb-2xl" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>

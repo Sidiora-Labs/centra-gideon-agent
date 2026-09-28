@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentProps, type ReactNode, type Ref } from 'react'
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode, type Ref } from 'react'
 import { X } from 'lucide-react'
 import { ConversationSearch, type SearchHit } from '../../shared/vendor/assistant-ui/elements/conversation-search'
 import { ThreadSearch } from '../../shared/vendor/assistant-ui/elements/thread-search'
@@ -13,13 +13,18 @@ import { turnText, type ChatTurn } from './chatTypes'
 import { sessionTitle } from '../../shared/data/sessionTitle'
 import type { ChatSessionSummary, ChatSessionShare, ChatSessionShareDetail } from '../../shared/data/api'
 
-export function ThreadConversationSearch({ turns, nodeOf, onClose }: {
+export const MAX_CONVERSATION_SEARCH_QUERY = 200
+
+export function ThreadConversationSearch({ turns, nodeOf, initialQuery = '', onClose }: {
   turns: readonly ChatTurn[]
   nodeOf: (index: number) => HTMLElement | null | undefined
+  initialQuery?: string
   onClose: () => void
 }) {
-  const [query, setQuery] = useState('')
+  const boundedInitialQuery = initialQuery.slice(0, MAX_CONVERSATION_SEARCH_QUERY)
+  const [query, setQuery] = useState(boundedInitialQuery)
   const [active, setActive] = useState(0)
+  useEffect(() => { setQuery(boundedInitialQuery); setActive(0) }, [boundedInitialQuery])
   const hits = useMemo(() => {
     if (!query.trim()) return []
     return turns.flatMap((turn, turnIndex) => findSegments(turn).flatMap((text, segmentIndex) =>
@@ -43,7 +48,7 @@ export function ThreadConversationSearch({ turns, nodeOf, onClose }: {
     if (event.key === 'Escape') { event.stopPropagation(); onClose() }
     if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1) }
   }}>
-    <ConversationSearch query={query} hits={hits} activeIndex={current} onQueryChange={(value) => { setQuery(value); setActive(0) }} onStep={step}/>
+    <ConversationSearch query={query} hits={hits} activeIndex={current} onQueryChange={(value) => { setQuery(value.slice(0, MAX_CONVERSATION_SEARCH_QUERY)); setActive(0) }} onStep={step}/>
     <button type="button" aria-label="Close find" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-high"><X size={15}/></button>
   </div>
 }
