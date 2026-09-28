@@ -7,6 +7,7 @@ from aiohttp import web
 from gideon.core.config.document import write_configuration
 from gideon.core.config.loader import AppConfig, ConfigPreserveError, config_path
 from gideon.core.http_request import read_json_body
+from gideon.engine.rooms.cursors import RoomCursorError
 from gideon.engine.rooms.safety import resolved_posture
 from gideon.engine.rooms.store import RoomStore, session_key
 from gideon.engine.rooms.turn import RoomBusyError, RoomTurns
@@ -195,6 +196,8 @@ async def api_rooms(request: web.Request) -> web.Response:
         )
     except KeyError:
         return web.json_response({"error": "room not found"}, status=404)
+    except RoomCursorError as exc:
+        return web.json_response({"error": str(exc)}, status=503)
     except RoomBusyError as exc:
         return web.json_response({"error": str(exc)}, status=409)
     except PermissionError as exc:

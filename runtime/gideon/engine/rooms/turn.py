@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from gideon.core.config.loader import AppConfig
+from gideon.engine.rooms.cursors import cursor_for, member_feed, read_cursors
 from gideon.engine.rooms.safety import (
     ProfileRefusal,
     RoomApprover,
@@ -78,7 +79,7 @@ class MemberTurn:
     def prompt(self, messages: list[dict]) -> str:
         context = "\n".join(
             f"{row.get('speaker_name', row.get('speaker', row['role']))}: {row['content']}"
-            for row in messages[-100:]
+            for row in messages
         )
         role = (
             f" Your role in this room: {self.member.role}" if self.member.role else ""
@@ -130,6 +131,7 @@ class RoomTurns:
         if not config.enabled:
             raise PermissionError("rooms are disabled")
         room = self.store.get(room_id)
+        read_cursors(self.store, room_id)
         if not room.members:
             raise ValueError("room needs at least one member")
         if len(room.members) > config.max_members:
@@ -158,6 +160,7 @@ class RoomTurns:
         if not config.enabled:
             raise PermissionError("rooms are disabled")
         room = self.store.get(room_id)
+        read_cursors(self.store, room_id)
         current = self.store.turn(room_id)
         if not room.owed():
             return current
@@ -239,11 +242,14 @@ class RoomTurns:
             except ProfileRefusal as exc:
                 self.store.fail_member(room_id, turn_id, redact_field(str(exc))[:1000])
                 return False
+            messages = self.store.messages(room_id)
+            read_from = cursor_for(self.store, room_id, member.id)
+            read_boundary = len(messages)
             previous = self._bindings.get(key) or self.state.sessions.get_agent(key)
             if previous and previous != member.agent:
                 await self.state.sessions.destroy(key)
             with member_spend_scope(key, posture) as spend:
-                provider, _, _ = await self.state.sessions.get_or_create(
+                provider, is_new, resumed = await self.state.sessions.get_or_create(
                     key,
                     **turn.provider_options,
                 )
@@ -259,7 +265,7 @@ class RoomTurns:
                     if callable(announce_failover):
                         announce_failover()
                     async for event in provider.stream(
-                        turn.prompt(self.store.messages(room_id, limit=100))
+                        turn.prompt(member_feed(messages, read_from, member.id, remembers=bool(resumed or not is_new))[0])
                     ):
                         if not AppConfig.load().rooms.enabled:
                             await provider.cancel()
@@ -331,7 +337,7 @@ class RoomTurns:
                     if not answer.strip():
                         raise ValueError("Member returned no reply")
                     saved = True
-                    self.store.finish_member(room_id, turn_id)
+                    self.store.finish_member(room_id, turn_id, read_boundary=read_boundary)
                 except asyncio.CancelledError:
                     await provider.cancel()
                     raise

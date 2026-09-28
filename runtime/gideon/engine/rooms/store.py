@@ -218,6 +218,8 @@ class RoomStore:
             del rooms[_identifier(room_id)]
             self._save(rooms)
             self.transcript.delete_session(room_id)
+            from gideon.engine.rooms.cursors import cursors_path
+            cursors_path(self, room_id).unlink(missing_ok=True)
             shutil.rmtree(self.directory / "turns" / room_id, ignore_errors=True)
 
     def append(
@@ -475,7 +477,7 @@ class RoomStore:
             self._save_turn(record)
             return next((member for member in room.members if member.id == room.speaking), None)
 
-    def finish_member(self, room_id: str, turn_id: str) -> None:
+    def finish_member(self, room_id: str, turn_id: str, *, read_boundary: int | None = None) -> None:
         with self._locked():
             rooms = self._read()
             room = rooms[_identifier(room_id)]
@@ -483,6 +485,9 @@ class RoomStore:
                        and row.get("role") == "assistant" and not row.get("interrupted")
                        for row in self.messages(room_id)):
                 raise ValueError("a completed member must have a stored reply")
+            if read_boundary is not None:
+                from gideon.engine.rooms.cursors import _advance_locked
+                _advance_locked(self, room_id, room.speaking, read_boundary)
             room.speaking = ""
             room.updated_at = timestamp()
             self._save(rooms)
