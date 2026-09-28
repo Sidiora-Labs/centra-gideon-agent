@@ -1,18 +1,23 @@
+import { Combobox } from '../../shared/ui/Combobox'
+import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
 import { useEffect, useState } from 'react'
 import { Field, FieldError, TextInput } from '../../shared/ui/forms'
 import { Trash2, Play, FlaskConical, AlertTriangle, Users } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { Toggle } from '../../shared/ui/Toggle'
 import { confirmDelete } from '../../shared/ui/dialog'
-import { api, isOutcomeRoute, type Trigger as WireTrigger } from '../../shared/data/api'
+import { api, isOutcomeRoute, type ActionProvider, type EventPattern, type Trigger as WireTrigger } from '../../shared/data/api'
 import { RunHistory } from '../schedule/ScheduleDetail'
 import { triggerHealthMeta } from '../schedule/scheduleMeta'
-import { actionLabel } from './triggerMeta'
+import { actionLabel, EVENT_PATTERN_META } from './triggerMeta'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
-export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
+export function StoreTriggerDetail({ trigger, providers = [], editing, onEditingChange, onChanged, onDeleted }: {
   trigger: WireTrigger
+  providers?: ActionProvider[]
+  editing?: boolean
+  onEditingChange?: (editing: boolean) => void
   onChanged: () => void
   onDeleted: () => void
 }) {
@@ -29,6 +34,45 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
     setFailureDelivery(trigger.failure_delivery ?? 'inbox')
     setDedupeFailures(trigger.failure_policy?.dedupe_hash === true)
   }, [trigger])
+
+  const isEvent = trigger.store_kind === 'event'
+  const isManual = trigger.store_kind === 'manual'
+  const eventPattern = isEvent ? String(trigger.spec?.pattern ?? '') : ''
+  const pm = EVENT_PATTERN_META.find((item) => item.pattern === eventPattern)
+  const eventMatcher = pm?.matcher ? String(trigger.spec?.[pm.matcher] ?? '') : ''
+  const [localEditing, setLocalEditing] = useState(false)
+  const activeEditing = editing ?? localEditing
+  const changeEditing = onEditingChange ?? setLocalEditing
+  const [pattern, setPattern] = useState<EventPattern>((eventPattern || 'InboxMessage') as EventPattern)
+  const [matcher, setMatcher] = useState(eventMatcher)
+  const [provider, setProvider] = useState(trigger.action?.provider ?? '')
+  const [config, setConfig] = useState<Record<string, unknown>>(trigger.action?.config ?? {})
+  const draftPattern = EVENT_PATTERN_META.find((item) => item.pattern === pattern)
+  useEffect(() => {
+    if (activeEditing) return
+    setPattern((eventPattern || 'InboxMessage') as EventPattern)
+    setMatcher(eventMatcher)
+    setProvider(trigger.action?.provider ?? '')
+    setConfig(trigger.action?.config ?? {})
+  }, [activeEditing, eventPattern, eventMatcher, trigger.action])
+
+  async function saveEvent() {
+    const coerced = coerceActionConfig(providers, provider, config)
+    if (coerced.error) { setErr(coerced.error); return }
+    if (!draftPattern) { setErr('Choose a supported event pattern'); return }
+    if (draftPattern.matcherRequired && !matcher.trim()) { setErr(`${draftPattern.matcherLabel} is required`); return }
+    setBusy(true); setErr('')
+    try {
+      await api.updateEventTrigger(trigger.raw_id, {
+        pattern,
+        ...(draftPattern.matcher ? { [draftPattern.matcher]: matcher.trim() } : {}),
+        action: { provider, config: coerced.config },
+      })
+      changeEditing(false)
+      onChanged()
+    } catch (error) { setErr(error instanceof Error ? error.message : 'Could not save this trigger') }
+    finally { setBusy(false) }
+  }
 
   const readOnly = trigger.read_only === true
   const broken = trigger.broken ?? []
@@ -69,8 +113,10 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
         ? 'Quarantined — a payload matched an injection pattern; re-author it to resume'
         : trigger.state === 'parked'
           ? 'Parked — a resource it needs is busy; it resumes on its own'
-          : trigger.enabled
-            ? 'Firing on its own'
+          : isManual
+            ? 'Runs only when you run it — it never fires on its own'
+            : trigger.enabled
+            ? isEvent ? 'Listening — it fires when a matching event arrives' : 'Firing on its own'
             : 'Paused — it will not fire until re-enabled'
 
   async function run(dry: boolean) {
@@ -165,9 +211,9 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
         </div>
         {
 }
-        {readOnly
+        {!isManual && (readOnly
           ? <span className="shrink-0 text-on-surface-var text-[0.8125rem]">{trigger.enabled ? 'Enabled' : 'Disabled'}</span>
-          : <Toggle on={trigger.enabled} onChange={toggle} disabled={busy} label="Enabled" />}
+          : <Toggle on={trigger.enabled} onChange={toggle} disabled={busy} label="Enabled" />)}
       </div>
 
       <div className="flex items-center justify-between">
@@ -191,7 +237,10 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
       )}
 
       <Section label="When it runs">
-        <div data-type="body-m" className="text-on-surface">{storeKindLabel(trigger.store_kind)}</div>
+        <div data-type="body-m" className="text-on-surface">{isEvent ? pm?.label || (eventPattern ? `A data event (${eventPattern})` : 'Data event') : storeKindLabel(trigger.store_kind)}</div>
+        {pm && <p className="mt-0.5 text-on-surface-low text-[0.8125rem]">{pm.desc}</p>}
+        {pm?.matcher && <p className="mt-1 text-[0.8125rem]"><span className="text-on-surface-low">{pm.matcherLabel}: </span>
+          <span className="font-mono text-on-surface break-all">{eventMatcher || (pm.matcherRequired ? 'none — this trigger cannot fire' : 'every event')}</span></p>}
         {paths.length > 0 && (
           <ul className="mt-1 flex flex-col gap-0.5">
             {paths.map((p) => (
@@ -204,6 +253,19 @@ export function StoreTriggerDetail({ trigger, onChanged, onDeleted }: {
       <Section label="What it runs">
         <div data-type="body-m" className="text-on-surface">{actionLabel(trigger.action?.provider)}</div>
       </Section>
+
+      {isEvent && !readOnly && <Section label="Edit data event">
+        {!activeEditing ? <Button size="sm" variant="ghost" onClick={() => changeEditing(true)}>Edit event</Button> : <div className="flex flex-col gap-m rounded-lg bg-surface-container p-m">
+          <Field label="Fires on"><Combobox options={EVENT_PATTERN_META.map((item) => ({ value: item.pattern, label: item.label }))}
+            value={pattern} onChange={(value) => { setPattern(value as EventPattern); setMatcher('') }} placeholder="Choose an event" /></Field>
+          {draftPattern?.matcher && <Field label={draftPattern.matcherLabel} hint={draftPattern.matcherHint}>
+            <TextInput value={matcher} onChange={setMatcher} placeholder={draftPattern.matcherPlaceholder} /></Field>}
+          <ActionConfig providers={providers} provider={provider} config={config}
+            onProvider={(name) => { setProvider(name); setConfig(seedActionConfig(providers.find((item) => item.name === name))) }} onConfig={setConfig} vars={[]} />
+          <div className="flex gap-s"><Button size="sm" onClick={saveEvent} loading={busy}>Save changes</Button>
+            <Button size="sm" variant="ghost" onClick={() => changeEditing(false)} disabled={busy}>Cancel</Button></div>
+        </div>}
+      </Section>}
 
       {!readOnly && (
         <Section label="Outcome notifications">
@@ -276,6 +338,7 @@ function storeKindLabel(kind?: string): string {
     run_completed: 'When a workflow run finishes',
     view: 'When its surface is viewed',
     webhook: 'When its webhook receives a request',
+    manual: 'Only when you run it',
   }
   return map[kind ?? ''] ?? (kind || 'Automation')
 }

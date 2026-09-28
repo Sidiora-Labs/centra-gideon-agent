@@ -206,12 +206,9 @@ def _engaged_automation(state: Any) -> bool:
     as NOT engaged with automation, so the legibility surface told a user with live automations that
     they had none.
     """
-    from gideon.automation.event_triggers import EventTriggerStore
     from gideon.automation.triggers.store import TriggerStore
     from gideon.core.config.loader import config_dir
 
-    if EventTriggerStore(config_dir() / "event_triggers.json").load():
-        return True
     try:
         return bool(TriggerStore(base_dir=config_dir()).load())
     except Exception:  # noqa: BLE001 - a legibility probe must never raise

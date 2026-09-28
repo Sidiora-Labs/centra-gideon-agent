@@ -22,7 +22,7 @@ import { api, partitionRunHistory, type ActionProvider, type EventPattern } from
 import { ScheduleDetail } from '../schedule/ScheduleDetail'
 import { LifecycleDetail } from './LifecycleDetail'
 import { StoreTriggerDetail } from './StoreTriggerDetail'
-import { scheduleToTrigger, hookToTrigger, storeToTrigger, eventToTrigger, eventPatternMeta, relPast, triggerStatusMeta, useTriggerVariables, eventIsDormant, eventIsAgentScoped, type Trigger } from './triggerMeta'
+import { scheduleToTrigger, hookToTrigger, storeToTrigger, resolveOpenTrigger, eventPatternMeta, relPast, triggerStatusMeta, useTriggerVariables, eventIsDormant, eventIsAgentScoped, type Trigger } from './triggerMeta'
 import { RungChip } from '../../shared/ui/RungChip'
 import { providerRungIndex, useAutonomyLadder } from '../../shared/data/rungs'
 import { relFuture } from '../schedule/scheduleMeta'
@@ -58,7 +58,6 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   const { data: hooks, error: hooksErr, refresh: refreshHooks } = useQuery('triggers:hooks', () => api.hooks(), { persist: true })
   const catalog = useTriggerVariables()
   const { data: stores, error: storesErr, refresh: refreshStores } = useQuery('triggers:store', () => api.storeTriggers(), { persist: false })
-  const { data: events, error: eventsErr, refresh: refreshEvents } = useQuery('triggers:events', () => api.eventTriggers(), { persist: false })
   const { data: providers = [], error: providersErr, refresh: refreshProviders } = useQuery('triggers:action-providers', () => api.actionProviders(), { persist: true })
   const { ladder } = useAutonomyLadder()
   const rungByProvider = useMemo(() => providerRungIndex(ladder), [ladder])
@@ -66,27 +65,25 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   const loadSchedules = () => { invalidateKeys('triggers:schedules'); refreshSchedules() }
   const loadHooks = () => { invalidateKeys('triggers:hooks'); refreshHooks() }
   const loadStores = () => { invalidateKeys('triggers:store'); refreshStores() }
-  const loadEvents = () => { invalidateKeys('triggers:events'); refreshEvents() }
   useEffect(() => {
     const t = window.setInterval(refreshSchedules, 10000)
     return () => clearInterval(t)
   }, [refreshSchedules])
 
   const triggers = useMemo<Trigger[] | null>(() => {
-    if (schedules === undefined || hooks === undefined || stores === undefined || events === undefined) return null
+    if (schedules === undefined || hooks === undefined || stores === undefined) return null
     const all = [
       ...schedules.map(scheduleToTrigger),
       ...hooks.map(hookToTrigger),
       ...stores.map(storeToTrigger),
-      ...events.map(eventToTrigger),
     ]
     const n = q.trim().toLowerCase()
     return all
       .filter((t) => filter === 'all' || t.kind === filter)
       .filter((t) => !n || `${t.name} ${t.whenLabel} ${t.actionLabel}`.toLowerCase().includes(n))
-  }, [schedules, hooks, stores, events, filter, q])
+  }, [schedules, hooks, stores, filter, q])
 
-  const open = useMemo(() => triggers?.find((t) => t.id === openId) ?? null, [triggers, openId])
+  const open = useMemo(() => resolveOpenTrigger(triggers, openId), [triggers, openId])
 
   const partitionedTriggers = useMemo(
     () => partitionRunHistory(triggers ?? [], (trigger) => trigger.lastStatus),
@@ -97,12 +94,12 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
     : partitionedTriggers.visible
 
   const counts = useMemo(() => {
-    const s = schedules?.length ?? 0, h = hooks?.length ?? 0, st = stores?.length ?? 0, e = events?.length ?? 0
-    return { all: s + h + st + e, schedule: s, lifecycle: h, store: st, event: e }
-  }, [schedules, hooks, stores, events])
+    const s = schedules?.length ?? 0, h = hooks?.length ?? 0, st = stores?.length ?? 0, e = (stores ?? []).filter((row) => row.store_kind === 'event').length
+    return { all: s + h + st, schedule: s, lifecycle: h, store: st - e, event: e }
+  }, [schedules, hooks, stores])
 
   const loadFailed = triggers === null &&
-    !!(schedulesErr || hooksErr || storesErr || eventsErr)
+    !!(schedulesErr || hooksErr || storesErr)
 
   return (
     <WorkbenchLayout
@@ -141,10 +138,8 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
           <SidePanel key={open.id} fillHeight storeKey="trigger-panel-w" icon={<open.whenIcon size={18} style={{ color: open.whenTone }} />} title={open.name} onClose={() => setQuery({ open: null, edit: null })}>
             {open.kind === 'schedule' && open.schedule
               ? <ScheduleDetail job={open.schedule} editing={editing} onEditingChange={setEditing} onSaved={loadSchedules} onChanged={loadSchedules} onDeleted={() => { setOpenId(""); loadSchedules() }} />
-              : open.kind === 'store' && open.store
-              ? <StoreTriggerDetail trigger={open.store} onChanged={loadStores} onDeleted={() => { setOpenId(""); loadStores() }} />
-              : open.kind === 'event' && open.event
-              ? <EventTriggerSummary t={open} providers={providers} editing={editing} onEditingChange={setEditing} onChanged={loadEvents} onDeleted={() => { setOpenId(""); loadEvents() }} />
+              : (open.kind === 'store' || open.kind === 'event') && open.store
+              ? <StoreTriggerDetail trigger={open.store} providers={providers} editing={editing} onEditingChange={setEditing} onChanged={loadStores} onDeleted={() => { setOpenId(""); loadStores() }} />
               : open.hook
               ? providersErr ? <LoadError what="action providers" error={providersErr} onRetry={refreshProviders} /> : <LifecycleDetail hook={open.hook} providers={providers} editing={editing} onEditingChange={setEditing} onSaved={loadHooks} onDeleted={() => { setOpenId(""); loadHooks() }} />
               : null}
@@ -157,8 +152,8 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
       ) : (
       <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
         {loadFailed ? (
-          <LoadError what="triggers" error={schedulesErr || hooksErr || storesErr || eventsErr}
-            onRetry={() => { loadSchedules(); refreshHooks(); loadStores(); invalidateKeys('triggers:events'); }} />
+          <LoadError what="triggers" error={schedulesErr || hooksErr || storesErr}
+            onRetry={() => { loadSchedules(); refreshHooks(); loadStores(); }} />
         ) : triggers === null ? <ListSkeleton rows={6} what="triggers" /> : triggers.length === 0 ? (
               !q && filter === 'all' ? (
                 <PresetEmptyState

@@ -472,11 +472,12 @@ def _resolve_trigger_run(entity_id: str, state) -> InvestigateContext | None:
         )
     if kind == "event":
         try:
-            from gideon.automation.event_triggers import EventTriggerStore
+            from gideon.automation.event_triggers import CanonicalEventStore
             from gideon.core.config.loader import config_dir
 
-            store = EventTriggerStore(config_dir() / "event_triggers.json")
-            trig = next((t for t in store.load() if t.id == raw), None)
+            store = CanonicalEventStore(config_dir())
+            identity = raw if raw.startswith("event:") else f"event:{raw}"
+            trig = next((t for t in store.load() if t.id in {raw, identity}), None)
         except Exception:  # noqa: BLE001
             trig = None
         if trig is None:
@@ -491,10 +492,19 @@ def _resolve_trigger_run(entity_id: str, state) -> InvestigateContext | None:
             f"Fires: {trig.fire_count}"
             + (f" of max {trig.max_fires}" if trig.max_fires else ""),
             f"Last fired at: {trig.last_fired_at or 'never'}",
-            "",
-            "NOTE: event triggers record aggregate counters only — individual fires "
-            "are not persisted.",
         ]
+        try:
+            from gideon.automation.schedule_history import ExecutionJournal
+
+            rows, total = ExecutionJournal(config_dir()).list_for_job_sync(trig.id, 0, 5)
+            lines.extend(["", f"Recorded event fires: {total}"])
+            for row in rows:
+                lines.append(
+                    f"{row.get('status') or 'unknown'}: "
+                    f"{row.get('summary') or row.get('error') or 'event fire'}"
+                )
+        except Exception:  # noqa: BLE001
+            lines.extend(["", "Recorded event fires are temporarily unavailable."])
         return InvestigateContext(
             kind="trigger_run",
             id=entity_id,

@@ -84,7 +84,7 @@ def _event_rows(root: Path) -> tuple[list[dict[str, Any]], bool]:
         provider = str(item.get("action_provider") or "notify")
         pattern = str(item.get("pattern") or "MemoryUpdate")
         record = {
-            "id": _identity("event", item.get("id"), item, index),
+            "id": _event_identity(item.get("id"), item, index),
             "name": str(item.get("name") or item.get("id") or f"Imported event {index + 1}"),
             "kind": "event",
             "enabled": False,
@@ -105,14 +105,25 @@ def _event_rows(root: Path) -> tuple[list[dict[str, Any]], bool]:
                     if key in item
                 },
             },
-            "gates": {"debounce_secs": item.get("debounce_secs", 5)},
+            "gates": {
+                "debounce_secs": item.get("debounce_secs", 5),
+                "max_fires": int(item.get("max_fires", 0) or 0),
+            },
             "workflow": {"inline": {"provider": provider, "config": dict(item.get("action_config") or {})}},
             "run_count": int(item.get("fire_count", 0) or 0),
             "last_fired_at": to_iso(float(item.get("last_fired_at", 0) or 0)),
         }
-        record["id"] = _identity("event", item.get("id"), item, index)
         rows.append(record)
     return rows, True
+
+
+def _event_identity(raw_id: Any, row: dict[str, Any], index: int) -> str:
+    candidate = str(raw_id or "").strip()
+    candidate = re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate).strip("-.")[:80]
+    if not candidate:
+        raw = json.dumps(row, sort_keys=True, ensure_ascii=False, default=str)
+        candidate = hashlib.sha256(f"{index}:{raw}".encode()).hexdigest()[:20]
+    return f"event:{candidate}"
 
 
 def _nudge_rows(root: Path) -> tuple[list[dict[str, Any]], bool]:

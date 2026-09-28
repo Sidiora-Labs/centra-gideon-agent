@@ -115,15 +115,25 @@ def test_a_match_INSIDE_the_cap_still_fires():
 
 
 def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED(tmp_path, monkeypatch):
-    from gideon.automation.event_triggers import EventTriggerEngine, EventTriggerStore
+    from gideon.automation.event_triggers import emit_event
     from gideon.automation.triggers.dispatch import drain_spool
+    from gideon.automation.triggers import tools
+    from gideon.automation.triggers.store import TriggerStore
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    trigger = _trigger(content_re="NEEDLE")
+    store = TriggerStore(tmp_path)
+    created = tools.create(
+        store,
+        name="Needle watch",
+        kind="event",
+        spec={"source": "memory", "pattern": "ContentMatch", "content_re": "NEEDLE"},
+        workflow={"inline": {"provider": "notify", "config": {"title_template": "Changed"}}},
+        created_by="user",
+    )
+    assert created.ok, created.text
+    trigger_id = str(created.data["trigger"]["id"])
     value = "NEEDLE" + "x" * CONTENT_MATCH_SCAN_LIMIT + "TAIL"
-    store = EventTriggerStore(tmp_path / "event_triggers.json")
-    store.upsert(trigger)
-    EventTriggerEngine(store).on_event(
+    emit_event(
         source="memory",
         event_type="set",
         key="k",
@@ -134,7 +144,8 @@ def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED(tmp_path, monkeypatch
     assert invalid == 0 and len(pending) == 1
     assert pending[0].payload["value"] == value
     assert pending[0].payload["value"].endswith("TAIL")
-    assert trigger.content_re == store.load()[0].content_re == "NEEDLE"
+    stored = store.get(trigger_id)
+    assert stored is not None and stored.trigger.spec["content_re"] == "NEEDLE"
 
 
 @pytest.mark.parametrize(

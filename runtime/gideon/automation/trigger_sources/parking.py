@@ -51,7 +51,12 @@ class SourceAvailability:
             )
             changed.append(record.id)
         if changed:
-            self.store.save(self.records)
+            if callable(getattr(self.store, "save", None)):
+                self.store.save(self.records)
+            else:
+                for record in self.records:
+                    if record.id in changed:
+                        self.store.upsert(record)
             logger.info(
                 "%s %d event trigger(s) bound to app %r: %s",
                 "un-parked" if restore else "parked",
@@ -86,8 +91,7 @@ def unpark_for_app(store: EventTriggerStore, app: str) -> list[str]:
 
 
 def _default_store() -> Any:
-    from gideon.automation.event_triggers import EventTriggerStore
+    from gideon.automation.event_triggers import CanonicalEventStore
     from gideon.core.config.loader import config_dir
 
-    path = config_dir().joinpath("event_triggers.json")
-    return EventTriggerStore(path)
+    return CanonicalEventStore(config_dir())

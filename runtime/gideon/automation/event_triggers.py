@@ -72,6 +72,7 @@ class EventTrigger:
     last_fired_at: float = 0.0
     last_status: str = ""
     last_error: str = ""
+    name: str = ""
 
     def to_dict(self) -> dict:
         return {item.name: getattr(self, item.name) for item in fields(EventTrigger)}
@@ -281,7 +282,7 @@ class CanonicalEventStore:
         previous = previous_row.trigger if previous_row is not None else None
         current = Trigger(
             id=event.id,
-            name=event.id,
+            name=event.name or event.id,
             kind="event",
             enabled=bool(event.enabled),
             created_by=(previous.created_by if previous is not None else "user"),
@@ -297,7 +298,7 @@ class CanonicalEventStore:
                 "event_glob": event.event_glob,
                 "max_fires": event.max_fires,
             },
-            gates={"debounce_secs": event.debounce_secs},
+            gates={"debounce_secs": event.debounce_secs, "max_fires": event.max_fires},
             capabilities=dict(previous.capabilities if previous is not None else {}),
             workflow={"inline": {"provider": event.action_provider, "config": dict(event.action_config or {})}},
             run_count=event.fire_count,
@@ -556,6 +557,7 @@ class EventTriggerEngine:
         return EventTrigger(
             id=trigger.id,
             pattern=str(spec.get("pattern") or MEMORY_UPDATE),
+            name=str(getattr(trigger, "name", "") or trigger.id),
             source=str(spec.get("source") or SOURCE_MEMORY),
             action_provider=str(action.get("provider") or "notify"),
             action_config=dict(action.get("config") or {}),
@@ -635,29 +637,9 @@ class EventTriggerEngine:
         now: float,
         meta: dict | None = None,
     ) -> None:
-        occurrence = EventOccurrence(source, event_type, key, value, meta)
-        try:
-            subscriptions = self._load_events()
-        except Exception:
-            return
-        for trigger in subscriptions:
-            if not matches(trigger, **occurrence.parameters()):
-                continue
-            elapsed = now - trigger.last_fired_at
-            if (
-                trigger.debounce_secs
-                and trigger.last_fired_at
-                and elapsed < trigger.debounce_secs
-            ):
-                continue
-            if self._rate_ok(now):
-                self._fire_times.append(now)
-                self._schedule_fire(trigger, now=now, **occurrence.parameters())
-            else:
-                logger.warning(
-                    "event-trigger rate cap hit — dropping fire for %s", trigger.id
-                )
-                break
+        from gideon.automation.triggers.event_fire import RoutedEvent, emit
+
+        emit(RoutedEvent(source, event_type, key, value, now, dict(meta or {})))
 
     def _rate_ok(self, now: float) -> bool:
         retained = filter(
@@ -813,8 +795,9 @@ def emit_event(
     now: float,
     meta: dict | None = None,
 ) -> None:
-    event = EventOccurrence(source, event_type, key, value or "", meta)
     try:
-        get_engine().on_event(now=now, **event.parameters())
+        from gideon.automation.triggers.event_fire import RoutedEvent, emit
+
+        emit(RoutedEvent(source, event_type, key, value or "", now, dict(meta or {})))
     except Exception:
         logger.debug("emit_event failed", exc_info=True)

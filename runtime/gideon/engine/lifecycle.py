@@ -167,6 +167,10 @@ async def retire(runtime: RuntimeCoordinator) -> None:
             runtime._reaper_task,
         )
     )
+    from gideon.automation.triggers.event_fire import detach as detach_event_router
+
+    await detach_event_router(getattr(runtime, "_event_router", None))
+    runtime._event_router = None
     for service in (runtime.heartbeat_svc, runtime.inbox_svc):
         if service is not None:
             service.stop()

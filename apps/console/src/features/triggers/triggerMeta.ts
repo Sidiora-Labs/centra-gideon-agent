@@ -214,11 +214,16 @@ export function hookToTrigger(h: HookItem): Trigger {
 }
 
 export function storeToTrigger(t: WireTrigger): Trigger {
-  const km = storeKindMeta(t.store_kind)
+  const isEvent = t.store_kind === 'event'
+  const pattern = typeof t.spec?.pattern === 'string' ? t.spec.pattern : ''
+  const pm = EVENT_PATTERN_META.find((row) => row.pattern === pattern)
+  const km = isEvent
+    ? pm ? { label: pm.label, icon: eventSourceIcon(pm.source) } : { label: pattern ? `Data event · ${pattern}` : 'Data event', icon: Zap }
+    : storeKindMeta(t.store_kind)
   const provider = t.action?.provider
   return {
-    kind: 'store', id: t.id, rawId: t.raw_id, name: t.name || t.raw_id, enabled: t.enabled,
-    whenLabel: km.label, whenIcon: km.icon, whenTone: 'var(--color-primary)',
+    kind: isEvent ? 'event' : 'store', id: t.id, rawId: t.raw_id, name: t.name || t.raw_id, enabled: t.enabled,
+    whenLabel: km.label, whenIcon: km.icon, whenTone: isEvent ? 'var(--color-secondary)' : 'var(--color-primary)',
     actionLabel: provider ? actionLabel(provider) : 'Action',
     actionIcon: provider ? actionIcon(provider) : Zap,
     actionProvider: provider,
@@ -226,6 +231,7 @@ export function storeToTrigger(t: WireTrigger): Trigger {
     state: t.state ?? null, health: t.health ?? null, lastError: t.last_error ?? null,
     runCount: t.run_count ?? null, usedBy: [],
     storeKind: t.store_kind, broken: t.broken ?? [], warnings: t.warnings ?? [], store: t,
+    ...(isEvent ? { eventPattern: pattern, eventMatcher: pm?.matcher ? String(t.spec?.[pm.matcher] ?? '') : '' } : {}),
     author: t.author, readOnly: t.read_only === true,
   }
 }
@@ -273,4 +279,11 @@ export function relPast(ts?: number | string | null): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
+}
+
+export function resolveOpenTrigger(triggers: readonly Trigger[] | null | undefined, openId: string | null): Trigger | null {
+  if (!triggers || !openId) return null
+  return triggers.find((trigger) => trigger.id === openId)
+    ?? triggers.find((trigger) => trigger.kind !== 'lifecycle' && trigger.rawId === openId)
+    ?? null
 }

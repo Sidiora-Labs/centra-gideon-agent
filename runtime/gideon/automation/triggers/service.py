@@ -8,7 +8,6 @@ from typing import Any
 
 from gideon.automation.triggers import provider
 from gideon.automation.triggers.models import (
-    INERT_OUTCOMES,
     Outcome,
     Trigger,
     TriggerHealth,
@@ -228,29 +227,13 @@ class TickPass:
         self.result.retired.append(trigger.id)
 
     async def context_for(self, trigger: Trigger, slot_map: dict[str, str]) -> Any:
-        from gideon.automation.triggers import claims, firepath, screen
-
-        return firepath.FireContext(
-            trigger_id=trigger.id,
-            trigger=trigger,
-            gates=trigger.gates or {},
-            capabilities=trigger.capabilities,
-            holder=f"tick:{int(self.now)}",
-            overlap=str(getattr(trigger, "overlap", "skip") or "skip"),
+        return await fire_context(
+            trigger,
             now=self.now,
+            base_dir=self.base_dir,
+            slot_map=slot_map,
             user_active=self.user_active,
-            yield_to_user=bool(getattr(trigger, "yield_to_user", False)),
-            fires_in_window=await _fires_in_window(
-                trigger, now=self.now, base_dir=self.base_dir
-            ),
-            since_last_fire=_since_last_fire(trigger, now=self.now),
-            busy_slot=claims.busy_slot(trigger, holders=slot_map),
-            **_target_active_kwargs(trigger, now=self.now, base_dir=self.base_dir),
-            existing_claim=claims.read_claim(
-                trigger.id, now=self.now, base_dir=self.base_dir
-            ),
-            requested=screen.requested_capabilities(trigger),
-            budget_remaining=_budget_remaining(trigger),
+            holder=f"tick:{int(self.now)}",
         )
 
     def grant(self, trigger: Trigger, decision: Any, scheduled_for: float) -> None:
@@ -337,7 +320,7 @@ async def _persist_suppression(
         outcome, trigger_id = (
             str(row.get(key) or "") for key in ("outcome", "trigger_id")
         )
-        if not trigger_id or outcome not in INERT_OUTCOMES:
+        if not trigger_id or outcome == Outcome.RAN.value:
             return
         record = ExecutionRecord(
             run_id=f"skip-{int(now * 1000)}",
@@ -354,6 +337,96 @@ async def _persist_suppression(
         logger.debug(
             "could not persist the suppression row for %s", row.get("trigger_id")
         )
+
+
+async def fire_context(
+    trigger: Any,
+    *,
+    now: float,
+    base_dir: Any = None,
+    slot_map: dict[str, str] | None = None,
+    user_active: bool = False,
+    holder: str = "event",
+    payload_text: str = "",
+) -> Any:
+    """Build the same gate context for clock and event-trigger admissions."""
+    from gideon.automation.triggers import claims, firepath, screen
+
+    return firepath.FireContext(
+        trigger_id=trigger.id,
+        trigger=trigger,
+        payload_text=payload_text,
+        gates=trigger.gates or {},
+        capabilities=trigger.capabilities,
+        holder=holder,
+        overlap=str(getattr(trigger, "overlap", "skip") or "skip"),
+        now=now,
+        user_active=user_active,
+        yield_to_user=bool(getattr(trigger, "yield_to_user", False)),
+        fires_in_window=await _fires_in_window(trigger, now=now, base_dir=base_dir),
+        since_last_fire=_since_last_fire(trigger, now=now),
+        busy_slot=claims.busy_slot(trigger, holders=slot_map or {}),
+        **_target_active_kwargs(trigger, now=now, base_dir=base_dir),
+        existing_claim=claims.read_claim(trigger.id, now=now, base_dir=base_dir),
+        requested=screen.requested_capabilities(trigger),
+        budget_remaining=_budget_remaining(trigger),
+    )
+
+
+async def admit_fire(
+    store: Any,
+    trigger: Any,
+    *,
+    now: float,
+    payload_text: str = "",
+    holder: str = "event",
+) -> tuple[Any, Any]:
+    """Run one trigger through the canonical ordered fire-gate walk."""
+    from gideon.automation.triggers import claims, firepath
+
+    context = await fire_context(
+        trigger,
+        now=now,
+        base_dir=getattr(store, "base_dir", None),
+        slot_map=claims.slot_holders(
+            store, now=now, base_dir=getattr(store, "base_dir", None)
+        ),
+        holder=holder,
+        payload_text=payload_text,
+    )
+    return context, await firepath.evaluate(context)
+
+
+async def record_suppression(
+    trigger: Any,
+    *,
+    outcome: str,
+    reason: str,
+    now: float,
+    base_dir: Any = None,
+    event: Any = None,
+) -> None:
+    """Persist typed gate refusal/suppression history for scheduled and event fires."""
+    try:
+        from gideon.automation.schedule_history import ExecutionRecord
+
+        context = ""
+        if event is not None:
+            context = f"event {event.source}.{event.event_type} key={event.key}"
+        await _run_store(base_dir).append(
+            ExecutionRecord(
+                run_id=f"{outcome}-{int(now * 1000)}",
+                job_id=str(getattr(trigger, "id", "") or ""),
+                trigger="event" if event is not None else outcome,
+                started_at=now,
+                finished_at=now,
+                status=outcome,
+                summary=context,
+                error=reason,
+            )
+        )
+    except Exception:
+        logger.debug("could not persist trigger suppression for %s", getattr(trigger, "id", "?"), exc_info=True)
 
 
 async def _fires_in_window(
@@ -417,7 +490,11 @@ def _budget_remaining(trigger: Any) -> float | None:
     gates = getattr(trigger, "gates", None)
     gates = gates if isinstance(gates, dict) else {}
     try:
-        cap = int(gates.get("max_fires", 0) or 0)
+        cap = int(
+            gates.get("max_fires")
+            or ((getattr(trigger, "spec", None) or {}).get("max_fires", 0))
+            or 0
+        )
     except (TypeError, ValueError):
         return 0.0
     if cap <= 0:

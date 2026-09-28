@@ -59,7 +59,7 @@ _EVENT = "event"
 _STORE = "store"
 
 _STORE_ONLY_KINDS: frozenset[str] = frozenset(
-    {"file", "web_watch", "idle", "run_completed", "view", "webhook"}
+    {"file", "web_watch", "idle", "run_completed", "view", "webhook", "event"}
 )
 
 
@@ -96,8 +96,8 @@ def _serialize_event(t) -> dict[str, Any]:
         }
     return {
         "kind": _EVENT,
-        "id": f"{_EVENT}:{t.id}",
-        "name": t.id,
+        "id": t.id if str(t.id).startswith(f"{_EVENT}:") else f"{_EVENT}:{t.id}",
+        "name": t.name or t.id,
         "enabled": t.enabled,
         "source": t.source,
         "pattern": t.pattern,
@@ -463,7 +463,11 @@ def _serialize_store(
         "enabled": trigger.enabled,
         "created_by": trigger.created_by,
         "spec": redact_values_for_display(dict(trigger.spec or {})),
-        "action": redact_values_for_display(dict(trigger.workflow or {})),
+        "action": redact_values_for_display(
+            dict((trigger.workflow or {}).get("inline") or {})
+            if trigger.kind == "event"
+            else dict(trigger.workflow or {})
+        ),
         "delivery": trigger.delivery,
         "failure_delivery": trigger.failure_delivery,
         "failure_policy": redact_values_for_display(dict(trigger.failure_policy or {})),
@@ -734,8 +738,8 @@ def unified_trigger_count(state: ConsoleState) -> int:
     """The number of triggers ``GET /api/triggers`` lists — the tally the dashboard
     SystemHealth rail renders under "triggers" so it AGREES with the Triggers page (#773).
 
-    Counts the SAME four sources :func:`api_triggers` gathers — clock schedules and the
-    store-only kinds from the unified store, lifecycle hooks, and data-event triggers —
+    Counts the SAME three sources :func:`api_triggers` gathers — clock and store rows
+    from the unified store, plus lifecycle hooks —
     but never serializes or redacts a row: a status poll only needs the tally. This is
     deliberately WIDER than ``ConsoleState.trigger_counts()`` / the ``cron`` status
     block, which count the schedule store alone and stay as they are; the rail exists to
@@ -759,10 +763,6 @@ def unified_trigger_count(state: ConsoleState) -> int:
         total += len(_hook_store(state).list_all())
     except Exception:  # noqa: BLE001 - nor on the lifecycle-hook half
         logger.debug("lifecycle hook count unavailable", exc_info=True)
-    try:
-        total += len(_event_store().load())
-    except Exception:  # noqa: BLE001 - nor on the data-event half
-        logger.debug("event trigger count unavailable", exc_info=True)
     return total
 
 
@@ -782,7 +782,7 @@ async def api_triggers(request: web.Request) -> web.Response:
         used_by = _used_by_index()
         for hook in _hook_store(state).list_all():
             triggers.append(_serialize_lifecycle(hook, used_by.get(hook.id, [])))
-    if want in ("", _EVENT):
+    if want == _EVENT:
         for t in _event_store().load():
             triggers.append(_serialize_event(t))
     if want in ("", _STORE):
@@ -875,7 +875,13 @@ def _create_event(body: dict, request: web.Request) -> web.Response:
     name = str(body.get("name") or "").strip()
     if not name:
         return web.json_response({"error": "name required"}, status=400)
-    if any(t.id == name for t in _event_store().load()):
+    import re
+
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-._").lower()[:80]
+    if not slug:
+        return web.json_response({"error": "name must include a letter or number"}, status=400)
+    identity = f"event:{slug}"
+    if any(t.id == identity for t in _event_store().load()):
         return web.json_response({"error": "an event trigger with this name already exists"}, status=409)
     try:
         max_fires = int(body.get("max_fires", 0) or 0)
@@ -884,8 +890,9 @@ def _create_event(body: dict, request: web.Request) -> web.Response:
     if max_fires < 0:
         return web.json_response({"error": "max_fires must be nonnegative"}, status=400)
     t = EventTrigger(
-        id=name,
+        id=identity,
         pattern=pattern,
+        name=name,
         source=PATTERN_SOURCE[pattern],
         action_provider=str(action.get("provider") or "notify"),
         action_config=dict(action.get("config") or {}),
@@ -896,8 +903,10 @@ def _create_event(body: dict, request: web.Request) -> web.Response:
         event_glob=str(body.get("event_glob") or ""),
         max_fires=max_fires,
     )
-    _event_store().upsert(t)
-    payload = _serialize_event(t)
+    event_store = _event_store()
+    event_store.upsert(t)
+    saved = event_store._store.get(identity)
+    payload = _serialize_store(saved.trigger) if saved is not None else _serialize_event(t)
     hint = _regex_hint(t.content_re)
     if hint:
         payload["warning"] = hint
@@ -1259,7 +1268,13 @@ def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
             trigger.action_config = dict(action["config"] or {})
 
     store.upsert(trigger)
-    result: dict[str, Any] = {"ok": True, "trigger": _serialize_event(trigger)}
+    persisted = store._store.get(trigger.id)
+    result: dict[str, Any] = {
+        "ok": True,
+        "trigger": _serialize_store(persisted.trigger)
+        if persisted is not None
+        else _serialize_event(trigger),
+    }
     hint = _regex_hint(trigger.content_re)
     if hint:
         result["warning"] = hint
@@ -1582,7 +1597,15 @@ async def api_trigger_toggle(request: web.Request) -> web.Response:
         ):
             trigger.fire_count = 0
         store.upsert(trigger)
-        return web.json_response({"ok": True, "trigger": _serialize_event(trigger)})
+        persisted = store._store.get(trigger.id)
+        return web.json_response(
+            {
+                "ok": True,
+                "trigger": _serialize_store(persisted.trigger)
+                if persisted is not None
+                else _serialize_event(trigger),
+            }
+        )
     try:
         body = await read_json_body(request)
     except Exception:

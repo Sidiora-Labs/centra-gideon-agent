@@ -176,7 +176,16 @@ class AutomationBoot:
             self.logger.warning("trigger boot sweep failed", exc_info=True)
 
     async def start(self) -> None:
+        from gideon.automation.triggers.event_fire import attach
+        from gideon.automation.triggers.store import TriggerStore
+
         if self.runtime._no_crons:
+            self.runtime._event_router = attach(
+                TriggerStore(base_dir=self.home()),
+                self.runtime._fire_store_trigger,
+                asyncio.get_running_loop(),
+                enabled=False,
+            )
             self.logger.info("Automations disabled (--no-crons)")
             return
         await self.rotate()
@@ -187,11 +196,14 @@ class AutomationBoot:
             self.runtime._web_watch_poll_loop()
         )
         self.migrate()
-        from gideon.automation.triggers.store import TriggerStore
-
         store = TriggerStore(base_dir=self.home())
         self.reconcile(store)
         await self.recover(store)
+        self.runtime._event_router = attach(
+            store,
+            self.runtime._fire_store_trigger,
+            asyncio.get_running_loop(),
+        )
         self.runtime._clock_task = asyncio.create_task(self.runtime._clock_loop())
         self.runtime._reaper_task = asyncio.create_task(
             self.runtime._trigger_reaper_loop()
