@@ -389,9 +389,29 @@ async def api_loop_create(request: web.Request) -> web.Response:
         inputs["task"] = task
         if body.get("success_criteria"):
             inputs["exit_condition"] = str(body["success_criteria"])
+        if bool(body.get("auto_teardown_on_complete")):
+            return web.json_response(
+                {
+                    "error": "Validation failed",
+                    "errors": ["Scratch workspace teardown is not supported for workflow-backed loops."],
+                },
+                status=400,
+            )
+        overrides: dict[str, Any] = {}
+        if isinstance(body.get("attended"), bool):
+            overrides["attended"] = body["attended"]
+        cycles = validation._as_int(body.get("max_cycles"))
+        if cycles is not None:
+            overrides["max_cycles"] = cycles
         result = await workflow_service.start_kind_run(
             kind=kind,
             inputs=inputs,
+            title=(
+                str(body.get("name") or "").strip()
+                or str(body.get("title") or "").strip()
+                or _derive_name(task)
+            ),
+            policy_overrides=overrides,
             supervisor=workflow_http._supervisor(request),
             origin_kind=workflow_http._api_origin(),
             session_key=request.headers.get("X-Session-Key", ""),
@@ -427,13 +447,52 @@ async def api_loop_list(request: web.Request) -> web.Response:
     """GET /api/loops[?project_id=…][?kind=…] — loops (redacted), newest first."""
     project_id = request.query.get("project_id", "").strip()
     kind = request.query.get("kind", "").strip().lower()
-    return web.json_response(
-        {
-            "loops": _mask_projection(
-                store.list_redacted(project_id=project_id, kind=kind)
-            )
-        }
-    )
+    from gideon.automation.workflows import loop_view
+
+    rows = store.list_redacted(project_id=project_id, kind=kind)
+    rows.extend(loop_view.list_loop_views(project_id=project_id, kind=kind))
+    rows.sort(key=lambda row: float(row.get("created_at") or 0.0), reverse=True)
+    return web.json_response({"loops": _mask_projection(rows)})
+
+
+def _run_backed(loop_id: str):
+    from gideon.automation.workflows import store as run_store
+
+    run = run_store.get(loop_id)
+    return run if run is not None and isinstance(run.extra, dict) and run.extra.get("loop_kind") else None
+
+
+async def _run_backed_action(request: web.Request, run: Any, action: str) -> web.Response:
+    from gideon.automation.workflows import loop_view, service as workflows
+    from gideon.automation.workflows.handlers import _audit, _guard, _reply, _supervisor
+
+    status = loop_view.loop_status(run)
+    if status not in loop_view.RUN_ACTION_SOURCE_STATES[action]:
+        return web.json_response(
+            {"error": f"Cannot {action} a loop in '{status.value}' state"}, status=409
+        )
+    operation = {
+        "start": "workflow_run_start",
+        "pause": "workflow_run_pause",
+        "resume": "workflow_run_resume",
+        "stop": "workflow_run_cancel",
+    }[action]
+    denied = _guard(request, operation)
+    if denied is not None:
+        return denied
+    supervisor = _supervisor(request)
+    if action == "pause":
+        result = await workflows.pause_run_and_wait(run.id, supervisor=supervisor)
+    elif action == "resume":
+        result = await workflows.resume_loop_run(run.id, supervisor=supervisor)
+    elif action == "stop":
+        result = workflows.cancel_run(run.id, supervisor=supervisor)
+    else:
+        result = await workflows.start_draft(run.id, supervisor=supervisor)
+    _audit(request, operation, "success" if result.get("ok") else "failure", run.id)
+    if not result.get("ok"):
+        return _reply(result)
+    return web.json_response(loop_view.get_loop_view(run.id))
 
 
 async def api_loop_get(request: web.Request) -> web.Response:
@@ -442,6 +501,11 @@ async def api_loop_get(request: web.Request) -> web.Response:
         return web.json_response({"error": "Invalid loop id"}, status=400)
     view = store.get_redacted(cid)
     if view is None:
+        from gideon.automation.workflows import loop_view
+
+        run_view = loop_view.get_loop_view(cid)
+        if run_view is not None:
+            return web.json_response(_mask_projection(run_view))
         return web.json_response({"error": "Not found"}, status=404)
     if view.get("kind") == "code":
         from gideon.automation.loop.kinds.sdlc import _command_runnable_here
@@ -610,7 +674,10 @@ async def api_loop_action(request: web.Request) -> web.Response:
     async with manager.dashboard_boundary_lock(state, cid):
         loop = store.get(cid)
         if loop is None:
-            return web.json_response({"error": "Not found"}, status=404)
+            run = _run_backed(cid)
+            if run is None:
+                return web.json_response({"error": "Not found"}, status=404)
+            return await _run_backed_action(request, run, action)
         if LoopStatus(loop.status) not in ACTION_SOURCE_STATES[action]:
             return web.json_response(
                 {"error": f"Cannot {action} a loop in '{loop.status}' state"},
@@ -666,6 +733,21 @@ async def api_loop_delete(request: web.Request) -> web.Response:
     cid = request.match_info["id"]
     if not loop_files.valid_loop_id(cid):
         return web.json_response({"error": "Invalid loop id"}, status=400)
+    if store.get(cid) is None:
+        run = _run_backed(cid)
+        if run is not None:
+            from gideon.automation.workflows import service as workflows
+            from gideon.automation.workflows.handlers import _audit, _guard, _reply, _supervisor
+
+            denied = _guard(request, "workflow_run_delete")
+            if denied is not None:
+                return denied
+            result = await workflows.delete_run(run.id, supervisor=_supervisor(request))
+            _audit(request, "workflow_run_delete", "success" if result.get("ok") else "failure", run.id)
+            if not result.get("ok"):
+                return _reply(result)
+            request.app["state"].push_refresh("loops")
+            return web.json_response({"ok": bool(result.get("deleted"))})
     state = request.app["state"]
     async with manager.dashboard_boundary_lock(state, cid):
         from gideon.automation.triggers.nudge import get_instance

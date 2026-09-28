@@ -474,6 +474,16 @@ class RunController:
         """
         store.request_cancel(self.run.id)
 
+    def wake(self) -> None:
+        """Wake a paused controller after its durable pause marker is cleared."""
+        self._resume_loop()
+
+    async def wait_for_pause(self) -> RunStatus:
+        if self.run.status != RunStatus.PAUSED:
+            await self.start()
+            await self._terminal.wait()
+        return self.run.status
+
     async def _tick_loop(self) -> None:
         try:
             if not await self._prepare():
@@ -790,6 +800,12 @@ class RunController:
         if store.cancel_requested(self.run.id):
             await self._cancel_inflight()
             await self._finish(RunStatus.CANCELLED)
+            return True
+
+        if store.pause_requested(self.run.id):
+            await self._pause_inflight()
+            self._drain_mutations()
+            await self._finish(RunStatus.PAUSED)
             return True
 
         self._drain_mutations()
@@ -1495,7 +1511,7 @@ class RunController:
         self._pending_mutations.append(([op.to_dict() for op in result.ops], actor))
         self._persist_pending_mutations()
         body["queued"] = True
-        if self.run.status == RunStatus.NEEDS_INPUT:
+        if self.run.status in (RunStatus.NEEDS_INPUT, RunStatus.PAUSED):
             self._resume_loop()
         return body
 
@@ -4522,13 +4538,76 @@ class RunController:
         if tokens is not None:
             self.run.total_tokens = max(self.run.total_tokens, int(tokens))
 
+    async def _stop_run_workers(self, reason: str) -> None:
+        manager = self.services.subagents
+        if manager is None:
+            if any(inst.subagent_id for inst in self.instances.values()):
+                raise RuntimeError("cannot stop active workflow workers")
+            return
+        cancel = getattr(manager, "cancel", None)
+        if not callable(cancel):
+            if any(inst.subagent_id for inst in self.instances.values()):
+                raise RuntimeError("workflow worker manager cannot cancel active workers")
+            return
+        prefix = f"workflow:{self.run.id}:"
+        workers = [
+            info for info in getattr(manager, "running", [])
+            if str(getattr(info, "parent_session_key", "")).startswith(prefix)
+        ]
+        results = await asyncio.gather(
+            *(cancel(info.id) for info in workers), return_exceptions=True
+        )
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            raise RuntimeError(reason) from failures[0]
+
     async def _cancel_inflight(self) -> None:
-        for entry in list(self._inflight.values()):
+        self._reconcile_dispatched_stages()
+        await self._stop_run_workers("workflow workers could not be stopped")
+        entries = list(self._inflight.values())
+        for entry in entries:
             entry.task.cancel()
+        if entries:
+            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
+        for entry in entries:
             inst = self._instance(entry.ready.path)
-            inst.state = InstanceState.CANCELLED
-            inst.completed_at = _now()
+            if inst.state == InstanceState.RUNNING:
+                inst.state = InstanceState.CANCELLED
+                inst.completed_at = _now()
+        for inst in self.instances.values():
+            if inst.state == InstanceState.RUNNING and inst.subagent_id:
+                inst.state = InstanceState.CANCELLED
+                inst.completed_at = _now()
+                inst.subagent_id = ""
         self._inflight.clear()
+        self._persist_state()
+
+    async def _pause_inflight(self) -> None:
+        """Withdraw active stages and awaited turns before acknowledging a pause."""
+        self._reconcile_dispatched_stages()
+        entries = list(self._inflight.values())
+        for entry in entries:
+            if entry.task.done() and not entry.task.cancelled():
+                self._inflight.pop(entry.ready.path, None)
+                try:
+                    self._apply(entry, entry.task.result())
+                except Exception:
+                    logger.debug("completed workflow node could not settle before pause", exc_info=True)
+        self._reconcile_dispatched_stages()
+        await self._stop_run_workers("workflow workers could not be paused")
+        entries = list(self._inflight.values())
+        for entry in entries:
+            entry.task.cancel()
+        if entries:
+            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
+        self._inflight.clear()
+        for inst in self.instances.values():
+            if inst.state != InstanceState.RUNNING:
+                continue
+            inst.state = InstanceState.PENDING
+            inst.subagent_id = ""
+            inst.started_at = None
+            inst.attempt = max(0, inst.attempt - 1)
         self._persist_state()
 
     async def _finish(self, status: RunStatus, *, error: str = "") -> None:

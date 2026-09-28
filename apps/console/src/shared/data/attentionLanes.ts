@@ -1,4 +1,4 @@
-import type { ChatSession, InboxItem, InboxItemKind, InboxItemStatus, PendingApproval } from './api'
+import type { ChatSession, InboxItem, InboxItemKind, InboxItemStatus, Loop, PendingApproval } from './api'
 
 export const LANES = ['needs-approval', 'your-turn', 'working', 'idle'] as const
 export type Lane = (typeof LANES)[number]
@@ -12,10 +12,12 @@ export type ApprovalInput = Pick<PendingApproval, 'id' | 'source' | 'tool' | 'to
 
 export type ActivityInput = Pick<ChatSession, 'key' | 'title' | 'running' | 'stopping' | 'pending_approval'>
 
+export type LoopInput = Pick<Loop, 'run_id' | 'name' | 'task' | 'status' | 'started_at' | 'created_at'>
+
 export interface LaneCard {
   key: string
   lane: Lane
-  origin: 'approval' | 'inbox' | 'session'
+  origin: 'approval' | 'inbox' | 'session' | 'workflow'
   id: string
   title: string
   subtitle?: string
@@ -116,6 +118,7 @@ export function toLanes(
   items: AttentionInput[],
   approvals: ApprovalInput[],
   activity: ActivityInput[] = [],
+  loops: LoopInput[] = [],
 ): Record<Lane, LaneCard[]> {
   const out = emptyLanes()
 
@@ -171,6 +174,22 @@ export function toLanes(
       title: firstLine(s.title) || key,
       subtitle: s.stopping === true ? 'stopping' : 'running',
       at: null,
+    })
+  }
+
+  for (const loop of Array.isArray(loops) ? loops : []) {
+    if (!loop || typeof loop.run_id !== 'string' || loop.run_id === '') continue
+    if (loop.status !== 'running' && loop.status !== 'paused') continue
+    const lane = loop.status === 'running' ? 'working' : 'idle'
+    out[lane].push({
+      key: `workflow:${loop.run_id}`,
+      lane,
+      origin: 'workflow',
+      id: loop.run_id,
+      title: firstLine(loop.name) || firstLine(loop.task) || loop.run_id,
+      subtitle: loop.status,
+      at: loop.started_at ?? loop.created_at,
+      refs: { workflow: loop.run_id },
     })
   }
 

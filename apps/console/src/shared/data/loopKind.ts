@@ -14,3 +14,8 @@ const LOOP_KIND_META: Record<LoopKind, LoopKindMeta> = {
 export function loopKindMeta(kind: string | undefined): LoopKindMeta {
   return (kind && LOOP_KIND_META[kind as LoopKind]) || LOOP_KIND_META.general
 }
+
+export function loopRoute(loop: { id: string; kind?: string; run_id?: string }): string {
+  if (loop.run_id) return `workflows/runs/${encodeURIComponent(loop.run_id)}`
+  return `${loop.kind === 'code' ? 'code' : 'loops'}/${encodeURIComponent(loop.id)}`
+}

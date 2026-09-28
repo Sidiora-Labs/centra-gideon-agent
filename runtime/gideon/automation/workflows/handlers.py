@@ -64,6 +64,7 @@ _STATUS_MAP: dict[str, tuple[int, str]] = {
     "WF_RUN_PREFLIGHT_FAILED": (422, "preflight_failed"),
     "WF_NO_SUPERVISOR": (503, "engine_unavailable"),
     "WF_RUN_LAUNCH_FAILED": (500, "launch_failed"),
+    "WF_LOOP_RESUME_RECONCILE_REQUIRED": (409, "loop_resume_reconcile_required"),
     "WF_RUN_NOT_LIVE": (409, "run_not_live"),
     "WF_RUN_NOT_INTERRUPTED": (409, "round_not_interrupted"),
     "WF_RUN_ALREADY_LIVE": (409, "run_already_live"),

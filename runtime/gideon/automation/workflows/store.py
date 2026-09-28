@@ -318,6 +318,25 @@ def list_runs(
     return list(map(_row_to_run, selected)), int(count)
 
 
+def list_loop_runs(*, project_id: str = "", kind: str = "") -> list[WorkflowRun]:
+    """List runs explicitly created through the loop launch seam."""
+    clauses = ["json_valid(extra)", "COALESCE(json_extract(extra, '$.loop_kind'), '') <> ''"]
+    values: list[str] = []
+    if project_id:
+        clauses.append("project_id = ?")
+        values.append(project_id)
+    if kind:
+        clauses.append("json_extract(extra, '$.loop_kind') = ?")
+        values.append(kind)
+    with _connection() as database:
+        rows = database.execute(
+            "SELECT * FROM runs WHERE " + " AND ".join(clauses)
+            + " ORDER BY created_at DESC, id DESC",
+            values,
+        ).fetchall()
+    return list(map(_row_to_run, rows))
+
+
 def active_runs() -> list[WorkflowRun]:
     return RunTable.rows(
         " WHERE status IN (?, ?, ?)",
@@ -551,3 +570,17 @@ def cancel_requested(run_id: str) -> bool:
 
 def clear_cancel(run_id: str) -> None:
     (run_dir(run_id) / "CANCEL").unlink(missing_ok=True)
+
+
+def request_pause(run_id: str) -> None:
+    marker = run_dir(run_id) / "PAUSE"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(marker, _now())
+
+
+def pause_requested(run_id: str) -> bool:
+    return (run_dir(run_id) / "PAUSE").is_file()
+
+
+def clear_pause(run_id: str) -> None:
+    (run_dir(run_id) / "PAUSE").unlink(missing_ok=True)

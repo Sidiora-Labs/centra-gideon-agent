@@ -26,7 +26,7 @@ import { loopKindMeta } from '../../shared/data/loopKind'
 import { loopToGoalLoop } from './goalAdapter'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { activePhaseIndex, phaseMinCycles, phaseForCycle, hasDistinctName } from './loopPhases'
-import { loopStatusLabel, loopStatusColor, loopStatusTone, effectiveLoopStatus, shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
+import { loopStatusLabel, loopStatusColor, loopStatusTone, effectiveLoopStatus, shownCycle, ACTIVE_LOOP_STATUSES, PRELAUNCH_LOOP_STATUSES, loopActionSources } from '../../shared/data/loopStatus'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { HeatGraph } from '../../shared/vendor/assistant-ui/elements/heat-graph'
 
@@ -54,7 +54,7 @@ function order(a: GoalLoop, b: GoalLoop) {
   return (b.started_at ?? b.created_at) - (a.started_at ?? a.created_at)
 }
 
-export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (id: string) => void; onCreate: () => void } & Pick<RouteProps, 'query' | 'setQuery'>) {
+export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (loop: Pick<GoalLoop, 'id' | 'run_id'> & { kind?: string }) => void; onCreate: () => void } & Pick<RouteProps, 'query' | 'setQuery'>) {
   const { data: loops, error: loopsErr, refresh } = useQuery<GoalLoop[]>('loops', () => api.uLoops().then((ls) => ls.filter((l) => l.kind !== 'code').map(loopToGoalLoop).sort(order)), { persist: false })
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [peekId, setPeekId] = useQueryParam(query, setQuery, 'peek', '')
@@ -122,7 +122,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
         <SidePanel key={peek.id} fillHeight storeKey="loop-peek-w"
           icon={(() => { const KI = loopKindMeta((peek as { kind?: string }).kind).icon; return <KI size={18} className="text-primary" /> })()} title={peek.name || peek.goal.slice(0, 60)}
           onClose={() => setPeekId('')}>
-          <LoopPeek loop={peek} onOpenFull={() => onOpen(peek.id)} />
+          <LoopPeek loop={peek} onOpenFull={() => onOpen(peek)} />
         </SidePanel>
       )}
     >
@@ -167,9 +167,9 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
                 const goalEarnsItsLine = hasDistinctName(c.name, c.goal)
                 const menuItems: ContextMenuItem[] = [
                   { icon: <ExternalLink size={15} />, label: 'Open', onSelect: () => setPeekId(c.id) },
-                  ...(LOOP_ACTION_SOURCE_STATUSES.pause.has(c.status) ? [{ icon: <Pause size={15} />, label: 'Pause', onSelect: () => act(undefined, c.id, 'pause') }] : []),
-                  ...(LOOP_ACTION_SOURCE_STATUSES.resume.has(c.status) ? [{ icon: <Play size={15} />, label: 'Resume', onSelect: () => act(undefined, c.id, 'resume') }] : []),
-                  ...(LOOP_ACTION_SOURCE_STATUSES.stop.has(c.status) ? [{ icon: <Square size={15} />, label: 'Stop', onSelect: () => act(undefined, c.id, 'stop') }] : []),
+                  ...(loopActionSources(c).pause.has(c.status) ? [{ icon: <Pause size={15} />, label: 'Pause', onSelect: () => act(undefined, c.id, 'pause') }] : []),
+                  ...(loopActionSources(c).resume.has(c.status) ? [{ icon: <Play size={15} />, label: 'Resume', onSelect: () => act(undefined, c.id, 'resume') }] : []),
+                  ...(loopActionSources(c).stop.has(c.status) ? [{ icon: <Square size={15} />, label: 'Stop', onSelect: () => act(undefined, c.id, 'stop') }] : []),
                   ...(['complete', 'stopped', 'failed'].includes(c.status) ? [{ icon: <Trash2 size={15} />, label: 'Delete', danger: true, onSelect: () => del(undefined, c.id) }] : []),
                 ]
                 return (
@@ -210,9 +210,9 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
 
                     { }
                     <div className={`flex items-center gap-1 shrink-0 transition-opacity ${confirmDelete === c.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
-                      {LOOP_ACTION_SOURCE_STATUSES.pause.has(c.status) && <IconButton icon={Pause} label="Pause" size={34} onClick={(e) => act(e, c.id, 'pause')} />}
-                      {LOOP_ACTION_SOURCE_STATUSES.resume.has(c.status) && <IconButton icon={Play} label="Resume" size={34} onClick={(e) => act(e, c.id, 'resume')} />}
-                      {LOOP_ACTION_SOURCE_STATUSES.stop.has(c.status) && <IconButton icon={Square} label="Stop" size={34} onClick={(e) => act(e, c.id, 'stop')} />}
+                      {loopActionSources(c).pause.has(c.status) && <IconButton icon={Pause} label="Pause" size={34} onClick={(e) => act(e, c.id, 'pause')} />}
+                      {loopActionSources(c).resume.has(c.status) && <IconButton icon={Play} label="Resume" size={34} onClick={(e) => act(e, c.id, 'resume')} />}
+                      {loopActionSources(c).stop.has(c.status) && <IconButton icon={Square} label="Stop" size={34} onClick={(e) => act(e, c.id, 'stop')} />}
                       {['complete', 'stopped', 'failed'].includes(c.status) && (
                         <IconButton icon={Trash2} size={34} tone="danger"
                           label={confirmDelete === c.id ? 'Click again to delete' : 'Delete loop'}
@@ -225,11 +225,11 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
                       <ProgressRing pct={pct} tone={loopStatusColor(dispStatus)} label={`Cycle progress: ${cycle}${c.max_cycles ? ` of ${c.max_cycles}` : ''}`} />
                       {
 }
-                      <span data-type="caption" className="text-on-surface-low tabular-nums w-9"
+                      {c.run_id ? <span className="w-9" aria-hidden="true" /> : <span data-type="caption" className="text-on-surface-low tabular-nums w-9"
                         title={`${c.findings?.length ?? 0} findings`}>
                         <span aria-hidden="true">{c.findings?.length ?? 0} fnd</span>
                         <span className="sr-only">{c.findings?.length ?? 0} findings</span>
-                      </span>
+                      </span>}
                     </div>
                   </motion.div>
                   </ContextMenu>
@@ -254,7 +254,7 @@ export function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () 
   const heatData = findingHeatData(loop.findings)
   return (
     <div className="flex min-w-0 flex-col gap-l">
-      <Button onClick={onOpenFull}><ExternalLink size={15} /> Open full loop</Button>
+      <Button onClick={onOpenFull}><ExternalLink size={15} /> {loop.run_id ? 'Open the run' : 'Open full loop'}</Button>
 
       <div data-type="body-s" className="flex flex-wrap items-center gap-s">
         <span className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={loopStatusTone(dispStatus)}>

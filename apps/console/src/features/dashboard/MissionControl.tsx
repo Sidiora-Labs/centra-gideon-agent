@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, X } from 'lucide-react'
-import { api, type ChatSessionSummary, type InboxItem, type PendingApproval } from '../../shared/data/api'
+import { api, type ChatSessionSummary, type InboxItem, type Loop, type PendingApproval } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { Button } from '../../shared/ui/Button'
 import { TextLink } from '../../shared/ui/TextLink'
-import { LANES, toLanes, type Lane } from '../../shared/data/attentionLanes'
+import { LANES, toLanes, type Lane, type LaneCard } from '../../shared/data/attentionLanes'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 
@@ -41,6 +41,7 @@ interface Attention {
   items: InboxItem[]
   approvals: PendingApproval[]
   activity: SessionActivity[]
+  loops: Loop[]
 }
 
 export interface SessionActivity {
@@ -63,12 +64,13 @@ function activityOf(s: ChatSessionSummary): SessionActivity {
 }
 
 async function readAttention(): Promise<Attention> {
-  const [items, approvals, sessions] = await Promise.all([
+  const [items, approvals, sessions, loops] = await Promise.all([
     api.inboxOpen(),
     api.approvals(),
     api.chatSessions(),
+        api.uLoops(),
   ])
-  return { items, approvals, activity: sessions.map(activityOf) }
+  return { items, approvals, activity: sessions.map(activityOf), loops }
 }
 
 export interface CardQuestion {
@@ -114,7 +116,8 @@ export function MissionControl() {
   const items = data?.items ?? []
   const approvals = data?.approvals ?? []
   const activity = data?.activity ?? []
-  const lanes = useMemo(() => toLanes(items, approvals, activity), [items, approvals, activity])
+  const loops = data?.loops ?? []
+  const lanes = useMemo(() => toLanes(items, approvals, activity, loops), [items, approvals, activity, loops])
   const cards = useMemo(() => {
     const inboxById = new Map(items.map(item => [item.id, item]))
     const approvalsById = new Map(approvals.map(approval => [approval.id, approval]))
@@ -210,7 +213,7 @@ export function MissionControl() {
   )
 }
 
-type ConsumedCard = {
+type ConsumedCard = Pick<LaneCard, 'origin'> & {
   id: string
   title?: string
   detail?: string
@@ -307,6 +310,11 @@ function AttentionCard({
       {card.item ? (
         <TextLink href={`#/inbox?open=${encodeURIComponent(card.item.id)}`} size="xs" aria-label={`Open inbox item: ${subject}`}>
           Open inbox item
+        </TextLink>
+      ) : null}
+      {card.origin === 'workflow' ? (
+        <TextLink href={`#/workflows/runs/${encodeURIComponent(card.id)}`} size="xs" aria-label={`Open the run: ${subject}`}>
+          Open the run
         </TextLink>
       ) : null}
       {question?.prompt ? (

@@ -69,3 +69,14 @@ export const LOOP_ACTION_SOURCE_STATUSES: Readonly<Record<LoopAction, ReadonlySe
   resume: new Set(['paused', 'stagnant', 'blocked', 'needs_input', 'failed']),
   stop: STOPPABLE_LOOP_STATUSES,
 }
+
+export const RUN_LOOP_ACTION_SOURCE_STATUSES: Readonly<Record<LoopAction, ReadonlySet<string>>> = {
+  start: new Set(['ready']),
+  pause: new Set(['running']),
+  resume: new Set(['paused']),
+  stop: new Set(['ready', 'running', 'paused', 'needs_input']),
+}
+
+export function loopActionSources(loop: { run_id?: string }): Readonly<Record<LoopAction, ReadonlySet<string>>> {
+  return loop.run_id ? RUN_LOOP_ACTION_SOURCE_STATUSES : LOOP_ACTION_SOURCE_STATUSES
+}

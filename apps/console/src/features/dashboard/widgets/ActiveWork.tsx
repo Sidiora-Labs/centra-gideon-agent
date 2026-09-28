@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Send, MessageCircleQuestion, Coffee } from 'lucide-react'
 import { api, type Loop } from '../../../shared/data/api'
+import { loopRoute } from '../../../shared/data/loopKind'
 import { useDashboardLive } from '../DashboardLive'
 import { loopStatusLabel, loopStatusColor, effectiveLoopStatus, ACTIVE_LOOP_STATUSES } from '../../../shared/data/loopStatus'
 import { SlotEmptyState, RowAction, StatusDot } from './kit'
@@ -66,7 +67,7 @@ function ActiveRow({ loop, navigate }: { loop: Loop; navigate: RouteProps['navig
       className="rounded-lg bg-surface-low p-m"
     >
       <div className="flex items-center gap-s">
-        <button type="button" onClick={() => navigate(`loops/${loop.id}`)} className="flex min-w-0 flex-1 items-center gap-s text-left">
+        <button type="button" onClick={() => navigate(loopRoute(loop))} className="flex min-w-0 flex-1 items-center gap-s text-left">
           {pct != null
             ? <ProgressRing pct={pct} tone={statusColor} label={`Cycle progress for ${loop.name || loop.task || 'this loop'}`} />
             : <StatusDot color={statusColor} pulse={loop.status === 'running'} />}
@@ -78,11 +79,11 @@ function ActiveRow({ loop, navigate }: { loop: Loop; navigate: RouteProps['navig
           </div>
         </button>
         {loop.status === 'needs_input' && !answering && (
-          <RowAction tone="primary" onClick={() => setAnswering(true)} title="Answer the loop's question"
+          <RowAction tone="primary" onClick={() => loop.run_id ? navigate(loopRoute(loop)) : setAnswering(true)} title="Answer the loop's question"
             ariaLabel={`Answer: ${loopLabel}`}><MessageCircleQuestion size={14} /> Answer</RowAction>
         )}
         {loop.status !== 'needs_input' && !answering && (
-          <RowAction tone="default" onClick={() => setAnswering(true)} title="Nudge this loop"
+          <RowAction tone="default" onClick={() => loop.run_id ? navigate(loopRoute(loop)) : setAnswering(true)} title="Nudge this loop"
             ariaLabel={`Nudge: ${loopLabel}`}><Send size={14} /> Nudge</RowAction>
         )}
       </div>

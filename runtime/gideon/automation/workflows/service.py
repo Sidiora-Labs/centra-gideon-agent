@@ -598,6 +598,9 @@ async def start_run(
     idempotency_key: str = "",
     blocking_timeout: float = 0.0,
     skip_preflight: bool = False,
+    policy_overrides: dict[str, Any] | None = None,
+    loop_kind: str = "",
+    loop_name: str = "",
 ) -> dict[str, Any]:
     """Instantiate a def and start driving it.
 
@@ -640,6 +643,18 @@ async def start_run(
             invalid_inputs=invalid,
         )
 
+    policy_overrides = dict(policy_overrides or {})
+    if policy_overrides:
+        from gideon.automation.workflows.supervisor_policy import OVERRIDABLE_POLICY_KEYS
+
+        unknown = sorted(set(policy_overrides) - OVERRIDABLE_POLICY_KEYS)
+        if unknown:
+            return _service_failure(
+                "WF_POLICY_OVERRIDE_INVALID",
+                f"unknown policy override key(s) {unknown}; allowed: {sorted(OVERRIDABLE_POLICY_KEYS)}",
+                invalid_overrides=unknown,
+            )
+
     if not skip_preflight:
         from gideon.automation.workflows.preflight import preflight as run_preflight
 
@@ -665,6 +680,9 @@ async def start_run(
     run_extra: dict[str, Any] = {}
     if inherited is not ownership.MemoryMode.NORMAL:
         run_extra = ownership.stamp_run_mode({}, inherited)
+    if loop_kind:
+        run_extra["loop_kind"] = str(loop_kind)
+        run_extra["loop_name"] = str(loop_name or "")
 
     run = store.create(
         WorkflowRun(
@@ -676,6 +694,7 @@ async def start_run(
             mode=mode if mode in ("blocking", "background") else "background",
             project_id=project_id,
             origin=RunOrigin(kind=origin_kind, session_key=session_key),
+            policy_overrides=policy_overrides,
             extra=run_extra,
         )
     )
@@ -744,7 +763,16 @@ async def start_kind_run(
             f"loop kind {kind!r} has no bundled convergence launch",
         )
     register_bundled_provider()
-    return await start_run(name=resolve_kind(normalized), inputs=inputs, **options)
+    title = str(options.pop("title", "") or "").strip()
+    policy_overrides = options.pop("policy_overrides", None)
+    return await start_run(
+        name=resolve_kind(normalized),
+        inputs=inputs,
+        loop_kind=normalized,
+        loop_name=title,
+        policy_overrides=policy_overrides,
+        **options,
+    )
 
 
 async def start_draft(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
@@ -1938,11 +1966,7 @@ def workspace_review(run_id: str) -> dict[str, Any]:
 
 
 def pause_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
-    """Stop launching new nodes; in-flight ones finish.
-
-    A pause is a REQUEST recorded on the run, consumed by the tick loop — the same
-    single-writer discipline as cancel.
-    """
+    """Persist a pause request for the controller's next serialized tick."""
     run = store.get(run_id)
     if run is None:
         return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
@@ -1950,9 +1974,113 @@ def pause_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
         return _service_failure(
             "WF_RUN_ALREADY_TERMINAL", f"run is already {run.status.value}"
         )
-    run.extra["pause_requested"] = True
-    store.save(run)
+    if run.status == RunStatus.DRAFT:
+        return _service_failure("WF_RUN_NOT_LIVE", "this run has not started")
+    store.request_pause(run_id)
+    controller = _live(run_id, supervisor)
+    if controller is not None:
+        controller.wake()
     return _ok(run_id=run_id, pause_requested=True)
+
+
+async def pause_run_and_wait(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    result = pause_run(run_id, supervisor=supervisor)
+    if not result.get("ok"):
+        return result
+    controller = _live(run_id, supervisor)
+    if controller is None:
+        run = store.get(run_id)
+        if run is not None and run.status == RunStatus.PAUSED:
+            return _ok(run_id=run_id, pause_requested=True, status=run.status.value)
+        return _service_failure("WF_RUN_NOT_LIVE", "the run controller is unavailable")
+    status = await controller.wait_for_pause()
+    if status != RunStatus.PAUSED:
+        return _service_failure(
+            "WF_RUN_PAUSE_INCOMPLETE",
+            f"the run stopped before pause was applied ({status.value})",
+            status=status.value,
+        )
+    return _ok(run_id=run_id, pause_requested=True, status=status.value)
+
+
+def _loop_resume_effects_pending(run_id: str) -> list[dict[str, Any]]:
+    events = journal_mod.ledger(
+        run_id,
+        kinds={journal_mod.EFFECT, journal_mod.STEP_COMPLETED, journal_mod.STEP_CACHED, journal_mod.STEP_SKIPPED},
+    )
+    latest_effect: dict[tuple[str, int], tuple[int, dict[str, Any]]] = {}
+    completed_at: dict[tuple[str, int], int] = {}
+    for position, event in enumerate(events):
+        path = str(event.get("instance_path", "") or "")
+        try:
+            epoch = int(event.get("epoch", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        key = (path, epoch)
+        if event.get("kind") == journal_mod.EFFECT:
+            latest_effect[key] = (position, event)
+        elif event.get("kind") in (journal_mod.STEP_COMPLETED, journal_mod.STEP_CACHED, journal_mod.STEP_SKIPPED):
+            completed_at[key] = position
+
+    pending: list[dict[str, Any]] = []
+    for (path, epoch), (position, event) in latest_effect.items():
+        status = str(event.get("effect_status", "") or "")
+        if status not in ("attempted", "committed") or completed_at.get((path, epoch), -1) > position:
+            continue
+        pending.append(
+            {
+                "node": str(event.get("node_id", "") or path or "unknown"),
+                "epoch": epoch,
+                "effect_status": status,
+            }
+        )
+    return pending
+
+
+async def resume_loop_run(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+    run = store.get(run_id)
+    if run is None:
+        return _run_not_found(run_id)
+    if not isinstance(run.extra, dict) or not run.extra.get("loop_kind"):
+        return _service_failure("WF_RUN_NOT_LOOP", "this run was not started as a loop")
+    if run.status != RunStatus.PAUSED:
+        return _service_failure("WF_RUN_NOT_PAUSED", f"run is {run.status.value}")
+    try:
+        blocked_effects = _loop_resume_effects_pending(run_id)
+    except Exception:
+        logger.exception("could not inspect paused loop effects for %s", run_id)
+        return _service_failure(
+            "WF_LOOP_RESUME_RECONCILE_REQUIRED",
+            "the run's effect journal could not be checked; keep it paused until the journal is readable",
+            blocked_effects=[],
+            journal_readable=False,
+        )
+    if blocked_effects:
+        nodes = ", ".join(effect["node"] for effect in blocked_effects)
+        return _service_failure(
+            "WF_LOOP_RESUME_RECONCILE_REQUIRED",
+            f"node(s) {nodes} have effects without a completed replay; reconcile each external result, then skip the affected node using the run controls after gateway recovery attaches its controller, or cancel the run; skipping keeps it paused until you explicitly resume",
+            blocked_effects=blocked_effects,
+        )
+    store.clear_pause(run_id)
+    run.extra.pop("pause_requested", None)
+    store.save(run)
+    controller = _live(run_id, supervisor)
+    if controller is not None:
+        controller.wake()
+    elif supervisor is not None:
+        spec = store.read_spec(run_id)
+        if not isinstance(spec, dict):
+            return _service_failure("WF_RUN_NO_SPEC", "the run spec is missing or unreadable")
+        try:
+            await supervisor.launch(run, spec)
+        except Exception as exc:
+            store.request_pause(run_id)
+            return _service_failure("WF_RUN_LAUNCH_FAILED", f"could not resume the run: {exc}")
+    else:
+        store.request_pause(run_id)
+        return _service_failure("WF_NO_SUPERVISOR", "the workflow supervisor is unavailable")
+    return _ok(run_id=run_id, resumed=True, status=RunStatus.RUNNING.value)
 
 
 def steer_run(run_id: str, text: str) -> dict[str, Any]:

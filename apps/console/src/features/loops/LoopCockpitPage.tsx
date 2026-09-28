@@ -40,7 +40,7 @@ import { useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { accentChip } from '../../shared/theme/accent'
 import { WARN_STRIP } from '../../shared/theme/warnings'
 import { tabListKeys } from '../../shared/data/tabListKeys'
-import { shownCycle, loopStatusLabel, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, LOOP_ACTION_SOURCE_STATUSES } from '../../shared/data/loopStatus'
+import { shownCycle, loopStatusLabel, effectiveLoopStatus, ACTIVE_LOOP_STATUSES, loopActionSources } from '../../shared/data/loopStatus'
 import { notify } from '../../app/shell/appSdk'
 import { copyText } from '../../app/shell/clipboard'
 
@@ -543,10 +543,10 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
         right={
           <HeaderActions className="max-w-[60vw]">
             {!active && <HeaderControl icon={Trash2} label={confirmDelete ? 'Confirm delete?' : 'Delete'} danger priority="low" onClick={del} />}
-            {LOOP_ACTION_SOURCE_STATUSES.start.has(c.status) && <HeaderControl icon={Start} label="Start" variant="primary" priority="primary" onClick={() => act('start')} />}
-            {LOOP_ACTION_SOURCE_STATUSES.pause.has(c.status) && <HeaderControl icon={Pause} label="Pause" variant="secondary" priority="primary" onClick={() => act('pause')} />}
-            {LOOP_ACTION_SOURCE_STATUSES.resume.has(c.status) && <HeaderControl icon={Play} label="Resume" variant="primary" priority="primary" onClick={() => act('resume')} />}
-            {LOOP_ACTION_SOURCE_STATUSES.stop.has(c.status) && <HeaderControl icon={Square} label={confirmStop ? 'Stop for good?' : 'Stop'} variant={confirmStop ? 'danger' : 'secondary'} onClick={() => { if (!confirmStop) { setConfirmStop(true); return } setConfirmStop(false); act('stop') }} />}
+            {loopActionSources(c).start.has(c.status) && <HeaderControl icon={Start} label="Start" variant="primary" priority="primary" onClick={() => act('start')} />}
+            {loopActionSources(c).pause.has(c.status) && <HeaderControl icon={Pause} label="Pause" variant="secondary" priority="primary" onClick={() => act('pause')} />}
+            {loopActionSources(c).resume.has(c.status) && <HeaderControl icon={Play} label="Resume" variant="primary" priority="primary" onClick={() => act('resume')} />}
+            {loopActionSources(c).stop.has(c.status) && <HeaderControl icon={Square} label={confirmStop ? 'Stop for good?' : 'Stop'} variant={confirmStop ? 'danger' : 'secondary'} onClick={() => { if (!confirmStop) { setConfirmStop(true); return } setConfirmStop(false); act('stop') }} />}
             {
 }
             {active && <HeaderControl icon={MessageSquarePlus} label="Nudge" variant="secondary" ariaExpanded={nudgeOpen} onClick={() => setNudgeOpen(!nudgeOpen)} />}
@@ -629,7 +629,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
               <p className="break-words opacity-90">{c.error_message}</p>
               {
 }
-              {LOOP_ACTION_SOURCE_STATUSES.resume.has(c.status) && <p className="mt-1.5 opacity-75">Fix the underlying cause, then <span style={fvs(500)}>Resume</span> to continue from where it left off.</p>}
+              {loopActionSources(c).resume.has(c.status) && <p className="mt-1.5 opacity-75">Fix the underlying cause, then <span style={fvs(500)}>Resume</span> to continue from where it left off.</p>}
             </motion.div>
           )})()}
           {(c.unrunnable_commands?.length ?? 0) > 0 && (

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { loopRoute } from '../../shared/data/loopKind'
+import { useEffect, useRef, useState } from 'react'
 import { LoopsListPage } from './LoopsListPage'
 import type { LoopDraft } from './loopDraft'
 import { LoopPlanReview } from './LoopPlanReview'
@@ -65,7 +66,7 @@ export function LoopsSection({ sub, navigate, query, setQuery }: RouteProps) {
   }
 
   if (seg === 'history') {
-    return <LoopsListPage onCreate={() => navigate('loops')} onOpen={(id) => navigate(`loops/${id}`)} query={query} setQuery={setQuery} />
+    return <LoopsListPage onCreate={() => navigate('loops')} onOpen={(loop) => navigate(loopRoute(loop))} query={query} setQuery={setQuery} />
   }
 
   if (seg) {
@@ -76,12 +77,18 @@ export function LoopsSection({ sub, navigate, query, setQuery }: RouteProps) {
 }
 
 function CockpitRouter({ id, navigate, query, setQuery }: { id: string } & Pick<RouteProps, 'navigate' | 'query' | 'setQuery'>) {
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   const [kind, setKind] = useState<Loop['kind'] | null>(null)
   const [missing, setMissing] = useState(false)
   useEffect(() => {
     let alive = true
     setKind(null); setMissing(false)
-    api.uLoop(id).then((l) => { if (alive) setKind(l?.kind ?? null) })
+    api.uLoop(id).then((l) => {
+      if (!alive) return
+      if (l?.run_id) { navigateRef.current(loopRoute(l), { replace: true }); return }
+      setKind(l?.kind ?? null)
+    })
       .catch(() => { if (alive) setMissing(true) })
     return () => { alive = false }
   }, [id])

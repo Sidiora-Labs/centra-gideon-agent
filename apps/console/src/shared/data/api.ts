@@ -3166,6 +3166,7 @@ export interface LoopVerdict {
 export interface LoopNudge { text: string; sent_at: number; sent_at_cycle: number; applied_cycle: number | null }
 export interface RosterMember { role: string; persona: string; role_hint?: string; agent_name?: string }
 export interface GoalLoop {
+  run_id?: string; workflow_name?: string
   id: string; name: string; goal: string; sub_goals: string[]; deliverables?: string[]; scope?: string[]
   goal_type: GoalType; intake_rigor: string
   execution: 'solo' | 'multi_agent'; roster?: RosterMember[]; strategy_id?: string
@@ -3316,6 +3317,7 @@ export interface LoopSpend {
   planning: { dollars_est: number; turns: number }
 }
 export interface Loop {
+  run_id?: string; workflow_name?: string
   id: string; kind: LoopKind; name: string; task: string; summary?: string
   spend?: LoopSpend
   intake_rigor?: string
