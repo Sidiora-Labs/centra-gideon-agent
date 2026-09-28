@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +40,8 @@ DRILL_SECS = 30 * 24 * 60 * 60
 TICK_SECS = 5 * 60
 
 _STATE_FILE = "durability_state.json"
+
+_history_service_lock = threading.Lock()
 
 
 @dataclass
@@ -843,9 +846,25 @@ class DurabilityService:
         # `ConsoleState.notify`-shaped callable, or None for headless runs.
         self._notifier = notifier
         self._task: asyncio.Task | None = None
+        self._stopping_task: asyncio.Task | None = None
+        self._history_debouncer = None
 
     async def start(self) -> None:
-        if self._task is not None:
+        if self._task is not None and not self._task.done():
+            return
+        if self._stopping_task is not None:
+            task = self._stopping_task
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError("durability service is still stopping") from exc
+            except Exception:
+                logger.warning("durability service stopped with an error", exc_info=True)
+            if self._stopping_task is task:
+                self._stopping_task = None
+        if self._task is not None and not self._task.done():
             return
         self._task = asyncio.create_task(self._loop())
         self._install_history()
@@ -855,9 +874,15 @@ class DurabilityService:
         try:
             if not _cfg().time_travel:
                 return
-            from gideon.operations.durability.history_debounce import install
+            from gideon.operations.durability.history_debounce import active, install
 
-            install(home=active_home())
+            with _history_service_lock:
+                current = active()
+                if current is not None:
+                    return
+                installed = install(home=active_home())
+                if installed is not None and active() is installed:
+                    self._history_debouncer = installed
         except Exception:  # noqa: BLE001 — history must never block boot
             logger.warning(
                 "durability: could not install time-travel history", exc_info=True
@@ -865,12 +890,45 @@ class DurabilityService:
 
     def stop(self) -> None:
         if self._task is not None:
-            self._task.cancel()
+            task = self._task
             self._task = None
-        try:
-            from gideon.operations.durability.history_debounce import uninstall
+            self._stopping_task = task
+            if not task.done():
+                task.cancel()
+        self._uninstall_history()
 
-            uninstall()
+    async def shutdown(self, timeout: float = 5.0) -> bool:
+        if timeout < 0:
+            raise ValueError("timeout must not be negative")
+        self.stop()
+        task = self._stopping_task
+        if task is None:
+            return True
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except asyncio.CancelledError:
+            pass
+        except asyncio.TimeoutError:
+            logger.warning("durability service did not stop within %.1fs", timeout)
+            return False
+        except Exception:  # noqa: BLE001
+            logger.warning("durability service stopped with an error", exc_info=True)
+        stopped = task.done()
+        if stopped and self._stopping_task is task:
+            self._stopping_task = None
+        return stopped
+
+    def _uninstall_history(self) -> None:
+        installed = self._history_debouncer
+        if installed is None:
+            return
+        try:
+            from gideon.operations.durability.history_debounce import active, uninstall
+
+            with _history_service_lock:
+                if active() is installed:
+                    uninstall()
+                self._history_debouncer = None
         except Exception:  # noqa: BLE001
             logger.debug("durability: history uninstall failed", exc_info=True)
 

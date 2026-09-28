@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING
 
 from gideon.extensions.apps.manager import app_dir
 from gideon.extensions.apps.manifest import AppManifest
+from gideon.core.periodic_sweep import PeriodicSweep
 
 if TYPE_CHECKING:
     from gideon.integrations.sandbox_providers import SandboxSpec
@@ -463,25 +464,17 @@ def get_backend_supervisor() -> BackendSupervisor:
 
 
 _WATCHDOG_INTERVAL = 30
+_WATCHDOG = PeriodicSweep(
+    "app-backend-watchdog", _WATCHDOG_INTERVAL, lambda: _check_and_revive()
+)
 
 
 def start_backend_watchdog() -> threading.Thread:
-    """Start a daemon thread that checks backend health every 30s and
-    relaunches any that crashed. Returns the thread (for testing)."""
-    import time
+    return _WATCHDOG.start()
 
-    def _loop() -> None:
-        while True:
-            time.sleep(_WATCHDOG_INTERVAL)
-            try:
-                _check_and_revive()
-            except Exception:
-                logger.debug("backend watchdog sweep failed", exc_info=True)
 
-    t = threading.Thread(target=_loop, name="app-backend-watchdog", daemon=True)
-    t.start()
-    logger.info("app-backend watchdog started (interval=%ds)", _WATCHDOG_INTERVAL)
-    return t
+def stop_backend_watchdog(timeout: float = 5.0) -> bool:
+    return _WATCHDOG.stop(timeout=timeout)
 
 
 def _check_and_revive() -> None:

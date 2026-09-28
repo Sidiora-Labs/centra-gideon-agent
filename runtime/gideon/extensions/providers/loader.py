@@ -418,3 +418,36 @@ def load_all_extensions() -> None:
         start_sidecar_watchdog()
     except Exception:
         logger.debug("app backend startup launch failed", exc_info=True)
+
+
+def stop_extension_watchdogs(timeout: float = 5.0) -> bool:
+    stopped = True
+    stop_calls = (
+        (
+            "backend",
+            "gideon.extensions.apps.backend_runtime",
+            "stop_backend_watchdog",
+        ),
+        (
+            "worker",
+            "gideon.extensions.apps.worker_runtime",
+            "stop_worker_watchdog",
+        ),
+        (
+            "sidecar",
+            "gideon.integrations.local_models.sidecar",
+            "stop_sidecar_watchdog",
+        ),
+    )
+    for label, module_name, function_name in stop_calls:
+        try:
+            from importlib import import_module
+
+            stop = getattr(import_module(module_name), function_name)
+            if not stop(timeout=timeout):
+                stopped = False
+                logger.warning("%s watchdog did not stop within %.1fs", label, timeout)
+        except Exception:
+            stopped = False
+            logger.warning("%s watchdog shutdown failed", label, exc_info=True)
+    return stopped

@@ -1847,16 +1847,62 @@ async def start_dashboard(
     app.on_cleanup.append(_mcp_client_shutdown)
 
     async def _app_backends_shutdown(app_: web.Application) -> None:
-        """Terminate every app-backend subprocess on gateway stop. Without this the
-        backends (snippet-lab/standup-notes/… server.py) were spawned on enable but
-        never reaped on shutdown — so each gateway restart ORPHANED another set
-        (reparented to init), leaking dozens of processes over a dev session."""
+        """Stop gateway-owned maintenance and supervised app processes."""
+        try:
+            from gideon.extensions.providers.loader import stop_extension_watchdogs
+
+            if not stop_extension_watchdogs():
+                logger.warning("one or more app watchdogs did not stop cleanly")
+        except Exception:
+            logger.debug("app watchdog shutdown failed", exc_info=True)
+
+        async def _cancel_task(task: asyncio.Task | None, label: str) -> None:
+            if task is None:
+                return
+            if not task.done():
+                task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                logger.warning("%s did not stop within 5s", label)
+            except Exception:
+                logger.debug("%s stopped with an error", label, exc_info=True)
+
+        for attr, label in (
+            ("_terminal_reaper", "terminal reaper"),
+            ("_sel_prune_task", "SEL prune task"),
+            ("_upload_sweep_task", "upload sweep task"),
+        ):
+            await _cancel_task(getattr(state, attr, None), label)
+
+        service = getattr(state, "_durability_svc", None)
+        if service is not None:
+            try:
+                if not await service.shutdown():
+                    logger.warning("durability service did not stop cleanly")
+            except Exception:
+                logger.warning("durability service shutdown failed", exc_info=True)
+
         try:
             from gideon.extensions.apps.backend_runtime import get_backend_supervisor
 
             get_backend_supervisor().stop_all()
         except Exception:
-            logger.debug("app-backend shutdown failed", exc_info=True)
+            logger.warning("app-backend shutdown failed", exc_info=True)
+        try:
+            from gideon.extensions.apps.worker_runtime import get_worker_supervisor
+
+            get_worker_supervisor().stop_all()
+        except Exception:
+            logger.warning("app-worker shutdown failed", exc_info=True)
+        try:
+            from gideon.integrations.local_models.sidecar import stop_all_sidecars
+
+            stop_all_sidecars()
+        except Exception:
+            logger.warning("local-model sidecar shutdown failed", exc_info=True)
 
     app.on_cleanup.append(_app_backends_shutdown)
 

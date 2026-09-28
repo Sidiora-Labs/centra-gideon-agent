@@ -73,6 +73,7 @@ from gideon.extensions.apps.background import (
 )
 from gideon.extensions.apps.manager import app_dir
 from gideon.extensions.apps.manifest import AppManifest
+from gideon.core.periodic_sweep import PeriodicSweep
 
 logger = logging.getLogger(__name__)
 
@@ -709,21 +710,15 @@ def get_worker_supervisor() -> WorkerSupervisor:
 
 
 def start_worker_watchdog() -> threading.Thread:
-    """Start the daemon thread that sweeps every ``_WATCHDOG_INTERVAL`` seconds.
+    return _WATCHDOG.start()
 
-    The equivalent of ``start_backend_watchdog``, and it wants the same call site:
-    ``providers/loader.py`` starts that one at boot. Returned for testing.
-    """
 
-    def _loop() -> None:
-        while True:
-            time.sleep(_WATCHDOG_INTERVAL)
-            try:
-                get_worker_supervisor().sweep()
-            except Exception:  # noqa: BLE001 — one bad sweep must not end the watchdog
-                logger.debug("app-worker watchdog sweep failed", exc_info=True)
+def stop_worker_watchdog(timeout: float = 5.0) -> bool:
+    return _WATCHDOG.stop(timeout=timeout)
 
-    t = threading.Thread(target=_loop, name="app-worker-watchdog", daemon=True)
-    t.start()
-    logger.info("app-worker watchdog started (interval=%ds)", _WATCHDOG_INTERVAL)
-    return t
+
+_WATCHDOG = PeriodicSweep(
+    "app-worker-watchdog",
+    _WATCHDOG_INTERVAL,
+    lambda: get_worker_supervisor().sweep(),
+)
