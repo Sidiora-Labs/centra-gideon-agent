@@ -7,6 +7,8 @@ const BASE_URL = process.env.PW_BASE_URL || `http://localhost:${PORT}`
 const GATEWAY_PORT = Number(process.env.PW_GATEWAY_PORT || 10437)
 
 const STORAGE_STATE = process.env.STORAGE_STATE || 'e2e/.auth/state.json'
+const MODEL_DOWNLOAD_LIVE_REQUESTED = !!process.env.GIDEON_E2E_MODEL_ACTION
+  || process.argv.some((argument) => argument.includes('modelDownloadSafety.live'))
 
 export const VISUAL_BASELINE_PLATFORMS = ['darwin'] as const
 
@@ -34,7 +36,10 @@ const GATEWAY_COMMAND = [
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: /onboardingGeometry\.spec\.ts$/,
+  testIgnore: [
+    /onboardingGeometry\.spec\.ts$/,
+    ...(!MODEL_DOWNLOAD_LIVE_REQUESTED ? [/modelDownloadSafety\.live\.spec\.ts$/] : []),
+  ],
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}-{platform}{ext}',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
