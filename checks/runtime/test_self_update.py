@@ -1,9 +1,8 @@
 """Install-kind detection + the shared self-update primitives (contracts C1/C2).
 
-Four fixtures — one per InstallKind — pin the resolution order:
-env (container/desktop) wins first, then a .git working tree => git, else pip.
-Each test isolates the two env vars the classifier reads (monkeypatch.delenv)
-so it never inherits the runner's real environment.
+The classifier gives explicit container/desktop declarations priority, then
+classifies the installed package location as a checkout or wheel install.
+Configured workspaces never decide the package kind.
 
 The module under test moved out of ``dashboard/handlers/updates_kind.py`` into the
 core package in DIST-13, so the CLI can reach the same decision the dashboard makes
@@ -44,40 +43,26 @@ def test_env_kind_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_unknown_env_kind_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIDEON_INSTALL_KIND", "banana")
-    assert detect_install_kind() == "pip"
+    assert detect_install_kind() == uk._install_kind_for_package(uk.__file__)
 
 
-def test_git_when_project_dir_has_dot_git(
+def test_workspace_checkout_does_not_override_package_location(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-    assert detect_install_kind() == "git"
+    assert detect_install_kind() == uk._install_kind_for_package(uk.__file__)
 
 
-def test_git_worktree_dot_git_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    (tmp_path / ".git").write_text("gitdir: /somewhere/.git/worktrees/x\n")
-    monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-    assert detect_install_kind() == "git"
-
-
-def test_git_when_dot_git_in_monorepo_parent(
+def test_workspace_path_does_not_change_package_kind(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    (tmp_path / ".git").mkdir()
-    nested = tmp_path / "Gideon"
-    nested.mkdir()
-    monkeypatch.setenv("GIDEON_PROJECT_DIR", str(nested))
-    assert detect_install_kind() == "git"
-
-
-def test_pip_when_no_env_no_git(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("GIDEON_PROJECT_DIR", str(tmp_path))
-    assert detect_install_kind() == "pip"
+    assert detect_install_kind() == uk._install_kind_for_package(uk.__file__)
 
 
-def test_pip_when_nothing_set() -> None:
-    assert detect_install_kind() == "pip"
+def test_kind_without_overrides_comes_from_package_location() -> None:
+    assert detect_install_kind() == uk._install_kind_for_package(uk.__file__)
 
 
 def test_install_kind_literal_values() -> None:
@@ -167,7 +152,7 @@ async def test_build_status_update_available(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_status_up_to_date_pip(monkeypatch) -> None:
+async def test_build_status_up_to_date_uses_running_package_kind(monkeypatch) -> None:
     async def _fake_release() -> dict:
         return {"tag": "v0.1.0", "name": "0.1.0", "body": ""}
 
@@ -175,9 +160,10 @@ async def test_build_status_up_to_date_pip(monkeypatch) -> None:
     monkeypatch.delenv("GIDEON_INSTALL_KIND", raising=False)
     monkeypatch.delenv("GIDEON_PROJECT_DIR", raising=False)
     status = await uk.build_update_status("0.1.0")
-    assert status["kind"] == "pip"
+    expected_kind = uk._install_kind_for_package(uk.__file__)
+    assert status["kind"] == expected_kind
     assert status["update_available"] is False
-    assert status["apply_method"] == "pip_upgrade"
+    assert status["apply_method"] == uk._APPLY_METHOD[expected_kind]
     assert status["instructions"] == []
 
 
@@ -303,7 +289,9 @@ async def test_c2_wire_shape_conformance(monkeypatch) -> None:
 
     monkeypatch.delenv("GIDEON_INSTALL_KIND", raising=False)
     p = await uk.build_update_status("0.1.0")
-    assert p["apply_method"] == "pip_upgrade"
+    package_kind = uk._install_kind_for_package(uk.__file__)
+    assert p["kind"] == package_kind
+    assert p["apply_method"] == uk._APPLY_METHOD[package_kind]
     assert p["commits_behind"] is None
     assert p["instructions"] == []
     assert p["current"] == "0.1.0"

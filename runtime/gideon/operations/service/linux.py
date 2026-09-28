@@ -22,6 +22,13 @@ import tempfile
 from pathlib import Path
 
 from gideon.operations.service.common import SERVICE_NAME, gideon_bin, service_path
+from gideon.operations.service.environment import (
+    ServiceEnvironment,
+    ServiceEnvironmentError,
+    resolve_service_environment,
+    status_environment_lines,
+    systemd_environment_lines,
+)
 
 UNIT_PATH = Path(f"/etc/systemd/system/{SERVICE_NAME}.service")
 
@@ -50,7 +57,9 @@ def _current_group(user: str) -> str:
     return user
 
 
-def render_unit() -> str:
+def render_unit(
+    env_additions: tuple[str, ...] = (), env_removals: tuple[str, ...] = ()
+) -> str:
     """Render the systemd system-unit file contents.
 
     Runs the gateway as the invoking user (``User=``, ``Group=``) so it
@@ -62,6 +71,15 @@ def render_unit() -> str:
     user = _current_user()
     group = _current_group(user) if user else ""
     home = str(Path.home())
+    environment = resolve_service_environment(env_additions, env_removals)
+    env_lines = systemd_environment_lines(
+        environment,
+        fixed_values={
+            "HOME": home,
+            "USER": user,
+            "PATH": service_path(home),
+        },
+    )
     return (
         "[Unit]\n"
         "Description=Gideon gateway (dashboard + channels + cron)\n"
@@ -79,9 +97,7 @@ def render_unit() -> str:
         "Restart=on-failure\n"
         "RestartSec=10\n"
         "TimeoutStopSec=20\n"
-        f"Environment=HOME={home}\n"
-        f"Environment=USER={user}\n"
-        f"Environment=PATH={service_path(home)}\n"
+        f"{env_lines}\n"
         "\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
@@ -159,7 +175,9 @@ def _write_unit_via_sudo(contents: str) -> subprocess.CompletedProcess[str]:
             pass
 
 
-def install() -> None:
+def install(
+    env_additions: tuple[str, ...] = (), env_removals: tuple[str, ...] = ()
+) -> None:
     """Write the unit file and enable+start the service. Idempotent.
 
     Calls ``sudo`` to write the unit and to invoke ``systemctl``. Sudo
@@ -179,7 +197,7 @@ def install() -> None:
             "Set $USER and re-run."
         )
 
-    write_res = _write_unit_via_sudo(render_unit())
+    write_res = _write_unit_via_sudo(render_unit(env_additions, env_removals))
     if write_res.returncode != 0:
         raise ServiceInstallError(
             "Failed to write the unit file. The sudo step is required because "
@@ -249,3 +267,20 @@ def status() -> str:
     """
     res = _systemctl("status", f"{SERVICE_NAME}.service", "--no-pager", sudo=False)
     return res.stdout or res.stderr
+
+
+def environment_status() -> str:
+    """Read the installed unit's safe environment and name-only exclusions."""
+    values: dict[str, str] = {}
+    excluded: list[str] = []
+    if UNIT_PATH.is_file():
+        for line in UNIT_PATH.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# GideonEnvironmentExcluded="):
+                excluded.append(line.partition("=")[2])
+            elif line.startswith("Environment=\"") and line.endswith('"'):
+                raw = line[len('Environment="') : -1]
+                name, separator, value = raw.partition("=")
+                if separator:
+                    value = value.replace("%%", "%").replace('\\"', '"').replace("\\\\", "\\")
+                    values[name] = value
+    return status_environment_lines(ServiceEnvironment(values, tuple(sorted(excluded))))

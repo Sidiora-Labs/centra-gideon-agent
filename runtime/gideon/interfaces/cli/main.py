@@ -1115,8 +1115,22 @@ per-arm marginal contribution is the leave-one-out delta with an enable/hold ver
         help="Manage the Gideon gateway as a system service (requires sudo on Linux)",
     )
     svc_sub = svc_parser.add_subparsers(dest="service_action")
-    svc_sub.add_parser(
+    svc_install_parser = svc_sub.add_parser(
         "install", help="Install and start the gateway service (sudo on Linux)"
+    )
+    svc_install_parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Add or override one allowlisted non-secret service variable (repeatable)",
+    )
+    svc_install_parser.add_argument(
+        "--no-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Remove one allowlisted inherited service variable (repeatable)",
     )
     svc_sub.add_parser(
         "uninstall", help="Stop and remove the gateway service (sudo on Linux)"

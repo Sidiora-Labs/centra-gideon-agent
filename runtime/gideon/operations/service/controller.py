@@ -10,6 +10,10 @@ import sys
 
 from gideon.operations.service import linux, macos
 from gideon.operations.service.common import Platform, current_platform
+from gideon.operations.service.environment import (
+    ServiceEnvironmentError,
+    resolve_service_environment,
+)
 
 
 def _unsupported_message() -> None:
@@ -21,7 +25,9 @@ def _unsupported_message() -> None:
     )
 
 
-def install_service() -> int:
+def install_service(
+    env_additions: tuple[str, ...] = (), env_removals: tuple[str, ...] = ()
+) -> int:
     """Install and start the platform service.
 
     Returns 0 on success, non-zero otherwise. On Linux the install
@@ -32,10 +38,18 @@ def install_service() -> int:
     invoked under sudo. On macOS no sudo is required. The CLI is
     expected to surface the sudo prompt to a real terminal.
     """
+    try:
+        resolve_service_environment(env_additions, env_removals)
+    except ServiceEnvironmentError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
     plat = current_platform()
     if plat == Platform.SYSTEMD:
         try:
-            linux.install()
+            if env_additions or env_removals:
+                linux.install(env_additions, env_removals)
+            else:
+                linux.install()
         except linux.ServiceInstallError as exc:
             print(f"❌ {exc}", file=sys.stderr)
             return 1
@@ -48,7 +62,10 @@ def install_service() -> int:
         return 0
     if plat == Platform.LAUNCHD:
         try:
-            macos.install()
+            if env_additions or env_removals:
+                macos.install(env_additions, env_removals)
+            else:
+                macos.install()
         except macos.ServiceInstallError as exc:
             print(f"❌ {exc}", file=sys.stderr)
             return 1
@@ -83,9 +100,15 @@ def service_status() -> int:
     plat = current_platform()
     if plat == Platform.SYSTEMD:
         print(linux.status())
+        configured = linux.environment_status()
+        if configured:
+            print(configured)
         return 0 if linux.is_active() else 1
     if plat == Platform.LAUNCHD:
         print(macos.status())
+        configured = macos.environment_status()
+        if configured:
+            print(configured)
         return 0 if macos.is_active() else 1
     _unsupported_message()
     return 2

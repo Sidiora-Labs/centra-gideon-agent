@@ -855,7 +855,10 @@ def _service_cmd(args: argparse.Namespace) -> int:
     """
     action = getattr(args, "service_action", None)
     if action == "install":
-        rc = service_controller.install_service()
+        rc = service_controller.install_service(
+            tuple(getattr(args, "env", ()) or ()),
+            tuple(getattr(args, "no_env", ()) or ()),
+        )
         sel().log_api_access(
             caller="cli",
             operation="service_install",

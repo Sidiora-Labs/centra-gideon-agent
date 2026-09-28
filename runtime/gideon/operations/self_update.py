@@ -103,13 +103,25 @@ def git_root(proj: str) -> str:
     return InstallLayout(proj).checkout()
 
 
+def _install_kind_for_package(package_file: str | Path) -> InstallKind:
+    """Classify the code location that contains the running package."""
+    package_dir = Path(package_file).resolve().parents[1]
+    runtime_dir = package_dir.parent
+    if package_dir.name != "gideon" or runtime_dir.name != "runtime":
+        return "pip"
+    package_source_root = runtime_dir.parent
+    return "git" if package_source_root.joinpath(".git").exists() else "pip"
+
+
 def detect_install_kind() -> InstallKind:
     if getattr(sys, "frozen", False):
         return "desktop"
     selected = (os.environ.get("GIDEON_INSTALL_KIND") or "").strip().lower()
     if selected in _ENV_KINDS:
         return cast(InstallKind, selected)
-    return "git" if git_root(project_dir()) else "pip"
+    # A configured project/workspace can be any checkout. Classify the running
+    # package itself so a wheel launched from a repository stays a pip install.
+    return _install_kind_for_package(__file__)
 
 
 def package_root(proj: str) -> str:

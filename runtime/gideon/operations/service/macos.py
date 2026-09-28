@@ -6,11 +6,17 @@ and is restarted on crash by ``KeepAlive``.
 """
 
 import os
+import plistlib
 import subprocess
 import tempfile
 from pathlib import Path
 
 from gideon.operations.service.common import LAUNCHD_LABEL, gideon_bin, service_path
+from gideon.operations.service.environment import (
+    ServiceEnvironment,
+    resolve_service_environment,
+    status_environment_lines,
+)
 
 class _HomePath(os.PathLike[str]):
     """Resolve a LaunchAgent path against the current macOS user home."""
@@ -44,14 +50,25 @@ def _xml_escape(value: str) -> str:
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def render_plist() -> str:
+def render_plist(
+    env_additions: tuple[str, ...] = (), env_removals: tuple[str, ...] = ()
+) -> str:
     """Render the launchd LaunchAgent plist contents."""
     bin_path = _xml_escape(gideon_bin())
     home_str = str(Path.home())
-    home = _xml_escape(home_str)
-    path = _xml_escape(service_path(home_str))
+    environment = resolve_service_environment(env_additions, env_removals)
     out_log = _xml_escape(str(STDOUT_LOG))
     err_log = _xml_escape(str(STDERR_LOG))
+    env_items = {"HOME": home_str, "PATH": service_path(home_str), **environment.values}
+    env_xml = "".join(
+        f"        <key>{_xml_escape(name)}</key>\n"
+        f"        <string>{_xml_escape(value)}</string>\n"
+        for name, value in sorted(env_items.items())
+    )
+    excluded_xml = "".join(
+        f"            <string>{_xml_escape(name)}</string>\n"
+        for name in environment.excluded_names
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -74,11 +91,12 @@ def render_plist() -> str:
         "    </dict>\n"
         "    <key>EnvironmentVariables</key>\n"
         "    <dict>\n"
-        "        <key>HOME</key>\n"
-        f"        <string>{home}</string>\n"
-        "        <key>PATH</key>\n"
-        f"        <string>{path}</string>\n"
+        f"{env_xml}"
         "    </dict>\n"
+        "    <key>GideonEnvironmentExcluded</key>\n"
+        "    <array>\n"
+        f"{excluded_xml}"
+        "    </array>\n"
         f"    <key>StandardOutPath</key>\n"
         f"    <string>{out_log}</string>\n"
         f"    <key>StandardErrorPath</key>\n"
@@ -125,7 +143,9 @@ def _launchctl(*args: str, check: bool = False) -> subprocess.CompletedProcess[s
     )
 
 
-def install() -> None:
+def install(
+    env_additions: tuple[str, ...] = (), env_removals: tuple[str, ...] = ()
+) -> None:
     """Write the plist and load+start the agent.
 
     Idempotent — unloads first if already loaded so the new plist takes
@@ -139,7 +159,7 @@ def install() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     if PLIST_PATH.exists():
         _launchctl("unload", "-w", str(PLIST_PATH))
-    _write_plist_atomic(render_plist())
+    _write_plist_atomic(render_plist(env_additions, env_removals))
     load_res = _launchctl("load", "-w", str(PLIST_PATH))
     if load_res.returncode != 0:
         raise ServiceInstallError(
@@ -202,3 +222,16 @@ def status() -> str:
     if res.returncode != 0:
         return f"gideon service is not loaded ({res.stderr.strip() or 'no entry'})\n"
     return res.stdout
+
+
+def environment_status() -> str:
+    """Read the installed plist's safe environment and name-only exclusions."""
+    try:
+        data = plistlib.loads(PLIST_PATH.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return ""
+    env = data.get("EnvironmentVariables", {})
+    values = {str(key): str(value) for key, value in env.items()} if isinstance(env, dict) else {}
+    excluded = data.get("GideonEnvironmentExcluded", [])
+    names = tuple(sorted(str(name) for name in excluded)) if isinstance(excluded, list) else ()
+    return status_environment_lines(ServiceEnvironment(values, names))
