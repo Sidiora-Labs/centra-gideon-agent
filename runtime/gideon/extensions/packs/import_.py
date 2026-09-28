@@ -466,15 +466,12 @@ def _local_exists(home: Path, kind: str, cid: str) -> bool:
     Drives both fresh-id collision detection and the lint's local-reference resolution: a
     dependent may reference a component the pack doesn't carry but the home already has.
     """
-    if kind == "skill":
-        return (home / "skills" / cid / "SKILL.md").is_file()
-    if kind == "template":
-        return (home / "workflows" / "defs" / cid / "workflow.json").is_file()
-    if kind == "prompt":
-        return (home / "prompts" / f"{cid}.yaml").is_file()
-    if kind == "agent":
-        return (_agents_base(home) / cid / "agent.json").is_file()
-    return False
+    from gideon.extensions.packs.component_paths import component_path
+
+    path = component_path(kind, cid, home)
+    if path is None:
+        return False
+    return (path / "SKILL.md").is_file() if kind == "skill" else path.is_file()
 
 
 def _fresh_id(home: Path, kind: str, orig_id: str, taken: set[tuple[str, str]]) -> str:
@@ -941,13 +938,16 @@ def _commit_file_component(
     Returns the written path so the caller can stamp the component's ledger lock (§1
     ``pack_owned`` update flow) from the bytes that actually landed — deriving the lock from
     anything other than the committed file would let the two disagree."""
+    from gideon.extensions.packs.component_paths import component_path
+
+    path = component_path(comp.kind, comp.target_id, home, stage)
+    if path is None:
+        raise PackImportRefused("lint", f"cannot commit component kind {comp.kind!r}")
     if comp.kind == "template":
-        path = home / "workflows" / "defs" / comp.target_id / "workflow.json"
         text = json.dumps(comp.obj, indent=2, ensure_ascii=False)
     elif comp.kind == "prompt":
         import yaml  # type: ignore
 
-        path = home / "prompts" / f"{comp.target_id}.yaml"
         text = yaml.safe_dump(comp.obj, sort_keys=False, allow_unicode=True)
     elif comp.kind == "agent":
         errors = comp.obj.validate()
@@ -956,10 +956,8 @@ def _commit_file_component(
                 "lint",
                 f"agent {comp.target_id!r} invalid after import: {'; '.join(errors)}",
             )
-        path = _agents_base(home) / comp.target_id / "agent.json"
         text = json.dumps(comp.obj.to_dict(), indent=2, ensure_ascii=False)
     elif comp.kind == "trigger":
-        path = _staged_dir(home, stage) / "triggers" / f"{comp.target_id}.json"
         text = json.dumps(comp.obj, indent=2, ensure_ascii=False)
     else:  # pragma: no cover - guarded by caller
         raise PackImportRefused("lint", f"cannot commit component kind {comp.kind!r}")
@@ -983,15 +981,18 @@ def _commit_skill(
     ``skills/`` if absent, which rollback must also unwind or a faulted import would leave an
     empty ``skills/`` behind (not byte-identical). ``record_skill`` handles the skill dir; the
     journaled ``mkdir`` handles the parent."""
-    from gideon.extensions.skills.loader import skills_dir
+    from gideon.extensions.packs.component_paths import component_path
     from gideon.extensions.skills.marketplace import get_default_skills_registry
 
-    target = skills_dir()
+    skill_path = component_path("skill", comp.target_id, home)
+    if skill_path is None:
+        raise PackImportRefused("lint", f"cannot commit skill {comp.target_id!r}")
+    target = skill_path.parent
     _mkdir_journaled(journal, target)
     get_default_skills_registry().install_guarded(
         marketplace_name, comp.target_id, target, force=True
     )
-    return target / comp.target_id
+    return skill_path
 
 
 def _stage_roster(plan: ImportPlan, home: Path, journal: _Journal, stage: str) -> None:

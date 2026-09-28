@@ -34,6 +34,8 @@ AP-7 adds the discovery + maintenance half:
 * ``POST /api/packs/{name}/update`` — the §1 ``pack_owned`` update flow. DRY-RUN by default:
   it returns which components would be overwritten and which are skipped, with the drift note
   for each user-edited copy. ``confirm: true`` applies it.
+* ``POST /api/packs/{name}/uninstall`` — dry-run by default; explicit confirmation removes only
+  the still-unedited pack components and preserves configured servers and active dependencies.
 
 Kept deliberately thin: every route is a few lines over a core function. Errors use the shared
 envelope (``{"error": {"code", "message"}}``) so a caller branches on a stable code.
@@ -396,6 +398,30 @@ async def api_pack_update(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "update": plan.to_dict()})
 
 
+async def api_pack_uninstall(request: web.Request) -> web.Response:
+    """Plan pack removal by default; apply only the exact current plan after confirmation."""
+    from gideon.extensions.packs.uninstall import (
+        PackUninstallError,
+        apply_uninstall,
+        plan_uninstall,
+    )
+
+    name = request.match_info.get("name", "")
+    body = await _json_body(request)
+    if body is None:
+        return json_error(
+            "invalid_json", message="request body must be a JSON object", status=400
+        )
+    try:
+        if body.get("confirm") is True:
+            plan = apply_uninstall(name, str(body.get("confirmation_token", "") or ""))
+        else:
+            plan = plan_uninstall(name)
+    except PackUninstallError as exc:
+        return json_error(exc.code, message=str(exc), status=exc.status)
+    return web.json_response({"ok": True, "uninstall": plan.to_dict()})
+
+
 async def _json_body(request: web.Request) -> dict | None:
     """The request's JSON object, or None when there isn't one. An EMPTY body is ``{}`` —
     every route here has usable defaults, so requiring a body would be ceremony."""
@@ -430,3 +456,4 @@ def register_pack_routes(app: web.Application) -> None:
     app.router.add_post("/api/packs/{name}/triggers/deploy", api_pack_triggers_deploy)
     app.router.add_post("/api/packs/{name}/bindings", api_pack_bindings)
     app.router.add_post("/api/packs/{name}/update", api_pack_update)
+    app.router.add_post("/api/packs/{name}/uninstall", api_pack_uninstall)

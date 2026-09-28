@@ -134,6 +134,8 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "labels_rejected": "The submitted qrels labels were refused.",
     "field_metrics_unreadable": "The lab/field metric sources could not be read.",
     "pack_not_installed": "No such installed pack.",
+    "pack_in_use": "A deployed agent or automation still depends on this pack.",
+    "pack_uninstall_incomplete": "Some pack components could not be removed safely.",
     "pack_not_bundled": "The pack is not bundled with this build.",
     "pack_build_failed": "Building the pack artifact failed.",
     "pack_update_refused": "The pack update was refused.",

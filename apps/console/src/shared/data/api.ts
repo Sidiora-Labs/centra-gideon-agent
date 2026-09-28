@@ -3708,6 +3708,18 @@ export interface PackUpdateRec {
   skipped: string[]
 }
 
+export interface PackUninstallRec {
+  pack: string
+  version: string
+  removed: string[]
+  kept: Array<{ ref: string; reason: string }>
+  missing: string[]
+  in_use: Array<{ kind: 'agent' | 'automation'; id: string; name: string }>
+  servers: string[]
+  applied: boolean
+  confirmation_token: string
+}
+
 export interface RewindFileWire {
   path: string
   action: 'restore' | 'delete' | 'unchanged' | 'not_captured'
@@ -3808,6 +3820,7 @@ export const api = {
   packProposals: (projectId?: string) => get<{ proposals: PackProposalRec[] }>(`/api/packs/proposals${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`).then((d) => d.proposals),
   packRejectProposal: (projectId: string, pack: string) => post<{ ok: boolean }>('/api/packs/proposals/reject', { project_id: projectId, pack }),
   packUpdate: (name: string, confirm = false) => post<{ ok: boolean; update: PackUpdateRec }>(`/api/packs/${encodeURIComponent(name)}/update`, { confirm }),
+  packUninstall: (name: string, confirm = false, confirmationToken = '') => post<{ ok: boolean; uninstall: PackUninstallRec }>(`/api/packs/${encodeURIComponent(name)}/uninstall`, { confirm, confirmation_token: confirmationToken }),
   packRosterDeploy: (name: string) => post<{ ok: boolean; pack: string; deployed: string[]; dormant: string[]; missing: string[] }>(`/api/packs/${encodeURIComponent(name)}/roster/deploy`, {}),
   packTriggersDeploy: (name: string) => post<{ ok: boolean; pack: string; deployed: string[]; skipped: Array<{ file: string; id?: string; reason: string }> }>(`/api/packs/${encodeURIComponent(name)}/triggers/deploy`, {}),
 

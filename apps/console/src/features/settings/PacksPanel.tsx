@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type InstalledPackRec, type PackProposalRec, type PackUpdateRec } from '../../shared/data/api'
+import { api, type InstalledPackRec, type PackProposalRec, type PackUninstallRec, type PackUpdateRec } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { invalidateKeys, useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup, Row, Field, SavedToast, ToggleRow } from './settingsUI'
@@ -7,6 +7,7 @@ import { TextInput } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { confirmDestructive } from '../../shared/ui/dialog'
 
 type PacksCfg = Record<string, unknown>
 
@@ -247,6 +248,69 @@ export function InstalledPacks({ packs, onChanged = () => {} }: { packs: Install
   )
 }
 
+const COMPONENT_LABELS: Record<string, string> = {
+  skill: 'skill',
+  agent: 'agent definition',
+  prompt: 'prompt',
+  template: 'workflow',
+  trigger: 'staged automation',
+}
+
+export function uninstallSummaryText(plan: PackUninstallRec): string {
+  const counts = new Map<string, number>()
+  for (const ref of plan.removed) {
+    const kind = ref.split(':', 1)[0]
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  const parts = Object.entries(COMPONENT_LABELS)
+    .map(([kind, label]) => {
+      const count = counts.get(kind) ?? 0
+      return count ? `${count} ${label}${count === 1 ? '' : 's'}` : ''
+    })
+    .filter(Boolean)
+  return parts.length ? `Removes ${parts.join(', ')}.` : 'No unedited components will be removed.'
+}
+
+export function UninstallPlanDetails({ plan }: { plan: PackUninstallRec }) {
+  return (
+    <div className="flex flex-col gap-3 text-left">
+      <p>{uninstallSummaryText(plan)}</p>
+      {plan.kept.length > 0 && (
+        <div>
+          <p className="font-medium">Edited or unverifiable components stay</p>
+          <ul className="list-disc pl-5">
+            {plan.kept.map((item) => <li key={item.ref}><code>{item.ref}</code>: {item.reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {plan.missing.length > 0 && <p>Already missing: {plan.missing.join(', ')}.</p>}
+      {plan.servers.length > 0 && (
+        <p>The MCP server{plan.servers.length === 1 ? '' : 's'} you configured ({plan.servers.join(', ')}) stay in Settings → MCP servers.</p>
+      )}
+    </div>
+  )
+}
+
+export function PackUninstallBlockers({ pack, inUse }: {
+  pack: string
+  inUse: PackUninstallRec['in_use']
+}) {
+  if (!inUse.length) return null
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-on-surface">
+      <p>{pack} is still in use, so nothing was removed.</p>
+      {inUse.map((item) => (
+        <p key={`${item.kind}:${item.id}`}>
+          {item.kind === 'agent' ? 'Agent' : 'Automation'} {item.name}, in{' '}
+          <a className="underline" href={item.kind === 'agent' ? '#/agents' : '#/triggers'}>
+            {item.kind === 'agent' ? 'Agents' : 'Automations'}
+          </a>
+        </p>
+      ))}
+    </div>
+  )
+}
+
 export function connectorWarning(markers: string[]): string | undefined {
   if (!markers.length) return undefined
   const PREFIX = 'connector_missing:'
@@ -287,6 +351,7 @@ function ConnectorLine({ c }: { c: InstalledPackRec['connectors'][number] }) {
 export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec; onChanged?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [update, setUpdate] = useState<PackUpdateRec | null>(null)
+  const [uninstallBlockers, setUninstallBlockers] = useState<PackUninstallRec['in_use']>([])
   const always = (pack.roster ?? []).filter((row) => row.activation === 'always')
   const rosterReady = always.length === 0 || always.every((row) => pack.roster_active?.includes(row.target || row.slug || ''))
   const triggersReady = !pack.staged_triggers?.length || pack.staged_triggers.every((id) => pack.triggers_added?.includes(id))
@@ -299,6 +364,37 @@ export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec
       if (r.update.components.length === 0) notify(`${pack.name} has nothing to update.`, 'info')
     }).catch((e) => notify(`Couldn't check for an update: ${String((e as Error)?.message || e)}`, 'error'))
       .finally(() => setBusy(false))
+  }
+  const uninstallPack = async () => {
+    setBusy(true)
+    setUninstallBlockers([])
+    try {
+      const preview = (await api.packUninstall(pack.name, false)).uninstall
+      if (preview.in_use.length) {
+        setUninstallBlockers(preview.in_use)
+        return
+      }
+      const confirmed = await confirmDestructive(
+        `Uninstall ${pack.name}?`,
+        <UninstallPlanDetails plan={preview} />,
+        { confirmLabel: 'Uninstall' },
+      )
+      if (!confirmed) return
+      const result = (await api.packUninstall(pack.name, true, preview.confirmation_token)).uninstall
+      if (!result.applied) throw new Error(`The uninstall for ${pack.name} was not applied.`)
+      const kept = result.kept.length
+      notify(
+        kept
+          ? `Uninstalled ${pack.name} — ${kept} component${kept === 1 ? '' : 's'} kept.`
+          : `Uninstalled ${pack.name}.`,
+        'success',
+      )
+      onChanged()
+    } catch (error) {
+      notify(`Couldn't uninstall ${pack.name}: ${String((error as Error)?.message || error)}`, 'error')
+    } finally {
+      setBusy(false)
+    }
   }
   const applyUpdate = () => {
     setBusy(true)
@@ -348,16 +444,20 @@ export function PackRow({ pack, onChanged = () => {} }: { pack: InstalledPackRec
         hint={connectorWarning(pack.connector_markers)}>
         <div className="flex items-center gap-2">
           {pack.setup_pending && (
-            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={finishSetup}>Finish setup</Button>
+            <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} ariaLabel={`Finish setup for ${pack.name}`} onClick={finishSetup}>Finish setup</Button>
           )}
           {hasStaged && (active
             ? <span data-type="caption" className="text-ok">Active · {pack.roster_active?.length ?? 0} agents, {pack.triggers_added?.length ?? 0} triggers added disabled</span>
-            : <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={activatePack}>Activate pack</Button>)}
-          <Button variant="ghost" size="sm" loading={busy} loadingLabel="Checking…" onClick={checkUpdate}>
+            : <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} ariaLabel={`Activate pack ${pack.name}`} onClick={activatePack}>Activate pack</Button>)}
+          <Button variant="ghost" size="sm" loading={busy} loadingLabel="Checking…" ariaLabel={`Check for update to ${pack.name}`} onClick={checkUpdate}>
             Check for update
+          </Button>
+          <Button variant="danger" size="sm" disabled={busy} disabledReason={BUSY_REASON} ariaLabel={`Uninstall ${pack.name}`} onClick={uninstallPack}>
+            Uninstall
           </Button>
         </div>
       </Row>
+      <PackUninstallBlockers pack={pack.name} inUse={uninstallBlockers} />
       {update && <UpdatePreview update={update} busy={busy} onApply={applyUpdate} />}
       {
 }
@@ -403,7 +503,7 @@ export function UpdatePreview({ update, busy, onApply }: {
           {' · '}{update.overwritten.length} to replace, {update.skipped.length} to keep
         </span>
         {!update.applied && update.overwritten.length > 0 && (
-          <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} onClick={onApply}>Apply update</Button>
+          <Button variant="primary" size="sm" disabled={busy} disabledReason={BUSY_REASON} ariaLabel={`Apply update for ${update.pack}`} onClick={onApply}>Apply update</Button>
         )}
       </div>
       {

@@ -19,9 +19,16 @@ from __future__ import annotations
 
 import json
 import logging
+import errno
+import fcntl
+import os
+import stat
+import threading
+import time
 from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from gideon.core.config import loader as config_loader
 
@@ -38,6 +45,92 @@ def config_dir() -> Path:
 logger = logging.getLogger(__name__)
 
 LEDGER_FILE = "installed.json"
+_LEDGER_LOCK_TIMEOUT = 5.0
+_ledger_thread_locks: dict[str, threading.Lock] = {}
+_ledger_thread_locks_guard = threading.Lock()
+
+
+class InstalledPackLedgerError(OSError):
+    """The installed-pack ledger could not be read or updated safely."""
+
+
+@contextmanager
+def _ledger_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_name(f"{path.name}.lock")
+    key = os.path.realpath(lock_path)
+    with _ledger_thread_locks_guard:
+        thread_lock = _ledger_thread_locks.setdefault(key, threading.Lock())
+    if not thread_lock.acquire(timeout=_LEDGER_LOCK_TIMEOUT):
+        raise InstalledPackLedgerError("installed-pack ledger lock timed out")
+    fd = -1
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+        )
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise InstalledPackLedgerError("installed-pack ledger lock is not a regular file")
+        os.fchmod(fd, 0o600)
+        deadline = time.monotonic() + _LEDGER_LOCK_TIMEOUT
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EACCES):
+                    raise InstalledPackLedgerError("could not lock installed-pack ledger") from exc
+                if time.monotonic() >= deadline:
+                    raise InstalledPackLedgerError("installed-pack ledger lock timed out") from exc
+                time.sleep(0.02)
+        yield
+    finally:
+        if fd >= 0:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+        thread_lock.release()
+
+
+def _read_ledger(path: Path) -> dict[str, Any]:
+    if not os.path.lexists(path):
+        return {}
+    try:
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+            raise InstalledPackLedgerError("installed-pack ledger is not a regular file")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if isinstance(exc, InstalledPackLedgerError):
+            raise
+        raise InstalledPackLedgerError("installed-pack ledger is unreadable") from exc
+    if not isinstance(raw, dict):
+        raise InstalledPackLedgerError("installed-pack ledger is not an object")
+    return raw
+
+
+@contextmanager
+def installed_ledger(home: Path | None = None) -> Iterator[dict[str, Any]]:
+    """Hold the cross-process ledger lock for a read/modify/write transaction.
+
+    Changes are atomically published on normal exit; an exception leaves the original
+    ledger bytes untouched.
+    """
+    from gideon.core.atomic_write import atomic_write
+
+    path = _ledger_path(home)
+    with _ledger_lock(path):
+        original = _read_ledger(path)
+        current = json.loads(json.dumps(original))
+        try:
+            yield current
+        except BaseException:
+            raise
+        else:
+            if current != original:
+                atomic_write(path, json.dumps(current, indent=2, ensure_ascii=False) + "\n")
 
 
 @dataclass
@@ -97,15 +190,17 @@ def _ledger_path(home: Path | None = None) -> Path:
 def load_installed(home: Path | None = None) -> list[InstalledPack]:
     """Every recorded installed pack (empty when nothing has been imported)."""
     path = _ledger_path(home)
-    if not path.is_file():
+    if not os.path.lexists(path):
         return []
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        with installed_ledger(home) as raw:
+            return _installed_packs(raw)
+    except InstalledPackLedgerError:
         logger.warning("installed-pack ledger unreadable at %s", path)
         return []
-    if not isinstance(raw, dict):
-        return []
+
+
+def _installed_packs(raw: dict[str, Any]) -> list[InstalledPack]:
     out: list[InstalledPack] = []
     for name, rec in raw.items():
         if not isinstance(rec, dict):
@@ -148,22 +243,19 @@ def record_install(pack: InstalledPack, home: Path | None = None) -> None:
     records are preserved. The ledger is a dict keyed by name so a read is an O(1) lookup and
     a re-import never duplicates a row.
     """
-    from gideon.core.atomic_write import atomic_write
-
-    path = _ledger_path(home)
-    existing: dict[str, Any] = {}
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                existing = loaded
-        except (json.JSONDecodeError, OSError):
-            existing = {}
     rec = pack.to_dict()
     rec.pop("name", None)
-    existing[pack.name] = rec
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(existing, indent=2, ensure_ascii=False) + "\n")
+    with installed_ledger(home) as existing:
+        existing[pack.name] = rec
+
+
+def forget_install(pack_name: str, home: Path | None = None) -> bool:
+    """Remove one pack record without disturbing other installs."""
+    with installed_ledger(home) as existing:
+        if pack_name not in existing:
+            return False
+        del existing[pack_name]
+        return True
 
 
 class BindingError(Exception):
