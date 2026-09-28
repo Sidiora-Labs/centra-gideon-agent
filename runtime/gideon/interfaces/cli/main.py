@@ -576,6 +576,10 @@ Examples:
         "--port", type=int, default=DASHBOARD_PORT, help="Dashboard port"
     )
 
+    footprint_parser = sub.add_parser("footprint", help="Measure declared database storage")
+    footprint_parser.add_argument("--reclaim", action="store_true", help="Compact declared databases")
+    footprint_parser.add_argument("--json", action="store_true", help="Print structured results")
+
     # snapshot / restore
     snap_parser = sub.add_parser(
         "snapshot", help="Create a portable backup of Gideon state"
@@ -1515,6 +1519,10 @@ Examples:
         _incident_cmd(args)
     elif args.command == "config":
         _config_cmd(args)
+    elif args.command == "footprint":
+        from gideon.operations.durability.footprint import footprint_cmd
+
+        raise SystemExit(footprint_cmd(args))
     elif args.command == "snapshot":
         from gideon.workspace.snapshot import snapshot_main
 

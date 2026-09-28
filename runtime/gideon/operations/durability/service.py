@@ -133,6 +133,8 @@ def job_stamp_fields(result: JobResult, *, at: float) -> dict:
         return {"last_export": at} if result.ok else {}
     if result.job == "nightly_snapshot":
         return {"last_snapshot": at} if result.ok else {}
+    if result.job == "reclaim":
+        return {"last_reclaim": at} if result.ok else {}
     if result.job == "restore_drill":
         return drill_fields(result, at=at)
     return {}
@@ -672,6 +674,35 @@ def _cfg_evals_enabled() -> bool:
     return bool(AppConfig.load().evals.enabled)
 
 
+def run_reclaim() -> JobResult:
+    from gideon.core.concurrency import single_flight
+    from gideon.operations.durability import footprint
+
+    started = time.monotonic()
+    with single_flight("footprint-reclaim") as acquired:
+        if not acquired:
+            return JobResult("reclaim", skipped="another reclaim is running")
+        try:
+            result = footprint.reclaim(active_home())
+        except Exception:
+            logger.warning("footprint reclaim failed", exc_info=True)
+            return JobResult("reclaim", ok=False, detail="Database compaction failed")
+        return JobResult(
+            "reclaim", detail=result.describe(), extra=result.to_dict(),
+            duration_secs=time.monotonic() - started,
+        )
+
+
+def _tick_footprint_maintenance() -> None:
+    if not _due(load_state(), "last_reclaim", NIGHTLY_SECS):
+        return
+    result = run_reclaim()
+    persist_job_result(result)
+    if not result.skipped:
+        logger.log(logging.INFO if result.ok else logging.WARNING,
+                   "footprint reclaim: %s", result.detail)
+
+
 def run_due_jobs(
     *, now: float | None = None, force: str = "", notifier=None
 ) -> list[JobResult]:
@@ -758,6 +789,7 @@ def status() -> dict:
         "export": _entry("last_export", HOURLY_SECS),
         "snapshot": _entry("last_snapshot", NIGHTLY_SECS),
         "drill": _entry("last_drill", DRILL_SECS),
+        "reclaim": _entry("last_reclaim", NIGHTLY_SECS),
         "sync": {
             **_entry("last_sync", stale),
             "enabled": bool(getattr(cfg, "sync_enabled", False)),
@@ -874,6 +906,14 @@ class DurabilityService:
                 raise
             except Exception:  # noqa: BLE001 — evals must never break the backup tick
                 logger.warning("evals maintenance tick failed", exc_info=True)
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, _tick_footprint_maintenance
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("footprint maintenance tick failed", exc_info=True)
             if not enabled():
                 continue
             try:

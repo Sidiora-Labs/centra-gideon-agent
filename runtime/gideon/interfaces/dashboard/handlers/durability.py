@@ -38,7 +38,7 @@ from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
 
-_RUNNABLE = ("export", "snapshot", "drill")
+_RUNNABLE = ("export", "snapshot", "drill", "reclaim")
 
 
 def _sel():
@@ -384,6 +384,7 @@ async def api_durability_run(request: web.Request) -> web.Response:
     state = request.app.get("state")
     notifier = getattr(state, "notify", None) if state is not None else None
     runners = {
+        "reclaim": service.run_reclaim,
         "export": service.run_incremental_export,
         "snapshot": service.run_nightly_snapshot,
         "drill": lambda: service.run_restore_drill(notifier=notifier),
