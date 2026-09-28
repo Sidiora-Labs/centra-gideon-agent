@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 from aiohttp import web
 
 from gideon.assurance.validation import sanitize_string
-from gideon.cognition.history import SEARCH_MIN_CHARS
 from gideon.http_errors import json_error
 from gideon.integrations.mcp_discovery import (
     discover_servers_to_sync,
@@ -107,47 +106,61 @@ async def api_sessions(request: web.Request) -> web.Response:
 async def api_sessions_search(request: web.Request) -> web.Response:
     """GET /api/sessions/search — content search across session transcripts.
 
-    Served from the FTS5 index when it has an answer (SESSION-MANAGEMENT §C1),
-    which also yields a highlighted ``snippet`` showing why each session matched.
-    Falls back to the linear transcript scan when the index is unavailable, empty,
-    or genuinely finds nothing — the scan reads a bounded window of recent
-    sessions, so it stays a correct-but-narrower answer rather than a wrong one.
+    The response carries an explicit coverage envelope. Search all is an
+    intentional full scan; ordinary requests report how much of the eligible
+    history the index has covered.
 
     Query params:
       - ``q``: search string (min 2 chars; empty returns no results)
       - ``limit``: max results (default 50, max 200)
 
-    Returns ``{sessions, source}`` — session metadata as in :func:`api_sessions`,
-    plus which path answered. Titles may be LLM-generated and are redacted.
+    Returns ``{sessions, source, searched, complete, index, matched}``.
     """
     state: ConsoleState = request.app["state"]
     if not state.conversation_log:
-        return web.json_response({"sessions": []})
+        return web.json_response(
+            {
+                "sessions": [],
+                "source": "none",
+                "searched": {"chats": 0, "of": 0},
+                "complete": False,
+                "index": None,
+                "matched": 0,
+            }
+        )
     q = sanitize_string(request.query.get("q", "")).strip()
-    if len(q) < SEARCH_MIN_CHARS:
-        return web.json_response({"sessions": []})
     try:
         limit = max(1, min(int(request.query.get("limit", "50")), 200))
     except (TypeError, ValueError):
         limit = 50
 
+    rest = request.query.get("rest", "").strip().lower() in ("1", "true", "yes")
+    request_app = str(request.get("app", "") or "")
     loop = asyncio.get_running_loop()
-    source = "index"
-    sessions: list = []
     try:
-        from gideon.engine import session_search
+        from gideon.cognition.session_search import answer
 
-        sessions = await loop.run_in_executor(
-            None, lambda: session_search.search_sessions(q, limit=limit)
+        result = await loop.run_in_executor(
+            None,
+            lambda: answer(
+                state.conversation_log,
+                q,
+                limit=limit,
+                rest=rest,
+                request_app=request_app,
+            ),
         )
-    except Exception:  # noqa: BLE001 — the scan below is the designed fallback
-        logger.debug("session search index unavailable", exc_info=True)
-        sessions = []
-    if not sessions:
-        source = "scan"
-        sessions = await loop.run_in_executor(
-            None, state.conversation_log.search_sessions, q, limit
-        )
+    except Exception:
+        logger.warning("session search failed", exc_info=True)
+        result = {
+            "sessions": [],
+            "source": "none",
+            "searched": {"chats": 0, "of": 0},
+            "complete": False,
+            "index": None,
+            "matched": 0,
+        }
+    sessions = result["sessions"]
     for s in sessions:
         title = s.get("title")
         if title:
@@ -163,7 +176,8 @@ async def api_sessions_search(request: web.Request) -> web.Response:
             snippet, _ = _h.redact_exfiltration_urls(snippet)
             snippet, _ = _h.redact_credentials(snippet)
             s["snippet"] = snippet
-    return web.json_response({"sessions": sessions, "source": source})
+    result["sessions"] = sessions
+    return web.json_response(result)
 
 
 def _path_home_gideon():

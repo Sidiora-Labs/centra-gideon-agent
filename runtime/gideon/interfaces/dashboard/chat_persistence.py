@@ -854,7 +854,11 @@ def save_session_to_history(
             from gideon.engine import session_search
 
             session_search.index_turn(
-                history_key, "", "", memory_mode=getattr(session, "memory_mode", "")
+                history_key,
+                "",
+                "",
+                memory_mode=getattr(session, "memory_mode", ""),
+                log=state.conversation_log,
             )
         except Exception:  # noqa: BLE001
             logger.debug(

@@ -245,6 +245,9 @@ def write_transcript(item: ImportItem, api):
                            destination, "already imported" if same else "this imported conversation has changed; the existing session was kept")
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, content)
+    from gideon.cognition.session_search import note_changed
+
+    note_changed(key, log=log)
     # The journal header is the durable idempotence record for conversations. Keeping
     # each transcript in the general import ledger would duplicate one row per session.
     return api._result(item, api.WriteOutcome.IMPORTED, destination)

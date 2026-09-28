@@ -1,3 +1,5 @@
+import { ChatSearchCoverage } from './chat/ChatSearchCoverage'
+import type { SessionSearchAnswer } from '../shared/data/api'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ResultAnnouncement } from '../shared/ui/ListControls'
 import { reportActionFailure, reportingWrite } from '../app/shell/reportingWrite'
@@ -3312,24 +3314,37 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
   const recency = sessionRecencyMs
   const [contentKeys, setContentKeys] = useState<Set<string> | null>(null)
   const [contentSnippets, setContentSnippets] = useState<Map<string, string>>(new Map())
+  const [contentSearch, setContentSearch] = useState<SessionSearchAnswer | null>(null)
+  const [contentSearchPending, setContentSearchPending] = useState(false)
+  const [contentSearchError, setContentSearchError] = useState(false)
+  const [fullSearchQuery, setFullSearchQuery] = useState('')
+  const [searchAttempt, setSearchAttempt] = useState(0)
   const [folderDragKey, setFolderDragKey] = useState<string | null>(null)
   const [overFolder, setOverFolder] = useState<string | null>(null)
   useEffect(() => {
     const query = q.trim()
-    if (query.length < 2) { setContentKeys(null); setContentSnippets(new Map()); return }
+    setContentSearch(null)
+    setContentSearchError(false)
+    setContentKeys(null)
+    setContentSnippets(new Map())
+    if (query.length < 2) { setContentSearchPending(false); return }
+    setContentSearchPending(true)
     let alive = true
     const t = window.setTimeout(() => {
-      api.sessionsSearch(query).then((rows) => {
+      api.sessionsSearch(query, fullSearchQuery === query).then((answer) => {
         if (!alive) return
         const strip = (k: string) => k.replace(/^dashboard[_:]/, '')
-        setContentKeys(new Set(rows.map((r) => strip(r.key))))
-        setContentSnippets(new Map(
-          rows.filter((r) => r.snippet).map((r) => [strip(r.key), r.snippet as string]),
-        ))
-      }).catch(() => { if (alive) { setContentKeys(null); setContentSnippets(new Map()) } })
+        setContentSearch(answer)
+        setContentSearchPending(false)
+        setContentKeys(new Set(answer.sessions.map((r) => strip(r.key))))
+        setContentSnippets(new Map(answer.sessions.flatMap((r) =>
+          r.snippet ? [[strip(r.key), r.snippet] as [string, string]] : [])))
+      }).catch(() => {
+        if (alive) { setContentSearchPending(false); setContentSearchError(true) }
+      })
     }, 300)
     return () => { alive = false; clearTimeout(t) }
-  }, [q])
+  }, [q, fullSearchQuery, searchAttempt])
   const matches = useCallback((s: ChatSessionSummary) => {
     const sOrigin = s.origin ?? 'manual'
     if (origin !== 'all' && sOrigin !== origin) return false
@@ -3596,8 +3611,12 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
               </div>
             )}
             <div className="mb-m">
-              <SearchField value={q} onChange={setQ} placeholder="Search chats — title or anything said"
+              <SearchField value={q} onChange={(value) => { setQ(value); setFullSearchQuery('') }} placeholder="Search chats — title or anything said"
                 ariaLabel="Search chats" autoFocus />
+              <ChatSearchCoverage query={q} answer={contentSearch} pending={contentSearchPending}
+                error={contentSearchError} onSearchAll={() => {
+                  setFullSearchQuery(q.trim()); setSearchAttempt((attempt) => attempt + 1)
+                }} />
               {
 }
               <ResultAnnouncement count={filtered.length} noun="chats"

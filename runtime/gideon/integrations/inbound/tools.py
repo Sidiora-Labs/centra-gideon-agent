@@ -234,7 +234,7 @@ async def _sessions_search(arguments: dict, state: Any) -> str:
         try:
             from gideon.engine import session_search
 
-            hits = session_search.search_sessions(query, limit=limit)
+            hits = session_search.search_sessions(query, limit=limit, log=log)
             if hits:
                 return hits
         except Exception:  # noqa: BLE001

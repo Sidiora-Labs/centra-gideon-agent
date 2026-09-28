@@ -715,7 +715,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_WORK,
         merge=MERGE_APPEND_DEDUP,
         help="chat transcripts",
-        derived_within=("*.summary.json",),
+        derived_within=("*.summary.json", "session_listing.json"),
     ),
     StateEntry(
         id="subagents",

@@ -3169,6 +3169,15 @@ export interface OnboardingStatePatch {
   essentials?: Partial<OnboardingEssentials>
   first_success?: Partial<{ knowledge: boolean; trigger: boolean; loop: boolean }>
 }
+export interface SessionSearchAnswer {
+  sessions: Array<{ key: string; title?: string; messages?: number; snippet?: string }>
+  source: 'index' | 'scan' | 'index+scan' | 'none'
+  searched: { chats: number; of: number }
+  complete: boolean
+  index: { indexed: number; of: number; building: boolean; long: number } | null
+  matched: number
+}
+
 export interface OnboardingImportItem {
   fingerprint: string; source: string; category: string; key: string; title: string
   scan?: { verdict: string; consent: string; findings: Array<{ rule: string; severity: string; path: string; line?: string; gloss?: string; evidence: string }> }
@@ -4086,7 +4095,7 @@ export const api = {
   addLesson: (rule: string, category = 'knowledge') => post<{ ok: boolean }>('/api/lessons', { rule, category }),
   deleteLesson: (rule: string) => fetch('/api/lessons', { method: 'DELETE', headers: { 'Content-Type': 'application/json', ...SK }, body: JSON.stringify({ rule }) }).then(j<{ ok: boolean }>),
 
-  sessionsSearch: (q: string) => get<{ sessions: Array<{ key: string; title?: string; messages?: number; snippet?: string }>; source?: string }>(`/api/sessions/search?q=${encodeURIComponent(q)}`).then((d) => d.sessions),
+  sessionsSearch: (q: string, rest = false) => get<SessionSearchAnswer>(`/api/sessions/search?q=${encodeURIComponent(q)}${rest ? '&rest=1' : ''}`),
 
   spawnedAgents: () => get<{ agents: SpawnedAgent[] }>('/api/spawn').then((d) => d.agents),
   spawnedAgent: (id: string) => get<SpawnedAgent>(`/api/spawn/${encodeURIComponent(id)}`),

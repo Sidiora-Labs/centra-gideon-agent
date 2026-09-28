@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import time as _time
 from datetime import datetime
@@ -288,6 +289,9 @@ class _SessionSummary:
             if metadata.get(stored):
                 result[shown] = metadata[stored]
         result["memory_mode"] = metadata.get("memory_mode", "persistent")
+        result["_created_by_app"] = str(metadata.get("created_by_app", "") or "")
+        result["_closed"] = bool(metadata.get("closed", False))
+        result["_lifecycle"] = str(metadata.get("lifecycle", "active") or "active")
         if "title" not in result:
             result["title"] = self.first_user_title() or self.key
         return result
@@ -388,6 +392,8 @@ class ConversationLog:
         self._pages = JournalPages()
         self._msg_cache = self._pages.messages
         self._meta_cache = self._pages.metadata
+        self._listing_cache: dict[str, dict] | None = None
+        self._listing_stamp: tuple[int, int] | None = None
 
     def init(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -503,6 +509,15 @@ class ConversationLog:
             stream.write(json.dumps(entry) + "\n")
         self._invalidate_cache(key)
         self._maybe_rotate(path)
+        self._notify_search_index(key)
+
+    def _notify_search_index(self, key: str) -> None:
+        try:
+            from gideon.cognition.session_search import note_changed
+
+            note_changed(key, log=self)
+        except Exception:
+            logger.debug("session search update skipped for %s", key, exc_info=True)
 
     def recent(
         self, key: str, max_messages: int = 20, roles: set[str] | None = None
@@ -563,25 +578,108 @@ class ConversationLog:
         residual = re.sub(r"^(?:dashboard_)+", "", key)
         return "dashboard_" + residual if residual and residual != key else key
 
-    def list_sessions(self) -> list[dict]:
+    def _list_session_records(self) -> list[dict]:
         if not self._dir.exists():
             return []
-        summaries: dict = {}
-        for path in self._dir.glob("*.jsonl"):
+        root = self._dir.resolve()
+        listing_path = root / "session_listing.json"
+        try:
+            listing_stat = listing_path.stat()
+            listing_stamp = (listing_stat.st_mtime_ns, listing_stat.st_size)
+        except OSError:
+            listing_stamp = None
+        cached = self._listing_cache
+        if cached is None or listing_stamp != self._listing_stamp:
+            cached = {}
             try:
-                info = path.stat()
+                payload = json.loads(listing_path.read_text(encoding="utf-8"))
+                if payload.get("version") == 1 and payload.get("root") == str(root):
+                    rows = payload.get("entries", {})
+                    if isinstance(rows, dict):
+                        cached = rows
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+            self._listing_cache = cached
+            self._listing_stamp = listing_stamp
+
+        refreshed: dict[str, dict] = {}
+        summaries: dict[str, dict] = {}
+        changed = False
+        try:
+            directory = os.scandir(root)
+        except OSError:
+            return []
+        with directory:
+            for entry in directory:
+                if not entry.name.endswith(".jsonl"):
+                    continue
+                try:
+                    if entry.is_symlink():
+                        continue
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if not os.path.isfile(entry.path):
+                    continue
+                identity = [
+                    int(info.st_ino), int(info.st_size), int(info.st_mtime_ns)
+                ]
+                prior = cached.get(entry.name)
+                if isinstance(prior, dict) and prior.get("identity") == identity:
+                    item = prior.get("item")
+                    if not isinstance(item, dict):
+                        item = None
+                        needs_refresh = True
+                    else:
+                        needs_refresh = False
+                else:
+                    item = None
+                    needs_refresh = True
+                if item is None:
+                    path = Path(entry.path)
+                    self._invalidate_cache(path.stem)
+                    item = _SessionSummary(self, path, info).project()
+                key = str(item.get("key", "") or "")
+                mode = str(item.get("memory_mode", "persistent") or "persistent")
+                if mode.strip().lower() in ("incognito", "temporary") or _live_restricted(key):
+                    self._forget_search_rows(key)
+                    changed = changed or prior is not None
+                    continue
+                refreshed[entry.name] = {"identity": identity, "item": item}
+                item = dict(item, _identity=identity)
+                canonical = self._canonical_key(key)
+                existing = summaries.get(canonical)
+                if existing is None or info.st_mtime >= existing["modified"]:
+                    summaries[canonical] = item
+                if needs_refresh:
+                    changed = True
+        if set(cached) != set(refreshed):
+            changed = True
+        if changed or listing_stamp is None:
+            try:
+                payload = {"version": 1, "root": str(root), "entries": refreshed}
+                atomic_write(
+                    listing_path,
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                )
+                info = listing_path.stat()
+                self._listing_stamp = (info.st_mtime_ns, info.st_size)
+                self._listing_cache = refreshed
             except OSError:
-                continue
-            if path.is_symlink():
-                continue
-            item = _SessionSummary(self, path, info).project()
-            canonical = self._canonical_key(path.stem)
-            existing = summaries.get(canonical)
-            if existing is None or info.st_mtime >= existing["modified"]:
-                summaries[canonical] = item
+                logger.debug("session listing cache write skipped", exc_info=True)
         return sorted(
             summaries.values(), key=lambda item: item.get("modified", 0), reverse=True
         )
+
+    def list_session_records(self) -> list[dict]:
+        """Return listed session metadata with its private file identity for indexing."""
+        return self._list_session_records()
+
+    def list_sessions(self) -> list[dict]:
+        return [
+            {key: value for key, value in row.items() if not key.startswith("_")}
+            for row in self._list_session_records()
+        ]
 
     def search_sessions(self, query: str, limit: int = 50) -> list[dict]:
         if not query or limit <= 0 or not self._dir.exists():
@@ -644,14 +742,13 @@ class ConversationLog:
         self._forget_search_rows(key)
         return True
 
-    @staticmethod
-    def _forget_search_rows(key: str) -> None:
+    def _forget_search_rows(self, key: str) -> None:
         try:
             from gideon.engine import session_search
 
             aliases = {key.replace(":", "_", 1), key.replace("_", ":", 1), key}
             for alias in aliases:
-                session_search.forget_session(alias)
+                session_search.forget_session(alias, scope=str(self._dir.resolve()))
         except Exception:
             logger.debug("delete_session: FTS forget failed for %s", key, exc_info=True)
 
@@ -674,6 +771,7 @@ class ConversationLog:
         header.update(fields)
         atomic_write(path, document.replace_header(header), fsync=True)
         self._invalidate_cache(key)
+        self._notify_search_index(key)
 
     def _read_messages(self, key: str) -> list[dict]:
         return self._pages.read_messages(key, self._path(key))
@@ -721,6 +819,7 @@ class ConversationLog:
                 header[field] = prior[field]
         atomic_write(path, JournalDocument.render(header, messages))
         self._invalidate_cache(key)
+        self._notify_search_index(key)
 
     def _maybe_rotate(self, path: Path) -> None:
         try:
