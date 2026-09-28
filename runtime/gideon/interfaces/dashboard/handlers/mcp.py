@@ -8,6 +8,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
@@ -1304,6 +1305,210 @@ async def api_mcp_server_allow(request: web.Request) -> web.Response:
     return web.json_response(
         {"ok": True, "name": name, "allowed": True, "revision": revision}
     )
+
+
+def _mcp_oauth_record(name: str) -> tuple[dict[str, Any] | None, str]:
+    from gideon.security import mcp_grants
+
+    try:
+        record = _load_json_for_update(_canonical_mcp_json()).get("mcpServers", {}).get(name)
+    except ConfigUnreadable as exc:
+        raise ValueError("MCP configuration is unavailable") from exc
+    if not isinstance(record, dict):
+        return None, ""
+    server = {**record, "name": name, "source": "mcp.json"}
+    return server, mcp_grants.revision(server)
+
+
+def _mcp_oauth_redirect_uri(request: web.Request) -> str:
+    from gideon.core.config.loader import AppConfig
+    from gideon.interfaces.dashboard.origin import dashboard_origin, is_loopback
+
+    public_url = str(AppConfig.load().dashboard.public_url or "").strip()
+    if public_url:
+        origin = dashboard_origin(public_url)
+        if origin.startswith("https://"):
+            return origin + "/api/mcp/oauth/callback"
+        raise ValueError("MCP OAuth requires a configured HTTPS dashboard public URL")
+    if not is_loopback(request.remote or ""):
+        raise ValueError("MCP OAuth requires a configured HTTPS dashboard public URL")
+    host = request.host
+    parsed = urlsplit("http://" + host)
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"} or parsed.username or parsed.password:
+        raise ValueError("MCP OAuth is available only from the local dashboard without a public URL")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("MCP OAuth dashboard port is invalid") from exc
+    authority = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    if port:
+        authority += f":{port}"
+    return f"http://{authority}/api/mcp/oauth/callback"
+
+
+async def api_mcp_oauth_status(request: web.Request) -> web.Response:
+    principal = _mcp_owner(request)
+    if principal is None:
+        return web.json_response({"error": "Only the authenticated owner may view MCP OAuth status."}, status=403)
+    name = request.match_info["name"].strip()
+    try:
+        server, revision = _mcp_oauth_record(name)
+    except (OSError, TypeError, ValueError):
+        return web.json_response({"error": "MCP configuration is unavailable."}, status=409)
+    if server is None:
+        return web.json_response({"error": "MCP server not found"}, status=404)
+    from gideon.security import mcp_grants
+
+    if not mcp_grants.allowed(server):
+        return web.json_response(
+            {"state": "signin", "allowed": False, "revision": revision},
+            headers={"Cache-Control": "no-store"},
+        )
+    url = str(server.get("url") or server.get("endpoint") or "")
+    if not url.startswith("https://"):
+        return web.json_response(
+            {"state": "signin", "allowed": True, "revision": revision},
+            headers={"Cache-Control": "no-store"},
+        )
+    from gideon.integrations.mcp_oauth import McpOAuthStorage
+
+    status = await McpOAuthStorage(name, url).status()
+    status.update({"allowed": True, "revision": revision})
+    return web.json_response(status, headers={"Cache-Control": "no-store"})
+
+
+async def api_mcp_oauth_start(request: web.Request) -> web.Response:
+    principal = _mcp_owner(request)
+    if principal is None:
+        return web.json_response({"error": "Only the authenticated owner may start MCP OAuth."}, status=403)
+    name = request.match_info["name"].strip()
+    try:
+        server, revision = _mcp_oauth_record(name)
+    except (OSError, TypeError, ValueError):
+        return web.json_response({"error": "MCP configuration is unavailable."}, status=409)
+    if server is None:
+        return web.json_response({"error": "MCP server not found"}, status=404)
+    from gideon.security import mcp_grants
+
+    if not mcp_grants.allowed(server):
+        return web.json_response({"error": "Allow the current MCP server definition before signing in."}, status=409)
+    try:
+        redirect_uri = _mcp_oauth_redirect_uri(request)
+        from gideon.integrations.mcp_oauth import begin_dashboard_authorization
+
+        result = await begin_dashboard_authorization(
+            name,
+            server,
+            principal,
+            revision=revision,
+            redirect_uri=redirect_uri,
+        )
+    except PermissionError:
+        return web.json_response({"error": "MCP OAuth is not available for this server."}, status=403)
+    except (OSError, TypeError, ValueError):
+        return web.json_response({"error": "MCP OAuth could not start safely."}, status=409)
+    return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+
+async def api_mcp_oauth_callback(request: web.Request) -> web.Response:
+    principal = _mcp_owner(request)
+    if principal is None:
+        return web.json_response({"error": "Sign in to the dashboard to finish MCP authorization."}, status=403)
+    codes = request.query.getall("code", [])
+    states = request.query.getall("state", [])
+    issuers = request.query.getall("iss", [])
+    if len(codes) > 1 or len(states) != 1 or len(issuers) > 1:
+        return web.json_response({"error": "MCP authorization callback is invalid."}, status=400)
+    code = codes[0] if codes else ""
+    state = states[0]
+    if request.query.get("error"):
+        from gideon.integrations.mcp_oauth import cancel_dashboard_callback
+
+        try:
+            cancel_dashboard_callback(state, principal)
+        except (PermissionError, TypeError, ValueError):
+            return web.json_response({"error": "MCP authorization callback is invalid."}, status=409)
+        return web.Response(
+            text="MCP authorization was declined. You may close this tab.",
+            content_type="text/plain",
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+    try:
+        from gideon.integrations.mcp_oauth import (
+            OAuthCallbackError,
+            _canonical_resource,
+            callback_binding,
+            complete_dashboard_callback,
+            purge_server,
+        )
+
+        binding = callback_binding(state, principal)
+        async with _get_mcp_lock():
+            server, revision = _mcp_oauth_record(binding.server)
+            if server is None:
+                raise OAuthCallbackError("MCP server no longer exists")
+            from gideon.security import mcp_grants
+
+            current_url = str(server.get("url") or server.get("endpoint") or "")
+            from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_server_url
+
+            if (
+                revision != binding.revision
+                or not mcp_grants.allowed(server)
+                or not current_url.startswith("https://")
+                or not check_resource_allowed(
+                    requested_resource=resource_url_from_server_url(current_url),
+                    configured_resource=binding.resource,
+                )
+            ):
+                purge_server(binding.server, current_url)
+                raise OAuthCallbackError("MCP server definition changed during authorization")
+        result = await complete_dashboard_callback(
+            state,
+            code,
+            principal,
+            server=binding.server,
+            resource=binding.resource,
+            revision=revision,
+            issuer=issuers[0] if issuers else "",
+        )
+        from gideon.integrations.mcp_client import get_mcp_client_registry
+
+        registry = get_mcp_client_registry()
+        if registry is not None:
+            registry.invalidate_server(binding.server)
+        return web.Response(
+            text="MCP authorization completed. You may close this tab.",
+            content_type="text/plain",
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+        )
+    except PermissionError:
+        return web.json_response({"error": "MCP OAuth callback is not authorized."}, status=403, headers={"Cache-Control": "no-store"})
+    except (OSError, TypeError, ValueError):
+        return web.json_response({"error": "MCP OAuth callback could not be completed."}, status=409, headers={"Cache-Control": "no-store"})
+
+
+async def api_mcp_oauth_signout(request: web.Request) -> web.Response:
+    principal = _mcp_owner(request)
+    if principal is None:
+        return web.json_response({"error": "Only the authenticated owner may sign out of MCP OAuth."}, status=403)
+    name = request.match_info["name"].strip()
+    try:
+        server, _revision = _mcp_oauth_record(name)
+    except (OSError, TypeError, ValueError):
+        return web.json_response({"error": "MCP configuration is unavailable."}, status=409)
+    if server is None:
+        return web.json_response({"error": "MCP server not found"}, status=404)
+    url = str(server.get("url") or server.get("endpoint") or "")
+    from gideon.integrations.mcp_oauth import purge_server
+
+    purge_server(name, url)
+    from gideon.integrations.mcp_client import get_mcp_client_registry
+
+    registry = get_mcp_client_registry()
+    if registry is not None:
+        registry.invalidate_server(name)
+    return web.json_response({"ok": True, "state": "signin"}, headers={"Cache-Control": "no-store"})
 
 
 _CC_GLOBAL_JSON = _HomeMcpPath(".claude.json")

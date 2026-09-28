@@ -3,17 +3,359 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hmac
 import hashlib
 import json
 import os
 import secrets
 import stat
+import time
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from gideon.core.config.loader import config_dir
+
+
+_CALLBACK_STATE_TTL = 600.0
+_CALLBACK_STATE_KEY = secrets.token_bytes(32)
+_PENDING_CALLBACKS: dict[str, "PendingCallback"] = {}
+_CALLBACK_FUTURES: dict[str, asyncio.Future] = {}
+_AUTHORIZATION_TASKS: dict[str, asyncio.Task] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class PendingCallback:
+    """One in-process OAuth callback bound to its authenticated owner and server."""
+
+    principal: str
+    tenant: str
+    server: str
+    resource: str
+    revision: str
+    sdk_state: str
+    created_at: float
+    issuer: str = ""
+
+
+class OAuthCallbackError(ValueError):
+    """A dashboard OAuth callback is expired, replayed, or bound elsewhere."""
+
+
+def _state_signature(nonce: str) -> str:
+    digest = hmac.new(_CALLBACK_STATE_KEY, nonce.encode("ascii"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _prune_pending_callbacks(now: float | None = None) -> None:
+    current = time.monotonic() if now is None else now
+    expired = [
+        nonce for nonce, pending in _PENDING_CALLBACKS.items()
+        if current - pending.created_at > _CALLBACK_STATE_TTL
+    ]
+    for nonce in expired:
+        _PENDING_CALLBACKS.pop(nonce, None)
+        callback = _CALLBACK_FUTURES.pop(nonce, None)
+        task = _AUTHORIZATION_TASKS.pop(nonce, None)
+        if callback is not None and not callback.done():
+            callback.cancel()
+        if task is not None and not task.done():
+            task.cancel()
+
+
+def issue_callback_state(
+    principal: Any,
+    *,
+    server: str,
+    resource: str,
+    revision: str,
+    sdk_state: str,
+    issuer: str = "",
+) -> str:
+    """Create an opaque signed, one-time state tied to the exact OAuth attempt."""
+    from gideon.security.approval_answer import OWNER, Principal
+
+    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+        raise PermissionError("MCP OAuth requires an authenticated owner")
+    if not all(isinstance(value, str) and value for value in (server, resource, revision, sdk_state)):
+        raise ValueError("MCP OAuth callback binding is incomplete")
+    if issuer and not issuer.startswith("https://"):
+        raise ValueError("MCP OAuth issuer must be an HTTPS URL")
+    parsed = urlsplit(resource)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("MCP OAuth resource must be a credential-free HTTPS URL")
+
+    now = time.monotonic()
+    _prune_pending_callbacks(now)
+    nonce = secrets.token_urlsafe(32)
+    _PENDING_CALLBACKS[nonce] = PendingCallback(
+        principal=principal.name,
+        tenant=principal.tenant,
+        server=server,
+        resource=resource,
+        revision=revision,
+        sdk_state=sdk_state,
+        created_at=now,
+        issuer=issuer,
+    )
+    return nonce + "." + _state_signature(nonce)
+
+
+def consume_callback_state(
+    state: str,
+    principal: Any,
+    *,
+    server: str,
+    resource: str,
+    revision: str,
+) -> PendingCallback:
+    """Validate and consume a callback state exactly once for its initiating owner."""
+    from gideon.security.approval_answer import OWNER, Principal
+
+    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+        raise PermissionError("MCP OAuth callback requires an authenticated owner")
+    if not isinstance(state, str) or state.count(".") != 1:
+        raise OAuthCallbackError("MCP OAuth callback state is invalid")
+    nonce, signature = state.split(".", 1)
+    expected = _state_signature(nonce)
+    if not hmac.compare_digest(signature, expected):
+        raise OAuthCallbackError("MCP OAuth callback state is invalid")
+    now = time.monotonic()
+    _prune_pending_callbacks(now)
+    pending = _PENDING_CALLBACKS.get(nonce)
+    if pending is None:
+        raise OAuthCallbackError("MCP OAuth callback state is expired or already used")
+    if (
+        pending.principal != principal.name
+        or pending.tenant != principal.tenant
+        or pending.server != server
+        or pending.resource != resource
+        or pending.revision != revision
+    ):
+        raise OAuthCallbackError("MCP OAuth callback does not match the initiating owner or server")
+    del _PENDING_CALLBACKS[nonce]
+    return pending
+
+
+def callback_binding(state: str, principal: Any) -> PendingCallback:
+    """Read a signed callback binding without consuming its one-time state."""
+    from gideon.security.approval_answer import OWNER, Principal
+
+    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+        raise PermissionError("MCP OAuth callback requires an authenticated owner")
+    if not isinstance(state, str) or state.count(".") != 1:
+        raise OAuthCallbackError("MCP OAuth callback state is invalid")
+    nonce, signature = state.split(".", 1)
+    if not hmac.compare_digest(signature, _state_signature(nonce)):
+        raise OAuthCallbackError("MCP OAuth callback state is invalid")
+    _prune_pending_callbacks()
+    pending = _PENDING_CALLBACKS.get(nonce)
+    if pending is None:
+        raise OAuthCallbackError("MCP OAuth callback state is expired or already used")
+    if pending.principal != principal.name or pending.tenant != principal.tenant:
+        raise OAuthCallbackError("MCP OAuth callback belongs to another owner")
+    return pending
+
+
+def _canonical_resource(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise OAuthCallbackError("MCP OAuth resource must be a canonical HTTPS URL")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise OAuthCallbackError("MCP OAuth resource has an invalid port") from exc
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    if port and port != 443:
+        host = f"{host}:{port}"
+    return urlunsplit(("https", host, parsed.path or "/", "", ""))
+
+
+async def begin_dashboard_authorization(
+    name: str,
+    server: dict[str, Any],
+    principal: Any,
+    *,
+    revision: str,
+    redirect_uri: str,
+) -> dict[str, str]:
+    """Start the SDK's real MCP OAuth challenge flow and return its safe login URL."""
+    from gideon.security.approval_answer import OWNER, Principal
+    from gideon.security import mcp_grants
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+        raise PermissionError("MCP OAuth requires an authenticated owner")
+    if not isinstance(server, dict) or server.get("name") != name or server.get("source") != "mcp.json":
+        raise ValueError("MCP OAuth is available only for the current owner-managed server")
+    url = str(server.get("url") or server.get("endpoint") or "")
+    if urlsplit(url).scheme.lower() != "https":
+        raise ValueError("MCP OAuth requires an HTTPS remote server")
+    if mcp_grants.revision(server) != revision or not mcp_grants.allowed(server):
+        raise ValueError("Allow the current MCP server definition before signing in")
+
+    authorization_url: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+    callback: asyncio.Future[tuple[str, str]] = asyncio.get_running_loop().create_future()
+    flow_state: dict[str, str] = {}
+    provider: dict[str, Any] = {}
+
+    async def redirect(auth_url: str) -> None:
+        parsed = urlsplit(auth_url)
+        if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+            raise OAuthCallbackError("MCP authorization server returned an unsafe URL")
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        states = query.get("state", [])
+        if len(states) != 1 or not states[0]:
+            raise OAuthCallbackError("MCP authorization request has no unique state")
+        resources = query.get("resource", [])
+        if len(resources) > 1:
+            raise OAuthCallbackError("MCP authorization request has an ambiguous resource")
+        selected_resource = resources[0] if resources else ""
+        if not selected_resource and provider.get("auth") is not None:
+            selected_resource = str(provider["auth"].context.get_resource_url())
+        resource = _canonical_resource(selected_resource or url)
+        sdk_state = states[0]
+        auth_context = provider.get("auth").context if provider.get("auth") is not None else None
+        oauth_metadata = getattr(auth_context, "oauth_metadata", None)
+        issuer = str(getattr(oauth_metadata, "issuer", "") or getattr(auth_context, "auth_server_url", "") or "")
+        signed_state = issue_callback_state(
+            principal,
+            server=name,
+            resource=resource,
+            revision=revision,
+            sdk_state=sdk_state,
+            issuer=issuer,
+        )
+        nonce = signed_state.split(".", 1)[0]
+        flow_state["nonce"] = nonce
+        _CALLBACK_FUTURES[nonce] = callback
+        query["state"] = [signed_state]
+        safe_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query, doseq=True), ""))
+        if not authorization_url.done():
+            authorization_url.set_result(safe_url)
+
+    async def receive_callback() -> tuple[str, str]:
+        return await callback
+
+    async def authorize() -> None:
+        try:
+            from gideon.integrations.mcp_client import _remote_http_client_factory, normalize_transport
+
+            auth = oauth_provider(
+                name,
+                url,
+                server,
+                redirect_handler=redirect,
+                callback_handler=receive_callback,
+                redirect_uri=redirect_uri,
+            )
+            provider["auth"] = auth
+            factory = lambda **kw: _remote_http_client_factory(
+                endpoint=url,
+                oauth_context=getattr(auth, "context", None),
+                **kw,
+            )
+            if normalize_transport(server) == "sse":
+                from mcp.client.sse import sse_client
+
+                async with sse_client(url, auth=auth, httpx_client_factory=factory) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+            else:
+                async with streamablehttp_client(
+                    url,
+                    auth=auth,
+                    httpx_client_factory=factory,
+                ) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+        except Exception:
+            if not authorization_url.done():
+                authorization_url.set_exception(ValueError("MCP OAuth authorization could not start"))
+            raise
+
+    task = asyncio.create_task(authorize())
+    try:
+        auth_url = await asyncio.wait_for(authorization_url, timeout=30)
+    except Exception:
+        task.cancel()
+        raise
+    nonce = flow_state.get("nonce")
+    if not nonce:
+        task.cancel()
+        raise OAuthCallbackError("MCP authorization state was not created")
+    _AUTHORIZATION_TASKS[nonce] = task
+    return {"authorization_url": auth_url, "state": "signin", "server": name}
+
+
+async def complete_dashboard_callback(
+    state: str,
+    code: str,
+    principal: Any,
+    *,
+    server: str,
+    resource: str,
+    revision: str,
+    issuer: str = "",
+) -> dict[str, str]:
+    """Consume an owner-bound callback, let the SDK exchange it, and return safe status."""
+    if not isinstance(code, str) or not code or len(code) > 8192 or any(ord(ch) < 32 for ch in code):
+        raise OAuthCallbackError("MCP OAuth callback has no valid authorization code")
+    pending = consume_callback_state(
+        state,
+        principal,
+        server=server,
+        resource=resource,
+        revision=revision,
+    )
+    if issuer and issuer != pending.issuer:
+        nonce = state.split(".", 1)[0]
+        callback = _CALLBACK_FUTURES.pop(nonce, None)
+        task = _AUTHORIZATION_TASKS.pop(nonce, None)
+        if callback is not None and not callback.done():
+            callback.cancel()
+        if task is not None and not task.done():
+            task.cancel()
+        raise OAuthCallbackError("MCP OAuth callback issuer does not match the authorization server")
+    nonce = state.split(".", 1)[0]
+    callback = _CALLBACK_FUTURES.pop(nonce, None)
+    task = _AUTHORIZATION_TASKS.get(nonce)
+    if callback is None or task is None or callback.done():
+        _AUTHORIZATION_TASKS.pop(nonce, None)
+        raise OAuthCallbackError("MCP OAuth authorization expired")
+    callback.set_result((code, pending.sdk_state))
+    try:
+        await asyncio.wait_for(task, timeout=60)
+    except Exception as exc:
+        raise OAuthCallbackError("MCP OAuth authorization failed") from exc
+    finally:
+        _AUTHORIZATION_TASKS.pop(nonce, None)
+    return {"state": "connected", "server": server}
+
+
+def cancel_dashboard_callback(state: str, principal: Any) -> None:
+    """Consume a declined authorization response and stop its pending SDK attempt."""
+    binding = callback_binding(state, principal)
+    nonce = state.split(".", 1)[0]
+    consume_callback_state(
+        state,
+        principal,
+        server=binding.server,
+        resource=binding.resource,
+        revision=binding.revision,
+    )
+    callback = _CALLBACK_FUTURES.pop(nonce, None)
+    task = _AUTHORIZATION_TASKS.pop(nonce, None)
+    if callback is not None and not callback.done():
+        callback.cancel()
+    if task is not None and not task.done():
+        task.cancel()
 
 
 def _owner(name: str):
@@ -86,6 +428,9 @@ class McpOAuthStorage:
                     result[field] = json.loads(value)
                 except json.JSONDecodeError as exc:
                     raise ValueError("MCP OAuth credential record is malformed") from exc
+        saved_at = refs.get("tokens_saved_at")
+        if isinstance(saved_at, (int, float)) and not isinstance(saved_at, bool):
+            result["tokens_saved_at"] = float(saved_at)
         return result
 
     def _write_references(self, data: dict[str, Any]) -> None:
@@ -115,6 +460,8 @@ class McpOAuthStorage:
             if isinstance(data.get(field), dict)
         }
         refs = store(values, owner=_owner(self.name), declared=set(values), previous=old)
+        if isinstance(data.get("tokens_saved_at"), (int, float)):
+            refs["tokens_saved_at"] = float(data["tokens_saved_at"])
         try:
             self._write_references(refs)
         except Exception:
@@ -131,6 +478,7 @@ class McpOAuthStorage:
     async def set_tokens(self, tokens) -> None:
         data = self._read()
         data["tokens"] = tokens.model_dump(mode="json")
+        data["tokens_saved_at"] = time.time()
         self._write(data)
 
     async def get_client_info(self):
@@ -144,9 +492,41 @@ class McpOAuthStorage:
         data["client_info"] = client_info.model_dump(mode="json")
         self._write(data)
 
+    async def status(self) -> dict[str, Any]:
+        data = self._read()
+        tokens = data.get("tokens")
+        if not isinstance(tokens, dict) or not tokens.get("access_token"):
+            return {"state": "signin"}
+        saved_at = data.get("tokens_saved_at")
+        expires_in = tokens.get("expires_in")
+        renewal_needed = (
+            isinstance(saved_at, (int, float))
+            and isinstance(expires_in, (int, float))
+            and float(saved_at) + float(expires_in) <= time.time() + 300
+        )
+        return {
+            "state": "renewal_needed" if renewal_needed else "connected",
+            "renewable": bool(tokens.get("refresh_token")),
+        }
+
+    async def has_tokens(self) -> bool:
+        tokens = self._read().get("tokens")
+        return isinstance(tokens, dict) and bool(tokens.get("access_token"))
+
 
 def purge_server(name: str, url: str) -> None:
     """Remove this server's legacy private OAuth cache after owner deletion."""
+    _prune_pending_callbacks()
+    for nonce, pending in list(_PENDING_CALLBACKS.items()):
+        if pending.server != name:
+            continue
+        _PENDING_CALLBACKS.pop(nonce, None)
+        callback = _CALLBACK_FUTURES.pop(nonce, None)
+        task = _AUTHORIZATION_TASKS.pop(nonce, None)
+        if callback is not None and not callback.done():
+            callback.cancel()
+        if task is not None and not task.done():
+            task.cancel()
     digest = hashlib.sha256(f"{name}\0{url}".encode()).hexdigest()
     path = config_dir() / "mcp-oauth" / f"{digest}.json"
     try:
@@ -158,17 +538,33 @@ def purge_server(name: str, url: str) -> None:
     purge([_owner(name).prefix])
 
 
-def oauth_provider(name: str, url: str, spec: dict[str, Any], *, redirect_handler=None, callback_handler=None):
+def oauth_provider(
+    name: str,
+    url: str,
+    spec: dict[str, Any],
+    *,
+    redirect_handler=None,
+    callback_handler=None,
+    redirect_uri: str | None = None,
+):
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
 
     settings = spec.get("oauth") or {}
     if not isinstance(settings, dict):
         raise ValueError("MCP OAuth settings must be an object")
-    redirect_uri = str(settings.get("redirect_uri") or "http://127.0.0.1:8765/callback")
+    redirect_uri = str(redirect_uri or settings.get("redirect_uri") or "http://127.0.0.1:8765/callback")
     parsed = urlsplit(redirect_uri)
-    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port or parsed.path != "/callback":
-        raise ValueError("MCP OAuth redirect_uri must be an http://127.0.0.1:<port>/callback URL")
+    if parsed.scheme == "https":
+        if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path != "/api/mcp/oauth/callback":
+            raise ValueError("MCP OAuth dashboard redirect_uri must be an HTTPS callback URL")
+    elif (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or not parsed.port
+        or parsed.path not in {"/callback", "/api/mcp/oauth/callback"}
+    ):
+        raise ValueError("MCP OAuth redirect_uri must use the dashboard HTTPS callback or local loopback callback")
     metadata = OAuthClientMetadata(
         client_name="Gideon",
         redirect_uris=[redirect_uri],

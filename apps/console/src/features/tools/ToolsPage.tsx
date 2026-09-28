@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { withWeight } from '../../shared/theme/fontWeight'
 import { Wrench, ShieldAlert, Server, Cpu, Plug, Circle, RefreshCw, Loader2, Plus, Trash2, Download, ChevronRight } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
@@ -345,6 +345,60 @@ export function providerBadge(g: Pick<Group, 'providerLocked' | 'tier'>): { labe
   return { label: trustTierLabel(g.tier), title: trustTierHint(g.tier) }
 }
 
+export function McpOAuthStateLabel({ state }: { state: 'signin' | 'connected' | 'renewal_needed' }) {
+  const label = state === 'connected' ? 'Connected' : state === 'renewal_needed' ? 'Renewal needed' : 'Sign-in required'
+  return <span data-type="caption" className="text-on-surface">{label}</span>
+}
+
+function McpOAuthControls({ server }: { server: McpServer }) {
+  const [state, setState] = useState<'signin' | 'connected' | 'renewal_needed'>('signin')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let current = true
+    const read = async () => {
+      try {
+        const result = await api.mcpOAuthStatus(server.name)
+        if (current) setState(result.state)
+      } catch {
+        if (current) setState('signin')
+      }
+    }
+    void read()
+    const timer = window.setInterval(() => { void read() }, 5000)
+    return () => { current = false; window.clearInterval(timer) }
+  }, [server.name])
+  const signIn = async () => {
+    setBusy(true); setError('')
+    const popup = window.open('about:blank', '_blank')
+    try {
+      const result = await api.startMcpOAuth(server.name)
+      if (popup) { popup.opener = null; popup.location.replace(result.authorization_url) }
+      else window.location.assign(result.authorization_url)
+    } catch (cause) {
+      popup?.close()
+      setError(cause instanceof Error ? cause.message : 'MCP sign-in could not start.')
+    } finally { setBusy(false) }
+  }
+  const signOut = async () => {
+    setBusy(true); setError('')
+    try { await api.signOutMcpOAuth(server.name); setState('signin') }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'MCP sign-out could not be completed.') }
+    finally { setBusy(false) }
+  }
+  return <div className="mb-s flex flex-wrap items-center gap-s rounded-lg bg-surface-container px-m py-2.5">
+    <span data-type="caption" className="text-on-surface-low">OAuth</span>
+    <McpOAuthStateLabel state={state} />
+    {server.allowed === false
+      ? <span data-type="caption" className="text-on-surface-low">Allow this server definition before signing in.</span>
+      : state === 'connected'
+        ? <Button variant="secondary" size="sm" loading={busy} onClick={() => void signOut()}>Sign out</Button>
+        : <Button variant="secondary" size="sm" loading={busy} onClick={() => void signIn()}>{state === 'renewal_needed' ? 'Sign in again' : 'Sign in'}</Button>}
+    {error && <span data-type="caption" role="alert" className="text-danger">{error}</span>}
+  </div>
+}
+
+
 export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowServer, onEditServer, allowing, onToggleTool, onToggleProvider, onReconnect, reconnecting }: { g: Group; onOpen: (name: string) => void; onToggleServer: (s: McpServer) => void; onRemoveServer: (s: McpServer) => void; onAllowServer: (s: McpServer) => void; onEditServer: (s: McpServer) => void; allowing: string | null; onToggleTool: (g: Group, t: ToolItem) => void; onToggleProvider: (g: Group) => void; onReconnect: (s: McpServer) => void; reconnecting: string | null }) {
   const health = g.server ? serverHealth(g.server) : null
   const nativeToggleable = g.kind === 'native' && !g.providerLocked
@@ -356,7 +410,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
         <span data-type="caption" className="text-on-surface-low uppercase tracking-wide">{g.label}</span>
         {g.kind === 'native'
           ? badge && <span data-type="caption" title={badge.title} className="rounded-pill bg-surface-high px-2 h-5 inline-flex items-center text-on-surface-low">{badge.label}</span>
-          : health && <><span data-type="caption" className="inline-flex items-center gap-1" style={{ color: health.tone }} title={health.detail}><Circle size={7} fill="currentColor" stroke="none" /> {health.state}</span><span data-type="caption" className="text-on-surface-low">{uiText("Connection: {p0}", [connectionHealth(g.server!)])}</span></>}
+          : health && <><span data-type="caption" className="inline-flex items-center gap-1" style={{ color: health.tone }} title={health.detail}><Circle size={7} fill="currentColor" stroke="none" /> {health.state}</span><span data-type="caption" className="text-on-surface-low">{`Connection: ${connectionHealth(g.server!)}`}</span></>}
         <span data-type="caption" className="text-on-surface-low">· {g.tools.length}</span>
         {
 }
@@ -406,6 +460,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
       </div>
       {
 }
+      {g.kind === 'mcp' && g.server?.url?.startsWith('https://') && <McpOAuthControls server={g.server} />}
       {g.kind === 'mcp' && g.tools.length === 0 ? (
         <div data-type="body-s" className="rounded-lg bg-surface-container px-m py-3 text-on-surface-low flex items-center gap-s">
           <Plug size={14} />

@@ -1567,7 +1567,9 @@ export interface McpServer {
   error?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
   url?: string; transport?: string; env?: string[]; headers?: string[]; header_credentials?: string[]; oauth?: string[]
   allowed?: boolean; allowRevision?: string; allowQuestion?: string
+  oauth_status?: { state: 'signin' | 'connected' | 'renewal_needed'; renewable?: boolean }
 }
+export type McpTransport = 'streamable_http' | 'sse'
 export interface McpPoolStats {
   available: boolean
   live_connections?: number; shared_conns?: number; session_conns?: number
@@ -4832,6 +4834,9 @@ export const api = {
   mcpPoolStats: () => get<McpPoolStats>('/api/mcp/pool-stats'),
   probeMcp: () => post<{ ok?: boolean }>('/api/mcp/probe'),
   reconnectMcp: (name: string) => post<McpServer>(`/api/mcp/probe/${encodeURIComponent(name)}`),
+  mcpOAuthStatus: (name: string) => get<{ state: 'signin' | 'connected' | 'renewal_needed'; renewable?: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/oauth`),
+  startMcpOAuth: (name: string) => post<{ authorization_url: string; state: string; server: string }>(`/api/mcp/servers/${encodeURIComponent(name)}/oauth/start`),
+  signOutMcpOAuth: (name: string) => del(`/api/mcp/servers/${encodeURIComponent(name)}/oauth`),
   toggleAllMcp: (enabled: boolean) => post('/api/mcp/toggle-all', { enabled }),
   addMcpServer: (name: string, body: McpServerUpdate) =>
     put<{ ok?: boolean; name: string; server?: McpServer }>(`/api/mcp/servers/${encodeURIComponent(name)}`, body),

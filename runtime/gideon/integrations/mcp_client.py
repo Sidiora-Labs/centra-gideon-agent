@@ -43,7 +43,22 @@ _BREAKER_THRESHOLD = 3
 _BREAKER_COOLDOWN_SECS = 60.0
 
 
-def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoint=""):
+def _resource_metadata_from_challenge(challenge: str) -> str | None:
+    """Extract the resource-metadata auth parameter after its scheme token."""
+    if not isinstance(challenge, str):
+        return None
+    parameters = re.sub(r"^\s*[A-Za-z][A-Za-z0-9+.-]*\s+", "", challenge, count=1)
+    match = re.search(
+        r'(?:^|,)\s*resource_metadata\s*=\s*(?:"([^"]+)"|([^,\s]+))',
+        parameters,
+        re.I,
+    )
+    if match is None:
+        return None
+    return (match.group(1) or match.group(2) or "").strip() or None
+
+
+def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoint="", oauth_context=None):
     """Create MCP's HTTP client with the shared egress decision on every request."""
     import httpx
 
@@ -53,6 +68,8 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
 
     policy = egress_policy_for(STRICT)
     base = urlsplit(endpoint)
+    default_headers = httpx.Headers(headers or {})
+    oauth_metadata_urls: set[str] = set()
 
     def same_origin(candidate):
         target = urlsplit(candidate)
@@ -68,6 +85,50 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
             target.scheme == base.scheme or (base.scheme == "http" and target.scheme == "https")
         )
 
+    def oauth_request(request):
+        context = oauth_context
+        if context is None:
+            return False
+        parsed = urlsplit(str(request.url))
+        path = parsed.path.lower()
+        if str(request.url) in oauth_metadata_urls:
+            if parsed.scheme.lower() != "https":
+                raise ValueError("MCP OAuth endpoints require HTTPS")
+            return True
+        metadata = getattr(context, "oauth_metadata", None)
+        for field in ("token_endpoint", "registration_endpoint", "revocation_endpoint", "introspection_endpoint"):
+            endpoint_value = getattr(metadata, field, None) if metadata is not None else None
+            if endpoint_value is not None and str(endpoint_value) == str(request.url):
+                if parsed.scheme.lower() != "https":
+                    raise ValueError("MCP OAuth endpoints require HTTPS")
+                return True
+        auth_server = getattr(context, "auth_server_url", None)
+        if auth_server:
+            auth_origin = urlsplit(str(auth_server))
+            if auth_origin.scheme.lower() != "https":
+                raise ValueError("MCP OAuth authorization server requires HTTPS")
+            if request.method.upper() == "POST":
+                fallback_origin = f"{auth_origin.scheme}://{auth_origin.netloc}"
+                if str(request.url) in {fallback_origin + "/token", fallback_origin + "/register"}:
+                    if parsed.scheme.lower() != "https":
+                        raise ValueError("MCP OAuth endpoints require HTTPS")
+                    return True
+            if request.method.upper() == "GET":
+                for suffix in ("/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"):
+                    if str(request.url) == f"{auth_server.rstrip('/')}{suffix}":
+                        return True
+        return False
+
+    def record_oauth_metadata(request, response):
+        if not same_origin(str(request.url)) or response.status_code != 401:
+            return
+        challenge = response.headers.get("www-authenticate", "")
+        candidate = _resource_metadata_from_challenge(challenge)
+        if candidate:
+            target = urlsplit(candidate)
+            if target.scheme == "https" and target.hostname and not (target.username or target.password or target.query or target.fragment):
+                oauth_metadata_urls.add(candidate)
+
     class GuardedTransport(httpx.AsyncBaseTransport):
         def __init__(self):
             self._transport = httpx.AsyncHTTPTransport()
@@ -76,7 +137,10 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
             parsed = urlsplit(str(request.url))
             if parsed.username or parsed.password or parsed.fragment:
                 raise ValueError("MCP remote URL must not contain userinfo or a fragment")
-            if not same_origin(str(request.url)):
+            is_oauth = oauth_request(request)
+            if not same_origin(str(request.url)) and not is_oauth:
+                # Cross-origin GETs in an OAuth flow are discovery documents; credentials
+                # configured for the MCP resource never travel with those requests.
                 raise ValueError("MCP remote transport refused a cross-origin redirect or endpoint")
             decision = evaluate(str(request.url), policy)
             audit_origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -85,7 +149,13 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
                 raise EgressBlocked(decision)
             _audit(audit_origin, policy, outcome="allowed")
             if not policy.pin_resolved_ip or not decision.pinned_ips:
-                return await self._transport.handle_async_request(request)
+                if not is_oauth:
+                    for name, value in default_headers.multi_items():
+                        if name not in request.headers:
+                            request.headers[name] = value
+                response = await self._transport.handle_async_request(request)
+                record_oauth_metadata(request, response)
+                return response
             original_host = request.url.host
             original_authority = request.url.netloc.decode("ascii")
             ip = decision.pinned_ips[0]
@@ -99,15 +169,20 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
                 extensions=extensions,
             )
             pinned.headers["host"] = original_authority
+            if not is_oauth:
+                for name, value in default_headers.multi_items():
+                    if name not in pinned.headers:
+                        pinned.headers[name] = value
             response = await self._transport.handle_async_request(pinned)
             response._request = request
+            record_oauth_metadata(request, response)
             return response
 
         async def aclose(self):
             await self._transport.aclose()
 
     return httpx.AsyncClient(
-        headers=headers,
+        headers=None,
         timeout=timeout or httpx.Timeout(_CONNECT_TIMEOUT_SECS, read=300),
         auth=auth,
         transport=GuardedTransport(),
@@ -406,7 +481,13 @@ class McpServerConn:
             if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
                 raise ValueError("MCP headers must be a string mapping")
             auth = None
-            if spec.get("oauth") is not None:
+            oauth_settings = spec.get("oauth")
+            oauth_enabled = isinstance(oauth_settings, dict) and bool(oauth_settings)
+            if not oauth_enabled and str(url).startswith("https://"):
+                from gideon.integrations.mcp_oauth import McpOAuthStorage
+
+                oauth_enabled = await McpOAuthStorage(self.name, str(url)).has_tokens()
+            if oauth_enabled:
                 from gideon.integrations.mcp_oauth import oauth_provider
 
                 if not str(url).startswith("https://"):
@@ -419,7 +500,11 @@ class McpServerConn:
                 read, write, _ = await stack.enter_async_context(
                     streamablehttp_client(
                         url, headers=headers, auth=auth,
-                        httpx_client_factory=lambda **kw: _remote_http_client_factory(endpoint=str(url), **kw),
+                        httpx_client_factory=lambda **kw: _remote_http_client_factory(
+                            endpoint=str(url),
+                            oauth_context=getattr(auth, "context", None),
+                            **kw,
+                        ),
                     )
                 )
                 return read, write
@@ -427,7 +512,11 @@ class McpServerConn:
 
             read, write = await stack.enter_async_context(
                 sse_client(url, headers=headers, auth=auth,
-                           httpx_client_factory=lambda **kw: _remote_http_client_factory(endpoint=str(url), **kw))
+                           httpx_client_factory=lambda **kw: _remote_http_client_factory(
+                               endpoint=str(url),
+                               oauth_context=getattr(auth, "context", None),
+                               **kw,
+                           ))
             )
             return read, write
 
@@ -693,6 +782,14 @@ class McpClientRegistry:
             conn = self._conns.pop(key)
             self._stats["evicted"] += 1
             asyncio.ensure_future(conn.shutdown())
+
+    def invalidate_server(self, name: str) -> int:
+        """Drop every live scope for one server after its OAuth authority changes."""
+        keys = [key for key in self._conns if key[0] == name]
+        for key in keys:
+            conn = self._conns.pop(key)
+            asyncio.ensure_future(conn.shutdown())
+        return len(keys)
 
     def sweep_idle(self, ttl_secs: float = _IDLE_TTL_SECS) -> int:
         """Reap connections unused for longer than ``ttl_secs``. Returns the count

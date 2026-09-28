@@ -1025,6 +1025,10 @@ async def start_dashboard(
     app.router.add_put("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_delete("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_post("/api/mcp/servers/{name}/allow", handlers.api_mcp_server_allow)
+    app.router.add_get("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_status)
+    app.router.add_post("/api/mcp/servers/{name}/oauth/start", handlers.api_mcp_oauth_start)
+    app.router.add_delete("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_signout)
+    app.router.add_get("/api/mcp/oauth/callback", handlers.api_mcp_oauth_callback)
 
     app.router.add_post("/api/chat", chat.api_chat)
     app.router.add_get("/api/chat/image-input", chat.api_chat_image_input)
