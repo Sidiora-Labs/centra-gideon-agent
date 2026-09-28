@@ -16,7 +16,7 @@ import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
 import { acceptedActionSnapshot, claimTurnEndAnnouncement, readTurnOutcome } from './chat/turnOutcome'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
+import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins, Send } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
 import { SquareIconButton } from '../shared/ui/SquareIconButton'
 import { SearchField } from '../shared/ui/SearchField'
@@ -84,7 +84,7 @@ import { SnipOverlay } from '../shared/ui/SnipOverlay'
 import { chooseCaptureProvider, cropToPngFile, displayCaptureSupported, grabOneFrame, type SnipRect } from '../shared/ui/composer/displayCapture'
 import { notify } from '../app/shell/appSdk'
 import { spring } from '../shared/theme/motion'
-import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire, type ChatTurnOutcome } from '../shared/data/api'
+import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire, type ChatTurnOutcome, type ChannelRuntime } from '../shared/data/api'
 import { claimCompletedReplySpeech, forgetSpeechOwner, rememberSpeechOwner, sessionSpeechStorage } from './chat/speakRepliesAloud'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
 import { useStreamCoalescer, type StreamCursor } from './chat/useStreamCoalescer'
@@ -438,6 +438,23 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   )
   const { data: threadSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
   const { data: ttsSettings } = useQuery('settings:tts-auto-speak', () => api.useCaseSettings('tts'), { persist: false })
+  const { data: handoffChannels, error: handoffChannelsError, refresh: refreshHandoffChannels } = useQuery(
+    'settings:channels-owners:handoff',
+    async () => {
+      const channels = await api.channels()
+      const eligible = channels.filter((channel) => channel.connected
+        && channel.capabilities?.inbound === true
+        && channel.capabilities?.owner_pairing === true)
+      const withOwners = await Promise.all(eligible.map(async (channel) => ({
+        channel,
+        owner: await api.channelOwner(channel.name),
+      })))
+      return withOwners.filter(({ owner }) => owner.supported && owner.owner_configured).map(({ channel }) => channel)
+    },
+    { persist: false },
+  )
+  const [handoffOpen, setHandoffOpen] = useState(false)
+  const [handoffBusy, setHandoffBusy] = useState<string | null>(null)
   const [input, setInput] = useState(seed)
   const [streaming, setStreaming] = useState(false)
   const [lastTurnOutcome, setLastTurnOutcome] = useState<ChatTurnOutcome | null>(null)
@@ -533,6 +550,19 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const sideOpenedRef = useRef(false)
 
   const sessionRef = useRef<string | null>(sessionId)
+  const handoffTo = async (provider: string, displayName: string) => {
+    const key = sessionRef.current
+    if (!key || handoffBusy) return
+    setHandoffBusy(provider)
+    try {
+      if (await reportingWrite(`continue this chat on ${displayName}`, () => api.handoffChat(key, provider))) {
+        notify(`This chat is ready in your ${displayName} direct message.`, 'success')
+        setHandoffOpen(false)
+      }
+    } finally {
+      setHandoffBusy(null)
+    }
+  }
   const ensureInFlightRef = useRef<Promise<string> | null>(null)
   const lastWsActivityRef = useRef<number>(0)
   const [selection, setSelection] = useState<ComposerValue>({ agent: initialAgent, model: 'Auto', approval: 'normal', taskMode: 'agent', reasoning: '' })
@@ -2422,6 +2452,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             {started && sessionRef.current && (
               <HeaderControl icon={Sparkles} label="Save as starter" priority="low" onClick={saveAsTemplate} />
             )}
+            {started && sessionRef.current && (
+              <HeaderControl icon={Send} label="Continue on a channel" priority="low" onClick={() => setHandoffOpen(true)} />
+            )}
             <HeaderControl icon={Edit3} label="New chat" variant="primary" priority="primary" preserveLabel={!isMobile} onClick={() => navigate('chat/new')} />
             {started && (
               <HeaderControl icon={PanelRight} label="Workspace" priority="primary" preserveLabel={!isMobile} active={activityOpen || !!workspacePane} onClick={() => { if (activityOpen || workspacePane) { setActivityOpen(false); setWorkspacePane('') } else setWorkspacePane('activity') }} />
@@ -2430,6 +2463,28 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               <HeaderControl icon={History} label="Chat history" active={historyOpen} onClick={() => setHistoryOpen(!historyOpen)} />
             )}
           </HeaderActions>} />
+
+      {handoffOpen && <Modal title="Continue this chat on a channel" icon={<Send size={18} />} onClose={() => setHandoffOpen(false)}>
+        <div className="flex w-[min(440px,calc(100vw-2rem))] flex-col gap-3 p-l">
+          <p data-type="body-s" className="text-on-surface-low">Choose a connected channel with an owner direct message paired. Gideon will send this chat to that provider only.</p>
+          {handoffChannelsError ? (
+            <LoadError what="channel owners" error={handoffChannelsError} onRetry={refreshHandoffChannels} />
+          ) : handoffChannels === undefined ? (
+            <div data-type="body-s" className="text-on-surface-low">Checking connected channel owners…</div>
+          ) : handoffChannels.length === 0 ? (
+            <div className="flex flex-col gap-3">
+              <p data-type="body-s" className="text-on-surface-low">No connected channel has an owner direct message paired yet.</p>
+              <Button size="sm" variant="secondary" onClick={() => { setHandoffOpen(false); navigate('settings/sender-trust') }}>Pair a channel owner</Button>
+            </div>
+          ) : handoffChannels.map((channel: ChannelRuntime) => (
+            <Button key={channel.name} size="sm" variant="secondary" disabled={handoffBusy !== null}
+              loading={handoffBusy === channel.name}
+              onClick={() => void handoffTo(channel.name, channel.display_name || channel.name)}>
+              <Send size={14} /> Continue on {channel.display_name || channel.name}
+            </Button>
+          ))}
+        </div>
+      </Modal>}
 
       {visibleAppOrigin && <div className="mx-auto flex w-full max-w-[1120px] shrink-0 px-l py-1" data-chat-header-context>
         <ChatContextLine startedBy={visibleAppOrigin} navigate={navigate} />

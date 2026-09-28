@@ -453,10 +453,13 @@ class _ChatSession:
         self.event.clear()
         return out
 
-    def queue_append(self, content: str) -> str:
-        """Append a message to the queue. Returns the generated queue ID."""
+    def queue_append(self, content: str, *, channel: str = "") -> str:
+        """Append a message to the queue, retaining its channel origin when present."""
         qid = uuid.uuid4().hex[:12]
-        self._queue.append({"id": qid, "content": content})
+        item = {"id": qid, "content": content}
+        if channel:
+            item["channel"] = channel
+        self._queue.append(item)
         return qid
 
     def queue_insert(self, index: int, content: str) -> str:

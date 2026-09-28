@@ -479,6 +479,7 @@ export interface RemediationSnapshot {
 export interface ChannelHealth { state: string; detail?: string }
 export interface ChannelRuntime {
   name: string; display_name: string; connected: boolean
+  app?: string
   capabilities?: Record<string, unknown>
   health: ChannelHealth
 }
@@ -4133,6 +4134,8 @@ export const api = {
   syncAgents: () => post<{ ok: boolean; synced?: number }>('/api/agents/sync'),
 
   channels: () => get<{ channels: ChannelRuntime[] }>('/api/channels').then((d) => d.channels),
+  handoffChat: (session: string, provider: string) =>
+    post<{ ok: boolean; thread_ts: string }>(`/api/chat/sessions/${encodeURIComponent(session)}/handoff`, { provider }),
   connectChannel: (name: string) => post<{ ok: boolean; health?: ChannelHealth }>(`/api/channels/${encodeURIComponent(name)}/connect`),
   disconnectChannel: (name: string) => post<{ ok: boolean }>(`/api/channels/${encodeURIComponent(name)}/disconnect`),
   testChannel: (name: string) => post<{ ok: boolean; health?: ChannelHealth; detail?: string }>(`/api/channels/${encodeURIComponent(name)}/test`),

@@ -87,7 +87,22 @@ class ChannelManager:
     async def get(self, name: str) -> dict[str, Any] | None:
         await settled()
         selected = self._resolve(name)
-        return None if selected is None else await _TransportProbe(selected).describe()
+        if selected is None:
+            return None
+        description = await _TransportProbe(selected).describe()
+        from gideon.extensions.providers.registry import get_provider_registry
+
+        owner = next(
+            (
+                ext.name
+                for ext in get_provider_registry().list_by_type("channel")
+                if ext.enabled and ext.provider_instance is selected
+            ),
+            None,
+        )
+        if owner:
+            description["app"] = owner
+        return description
 
     async def _connection(self, name: str, enabled: bool) -> dict[str, Any]:
         selected = self._resolve(name)

@@ -11,6 +11,7 @@ import hashlib
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -162,14 +163,38 @@ class _SessionIngress:
         self, session: Any, runner: Callable[[Any, Any, str], Awaitable[None]]
     ) -> None:
         if getattr(session, "running", False):
-            session.queue_append(self.text)
-        else:
-            pending = asyncio.ensure_future(runner(self.state, session, self.text))
-            session.task = pending
-            retained = getattr(self.state, "_background_tasks", None)
-            if retained is not None:
-                retained.add(pending)
-                pending.add_done_callback(retained.discard)
+            queue_id = session.queue_append(self.text, channel=self.provider)
+            from gideon.security.security import (
+                redact_credentials,
+                redact_exfiltration_urls,
+            )
+
+            displayed = self.text
+            for redact in (redact_exfiltration_urls, redact_credentials):
+                displayed, _ = redact(displayed)
+            broadcast = getattr(self.state, "broadcast_ws", None)
+            if broadcast is not None:
+                broadcast(
+                    "queue_push",
+                    {
+                        "session": session.key,
+                        "content": displayed,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "queue_id": queue_id,
+                    },
+                )
+            refresh = getattr(self.state, "push_sessions_update", None)
+            if refresh is not None:
+                refresh()
+            return
+
+        self.record(session)
+        pending = asyncio.ensure_future(runner(self.state, session, self.text))
+        session.task = pending
+        retained = getattr(self.state, "_background_tasks", None)
+        if retained is not None:
+            retained.add(pending)
+            pending.add_done_callback(retained.discard)
 
 
 async def deliver_inbound(
@@ -209,7 +234,6 @@ async def _route_to_session(
     if state is not None:
         ingress = _SessionIngress(state, provider, msg, text)
         session = ingress.resolve()
-        ingress.record(session)
         ingress.dispatch(session, turn_runner)
     else:
         logger.warning(

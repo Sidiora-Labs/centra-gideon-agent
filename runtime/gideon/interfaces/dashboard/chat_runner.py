@@ -1849,6 +1849,7 @@ async def run_chat(
     _prompt_depth: int = 0,
     regenerate_hint: str = "",
     persona_snippet: str = "",
+    arrived_from_channel: bool = False,
 ) -> None:
     """Stream LLM response into *session*.  Survives browser disconnect.
 
@@ -2708,12 +2709,13 @@ async def run_chat(
                 )
             if _mirror_thread and _mirror_chan and _mirror_delivery:
                 try:
-                    _mirror_msg = message[:500]
-                    _mirror_msg, _ = redact_exfiltration_urls(_mirror_msg)
-                    _mirror_msg, _ = redact_credentials(_mirror_msg)
-                    await _mirror_delivery.deliver_text(
-                        _mirror_chan, f"💬 _{_mirror_msg}_", _mirror_thread
-                    )
+                    if not arrived_from_channel:
+                        _mirror_msg = message[:500]
+                        _mirror_msg, _ = redact_exfiltration_urls(_mirror_msg)
+                        _mirror_msg, _ = redact_credentials(_mirror_msg)
+                        await _mirror_delivery.deliver_text(
+                            _mirror_chan, f"💬 _{_mirror_msg}_", _mirror_thread
+                        )
                     _mirror_stream_ts = (
                         await _mirror_delivery.start_stream(
                             _mirror_chan, _mirror_thread, initial_text="Thinking…"
@@ -4412,7 +4414,15 @@ async def run_chat(
 
             task = asyncio.create_task(
                 asyncio.wait_for(
-                    run_chat(state, session, next_msg), timeout=CHAT_TURN_TIMEOUT
+                    run_chat(
+                        state,
+                        session,
+                        next_msg,
+                        arrived_from_channel=any(
+                            bool(item.get("channel")) for item in consumed
+                        ),
+                    ),
+                    timeout=CHAT_TURN_TIMEOUT,
                 )
             )
             session.task = task

@@ -15,7 +15,7 @@ export function ChannelOwnerSection() {
   const { data, error, refresh } = useQuery(CHANNELS_KEY, () => api.channels(), { persist: false })
   if (!data && error) return <LoadError what="channel owner pairing" error={error} onRetry={refresh} />
   if (!data) return <FormSkeleton sections={1} what="channel owner pairing" />
-  const eligible = data.channels.filter(channel => channel.name !== 'webui' && channel.capabilities?.owner_pairing === true)
+  const eligible = data.filter(channel => channel.name !== 'webui' && channel.capabilities?.owner_pairing === true)
 
   return (
     <div className="space-y-2xl">

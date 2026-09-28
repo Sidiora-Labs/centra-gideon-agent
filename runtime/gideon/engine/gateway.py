@@ -592,7 +592,11 @@ class RuntimeCoordinator:
         from gideon.integrations import channel_inbound
 
         return await channel_inbound.deliver_inbound(
-            self, provider, msg, is_dm=is_dm, turn_runner=run_chat
+            self,
+            provider,
+            msg,
+            is_dm=is_dm,
+            turn_runner=functools.partial(run_chat, arrived_from_channel=True),
         )
 
     def _interactive_approval(

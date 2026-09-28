@@ -1039,7 +1039,7 @@ class ConversationDirectory:
                 entry = self._sessions.pop(key, None)
             if entry is None:
                 return
-            self._session_map.delete(key)
+            self._session_map.forget_session_id(key)
             await entry.provider.shutdown()
             if self._on_compacted is not None:
                 try:

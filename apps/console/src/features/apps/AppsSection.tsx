@@ -141,7 +141,7 @@ type DispatchAppAction = (app: { name: string; displayName: string; enabled: boo
 
 function useAppActions(nav: (p: string) => void, reload: () => void, apps: AppSummary[]) {
   const [busyName, setBusyName] = useState<string | null>(null)
-  const [configFor, setConfigFor] = useState<{ name: string; displayName: string } | null>(null)
+  const [configFor, setConfigFor] = useState<{ name: string; displayName: string; providerType?: string } | null>(null)
   const [updateFor, setUpdateFor] = useState<string | null>(null)
   const [uninstallFor, setUninstallFor] = useState<string | null>(null)
   const [removeFor, setRemoveFor] = useState<string | null>(null)
@@ -149,7 +149,7 @@ function useAppActions(nav: (p: string) => void, reload: () => void, apps: AppSu
   const dispatch: DispatchAppAction = (app, action) => {
     switch (action) {
       case 'open': nav(`app/${encodeURIComponent(app.name)}`); return
-      case 'configure': setConfigFor(app); return
+      case 'configure': setConfigFor({ ...app, providerType: apps.find((item) => item.name === app.name)?.providerType }); return
       case 'update':
         setUpdateFor(app.name); return
       case 'uninstall': setRemoveFor(app.name); return
@@ -169,7 +169,7 @@ function useAppActions(nav: (p: string) => void, reload: () => void, apps: AppSu
         initialSource={appUpdateSource(apps.find((app) => app.name === updateFor) ?? {})}
         onClose={() => setUpdateFor(null)}
         onUpdated={() => { setUpdateFor(null); reload() }} />}
-      {configFor && <ConfigModal name={configFor.name} displayName={configFor.displayName} onClose={() => setConfigFor(null)} />}
+      {configFor && <ConfigModal name={configFor.name} displayName={configFor.displayName} providerType={configFor.providerType} onClose={() => setConfigFor(null)} />}
       {removeFor && <RemoveAppModal name={removeFor} onClose={() => setRemoveFor(null)}
         onDone={() => { setRemoveFor(null); reload() }} />}
       {uninstallFor && <UninstallModal name={uninstallFor} onClose={() => setUninstallFor(null)}
@@ -1468,14 +1468,42 @@ export function AppConfigDialog({ displayName, onClose, children }: { displayNam
   return <Modal title={`Configure ${displayName}`} icon={<Settings2 size={18} />} onClose={onClose}>{children}</Modal>
 }
 
-export function ConfigModal({ name, displayName, onClose }: { name: string; displayName: string; onClose: () => void }) {
+export function ConfigModal({ name, displayName, providerType, onClose }: { name: string; displayName: string; providerType?: string; onClose: () => void }) {
   const cfg = useAppConfig(name)
   const showsPairing = name === 'weixin-channel' || name === 'whatsapp-channel'
+  const { data: channels, error: channelsError, refresh: refreshChannels } = useQuery(
+    providerType === 'channel' ? 'settings:channels-owners:configure' : `settings:channels-owners:unused:${name}`,
+    () => providerType === 'channel' ? api.channels() : Promise.resolve([]),
+    { persist: false },
+  )
+  const channel = providerType === 'channel' ? channels?.find((entry) => entry.app === name) : undefined
+  const ownerQuery = useQuery(
+    channel ? `settings:channel-owner:${channel.name}` : `settings:channel-owner:unused:${name}`,
+    () => channel ? api.channelOwner(channel.name) : Promise.resolve(null),
+    { persist: false },
+  )
+  useEffect(() => {
+    if (cfg.savedAt) invalidateKeys('settings:channels', true)
+  }, [cfg.savedAt])
 
   return (
     <AppConfigDialog displayName={displayName} onClose={onClose}>
       <div className="flex flex-col gap-m p-l" style={{ width: 440, maxWidth: '100%' }}>
         <StaleWriteNotice guard={cfg.stale} what="app settings" present={cfg.present} />
+        {providerType === 'channel' && (channelsError ? (
+          <LoadError what="channel owner availability" error={channelsError} onRetry={refreshChannels} />
+        ) : channels && !channel ? (
+          <p role="status" data-type="body-s" className="text-on-surface-low">This channel provider is not currently connected.</p>
+        ) : channel && ownerQuery.error ? (
+          <LoadError what={`${channel.display_name} owner state`} error={ownerQuery.error} onRetry={ownerQuery.refresh} />
+        ) : channel && ownerQuery.data ? (
+          <div className="rounded-lg border border-outline-variant/40 p-3">
+            <p data-type="body-s" className="text-on-surface">{ownerQuery.data.owner_configured
+              ? `An owner direct message is paired for ${channel.display_name}.`
+              : `No owner direct message is paired for ${channel.display_name}.`}</p>
+            {!ownerQuery.data.owner_configured && <p data-type="caption" className="mt-1 text-on-surface-low">Pair this owner from Settings → Providers.</p>}
+          </div>
+        ) : null)}
         {cfg.error ? (
           <LoadError what="app configuration" error={cfg.error} onRetry={cfg.reload} />
         ) : cfg.loading ? <div data-type="body-s" className="text-on-surface-low">Loading…</div>

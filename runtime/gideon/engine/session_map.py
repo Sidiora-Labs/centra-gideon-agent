@@ -218,6 +218,17 @@ class SessionMap:
     def delete(self, key: str) -> None:
         self._remove_entry(key)
 
+    def forget_session_id(self, key: str) -> None:
+        """Clear a replaced agent session id while retaining any channel thread link."""
+        entry = self._data.get(key)
+        if not entry:
+            return
+        if not entry.get("thread_ts"):
+            self._remove_entry(key)
+            return
+        entry["sid"] = ""
+        self._save()
+
     def prune(self) -> int:
         expired = set(self._data).difference(
             key
