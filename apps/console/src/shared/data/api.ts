@@ -1534,7 +1534,7 @@ export interface SkillFile { path: string; size: number }
 export interface SkillMarketplace { name: string; type: string }
 export interface SkillSearchResult { id: string; name: string; description: string; source: string; url?: string; installs?: number }
 export interface SkillMarketplaceDetail { id: string; name: string; audit_status?: string; files: Array<{ path: string; binary?: boolean }>; frontmatter?: Record<string, unknown>; body?: string; marketplace?: string }
-export interface ToolItem { name: string; description: string; provider: string; parameters?: Record<string, unknown>; requires_approval?: boolean; risk_level?: 'safe' | 'caution' | 'destructive'; disabled: boolean; locked?: boolean; providerDisabled: boolean; group?: string; tier?: string }
+export interface ToolItem { name: string; description: string; provider: string; serverTool?: string; parameters?: Record<string, unknown>; requires_approval?: boolean; risk_level?: 'safe' | 'caution' | 'destructive'; disabled: boolean; locked?: boolean; providerDisabled: boolean; group?: string; tier?: string }
 export interface ToolLoadFailure { provider: string; error: string }
 export interface ManifestToolExample { summary: string; args: Record<string, unknown> }
 export interface ManifestTool { name: string; provider: string; description: string; parameters?: Record<string, unknown>; requires_approval: boolean; risk_level: string; response_type: string; error_codes: string[]; examples: ManifestToolExample[] }
@@ -1558,6 +1558,7 @@ export interface AlwaysOnResponse {
 }
 export interface McpServer {
   name: string; command?: string; args?: string[]; status: string; tools: Array<string | { name: string; description?: string }>
+  disabledTools?: string[]
   healthStatus?: string; healthError?: string; agentCallable?: boolean; agentCallableToolCount?: number; unservedReason?: string
   error?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
   url?: string; transport?: string; env?: string[]; headers?: string[]; header_credentials?: string[]; oauth?: string[]

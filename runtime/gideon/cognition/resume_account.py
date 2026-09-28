@@ -35,16 +35,16 @@ not be.
 Status vocabulary, and where each one's authority comes from:
 
 ============  ==================================================================================
-``done``      ledger ``step_completed``; effect ``committed``; or a tool result that is neither
-              an error nor a denial — the discriminator the runtime itself uses
-              (``agents/native/runtime.py:1143``: ``failed = result_str.startswith("Error:")``).
+``done``      ledger ``step_completed``; effect ``committed``; or a tool result with structured
+              ``_tool_status=true``.
 ``failed``    ledger ``step_failed``; effect ``compensated`` (it was rolled back, so it does not
-              stand); or a tool result starting with ``Error:``.
-``denied``    a tool result :func:`gideon.security.security.is_denial_observation` recognises. A
-              denial is NOT a failure (WF2LEA-13) and is certainly not a completion.
+              stand); or a tool result with structured ``_tool_status=false``.
+``denied``    a failed tool result that :func:`gideon.security.security.is_denial_observation`
+              recognises. A denial is NOT a failure (WF2LEA-13) and is certainly not a completion.
 ``skipped``   ledger ``step_skipped``; effect ``skipped``.
-``attempted`` a recorded tool call with NO recorded result, or effect ``attempted``/``retried``
-              ("unknown, possibly fired"). The honest label for interrupted work.
+``attempted`` a recorded tool call with no result or legacy result status, or effect
+              ``attempted``/``retried`` ("unknown, possibly fired"). The honest label for
+              interrupted work.
 ============  ==================================================================================
 
 **Stated as fact, not instruction.** The block says "the record shows X"; it never says "do Y".
@@ -358,7 +358,7 @@ def _facts_from_tool_history(
     from gideon.security import security
 
     calls: list[tuple[str, str, dict[str, Any]]] = []
-    results: dict[str, str] = {}
+    results: dict[str, tuple[str, bool | None]] = {}
     for msg in messages:
         for call in msg.get("tool_calls") or []:
             if not isinstance(call, Mapping):
@@ -379,25 +379,33 @@ def _facts_from_tool_history(
                 )
             )
         if msg.get("role") == "tool":
-            results[str(msg.get("tool_call_id") or "")] = str(msg.get("content") or "")
+            status = msg.get("_tool_status")
+            results[str(msg.get("tool_call_id") or "")] = (
+                str(msg.get("content") or ""),
+                status if isinstance(status, bool) else None,
+            )
 
     facts: list[StepFact] = []
     written: list[str] = []
     deleted: list[str] = []
     for call_id, name, args in calls:
-        content = results.get(call_id)
+        result = results.get(call_id)
         status: Status
         detail = ""
-        if content is None:
+        if result is None:
             status = "attempted"
             detail = "no result recorded — this call may not have finished"
-        elif content.startswith("Error:"):
+        elif result[1] is None:
+            status = "attempted"
+            detail = "result status unavailable in this record"
+        elif result[1] is False:
+            content = result[0]
             if security.is_denial_observation(content):
                 status = "denied"
                 detail = "refused by policy or by the user"
             else:
                 status = "failed"
-                detail = content[len("Error:") :]
+                detail = content
         else:
             status = "done"
         facts.append(

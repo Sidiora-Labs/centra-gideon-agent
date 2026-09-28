@@ -61,6 +61,35 @@ interface ToolsIndexData {
   groups: ToolGroupsData | null
 }
 
+export function mcpToggleTarget(
+  server: string,
+  serverTool: string,
+): { server: string; tool: string } | null {
+  const prefix = `mcp/${server}/`
+  if (!server || !serverTool.startsWith(prefix)) return null
+  const rawName = serverTool.slice(prefix.length)
+  return rawName && !rawName.startsWith('mcp/') ? { server, tool: rawName } : null
+}
+
+export function disabledMcpToolItems(server: McpServer, listed: ToolItem[]): ToolItem[] {
+  const names = new Set(listed.map((tool) => tool.serverTool ?? tool.name))
+  return (server.disabledTools ?? []).flatMap((rawName) => {
+    const serverTool = `mcp/${server.name}/${rawName}`
+    if (names.has(serverTool) || rawName.startsWith('mcp/')) return []
+    const serverEntry = server.tools.find((item) =>
+      (typeof item === 'string' ? item : item.name) === rawName)
+    return [{
+      name: serverTool,
+      serverTool,
+      description: typeof serverEntry === 'string' ? '' : serverEntry?.description ?? '',
+      provider: server.name,
+      disabled: true,
+      providerDisabled: false,
+      requires_approval: true,
+    } satisfies ToolItem]
+  })
+}
+
 export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQuery'>) {
   const { data, error: loadErr, refresh } = useQuery<ToolsIndexData>('tools:index', async () => {
     const [idx, servers, importable, poolStats, groups] = await Promise.all([
@@ -140,9 +169,18 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
   async function toggleTool(g: Group, t: ToolItem) {
     const enabled = t.disabled === true
     const what = `${enabled ? 'enable' : 'disable'} "${t.name}"`
-    const ok = g.kind === 'mcp' && g.server
-      ? await reportingWrite(what, () => api.toggleMcpTool(g.server!.name, t.name, enabled))
-      : await reportingWrite(what, () => api.toggleTool(t.provider, t.name, enabled))
+    let ok = false
+    if (g.kind === 'mcp' && g.server) {
+      const serverTool = t.serverTool ?? t.name
+      const target = mcpToggleTarget(g.server.name, serverTool)
+      if (target === null) {
+        notify('This MCP tool has an invalid canonical identity.', 'error')
+        return
+      }
+      ok = await reportingWrite(what, () => api.toggleMcpTool(target.server, target.tool, enabled))
+    } else {
+      ok = await reportingWrite(what, () => api.toggleTool(t.provider, t.name, enabled))
+    }
     if (ok) setTimeout(load, 300)
   }
 
@@ -190,7 +228,8 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
     }
     out.sort((a, b) => a.label.localeCompare(b.label))
     for (const s of servers) {
-      const list = (byProvider.get(s.name) ?? []).filter(match)
+      const listed = byProvider.get(s.name) ?? []
+      const list = [...listed, ...disabledMcpToolItems(s, listed)].filter(match)
       out.push({ key: s.name, label: s.name, kind: 'mcp', tools: list, server: s, group: groupOf(byProvider.get(s.name) ?? []) })
     }
     return out.filter((g) => g.tools.length > 0 || (g.kind === 'mcp' && !active) || !active)

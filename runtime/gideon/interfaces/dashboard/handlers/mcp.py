@@ -65,6 +65,19 @@ def _is_valid_mcp_name(name: str) -> bool:
     return "/" not in name and bool(_VALID_MCP_NAME_RE.match(name))
 
 
+def _canonical_server_tool_name(server: str, raw_tool: str) -> str | None:
+    if (
+        not _is_valid_mcp_name(server)
+        or not raw_tool
+        or raw_tool != raw_tool.strip()
+        or raw_tool.startswith("mcp/")
+        or len(raw_tool) > _MAX_MCP_NAME_LEN
+        or any(ord(char) < 32 for char in raw_tool)
+    ):
+        return None
+    return f"mcp/{server}/{raw_tool}"
+
+
 def _canonical_mcp_json() -> Path:
     from gideon.core.config.loader import config_dir
 
@@ -868,11 +881,19 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
-    server = body.get("server", "").strip()
-    tool = body.get("tool", "").strip()
+    server = string_field(body, "server")
+    raw_tool = body.get("tool")
+    tool = raw_tool if isinstance(raw_tool, str) else ""
     enabled = body.get("enabled", True)
     if not server or not tool:
         return web.json_response({"error": "server and tool are required"}, status=400)
+    server_tool = _canonical_server_tool_name(server, tool)
+    if server_tool is None:
+        return web.json_response(
+            {"error": "tool must be the raw server tool name"}, status=400
+        )
+    if not isinstance(enabled, bool):
+        return web.json_response({"error": "enabled must be a boolean"}, status=400)
 
     async with _get_mcp_lock():
         try:
@@ -906,7 +927,11 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
                     },
                     status=500,
                 )
-        disabled_tools: list[str] = spec.get("disabledTools", [])
+        disabled_tools = spec.get("disabledTools", [])
+        if not isinstance(disabled_tools, list) or any(
+            not isinstance(name, str) for name in disabled_tools
+        ):
+            return web.json_response({"error": "invalid disabledTools configuration"}, status=500)
         if enabled:
             disabled_tools = [t for t in disabled_tools if t != tool]
         else:
@@ -923,7 +948,13 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
             logger.warning("mcp: failed to write global mcp.json", exc_info=True)
             return web.json_response({"error": relayed_failure_copy(exc)}, status=500)
     return web.json_response(
-        {"ok": True, "server": server, "tool": tool, "enabled": enabled}
+        {
+            "ok": True,
+            "server": server,
+            "tool": tool,
+            "serverTool": server_tool,
+            "enabled": enabled,
+        }
     )
 
 

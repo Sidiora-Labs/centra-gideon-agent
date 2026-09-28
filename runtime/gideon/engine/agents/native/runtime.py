@@ -771,7 +771,7 @@ class NativeAgentRuntime(AgentProvider):
                 )
         return lines
 
-    def _reset_tools(self, args: dict) -> str:
+    def _reset_tools(self, args: dict, *, meta_sink: dict | None = None) -> str:
         requested = args.get("groups")
         if isinstance(requested, str):
             try:
@@ -779,6 +779,8 @@ class NativeAgentRuntime(AgentProvider):
             except (TypeError, ValueError):
                 requested = None
         if not isinstance(requested, dict):
+            if meta_sink is not None:
+                meta_sink["ok"] = False
             return (
                 "Error: `groups` must be an object mapping group name → true/false, "
                 'e.g. {"groups": {"schedule": true, "memory": true}}.'
@@ -940,9 +942,12 @@ class NativeAgentRuntime(AgentProvider):
         ).substitution(served or self._active_fallback, self._fallback_failures)
 
     def _messages_with_staged_images(self, messages: list[dict]) -> list[dict]:
+        adapted: list[dict] = [
+            {key: value for key, value in message.items() if key != "_tool_status"}
+            for message in messages
+        ]
         if not self._staged_images:
-            return messages
-        adapted: list[dict] = [dict(message) for message in messages]
+            return adapted
         position = next(
             (index for index in range(len(adapted) - 1, -1, -1)
              if adapted[index].get("role") == "user"),
@@ -1055,8 +1060,11 @@ class NativeAgentRuntime(AgentProvider):
                     if self._drain_steers_into_history():
                         continue
                 if not tool_calls or self._cancelled:
+                    if self._cancelled:
+                        for call in tool_calls:
+                            self._record_tool_outcome(call.title, True, CANCELLED_BEFORE_RUN)
                     self._messages.extend(
-                        self._tool_result_msg(call, CANCELLED_BEFORE_RUN)
+                        self._tool_result_msg(call, CANCELLED_BEFORE_RUN, {"ok": False})
                         for call in tool_calls
                     )
                     reason = (
@@ -1242,7 +1250,7 @@ class NativeAgentRuntime(AgentProvider):
                     poisoned.append(ticket.prepared.reservations)
                     ticket.outcome = (
                         f"Error: {ticket.prepared.tool_name} raised {type(outcome).__name__}: {outcome}",
-                        {},
+                        {"ok": False},
                     )
                 else:
                     ticket.outcome = outcome
@@ -1262,8 +1270,10 @@ class NativeAgentRuntime(AgentProvider):
         self, prep: "_PreparedCall"
     ) -> AsyncIterator[AgentEvent]:
         self._cancel.note_tool_call_dropped()
-        yield prep.result_event(CANCELLED_BEFORE_RUN)
-        self._messages.append(self._tool_result_msg(prep.call, CANCELLED_BEFORE_RUN))
+        metadata = {"ok": False}
+        self._record_tool_outcome(prep.tool_name, True, CANCELLED_BEFORE_RUN)
+        yield prep.result_event(CANCELLED_BEFORE_RUN, metadata)
+        self._messages.append(self._tool_result_msg(prep.call, CANCELLED_BEFORE_RUN, metadata))
 
     @staticmethod
     def _unrunnable_result(
@@ -1286,9 +1296,9 @@ class NativeAgentRuntime(AgentProvider):
                 f"Error: {prep.tool_name} was not run — an earlier call in this turn that "
                 "touches the same resource failed, so the resource's state is unknown. "
                 "Re-check that state before retrying.",
-                {},
+                {"ok": False},
             )
-        return f"Error: {prep.tool_name} was not run. {detail}", {}
+        return f"Error: {prep.tool_name} was not run. {detail}", {"ok": False}
 
     async def _prefetch(self, prep: "_PreparedCall") -> tuple[Any, dict]:
         metadata: dict = {}
@@ -1318,8 +1328,10 @@ class NativeAgentRuntime(AgentProvider):
             observation = blocked_message(
                 prep.tool_name, self._breaker.count(prep.bkey)
             )
-            yield prep.result_event(observation)
-            self._messages.append(self._tool_result_msg(prep.call, observation))
+            metadata = {"ok": False}
+            self._record_tool_outcome(prep.tool_name, True, observation)
+            yield prep.result_event(observation, metadata)
+            self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
             return
         observation, metadata = (
             await self._prefetch(prep) if prefetched is None else prefetched
@@ -1332,6 +1344,7 @@ class NativeAgentRuntime(AgentProvider):
                     "this tool needs approval but the run is unattended (no human to approve) — it was auto-declined",
                     prep.tool_name,
                 )
+                metadata["ok"] = False
             else:
                 request = prep.call.tool_call_id or prep.tool_name
                 future = self._approval.register(request)
@@ -1348,39 +1361,36 @@ class NativeAgentRuntime(AgentProvider):
                 decision = await self._approval.wait(request, future)
                 if self._cancelled:
                     observation = "Error: cancelled"
+                    metadata["ok"] = False
                 elif decision == REVISE:
                     revision_instruction = self._revisions.pop(str(request), "")
                     observation = "Error: the user requested a revision; this action was not run."
+                    metadata["ok"] = False
                 elif decision == REJECT:
                     observation = self._denial(
                         security.DENY_KIND_USER,
                         "the user declined this tool call",
                         prep.tool_name,
                     )
+                    metadata["ok"] = False
                 else:
                     observation = await self._invoke(
                         prep.tool_name, prep.args, meta_sink=metadata
                     )
-        observation = self._observe_tool_result(prep, observation)
+        observation = self._observe_tool_result(prep, observation, metadata)
         yield prep.result_event(observation, metadata)
-        self._messages.append(self._tool_result_msg(prep.call, observation))
+        self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
         if revision_instruction:
             self._pending_revisions.append((prep.tool_name, revision_instruction))
         if self._breaker.circuit_tripped():
             logger.warning("native: %s", circuit_message(self._breaker.total_failures))
             self._cancel.request(reason=CANCEL_INTERNAL)
 
-    def _observe_tool_result(self, prep: "_PreparedCall", observation: str) -> str:
-        from gideon.security.security import is_denial_observation
-
-        failed = observation.startswith("Error:")
-        if len(self._tool_outcomes) < 200:
-            outcome = (
-                "success"
-                if not failed
-                else "denied" if is_denial_observation(observation) else "failed"
-            )
-            self._tool_outcomes.append((prep.tool_name, outcome))
+    def _observe_tool_result(
+        self, prep: "_PreparedCall", observation: str, metadata: dict
+    ) -> str:
+        failed = metadata.get("ok") is False
+        self._record_tool_outcome(prep.tool_name, failed, observation)
         streak = self._breaker.record(prep.bkey, failed)
         if failed:
             return (
@@ -1394,6 +1404,18 @@ class NativeAgentRuntime(AgentProvider):
             logger.info("native structural loop for %s: %s", prep.tool_name, repeated)
             return observation + structural_note(repeated)
         return observation
+
+    def _record_tool_outcome(self, tool_name: str, failed: bool, observation: str) -> None:
+        from gideon.security.security import is_denial_observation
+
+        if len(self._tool_outcomes) >= 200:
+            return
+        outcome = (
+            "success"
+            if not failed
+            else "denied" if is_denial_observation(observation) else "failed"
+        )
+        self._tool_outcomes.append((tool_name, outcome))
 
     async def _policy_refusal(
         self, call: AgentEvent, name: str, arguments: dict, *, meta: dict | None = None
@@ -1413,7 +1435,7 @@ class NativeAgentRuntime(AgentProvider):
             decided_by = "tool_grant"
         if reason:
             if meta is not None:
-                meta.update(unasked_outcome="denied", decided_by=decided_by)
+                meta.update(ok=False, unasked_outcome="denied", decided_by=decided_by)
             return self._denial(security.DENY_KIND_POLICY, reason, name)
         if self._hook_fire is not None:
             try:
@@ -1428,7 +1450,7 @@ class NativeAgentRuntime(AgentProvider):
             if blocked:
                 reason = blocked[0].removeprefix("BLOCKED:").strip() or "policy hook"
                 if meta is not None:
-                    meta.update(unasked_outcome="denied", decided_by="hook_deny")
+                    meta.update(ok=False, unasked_outcome="denied", decided_by="hook_deny")
                 return self._denial(security.DENY_KIND_HOOK, reason, name)
         return None
 
@@ -1439,6 +1461,7 @@ class NativeAgentRuntime(AgentProvider):
             self._dry_run
             and self._tool_risk.get(tool_name, RiskLevel.SAFE) != RiskLevel.SAFE
         ):
+            meta["ok"] = False
             return (
                 f"[DRY RUN — observe mode] `{tool_name}` is a write-capable tool; "
                 f"it was NOT executed. With args {_short_json(args)} it would have "
@@ -1447,6 +1470,7 @@ class NativeAgentRuntime(AgentProvider):
             )
         refusal = await self._policy_refusal(call, tool_name, args, meta=meta)
         if refusal is not None:
+            meta["ok"] = False
             return refusal
         if self._requires_approval(tool_name, meta=meta):
             return _NEEDS_APPROVAL
@@ -1492,7 +1516,7 @@ class NativeAgentRuntime(AgentProvider):
             + "\n".join(lines)
         )
 
-    def _describe_tool(self, args: dict) -> str:
+    def _describe_tool(self, args: dict, *, meta_sink: dict | None = None) -> str:
         import json
 
         requested = str(args.get("tool_name", "")).strip()
@@ -1509,6 +1533,8 @@ class NativeAgentRuntime(AgentProvider):
                     },
                     indent=2,
                 )
+        if meta_sink is not None:
+            meta_sink["ok"] = False
         return (
             f"No tool named {requested!r}. Use tool_search(query) to find the right name "
             "(names are case-sensitive and exact)."
@@ -1517,6 +1543,7 @@ class NativeAgentRuntime(AgentProvider):
     @staticmethod
     def _result_metadata(result: Any) -> dict:
         metadata = dict(getattr(result, "metadata", {}) or {})
+        metadata["ok"] = bool(getattr(result, "success", True))
         if getattr(result, "truncated", False):
             metadata["truncated"] = True
             length = getattr(result, "original_length", None)
@@ -1533,16 +1560,22 @@ class NativeAgentRuntime(AgentProvider):
         return metadata
 
     async def _invoke(self, tool_name: str, args: dict, *, meta_sink: dict) -> str:
-        handlers = {
-            "tool_schema": self._describe_tool,
-            "reset_tools": self._reset_tools,
-        }
+        if tool_name == "tool_schema":
+            result = self._describe_tool(args, meta_sink=meta_sink)
+            meta_sink.setdefault("ok", True)
+            return result
+        if tool_name == "reset_tools":
+            result = self._reset_tools(args, meta_sink=meta_sink)
+            meta_sink.setdefault("ok", True)
+            return result
         if self._tool_retriever is not None:
-            handlers["tool_search"] = self._search_tools
-        if tool_name in handlers:
-            return handlers[tool_name](args)
+            if tool_name == "tool_search":
+                result = self._search_tools(args)
+                meta_sink.setdefault("ok", True)
+                return result
         provider = self._tool_index.get(tool_name)
         if provider is None:
+            meta_sink["ok"] = False
             return f"Error: unknown tool {tool_name!r}"
         if self._tool_retriever is not None:
             self._tool_retriever.mark_used(tool_name)
@@ -1562,7 +1595,11 @@ class NativeAgentRuntime(AgentProvider):
             release.callback(mcp_core.reset_current_agent_id, agent)
             release.callback(mcp_core.reset_current_session_key, session)
             release.callback(cancellation.reset_scope, scope)
-            result = await provider.invoke(tool_name, args)
+            try:
+                result = await provider.invoke(tool_name, args)
+            except Exception as exc:
+                meta_sink["ok"] = False
+                return f"Error: {tool_name} raised {type(exc).__name__}: {exc}"
         meta_sink.update(self._result_metadata(result))
         return format_tool_result(result)
 
@@ -1662,8 +1699,13 @@ class NativeAgentRuntime(AgentProvider):
         return message
 
     @staticmethod
-    def _tool_result_msg(call: AgentEvent, result_str: str) -> dict:
-        return dict(role="tool", tool_call_id=call.tool_call_id, content=result_str)
+    def _tool_result_msg(
+        call: AgentEvent, result_str: str, metadata: dict | None = None
+    ) -> dict:
+        message = dict(role="tool", tool_call_id=call.tool_call_id, content=result_str)
+        if metadata is not None and isinstance(metadata.get("ok"), bool):
+            message["_tool_status"] = metadata["ok"]
+        return message
 
     async def approve_tool(self, request_id: str | int) -> None:
         gate = self._approval

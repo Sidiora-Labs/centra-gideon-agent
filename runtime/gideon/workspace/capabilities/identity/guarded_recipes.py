@@ -303,10 +303,7 @@ class _RuntimeStep:
                 )
             elif event.kind == EVENT_TOOL_RESULT:
                 self.service._update(self.run_id, permission=None)
-                failed = (
-                    event.tool_output.startswith("Error:")
-                    or event.tool_meta.get("ok") is False
-                )
+                failed = event.tool_meta.get("ok") is False
                 try:
                     output = json.loads(event.tool_output)
                 except (ValueError, TypeError):

@@ -106,10 +106,36 @@ def _save(doc: dict) -> None:
     atomic_write(_prefs_path(), json.dumps(out, ensure_ascii=False, indent=2))
 
 
+def _load_mcp_disabled() -> set[str]:
+    """Return disabled MCP tools as canonical ``mcp/{server}/{tool}`` names."""
+    try:
+        doc = json.loads((config_dir() / "mcp.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return set()
+    except (json.JSONDecodeError, OSError):
+        logger.debug("tool_prefs: unreadable MCP config", exc_info=True)
+        return set()
+    servers = doc.get("mcpServers") if isinstance(doc, dict) else None
+    if not isinstance(servers, dict):
+        return set()
+    disabled: set[str] = set()
+    for server, spec in servers.items():
+        if not isinstance(server, str) or not server or not isinstance(spec, dict):
+            continue
+        names = spec.get("disabledTools")
+        if isinstance(names, list):
+            disabled.update(
+                f"mcp/{server}/{name}"
+                for name in names
+                if isinstance(name, str) and name
+            )
+    return disabled
+
+
 def load_disabled() -> set[str]:
-    """The set of disabled TOOL keys (``provider:tool``)."""
+    """The disabled preference keys plus canonical disabled MCP identities."""
     items = _load().get("disabled", [])
-    return {str(k) for k in items if isinstance(k, str)}
+    return {str(k) for k in items if isinstance(k, str)} | _load_mcp_disabled()
 
 
 def load_disabled_providers() -> set[str]:
@@ -178,7 +204,12 @@ def is_disabled(
     if provider in dp:
         return True
     d = disabled if disabled is not None else load_disabled()
-    return key_for(provider, name) in d
+    canonical_mcp_name = (
+        name
+        if isinstance(name, str) and name.startswith(f"mcp/{provider}/")
+        else f"mcp/{provider}/{name}"
+    )
+    return key_for(provider, name) in d or canonical_mcp_name in d
 
 
 def is_provider_disabled(

@@ -155,8 +155,7 @@ async def api_tools_list(request: web.Request) -> web.Response:
         seen.add(key)
         locked = tool_prefs.is_locked(name)
         prov_off = provider in disabled_provs
-        tools_out.append(
-            {
+        entry = {
                 "name": name,
                 "description": description,
                 "provider": provider,
@@ -166,11 +165,15 @@ async def api_tools_list(request: web.Request) -> web.Response:
                 "locked": locked,
                 "providerDisabled": prov_off,
                 "disabled": (not locked)
-                and (prov_off or tool_prefs.key_for(provider, name) in disabled_keys),
+                and tool_prefs.is_disabled(
+                    provider, name, disabled_keys, disabled_provs
+                ),
                 "group": _group_of(name, provider),
                 "tier": provider_tiers.get(provider, default_tier),
             }
-        )
+        if name.startswith(f"mcp/{provider}/"):
+            entry["serverTool"] = name
+        tools_out.append(entry)
 
     try:
         from gideon.engine.agents.native.builtin_tools import (
@@ -286,6 +289,26 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
             {"ok": False, "error": "provider must be a string"}, status=400
         )
     provider_name = provider_raw or ""
+
+    if tool_name.startswith("mcp/"):
+        _prefix, separator, remainder = tool_name.partition("/")
+        server, separator, raw_name = remainder.partition("/")
+        if separator and raw_name:
+            from gideon.integrations.tool_providers import tool_prefs
+
+            if provider_name and provider_name != server:
+                return web.json_response(
+                    {"ok": False, "error": "MCP tool owner does not match its canonical name"},
+                    status=400,
+                )
+            if tool_prefs.is_disabled(server, tool_name):
+                return json_error(
+                    "tool_disabled",
+                    message=(
+                        f"{tool_name!r} is disabled — re-enable it on the Tools page to invoke it"
+                    ),
+                    status=403,
+                )
 
     from gideon.engine.agents.native.builtin_tools import (
         PLATFORM_TOOL_NAMES,
@@ -457,6 +480,11 @@ async def api_tools_toggle(request: web.Request) -> web.Response:
         )
     if not name:
         return web.json_response({"ok": False, "error": "name is required"}, status=400)
+    if name.startswith("mcp/") or provider == "mcp":
+        return web.json_response(
+            {"ok": False, "error": "MCP tools must use /api/mcp/toggle-tool with server and raw tool name"},
+            status=400,
+        )
     if name not in {t.name for t in await list_all_tools()}:
         return web.json_response(
             {"ok": False, "error": f"unknown tool {name!r}"}, status=404
