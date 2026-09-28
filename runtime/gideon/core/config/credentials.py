@@ -64,7 +64,7 @@ class DotenvDocument:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         lines = self.lines()
         positions = [index for index, line in enumerate(lines) if self.key(line) == key]
-        replacement = f"{key}={value}"
+        replacement = f"{key}={json.dumps(value)}"
         for index in positions:
             lines[index] = replacement
         if not positions:
@@ -92,7 +92,16 @@ def parse_dotenv(text: str) -> dict[str, str]:
     for line in text.splitlines():
         key = DotenvDocument.key(line)
         if key is not None:
-            values[key] = line.split("=", 1)[1].strip()
+            value = line.split("=", 1)[1].strip()
+            if value.startswith('"'):
+                try:
+                    decoded = json.loads(value)
+                except ValueError:
+                    pass
+                else:
+                    if isinstance(decoded, str):
+                        value = decoded
+            values[key] = value
     return values
 
 
