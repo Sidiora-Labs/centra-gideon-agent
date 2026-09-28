@@ -29,6 +29,7 @@ import math
 import re
 import shutil
 import time
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -73,6 +74,30 @@ MIN_OBSERVE_MS = 100
 MAX_OBSERVE_MS = 30_000
 DEFAULT_OBSERVE_MS = 5_000
 PORTED_LOOP_KINDS = frozenset({"general"})
+
+
+@dataclass(frozen=True)
+class ScheduledEventWake:
+    """A trigger's verified, one-target permission to wake an EVENT gate."""
+
+    trigger_id: str
+    action_revision: str
+    run_id: str
+    resume_token: str
+    node_id: str
+    declared_resume_token: str
+    answer: Any
+    project_id: str = ""
+
+
+def json_values_equal(left: Any, right: Any) -> bool:
+    """Compare supported JSON values without Python's bool/int equivalence."""
+    try:
+        return json.dumps(
+            left, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ) == json.dumps(right, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        return False
 
 
 def _service_failure(code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -2032,6 +2057,7 @@ def resume_run(
     responder: str = "",
     channel: str = "",
     always_allow: bool = False,
+    scheduled_event_wake: ScheduledEventWake | None = None,
 ) -> dict[str, Any]:
     """Answer a gate, or clear a pause.
 
@@ -2053,7 +2079,21 @@ def resume_run(
             "WF_RUN_ALREADY_TERMINAL", f"run is already {run.status.value}"
         )
 
-    if answer is None and not token:
+    if scheduled_event_wake is not None:
+        if (
+            not isinstance(scheduled_event_wake, ScheduledEventWake)
+            or scheduled_event_wake.run_id != run_id
+            or not scheduled_event_wake.resume_token
+            or token != scheduled_event_wake.resume_token
+            or not json_values_equal(answer, scheduled_event_wake.answer)
+            or channel
+            or responder != f"trigger:{scheduled_event_wake.trigger_id}"
+        ):
+            return _service_failure(
+                "WF_EVENT_WAKE_INVALID", "the scheduled event wake does not match this resume"
+            )
+
+    if scheduled_event_wake is None and answer is None and not token:
         run.extra.pop("pause_requested", None)
         store.save(run)
         return _ok(run_id=run_id, resumed=True, gate_answered=False)
@@ -2086,9 +2126,14 @@ def resume_run(
                 ],
             )
         token = pending[0].token
-    result = controller.resume(
-        token, answer, responder=responder, channel=channel, always_allow=always_allow
-    )
+    resume_kwargs = {
+        "responder": responder,
+        "channel": channel,
+        "always_allow": always_allow,
+    }
+    if scheduled_event_wake is not None:
+        resume_kwargs["scheduled_event_wake"] = scheduled_event_wake
+    result = controller.resume(token, answer, **resume_kwargs)
     result.setdefault("run_id", run_id)
     return result
 

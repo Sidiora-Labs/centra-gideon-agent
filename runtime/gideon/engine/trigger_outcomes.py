@@ -249,6 +249,9 @@ class FireLedger:
             if not identity:
                 return
             outcome = FireResult.read(result, error)
+            from gideon.automation.triggers import parks
+
+            waiting = parks.parked(result)
             journal = self.journal_type(config_dir())
             now = time.time()
             await journal.append(
@@ -259,12 +262,20 @@ class FireLedger:
                     started_at=now,
                     finished_at=now,
                     status=(
-                        "success"
+                        "waiting"
+                        if waiting
+                        else "success"
                         if outcome.exit_type == autopause.ExitType.OK.value
                         else "failure"
                     ),
+                    summary=parks.waiting_line(result) if waiting else "",
                     error=outcome.exception_text[:200],
                 )
+            )
+            parks.settle(
+                trigger,
+                result,
+                state=getattr(self.runtime, "dashboard_state", None),
             )
             rows, _ = await journal.list_for_job(identity, 0, 20)
             decision = autopause.evaluate(

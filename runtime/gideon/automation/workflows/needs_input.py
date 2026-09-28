@@ -17,6 +17,7 @@ class BlockKind(str, Enum):
     CAPABILITY = "capability"
     TRANSIENT = "transient"
     APPROVAL = "approval"
+    EVENT = "event"
 
 
 _CAPABILITY_CLASSES = frozenset({"permission", "budget"})
@@ -183,6 +184,8 @@ def build_item(
 def classify_block(
     ask: dict[str, Any] | None, failure: dict[str, Any] | None
 ) -> BlockKind:
+    if str((ask or {}).get("kind") or "").strip().lower() == "event":
+        return BlockKind.EVENT
     if str((ask or {}).get("kind") or "").strip().lower() == "approval":
         return BlockKind.APPROVAL
     failure_class = str((failure or {}).get("failure_class") or "").strip().lower()

@@ -1719,6 +1719,69 @@ async def api_trigger_run(request: web.Request) -> web.Response:
 
 
 
+async def api_trigger_answer(request: web.Request) -> web.Response:
+    """Consume one owner answer for a parked store trigger and resume its action."""
+    from gideon.automation.triggers import parks
+    from gideon.automation.triggers import tools as trigger_tools
+    from gideon.security.approval_answer import OWNER, of_request
+
+    principal = of_request(request)
+    if principal.kind != OWNER or not principal.name:
+        return web.json_response({"error": "owner required"}, status=403)
+    path_id = request.match_info["id"]
+    raw = path_id.removeprefix("store:")
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "resume_token and answer are required"}, status=400)
+    if (
+        not isinstance(body, dict)
+        or set(body) != {"resume_token", "answer"}
+        or not isinstance(body.get("resume_token"), str)
+        or not body.get("resume_token")
+        or not isinstance(body.get("answer"), bool)
+    ):
+        return web.json_response({"error": "resume_token and answer are required"}, status=400)
+
+    store = _trigger_store()
+    row = store.get(raw)
+    if row is None:
+        return web.json_response({"error": "not found"}, status=404)
+    if body["answer"]:
+        if row.errors:
+            return web.json_response({"error": "trigger action is invalid"}, status=400)
+        from gideon.automation.triggers import grants
+
+        missing_grants = grants.missing(row.trigger)
+        if missing_grants:
+            return web.json_response(
+                {"error": "owner action grant required", "providers": missing_grants},
+                status=409,
+            )
+        refusal = trigger_tools.manual_refusal()
+        if refusal:
+            return web.json_response({"ok": False, "refused": refusal}, status=409)
+    if not parks.claim(raw, body["resume_token"]):
+        return web.json_response({"error": "park is stale or already answered"}, status=409)
+    parks.close_row(request.app.get("state"), raw)
+    if not body["answer"]:
+        return web.json_response({"ok": True, "outcome": "declined"})
+
+    ran, note = await _dispatch_store_action(
+        row.trigger,
+        {"trigger_id": raw, "manual": True, "answer": True},
+        event="manual.answer",
+    )
+    return _trigger_answer_response(ran, note)
+
+
+def _trigger_answer_response(ran: bool, note: str) -> web.Response:
+    return web.json_response(
+        {"ok": ran, "outcome": "resumed" if ran else "failed", "result": _redact(note)}
+    )
+
+
+
 _NO_STORE = {"Cache-Control": "no-store"}
 
 _WEBHOOK_SURFACE = "webhook"
@@ -2149,6 +2212,9 @@ async def _record_manual_run(
         else:
             live.last_success_at = stamp
         store.upsert(live)
+        from gideon.automation.triggers import parks
+
+        parks.settle(trigger, result)
     except (
         Exception
     ):  # noqa: BLE001 - see the docstring: recording must never fail the run
@@ -2697,6 +2763,7 @@ def register_trigger_routes(app: web.Application) -> None:
     app.router.add_post("/api/triggers/{id}/toggle", api_trigger_toggle)
     app.router.add_post("/api/triggers/{id}/grant", api_trigger_grant)
     app.router.add_post("/api/triggers/{id}/run", api_trigger_run)
+    app.router.add_post("/api/triggers/{id}/answer", api_trigger_answer)
     app.router.add_post("/api/triggers/{id}/fire", api_trigger_fire)
     app.router.add_post("/api/triggers/{id}/test", api_trigger_test)
     app.router.add_post("/api/triggers/{id}/to-chat", api_trigger_to_chat)

@@ -1090,7 +1090,7 @@ export interface WorkflowLedgerRow {
   }
 }
 export type WorkflowRunStatus =
-  'draft' | 'running' | 'paused' | 'needs_input' | 'complete' | 'failed' | 'cancelled' | 'escalated'
+  'draft' | 'running' | 'paused' | 'needs_input' | 'complete' | 'failed' | 'cancelled' | 'declined' | 'escalated'
 export interface WorkflowNodeState {
   instance_path: string; node_id: string; state: string; attempt?: number
   cached?: boolean
@@ -1119,8 +1119,8 @@ export interface WorkflowRunDetailData {
 }
 export interface WorkflowContinuation {
   resume_token: string; node_id: string; instance_path: string
-  ask: { kind?: string; prompt?: string; choices?: string[]; fields?: Array<{ name: string; type?: string; label?: string; required?: boolean; choices?: string[] }> }
-  handoff: { scope?: string; status?: string; outstanding?: string[]; checks_run?: string[]; next_steps?: string[]; risks?: string[] }
+  ask: { kind?: string; prompt?: string; rerun?: boolean; choices?: string[]; fields?: Array<{ name: string; type?: string; label?: string; required?: boolean; choices?: string[] }> }
+  handoff: { scope?: string; status?: string; attempted?: string[]; outstanding?: string[]; checks_run?: string[]; next_steps?: string[]; risks?: string[] }
   expires_at: number; expired: boolean
 }
 export interface WorkflowCascadePreview {
@@ -4484,6 +4484,9 @@ export const api = {
   triggerHistory: (triggerId: string, limit = 10, offset = 0) =>
     get<{ runs: ScheduleRun[]; total: number; supported?: boolean; reason?: string }>(
       `/api/triggers/${encodeURIComponent(triggerId)}/history?limit=${limit}&offset=${offset}`),
+  answerTriggerPark: (triggerId: string, body: { resume_token: string; answer: boolean }) =>
+    post<{ ok: boolean; approved?: boolean; result?: string; waiting?: boolean; refused?: string }>(
+      `/api/triggers/${encodeURIComponent(triggerId)}/answer`, body),
   triggerRunDetail: (triggerId: string, runId: string) =>
     get<{ run: ScheduleRun }>(
       `/api/triggers/${encodeURIComponent(triggerId)}/history/${encodeURIComponent(runId)}`).then((d) => d.run),

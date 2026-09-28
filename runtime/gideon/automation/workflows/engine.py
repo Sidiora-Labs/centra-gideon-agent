@@ -1380,9 +1380,10 @@ def _ask_payload(node: Node, cfg: dict[str, Any]) -> dict[str, Any]:
     the shape is fixed by `human_input.Ask` rather than left to each template."""
     from gideon.automation.workflows.human_input import Ask
 
+    event = str(cfg.get("kind", "") or "") == GateKind.EVENT.value
     return Ask.from_dict(
         {
-            "kind": cfg.get("ask_kind", "approval"),
+            "kind": "event" if event else cfg.get("ask_kind", "approval"),
             "prompt": str(cfg.get("prompt", "") or cfg.get("message", "") or ""),
             "fields": cfg.get("fields") or [],
             "choices": cfg.get("choices") or [],

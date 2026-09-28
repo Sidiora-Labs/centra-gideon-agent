@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import calendar
 import contextlib
+import copy
 import json
 import logging
 import os
@@ -187,6 +188,7 @@ _ROOT_TO_RUN = {
     InstanceState.NO_CHANGE: RunStatus.COMPLETE,
     InstanceState.SKIPPED: RunStatus.COMPLETE,
     InstanceState.FAILED: RunStatus.FAILED,
+    InstanceState.DECLINED: RunStatus.DECLINED,
     InstanceState.SCOPE_VIOLATION: RunStatus.FAILED,
     InstanceState.BLOCKED: RunStatus.FAILED,
     InstanceState.ESCALATED: RunStatus.ESCALATED,
@@ -288,7 +290,12 @@ class RunController:
         self._breakers: dict[str, BreakerState] = {}
         self._budget_warned = False
         self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
-        self._pending_mutations: list[tuple[mutations.BatchResult, str]] = []
+        queued = self.run.extra.get("workflow_queued_mutations", [])
+        self._pending_mutations: list[tuple[list[dict[str, Any]], str]] = [
+            (list(item.get("ops") or []), str(item.get("actor") or "user"))
+            for item in queued
+            if isinstance(item, dict) and isinstance(item.get("ops"), list)
+        ]
         self._allow_memory = gate_policy.AllowMemory()
         self._event_holds: dict[str, gate_policy.HoldState] = {}
         self._event_seq = 0
@@ -789,6 +796,13 @@ class RunController:
 
         self._wake_due_nodes()
 
+        gate_end = self._gate_end_outcome()
+        if gate_end is not None:
+            status, reason = gate_end
+            await self._cancel_inflight()
+            await self._finish(status, error=reason)
+            return True
+
         self._reconcile_dispatched_stages()
 
         self._reap_watchers()
@@ -839,6 +853,27 @@ class RunController:
                 await self._finish(RunStatus.NEEDS_INPUT)
                 return True
         return False
+
+    def _gate_end_outcome(self) -> tuple[RunStatus, str] | None:
+        """Stop at a declined gate or an untolerated failed gate before scheduling followers."""
+        nodes = dict(_walk(self.root))
+        for path, inst in self.instances.items():
+            node = nodes.get(spec_path(path))
+            if node is None or node.kind != NodeKind.GATE:
+                continue
+            config = node.config or {}
+            if inst.state == InstanceState.DECLINED:
+                reason = inst.failure.cause_plain if inst.failure else "gate was declined"
+                return RunStatus.DECLINED, f"{node.id or path}: {reason}"
+            if inst.state != InstanceState.FAILED:
+                continue
+            tolerated = bool(config.get("allow_failure")) or (
+                "on_error" in config and str(config.get("on_error") or "") == "null_continue"
+            )
+            if not tolerated:
+                reason = inst.failure.cause_plain if inst.failure else "gate failed"
+                return RunStatus.FAILED, f"{node.id or path}: {reason}"
+        return None
 
     def _surface_needs_input(self) -> None:
         """Publish the needs-input state without ending the run.
@@ -918,7 +953,7 @@ class RunController:
                 "expires_at": cont.expires_at,
             },
         )
-        confirmation_id = _confirmation_id(
+        confirmation_id = cont.confirmation_id or _confirmation_id(
             self.run.id, cont.node_id or path, inst.epoch
         )
         self.publish_confirmation_pending(
@@ -949,6 +984,79 @@ class RunController:
         deps = node_deps(node.config or {})
         return {dep: self._outputs.get(dep) for dep in sorted(deps)}
 
+    def _valid_scheduled_event_wake(
+        self,
+        context: Any,
+        cont: Any,
+        *,
+        token: str,
+        answer: Any,
+        responder: str,
+        channel: str,
+    ) -> bool:
+        """Revalidate the real trigger target, current grant, and one EVENT ask."""
+        try:
+            from gideon.automation.triggers import grants
+            from gideon.automation.triggers.store import TriggerStore
+            from gideon.automation.triggers.wakeup import resume_target_of
+            from gideon.automation.workflows.human_input import Ask, AskKind, list_continuations
+            from gideon.automation.workflows.service import (
+                ScheduledEventWake,
+                json_values_equal,
+            )
+            from gideon.core.config.loader import config_dir
+
+            if not isinstance(context, ScheduledEventWake):
+                return False
+            if (
+                channel
+                or responder != f"trigger:{context.trigger_id}"
+                or context.run_id != self.run.id
+                or context.resume_token != token
+                or not json_values_equal(context.answer, answer)
+                or not token
+                or Ask.from_dict(cont.ask).kind != AskKind.EVENT
+                or context.node_id != cont.node_id
+            ):
+                return False
+            row = TriggerStore(base_dir=config_dir()).get(context.trigger_id)
+            if row is None or not row.ok or not row.trigger.enabled:
+                return False
+            trigger = row.trigger
+            if (
+                grants.action_revision(trigger) != context.action_revision
+                or not grants.is_granted(trigger)
+            ):
+                return False
+            target = resume_target_of(trigger)
+            if (
+                target.get("run_id") != context.run_id
+                or target.get("project_id", "") != context.project_id
+                or target.get("resume_token", "") != context.declared_resume_token
+                or target.get("answers_gate") is not True
+                or not json_values_equal(target.get("gate_answer"), context.answer)
+            ):
+                return False
+            if context.declared_resume_token:
+                return token == context.declared_resume_token
+            event_pending = [
+                pending
+                for pending in list_continuations(self.run.id)
+                if Ask.from_dict(pending.ask).kind == AskKind.EVENT
+            ]
+            return (
+                len(event_pending) == 1
+                and event_pending[0].token == token
+                and event_pending[0].node_id == context.node_id
+            )
+        except Exception:
+            logger.info(
+                "workflow %s: refusing an unverified scheduled event wake",
+                self.run.id,
+                exc_info=True,
+            )
+            return False
+
     def resume(
         self,
         token: str,
@@ -957,6 +1065,7 @@ class RunController:
         responder: str = "",
         channel: str = "",
         always_allow: bool = False,
+        scheduled_event_wake: Any = None,
     ) -> dict[str, Any]:
         """Answer a waiting gate. The out-of-band entry point (widget, inbox, HTTP, chat).
 
@@ -976,32 +1085,47 @@ class RunController:
             load_continuation,
         )
 
-        allowed, why = gate_policy.may_answer(
-            self.run, responder=responder, channel=channel
-        )
-        if not allowed:
-            logger.info(
-                "workflow %s: refusing remote gate answer — %s", self.run.id, why
+        if scheduled_event_wake is None:
+            allowed, why = gate_policy.may_answer(
+                self.run, responder=responder, channel=channel
             )
-            return {"ok": False, "code": "WF_RESUME_NOT_OWNER", "message": why}
+            if not allowed:
+                logger.info(
+                    "workflow %s: refusing remote gate answer — %s", self.run.id, why
+                )
+                return {"ok": False, "code": "WF_RESUME_NOT_OWNER", "message": why}
 
         cont = load_continuation(self.run.id, token)
         if cont is None:
             return {"ok": False, "code": "WF_RESUME_UNKNOWN_TOKEN"}
+        if scheduled_event_wake is not None and not self._valid_scheduled_event_wake(
+            scheduled_event_wake,
+            cont,
+            token=token,
+            answer=answer,
+            responder=responder,
+            channel=channel,
+        ):
+            return {"ok": False, "code": "WF_EVENT_WAKE_INVALID"}
         if cont.expired:
             consume_continuation(self.run.id, token)
             item = expired_item(cont)
             self._publish("workflow_needs_input", item)
+            self._journal_wait_outcome(cont, "declined", "gate answer expired")
+            attention.resolve_gate_item(
+                self.services.attention_state, self.run.id, cont.node_id
+            )
             return {"ok": False, "code": "WF_RESUME_EXPIRED", "item": item}
 
-        revise = _parse_revise(answer)
+        ask = Ask.from_dict(cont.ask)
+        is_event = ask.kind.value == "event"
+        revise = None if is_event else _parse_revise(answer)
         if revise is not None:
             step_ref, comment = revise
             return self._resume_revise(
                 cont, token, step_ref, comment, responder=responder, channel=channel
             )
 
-        ask = Ask.from_dict(cont.ask)
         problem = ask.validate_answer(answer)
         if problem:
             return {"ok": False, "code": "WF_RESUME_INVALID_ANSWER", "message": problem}
@@ -1015,21 +1139,24 @@ class RunController:
             return {"ok": False, "code": "WF_RESUME_STALE_EPOCH"}
 
         filled = ask.apply_defaults(answer)
-        approved = _is_approved(ask, filled)
-        if approved and always_allow:
+        approved = True if is_event else _is_approved(ask, filled)
+        if approved and always_allow and not is_event:
             node = dict(_walk(self.root)).get(spec_path(cont.instance_path))
             self._allow_memory.remember(node.config if node else {}, cont.node_id)
         inst.wake_at = 0.0
         if approved:
             inst.state = InstanceState.DONE
-            ref, preview = self.journal.store_output(
-                cont.instance_path, {"answer": filled, "approved": True}
+            output = (
+                {"answer": filled, "woken": True}
+                if is_event
+                else {"answer": filled, "approved": True}
             )
+            ref, preview = self.journal.store_output(cont.instance_path, output)
             inst.output_ref = ref
             if cont.node_id:
                 self._outputs[cont.node_id] = preview
         else:
-            inst.state = InstanceState.FAILED
+            inst.state = InstanceState.DECLINED
             inst.failure = Failure(
                 failure_class=FailureClass.USER,
                 cause_plain="the gate was denied",
@@ -1040,11 +1167,11 @@ class RunController:
         self.publish_confirmation_resolved(
             cont.instance_path,
             cont.node_id,
-            confirmation_id=_confirmation_id(
+            confirmation_id=cont.confirmation_id or _confirmation_id(
                 self.run.id, cont.node_id or cont.instance_path, cont.epoch
             ),
-            verb="approve" if approved else "reject",
-            approved=approved,
+            verb=("wake" if is_event else "approve") if approved else "reject",
+            approved=approved if not is_event else False,
             resolved_by=responder or channel or "dashboard",
         )
         self.journal.write(
@@ -1052,7 +1179,9 @@ class RunController:
             instance_path=cont.instance_path,
             node_id=cont.node_id,
             epoch=cont.epoch,
-            approved=approved,
+            approved=approved if not is_event else False,
+            outcome=("woken" if is_event else "approved") if approved else "declined",
+            event_woken=is_event,
             decided_by=(
                 "you"
                 if str(responder or "").startswith(("owner:", "channel:"))
@@ -1065,7 +1194,8 @@ class RunController:
                 else 0.0
             ),
         )
-        self._emit_judge_divergence(cont.instance_path, cont.node_id, approved)
+        if not is_event:
+            self._emit_judge_divergence(cont.instance_path, cont.node_id, approved)
         self.run.attention = None
         if self.run.status == RunStatus.NEEDS_INPUT:
             self.run.status = RunStatus.RUNNING
@@ -1076,7 +1206,8 @@ class RunController:
             {
                 "node_id": cont.node_id,
                 "instance_path": cont.instance_path,
-                "approved": approved,
+                "approved": approved if not is_event else None,
+                "woken": is_event,
             },
         )
         attention.resolve_gate_item(
@@ -1084,7 +1215,12 @@ class RunController:
         )
         self._publish("workflow_run_update", {"status": self.run.status.value})
         self._resume_loop()
-        return {"ok": True, "approved": approved, "node_id": cont.node_id}
+        return {
+            "ok": True,
+            "approved": approved if not is_event else False,
+            "woken": is_event,
+            "node_id": cont.node_id,
+        }
 
     def _resume_revise(
         self,
@@ -1190,6 +1326,8 @@ class RunController:
             instance_path=cont.instance_path,
             node_id=cont.node_id,
             epoch=cont.epoch,
+            confirmation_id=cont.confirmation_id,
+            outcome="revised",
             step_ref=node_id,
             comment=text,
             revised_by=responder or channel or "dashboard",
@@ -1240,6 +1378,44 @@ class RunController:
         self._terminal.clear()
         self._task = asyncio.create_task(self._tick_loop())
 
+    def _journal_wait_outcome(self, cont: Any, outcome: str, reason: str) -> None:
+        confirmation_id = cont.confirmation_id or _confirmation_id(
+            self.run.id, cont.node_id or cont.instance_path, cont.epoch
+        )
+        self.publish_confirmation_resolved(
+            cont.instance_path,
+            cont.node_id,
+            confirmation_id=confirmation_id,
+            verb=outcome,
+            approved=outcome == "approved",
+            resolved_by="nobody" if outcome in ("withdrawn", "declined") else "you",
+        )
+        self.journal.write(
+            journal_mod.GATE_RESOLVED,
+            instance_path=cont.instance_path,
+            node_id=cont.node_id,
+            epoch=cont.epoch,
+            approved=outcome == "approved",
+            outcome=outcome,
+            reason=reason,
+            decided_by="nobody" if outcome in ("withdrawn", "declined") else "you",
+        )
+
+    def _close_waits(self, *, outcome: str, reason: str, instance_path: str = "") -> None:
+        from gideon.automation.workflows.human_input import (
+            drop_continuations,
+            list_continuations,
+        )
+
+        for cont in list_continuations(self.run.id):
+            if instance_path and cont.instance_path != instance_path:
+                continue
+            self._journal_wait_outcome(cont, outcome, reason)
+            attention.resolve_gate_item(
+                self.services.attention_state, self.run.id, cont.node_id
+            )
+        drop_continuations(self.run.id, instance_prefix=instance_path)
+
     def submit_mutation(
         self,
         raw_ops: list[dict[str, Any]],
@@ -1258,6 +1434,17 @@ class RunController:
         A cascade that re-runs completed work needs `confirm=True`. Without the gate, a
         one-line prompt edit could silently re-run (and re-bill) a dozen finished stages.
         """
+        if self.run.is_terminal:
+            return {
+                "ok": False,
+                "code": "WF_MUT_RUN_TERMINAL",
+                "issues": [{
+                    "code": "WF_MUT_RUN_TERMINAL",
+                    "message": f"run is already {self.run.status.value}",
+                    "node_id": "",
+                }],
+                "preview": mutations.CascadePreview().to_dict(),
+            }
         if expect_version is not None and int(expect_version) != int(
             self.run.spec_version
         ):
@@ -1276,8 +1463,16 @@ class RunController:
                 "preview": mutations.CascadePreview().to_dict(),
             }
 
+        projected = copy.deepcopy(self.spec)
+        for queued_ops, _queued_actor in self._pending_mutations:
+            previous = mutations.prepare_batch(
+                queued_ops, projected, self.instances, effects=self._effects
+            )
+            if not previous.ok or previous.spec is None:
+                return previous.to_dict()
+            projected = previous.spec
         result = mutations.prepare_batch(
-            raw_ops, self.spec, self.instances, effects=self._effects
+            raw_ops, projected, self.instances, effects=self._effects
         )
         body = result.to_dict()
         if not result.ok:
@@ -1297,9 +1492,18 @@ class RunController:
                 }
             ]
             return body
-        self._pending_mutations.append((result, actor))
+        self._pending_mutations.append(([op.to_dict() for op in result.ops], actor))
+        self._persist_pending_mutations()
         body["queued"] = True
+        if self.run.status == RunStatus.NEEDS_INPUT:
+            self._resume_loop()
         return body
+
+    def _persist_pending_mutations(self) -> None:
+        self.run.extra["workflow_queued_mutations"] = [
+            {"ops": ops, "actor": actor} for ops, actor in self._pending_mutations
+        ]
+        self._save_run()
 
     def _drain_mutations(self) -> None:
         """Apply queued batches. Called under the lock, between scheduling steps.
@@ -1311,30 +1515,35 @@ class RunController:
         """
         if not self._pending_mutations:
             return
-        queued = list(self._pending_mutations)
-        self._pending_mutations.clear()
-        for result, actor in queued:
+        while self._pending_mutations:
+            ops, actor = self._pending_mutations[0]
             try:
-                root = Node.from_dict(self.spec.get("root") or {})
+                Node.from_dict(self.spec.get("root") or {})
             except ValueError:
                 logger.warning(
                     "workflow %s: spec unreadable, dropping mutation", self.run.id
                 )
+                self._pending_mutations.pop(0)
+                self._persist_pending_mutations()
                 continue
-            issues = mutations.validate_batch(result.ops, root, self.instances)
-            if issues:
+            result = mutations.prepare_batch(
+                ops, self.spec, self.instances, effects=self._effects
+            )
+            if not result.ok:
                 self.journal.write(
                     journal_mod.MUTATION_REJECTED,
                     actor=actor,
                     ops=[o.to_dict() for o in result.ops],
-                    issues=[i.to_dict() for i in issues],
+                    issues=[i.to_dict() for i in result.issues],
                 )
                 self._publish(
                     "workflow_mutation_rejected",
-                    {"issues": [i.to_dict() for i in issues], "actor": actor},
+                    {"issues": [i.to_dict() for i in result.issues], "actor": actor},
                 )
-                continue
-            self._commit_mutation(result, actor)
+            else:
+                self._commit_mutation(result, actor)
+            self._pending_mutations.pop(0)
+            self._persist_pending_mutations()
 
     def _commit_mutation(self, result: mutations.BatchResult, actor: str) -> None:
         """Swap in the candidate spec, apply state effects, journal the batch."""
@@ -1417,6 +1626,9 @@ class RunController:
             if node is not None and node.id:
                 self._outputs.pop(node.id, None)
             self.journal.invalidate_prefix(path)
+            self._close_waits(
+                outcome="revised", reason="the gate was invalidated by a rewind", instance_path=path
+            )
             drop_continuations(self.run.id, instance_prefix=path)
 
     def _apply_fork(self, op: mutations.Op) -> None:
@@ -2967,14 +3179,20 @@ class RunController:
             return
 
         if result.state == InstanceState.WAITING:
-            verdict = gate_policy.decide(
-                item.node.config or {},
-                item.node.id,
-                origin_kind=self.run.origin.kind,
-                mode=self.run.mode,
-                memory=self._allow_memory,
-                run_id=self.run.id,
-            )
+            if (result.ask or {}).get("kind") == "event":
+                verdict = gate_policy.PolicyVerdict(
+                    decision=gate_policy.Decision.ASK,
+                    reason="waiting for the event that wakes this gate",
+                )
+            else:
+                verdict = gate_policy.decide(
+                    item.node.config or {},
+                    item.node.id,
+                    origin_kind=self.run.origin.kind,
+                    mode=self.run.mode,
+                    memory=self._allow_memory,
+                    run_id=self.run.id,
+                )
             if verdict.approved:
                 inst.state = InstanceState.DONE
                 inst.completed_at = _now()
@@ -4245,6 +4463,9 @@ class RunController:
                 remediation="answer the gate from the run view, or raise its timeout_secs",
                 terminal_reason="timed_out_unattended",
             )
+            self._close_waits(
+                outcome="declined", reason="gate timed out with no answer", instance_path=path
+            )
             inst.state = InstanceState.FAILED
             inst.failure = failure
             inst.completed_at = _now()
@@ -4322,11 +4543,14 @@ class RunController:
                 node = dict(_walk(self.root)).get(spec_path(path))
                 label = node.id if node and node.id else path
                 error = f"{label}: {inst.failure.cause_plain}"[:500]
+        if status in TERMINAL_RUN_STATUSES:
+            self._close_waits(outcome="withdrawn", reason=f"run ended {status.value}")
         self.run.status = status
         self.run.error_message = error
         if status in (
             RunStatus.COMPLETE,
             RunStatus.FAILED,
+            RunStatus.DECLINED,
             RunStatus.CANCELLED,
             RunStatus.ESCALATED,
         ):

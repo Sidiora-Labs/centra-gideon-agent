@@ -25,6 +25,7 @@ class AskKind(str, Enum):
     CHOICE = "choice"
     TEXT = "text"
     FORM = "form"
+    EVENT = "event"
 
 
 @dataclass
@@ -173,6 +174,10 @@ class _AnswerRules:
         return ""
 
     def validate(self, answer: Any) -> str:
+        # An event gate carries a wake payload, not a human decision. Its value is opaque
+        # workflow input: false, strings, numbers, arrays, and objects are all meaningful.
+        if self.ask.kind == AskKind.EVENT:
+            return ""
         routes = (
             (AskKind.APPROVAL, self.approval),
             (AskKind.CHOICE, self.choice),
@@ -243,6 +248,7 @@ class Continuation:
     created_at: float = 0.0
     expires_at: float = 0.0
     handoff: dict[str, Any] = field(default_factory=dict)
+    confirmation_id: str = ""
 
     @property
     def expired(self) -> bool:
@@ -260,6 +266,7 @@ class Continuation:
             "created_at",
             "expires_at",
             "handoff",
+            "confirmation_id",
         )
         copies = {"resolved_inputs", "ask", "handoff"}
         return {
@@ -280,6 +287,7 @@ class Continuation:
         for name in ("created_at", "expires_at"):
             identity[name] = float(record.get(name, 0.0) or 0.0)
         identity["handoff"] = dict(record.get("handoff") or {})
+        identity["confirmation_id"] = str(record.get("confirmation_id", "") or "")
         return cls(**identity)
 
 
@@ -433,6 +441,7 @@ def create_continuation(
         created_at=clock,
         expires_at=clock + max(0, int(ttl_secs)) if ttl_secs else 0.0,
         handoff=dict(handoff or {}),
+        confirmation_id="gate-" + new_token(),
     )
     return save_continuation(Continuation(**values))
 

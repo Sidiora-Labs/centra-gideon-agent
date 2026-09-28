@@ -124,6 +124,7 @@ def resolve_run_items(state: Any, run_id: str) -> int:
 
 
 _ASK_DESCRIPTIONS = {
+    "event": "Parked until something wakes it. You can wake it now.",
     "approval": "Waiting for your approval.",
     "choice": "Waiting for you to choose an option.",
     "text": "Waiting for a written answer.",

@@ -10,6 +10,7 @@ const RUN_LOOK: Record<WorkflowRunStatus, StatusLook> = {
   needs_input: { label: 'Needs you', icon: TriangleAlert, tone: 'text-warning' },
   complete: { label: 'Completed', icon: CircleCheck, tone: 'text-success' },
   failed: { label: 'Failed', icon: OctagonAlert, tone: 'text-danger' },
+  declined: { label: 'Declined', icon: CircleSlash, tone: 'text-on-surface-low' },
   cancelled: { label: 'Cancelled', icon: CircleSlash, tone: 'text-on-surface-low' },
   escalated: { label: 'Escalated', icon: TriangleAlert, tone: 'text-danger' },
 }
@@ -31,6 +32,7 @@ const NODE_LOOK: Record<string, StatusLook> = {
   scope_violation: { label: 'Scope violation', icon: OctagonAlert, tone: 'text-danger' },
   blocked: { label: 'Blocked', icon: OctagonAlert, tone: 'text-danger' },
   escalated: { label: 'Escalated', icon: TriangleAlert, tone: 'text-danger' },
+  declined: { label: 'Declined', icon: CircleSlash, tone: 'text-on-surface-low' },
   cancelled: { label: 'Cancelled', icon: CircleSlash, tone: 'text-on-surface-low' },
   discarded: { label: 'Discarded', icon: CircleSlash, tone: 'text-on-surface-low' },
 }
@@ -39,7 +41,7 @@ export function nodeLook(state: string): StatusLook {
   return NODE_LOOK[state] ?? { label: state || 'Unknown', icon: CircleDashed, tone: 'text-on-surface-low' }
 }
 
-export const TERMINAL_RUN_STATUSES = new Set<string>(['complete', 'failed', 'cancelled', 'escalated'])
+export const TERMINAL_RUN_STATUSES = new Set<string>(['complete', 'failed', 'cancelled', 'declined', 'escalated'])
 
 export const isTerminal = (status: string) => TERMINAL_RUN_STATUSES.has(status)
 
@@ -48,7 +50,7 @@ export const PRELAUNCH_RUN_STATUSES = new Set<string>(['draft'])
 export const isPrelaunch = (status: string) => PRELAUNCH_RUN_STATUSES.has(status)
 
 export const TERMINAL_NODE_STATES = new Set<string>([
-  'done', 'degraded', 'failed', 'skipped', 'no_change', 'scope_violation', 'discarded', 'escalated', 'blocked', 'cancelled',
+  'done', 'degraded', 'failed', 'skipped', 'no_change', 'scope_violation', 'discarded', 'escalated', 'blocked', 'cancelled', 'declined',
 ])
 
 export const isNodeTerminal = (state: string) => TERMINAL_NODE_STATES.has(state)

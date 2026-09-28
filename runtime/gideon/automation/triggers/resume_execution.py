@@ -65,7 +65,9 @@ class ResumeExecution:
         code = str(result.get("code") or "")
         if result.get("ok"):
             report = (
-                "gate answered"
+                "event gate woken"
+                if result.get("woken")
+                else "gate answered"
                 if result.get("gate_answered", True)
                 else "pause cleared"
             )
@@ -102,19 +104,99 @@ class ResumeExecution:
         if reason:
             logger.warning("trigger %s: %s", self.trigger_id, reason)
             return self.outcome(Outcome.REFUSED.value, reason)
+        payload_trigger_id = str(self.payload.get("trigger_id") or "")
+        wakeup_trigger_id = str(getattr(self.wakeup, "trigger_id", "") or "")
+        if not payload_trigger_id or payload_trigger_id != wakeup_trigger_id:
+            return self.outcome(
+                Outcome.REFUSED.value,
+                "the wake-up trigger identity does not match its payload",
+            )
         try:
+            from gideon.automation.triggers import grants
+            from gideon.automation.triggers.store import TriggerStore
+            from gideon.automation.triggers.wakeup import resume_target_of
+            from gideon.automation.workflows.human_input import (
+                Ask,
+                AskKind,
+                list_continuations,
+            )
+
+            row = TriggerStore(base_dir=self.base_dir).get(payload_trigger_id)
+            if row is None or not row.ok or not row.trigger.enabled:
+                return self.outcome(
+                    Outcome.REFUSED.value,
+                    "the current trigger is missing, invalid, or disabled",
+                )
+            trigger = row.trigger
+            action_revision = grants.action_revision(trigger)
+            if not action_revision or not grants.is_granted(trigger):
+                return self.outcome(
+                    Outcome.REFUSED.value,
+                    "the current trigger action does not have its owner grant",
+                )
+            target = resume_target_of(trigger)
+            if (
+                not target
+                or target.get("run_id") != self.run_id
+                or target.get("run_id") != self.payload.get("run_id")
+                or target.get("project_id", "")
+                != str(self.payload.get("project_id") or "")
+                or target.get("resume_token", "")
+                != str(self.payload.get("resume_token") or "")
+                or target.get("answers_gate") is not True
+                or self.payload.get("answers_gate") is not True
+                or not service.json_values_equal(
+                    target.get("gate_answer"), self.payload.get("gate_answer")
+                )
+            ):
+                return self.outcome(
+                    Outcome.REFUSED.value,
+                    "the wake-up payload no longer matches the trigger's saved resume target",
+                )
+            pending = list_continuations(self.run_id)
+            declared_token = str(target.get("resume_token") or "")
+            if declared_token:
+                matching = [item for item in pending if item.token == declared_token]
+                if len(matching) != 1 or Ask.from_dict(matching[0].ask).kind != AskKind.EVENT:
+                    return self.outcome(
+                        Outcome.REFUSED.value,
+                        "the declared resume token does not name one pending event gate",
+                    )
+            else:
+                event_pending = [
+                    item
+                    for item in pending
+                    if Ask.from_dict(item.ask).kind == AskKind.EVENT
+                ]
+                if len(event_pending) != 1:
+                    return self.outcome(
+                        Outcome.REFUSED.value,
+                        "a token-less target needs exactly one pending event gate",
+                    )
+                matching = event_pending
+            continuation = matching[0]
+            if continuation.run_id != self.run_id:
+                return self.outcome(
+                    Outcome.REFUSED.value,
+                    "the pending event gate belongs to another run",
+                )
+            event_wake = service.ScheduledEventWake(
+                trigger_id=payload_trigger_id,
+                action_revision=action_revision,
+                run_id=self.run_id,
+                resume_token=continuation.token,
+                node_id=continuation.node_id,
+                declared_resume_token=declared_token,
+                answer=target.get("gate_answer"),
+                project_id=str(target.get("project_id") or ""),
+            )
             response = service.resume_run(
                 self.run_id,
                 supervisor=self.supervisor(),
-                token=str(self.payload.get("resume_token") or ""),
-                answer=(
-                    self.payload.get("gate_answer")
-                    if bool(self.payload.get("answers_gate"))
-                    else None
-                ),
-                responder=(
-                    f"trigger:{self.trigger_id}" if self.trigger_id else "trigger"
-                ),
+                token=event_wake.resume_token,
+                answer=event_wake.answer,
+                responder=f"trigger:{payload_trigger_id}",
+                scheduled_event_wake=event_wake,
             )
         except Exception as exc:
             logger.warning(

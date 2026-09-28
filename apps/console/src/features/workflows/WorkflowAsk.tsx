@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, TriangleAlert, X } from 'lucide-react'
+import { Check, Play, TriangleAlert, X } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { Checkbox, Field, NumberField, Select, TextArea, TextInput } from '../../shared/ui/forms'
@@ -9,14 +9,16 @@ import { GenUiWidget } from '../../shared/ui/genui/GenUiWidget'
 import { GenUiHostCtx } from '../../shared/ui/genui/actions'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
-export function WorkflowAsk({ continuation, runId, busy, onAnswer }: {
+export function WorkflowAsk({ continuation, runId, busy, onAnswer, rerunCaption }: {
   continuation: WorkflowContinuation
+  rerunCaption?: string
   runId: string
   busy: boolean
   onAnswer: (c: WorkflowContinuation, value: unknown, alwaysAllow: boolean) => void | Promise<void>
 }) {
   const { ask, handoff, expired } = continuation
   const kind = ask.kind || 'approval'
+  const event = kind === 'event'
   const [text, setText] = useState('')
   const [choice, setChoice] = useState(ask.choices?.[0] ?? '')
   const [form, setForm] = useState<Record<string, unknown>>(() => {
@@ -46,7 +48,7 @@ export function WorkflowAsk({ continuation, runId, busy, onAnswer }: {
     producer: { kind: 'workflow-gate' as const, runId, token: continuation.resume_token },
   }
 
-  const hasContext = !!(handoff.checks_run?.length || handoff.outstanding?.length || handoff.risks?.length)
+  const hasContext = !!(handoff.checks_run?.length || handoff.outstanding?.length || handoff.risks?.length || handoff.attempted?.length)
 
   return (
     <div className="flex flex-col gap-m rounded-xl border border-outline-variant p-l">
@@ -65,11 +67,15 @@ export function WorkflowAsk({ continuation, runId, busy, onAnswer }: {
 }
       {hasContext && (
         <div data-type="caption" className="flex flex-col gap-xs text-on-surface-low">
+          {handoff.attempted?.map((attempt, index) => <span key={index}>{attempt}</span>)}
           {!!handoff.checks_run?.length && <span>Already done: {handoff.checks_run.length} step{handoff.checks_run.length === 1 ? '' : 's'}</span>}
           {!!handoff.outstanding?.length && <span>Still to do: {handoff.outstanding.length} step{handoff.outstanding.length === 1 ? '' : 's'}</span>}
           {handoff.risks?.map((r) => <span key={r} className="text-warning">Risk: {r}</span>)}
         </div>
       )}
+
+      {event && <p data-type="body-s" className="text-on-surface-low">This step waits for something to happen, and the run carries on when it does. Wake it now to carry on early.</p>}
+      {ask.rerun && rerunCaption && <p data-type="body-s" className="text-on-surface-low">{rerunCaption}</p>}
 
       {kind === 'choice' && (
         <Field label="Choose one">
@@ -121,20 +127,24 @@ export function WorkflowAsk({ continuation, runId, busy, onAnswer }: {
         </div>
       )}
 
-      <label data-type="caption" className="inline-flex items-center gap-s text-on-surface-low">
+      {!event && !ask.rerun && (<label data-type="caption" className="inline-flex items-center gap-s text-on-surface-low">
         <Checkbox checked={alwaysAllow} onChange={setAlwaysAllow} ariaLabel="Don't ask again for this step in this run" />
         Don&apos;t ask again for this step in this run
-      </label>
+      </label>)}
 
       <div className="flex items-center gap-s">
-        {kind === 'approval' ? (
+        {event ? (
+          <Button onClick={() => onAnswer(continuation, true, false)} disabled={busy} disabledReason={BUSY_REASON}>
+            <Play size={14} /> Wake it now
+          </Button>
+        ) : kind === 'approval' ? (
           <>
-            <Button onClick={() => onAnswer(continuation, true, alwaysAllow)} disabled={busy} disabledReason={BUSY_REASON}>
+            <Button onClick={() => onAnswer(continuation, true, ask.rerun ? false : alwaysAllow)} disabled={busy} disabledReason={BUSY_REASON}>
               <Check size={14} /> Approve
             </Button>
             {
 }
-            <QuietButton onClick={() => onAnswer(continuation, false, alwaysAllow)} title="Deny this step">
+            <QuietButton disabled={busy} disabledReason={BUSY_REASON} onClick={() => onAnswer(continuation, false, ask.rerun ? false : alwaysAllow)} title="Deny this step">
               <X size={13} /> Deny
             </QuietButton>
           </>

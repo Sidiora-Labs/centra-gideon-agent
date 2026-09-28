@@ -12,6 +12,7 @@ import { TextArea, Segmented, FieldError } from '../../shared/ui/forms'
 import { api, ApiError, type InboxItem, type InboxClassification, type SkillProposalDetail } from '../../shared/data/api'
 import { classMeta, confMeta, statusMeta, kindMeta, channelLabel, sourceLabel, relPast, CLASSIFICATIONS, NON_CHANNEL_ITEM_KINDS, refTarget, refLabel } from './inboxMeta'
 import { WorkflowGateActions } from './WorkflowGateActions'
+import { TriggerParkActions } from './TriggerParkActions'
 import { invalidateKeys } from '../../shared/data/data'
 import { TextLink } from '../../shared/ui/TextLink'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
@@ -29,6 +30,7 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
   const target = refTarget(item)
 
   const answerableGate = item.item_kind === 'needs_input' && !!item.refs?.workflow
+  const answerableTrigger = item.item_kind === 'needs_input' && !!item.refs?.trigger_park
 
   return (
     <div className="grid gap-l">
@@ -100,7 +102,11 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
         </Section>
       )}
 
-      {!channelBacked && target && item.item_kind !== 'proposal' && !answerableGate && (
+      {answerableTrigger && (<Section label="Waiting on you">
+        <TriggerParkActions key={item.id} item={item} onChanged={onChanged} />
+      </Section>)}
+
+      {!channelBacked && target && item.item_kind !== 'proposal' && !answerableGate && !answerableTrigger && (
         <Section label="Source">
           <Button size="sm" variant="secondary" onClick={() => navigate(target)}>
             <ExternalLink size={14} /> {refLabel(item)}
