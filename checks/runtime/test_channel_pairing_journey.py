@@ -49,6 +49,17 @@ async def _health(client: TestClient, name: str, state: str) -> dict:
     raise AssertionError(f"{name} never reached {state}: {last}")
 
 
+async def _save_app_config(client: TestClient, name: str, config: dict):
+    current = await client.get(f"/api/apps/{name}/config")
+    assert current.status == 200, await current.text()
+    revision = (await current.json())["revision"]
+    return await client.put(
+        f"/api/apps/{name}/config",
+        json=config,
+        headers={"If-Match": f'"{revision}"'},
+    )
+
+
 @pytest.mark.asyncio
 async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(tmp_path, monkeypatch):
     monkeypatch.setattr(config_loader, "config_dir", lambda: tmp_path)
@@ -92,9 +103,10 @@ async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(tmp
                 configuration = await client.get(f"/api/apps/{name}/config")
                 assert configuration.status == 200
                 assert "bridge_url" in (await configuration.json())["schema"]["properties"]
-                saved = await client.put(
-                    f"/api/apps/{name}/config",
-                    json={
+                saved = await _save_app_config(
+                    client,
+                    name,
+                    {
                         "bridge_url": f"ws://127.0.0.1:{port}",
                         "bridge_token": "tenant-secret",
                         "auto_bridge": False,
@@ -152,9 +164,10 @@ async def test_mochat_apps_save_adopts_settings_and_connects(tmp_path, monkeypat
     try:
         async with TestClient(TestServer(vendor)) as vendor_client:
             async with TestClient(TestServer(app)) as client:
-                saved = await client.put(
-                    f"/api/apps/{name}/config",
-                    json={
+                saved = await _save_app_config(
+                    client,
+                    name,
+                    {
                         "base_url": str(vendor_client.make_url("/")).rstrip("/"),
                         "claw_token": "mochat-secret",
                         "sessions": "room-1",
@@ -242,9 +255,10 @@ async def test_weixin_apps_save_reaches_qr_and_confirmed_health(tmp_path, monkey
                 check = await probe.get(f"https://localhost:{vendor_server.port}/ilink/bot/get_bot_qrcode")
                 assert check.status_code == 200
             async with TestClient(TestServer(app)) as client:
-                saved = await client.put(
-                    f"/api/apps/{name}/config",
-                    json={"base_url": f"https://localhost:{vendor_server.port}"},
+                saved = await _save_app_config(
+                    client,
+                    name,
+                    {"base_url": f"https://localhost:{vendor_server.port}"},
                 )
                 assert saved.status == 200, await saved.text()
                 current = get_transport("weixin")

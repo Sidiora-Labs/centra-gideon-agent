@@ -29,6 +29,9 @@ import { TextInput } from '../../shared/ui/forms'
 import { MetaChip } from '../../shared/ui/MetaChip'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { useModelDownloads } from './useModelDownloads'
+import { mergeText, type Revisioned } from '../../shared/data/staleWrite'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 
 const modelBytes = (bytes: number) => {
   const gib = 1024 ** 3
@@ -192,9 +195,9 @@ export function ModelsPanel() {
   const { data, refresh } = useQuery('settings:models', async () => {
     const [rows, active] = await Promise.all([
       api.modelsAvailable().catch(() => [] as { name: string; models?: AvailableModel[] }[]),
-      api.modelsActive().catch(() => ({} as Record<string, string[]>)),
+      api.activeModels().catch(() => ({ use_cases: {}, revisions: {} })),
     ])
-    return { allModels: rows.flatMap((r) => r.models ?? []), active }
+    return { allModels: rows.flatMap((r) => r.models ?? []), active: active.use_cases, revisions: active.revisions }
   }, { persist: true })
   const { data: health } = useQuery('settings:models-health', () =>
     api.modelsHealth().then((h) => h.providers).catch(() => [] as ProviderHealth[]), { persist: false })
@@ -203,6 +206,7 @@ export function ModelsPanel() {
     { persist: false })
   const allModels = data?.allModels
   const active = data?.active ?? {}
+  const revisions = data?.revisions ?? {}
 
   const reloadActive = () => { invalidateKeys('settings:models'); refresh() }
   const { jobs: downloadJobs, start: startDownload, cancel: cancelDownload } = useModelDownloads(null, reloadActive)
@@ -231,7 +235,7 @@ export function ModelsPanel() {
           return (
             <div key={uc}>
               {showGroupHeader && <div data-type="caption" className="mb-1.5 mt-3 px-1 text-on-surface-low uppercase tracking-wide">{meta.group}</div>}
-              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} allModels={allModels} health={health ?? []} downloadJobs={downloadJobs} startDownload={startDownload} cancelDownload={cancelDownload} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
+              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} revision={revisions[uc]} allModels={allModels} health={health ?? []} downloadJobs={downloadJobs} startDownload={startDownload} cancelDownload={cancelDownload} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
             </div>
           )
         })}
@@ -478,8 +482,8 @@ function HealthDot({ provider, health }: { provider: string; health: ProviderHea
   return <span role="img" className="size-2 shrink-0 rounded-pill" style={{ background: color }} title={label} aria-label={label} />
 }
 
-function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, startDownload, cancelDownload, judgeRec, onChanged }: {
-  useCase: string; activeModels: string[]; allModels: AvailableModel[]; health: ProviderHealth[]
+function UseCaseRow({ useCase, activeModels, revision, allModels, health, downloadJobs, startDownload, cancelDownload, judgeRec, onChanged }: {
+  useCase: string; activeModels: string[]; revision?: string; allModels: AvailableModel[]; health: ProviderHealth[]
   downloadJobs: Record<string, DownloadJob>
   startDownload: (model: string, providerOverride?: string) => Promise<void>
   cancelDownload: (model: string, providerOverride?: string) => Promise<void>
@@ -489,6 +493,15 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
   const [query, setQuery] = useState('')
   const [reindex, setReindex] = useState<import('../../shared/data/api').ReindexJob | null>(null)
   const [repairErrors, setRepairErrors] = useState<Record<string, string>>({})
+  const stale = useStaleWriteGuard<string[]>({
+    read: async () => {
+      const current = await api.activeModels()
+      return { value: current.use_cases[useCase] ?? [], revision: current.revisions[useCase] ?? '' }
+    },
+    write: (next, base) => api.setActiveModel(useCase, next, base),
+    onSaved: onChanged,
+    onDiscard: onChanged,
+  })
   const repairRows = useRef<Record<string, HTMLDivElement | null>>({})
   const capable = useMemo(() => capableModels(useCase, allModels, activeModels), [allModels, useCase, activeModels])
   useEffect(() => {
@@ -547,8 +560,14 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
     }
     setSaving(true)
     try {
-      if (!(await reportingWrite('change the model', () => api.setActiveModel(useCase, models)))) return
-      onChanged()
+      const base: Revisioned<string[]> = { value: activeModels, revision: revision ?? '' }
+      const merge = (theirs: string[]) => {
+        if (activeModels.join('\n') === models.join('\n')) return theirs
+        if (activeModels.join('\n') === theirs.join('\n')) return models
+        const merged = mergeText(activeModels.join('\n'), models.join('\n'), theirs.join('\n'))
+        return merged === null ? null : (merged === '' ? [] : merged.split('\n'))
+      }
+      if (!(await reportingWrite('change the model', () => stale.save(base, models, merge)))) return
       if (useCase === 'embedding' && models.length > 0) startReindex()
     } finally { setSaving(false) }
   }
@@ -585,6 +604,7 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
       {
 }
       <p data-type="body-s" className="text-on-surface-low">{meta.description}</p>
+      <StaleWriteNotice guard={stale} what={`The ${meta.label.toLowerCase()} model chain`} />
       <div data-type="caption" className="inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1"
         style={meta.chain ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
         <span className="size-1.5 rounded-pill" style={{ background: meta.chain ? 'var(--color-primary)' : 'var(--color-on-surface-low)' }} />
@@ -605,7 +625,7 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
               <Check size={12} /> already the default
             </span>
           ) : (
-            <Button size="sm" variant="tonal" disabled={saving} disabledReason={BUSY_REASON}
+            <Button size="sm" variant="tonal" disabled={saving || stale.conflict !== null} disabledReason={BUSY_REASON}
               onClick={() => setActive([judgeRec.model_ref, ...activeModels.filter((m) => m !== judgeRec.model_ref)])}>
               Bind as default
             </Button>
@@ -632,13 +652,13 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
                 {
 }
                 <IconButton icon={ArrowUp} label={`Move ${id} up`} size={24} iconSize={13}
-                  disabled={i === 0} loading={saving} onClick={() => move(i, -1)}
+                  disabled={i === 0 || stale.conflict !== null} loading={saving} onClick={() => move(i, -1)}
                   disabledReason={i === 0 ? 'Already the default' : undefined} />
                 <IconButton icon={ArrowDown} label={`Move ${id} down`} size={24} iconSize={13}
-                  disabled={i === activeModels.length - 1} loading={saving} onClick={() => move(i, 1)}
+                  disabled={i === activeModels.length - 1 || stale.conflict !== null} loading={saving} onClick={() => move(i, 1)}
                   disabledReason={i === activeModels.length - 1 ? 'Already the last fallback' : undefined} />
                 <IconButton icon={X} label={`Remove ${id} from chain`} size={24} iconSize={13}
-                  loading={saving} onClick={() => setActive(activeModels.filter((m) => m !== ref))} />
+                  loading={saving} disabled={stale.conflict !== null} onClick={() => setActive(activeModels.filter((m) => m !== ref))} />
               </div>
             )
           })}
@@ -711,7 +731,7 @@ function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, st
               <div
                 className="flex items-center gap-2.5 rounded-md pr-3 transition-colors hover:bg-surface-high"
                 style={on ? { background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' } : undefined}>
-                <button type="button" onClick={() => toggle(ref)} disabled={saving}
+                <button type="button" onClick={() => toggle(ref)} disabled={saving || stale.conflict !== null}
                   className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-3 py-2 text-left">
                   <span className="grid size-4 shrink-0 place-items-center rounded border"
                     style={on ? { background: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : { borderColor: 'var(--color-outline-variant)' }}>

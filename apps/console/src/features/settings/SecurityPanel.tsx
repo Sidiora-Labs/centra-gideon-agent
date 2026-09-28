@@ -1,3 +1,6 @@
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { rebaseList, rebaseRecord, type Revisioned } from '../../shared/data/staleWrite'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 import { useState } from 'react'
 import { FieldError } from '../../shared/ui/forms'
 import { unavailableWhen, BUSY_REASON } from '../../shared/ui/unavailable'
@@ -7,7 +10,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  api, type DesktopCapabilityWire, type EgressPolicyConfig, type DenylistBaseline,
+  api, ApiError, type DesktopCapabilityWire, type EgressPolicyConfig, type DenylistBaseline,
 } from '../../shared/data/api'
 import { confirm } from '../../shared/ui/dialog'
 import {
@@ -74,10 +77,30 @@ export function SecurityPanel() {
   )
 }
 
+async function readOutsideHomeDocument(): Promise<Revisioned<string[]>> {
+  const config = await api.gideonConfig()
+  const revision = config.revisions?.['security.outside_home']
+  if (typeof revision !== 'string' || !revision) throw new Error('The read permissions have not been read with a revision.')
+  return { value: config.security.outside_home as string[], revision }
+}
+
 function OutsideHomeEditor() {
-  const { data, error, refresh } = useQuery('settings:outside-home', () => api.securityOutsideHome())
+  const { data, error, refresh } = useQuery('settings:outside-home', async () => {
+    const [places, document] = await Promise.all([api.securityOutsideHome(), readOutsideHomeDocument()])
+    return { places: places.places, document }
+  })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const guard = useStaleWriteGuard<string[]>({
+    read: readOutsideHomeDocument,
+    write: (next, revision) => saveSecurityCollection(
+      (confirmed) => api.setOutsideHome(next, revision, confirmed),
+      'Allow outside-home reads?',
+      "Gideon will be able to read the selected shared locations. They remain read-only; files are saved in Gideon's own home.",
+    ),
+    onSaved: () => { setErr(''); refresh() },
+    onDiscard: () => { setErr(''); refresh() },
+  })
   if (!data) return <Section title="Outside-home reads">
     {error ? <LoadError what="outside-home locations" error={error} onRetry={refresh} />
       : <CardGridSkeleton cards={1} cols={1} what="outside-home locations" />}
@@ -86,21 +109,18 @@ function OutsideHomeEditor() {
     <p data-type="body-s" className="mb-3 text-on-surface-low">
       Allow Gideon to read a named shared location. These locations stay read-only; Gideon installs and saves files in its own home.
     </p>
+    <StaleWriteNotice guard={guard} what="Your outside-home read permissions" />
+    <HeldChange guard={guard}>
     <div className="space-y-2">
       {data.places.map((place) => <div key={place.id} className="flex items-start gap-3 rounded-lg bg-surface-container px-3 py-3">
-        <Toggle on={place.allowed} disabled={busy} label={`Allow read access to ${place.label}`}
+        <Toggle on={data.document.value.includes(place.id)} disabled={busy} label={`Allow read access to ${place.label}`}
           onChange={async (on) => {
-            if (on && !(await confirm({
-              title: `Allow Gideon to read ${place.label}?`,
-              body: `${place.path} is outside Gideon's home. Enabling this permission lets Gideon read files there, but it cannot write to this location. You can revoke access at any time.`,
-              confirmLabel: 'Allow read access',
-            }))) return
             setBusy(true); setErr('')
             try {
-              const ids = data.places
-                .filter((item) => item.id === place.id ? on : item.allowed)
-                .map((item) => item.id)
-              await api.setOutsideHome(ids, on); refresh()
+              const ids = on
+                ? [...new Set([...data.document.value, place.id])]
+                : data.document.value.filter((id) => id !== place.id)
+              await guard.save(data.document, ids, rebaseList(data.document.value, ids))
             } catch (ex) { setErr(ex instanceof Error ? ex.message : 'Could not save location access') }
             finally { setBusy(false) }
           }} />
@@ -110,6 +130,7 @@ function OutsideHomeEditor() {
         </div>
       </div>)}
     </div>
+    </HeldChange>
     {err && <FieldError>{err}</FieldError>}
   </Section>
 }
@@ -373,32 +394,69 @@ function DesktopCapabilitiesPanel() {
   )
 }
 
+async function readEgressDocument(): Promise<Revisioned<EgressPolicyConfig>> {
+  const config = await api.gideonConfig()
+  const revision = config.revisions?.['security.egress']
+  if (typeof revision !== 'string' || !revision) throw new Error('The network policy has not been read with a revision.')
+  return { value: config.security.egress as EgressPolicyConfig, revision }
+}
+
+async function readDeniedDocument(): Promise<Revisioned<string[]>> {
+  const config = await api.gideonConfig()
+  const revision = config.revisions?.['security.denied_commands']
+  if (typeof revision !== 'string' || !revision) throw new Error('The denied commands have not been read with a revision.')
+  return { value: config.security.denied_commands as string[], revision }
+}
+
+async function saveSecurityCollection(
+  write: (confirmed: boolean) => Promise<unknown>, title: string, body: string,
+): Promise<unknown> {
+  try { return await write(false) }
+  catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 400
+      || (error.code !== 'confirmation_required' && error.message !== 'confirmation_required')) throw error
+    if (!(await confirm({ title, body, confirmLabel: 'Allow this change', danger: true }))) {
+      throw new Error('The change was not saved.')
+    }
+    return write(true)
+  }
+}
+
 function EgressPolicyEditor() {
-  const { data: eg, refresh } = useQuery(
-    'settings:egress', () => api.securityEgress().catch(() => null), { persist: true },
+
+  const { data: document, refresh } = useQuery(
+    'settings:egress-document', readEgressDocument, { persist: true },
   )
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const guard = useStaleWriteGuard<EgressPolicyConfig>({
+    read: readEgressDocument,
+    write: (next, revision) => saveSecurityCollection(
+      (confirmed) => api.setSecurityEgress(next, revision, confirmed),
+      ('Allow more network destinations?'),
+      ('This change expands network access. Allowing all private networks removes SSRF protection for the whole LAN.'),
+    ),
+    onSaved: () => { setErr(''); refresh() },
+    onDiscard: () => { setErr(''); refresh() },
+  })
+  const eg = document?.value
   if (!eg) return null
 
-  const save = async (next: EgressPolicyConfig) => {
+  const save = async (next: EgressPolicyConfig): Promise<boolean> => {
     setBusy(true); setErr('')
-    try { await api.setSecurityEgress(next); refresh() }
-    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save') }
+    try {
+      if (!document) throw new Error(('The network policy has not been read yet.'))
+      return await guard.save(document, next, rebaseRecord({ ...document.value }, { ...next }))
+    }
+    catch (e) { setErr(e instanceof Error ? e.message : ('Failed to save')); return false }
     finally { setBusy(false) }
   }
-  const setAllowPrivate = async (next: boolean) => {
-    if (next && !(await confirm({
-      title: 'Allow all private networks?',
-      body: 'The agent will be able to reach any private or LAN address, removing SSRF protection for the whole LAN.',
-      confirmLabel: 'Allow private networks',
-      danger: true,
-    }))) return
-    await save({ ...eg, allow_private: next })
-  }
+  const setAllowPrivate = (next: boolean) => save({ ...eg, allow_private: next })
 
   return (
     <Section title="Network egress" hint="The agent's outbound fetches, scrapes, and webhooks are blocked from reaching non-public addresses (loopback, LAN, cloud metadata) by default — SSRF protection. Relax it for your own network below; a deny always wins over an allow.">
+      <StaleWriteNotice guard={guard} what="Your network policy" />
+      <HeldChange guard={guard}>
       <div className="flex flex-col gap-4">
         <HostList label="Allowed hosts" hint="Reachable even if they resolve to a private/LAN address (e.g. a homelab service). Bare domain covers subdomains."
           hosts={eg.allow_hosts} disabled={busy}
@@ -417,6 +475,7 @@ function EgressPolicyEditor() {
         </label>
         {err && <FieldError>{err}</FieldError>}
       </div>
+    </HeldChange>
     </Section>
   )
 }
@@ -505,33 +564,45 @@ function BaselineState({ baseline: b }: { baseline: DenylistBaseline }) {
 function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange }: {
   builtin: string[]; user: string[]; baseline: DenylistBaseline; userAdditions: number; onChange: () => void
 }) {
+
+  const { data: document, refresh } = useQuery(
+    'settings:denied-command-document', readDeniedDocument, { persist: true },
+  )
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const guard = useStaleWriteGuard<string[]>({
+    read: readDeniedDocument,
+    write: (next, revision) => saveSecurityCollection(
+      (confirmed) => api.setUserDeniedCommands(next, revision, confirmed),
+      ('Allow previously denied commands?'),
+      ('Removing these patterns permits commands that were previously blocked. The built-in baseline stays enforced.'),
+    ),
+    onSaved: () => { setDraft(''); setErr(''); refresh(); onChange() },
+    onDiscard: () => { setDraft(''); setErr(''); refresh(); onChange() },
+  })
+  const shown = document?.value ?? user
 
-  const save = async (next: string[]) => {
-    setBusy(true)
-    setErr('')
+  const save = async (next: string[]): Promise<boolean> => {
+    setBusy(true); setErr('')
     try {
-      await api.setUserDeniedCommands(next)
-      onChange()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to save')
-    } finally {
-      setBusy(false)
+      if (!document) throw new Error(('The denied commands have not been read yet.'))
+      return await guard.save(document, next, rebaseList(document.value, next))
     }
+    catch (e) { setErr(e instanceof Error ? e.message : ('Failed to save')); return false }
+    finally { setBusy(false) }
   }
 
   const add = async () => {
     const p = draft.trim()
-    if (!p || user.includes(p)) { setDraft(''); return }
-    try { new RegExp(p) } catch { setErr('Not a valid regular expression'); return }
-    await save([...user, p])
-    setDraft('')
+    if (!p || shown.includes(p)) { setDraft(''); return }
+    try { new RegExp(p) } catch { setErr(('Not a valid regular expression')); return }
+    if (await save([...shown, p])) setDraft('')
   }
-
   return (
     <Section title="Shell denylist" hint="Regexes matched against every command the agent runs. The packaged baseline is always enforced and read-only; your patterns are added to it, never subtracted from it.">
+      <StaleWriteNotice guard={guard} what="Your denied commands" />
+      <HeldChange guard={guard}>
       <div className="flex flex-col gap-4">
         <div>
           <div data-type="body-s" className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-on-surface-low">
@@ -564,10 +635,10 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
               && ` · ${user.length - userAdditions} of your ${user.length} entries already match a baseline pattern and add nothing`}
           </div>
           <div className="flex flex-col gap-1.5">
-            {user.map((p) => (
+            {shown.map((p) => (
               <div key={p} className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-2">
                 <code data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface">{p}</code>
-                <button type="button" disabled={busy} onClick={() => save(user.filter((x) => x !== p))}
+                <button type="button" disabled={busy || !document?.revision} onClick={() => save(shown.filter((x) => x !== p))}
                   className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" aria-label={`Remove ${p}`}>
                   <X size={15} />
                 </button>
@@ -577,7 +648,7 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
               {
 }
               <input
-                value={draft}
+                disabled={busy || !document?.revision} value={draft}
                 aria-label="Add a shell denylist pattern (regex)"
                 onChange={(e) => { setDraft(e.target.value); setErr('') }}
                 onKeyDown={(e) => { if (e.key === 'Enter') add() }}
@@ -585,7 +656,7 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
                 data-type="body-s" className="min-w-0 flex-1 rounded-lg bg-surface-container px-3 py-2 text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary"
               />
               <button type="button" onClick={add} data-type="body-s"
-                {...unavailableWhen(!draft.trim(), 'Enter a pattern first', { busy })}
+                {...unavailableWhen(!draft.trim(), 'Enter a pattern first', { busy: busy || !document?.revision })}
                 className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-on-primary disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
                 <Plus size={15} /> Add
               </button>
@@ -594,6 +665,7 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
           </div>
         </div>
       </div>
+    </HeldChange>
     </Section>
   )
 }

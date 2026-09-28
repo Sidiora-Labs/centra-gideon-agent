@@ -8,6 +8,9 @@ import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { Toggle } from '../../shared/ui/Toggle'
 import { Select, TextArea, TextInput } from '../../shared/ui/forms'
 import { SavedToast } from './settingsUI'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { presentSecrets, rebaseRecord, type Revisioned } from '../../shared/data/staleWrite'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 
 export function schemaDefaults(schema: ProviderSchema | null | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -22,6 +25,7 @@ export function ProviderConfigForm({ name }: { name: string }) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [schema, setSchema] = useState<ProviderSchema | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
+  const [base, setBase] = useState<Revisioned<Record<string, unknown>> | null>(null)
   const [secretSet, setSecretSet] = useState<string[]>([])
   const [clearedSecrets, setClearedSecrets] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)
@@ -43,10 +47,47 @@ export function ProviderConfigForm({ name }: { name: string }) {
         setSecretSet(set)
         setClearedSecrets([])
         setValues(next)
+        setBase({ value: c.config ?? {}, revision: c.revision })
       })
       .catch((error) => { if (live) setLoadErr(error) })
     return () => { live = false }
   }, [name, loadAttempt])
+
+  const guard = useStaleWriteGuard<Record<string, unknown>>({
+    read: async () => {
+      const current = await api.providerConfig(name)
+      setSecretSet(current._secret_set ?? [])
+      return { value: current.config ?? {}, revision: current.revision }
+    },
+    write: async (next, revision) => {
+      const savedConfig = await api.saveProviderConfig(
+        name,
+        Object.fromEntries(Object.entries(next).map(([key, value]) => [key, clearedSecrets.includes(key) ? null : value])),
+        revision,
+      )
+      setSecretSet(savedConfig._secret_set ?? [])
+      setClearedSecrets([])
+    },
+    onSaved: async () => {
+      const current = await api.providerConfig(name)
+      const secretNames = current._secret_set ?? []
+      setSecretSet(secretNames)
+      setBase({ value: current.config ?? {}, revision: current.revision })
+      setValues(Object.fromEntries(Object.entries(current.config ?? {}).map(([key, value]) => [key, secretNames.includes(key) ? '' : value])))
+      setDirty(false)
+      setSaved(true)
+    },
+    onDiscard: () => {
+      setDirty(false)
+      void api.providerConfig(name).then((current) => {
+        const secretNames = current._secret_set ?? []
+        setSecretSet(secretNames)
+        setBase({ value: current.config ?? {}, revision: current.revision })
+        setValues(Object.fromEntries(Object.entries(current.config ?? {}).map(([key, value]) => [key, secretNames.includes(key) ? '' : value])))
+        setClearedSecrets([])
+      }).catch(() => {})
+    },
+  })
 
   if (loadErr) return <LoadError what="provider configuration" error={loadErr} onRetry={() => setLoadAttempt((n) => n + 1)} />
   if (!schema) return <div data-type="caption" className="py-2 text-on-surface-low"><Loader2 size={12} className="inline animate-spin" /> Loading config…</div>
@@ -57,11 +98,9 @@ export function ProviderConfigForm({ name }: { name: string }) {
   const save = async () => {
     setSaving(true); setErr('')
     try {
-      const savedConfig = await api.saveProviderConfig(name, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, clearedSecrets.includes(key) ? null : value])))
-      setSecretSet(savedConfig._secret_set ?? [])
-      setClearedSecrets([])
-      setValues(Object.fromEntries(Object.entries(savedConfig.config ?? {}).map(([key, value]) => [key, savedConfig._secret_set?.includes(key) ? '' : value])))
-      setDirty(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+      if (!base) throw new Error('Provider settings have not been read yet.')
+      await guard.save(base, values, rebaseRecord(base.value, values))
+      setTimeout(() => setSaved(false), 2000)
     }
     catch (e) {
       let msg = e instanceof Error ? e.message : 'Save failed'
@@ -73,6 +112,8 @@ export function ProviderConfigForm({ name }: { name: string }) {
 
   return (
     <div className="mt-3 flex flex-col gap-3 border-t border-outline-variant/30 pt-3">
+      <StaleWriteNotice guard={guard} what={`The ${name} provider settings`} present={presentSecrets((key) => props.some(([field, prop]) => field === key && !!prop['x-meta']?.sensitive), secretSet)} />
+      <HeldChange guard={guard}>
       {props.map(([key, prop]) => (
         <SchemaField key={key} fieldKey={key} prop={prop} value={values[key]}
           secretAlreadySet={secretSet.includes(key) && !clearedSecrets.includes(key)}
@@ -80,11 +121,12 @@ export function ProviderConfigForm({ name }: { name: string }) {
           onChange={(v) => { setClearedSecrets((keys) => keys.filter((item) => item !== key)); set(key, v) }} />
       ))}
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={save} loading={saving} disabled={!dirty || saving} disabledReason={!dirty && !saving ? 'No changes to save' : undefined}>Save</Button>
+        <Button size="sm" onClick={save} loading={saving || guard.busy} disabled={!dirty || saving || guard.busy || guard.conflict !== null} disabledReason={guard.conflict !== null ? 'Reapply or discard the change that wasn’t saved first' : !dirty && !saving ? 'No changes to save' : undefined}>Save</Button>
         <SavedToast show={saved} />
         {dirty && !saved && <span data-type="caption" className="text-on-surface-low">Unsaved changes</span>}
         {err && <span data-type="caption" style={{ color: 'var(--color-danger)' }}>{err}</span>}
       </div>
+      </HeldChange>
     </div>
   )
 }

@@ -101,7 +101,7 @@ const useDevices = () => useQuery('settings:devices-card',
   () => api.devices().catch(() => null as DeviceRec[] | null), { persist: true })
 const useSenderTrust = () => useQuery('settings:sender-trust-card',
   () => api.channelTrust().catch(() => null as ChannelTrust | null), { persist: true })
-const useProjectionRules = () => useQuery('settings:projection-rules', () => api.projectionRules(), { persist: true })
+const useProjectionRules = () => useQuery('settings:projection-rules', async () => (await api.projectionRules()).value, { persist: true })
 const useToolsSavings = () => useQuery('settings:tools-savings', () => api.toolsSavings().catch(() => null as ToolsSavings | null), { persist: true })
 const useFeedbackProducers = () => useQuery('settings:feedback-producers', () => api.feedbackProducers(), { persist: false })
 const useAgentDefaults = () => useQuery('settings:agent-defaults', async () => {

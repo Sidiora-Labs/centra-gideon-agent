@@ -4,6 +4,7 @@ import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import * as ReactDOMClient from 'react-dom/client'
 import { useEffect, useRef, useState, createContext, useContext, createElement } from 'react'
+import { responseError } from '../../shared/data/gatewayRequest'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Calendar, Check, CheckCircle2,
   ChevronDown, ChevronRight, Clock, Download, ExternalLink, Eye, FileText,
@@ -94,9 +95,9 @@ async function appAuthHeaders(appName: string): Promise<Record<string, string>> 
 export interface AppApiClient {
   backendBase: string
   get: <T>(path: string) => Promise<T>
-  post: <T>(path: string, body?: unknown) => Promise<T>
-  put: <T>(path: string, body?: unknown) => Promise<T>
-  patch: <T>(path: string, body?: unknown) => Promise<T>
+  post: <T>(path: string, body?: unknown, options?: { basedOn?: string }) => Promise<T>
+  put: <T>(path: string, body?: unknown, options?: { basedOn?: string }) => Promise<T>
+  patch: <T>(path: string, body?: unknown, options?: { basedOn?: string }) => Promise<T>
   del: <T>(path: string) => Promise<T>
   can: (path: string) => boolean
 }
@@ -109,24 +110,24 @@ export function createAppApi(app: AppContext): AppApiClient {
     return matchesAny(pathname, app.permissions.api)
   }
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: string, path: string, body?: unknown, options?: { basedOn?: string }): Promise<T> {
     if (!allowed(path)) {
       throw new AppPermissionError(
         `app "${app.name}" is not permitted to access ${path} — declare it in permissions.api`,
       )
     }
-    const init: RequestInit = { method, headers: await appAuthHeaders(app.name) }
+    const headers = await appAuthHeaders(app.name)
+    if (options?.basedOn) headers['If-Match'] = `"${options.basedOn}"`
+    const init: RequestInit = { method, headers }
     if (body !== undefined) {
       init.headers = { ...init.headers, 'Content-Type': 'application/json' }
       init.body = JSON.stringify(body)
     }
     const r = await fetch(path, init)
     if (!r.ok) {
-      const text = await r.text().catch(() => '')
-      let msg = text || `HTTP ${r.status}`
-      try { const p = JSON.parse(text); if (p?.error) msg = p.error } catch {   }
-      app.reportError?.(msg)
-      throw new Error(msg)
+      const error = await responseError(r)
+      app.reportError?.(error.message)
+      throw error
     }
     const ct = r.headers.get('Content-Type') || ''
     return (ct.includes('application/json') ? await r.json() : await r.text()) as T
@@ -135,9 +136,9 @@ export function createAppApi(app: AppContext): AppApiClient {
   return {
     backendBase: `/apps/${app.name}/api`,
     get: <T,>(path: string) => request<T>('GET', path),
-    post: <T,>(path: string, body?: unknown) => request<T>('POST', path, body),
-    put: <T,>(path: string, body?: unknown) => request<T>('PUT', path, body),
-    patch: <T,>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+    post: <T,>(path: string, body?: unknown, options?: { basedOn?: string }) => request<T>('POST', path, body, options),
+    put: <T,>(path: string, body?: unknown, options?: { basedOn?: string }) => request<T>('PUT', path, body, options),
+    patch: <T,>(path: string, body?: unknown, options?: { basedOn?: string }) => request<T>('PATCH', path, body, options),
     del: <T,>(path: string) => request<T>('DELETE', path),
     can: allowed,
   }

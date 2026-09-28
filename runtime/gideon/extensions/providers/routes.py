@@ -178,21 +178,33 @@ async def handle_get_schema(request: web.Request) -> web.Response:
 
 
 async def handle_get_config(request: web.Request) -> web.Response:
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.stale_write import revision_of
+
     name = request.match_info["name"]
     registry = get_provider_registry()
     ext = registry.get(name)
     if not ext:
         return web.json_response({"error": f"Extension {name!r} not found"}, status=404)
 
-    config, secret_set = mask_secrets(
-        ProviderSettings.load(name), ext.provider_config.settingsSchema
-    )
+    with _ConfigLock(ProviderSettings.config_path(name), timeout=5.0):
+        config, secret_set = mask_secrets(
+            ProviderSettings.load(name), ext.provider_config.settingsSchema
+        )
     return web.json_response(
-        {"name": name, "config": config, "_secret_set": secret_set}
+        {
+            "name": name,
+            "config": config,
+            "revision": revision_of(config),
+            "_secret_set": secret_set,
+        }
     )
 
 
 async def handle_patch_config(request: web.Request) -> web.Response:
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.stale_write import refusal_outcome, revision_of, stale_write_refusal
+
     name = request.match_info["name"]
     registry = get_provider_registry()
     ext = registry.get(name)
@@ -208,14 +220,30 @@ async def handle_patch_config(request: web.Request) -> web.Response:
         return web.json_response({"error": "Body must be a JSON object"}, status=400)
 
     schema = ext.provider_config.settingsSchema
-    body = preserve_unchanged_secrets(body, ProviderSettings.load(name), schema)
-    errors = ProviderSettings.validate(body, schema)
-    if errors:
-        return web.json_response(
-            {"error": "Validation failed", "details": errors}, status=422
+    with _ConfigLock(ProviderSettings.config_path(name), timeout=5.0):
+        current, _ = mask_secrets(ProviderSettings.load(name), schema)
+        refusal = stale_write_refusal(
+            request, current, what=f"the {name} provider configuration"
         )
+        if refusal is not None:
+            from gideon.security.sel import sel
 
-    updated = ProviderSettings.update(name, body)
+            sel().log_api_access(
+                caller=request.get("user", "dashboard"),
+                operation="provider.config.patch",
+                outcome=refusal_outcome(refusal),
+                source="provider",
+                resources=name,
+                error="provider configuration revision refused",
+            )
+            return refusal
+        body = preserve_unchanged_secrets(body, ProviderSettings.load(name), schema)
+        errors = ProviderSettings.validate(body, schema)
+        if errors:
+            return web.json_response(
+                {"error": "Validation failed", "details": errors}, status=422
+            )
+        updated = ProviderSettings.update(name, body)
 
     if ext.enabled:
         registry.disable(name)
@@ -230,7 +258,12 @@ async def handle_patch_config(request: web.Request) -> web.Response:
         pass
     masked, secret_set = mask_secrets(updated, schema)
     return web.json_response(
-        {"name": name, "config": masked, "_secret_set": secret_set}
+        {
+            "name": name,
+            "config": masked,
+            "revision": revision_of(masked),
+            "_secret_set": secret_set,
+        }
     )
 
 

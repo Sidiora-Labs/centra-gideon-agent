@@ -212,8 +212,13 @@ async def test_it_configures_through_the_standard_provider_routes(registered):
             "folder" in props
         ), "the app's own settings schema did not survive the route"
 
+        config_read = await client.get(f"/api/providers/{APP_NAME}/config")
+        assert config_read.status == 200
+        revision = (await config_read.json())["revision"]
         patched = await client.patch(
-            f"/api/providers/{APP_NAME}/config", json={"folder": str(remote)}
+            f"/api/providers/{APP_NAME}/config",
+            json={"folder": str(remote)},
+            headers={"If-Match": f'"{revision}"'},
         )
         assert patched.status == 200
 

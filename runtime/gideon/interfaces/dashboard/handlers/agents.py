@@ -231,8 +231,26 @@ async def api_themes_create(request: web.Request) -> web.Response:
         "dark": _strip_to_allowed_vars(body.get("dark", {})),
         "light": _strip_to_allowed_vars(body.get("light", {})),
     }
-    target.write_text(json.dumps(theme_data, indent=2) + "\n", encoding="utf-8")
-    return web.json_response({"ok": True, "slug": slug, "theme": theme_data})
+    from gideon.core.atomic_write import atomic_write
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.stale_write import revision_of
+
+    try:
+        with _ConfigLock(target, timeout=5.0):
+            if target.exists():
+                return web.json_response(
+                    {"error": f"theme '{slug}' already exists"}, status=409
+                )
+            atomic_write(target, json.dumps(theme_data, indent=2) + "\n", mode=0o600)
+    except Exception:
+        return web.json_response({"error": "failed to write theme"}, status=500)
+    return web.json_response(
+        {
+            "ok": True,
+            "slug": slug,
+            "theme": {**theme_data, "revision": revision_of(theme_data)},
+        }
+    )
 
 
 async def api_theme_detail(request: web.Request) -> web.Response:
@@ -243,6 +261,8 @@ async def api_theme_detail(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid theme slug"}, status=400)
 
     target = _themes_dir() / f"{safe_slug}.json"
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.stale_write import refusal_outcome, revision_of, stale_write_refusal
 
     if request.method == "DELETE":
         if not target.exists():
@@ -269,30 +289,58 @@ async def api_theme_detail(request: web.Request) -> web.Response:
             body.get("emoji", _THEME_DEFAULT_EMOJI).strip()[:_THEME_EMOJI_MAX_LEN]
             or _THEME_DEFAULT_EMOJI
         )
-        try:
-            existing = json.loads(target.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-        theme_data = {
-            "name": name,
-            "slug": safe_slug,
-            "emoji": emoji,
-            "created_at": existing.get(
-                "created_at", datetime.now(timezone.utc).isoformat()
-            ),
-            "dark": _strip_to_allowed_vars(body.get("dark", {})),
-            "light": _strip_to_allowed_vars(body.get("light", {})),
-        }
-        target.write_text(json.dumps(theme_data, indent=2) + "\n", encoding="utf-8")
-        return web.json_response({"ok": True, "theme": theme_data})
+        from gideon.core.atomic_write import atomic_write
 
-    if not target.exists():
-        return web.json_response({"error": "not found"}, status=404)
+        try:
+            with _ConfigLock(target, timeout=5.0):
+                if not target.exists():
+                    return web.json_response({"error": "not found"}, status=404)
+                existing = json.loads(target.read_text(encoding="utf-8"))
+                refusal = stale_write_refusal(
+                    request, existing, what=f"theme {safe_slug}"
+                )
+                if refusal is not None:
+                    from gideon.security.sel import sel
+
+                    sel().log_api_access(
+                        caller=request.get("user", "dashboard"),
+                        operation="theme.update",
+                        outcome=refusal_outcome(refusal),
+                        source="dashboard",
+                        resources=f"theme:{safe_slug}",
+                        error="theme revision refused",
+                    )
+                    return refusal
+                theme_data = {
+                    "name": name,
+                    "slug": safe_slug,
+                    "emoji": emoji,
+                    "created_at": existing.get(
+                        "created_at", datetime.now(timezone.utc).isoformat()
+                    ),
+                    "dark": _strip_to_allowed_vars(body.get("dark", {})),
+                    "light": _strip_to_allowed_vars(body.get("light", {})),
+                }
+                atomic_write(
+                    target, json.dumps(theme_data, indent=2) + "\n", mode=0o600
+                )
+        except (json.JSONDecodeError, OSError):
+            return web.json_response({"error": "failed to update theme"}, status=500)
+        return web.json_response(
+            {
+                "ok": True,
+                "theme": {**theme_data, "revision": revision_of(theme_data)},
+            }
+        )
+
     try:
-        data = json.loads(target.read_text(encoding="utf-8"))
+        with _ConfigLock(target, timeout=5.0):
+            if not target.exists():
+                return web.json_response({"error": "not found"}, status=404)
+            data = json.loads(target.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return web.json_response({"error": "failed to read theme"}, status=500)
-    return web.json_response(data)
+    return web.json_response({**data, "revision": revision_of(data)})
 
 
 def _auto_install_agent() -> None:

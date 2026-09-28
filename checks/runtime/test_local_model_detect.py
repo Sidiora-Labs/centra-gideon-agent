@@ -26,10 +26,12 @@ async def test_local_model_detect(tmp_path, monkeypatch) -> None:
     previous = llm_registry.get_default_registry()
     llm_registry.set_default_registry(llm_registry.ProviderRegistry())
     try:
+        current = await model_registry.api_models_active(make_mocked_request("GET", "/api/models/active"))
+        current_revision = json.loads(current.text)["revisions"]["chat"]
         request = make_mocked_request(
             "PUT",
             "/api/models/active/chat",
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "If-Match": f'"{current_revision}"'},
         )
         request.match_info["use_case"] = "chat"
         request._read_bytes = json.dumps({"models": ["local:llama"]}).encode()

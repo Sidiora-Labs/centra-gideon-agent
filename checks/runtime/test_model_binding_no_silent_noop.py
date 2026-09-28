@@ -43,11 +43,13 @@ def _config(store, **payload) -> None:
 async def _put(body: object, use_case: str = "chat") -> tuple[int, dict]:
     """Drive the real handler with a request carrying real JSON bytes."""
     from aiohttp.test_utils import make_mocked_request
+    from gideon.stale_write import revision_of
 
+    current = uc.load_active_models().get(use_case, [])
     req = make_mocked_request(
         "PUT",
         f"/api/models/active/{use_case}",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "If-Match": f'"{revision_of(current)}"'},
     )
     req.match_info["use_case"] = use_case
     req._read_bytes = json.dumps(body).encode()

@@ -8,6 +8,9 @@ import { InlineError } from '../../shared/ui/InlineError'
 import { ListSkeleton } from '../../shared/ui/ListScaffold'
 import { NumberField, TextInput } from '../../shared/ui/forms'
 import { PanelHeader, Section } from './settingsUI'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { sameDocument } from '../../shared/data/staleWrite'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 
 const STRATEGIES: { id: ProjectionStrategy; label: string; blurb: string }[] = [
   { id: 'log', label: 'Log', blurb: 'keep head + error/warning lines + tail' },
@@ -19,21 +22,36 @@ const STRATEGIES: { id: ProjectionStrategy; label: string; blurb: string }[] = [
 ]
 
 export function ProjectionRulesPanel() {
-  const { data: rules, error: loadErr, refresh } = useQuery(
+  const { data: document, error: loadErr, refresh } = useQuery(
     'settings:projection-rules', () => api.projectionRules(),
     { persist: true },
   )
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const guard = useStaleWriteGuard<ProjectionRule[]>({
+    read: async () => {
+      const fresh = await api.projectionRules()
+      if (!fresh.revision) throw new Error('The current projection rules have no revision; retry the read.')
+      return { value: fresh.value, revision: fresh.revision }
+    },
+    write: (next, revision) => api.setProjectionRules(next, revision),
+    onSaved: () => refresh(),
+    onDiscard: () => refresh(),
+  })
 
-  const save = async (next: ProjectionRule[]): Promise<boolean> => {
+  const save = async (next: ProjectionRule[], rebase: (theirs: ProjectionRule[]) => ProjectionRule[] | null): Promise<boolean> => {
     setBusy(true); setErr('')
-    try { await api.setProjectionRules(next); refresh(); return true }
+    try {
+      if (!document?.revision) throw new Error('The projection rules have not been read yet.')
+      return await guard.save({ value: document.value, revision: document.revision }, next, rebase)
+    }
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); return false }
     finally { setBusy(false) }
   }
 
+  const rules = document?.value
   const list = rules ?? []
+  const held = guard.conflict !== null
 
   return (
     <div>
@@ -45,10 +63,20 @@ export function ProjectionRulesPanel() {
       <Section title="Custom rules"
         hint="A rule maps a content marker (regex, matched against the start of the output) to a projection strategy. Use it for a tool whose big output the builtin sniffer treats as generic (a blunt head/tail cut) — e.g. a domain-specific log or dump. Rules are checked before the builtin sniff.">
         <div className="flex flex-col gap-2">
+          <StaleWriteNotice guard={guard} what="Your projection rules" />
+          <HeldChange guard={guard}>
           {list.map((r, i) => (
-            <RuleRow key={i} rule={r} disabled={busy}
-              onChange={(next) => save(list.map((x, j) => (j === i ? next : x)))}
-              onRemove={() => save(list.filter((_, j) => j !== i))} />
+            <RuleRow key={i} rule={r} disabled={busy || held}
+              onChange={(next) => save(list.map((x, j) => (j === i ? next : x)), (theirs) => {
+                const index = theirs.findIndex((item) => item.name === r.name)
+                if (index < 0 || !sameDocument(theirs[index], r)) return null
+                return theirs.map((item, j) => j === index ? next : item)
+              })}
+              onRemove={() => save(list.filter((_, j) => j !== i), (theirs) => {
+                const index = theirs.findIndex((item) => item.name === r.name)
+                if (index < 0 || !sameDocument(theirs[index], r)) return null
+                return theirs.filter((_, j) => j !== index)
+              })} />
           ))}
           {
 }
@@ -64,8 +92,9 @@ export function ProjectionRulesPanel() {
               No custom rules — the builtin projectors handle logs, diffs, JSON, test output, CSV, and code automatically, and a builtin rule pack recognises common command output (git, pytest, npm, docker…). Add a rule only for a tool whose large output isn't recognised.
             </div>
           ) : null}
-          <AddRule disabled={busy} onAdd={(r) => save([...list, r])} />
+          <AddRule disabled={busy || held} onAdd={(r) => save([...list, r], (theirs) => theirs.some((item) => item.name === r.name) ? null : [...theirs, r])} />
           {err && <div role="status" aria-live="polite" data-type="body-s" className="flex items-center gap-1.5 text-danger"><AlertTriangle size={13} /> {err}</div>}
+          </HeldChange>
         </div>
       </Section>
     </div>

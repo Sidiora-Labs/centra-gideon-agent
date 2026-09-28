@@ -737,20 +737,24 @@ def _effective_config_schema(manifest) -> dict[str, Any]:
 
 
 async def api_app_config_get(request: web.Request) -> web.Response:
-    from gideon.extensions.apps.app_config import read_config
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.extensions.apps.app_config import _config_path, read_config
     from gideon.extensions.apps.app_manager import _manifest_of
     from gideon.extensions.apps.secret_fields import mask_secrets
+    from gideon.stale_write import revision_of
 
     name = request.match_info["name"]
     manifest = _manifest_of(name)
     if manifest is None:
         return web.json_response({"error": f"app {name!r} not installed"}, status=404)
     schema = _effective_config_schema(manifest)
-    masked, secret_set = mask_secrets(read_config(name), schema)
+    with _ConfigLock(_config_path(name), timeout=5.0):
+        masked, secret_set = mask_secrets(read_config(name), schema)
     return web.json_response(
         {
             "name": name,
             "config": masked,
+            "revision": revision_of(masked),
             "schema": schema,
             "_secret_set": secret_set,
         }
@@ -758,8 +762,10 @@ async def api_app_config_get(request: web.Request) -> web.Response:
 
 
 async def api_app_config_put(request: web.Request) -> web.Response:
+    from gideon.core.config.transactions import _ConfigLock
     from gideon.extensions.apps.app_config import (
         AppConfigError,
+        _config_path,
         read_config,
         write_config,
     )
@@ -768,6 +774,7 @@ async def api_app_config_put(request: web.Request) -> web.Response:
         mask_secrets,
         preserve_unchanged_secrets,
     )
+    from gideon.stale_write import refusal_outcome, revision_of, stale_write_refusal
 
     name = request.match_info["name"]
     manifest = _manifest_of(name)
@@ -778,9 +785,23 @@ async def api_app_config_put(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     schema = _effective_config_schema(manifest)
-    values = preserve_unchanged_secrets(values, read_config(name), schema)
     try:
-        saved = write_config(name, values, schema)
+        with _ConfigLock(_config_path(name), timeout=5.0):
+            current, _ = mask_secrets(read_config(name), schema)
+            refusal = stale_write_refusal(
+                request, current, what=f"the {name} app configuration"
+            )
+            if refusal is not None:
+                _sel_log(
+                    "apps.config",
+                    refusal_outcome(refusal),
+                    name,
+                    request,
+                    error="app configuration revision refused",
+                )
+                return refusal
+            values = preserve_unchanged_secrets(values, read_config(name), schema)
+            saved = write_config(name, values, schema)
     except AppConfigError as exc:
         _sel_log("apps.config", "error", name, request, error=str(exc))
         return web.json_response({"error": str(exc)}, status=400)
@@ -807,7 +828,13 @@ async def api_app_config_put(request: web.Request) -> web.Response:
     _sel_log("apps.config", "ok", name, request)
     masked, secret_set = mask_secrets(saved, schema)
     return web.json_response(
-        {"ok": True, "name": name, "config": masked, "_secret_set": secret_set}
+        {
+            "ok": True,
+            "name": name,
+            "config": masked,
+            "revision": revision_of(masked),
+            "_secret_set": secret_set,
+        }
     )
 
 

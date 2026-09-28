@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Field, Select, TextArea } from '../../shared/ui/forms'
 import { api } from '../../shared/data/api'
 import type { SchemaProp } from '../../shared/data/api'
@@ -6,6 +6,8 @@ export type { SchemaProp } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { missingRequired, SchemaFieldDisclosure } from '../tools/schema'
 import { usePromptWidgets } from '../tools/usePromptWidgets'
+import { rebaseRecord, type Revisioned, presentSecrets } from '../../shared/data/staleWrite'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
 
 export function serializeJsonField(value: unknown, expected: 'array' | 'object'): string {
   if (value === undefined || value === null) return expected === 'array' ? '[]' : '{}'
@@ -147,6 +149,7 @@ export function useAppConfig(name: string) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState(0)
+  const doneRef = useRef<(() => void) | undefined>(undefined)
   const reload = () => { invalidateKeys(`app-config:${name}`); refresh() }
 
   const schema = (data?.schema ?? {}) as AppConfigSchema
@@ -167,6 +170,24 @@ export function useAppConfig(name: string) {
   const missing = missingRequired(cur, required, { satisfied: secretSet })
   const missingLabels = missing.map((k) => props[k]?.['x-meta']?.label || k)
 
+  const editable = (value: Record<string, unknown>): Record<string, unknown> => value
+  const stale = useStaleWriteGuard<Record<string, unknown>>({
+    read: async () => {
+      const fresh = await api.appConfig(name)
+      return { value: editable(fresh.config), revision: fresh.revision }
+    },
+    write: (next, revision) => api.saveAppConfig(name, next, revision),
+    onSaved: () => {
+      invalidateKeys(`app-config:${name}`)
+      setValues(null)
+      setSavedAt(Date.now())
+      doneRef.current?.()
+      doneRef.current = undefined
+    },
+    onDiscard: () => { setValues(null); reload() },
+  })
+  const present = presentSecrets((key) => !!props[key]?.['x-meta']?.sensitive, secretSet)
+
   async function save(onDone?: () => void) {
     if (data === undefined) {
       setErr(loadErr
@@ -178,18 +199,16 @@ export function useAppConfig(name: string) {
       setErr(`Fill in ${missingLabels.join(', ')} before saving.`)
       return
     }
-    setBusy(true); setErr(null)
+    setBusy(true); setErr(null); doneRef.current = onDone
     try {
-      await api.saveAppConfig(name, cur)
-      invalidateKeys(`app-config:${name}`)
-      setValues(null)
-      setSavedAt(Date.now())
-      onDone?.()
-    } catch (e) { setErr(String((e as Error).message || e)) }
+      const mine = cur
+      const base: Revisioned<Record<string, unknown>> = { value: editable(data.config), revision: data.revision }
+      await stale.save(base, mine, rebaseRecord(base.value, mine))
+    } catch (e) { doneRef.current = undefined; setErr(String((e as Error).message || e)) }
     finally { setBusy(false) }
   }
 
   return { loading: data === undefined && !loadErr, error: loadErr, reload,
     props, hasSchema, cur, set, save, busy, err, dirty, savedAt, secretSet,
-    required, missing, missingLabels }
+    required, missing, missingLabels, stale, present }
 }

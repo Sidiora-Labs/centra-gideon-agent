@@ -639,7 +639,15 @@ async def api_models_active(request: web.Request) -> web.Response:
     normalized: dict[str, list[str]] = {}
     for uc in USE_CASES:
         normalized[uc] = active.get(uc, [])
-    return web.json_response({"use_cases": normalized})
+    from gideon.stale_write import revision_of
+
+    return web.json_response(
+        {
+            "use_cases": normalized,
+            "revision": revision_of(normalized),
+            "revisions": {uc: revision_of(value) for uc, value in normalized.items()},
+        }
+    )
 
 
 async def api_models_active_set(request: web.Request) -> web.Response:
@@ -698,6 +706,7 @@ async def api_models_active_set(request: web.Request) -> web.Response:
         )
 
     from gideon.extensions.providers.use_cases import model_ref_problem
+    from gideon.stale_write import refusal_outcome, revision_of, stale_write_refusal
 
     for model_ref in models:
         problem = model_ref_problem(model_ref)
@@ -738,9 +747,30 @@ async def api_models_active_set(request: web.Request) -> web.Response:
     except Exception:
         logger.debug("active-model provider validation skipped", exc_info=True)
 
-    active = load_active_models()
-    active[use_case] = [str(m) for m in models]
-    save_active_models(active)
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.extensions.providers.use_cases import active_models_path
+
+    try:
+        with _ConfigLock(active_models_path(), timeout=5.0):
+            active = load_active_models()
+            current = active.get(use_case, [])
+            refusal = stale_write_refusal(
+                request, current, what=f"the active {use_case} model chain"
+            )
+            if refusal is not None:
+                _sel_log(
+                    "models.active_set",
+                    refusal_outcome(refusal),
+                    use_case,
+                    request,
+                    error="active model chain revision refused",
+                )
+                return refusal
+            active[use_case] = [str(m) for m in models]
+            save_active_models(active)
+    except Exception:
+        logger.exception("Could not save active model chain")
+        return web.json_response({"error": "could not save active model chain"}, status=500)
 
     if use_case == "embedding":
         state = request.app["state"]
@@ -774,7 +804,12 @@ async def api_models_active_set(request: web.Request) -> web.Response:
         request,
     )
     return web.json_response(
-        {"ok": True, "use_case": use_case, "models": active[use_case]}
+        {
+            "ok": True,
+            "use_case": use_case,
+            "models": active[use_case],
+            "revision": revision_of(active[use_case]),
+        }
     )
 
 

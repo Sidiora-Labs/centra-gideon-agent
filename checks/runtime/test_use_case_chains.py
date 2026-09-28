@@ -661,10 +661,12 @@ class TestChainPut:
         from aiohttp import web
 
         from gideon.interfaces.dashboard.handlers.model_registry import (
+            api_models_active,
             api_models_active_set,
         )
 
         app = web.Application()
+        app.router.add_get("/api/models/active", api_models_active)
         app.router.add_put("/api/models/active/{use_case}", api_models_active_set)
         return app
 
@@ -676,9 +678,11 @@ class TestChainPut:
 
         monkeypatch.setattr(uc, "_known_provider_names", lambda: {"p1", "p2", "p3"})
         async with TestClient(TestServer(client_app)) as c:
+            current = await (await c.get("/api/models/active")).json()
             resp = await c.put(
                 "/api/models/active/reasoning",
                 json={"models": ["p1:m1", "p2:m2", "p3:m3"]},
+                headers={"If-Match": f'"{current["revisions"]["reasoning"]}"'},
             )
             assert resp.status == 200
         assert uc.load_active_models()["reasoning"] == ["p1:m1", "p2:m2", "p3:m3"]

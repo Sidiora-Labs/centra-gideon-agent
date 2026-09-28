@@ -335,6 +335,8 @@ HTTP_ERROR_CODES: dict[str, str] = {
         "offending keys and the keys a run may override."
     ),
     "insufficient_disk_space": "There is not enough free disk space for this download.",
+    "revision_required": "This whole-document write must name the revision it was read from.",
+    "stale_write": "The document changed since it was read; reload and reapply the edit.",
 }
 
 

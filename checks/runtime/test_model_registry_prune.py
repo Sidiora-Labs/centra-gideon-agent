@@ -127,6 +127,7 @@ def _mr_app(monkeypatch, tmp_path, *, providers):
     monkeypatch.setattr(loader, "config_path", lambda: cfg)
     monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
     app = web.Application()
+    app.router.add_get("/api/models/active", mr.api_models_active)
     app.router.add_put("/api/models/active/{use_case}", mr.api_models_active_set)
     return app
 
@@ -158,8 +159,10 @@ async def test_set_accepts_known_provider_ref(monkeypatch, tmp_path):
         providers=[{"name": "OpenAI", "type": "openai_compatible"}],
     )
     async with TestClient(TestServer(app)) as c:
+        current = await (await c.get("/api/models/active")).json()
         resp = await c.put(
-            "/api/models/active/chat", json={"models": ["OpenAI:gpt-anything-99"]}
+            "/api/models/active/chat", json={"models": ["OpenAI:gpt-anything-99"]},
+            headers={"If-Match": f'"{current["revisions"]["chat"]}"'},
         )
         assert resp.status == 200
         assert (await resp.json())["models"] == ["OpenAI:gpt-anything-99"]
@@ -169,10 +172,16 @@ async def test_set_accepts_known_provider_ref(monkeypatch, tmp_path):
 async def test_set_allows_bare_id_and_bundled(monkeypatch, tmp_path):
     app = _mr_app(monkeypatch, tmp_path, providers=[])
     async with TestClient(TestServer(app)) as c:
+        current = await (await c.get("/api/models/active")).json()
         r1 = await c.put(
             "/api/models/active/embedding",
             json={"models": ["sentence-transformers:all-MiniLM-L6-v2"]},
+            headers={"If-Match": f'"{current["revisions"]["embedding"]}"'},
         )
         assert r1.status == 200
-        r2 = await c.put("/api/models/active/chat", json={"models": ["just-a-bare-id"]})
+        current = await (await c.get("/api/models/active")).json()
+        r2 = await c.put(
+            "/api/models/active/chat", json={"models": ["just-a-bare-id"]},
+            headers={"If-Match": f'"{current["revisions"]["chat"]}"'},
+        )
         assert r2.status == 200

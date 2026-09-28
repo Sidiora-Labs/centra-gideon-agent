@@ -75,12 +75,13 @@ def test_legacy_empty_bindings_are_filtered_without_losing_colons(isolated_model
 
 def test_active_model_http_rejects_entire_invalid_chain(isolated_models):
     _, home = isolated_models
-    from gideon.interfaces.dashboard.handlers.model_registry import api_models_active_set, api_models_chat
+    from gideon.interfaces.dashboard.handlers.model_registry import api_models_active, api_models_active_set, api_models_chat
 
     (home / "config.json").write_text(json.dumps({"providers": [{"name": "Bedrock"}]}))
 
     async def exercise():
         app = web.Application()
+        app.router.add_get("/api/models/active", api_models_active)
         app.router.add_put("/api/models/active/{use_case}", api_models_active_set)
         app.router.add_get("/api/models/chat", api_models_chat)
         async with TestClient(TestServer(app)) as client:
@@ -89,7 +90,8 @@ def test_active_model_http_rejects_entire_invalid_chain(isolated_models):
                 assert response.status == 400
                 assert (await response.json())["error"]["code"] == "model_ref_names_no_model"
                 assert use_cases.load_active_models() == {}
-            response = await client.put("/api/models/active/chat", json={"models": ["Bedrock:amazon.nova:0"]})
+            current = await (await client.get("/api/models/active")).json()
+            response = await client.put("/api/models/active/chat", json={"models": ["Bedrock:amazon.nova:0"]}, headers={"If-Match": f'"{current["revisions"]["chat"]}"'})
             assert response.status == 200
             assert (await response.json())["models"] == ["Bedrock:amazon.nova:0"]
             response = await client.get("/api/models/chat")

@@ -45,6 +45,7 @@ import { QualityBadges } from './qualityBadges'
 import { StoreSideRail, type RailOption } from './StoreSideRail'
 import { artGradient } from './appArt'
 import { AppConfigFields, useAppConfig } from './appConfigForm'
+import { StaleWriteNotice, HeldChange } from '../../shared/ui/StaleWriteNotice'
 import { ChannelPairingStatus } from './ChannelPairingStatus'
 import { isInNav, setInNav } from './navApps'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -1474,13 +1475,16 @@ export function ConfigModal({ name, displayName, onClose }: { name: string; disp
   return (
     <AppConfigDialog displayName={displayName} onClose={onClose}>
       <div className="flex flex-col gap-m p-l" style={{ width: 440, maxWidth: '100%' }}>
+        <StaleWriteNotice guard={cfg.stale} what="app settings" present={cfg.present} />
         {cfg.error ? (
           <LoadError what="app configuration" error={cfg.error} onRetry={cfg.reload} />
         ) : cfg.loading ? <div data-type="body-s" className="text-on-surface-low">Loading…</div>
           : !cfg.hasSchema ? (
             <div data-type="body-s" className="text-on-surface-low">This app declares no configurable options.</div>
           ) : (
-            <AppConfigFields appName={name} props={cfg.props} cur={cfg.cur} set={cfg.set} secretSet={cfg.secretSet} required={cfg.required} />
+            <HeldChange guard={cfg.stale}>
+              <AppConfigFields appName={name} props={cfg.props} cur={cfg.cur} set={cfg.set} secretSet={cfg.secretSet} required={cfg.required} />
+            </HeldChange>
           )}
         {showsPairing && <ChannelPairingStatus appName={name} savedAt={cfg.savedAt} />}
         {
@@ -1490,11 +1494,13 @@ export function ConfigModal({ name, displayName, onClose }: { name: string; disp
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           {
 }
-          <Button variant="primary" disabled={cfg.busy || cfg.loading || !!cfg.error || cfg.missing.length > 0}
-            disabledReason={cfg.error ? 'The configuration failed to load'
-              : cfg.loading ? 'Still loading the configuration'
-              : cfg.missing.length > 0 ? `Fill in ${cfg.missingLabels.join(', ')}` : undefined}
-            onClick={() => cfg.save(showsPairing ? undefined : onClose)}>Save</Button>
+          <HeldChange guard={cfg.stale}>
+            <Button variant="primary" disabled={cfg.busy || cfg.loading || !!cfg.error || cfg.missing.length > 0}
+              disabledReason={cfg.error ? 'The configuration failed to load'
+                : cfg.loading ? 'Still loading the configuration'
+                : cfg.missing.length > 0 ? `Fill in ${cfg.missingLabels.join(', ')}` : undefined}
+              onClick={() => cfg.save(showsPairing ? undefined : onClose)}>Save</Button>
+          </HeldChange>
         </div>
       </div>
     </AppConfigDialog>

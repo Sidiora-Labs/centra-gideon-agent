@@ -22,9 +22,9 @@ export function isReportNotRun(value: unknown): value is ReportNotRunEnvelope {
 }
 
 const get = <T>(path: string) => requestJson<T>(path)
-const post = <T>(path: string, body?: unknown) => requestJson<T>(path, 'POST', body)
-const put = <T>(path: string, body?: unknown) => requestJson<T>(path, 'PUT', body)
-const patch = <T>(path: string, body?: unknown) => requestJson<T>(path, 'PATCH', body)
+const post = <T>(path: string, body?: unknown, basedOn?: string) => requestJson<T>(path, 'POST', body, { basedOn })
+const put = <T>(path: string, body?: unknown, basedOn?: string) => requestJson<T>(path, 'PUT', body, { basedOn })
+const patch = <T>(path: string, body?: unknown, basedOn?: string) => requestJson<T>(path, 'PATCH', body, { basedOn })
 const del = requestDelete
 
 type WriteReceipt = {
@@ -95,6 +95,7 @@ async function _installReq(path: string, body: unknown): Promise<AppInstallResul
 
 export interface ThemeSummary { slug: string; name: string; emoji: string; created_at: string }
 export interface ThemeRecord extends ThemeSummary {
+  revision: string
   dark: Record<string, string>
   light: Record<string, string>
 }
@@ -3854,7 +3855,7 @@ export const api = {
   rejectRoutingProposal: (id: string) => del(`/api/models/routing-proposals/${encodeURIComponent(id)}`),
   gideonConfig: () => get<Record<string, any>>('/api/config/gideon'),
   settingsConfig: () => get<{ sections: { id: string; label: string; path: string; field_label: string; value: boolean }[] }>('/api/config/settings'),
-  patchConfig: (path: string, value: unknown) => patch<Record<string, any>>('/api/config/gideon', { path, value }),
+  patchConfig: (path: string, value: unknown, basedOn?: string) => patch<Record<string, any>>('/api/config/gideon', { path, value }, basedOn),
 
   companionDiscovery: () => get<CompanionDiscovery>('/api/companion/discovery'),
   devices: () => get<{ devices: DeviceRec[] }>('/api/devices').then((d) => d.devices),
@@ -4123,7 +4124,7 @@ export const api = {
   themes: () => get<{ themes: ThemeSummary[] }>('/api/themes').then((d) => d.themes),
   theme: (slug: string) => get<ThemeRecord>(`/api/themes/${encodeURIComponent(slug)}`),
   createTheme: (body: ThemeWrite) => post<{ ok: boolean; slug: string; theme: ThemeRecord }>('/api/themes', body),
-  updateTheme: (slug: string, body: ThemeWrite) => put<{ ok: boolean; theme: ThemeRecord }>(`/api/themes/${encodeURIComponent(slug)}`, body),
+  updateTheme: (slug: string, body: ThemeWrite, basedOn: string) => put<{ ok: boolean; theme: ThemeRecord }>(`/api/themes/${encodeURIComponent(slug)}`, body, basedOn),
   deleteTheme: (slug: string) => del(`/api/themes/${encodeURIComponent(slug)}`),
   agentProviders: () => get<{ agent_providers: AgentProvider[] }>('/api/agent-providers').then((d) => d.agent_providers),
   agentProviderAgents: (id: string, refresh = false) =>
@@ -4133,9 +4134,9 @@ export const api = {
   settingsProviders: () => get<{ providers: SettingsProvider[] }>('/api/providers').then((d) => d.providers),
   refreshProviderAvailability: (name: string) => post<{ availability: ProviderAvailability }>(`/api/providers/${encodeURIComponent(name)}/availability`),
   providerSchema: (name: string) => get<{ schema: ProviderSchema }>(`/api/providers/${encodeURIComponent(name)}/schema`).then((d) => d.schema),
-  providerConfig: (name: string) => get<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
-  saveProviderConfig: (name: string, config: Record<string, unknown>) =>
-    patch<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`, config),
+  providerConfig: (name: string) => get<{ config: Record<string, unknown>; revision: string; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
+  saveProviderConfig: (name: string, config: Record<string, unknown>, basedOn: string) =>
+    patch<{ config: Record<string, unknown>; revision: string; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`, config, basedOn),
   enableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/enable`),
   disableProvider: (name: string) => post<{ enabled: boolean }>(`/api/providers/${encodeURIComponent(name)}/disable`),
   agentRuntimes: (refresh = false) => get<{ agent_providers: AgentRuntime[] }>(`/api/agent-providers${refresh ? '?refresh=1' : ''}`).then((d) => d.agent_providers),
@@ -4259,7 +4260,8 @@ export const api = {
   runOnboardingImport: (body: { fingerprints: string[] }) =>
     post<OnboardingImportReport>('/api/onboarding/import', body),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
-  setActiveModel: (useCase: string, models: string[]) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }),
+  activeModels: () => get<{ use_cases: Record<string, string[]>; revisions: Record<string, string> }>('/api/models/active'),
+  setActiveModel: (useCase: string, models: string[], basedOn?: string) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }, basedOn),
   startEmbeddingReindex: () => post<ReindexJob>('/api/models/embedding/reindex'),
   embeddingReindexStreamUrl: (id: string) => `/api/models/embedding/reindex/${encodeURIComponent(id)}/stream`,
 
@@ -5123,9 +5125,9 @@ export const api = {
   consolidateMemory: (key: string) => post<{ ok?: boolean; key?: string; error?: string }>('/api/memory/consolidate', { key }),
   securityStats: () => get<SecurityStats>('/api/security/stats'),
   securityOutsideHome: () => get<{ places: { id: string; label: string; path: string; allowed: boolean }[] }>('/api/security/outside-home'),
-  setOutsideHome: (ids: string[], confirm = false) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.outside_home', value: ids, ...(confirm ? { confirm: true } : {}) }),
+  setOutsideHome: (ids: string[], basedOn: string, confirm = false) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.outside_home', value: ids, ...(confirm ? { confirm: true } : {}) }, basedOn),
   deniedCommands: () => get<DeniedCommands>('/api/security/denied-commands'),
-  setUserDeniedCommands: (patterns: string[]) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.denied_commands', value: patterns }),
+  setUserDeniedCommands: (patterns: string[], basedOn: string, confirmed = false) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.denied_commands', value: patterns, ...(confirmed ? { confirm: true } : {}) }, basedOn),
   securityEgress: () => get<EgressPolicyConfig>('/api/security/egress'),
   credentialStore: () => get<CredentialStoreState>('/api/security/credentials'),
   migrateCredentialsToKeychain: () =>
@@ -5144,10 +5146,15 @@ export const api = {
       { method: 'DELETE', headers: { ...SK } },
     ).then(j<SecretDeleteResult>),
   desktopState: () => get<DesktopStateWire>('/api/desktop/state'),
-  setSecurityEgress: (cfg: EgressPolicyConfig) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.egress', value: cfg }),
-  projectionRules: () => get<Record<string, any>>('/api/config/gideon').then(
-    (c) => ((c?.tools?.projection_rules ?? []) as ProjectionRule[])),
-  setProjectionRules: (rules: ProjectionRule[]) => patch<Record<string, any>>('/api/config/gideon', { path: 'tools.projection_rules', value: rules }),
+  setSecurityEgress: (cfg: EgressPolicyConfig, basedOn: string, confirmed = false) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.egress', value: cfg, ...(confirmed ? { confirm: true } : {}) }, basedOn),
+  projectionRules: async () => {
+    const c = await get<Record<string, any>>('/api/config/gideon')
+    return {
+      value: (c?.tools?.projection_rules ?? []) as ProjectionRule[],
+      revision: c?.revisions?.['tools.projection_rules'] as string | undefined,
+    }
+  },
+  setProjectionRules: (rules: ProjectionRule[], basedOn: string) => patch<Record<string, any>>('/api/config/gideon', { path: 'tools.projection_rules', value: rules }, basedOn),
   toolsSavings: () => get<ToolsSavings>('/api/tools/savings'),
   toolGroups: () => get<ToolGroupsData>('/api/tools/groups'),
   setToolGroupsEnabled: (enabled: boolean) =>
@@ -5483,9 +5490,9 @@ export const api = {
   appUninstallPreview: (name: string) =>
     get<{ name: string; dependencies: AppDepClassification[]; data?: AppDataFacts }>(`/api/apps/${encodeURIComponent(name)}/uninstall-preview`),
   appConfig: (name: string) =>
-    get<{ name: string; config: Record<string, unknown>; schema: Record<string, unknown>; _secret_set?: string[] }>(`/api/apps/${encodeURIComponent(name)}/config`),
-  saveAppConfig: (name: string, config: Record<string, unknown>) =>
-    put<{ ok: boolean; config: Record<string, unknown> }>(`/api/apps/${encodeURIComponent(name)}/config`, config),
+    get<{ name: string; config: Record<string, unknown>; revision: string; schema: Record<string, unknown>; _secret_set?: string[] }>(`/api/apps/${encodeURIComponent(name)}/config`),
+  saveAppConfig: (name: string, config: Record<string, unknown>, basedOn: string) =>
+    put<{ ok: boolean; config: Record<string, unknown>; revision: string }>(`/api/apps/${encodeURIComponent(name)}/config`, config, basedOn),
   appCatalog: () => get<AppCatalog>('/api/apps/catalog'),
   appSources: () => get<{ sources: string[] }>('/api/apps/sources').then((d) => d.sources),
   addAppSource: (url: string) => post<{ ok: boolean; sources: string[] }>('/api/apps/sources', { url }),

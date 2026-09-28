@@ -9,6 +9,10 @@ import { confirmDelete } from '../../shared/ui/dialog'
 import { ColorControl, ScalarControl, SelectControl } from '../../shared/ui/TokenControls'
 import { TOKENS, type ColorToken, type ScalarToken, type SelectToken } from '../../shared/theme/tokenRegistry'
 import { useAppearance } from '../../app/shell/appearance'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { rebaseRecord, type Revisioned } from '../../shared/data/staleWrite'
+import { StaleWriteNotice, HeldChange } from '../../shared/ui/StaleWriteNotice'
+import type { ThemeWrite } from '../../shared/data/api'
 import { useMode, DEFAULT_PREFERENCE, type Preference } from '../../app/shell/theme'
 import { PersonalityPicker } from './PersonalityPicker'
 import { usePersonality } from '../../app/shell/personality'
@@ -19,7 +23,7 @@ import { useNavDisclosure } from '../../app/shell/navDisclosure'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 export function DesignPanel() {
-  const { activeScheme, allSchemes, saveCustomScheme, updateCustomScheme, deleteCustomScheme, themesLoading, resetAll } = useAppearance()
+  const { activeScheme, allSchemes, saveCustomScheme, themeBase, readCustomScheme, updateCustomScheme, revertCustomScheme, deleteCustomScheme, themesLoading, resetAll, currentColors } = useAppearance()
   const { personality, activate, pickScheme } = usePersonality()
   const { mode, preference, setPreference } = useMode()
   const resetEverything = () => {
@@ -42,6 +46,14 @@ export function DesignPanel() {
   const dark = mode === 'dark'
   const isCustom = (id: string) => id.startsWith('custom:') && id !== 'custom:unsaved'
   const activeSaved = isCustom(activeScheme) ? allSchemes.find((s) => s.id === activeScheme) : undefined
+  const guard = useStaleWriteGuard<ThemeWrite>({
+    read: () => readCustomScheme(activeSaved?.id ?? ''),
+    write: (next, revision) => updateCustomScheme(activeSaved?.id ?? '', next, revision),
+    onDiscard: () => {
+      if (activeSaved) void revertCustomScheme(activeSaved.id).catch(() => {})
+    },
+  })
+  const base = activeSaved ? themeBase(activeSaved.id) : undefined
   const MODES: { key: Preference; label: string; icon: typeof Sun }[] = [
     { key: 'dark', label: 'Dark', icon: Moon }, { key: 'light', label: 'Light', icon: Sun }, { key: 'auto', label: 'Auto', icon: Monitor },
   ]
@@ -104,7 +116,7 @@ export function DesignPanel() {
           {activeScheme === 'custom:unsaved' && !editingColors && (
             <p data-type="body-s" className="mt-1.5 text-on-surface-low">You've edited colors — open this to save them as a shareable theme.</p>
           )}
-          {editingColors && <ColorEditor onSave={saveCustomScheme} onUpdate={updateCustomScheme} activeTheme={activeSaved} />}
+          {editingColors && <ColorEditor onSave={saveCustomScheme} activeTheme={activeSaved} base={base} currentColors={currentColors} guard={guard} />}
         </div>
       </Section>
 
@@ -232,10 +244,12 @@ function ControlSection({ title, icon: Icon, subtitle, groups }: { title: string
 
 const THEME_EMOJI_CHOICES = ['🎨', '🌊', '🌇', '🌿', '🔥', '🌙', '⭐', '🍑', '💜', '🩵', '🌸', '🖤']
 
-function ColorEditor({ onSave, onUpdate, activeTheme }: {
+function ColorEditor({ onSave, activeTheme, base, currentColors, guard }: {
   onSave: (label: string, emoji?: string) => Promise<string>
-  onUpdate: (id: string, label: string, emoji?: string) => Promise<void>
   activeTheme?: Scheme
+  base?: Revisioned<ThemeWrite>
+  currentColors: () => { dark: Record<string, string>; light: Record<string, string> }
+  guard: ReturnType<typeof useStaleWriteGuard<ThemeWrite>>
 }) {
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState('🎨')
@@ -249,9 +263,10 @@ function ColorEditor({ onSave, onUpdate, activeTheme }: {
     finally { setBusy('') }
   }
   const update = async () => {
-    if (!activeTheme || busy) return
+    if (!activeTheme || !base || busy) return
     setBusy('update'); setErr('')
-    try { await onUpdate(activeTheme.id, activeTheme.label, activeTheme.emoji) }
+    const mine: ThemeWrite = { ...base.value, ...currentColors() }
+    try { await guard.save(base, mine, rebaseRecord(base.value, mine)) }
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed to update theme') }
     finally { setBusy('') }
   }
@@ -264,10 +279,12 @@ function ColorEditor({ onSave, onUpdate, activeTheme }: {
             <p className="text-on-surface-var text-[0.8125rem]">
               Editing the saved theme <strong className="text-on-surface">{activeTheme.emoji && !activeTheme.emoji.startsWith('icon:') ? `${activeTheme.emoji} ` : ''}{activeTheme.label}</strong> — save your changes back to it.
             </p>
-            <Button size="sm" variant="ghost" onClick={update} disabled={!!busy} disabledReason={BUSY_REASON}><Save size={15} /> {busy === 'update' ? 'Updating…' : 'Update theme'}</Button>
+            <Button size="sm" variant="ghost" onClick={update} disabled={!!busy || guard.conflict !== null} disabledReason={guard.conflict !== null ? 'Reapply or discard the change that wasn’t saved first' : BUSY_REASON}><Save size={15} /> {busy === 'update' ? 'Updating…' : 'Update theme'}</Button>
           </div>
+          <StaleWriteNotice guard={guard} what={`The theme “${activeTheme.label}”`} className="mt-m" />
         </Surface>
       )}
+      <HeldChange guard={guard}>
       <Surface tone="container" radius="lg" className="px-l py-m">
         <Field label={activeTheme ? 'Or save as a new theme' : 'Save these colors as a shareable theme'}>
           <div className="flex flex-wrap items-center gap-1.5 mb-s">
@@ -297,6 +314,7 @@ function ColorEditor({ onSave, onUpdate, activeTheme }: {
           </Surface>
         )
       })}
+      </HeldChange>
     </div>
   )
 }

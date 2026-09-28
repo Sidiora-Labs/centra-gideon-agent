@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
@@ -572,9 +573,27 @@ async def api_gideon_config(request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
 
     from gideon.core.config.document import redact_configuration
+    from gideon.stale_write import revision_of
 
     cfg = AppConfig.load()
-    return web.json_response(redact_configuration(cfg.to_dict()))
+    document = redact_configuration(cfg.to_dict())
+    revisions = {
+        path: revision_of(value)
+        for path in _EDITABLE_CONFIG
+        if isinstance((value := _path_value(document, path)), (dict, list))
+    }
+    return web.json_response(
+        {**document, "revision": revision_of(document), "revisions": revisions}
+    )
+
+
+def _path_value(document: dict[str, Any], path: str) -> Any:
+    value: Any = document
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
 
 
 _SETTINGS_CONFIG_SECTIONS = {
@@ -1076,11 +1095,34 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
             )
 
     from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
+    from gideon.stale_write import refusal_outcome, revision_of, stale_write_refusal
 
     def patch_config(data: dict) -> dict:
+        effective = AppConfig.load().to_dict()
+        forced_projection = request.get("_stale_write_projection")
+        forced_revision = bool(request.get("_stale_write_required"))
+        if forced_revision or isinstance(value, (dict, list)):
+            from gideon.core.config.document import redact_configuration
+
+            projection = (
+                forced_projection(effective)
+                if forced_revision and callable(forced_projection)
+                else redact_configuration(effective)
+            )
+            refusal = stale_write_refusal(
+                request,
+                projection if forced_revision else _path_value(projection, path_key),
+                what=(
+                    request.get("_stale_write_what", "settings preferences")
+                    if forced_revision
+                    else f"the {path_key} settings document"
+                ),
+            )
+            if refusal is not None:
+                return {"status": "revision_refused", "response": refusal}
+
         consent = ""
         if control is not None:
-            effective = AppConfig.load().to_dict()
             current: Any = effective
             for segment in path_key.split("."):
                 current = current.get(segment) if isinstance(current, dict) else None
@@ -1106,6 +1148,17 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     except Exception:
         _log_sel("error", f"{path_key}=write_failed")
         return web.json_response({"error": "failed to write config file"}, status=500)
+    if outcome["status"] == "revision_refused":
+        refusal = outcome["response"]
+        _sel().log_api_access(
+            caller=caller,
+            operation="config.patch",
+            outcome=refusal_outcome(refusal),
+            source="dashboard",
+            resources=path_key,
+            error="whole-document revision refused",
+        )
+        return refusal
     if outcome["status"] == "confirmation_required":
         _sel().log_api_access(
             caller=caller,
@@ -1245,7 +1298,15 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     from gideon.core.config.document import redact_configuration
 
     cfg = AppConfig.load()
-    return web.json_response(redact_configuration(cfg.to_dict()))
+    document = redact_configuration(cfg.to_dict())
+    revisions = {
+        path: revision_of(current)
+        for path in _EDITABLE_CONFIG
+        if isinstance((current := _path_value(document, path)), (dict, list))
+    }
+    return web.json_response(
+        {**document, "revision": revision_of(document), "revisions": revisions}
+    )
 
 
 async def api_incident(request: web.Request) -> web.Response:

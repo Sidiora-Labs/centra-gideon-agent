@@ -82,6 +82,15 @@ async def _client(tmp_path: Path):
             yield client
 
 
+async def _patch_config(client: TestClient, path: str, *, json: dict):
+    current = await client.get(path)
+    assert current.status == 200, await current.text()
+    revision = (await current.json())["revision"]
+    return await client.patch(
+        path, json=json, headers={"If-Match": f'"{revision}"'}
+    )
+
+
 def _stored(tmp_path: Path) -> dict:
     path = tmp_path / "apps" / "fake-channel" / "data" / "config.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
@@ -91,7 +100,8 @@ def _stored(tmp_path: Path) -> dict:
 async def test_get_config_masks_sensitive_fields(tmp_path):
     """A configured token never leaves the backend through this route."""
     async with _client(tmp_path) as client:
-        r = await client.patch(
+        r = await _patch_config(
+            client,
             "/api/providers/fake-channel/config",
             json={
                 "bot_token": _SECRET,
@@ -121,7 +131,8 @@ async def test_get_config_masks_sensitive_fields(tmp_path):
 async def test_patch_response_does_not_echo_the_saved_secret(tmp_path):
     async with _client(tmp_path) as client:
         raw = await (
-            await client.patch(
+            await _patch_config(
+                client,
                 "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
             )
         ).text()
@@ -137,10 +148,12 @@ async def test_patching_the_mask_back_preserves_the_stored_secret(tmp_path):
     saved an unrelated field on the same form — a worse bug than the one being fixed.
     """
     async with _client(tmp_path) as client:
-        await client.patch(
+        await _patch_config(
+            client,
             "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
         )
-        r = await client.patch(
+        r = await _patch_config(
+            client,
             "/api/providers/fake-channel/config",
             json={"bot_token": SECRET_MASK, "command": "renamed"},
         )
@@ -157,10 +170,11 @@ async def test_patching_the_mask_back_preserves_the_stored_secret(tmp_path):
 async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_path):
     """The second shape a round-tripped masked form produces (field cleared by the widget)."""
     async with _client(tmp_path) as client:
-        await client.patch(
+        await _patch_config(
+            client,
             "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
         )
-        await client.patch("/api/providers/fake-channel/config", json={"bot_token": ""})
+        await _patch_config(client, "/api/providers/fake-channel/config", json={"bot_token": ""})
         persisted = _stored(tmp_path)
         assert "{{secret:GIDEON_SECRET_APP_" in persisted["bot_token"]
         assert _SECRET not in json.dumps(persisted)
@@ -171,8 +185,8 @@ async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_pat
 @pytest.mark.asyncio
 async def test_explicit_clear_removes_a_saved_credential(tmp_path):
     async with _client(tmp_path) as client:
-        await client.patch("/api/providers/fake-channel/config", json={"bot_token": _SECRET})
-        response = await client.patch("/api/providers/fake-channel/config", json={"bot_token": None})
+        await _patch_config(client, "/api/providers/fake-channel/config", json={"bot_token": _SECRET})
+        response = await _patch_config(client, "/api/providers/fake-channel/config", json={"bot_token": None})
         assert response.status == 200, await response.text()
         assert _stored(tmp_path)["bot_token"] == ""
         assert (await response.json())["_secret_set"] == []
@@ -182,10 +196,12 @@ async def test_explicit_clear_removes_a_saved_credential(tmp_path):
 async def test_a_real_new_value_still_overwrites(tmp_path):
     """Masking must not make a token unchangeable."""
     async with _client(tmp_path) as client:
-        await client.patch(
+        await _patch_config(
+            client,
             "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
         )
-        await client.patch(
+        await _patch_config(
+            client,
             "/api/providers/fake-channel/config",
             json={"bot_token": "xoxb-ROTATED-fixture"},
         )

@@ -21,17 +21,21 @@ export async function readJson<T>(response: Response): Promise<T> {
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-export function gatewayRequest(path: string, method: Method = 'GET', body?: unknown): Promise<Response> {
+export interface WriteOptions { basedOn?: string }
+export function gatewayRequest(path: string, method: Method = 'GET', body?: unknown, options?: WriteOptions): Promise<Response> {
   const writesJson = method === 'POST' || method === 'PUT' || method === 'PATCH'
-  const headers = writesJson ? { 'Content-Type': 'application/json', ...gatewayHeaders } : { ...gatewayHeaders }
+  const headers: Record<string, string> = writesJson
+    ? { 'Content-Type': 'application/json', ...gatewayHeaders }
+    : { ...gatewayHeaders }
+  if (options?.basedOn) headers['If-Match'] = `"${options.basedOn}"`
   const init: RequestInit = { headers }
   if (method !== 'GET') init.method = method
   if (writesJson) init.body = body == null ? undefined : JSON.stringify(body)
   return fetch(path, init)
 }
 
-export function requestJson<T>(path: string, method: Method = 'GET', body?: unknown): Promise<T> {
-  return gatewayRequest(path, method, body).then(readJson<T>)
+export function requestJson<T>(path: string, method: Method = 'GET', body?: unknown, options?: WriteOptions): Promise<T> {
+  return gatewayRequest(path, method, body, options).then(readJson<T>)
 }
 
 export async function requestDelete(path: string): Promise<void> {
