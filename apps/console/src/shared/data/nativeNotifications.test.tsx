@@ -70,6 +70,7 @@ describe('routeForNote', () => {
     expect(routeForNote(note({ source: 'inbox' }))).toBe('inbox')
     expect(routeForNote(note({ source: 'loop' }))).toBe('loops')
     expect(routeForNote(note({ source: 'planning' }))).toBe('tasks')
+    expect(routeForNote(note({ source: 'tasks' }))).toBe('tasks')
   })
 
   it('falls back to the feed for an absent or unknown source', () => {
@@ -81,16 +82,16 @@ describe('routeForNote', () => {
   it('covers every source the backend can send', () => {
     const py = readFileSync(join(__dirname, "../../../../../runtime/gideon/workspace/notification_kinds.py"), 'utf8')
     const sources = new Set(
-      [...py.matchAll(/NotificationKind\(\s*"([a-z_]+)"/g)].map((m) => m[1]),
+      [...py.matchAll(/(?:_built_in|NotificationKind)\(\s*"([a-z_]+)"/g)].map((m) => m[1]),
     )
     expect(sources.size).toBeGreaterThan(5)
     for (const s of sources) expect(Object.keys(NOTIFICATION_SOURCE_ROUTES)).toContain(s)
   })
 
   it('only ever names a route App.tsx actually serves', () => {
-    const app = readFileSync(join(__dirname, "../../app/shell/App.tsx"), 'utf8')
-    const nav = [...app.matchAll(/\{ id: '([a-z-]+)', label:/g)].map((m) => m[1])
-    const routable = (app.match(/const ROUTABLE = new Set\(\[([^\]]*)\]/)?.[1] ?? '')
+    const routes = readFileSync(join(__dirname, "../../app/shell/navigationModel.ts"), 'utf8')
+    const nav = [...routes.matchAll(/\{ id: '([a-z-]+)', label:/g)].map((m) => m[1])
+    const routable = (routes.match(/export const ROUTABLE_ROOTS = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? '')
     const extras = [...routable.matchAll(/'([a-z-]+)'/g)].map((m) => m[1])
     const served = new Set([...nav, ...extras])
     expect(served.size).toBeGreaterThan(10)

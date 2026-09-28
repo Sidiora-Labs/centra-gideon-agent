@@ -14,9 +14,11 @@ export const NOTIFICATION_SOURCE_ROUTES: Record<string, string> = {
   knowledge: 'knowledge',
   learning: 'learning',
   loop: 'loops',
+  personal: 'notifications',
   planning: 'tasks',
   skills: 'skills',
   system: 'notifications',
+  tasks: 'tasks',
   user: 'inbox',
 }
 
