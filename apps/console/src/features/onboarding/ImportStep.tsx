@@ -39,13 +39,15 @@ export function ImportStep({ onDone, onSkip }: {
 
   onSkip: () => void
 }) {
-  const { scan, scanError, pickedItems, busy, report, failure, detected,
-    nothingPicked, load, run, pickItems } = useSetupImport()
+  const { scan, scanError, pickedItems, busy, job, report, failure, detected,
+    nothingPicked, reading, load, run, stop, resumeRemaining, pickItems } = useSetupImport()
 
   const announcement = report
     ? `Import finished: ${summaryOfReport(report)}.`
     : busy
       ? 'Importing your setup…'
+      : reading
+        ? 'Reading conversation titles and message counts…'
       : scan === null
         ? ''
         : detected.length === 0
@@ -69,7 +71,8 @@ export function ImportStep({ onDone, onSkip }: {
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
 
       {report
-        ? <Report report={report} onContinue={() => onDone(summaryOfReport(report))} />
+        ? <Report report={report} onContinue={() => onDone(summaryOfReport(report))}
+            onResume={resumeRemaining} />
         : detected.length === 0
           ? <Nothing looked={scan.sources} onContinue={() => onDone('Nothing to import')} />
           : (
@@ -90,6 +93,13 @@ export function ImportStep({ onDone, onSkip }: {
               </motion.div>
 
 
+              {busy && job && <div role="status" className="grid gap-s rounded-lg border border-outline-var p-s">
+                <p>{job.phase === 'scanning' ? 'Preparing selected items…' : `Imported ${job.done} of ${job.total}${job.current ? ` · ${job.current}` : ''}`}</p>
+                <Button variant="secondary" size="sm" disabled={job.stopping} onClick={stop}>
+                  {job.stopping ? 'Stopping after this item…' : 'Stop after this item'}
+                </Button>
+              </div>}
+
               {failure && (
                 <div className="flex flex-col gap-2">
                   <InlineError icon multiline>{failure}</InlineError>
@@ -102,9 +112,9 @@ export function ImportStep({ onDone, onSkip }: {
 
               <div className="flex items-center gap-m">
                 <Button variant="primary" size="md" loading={busy}
-                  disabled={nothingPicked}
+                  disabled={nothingPicked || busy}
                   disabledReason="Pick at least one individual item to bring over"
-                  onClick={run}>
+                  onClick={() => run()}>
                   {failure ? 'Try again' : 'Import selected'}
                   <ArrowRight size={16} aria-hidden="true" />
                 </Button>
@@ -140,7 +150,7 @@ function PickGroup({ items, picked, onPick, label }: {
   items: OnboardingImportItem[]; picked: Record<string, boolean>
   onPick: (items: OnboardingImportItem[], value: boolean) => void; label: string
 }) {
-  const eligible = items.filter(writableImportItem)
+  const eligible = items.filter(item => writableImportItem(item) && item.scan?.verdict !== "warning")
   const chosen = eligible.filter(item => picked[item.fingerprint]).length
   return <input type="checkbox" aria-label={label} checked={!!eligible.length && chosen === eligible.length}
     disabled={!eligible.length} ref={element => { if (element) element.indeterminate = chosen > 0 && chosen < eligible.length }}
@@ -164,9 +174,11 @@ function ImportGroup({ category, items, picked, onPick }: {
           <label>Filter {labelOfCategory(category)}<input type="search" className="w-full rounded-lg border border-outline-var bg-surface p-s"
             value={filter} onChange={event => { setFilter(event.target.value); setPage(0) }} /></label>
           {matching.slice(shownPage * 40, (shownPage + 1) * 40).map(item => <label key={item.fingerprint} className="flex items-start gap-s text-[0.8125rem]">
-            <input type="checkbox" aria-label={`Import ${item.title}`} checked={!!picked[item.fingerprint] && writableImportItem(item)}
+            <input type="checkbox" aria-label={item.scan?.verdict === "warning" ? `Accept these warnings and import ${item.title}` : `Import ${item.title}`} checked={!!picked[item.fingerprint] && writableImportItem(item)}
               disabled={!writableImportItem(item)} onChange={event => onPick([item], event.target.checked)} />
-            <span className="min-w-0 break-words">{item.title}<span className="block text-on-surface-low">{item.state ?? (item.existing ? 'existing' : 'new')}{item.destination ? ` → ${item.destination}` : ''}{item.detail ? ` · ${item.detail}` : ''}</span>
+            <span className="min-w-0 break-words">{item.title}{item.scan?.findings.map((finding, index) => <span key={`${finding.rule}:${index}`} className="block text-warn">
+                {finding.severity}: {finding.rule}{finding.gloss ? ` · ${finding.gloss}` : ''} · {finding.path}{finding.line ? `:${finding.line}` : ''}<span className="block">{finding.evidence}</span>
+              </span>)}{item.scan?.verdict === 'warning' && <span className="block">Accept these warnings to bring this skill over.</span>}<span className="block text-on-surface-low">{item.state ?? (item.existing ? 'existing' : 'new')}{item.destination ? ` → ${item.destination}` : ''}{item.detail ? ` · ${item.detail}` : ''}</span>
               {!!((item.secrets_skipped ?? 0) + item.redactions) && <span className="block">{(item.secrets_skipped ?? 0) + item.redactions} credential values withheld</span>}</span>
           </label>)}
           {!matching.length && <p>No matching items</p>}
@@ -194,9 +206,10 @@ function SourceCard({ source, picked, onPick }: {
   </section>
 }
 
-function Report({ report, onContinue }: {
+function Report({ report, onContinue, onResume }: {
   report: OnboardingImportReport
   onContinue: () => void
+  onResume: () => void
 }) {
   const outcomes = report.results.reduce((groups, row) => {
     (groups[row.outcome] ??= []).push(row)
@@ -228,6 +241,7 @@ function Report({ report, onContinue }: {
 
       {!!report.unselected?.length && <p>{report.unselected.length} items left unselected.</p>}
       {report.missing?.map(fingerprint => <p key={fingerprint}>Selected item {fingerprint} is missing; preview again.</p>)}
+      {!!report.not_reached?.length && <p role="status">Stopped between items with {report.not_reached.length} selected item{report.not_reached.length === 1 ? '' : 's'} remaining.</p>}
 
       {report.notes.length > 0 && (
         <ul className="flex flex-col gap-1">
@@ -241,6 +255,9 @@ function Report({ report, onContinue }: {
       )}
 
       <div>
+        {!!report.not_reached?.length && <Button variant="secondary" size="md" onClick={onResume}>
+          Import remaining items
+        </Button>}
         <Button variant="primary" size="md" onClick={onContinue}>
           Continue <ArrowRight size={16} aria-hidden="true" />
         </Button>

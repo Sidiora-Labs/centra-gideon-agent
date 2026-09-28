@@ -177,7 +177,8 @@ class DocumentCommit:
     @staticmethod
     def server(api, item):
         path = api.mcp_config_path()
-        destination = f"{api._rel_to_home(path)}#mcpServers.{item.key}"
+        server_name = item.name or item.key
+        destination = f"{api._rel_to_home(path)}#mcpServers.{server_name}"
         configuration = {}
         if path.is_file():
             try:
@@ -195,7 +196,7 @@ class DocumentCommit:
         servers = configuration.get("mcpServers")
         if not isinstance(servers, dict):
             servers = {}
-        existing = servers.get(item.key)
+        existing = servers.get(server_name)
         if isinstance(existing, dict):
             return FileAdmission.result(
                 api,
@@ -205,7 +206,7 @@ class DocumentCommit:
                 "already configured identically",
                 "an MCP server of this name is already configured differently; the existing entry was kept",
             )
-        servers[item.key] = dict(item.payload)
+        servers[server_name] = dict(item.payload)
         configuration["mcpServers"] = servers
         FileAdmission.publish(
             api, path, api.json.dumps(configuration, indent=2, sort_keys=True) + "\n"
@@ -266,10 +267,19 @@ class SkillCommit:
         marketplace = api._ImportedSkillsMarketplace(source)
         try:
             install_scanned(
-                marketplace, f"import:{item.source}", item.key, target, force=False
+                marketplace, f"import:{item.source}", item.key, target,
+                accepted_warnings=item.accepted_warnings or None
             )
         except SkillInstallRefused as exc:
-            refusal = f"the skill supply-chain scan refused this skill: {exc}"
+            band = "dangerous" if exc.dangerous else "warning"
+            rules = ", ".join(sorted({finding.rule for finding in exc.report.findings
+                                      if finding.severity.value == band}))
+            if exc.dangerous:
+                refusal = f"the skill supply-chain scan refuses it as dangerous: {rules}"
+            elif item.accepted_warnings:
+                refusal = f"its security scan finds warnings other than the ones you accepted, so it was not installed: {rules}. Scan again to read them"
+            else:
+                refusal = f"its security scan found warnings, and it comes over only if you accept them: {rules}"
         except (ValueError, OSError) as exc:
             refusal = f"could not install: {exc}"
         if refusal:

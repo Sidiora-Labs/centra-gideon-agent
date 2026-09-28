@@ -1,0 +1,85 @@
+{
+  "$schema": "https://service.example.invalid/sample",
+  "model": "opus",
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff check:*)",
+      "Bash(uv run ruff format:*)",
+      "Bash(uv run alembic history:*)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git switch:*)",
+      "Bash(rg:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh issue view:*)",
+      "Bash(docker compose ps)",
+      "Read(~/Notes/Garden/**)",
+      "mcp__github__get_issue",
+      "mcp__github__get_pull_request",
+      "mcp__github__list_pull_requests",
+      "mcp__sentry__search_issues",
+      "mcp__sentry__get_issue_details",
+      "WebFetch(domain:service.example.invalid)",
+      "WebFetch(domain:service.example.invalid)",
+      "WebFetch(domain:service.example.invalid)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(uv run alembic upgrade:*)",
+      "Bash(psql:*)",
+      "mcp__github__update_issue",
+      "mcp__github__add_issue_comment"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(rm -rf:*)",
+      "Read(~/.aws/**)",
+      "Read(~/.ssh/**)",
+      "Read(./.env)",
+      "Read(~/Notes/Garden/Health/**)",
+      "Read(~/Documents/Finance/**)"
+    ],
+    "defaultMode": "Synthetic sample text."
+  },
+  "env": {
+    "UV_PYTHON": "Synthetic sample text.",
+    "FEEDSMITH_DEV_DATABASE_URL": "postgresql://sample:invalid-sample-password@database.example.invalid/sample",
+    "SENTRY_AUTH_TOKEN": "invalid-sample-sentry-auth-token",
+    "DISABLE_TELEMETRY": "Synthetic sample text."
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Synthetic sample text.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf sample"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "Synthetic sample text.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf sample"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "printf sample"
+  },
+  "includeCoAuthoredBy": false,
+  "cleanupPeriodDays": 120,
+  "theme": "dark"
+}

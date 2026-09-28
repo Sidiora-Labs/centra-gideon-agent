@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +17,7 @@ _MAX_SOURCE_BYTES = 16 * 1024 * 1024
 _MAX_MESSAGES = 20000
 _MAX_MESSAGE_CHARS = 100000
 _ROLES = {"user", "assistant", "tool"}
+_UNPARSABLE = (ValueError, RecursionError)
 
 
 def _clean(value: object) -> tuple[str, int]:
@@ -63,7 +64,7 @@ def _timestamp(value: object) -> str:
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
-        except ValueError:
+        except _UNPARSABLE:
             pass
     return ""
 
@@ -109,7 +110,7 @@ def _hermes_event(event: dict) -> tuple[list[dict], int]:
                 redactions += count
                 try:
                     clean_calls.append(json.loads(rendered))
-                except ValueError:
+                except _UNPARSABLE:
                     clean_calls.append({"redacted": True})
         if text or clean_calls:
             row = {"role": message["role"], "content": text, "ts": _timestamp(message.get("timestamp"))}
@@ -129,7 +130,7 @@ def _read_rows(lines: list[str], format: str) -> tuple[list[dict], int]:
             break
         try:
             event = json.loads(line)
-        except ValueError:
+        except _UNPARSABLE:
             continue
         if not isinstance(event, dict):
             continue
@@ -202,12 +203,33 @@ def write_transcript(item: ImportItem, api):
 
     rows = item.payload.get("messages") if isinstance(item.payload, dict) else None
     if not isinstance(rows, list) or not rows:
+        try:
+            if item.source == "claude_code":
+                from gideon.cognition.onboarding_import.sources.claude_code import read_for_import
+
+                read = read_for_import(item)
+            elif item.source == "codex":
+                from gideon.cognition.onboarding_import.sources.codex import read_for_import
+
+                read = read_for_import(item)
+            else:
+                read = None
+        except Exception:
+            return api._result(item, api.WriteOutcome.REJECTED,
+                               detail="conversation could not be read completely")
+        if read is not None:
+            conversation, redactions = read
+            item = replace(item, payload=conversation,
+                           redactions=item.redactions + redactions)
+            rows = conversation.get("messages")
+    if not isinstance(rows, list) or not rows:
         return api._result(item, api.WriteOutcome.REJECTED, detail="conversation has no readable messages")
     key = f"imported_{item.source}_{item.fingerprint}"
     log = ConversationLog()
     path = log._path(key)
     header = {"_type": "metadata", "created_at": rows[0].get("ts") or datetime.now(timezone.utc).isoformat(),
-              "last_consolidated": 0, "title": item.title, "import_source": item.source, "import_key": item.key}
+              "last_consolidated": 0, "title": item.title, "import_source": item.source,
+              "import_key": item.key, "message_count": len(rows)}
     content = "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in [header, *rows]) + "\n"
     destination = api._rel_to_home(path)
     if path.exists():
@@ -223,5 +245,6 @@ def write_transcript(item: ImportItem, api):
                            destination, "already imported" if same else "this imported conversation has changed; the existing session was kept")
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, content)
-    api._record(item, destination)
+    # The journal header is the durable idempotence record for conversations. Keeping
+    # each transcript in the general import ledger would duplicate one row per session.
     return api._result(item, api.WriteOutcome.IMPORTED, destination)

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run sampleproject:*)",
+      "Bash(docker compose up -d db)",
+      "mcp__sampleproject-dev-db__list_objects",
+      "mcp__sampleproject-dev-db__get_object_details",
+      "mcp__sampleproject-dev-db__explain_query"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "sampleproject-dev-db",
+    "playwright"
+  ]
+}

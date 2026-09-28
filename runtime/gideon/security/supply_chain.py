@@ -223,7 +223,7 @@ _INJECTION_PROSE: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ),
     (
         "injection_coerce",
-        re.compile(r"you\s+must\s+(?:now\s+)?(?:run|execute|call|always)", re.I),
+        re.compile(r"you\s+must\s+(?:(?:now|always)\s+){0,2}(?:run|execute|call)\b", re.I),
     ),
     ("injection_override", re.compile(r"(?:new|updated)\s+system\s+prompt\s*:", re.I)),
 )

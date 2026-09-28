@@ -342,7 +342,7 @@ def verify_skill_integrity(skill_dir: Path) -> IntegrityReport:
 
 
 def _audit_install(
-    source: str, skill_id: str, tier: "Any", report: "Any", *, outcome: str
+    source: str, skill_id: str, tier: "Any", report: "Any", *, outcome: str, rules: str = ""
 ) -> None:
     """Emit a SEL audit event for a scan/install/refuse (best-effort)."""
     try:
@@ -354,7 +354,7 @@ def _audit_install(
             outcome=outcome,
             source="skills",
             resources=f"{source}/{skill_id}",
-            error=f"tier={getattr(tier, 'value', tier)} verdict={getattr(report.verdict, 'value', report.verdict)}",  # noqa: E501
+            error=f"tier={getattr(tier, 'value', tier)} verdict={getattr(report.verdict, 'value', report.verdict)}" + (f" rules={rules}" if rules else ""),  # noqa: E501
         )
     except Exception:
         logger.debug("skill install SEL audit failed", exc_info=True)
@@ -420,6 +420,55 @@ class SkillsRegistry:
         )
 
 
+def warnings_consent(detail: "SkillDetail", report: "Any") -> str:
+    """What a person accepts when they install a skill over a WARNING verdict: its warnings, and
+    the exact files that were scanned for them. ``""`` for any other verdict.
+
+    A digest of both, so an acceptance is bound to what was read: the same bytes scanned twice
+    give the same value, and a file that changes after the scan (a second command appended to a
+    script the scan had already flagged once) gives another, and is not installed on it.
+    """
+    import hashlib
+
+    from gideon.security.supply_chain import Verdict
+
+    if report.verdict is not Verdict.WARNING:
+        return ""
+    digest = hashlib.sha256(f"{detail.id}\0{detail.name}\n".encode("utf-8"))
+    for entry in sorted(detail.files, key=lambda e: str(e.get("path", ""))):
+        body = entry.get("data")
+        raw = body if isinstance(body, bytes) else str(entry.get("contents", "")).encode("utf-8")
+        digest.update(f"{entry.get('path', '')}\0{hashlib.sha256(raw).hexdigest()}\n".encode())
+    warned = [f for f in report.findings if f.severity is Verdict.WARNING]
+    for line in sorted(f"{f.rule}\0{f.path}\0{f.evidence}" for f in warned):
+        digest.update(f"{line}\n".encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def scan_before_install(marketplace: "SkillsMarketplace", skill_id: str) -> "tuple[Any, str]":
+    import shutil
+    import tempfile
+
+    from gideon.core.config.locations import active_home
+    from gideon.security.supply_chain import TrustTier, scan_dir
+
+    try:
+        tier = TrustTier(marketplace.trust_tier)
+    except ValueError:
+        tier = TrustTier.COMMUNITY
+    detail = marketplace.fetch(skill_id)
+    home = active_home()
+    home.mkdir(parents=True, exist_ok=True)
+    staged_root = Path(tempfile.mkdtemp(prefix=".gideon-skill-quarantine-", dir=home))
+    try:
+        staged_skill = record_path(staged_root, detail.name or skill_id, suffix="", kind="skill name")
+        _stage_files(detail.files, staged_skill)
+        report = scan_dir(staged_skill, tier)
+        return report, warnings_consent(detail, report)
+    finally:
+        shutil.rmtree(staged_root, ignore_errors=True)
+
+
 def install_scanned(
     marketplace: "SkillsMarketplace",
     source: str,
@@ -427,6 +476,7 @@ def install_scanned(
     target_dir: Path,
     *,
     force: bool = False,
+    accepted_warnings: str | None = None,
 ) -> "InstallResult":
     """The single supply-chain install gate — used by both registered-marketplace
     installs (:meth:`SkillsRegistry.install_guarded`) and app-owned skill seeding
@@ -483,9 +533,13 @@ def install_scanned(
         if report.verdict is Verdict.DANGEROUS:
             _audit_install(source, skill_id, tier, report, outcome="refused")
             raise SkillInstallRefused(report, dangerous=True)
-        if report.verdict is Verdict.WARNING and not force:
-            _audit_install(source, skill_id, tier, report, outcome="needs_confirm")
-            raise SkillInstallRefused(report, dangerous=False)
+        if report.verdict is Verdict.WARNING:
+            if not force and accepted_warnings != warnings_consent(detail, report):
+                _audit_install(source, skill_id, tier, report, outcome="needs_confirm")
+                raise SkillInstallRefused(report, dangerous=False)
+            rules = ",".join(sorted({finding.rule for finding in report.findings
+                                     if finding.severity is Verdict.WARNING}))
+            _audit_install(source, skill_id, tier, report, outcome="accepted", rules=rules)
 
         written = install_skill_files(detail.files, detail.name or skill_id, target_dir)
         _write_lock(target_dir, detail, source, tier, report)

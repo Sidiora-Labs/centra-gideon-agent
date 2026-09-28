@@ -3171,6 +3171,7 @@ export interface OnboardingStatePatch {
 }
 export interface OnboardingImportItem {
   fingerprint: string; source: string; category: string; key: string; title: string
+  scan?: { verdict: string; consent: string; findings: Array<{ rule: string; severity: string; path: string; line?: string; gloss?: string; evidence: string }> }
   redactions: number; existing: boolean
   state?: 'new' | 'existing' | 'conflict' | 'rejected'
   destination?: string; detail?: string; preselected?: boolean; secrets_skipped?: number
@@ -3178,6 +3179,7 @@ export interface OnboardingImportItem {
 export interface OnboardingImportSource {
   source: string; display_name: string; root: string; present: boolean; detected: boolean
   counts: Record<string, number>
+  reading?: { read: number; of: number }
   items: OnboardingImportItem[]
   not_imported?: Array<{ what: string; count: number; why: string }>
   secrets_skipped: number; redactions: number
@@ -3186,6 +3188,7 @@ export interface OnboardingImportSource {
 export interface OnboardingImportScan {
   sources: OnboardingImportSource[]
   categories: string[]
+  reading?: { running: boolean; read: number; of: number }
 }
 export interface OnboardingImportOutcome {
   fingerprint: string; source: string; category: string; key: string
@@ -3199,7 +3202,13 @@ export interface OnboardingImportReport {
   notes: string[]
   unselected?: OnboardingImportItem[]
   missing?: string[]
+  not_reached?: string[]
 
+}
+export interface OnboardingImportJob {
+  id: string; status: 'running' | 'done' | 'stopped' | 'failed'; phase: 'scanning' | 'importing' | 'finished'
+  stopping: boolean; total: number; done: number; counts: Record<string, number>; current: string
+  started_at: number; finished_at: number | null; error: string; report: OnboardingImportReport | null
 }
 export interface ChatModelOption { name: string; model_id: string; provider: string; description?: string }
 export interface SavedAgent {
@@ -4273,8 +4282,10 @@ export const api = {
   saveOnboardingState: (patch: OnboardingStatePatch) =>
     post<{ ok: boolean; state: OnboardingState }>('/api/onboarding/state', patch),
   onboardingImportScan: () => get<OnboardingImportScan>('/api/onboarding/import'),
-  runOnboardingImport: (body: { fingerprints: string[] }) =>
-    post<OnboardingImportReport>('/api/onboarding/import', body),
+  runOnboardingImport: (body: { fingerprints: string[]; accepted?: Record<string, string> }) =>
+    post<{ job: OnboardingImportJob }>('/api/onboarding/import', body),
+  onboardingImportJob: () => get<{ job: OnboardingImportJob | null }>('/api/onboarding/import/job'),
+  stopOnboardingImport: () => requestJson<{ job: OnboardingImportJob }>('/api/onboarding/import/job', 'DELETE'),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
   activeModels: () => get<{ use_cases: Record<string, string[]>; revisions: Record<string, string> }>('/api/models/active'),
   setActiveModel: (useCase: string, models: string[], basedOn?: string) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }, basedOn),

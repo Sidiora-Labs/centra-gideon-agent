@@ -291,3 +291,22 @@ def test_dangerous_floor_still_non_overridable_for_a_conformant_skill(tmp_path):
         reg.install_guarded("fake", "vendor-payloads", tmp_path / "live", force=True)
     assert ei.value.dangerous is True
     assert not (tmp_path / "live" / "vendor-payloads").exists()
+
+
+def test_digest_acceptance_uses_real_local_skill(tmp_path, monkeypatch):
+    from gideon.cognition.onboarding_import.sources.common import ImportedSkillMarketplace
+    from gideon.extensions.skills.marketplace import install_scanned, scan_before_install
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    source = tmp_path / "source" / "fetcher"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: fetcher\ndescription: Fetch a page.\n---\nFetch.\n")
+    (source / "fetch.sh").write_text("curl -s https://example.invalid/data\n")
+    market = ImportedSkillMarketplace(source)
+    report, consent = scan_before_install(market, "fetcher")
+    assert report.verdict.value == "warning" and consent
+    with pytest.raises(SkillInstallRefused):
+        install_scanned(market, "import:local", "fetcher", tmp_path / "wrong", accepted_warnings="0" * 16)
+    result = install_scanned(market, "import:local", "fetcher", tmp_path / "installed", accepted_warnings=consent)
+    assert result.path.is_file()
+    assert (result.path.parent / "fetch.sh").read_bytes() == (source / "fetch.sh").read_bytes()

@@ -9,10 +9,11 @@ Two properties are load-bearing and live here rather than in each scanner:
 - **Fingerprint idempotence.** An item's identity is ``sha256(source\\0category\\0key)``
   — stable across re-scans and independent of the item's body, so re-importing an
   edited file updates nothing it already owns and never creates a second copy.
-- **Secret-free payloads.** An item carries a redacted body and a secret-stripped
-  structured payload. A scanner that finds a credential *counts* it
-  (``ScanResult.secrets_skipped``) and drops it; the value never reaches an item, a
-  note, a log line, or an error message.
+- **Secret-free projections.** ``ImportItem.payload`` is excluded from repr and every public
+  projection. Local MCP readers may carry owner-provided values transiently so the existing
+  writer can place them in Gideon's credential store after selection; they are never serialized
+  into a scan or preview. Hosted readers discard credential-bearing servers before preview or
+  commit. Free text is redacted before it reaches an item.
 """
 
 from __future__ import annotations
@@ -37,8 +38,11 @@ class ImportCategory(str, Enum):
     MEMORIES = "memories"
     MCP_SERVERS = "mcp_servers"
     SKILLS = "skills"
+    AGENTS = "agents"
+    PROMPTS = "prompts"
     SETTINGS = "settings"
     CONVERSATIONS = "conversations"
+    DENIED_COMMANDS = "denied_commands"
 
 
 class WriteOutcome(str, Enum):
@@ -97,9 +101,9 @@ def fingerprint_of(source: str, category: ImportCategory | str, key: str) -> str
 class ImportItem:
     """One importable thing found by a scanner. Pure data — no store, no session.
 
-    ``text`` is the redacted body (instructions/memories); ``payload`` is the
-    secret-stripped structured value (mcp_servers/settings); ``path`` is the source
-    directory for skills. Exactly one of the three is populated per category.
+    ``text`` is the redacted body (instructions/memories); ``payload`` is hidden structured
+    input (an MCP writer may hold local owner values transiently for post-selection vaulting);
+    ``path`` is the source directory for skills. Public projections omit payload and path.
     """
 
     source: str
@@ -109,9 +113,15 @@ class ImportItem:
     text: str = ""
     payload: dict = field(default_factory=dict, repr=False)
     path: str = ""
+    name: str = ""
+    origin: str = ""
+    note: str = ""
+    provisional: bool = False
+    scan: object = field(default=None, repr=False)
     redactions: int = 0
     secrets_skipped: int = 0
     preselect: bool = True
+    accepted_warnings: str = field(default="", repr=False)
 
     @property
     def fingerprint(self) -> str:
@@ -165,6 +175,8 @@ class ScanResult:
     redactions: int = 0
     notes: list[str] = field(default_factory=list)
     not_imported: list[dict] = field(default_factory=list)
+    conversation_files: int = 0
+    unread: list[object] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         """Per-category item counts — what the onboarding checkboxes show."""
@@ -224,6 +236,7 @@ class ImportReport:
     notes: list[str] = field(default_factory=list)
     unselected: list[tuple[ImportItem, Plan]] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    not_reached: list[str] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         return RecordProjection.tally(self.results, "outcome", WriteOutcome)
@@ -232,4 +245,7 @@ class ImportReport:
         return RecordProjection.matching(self.results, "outcome", WriteOutcome.CONFLICT)
 
     def to_dict(self) -> dict:
-        return RecordProjection.render("report", self)
+        payload = RecordProjection.render("report", self)
+        if self.not_reached:
+            payload["not_reached"] = list(self.not_reached)
+        return payload

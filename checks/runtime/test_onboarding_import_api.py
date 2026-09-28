@@ -30,6 +30,7 @@ The load-bearing tests, one per clause the atom names:
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
 from pathlib import Path
@@ -55,14 +56,14 @@ def foreign(tmp_path: Path) -> Path:
         f"# House rules\n\n- Always run the linter.\n- The key is {SECRET}.\n",
         encoding="utf-8",
     )
-    (root / ".mcp.json").write_text(
+    (root / ".claude.json").write_text(
         json.dumps(
             {
                 "mcpServers": {
                     "weather": {
                         "command": "npx",
                         "args": ["-y", "weather-mcp"],
-                        "env": {"WEATHER_API_KEY": SECRET, "REGION": "eu"},
+                        "env": {"WEATHER_API_KEY": "fixture-weather-key", "REGION": "eu"},
                     }
                 }
             }
@@ -170,7 +171,17 @@ async def _import(client, **body):
                     ("sources" not in body or item["source"] in body["sources"]) and
                     ("categories" not in body or item["category"] in body["categories"])]
     resp = await client.post("/api/onboarding/import", json={"fingerprints": fingerprints})
-    return resp.status, await resp.json()
+    payload = await resp.json()
+    job = await _wait_job(client, payload["job"])
+    return resp.status, job["report"]
+
+
+async def _wait_job(client, job):
+    """Wait on the real owner job route; a 202 is only the accepted background work."""
+    while job["status"] == "running":
+        await asyncio.sleep(0.01)
+        job = (await (await client.get("/api/onboarding/import/job")).json())["job"]
+    return job
 
 
 @pytest.mark.asyncio
@@ -181,7 +192,7 @@ async def test_import_writes_the_picked_categories_and_reports_every_outcome(
         status, report = await _import(
             client, sources=["claude_code"], categories=["instructions", "mcp_servers"]
         )
-    assert status == 200
+    assert status == 202
     assert report["counts"]["imported"] >= 2, report
     mcp = json.loads((home / "mcp.json").read_text(encoding="utf-8"))
     assert "weather" in mcp["mcpServers"]
@@ -196,7 +207,7 @@ async def test_planted_secret_never_reaches_the_home_through_the_route(
 ):
     async with make_client() as client:
         status, report = await _import(client)
-    assert status == 200
+    assert status == 202
     assert report["counts"]["imported"] >= 1
     assert SECRET.encode() not in _bytes_under(home)
     assert report["secrets_skipped"] + report["redactions"] >= 1
@@ -210,7 +221,7 @@ async def test_reentry_marks_already_imported_items_existing(make_client):
         status, _ = await _import(
             client, sources=["claude_code"], categories=["mcp_servers"]
         )
-        assert status == 200
+        assert status == 202
         again = await (await client.get("/api/onboarding/import")).json()
 
     claude = next(s for s in again["sources"] if s["source"] == "claude_code")
@@ -238,11 +249,10 @@ async def test_reimport_reports_existing_and_imports_nothing(make_client):
 async def test_a_write_failure_is_reported_with_the_secret_redacted(
     make_client, monkeypatch
 ):
-    """A writer that raises must not become a 200 with a zero in it.
+    """A failed background job retains its outcome and screens exception text.
 
-    The exception carries the planted secret on purpose: a path or a value from a
-    foreign root can itself look like a credential, so the sentence a user reads is
-    screened at the one boundary where an exception becomes a string.
+    The exception carries the planted secret on purpose: a path or value from a
+    foreign root can itself look like a credential, so job status must screen it.
     """
 
     def boom(*_a, **_kw):
@@ -252,16 +262,15 @@ async def test_a_write_failure_is_reported_with_the_secret_redacted(
     async with make_client() as client:
         scan = await (await client.get("/api/onboarding/import")).json()
         resp = await client.post("/api/onboarding/import", json={"fingerprints": [scan["sources"][0]["items"][0]["fingerprint"]]})
-        assert resp.status == 500
-        raw = await resp.text()
-        body = json.loads(raw)
+        assert resp.status == 202
+        body = await _wait_job(client, (await resp.json())["job"])
+        raw = json.dumps(body)
 
-    assert body["error"]["code"] == "onboarding_import_failed"
-    assert (
-        "cannot write" in body["error"]["message"]
-    ), "the failure's own words are the point"
+    assert body["status"] == "failed"
+    assert "cannot write" in body["error"]
     assert SECRET not in raw
-    assert "again" in body["error"]["message"]
+    assert body["report"]["results"] == []
+    assert body["report"]["counts"]["imported"] == 0
 
 
 @pytest.mark.asyncio
@@ -347,6 +356,8 @@ def test_both_routes_resolve_on_a_registered_app():
     assert {(r.method, r.resource.canonical) for r in app.router.routes()} >= {
         ("GET", "/api/onboarding/import"),
         ("POST", "/api/onboarding/import"),
+        ("GET", "/api/onboarding/import/job"),
+        ("DELETE", "/api/onboarding/import/job"),
     }
 
 
@@ -388,10 +399,56 @@ async def test_commit_accepts_only_rescanned_fingerprints(make_client, home):
             response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"]], **extra})
             assert response.status == 400
         response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"], chosen["fingerprint"], "0" * 16]})
-        report = await response.json()
-        assert response.status == 200
+        assert response.status == 202
+        report = (await _wait_job(client, (await response.json())["job"]))["report"]
         assert len(report["results"]) == 1
         assert report["results"][0]["fingerprint"] == chosen["fingerprint"]
         assert report["missing"] == ["0" * 16]
         assert len(report["unselected"]) == len(items) - 1
         assert not (home / "skills" / "imported").exists()
+
+
+@pytest.mark.asyncio
+async def test_import_job_can_stop_between_real_item_writes(make_client, foreign):
+    memory = foreign / "projects" / "-Users-ada-src-app" / "memory"
+    memory.mkdir(parents=True)
+    for number in range(1600):
+        (memory / f"topic-{number:04d}.md").write_text(
+            f"# Topic {number}\nA real fixture memory for the import job.\n",
+            encoding="utf-8",
+        )
+
+    async with make_client() as client:
+        scan = await (await client.get("/api/onboarding/import")).json()
+        items = [item for source in scan["sources"] for item in source["items"]
+                 if item["category"] == "memories"]
+        assert len(items) == 1600
+        accepted = await client.post("/api/onboarding/import", json={
+            "fingerprints": [item["fingerprint"] for item in items],
+        })
+        assert accepted.status == 202
+        start = await accepted.json()
+        assert start["job"]["total"] == len(items)
+
+        progress = start["job"]
+        for _ in range(2000):
+            if progress["done"] > 0 or progress["status"] != "running":
+                break
+            await asyncio.sleep(0.01)
+            progress = (await (await client.get("/api/onboarding/import/job")).json())["job"]
+        assert progress["done"] > 0, progress
+
+        stopped = await client.delete("/api/onboarding/import/job")
+        assert stopped.status in {202, 409}
+        job = (await stopped.json()).get("job") if stopped.status == 202 else None
+        for _ in range(3000):
+            if job is not None and job["status"] != "running":
+                break
+            await asyncio.sleep(0.01)
+            job = (await (await client.get("/api/onboarding/import/job")).json())["job"]
+
+    assert job is not None
+    assert job["status"] in {"stopped", "done"}
+    if job["status"] == "stopped":
+        report = job["report"]
+        assert len(report["results"]) + len(report["not_reached"]) == len(items)

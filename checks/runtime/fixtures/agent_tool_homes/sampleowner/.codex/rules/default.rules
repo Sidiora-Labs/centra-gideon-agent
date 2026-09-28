@@ -1,0 +1,4 @@
+prefix_rule(pattern=['git', 'push'], decision='prompt', justification="Synthetic sample rule.")
+prefix_rule(pattern=['psql'], decision='prompt', justification="Synthetic sample rule.")
+prefix_rule(pattern=['uv', 'run', 'alembic', 'upgrade'], decision='prompt', justification="Synthetic sample rule.")
+prefix_rule(pattern=['rm', '-rf'], decision='forbidden', justification="Synthetic sample rule.")

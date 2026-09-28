@@ -16,6 +16,7 @@ from gideon.http_errors import json_error
 logger = logging.getLogger(__name__)
 
 _MAX_MESSAGE = 200
+ACTIVITY = "onboarding_import_activity"
 
 
 def _redacted(exc: BaseException) -> str:
@@ -33,13 +34,15 @@ def _redacted(exc: BaseException) -> str:
     return cleaned[:_MAX_MESSAGE]
 
 
-def _scan_with_ledger() -> tuple[list, set[str]]:
-    """One thread hop for both reads: the foreign roots, then our fingerprint ledger."""
-    from gideon.cognition.onboarding_import import already_imported, scan_all
-
-    results = scan_all()
+def _scan_with_ledger(activity) -> tuple[list, set[str]]:
+    """Answer from bounded transcript looks while a background pass completes them."""
+    from gideon.cognition.onboarding_import import scan_all
     from gideon.cognition.onboarding_import import plans
-    return results, plans(results)
+    with activity.scanning():
+        results = scan_all(look=True)
+        known = plans(results)
+    activity.read_behind(results)
+    return results, known
 
 
 async def api_onboarding_import_scan(request: web.Request) -> web.Response:
@@ -55,7 +58,8 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
     from gideon.cognition.onboarding_import import ImportCategory, detected
 
     try:
-        results, known = await asyncio.to_thread(_scan_with_ledger)
+        activity = request.app[ACTIVITY]
+        results, known = await asyncio.to_thread(_scan_with_ledger, activity)
     except (
         Exception
     ) as exc:  # noqa: BLE001 — a scan fault is reported, never a blank step
@@ -71,6 +75,8 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
     for result in results:
         payload = result.to_dict()
         payload["detected"] = result.source in found
+        payload["reading"] = {"read": result.conversation_files - len(result.unread),
+                              "of": result.conversation_files}
         for item in payload["items"]:
             plan = known[item["fingerprint"]]
             item.update(state=plan.state.value, destination=plan.destination, detail=plan.detail,
@@ -78,10 +84,13 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
                         preselected=item["preselected"] and plan.state.value == "new")
         sources.append(payload)
 
+    activity_state = request.app[ACTIVITY].status()
+    reading = activity_state["reading"]
     return web.json_response(
         {
             "sources": sources,
             "categories": [category.value for category in ImportCategory],
+            "reading": reading,
         }
     )
 
@@ -89,19 +98,30 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
 def _fingerprints(body: dict) -> list[str]:
     import re
 
-    if set(body) != {"fingerprints"}:
+    if "fingerprints" not in body or set(body) - {"fingerprints", "accepted"}:
         raise ValueError("Choose individual item fingerprints only")
     entries = body["fingerprints"]
-    if not isinstance(entries, list) or not entries or len(entries) > 10000:
-        raise ValueError("Choose between 1 and 10000 item fingerprints")
+    if not isinstance(entries, list) or not entries or len(entries) > 100000:
+        raise ValueError("Choose between 1 and 100000 item fingerprints")
     if any(not isinstance(entry, str) or re.fullmatch(r"[0-9a-f]{16}", entry) is None for entry in entries):
         raise ValueError("Each fingerprint must be 16 lowercase hexadecimal characters")
     return list(dict.fromkeys(entries))
 
 
-async def api_onboarding_import_run(request: web.Request) -> web.Response:
-    from gideon.cognition.onboarding_import import run_import, scan_all
+def _accepted(body: dict, fingerprints: list[str]) -> dict[str, str]:
+    import re
 
+    accepted = body.get("accepted", {})
+    if not isinstance(accepted, dict) or len(accepted) > 10000 or any(
+        not isinstance(key, str) or key not in fingerprints or
+        not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{16}", value) is None
+        for key, value in accepted.items()
+    ):
+        raise ValueError("'accepted' must map a selected item fingerprint to its warning consent digest")
+    return accepted
+
+
+async def api_onboarding_import_run(request: web.Request) -> web.Response:
     try:
         body = await read_json_body(request)
     except RequestBodyTypeError:
@@ -110,17 +130,41 @@ async def api_onboarding_import_run(request: web.Request) -> web.Response:
         return json_error("invalid_json", status=400)
     try:
         fingerprints = _fingerprints(body)
+        accepted = _accepted(body, fingerprints)
     except ValueError as exc:
         return json_error("invalid_request", message=str(exc), status=400)
-    try:
-        report = await asyncio.to_thread(lambda: run_import(scan_all(), fingerprints=fingerprints))
-    except Exception as exc:
-        logger.warning("onboarding import: write failed", exc_info=True)
-        return json_error("onboarding_import_failed", message=f"The import stopped after a write failed: {_redacted(exc)}. Anything already imported was recorded, so importing again is safe.", status=500)
-    return web.json_response(report.to_dict())
+    job, started = request.app[ACTIVITY].start_import(fingerprints, accepted)
+    if not started:
+        return web.json_response({"error": {"code": "import_running",
+                                             "message": "An import is already running. Wait for it, or stop it first."},
+                                  "job": job.to_dict(include_report=False)}, status=409)
+    return web.json_response({"job": job.to_dict(include_report=False)}, status=202)
+
+
+async def api_onboarding_import_job(request: web.Request) -> web.Response:
+    job = request.app[ACTIVITY].job
+    return web.json_response({"job": job.to_dict() if job is not None else None})
+
+
+async def api_onboarding_import_stop(request: web.Request) -> web.Response:
+    job = request.app[ACTIVITY].job
+    if job is None or not job.running:
+        return json_error("not_running", message="No import is running.", status=409)
+    job.stop()
+    return web.json_response({"job": job.to_dict(include_report=False)}, status=202)
+
+
+async def _stop_activity(app: web.Application) -> None:
+    await asyncio.to_thread(app[ACTIVITY].shutdown)
 
 
 def register_onboarding_import_routes(app: web.Application) -> None:
     """Register the two /api/onboarding/import routes."""
+    from gideon.cognition.onboarding_import.activity import ImportActivity
+
+    app[ACTIVITY] = ImportActivity()
+    app.on_shutdown.append(_stop_activity)
     app.router.add_get("/api/onboarding/import", api_onboarding_import_scan)
     app.router.add_post("/api/onboarding/import", api_onboarding_import_run)
+    app.router.add_get("/api/onboarding/import/job", api_onboarding_import_job)
+    app.router.add_delete("/api/onboarding/import/job", api_onboarding_import_stop)

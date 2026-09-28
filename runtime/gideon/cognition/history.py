@@ -272,13 +272,14 @@ class _SessionSummary:
         return None
 
     def project(self):
+        metadata = self.metadata()
         result = dict(
             key=self.key,
-            messages=max(1, int(self.stat.st_size / 200)),
+            messages=(metadata.get("message_count") if isinstance(metadata.get("message_count"), int)
+                      and metadata.get("message_count") >= 0 else max(1, int(self.stat.st_size / 200))),
             modified=self.stat.st_mtime,
             created=datetime.fromtimestamp(self.stat.st_mtime).isoformat(),
         )
-        metadata = self.metadata()
         for stored, shown in (
             ("created_at", "created"),
             ("title", "title"),

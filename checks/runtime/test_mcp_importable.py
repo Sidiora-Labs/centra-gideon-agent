@@ -73,3 +73,31 @@ def test_discover_importable_no_source_file(tmp_path, monkeypatch):
     monkeypatch.setattr(disc, "_mcp_json_paths", lambda: (tmp_path / "nope.json",))
     monkeypatch.setattr(disc, "_load_agent_config", lambda: {})
     assert disc.discover_importable_servers() == []
+
+
+def test_codex_reader_preserves_remote_transport_headers_and_disabled_tools(tmp_path):
+    from gideon.cognition.onboarding_import.model import ImportCategory
+    from gideon.cognition.onboarding_import.sources.codex import scan
+
+    root = tmp_path / ".codex"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        '[mcp_servers."research"]\n'
+        'url = "https://mcp.example.test/mcp"\n'
+        'enabled = false\n'
+        'disabled_tools = ["write", "delete"]\n'
+        '[mcp_servers."research".http_headers]\n'
+        'X-Workspace = "demo"\n',
+        encoding="utf-8",
+    )
+
+    result = scan(root, environ={})
+    item = result.by_category(ImportCategory.MCP_SERVERS)[0]
+    assert item.payload == {
+        "type": "http",
+        "transport": "streamable_http",
+        "url": "https://mcp.example.test/mcp",
+        "headers": {"X-Workspace": "demo"},
+        "disabled": True,
+        "disabledTools": ["write", "delete"],
+    }
