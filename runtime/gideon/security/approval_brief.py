@@ -25,10 +25,9 @@ change; nothing here tempted one.
 dashboard's chips and the out-of-context toast. Three surfaces must not invent three
 words for one claim, so:
 
-* the name evidence is not copied at all — :data:`WRITE_HINTS`,
-  :data:`DESTRUCTIVE_HINTS` and :data:`READ_VERB_HINTS` are DERIVED from
-  ``task_modes``' own tuples, the same tuples the TypeScript mirrors. Adding a hint
-  to ``task_modes`` flows into the brief automatically;
+* write and destructive name hints are derived from ``task_modes``' tuples, the same
+  tuples the TypeScript mirrors. Names never establish a read-only claim; that requires
+  an effective safe risk or a parsed read-only command;
 * the four facet labels are the TypeScript's ``FACET_COPY`` verbatim, and
   ``tests/test_approval_brief.py`` parses that file and asserts every label and
   hint list still agrees. A drift becomes a red test, not a third vocabulary.
@@ -166,11 +165,8 @@ def derive_blast_radius(
     network = _has_any(name, NETWORK_HINTS)
 
     writes = False
-    read_verb = False
     if _has_any(name, DESTRUCTIVE_HINTS):
         writes = True
-    elif _has_any(name, READ_VERB_HINTS):
-        read_verb = True
     elif _has_any(name, WRITE_HINTS):
         writes = True
 
@@ -178,8 +174,8 @@ def derive_blast_radius(
     if read_only_command is True:
         read_only = True
     elif read_only_command is not False:
-        read_only = _risk_establishes_read_only(risk) or read_verb
-    if writes:
+        read_only = _risk_establishes_read_only(risk)
+    if writes or network or shell:
         read_only = False
 
     if not writes and not network and not shell and not read_only:

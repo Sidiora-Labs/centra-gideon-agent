@@ -110,6 +110,18 @@ _NON_DESTRUCTIVE_MUTATING_NAME_HINTS = (
 
 _MUTATING_NAME_HINTS = _NON_DESTRUCTIVE_MUTATING_NAME_HINTS + _DESTRUCTIVE_NAME_HINTS
 
+_NETWORK_NAME_HINTS = (
+    "web_",
+    "http",
+    "fetch",
+    "browse",
+    "download",
+    "upload",
+    "crawl",
+    "scrape",
+    "url",
+)
+
 _BUILD_NAME_HINTS = (
     "artifact",
     "widget",
@@ -220,21 +232,43 @@ class _Invocation:
             return READ_ONLY if is_read_only_bash(command) else MUTATING
         if self.kind in _MUTATING_TOOL_KINDS:
             return MUTATING
+        # Tool names describe intent, not effects. Only the registry's explicit
+        # read-like kind is a declaration; otherwise deny by default.
         declared_read = self.kind in _READONLY_TOOL_KINDS
-        if not declared_read and any(
-            fragment in self.name for fragment in _MUTATING_NAME_HINTS
+        if any(
+            fragment in self.name
+            for fragment in (*_MUTATING_NAME_HINTS, *_NETWORK_NAME_HINTS)
         ):
             return MUTATING
-        # A command argument on a non-shell tool must never grant read authority.
-        return MUTATING if extract_bash_command(self.arguments) else READ_ONLY
+        # A command argument on a non-shell tool never grants read authority.
+        if extract_bash_command(self.arguments):
+            return MUTATING
+        return READ_ONLY if declared_read else MUTATING
 
     def effective_risk(self, declared: object) -> str:
         raw = getattr(declared, "value", declared)
         risk = str(raw).lower() if raw else ""
         classification = self.classification()
+        if self.runs_shell and not self.command():
+            return "caution"
+        if extract_bash_command(self.arguments) and not self.runs_shell:
+            return "destructive" if classification == MUTATING else "caution"
         if self.command():
-            return "safe" if classification == READ_ONLY else (risk or "destructive")
+            if classification == READ_ONLY:
+                return "safe"
+            return (
+                "destructive"
+                if any(fragment in self.name for fragment in _DESTRUCTIVE_NAME_HINTS)
+                else "caution"
+            )
         if risk in _RISK_ORDER:
+            if risk == "safe" and any(
+                fragment in self.name
+                for fragment in (*_MUTATING_NAME_HINTS, *_NETWORK_NAME_HINTS)
+            ):
+                return "destructive" if any(
+                    fragment in self.name for fragment in _DESTRUCTIVE_NAME_HINTS
+                ) else "caution"
             return risk
         if classification == UNCLASSIFIED:
             return "caution"
@@ -280,7 +314,6 @@ def infer_risk_from_name(name: str) -> str:
         bare = bare.rsplit("/", 1)[-1]
     priorities = (
         (_DESTRUCTIVE_NAME_HINTS, "destructive"),
-        (_READ_VERB_HINTS, "safe"),
         (_MUTATING_NAME_HINTS, "caution"),
     )
     return next(
@@ -289,7 +322,7 @@ def infer_risk_from_name(name: str) -> str:
             for fragments, risk in priorities
             if any(fragment in bare for fragment in fragments)
         ),
-        "safe",
+        "caution",
     )
 
 

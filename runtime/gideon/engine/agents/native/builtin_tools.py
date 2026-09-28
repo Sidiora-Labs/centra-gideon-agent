@@ -331,6 +331,12 @@ class NativeBuiltinToolProvider(ToolProvider):
     def _resolve(self, rel: str) -> Path:
         return WorkspaceDefaults.resolve(self._cwd, self._extra_roots, rel)
 
+    def _owner_only_path_reason(self, path: str) -> str:
+        from gideon.security.owner_only import owner_only_path_reason
+
+        return owner_only_path_reason(path, cwd=self._cwd)
+
+
     async def list_tools(self) -> list[ToolDefinition]:
         catalog = self._all_tool_defs({"type": "object"})
         if self._categories is not None:
@@ -736,6 +742,8 @@ class NativeBuiltinToolProvider(ToolProvider):
         return await app_tools.project_operation("list", a)
 
     async def _t_read_file(self, a: dict) -> ToolResult:
+        if reason := self._owner_only_path_reason(str(a["path"])):
+            return ToolResult(success=False, error=reason)
         path = self._resolve(str(a["path"]))
         size = int(a.get("max_bytes") or _MAX_READ_BYTES)
         snapshot = await asyncio.get_event_loop().run_in_executor(
@@ -779,6 +787,8 @@ class NativeBuiltinToolProvider(ToolProvider):
             logger.debug("checkpoint pre-edit skipped for %s", path, exc_info=True)
 
     async def _t_write_file(self, a: dict) -> ToolResult:
+        if reason := self._owner_only_path_reason(str(a["path"])):
+            return ToolResult(success=False, error=reason)
         path = self._resolve(str(a["path"]))
         content = str(a.get("content", ""))
         self._checkpoint_pre_edit(path)
@@ -809,6 +819,8 @@ class NativeBuiltinToolProvider(ToolProvider):
         return await asyncio.get_event_loop().run_in_executor(None, persist)
 
     async def _t_edit_file(self, a: dict) -> ToolResult:
+        if reason := self._owner_only_path_reason(str(a["path"])):
+            return ToolResult(success=False, error=reason)
         path = self._resolve(str(a["path"]))
         before, after = str(a["old_str"]), str(a["new_str"])
         all_matches = bool(a.get("replace_all"))
@@ -847,6 +859,8 @@ class NativeBuiltinToolProvider(ToolProvider):
         return await asyncio.get_event_loop().run_in_executor(None, persist)
 
     async def _t_list_dir(self, a: dict) -> ToolResult:
+        if reason := self._owner_only_path_reason(str(a.get("path") or ".")):
+            return ToolResult(success=False, error=reason)
         directory = self._resolve(str(a.get("path") or "."))
         listing = await asyncio.get_event_loop().run_in_executor(
             None, partial(WorkspaceTree.directory, directory)
@@ -908,6 +922,10 @@ class NativeBuiltinToolProvider(ToolProvider):
                 requested = _BASH_TIMEOUT
             timeout = max(1.0, min(requested, _BASH_TIMEOUT_MAX))
         command = str(a["command"])
+        from gideon.security.owner_only import owner_only_command_reason
+
+        if reason := owner_only_command_reason(command, cwd=self._cwd):
+            return ToolResult(success=False, error=reason)
         checks = (
             (
                 security.is_sensitive_bash_command,
@@ -939,7 +957,9 @@ class NativeBuiltinToolProvider(ToolProvider):
             return ToolResult(
                 success=False, error=offer.reason, recovery_hints=[handoff.HANDOFF_HINT]
             )
-        wrapped, cleanup = wrap_argv(["bash", "-lc", command], mode=self._sandbox_mode)
+        wrapped, cleanup = wrap_argv(
+            ["bash", "-lc", command], mode=self._sandbox_mode, cwd=self._cwd
+        )
         try:
             from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 

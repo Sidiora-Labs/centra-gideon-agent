@@ -907,7 +907,9 @@ def reset_backend() -> None:
     _backend_config_mode = None
 
 
-def wrap_argv(argv: list[str], mode: str = "auto") -> tuple[list[str], str | None]:
+def wrap_argv(
+    argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None
+) -> tuple[list[str], str | None]:
     """Wrap a command argv with OS-level sandbox if available.
 
     Args:
@@ -922,6 +924,23 @@ def wrap_argv(argv: list[str], mode: str = "auto") -> tuple[list[str], str | Non
         (macOS seatbelt profile or Linux launcher script).
         ``None`` when no cleanup is needed.
     """
+    from gideon.security.owner_only import (
+        owner_only_command_reason,
+        owner_only_path_reason,
+    )
+
+    for index, argument in enumerate(argv):
+        reason = owner_only_path_reason(argument, cwd=cwd)
+        if reason:
+            raise PermissionError(reason)
+        reason = owner_only_command_reason(argument, cwd=cwd)
+        if reason:
+            raise PermissionError(reason)
+        if (argument == "--command" or (argument.startswith("-") and argument.endswith("c"))) and index + 1 < len(argv):
+            reason = owner_only_command_reason(argv[index + 1], cwd=cwd)
+            if reason:
+                raise PermissionError(reason)
+
     if mode == "off":
         return argv, None
 

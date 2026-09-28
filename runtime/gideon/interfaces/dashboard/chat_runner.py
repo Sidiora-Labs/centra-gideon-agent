@@ -722,6 +722,20 @@ def _file_change_base(session: _ChatSession) -> Path:
     )
 
 
+def _permission_policy_denial(session: _ChatSession, event: Any) -> tuple[str, str]:
+    from gideon.security.owner_only import owner_only_command_reason
+
+    reason = owner_only_command_reason(
+        f"{event.title} {tool_input_to_str(event.tool_input)}",
+        cwd=_file_change_base(session),
+    )
+    if reason:
+        return reason, "owner_only"
+    reason = task_mode_denies(session, event.title, event.tool_kind, event.tool_input)
+    return reason, f"task_mode:{getattr(session, '_task_mode', 'agent')}"
+
+
+
 def _truncate_snapshot(text: str) -> str:
     if len(text) > _MAX_FILE_SNAPSHOT:
         return text[:_MAX_FILE_SNAPSHOT] + "\n… [truncated]"
@@ -2900,7 +2914,7 @@ async def run_chat(
                     _flush_segment(state, session, assistant_text)
                     assistant_text = ""
                 _task_mode = getattr(session, "_task_mode", "agent")
-                _tm_deny = task_mode_denies(session, event.title, "", event.tool_input)
+                _tm_deny, _policy_reason = _permission_policy_denial(session, event)
                 if _tm_deny:
                     await client.reject_tool(event.request_id)
                     _title, _ = redact_exfiltration_urls(event.title)
@@ -2914,7 +2928,7 @@ async def run_chat(
                         tool_kind=event.tool_kind,
                         outcome="denied",
                         request_id=event.request_id,
-                        metadata={"reason": f"task_mode:{_task_mode}"},
+                        metadata={"reason": _policy_reason},
                     )
                     continue
                 _pre_tool_hooks_fired = False
