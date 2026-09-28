@@ -39,6 +39,21 @@ class ModelProvider(ABC):
     supports_tools: bool = False
     prompt_cache: PromptCache = PromptCache.NONE
 
+    @property
+    def sampling_temperature(self) -> float | None:
+        """The sampling temperature this provider sends, when it can report one."""
+        return None
+
+    @property
+    def unsent_options(self) -> dict[str, str]:
+        """Requested call options omitted by the provider, with their reasons."""
+        return {}
+
+    @property
+    def output_token_limit(self) -> int | None:
+        """Output-token ceiling applied to requests through this provider."""
+        return None
+
     @abstractmethod
     async def start(self) -> None:
         """Prepare the provider for requests."""

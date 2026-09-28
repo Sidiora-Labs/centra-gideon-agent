@@ -243,19 +243,35 @@ def register_branded_app(
             _temperature, bool
         ):
             options["temperature"] = float(_temperature)
-        max_tokens_value = options.pop("max_tokens", None)
-        if isinstance(max_tokens_value, int):
+        configured_max_tokens = options.pop("max_tokens", None)
+        if isinstance(configured_max_tokens, int) and not isinstance(
+            configured_max_tokens, bool
+        ) and configured_max_tokens > 0:
+            ceiling = spec.max_tokens
             eff_spec = BrandedProviderSpec(
-                **{**spec.__dict__, "max_tokens": max_tokens_value}
+                **{
+                    **spec.__dict__,
+                    "max_tokens": configured_max_tokens
+                    if ceiling is None
+                    else min(ceiling, configured_max_tokens),
+                }
             )
         else:
             eff_spec = spec
+        requested_max_tokens = kwargs.get("max_tokens")
+        model = str(kwargs.get("model") or entry.own_model)
         return build_protocol_provider(
             eff_spec,
-            model=entry.model or spec.default_model,
+            model=model,
             credential=cred or _anon_credential(spec),
             base_url=base_url,
             extra_options=options,
+            max_tokens=(
+                int(requested_max_tokens)
+                if isinstance(requested_max_tokens, int)
+                and not isinstance(requested_max_tokens, bool)
+                else None
+            ),
         )
 
     def create_provider(config: dict[str, Any] | None = None) -> ModelProvider:

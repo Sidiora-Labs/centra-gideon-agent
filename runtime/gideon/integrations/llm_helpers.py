@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from gideon.engine.hooks import fire_tool_hooks, get_global_hook_store
 from gideon.integrations.llm.base import (
@@ -420,6 +420,7 @@ async def one_shot_completion(
     output_type: type | None = None,
     model: str = "",
     temperature: float | None = None,
+    _call_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Send a single prompt to the system's configured LLM and return the response.
 
@@ -581,6 +582,29 @@ async def one_shot_completion(
                 getattr(output_type, "__name__", str(output_type)), retry_text
             )
         finally:
+            if _call_metadata is not None:
+                sent_temperature = getattr(provider, "sampling_temperature", None)
+                unsent = getattr(provider, "unsent_options", {})
+                output_limit = getattr(provider, "output_token_limit", None)
+                _call_metadata.update(
+                    effective_temperature=(
+                        float(sent_temperature)
+                        if isinstance(sent_temperature, (int, float))
+                        and not isinstance(sent_temperature, bool)
+                        else None
+                    ),
+                    unsent_options=(
+                        {str(key): str(reason) for key, reason in unsent.items()}
+                        if isinstance(unsent, dict)
+                        else {}
+                    ),
+                    output_token_limit=(
+                        output_limit
+                        if isinstance(output_limit, int)
+                        and not isinstance(output_limit, bool)
+                        else None
+                    ),
+                )
             try:
                 await provider.shutdown()
             except Exception:
@@ -629,41 +653,10 @@ async def one_shot_completion(
             f"last error: {last_exc}"
         ) from last_exc
 
-    provider = None
     _plain_ref = _chain[0] if _chain else ""
-    try:
-        provider = resolve_provider_for_use_case(
-            resolved_uc, **(await _entry_kw(_plain_ref))
-        )
-    except Exception:
-        logger.debug(
-            "one_shot_completion: use-case bridge resolve failed for %r",
-            resolved_uc,
-            exc_info=True,
-        )
-
-    if provider is None:
-        from gideon.integrations.llm.registry import get_default_registry
-
-        registry = get_default_registry()
-        entries = registry.list_entries()
-        if not entries:
-            raise RuntimeError("No provider entries registered")
-        fallback = entries[0]
-        fallback_ref = (
-            f"{fallback.name}:{fallback.model}" if fallback.model else fallback.name
-        )
-        try:
-            provider = registry.build(fallback.name, **(await _entry_kw(fallback_ref)))
-        except (
-            Exception
-        ):  # noqa: BLE001 — an unaccepted build kwarg degrades, never blocks
-            logger.debug(
-                "one_shot_completion: last-resort build rejected derived kwargs for %r",
-                fallback.name,
-            )
-            provider = registry.build(fallback.name)
-
+    provider = resolve_provider_for_use_case(
+        resolved_uc, **(await _entry_kw(_plain_ref))
+    )
     return await _run(provider)
 
 

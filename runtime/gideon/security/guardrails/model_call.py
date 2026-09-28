@@ -439,6 +439,32 @@ class ModelCallGuard(ModelProvider):
         *,
         dollars: float = 0.0,
     ) -> None:
+        requested_temperature = getattr(
+            self._inner, "sampling_temperature", None
+        )
+        options = getattr(self._inner, "_extra_options", {})
+        if isinstance(options, dict):
+            requested_temperature = options.get("temperature", requested_temperature)
+        unsent_options = getattr(self._inner, "unsent_options", {})
+        output_token_limit = getattr(self._inner, "output_token_limit", None)
+        extra = {}
+        if isinstance(requested_temperature, (int, float)) and not isinstance(
+            requested_temperature, bool
+        ):
+            extra["requested_sampling_temperature"] = float(requested_temperature)
+        effective_temperature = getattr(self._inner, "sampling_temperature", None)
+        if isinstance(effective_temperature, (int, float)) and not isinstance(
+            effective_temperature, bool
+        ):
+            extra["effective_sampling_temperature"] = float(effective_temperature)
+        if isinstance(unsent_options, dict) and unsent_options:
+            extra["unsent_options"] = {
+                str(key): str(reason) for key, reason in unsent_options.items()
+            }
+        if isinstance(output_token_limit, int) and not isinstance(
+            output_token_limit, bool
+        ):
+            extra["output_token_limit"] = output_token_limit
         rec = AttemptRecord(
             audit_id=audit_id,
             ts=time.time(),
@@ -458,6 +484,7 @@ class ModelCallGuard(ModelProvider):
             routed=self._routed,
             routed_fallback=self._routed_fallback,
             caller=current_caller(),
+            extra=extra,
         )
         record_attempt(rec)
         try:
@@ -496,6 +523,18 @@ class ModelCallGuard(ModelProvider):
     @property
     def session_id(self) -> str:
         return self._inner.session_id
+
+    @property
+    def sampling_temperature(self) -> float | None:
+        return self._inner.sampling_temperature
+
+    @property
+    def unsent_options(self) -> dict[str, str]:
+        return self._inner.unsent_options
+
+    @property
+    def output_token_limit(self) -> int | None:
+        return self._inner.output_token_limit
 
     async def cleanup_session(self, session_id: str) -> None:
         await self._inner.cleanup_session(session_id)

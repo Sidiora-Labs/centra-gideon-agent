@@ -21,6 +21,7 @@ from gideon.integrations.llm.protocol_turn import (
     TurnUsage,
     wire_value,
 )
+from gideon.integrations.llm.catalog import SAMPLING_PARAMETERS, refused_sampling
 from gideon.integrations.llm.registry import CredentialMissing
 from gideon.integrations.model_windows import declared_context_window, is_local_endpoint
 from gideon.integrations.model_windows import model_context_window as _model_window
@@ -321,6 +322,7 @@ class AnthropicProvider(ConversationProtocol):
         self._anthropic_module = sdk
         self._model, self._base_url, self._max_tokens = model, base_url, max_tokens
         self._extra_options = dict(extra_options or {})
+        self._last_unsent_options: dict[str, str] = {}
         self.context_window = declared_context_window(
             self._extra_options.pop("context_window", None)
         )
@@ -350,6 +352,7 @@ class AnthropicProvider(ConversationProtocol):
         reasoning_effort: str = "",
         translate: bool,
     ) -> dict[str, Any]:
+        model = self._require_model(model)
         prepared = self._with_pending_image(messages)
         cache_enabled = translate and any(CACHE_HINT_KEY in message for message in prepared)
         system, prepared = (
@@ -366,12 +369,57 @@ class AnthropicProvider(ConversationProtocol):
                 "type": "enabled",
                 "budget_tokens": min(budget, max(1024, self._max_tokens - 1024)),
             }
+        unsent = self._unsent(model, thinking="thinking" in request)
+        self._last_unsent_options = unsent
+        extra_body: dict[str, Any] = {}
         for name, value in self._extra_options.items():
+            if name in SAMPLING_PARAMETERS:
+                if name not in unsent and name not in request:
+                    extra_body[name] = value
+                continue
             if translate and name == "temperature" and "thinking" in request:
                 continue
             if name not in request:
                 request[name] = value
+        if extra_body:
+            existing_body = request.get("extra_body")
+            request["extra_body"] = {
+                **(existing_body if isinstance(existing_body, dict) else {}),
+                **extra_body,
+            }
         return request
+
+    @property
+    def sampling_temperature(self) -> float | None:
+        if "temperature" in self.unsent_options:
+            return None
+        value = self._extra_options.get("temperature")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return None
+
+    @property
+    def output_token_limit(self) -> int | None:
+        return self._max_tokens
+
+    @property
+    def unsent_options(self) -> dict[str, str]:
+        return dict(
+            self._last_unsent_options or self._unsent(self._model, thinking=False)
+        )
+
+    def _unsent(self, model: str, *, thinking: bool) -> dict[str, str]:
+        requested = [name for name in SAMPLING_PARAMETERS if name in self._extra_options]
+        unsent = refused_sampling(model, requested)
+        if (
+            thinking
+            and "temperature" in self._extra_options
+            and "temperature" not in unsent
+        ):
+            unsent["temperature"] = (
+                "extended thinking does not accept a custom temperature"
+            )
+        return unsent
 
     async def _run_turn(
         self, request: dict[str, Any], model: str, *, remember: bool

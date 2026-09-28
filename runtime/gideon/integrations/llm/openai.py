@@ -174,12 +174,24 @@ class OpenAIProvider(ConversationProtocol):
         self._client = sdk.AsyncOpenAI(api_key=credential.secret, base_url=base_url)
         self._initialize_conversation()
 
+    @property
+    def sampling_temperature(self) -> float | None:
+        value = self._extra_options.get("temperature")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return None
+
+    @property
+    def output_token_limit(self) -> int | None:
+        return self._max_tokens
+
     async def start(self) -> None:
+        if not self._model:
+            return
         if self._model and not self._base_url:
             return
         try:
             from gideon.integrations.llm.catalog import (
-                infer_capabilities,
                 openai_compatible_list_models,
             )
 
@@ -188,13 +200,6 @@ class OpenAIProvider(ConversationProtocol):
             )
             from gideon.integrations.model_windows import register_served_context_window
 
-            suitable = [
-                item.id
-                for item in models
-                if "chat" in (item.capabilities or infer_capabilities(item.id))
-            ]
-            if models:
-                self._model = suitable[0] if suitable else models[0].id
             for item in models:
                 if item.id != self._model:
                     continue
@@ -218,6 +223,7 @@ class OpenAIProvider(ConversationProtocol):
         tools: list[dict] | None = None,
         reasoning_effort: str = "",
     ) -> dict[str, Any]:
+        model = self._require_model(model)
         request = {
             "model": model,
             "messages": self._with_pending_image(messages),
@@ -292,7 +298,7 @@ class OpenAIProvider(ConversationProtocol):
         model: str | None = None,
         reasoning_effort: str = "",
     ) -> AsyncIterator[LLMEvent]:
-        selected = model or self._model
+        selected = self._require_model(model or self._model)
         request = self._request(
             messages, model=selected, tools=tools, reasoning_effort=reasoning_effort
         )

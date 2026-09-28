@@ -364,8 +364,9 @@ def migrate_legacy_bindings() -> bool:
 
 
 def _config_provider_models() -> dict[str, str]:
-    """Map ``provider_name -> configured model`` from config.json ``providers[]``."""
+    """Map provider names to their model or configured Default Model."""
     from gideon.core.config.loader import config_path
+    from gideon.integrations.llm.registry import own_model
 
     path = config_path()
     if not path.is_file():
@@ -379,8 +380,11 @@ def _config_provider_models() -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for p in providers:
-        if isinstance(p, dict) and p.get("name") and p.get("model"):
-            out[str(p["name"])] = str(p["model"])
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        model = own_model(p.get("model"), p.get("options"))
+        if model:
+            out[str(p["name"])] = model
     return out
 
 

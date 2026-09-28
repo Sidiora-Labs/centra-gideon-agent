@@ -415,11 +415,7 @@ def _build_native_runtime(
         cfg = AppConfig.load()
         prof = (cfg.agents or {}).get(agent) if agent else None
         if prof is not None:
-            from gideon.core.config.loader import _compose_voice
-
-            system_prompt = _compose_voice(
-                getattr(prof, "voice", ""), getattr(prof, "system_prompt", "") or ""
-            )
+            system_prompt = getattr(prof, "system_prompt", "") or ""
             model = _strip_provider_prefix(
                 _reconcile_agent_model(model_override or "")
             ) or _strip_provider_prefix(
@@ -756,8 +752,13 @@ def can_resolve_use_case(use_case: str) -> bool:
         return False
 
     try:
-        if active_model_refs(use_case):
-            return True
+        refs = active_model_refs(use_case)
+        if refs:
+            from gideon.extensions.providers.use_cases import split_ref
+            return any(
+                bool((split_ref(ref) or ("", str(ref)))[1].strip())
+                for ref in refs
+            )
     except Exception:
         logger.debug("can_resolve: active-model probe failed", exc_info=True)
 
@@ -781,7 +782,7 @@ def can_resolve_use_case(use_case: str) -> bool:
                     caps = registry.capability_of(entry.type).capabilities
                 except Exception:
                     caps = frozenset()
-            if target_cap in caps:
+            if target_cap in caps and entry.own_model:
                 return True
     except Exception:
         logger.debug("can_resolve: registry probe failed", exc_info=True)
@@ -846,20 +847,15 @@ def _resolve_from_config_registry(
         failed("no_entries")
         return None
 
-    if (
-        model_override
-        and ":" in model_override
-        and any(e.name == model_override.split(":", 1)[0] for e in entries)
-    ):
-        _hint, model_override = model_override.split(":", 1)
-        provider_hint = provider_hint or _hint
-    elif model_override and "/" in model_override:
-        _hint, model_override = model_override.split("/", 1)
-        provider_hint = provider_hint or _hint
-    elif model_override and ":" in model_override:
+    if not provider_hint and model_override and ":" in model_override:
         _maybe_provider = model_override.split(":", 1)[0]
         if any(e.name == _maybe_provider for e in entries):
             _hint, model_override = model_override.split(":", 1)
+            provider_hint = provider_hint or _hint
+    elif not provider_hint and model_override and "/" in model_override:
+        _maybe_provider = model_override.split("/", 1)[0]
+        if any(e.name == _maybe_provider for e in entries):
+            _hint, model_override = model_override.split("/", 1)
             provider_hint = provider_hint or _hint
 
     if provider_hint and not any(entry.name == provider_hint for entry in entries):
@@ -872,6 +868,7 @@ def _resolve_from_config_registry(
             return None
 
     candidate = None
+    compatible_without_model = None
     for entry in entries:
         if model_axis_only and entry.type == "acp_agent":
             continue
@@ -885,22 +882,39 @@ def _resolve_from_config_registry(
             continue
         if provider_hint and entry.name != provider_hint:
             continue
-        candidate = entry
-        break
+        if model_override or entry.own_model or provider_hint:
+            candidate = entry
+            break
+        compatible_without_model = compatible_without_model or entry
 
     if candidate is None:
+        if compatible_without_model is not None:
+            from gideon.integrations.llm.registry import no_model_chosen
+
+            what, fix = no_model_chosen(compatible_without_model.name)
+            raise ProviderResolutionError(
+                f"WHAT: no model is chosen for this call\nWHY: {what}\nFIX: {fix}"
+            )
         failed("capability_missing")
         return None
     if candidate.type not in registry._factories:
         failed("factory_missing", candidate.type)
         return None
 
+    from gideon.integrations.llm.registry import no_model_chosen
+
+    served_model = str(model_override or candidate.own_model or "")
+    if not served_model.strip():
+        what, fix = no_model_chosen(candidate.name)
+        raise ProviderResolutionError(
+            f"WHAT: no model is chosen for this call\nWHY: {what}\nFIX: {fix}"
+        )
+
     config: dict[str, Any] = {
-        "model": candidate.model,
+        "model": served_model,
         **(candidate.options or {}),
     }
-    if model_override:
-        config["model"] = model_override
+    config["model"] = served_model
     if cwd:
         config["cwd"] = cwd
     if session_key:
@@ -911,8 +925,7 @@ def _resolve_from_config_registry(
         config.setdefault(k, v)
 
     build_kwargs = dict(kwargs)
-    if model_override:
-        build_kwargs["model"] = model_override
+    build_kwargs["model"] = served_model
     if "credential_store" not in build_kwargs and candidate.credential:
         try:
             from gideon.core.config import config_dir

@@ -79,6 +79,7 @@ def build_protocol_provider(
     credential: Credential,
     base_url: str,
     extra_options: dict[str, object] | None = None,
+    max_tokens: int | None = None,
 ) -> ModelProvider:
     anthropic = spec.protocol == "anthropic"
     module, symbol = (
@@ -90,6 +91,8 @@ def build_protocol_provider(
     limit = spec.max_tokens
     if anthropic and limit is None:
         limit = 4096
+    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0:
+        limit = max_tokens if limit is None else min(limit, max_tokens)
     return constructor(
         **{
             "model": model,

@@ -89,8 +89,12 @@ async def _sample_one(
     from gideon.integrations.llm_helpers import one_shot_completion
 
     try:
+        call_metadata: dict[str, Any] = {}
         text = await one_shot_completion(
-            prompt, use_case=use_case, temperature=temperature
+            prompt,
+            use_case=use_case,
+            temperature=temperature,
+            _call_metadata=call_metadata,
         )
     except Exception as exc:  # noqa: BLE001 — a dead candidate must not kill the slate
         logger.warning(
@@ -103,6 +107,9 @@ async def _sample_one(
         return {
             "idx": idx,
             "temperature": temperature,
+            "effective_temperature": call_metadata.get("effective_temperature"),
+            "output_token_limit": call_metadata.get("output_token_limit"),
+            "unsent_options": call_metadata.get("unsent_options", {}),
             "text": "",
             "error": f"{type(exc).__name__}: {exc}",
         }
@@ -110,10 +117,21 @@ async def _sample_one(
         return {
             "idx": idx,
             "temperature": temperature,
+            "effective_temperature": call_metadata.get("effective_temperature"),
+            "output_token_limit": call_metadata.get("output_token_limit"),
+            "unsent_options": call_metadata.get("unsent_options", {}),
             "text": "",
             "error": "empty completion",
         }
-    return {"idx": idx, "temperature": temperature, "text": text, "error": ""}
+    return {
+        "idx": idx,
+        "temperature": temperature,
+        "effective_temperature": call_metadata.get("effective_temperature"),
+        "output_token_limit": call_metadata.get("output_token_limit"),
+        "unsent_options": call_metadata.get("unsent_options", {}),
+        "text": text,
+        "error": "",
+    }
 
 
 async def _judge_candidates(

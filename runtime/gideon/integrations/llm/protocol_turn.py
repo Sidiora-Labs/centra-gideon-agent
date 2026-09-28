@@ -98,6 +98,12 @@ class TurnUsage:
 class ConversationProtocol(ModelProvider):
     _client: Any
 
+    @staticmethod
+    def _require_model(model: object) -> str:
+        from gideon.integrations.llm.registry import require_model
+
+        return require_model(model)
+
     def _initialize_conversation(self) -> None:
         self._history: list[dict[str, Any]] = []
         self._last_context_pct: float | None = None

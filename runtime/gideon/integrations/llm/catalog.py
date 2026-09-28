@@ -192,6 +192,7 @@ __all__ = [
     "ModelCatalog",
     "ModelManager",
     "infer_capabilities",
+    "refused_sampling",
     "openai_compatible_list_models",
 ]
 
@@ -208,6 +209,42 @@ _UNDERSTANDING_TAGS = (
     ("video_modality", _VIDEO_MODALITY_MARKERS),
     ("audio_modality", _AUDIO_MODALITY_MARKERS),
 )
+
+SAMPLING_PARAMETERS = ("temperature", "top_p", "top_k")
+_FIXED_SAMPLING_MARKERS = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+_TEMPERATURE_OR_TOP_P_MARKERS = (
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-haiku-4",
+)
+
+
+def refused_sampling(
+    model_id: str, requested: tuple[str, ...] | list[str]
+) -> dict[str, str]:
+    """Explain sampling parameters a known model family does not accept."""
+    wanted = [parameter for parameter in requested if parameter in SAMPLING_PARAMETERS]
+    normalized = (model_id or "").strip().lower().replace(".", "-")
+    if not wanted or not normalized:
+        return {}
+    shown = model_id.strip()
+    if any(marker in normalized for marker in _FIXED_SAMPLING_MARKERS):
+        return {
+            parameter: f"{shown} does not accept a custom {parameter}"
+            for parameter in wanted
+        }
+    if any(marker in normalized for marker in _TEMPERATURE_OR_TOP_P_MARKERS):
+        pair = [parameter for parameter in wanted if parameter in ("temperature", "top_p")]
+        if len(pair) == 2:
+            return {pair[1]: f"{shown} takes a temperature or a top_p, not both"}
+    return {}
 
 
 def model_family_provider_types(model_id: str) -> frozenset[str]:
@@ -346,5 +383,6 @@ __all__ = [
     "ModelCatalog",
     "ModelManager",
     "infer_capabilities",
+    "refused_sampling",
     "openai_compatible_list_models",
 ]

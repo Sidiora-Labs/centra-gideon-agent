@@ -27,6 +27,37 @@ class CredentialMissing(ProviderResolutionError):
     """Construction requires a credential that is unavailable."""
 
 
+DEFAULT_MODEL_OPTION = "default_model"
+
+
+def own_model(model: object, options: object) -> str:
+    """Return the model an entry names itself, or an empty string when it names none."""
+    named = str(model or "").strip()
+    if named:
+        return named
+    if isinstance(options, dict):
+        return str(options.get(DEFAULT_MODEL_OPTION) or "").strip()
+    return ""
+
+
+def no_model_chosen(entry_name: str) -> tuple[str, str]:
+    return (
+        f"no model is chosen for “{entry_name}”",
+        "choose one of its models in Settings → Models",
+    )
+
+
+NO_MODEL_NAMED = "No model is chosen for this call. Choose one in Settings → Models."
+
+
+def require_model(model: object) -> str:
+    """Return a non-empty wire model id or refuse before sending a request."""
+    named = str(model or "")
+    if not named.strip():
+        raise ProviderResolutionError(NO_MODEL_NAMED)
+    return named
+
+
 @dataclass(frozen=True)
 class ProviderEntry:
     name: str
@@ -35,6 +66,11 @@ class ProviderEntry:
     options: dict[str, object] = field(default_factory=dict)
     credential: str | None = None
     declared_capabilities: frozenset[Capability] = field(default_factory=frozenset)
+
+    @property
+    def own_model(self) -> str:
+        """The entry model, else its configured Default Model, or empty when unbound."""
+        return own_model(self.model, self.options)
 
 
 def _required(table: Mapping[str, _Value], key: str, subject: str) -> _Value:

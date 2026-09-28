@@ -322,12 +322,37 @@ def _register_cell_type(binding: CellProviderBinding) -> str:
         options = dict(entry.options or {})
         options.pop("base_url", None)
         options.pop("endpoint", None)
+        options.pop("model", None)
+        options.pop("default_model", None)
+        entry_max_tokens = options.pop("max_tokens", None)
+        if isinstance(entry_max_tokens, int) and not isinstance(entry_max_tokens, bool):
+            ceiling = spec.max_tokens
+            options_spec = BrandedProviderSpec(
+                **{
+                    **spec.__dict__,
+                    "max_tokens": entry_max_tokens
+                    if ceiling is None
+                    else min(ceiling, entry_max_tokens),
+                }
+            )
+        else:
+            options_spec = spec
+        temperature = kwargs.get("temperature")
+        if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
+            options["temperature"] = float(temperature)
+        requested_max_tokens = kwargs.get("max_tokens")
         return build_protocol_provider(
-            spec,
-            model=entry.model or binding.model,
+            options_spec,
+            model=str(kwargs.get("model") or entry.model or binding.model),
             credential=credential,
             base_url=binding.base_url,
             extra_options=options,
+            max_tokens=(
+                int(requested_max_tokens)
+                if isinstance(requested_max_tokens, int)
+                and not isinstance(requested_max_tokens, bool)
+                else None
+            ),
         )
 
     capability = ProviderCapability(
