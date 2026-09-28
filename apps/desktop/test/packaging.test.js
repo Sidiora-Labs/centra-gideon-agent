@@ -66,6 +66,16 @@ describe("electron-builder files list", () => {
   });
 });
 
+describe("native package third-party notices", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const notice = { from: "../console/dist/THIRD_PARTY_NOTICES.txt", to: "THIRD_PARTY_NOTICES.txt" };
+
+  it("ships the console's generated notice artifact with Mac and Linux packages", () => {
+    assert.ok(pkg.build.mac.extraResources.some((resource) => JSON.stringify(resource) === JSON.stringify(notice)));
+    assert.ok(pkg.build.linux.extraResources.some((resource) => JSON.stringify(resource) === JSON.stringify(notice)));
+  });
+});
+
 describe("electron-builder Linux target (DC-6)", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   const linux = pkg.build.linux;

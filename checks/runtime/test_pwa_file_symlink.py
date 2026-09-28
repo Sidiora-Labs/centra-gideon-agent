@@ -1,4 +1,4 @@
-"""Tests for the dist-ROOT file handlers: /gideon.svg, /manifest.webmanifest, /sw.js."""
+"""Tests for the dist-ROOT file handlers: PWA files and shipped third-party notices."""
 
 from unittest.mock import MagicMock, patch
 
@@ -48,6 +48,7 @@ async def test_favicon_404_when_missing(tmp_path):
     [
         ("manifest_webmanifest", "manifest.webmanifest", "application/manifest+json"),
         ("service_worker", "sw.js", "text/javascript"),
+        ("third_party_notices", "THIRD_PARTY_NOTICES.txt", "text/plain; charset=utf-8"),
     ],
 )
 async def test_pwa_root_file_states_its_content_type(
@@ -73,7 +74,7 @@ async def test_pwa_root_file_states_its_content_type(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("handler_name", ["manifest_webmanifest", "service_worker"])
+@pytest.mark.parametrize("handler_name", ["manifest_webmanifest", "service_worker", "third_party_notices"])
 async def test_pwa_root_file_missing_returns_404_and_does_not_raise(
     tmp_path, handler_name: str
 ) -> None:
@@ -106,6 +107,7 @@ async def test_pwa_root_files_serve_through_symlinked_dist(tmp_path) -> None:
     real_dist.mkdir()
     (real_dist / "manifest.webmanifest").write_text("{}")
     (real_dist / "sw.js").write_text("//")
+    (real_dist / "THIRD_PARTY_NOTICES.txt").write_text("notice bytes")
 
     link = tmp_path / "linked-dist"
     link.symlink_to(real_dist)
@@ -114,6 +116,9 @@ async def test_pwa_root_files_serve_through_symlinked_dist(tmp_path) -> None:
     with patch.object(core, "_DIST_DIR", link):
         assert isinstance(await core.manifest_webmanifest(req), web.FileResponse)
         assert isinstance(await core.service_worker(req), web.FileResponse)
+        response = await core.third_party_notices(req)
+        assert isinstance(response, web.FileResponse)
+        assert response.headers["Content-Type"] == "text/plain; charset=utf-8"
 
 
 def test_icons_and_pwa_roots_are_excluded_from_the_spa_fallback() -> None:
@@ -161,3 +166,4 @@ def test_pwa_routes_are_registered_at_the_origin_root() -> None:
     source = Path(server_mod.__file__).read_text(encoding="utf-8")
     assert 'add_get("/sw.js", handlers.service_worker)' in source
     assert 'add_get("/manifest.webmanifest", handlers.manifest_webmanifest)' in source
+    assert 'add_get("/THIRD_PARTY_NOTICES.txt", third_party_notices)' in source

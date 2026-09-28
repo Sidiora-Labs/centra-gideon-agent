@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "packages": {
+    "format@0.2.2": {
+      "notice": "npm-format-0.2.2",
+      "note": "The published Readme.md states this copyright and links the package MIT text; package.json declares MIT."
+    },
+    "khroma@2.1.0": {
+      "license": "MIT",
+      "note": "The exact installed package license file supplies MIT and its copyright notice; package.json declares no license identifier."
+    },
+    "measury@0.1.5": {
+      "notice": "npm-measury-0.1.5",
+      "note": "The exact package-lock tarball passed its recorded SHA-512 integrity check; package.json and README declare MIT, with no copyright holder."
+    },
+    "rehype-katex@7.0.1": {
+      "notice": "npm-rehype-katex-7.0.1",
+      "note": "The published package README identifies Junyoung Choi; package.json declares MIT and the upstream repository license supplies these terms."
+    },
+    "remark-math@6.0.0": {
+      "notice": "npm-remark-math-6.0.0",
+      "note": "The published package README identifies Junyoung Choi; package.json declares MIT and the upstream repository license supplies these terms."
+    },
+    "use-composed-ref@1.4.0": {
+      "notice": "npm-use-composed-ref-1.4.0",
+      "note": "The exact package-lock tarball passed its recorded SHA-512 integrity check; package.json declares MIT, and the archive contains no copyright holder."
+    }
+  }
+}

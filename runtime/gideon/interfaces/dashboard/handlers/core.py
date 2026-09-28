@@ -254,6 +254,11 @@ async def service_worker(request: web.Request) -> web.StreamResponse:
     return _dist_root_file("sw.js", "text/javascript")
 
 
+async def third_party_notices(request: web.Request) -> web.StreamResponse:
+    """Serve the customer-facing notice artifact delivered with the console build."""
+    return _dist_root_file("THIRD_PARTY_NOTICES.txt", "text/plain; charset=utf-8")
+
+
 async def api_stt_transcribe(request: web.Request) -> web.Response:
     """POST /api/stt/transcribe — transcribe uploaded audio via the active STT model.
 

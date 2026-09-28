@@ -23,6 +23,10 @@ export function changelogBody(md: string): string {
   }).join('\n')
 }
 
+export function ThirdPartyNoticesLink({ label = 'Open third-party notices' }: { label?: string }) {
+  return <a className="text-primary underline underline-offset-4" href="/THIRD_PARTY_NOTICES.txt" target="_blank" rel="noreferrer noopener">{label}</a>
+}
+
 export function UpdatesPanel() {
   const [applying, setApplying] = useState(false)
   const [rollingBack, setRollingBack] = useState(false)
@@ -172,6 +176,10 @@ export function UpdatesPanel() {
             </Row>
           )}
         </RowGroup>
+      </Section>
+
+      <Section title="Third-party notices" hint="Review the licenses for shipped fonts and console packages.">
+        <ThirdPartyNoticesLink />
       </Section>
 
       <Section title="Changelog" hint="What's changed recently.">

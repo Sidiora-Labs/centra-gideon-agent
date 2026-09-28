@@ -1,6 +1,6 @@
 export const SHELL_DOCUMENT = '/'
 export const ASSISTANT_DOCUMENT = '/assistant/'
-export const APP_SHELL = [SHELL_DOCUMENT, '/gideon.svg', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/gideon-dark.png', '/icons/gideon-light.png', '/icons/gideon-dark-32.png', '/icons/gideon-light-32.png', '/fonts/dm-sans.woff2'] as const
+export const APP_SHELL = [SHELL_DOCUMENT, '/gideon.svg', '/manifest.webmanifest', '/THIRD_PARTY_NOTICES.txt', '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/gideon-dark.png', '/icons/gideon-light.png', '/icons/gideon-dark-32.png', '/icons/gideon-light-32.png', '/fonts/dm-sans.woff2'] as const
 export const CACHEABLE_PREFIXES = ['/assets/', '/fonts/', '/icons/', '/sprites/', '/vendor/', '/assistant/_expo/', '/assistant/assets/'] as const
 export type FetchStrategy = 'network-only' | 'network-first' | 'cache-first'
 const shellPaths = new Set<string>(APP_SHELL)

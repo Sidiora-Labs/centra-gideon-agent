@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "assistant-source-license",
+      "path": "apps/console/public/assistant-source-notices.txt",
+      "source": "third-party-license-text",
+      "version": "embedded",
+      "sha256": "d7fb78e597c850af8956b0c1ad00dea15c3d8ebc2f4e2746f90aa44b785cccda",
+      "license": "MIT",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#assistant-source-license"
+    },
+    {
+      "id": "font-dm-sans",
+      "path": "apps/console/public/fonts/dm-sans.woff2",
+      "source": "google-fonts-dm-sans",
+      "version": "262406",
+      "sha256": "eab55c872ca9157c896f57d06b136b3ed93db0dd74c774860fe297f0c499723d",
+      "license": "OFL-1.1",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#dm-sans"
+    },
+    {
+      "id": "font-google-sans-code",
+      "path": "apps/console/public/fonts/google-sans-code.woff2",
+      "source": "google-fonts-google-sans-code",
+      "version": "458752",
+      "sha256": "5dd4b3772ede212e3f1cdc33aa5e588c23cb929c19ee92056e0b7e04a73d880e",
+      "license": "OFL-1.1",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#google-sans-code"
+    },
+    {
+      "id": "font-google-sans-flex",
+      "path": "apps/console/public/fonts/google-sans-flex.woff2",
+      "source": "google-fonts-google-sans-flex",
+      "version": "262472",
+      "sha256": "dae2e728eb8fd5198bdc057c49dd959870027bcd00f61b7a1223dd5e3737bc16",
+      "license": "OFL-1.1",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#google-sans-flex"
+    },
+    {
+      "id": "font-inter",
+      "path": "apps/console/public/fonts/inter.woff2",
+      "source": "rsms-inter",
+      "version": "262210",
+      "sha256": "dd05e326cf8eac3b55acecf29c842ed73e6e6dd06491cf47f7e8800680ab3e33",
+      "license": "OFL-1.1",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#inter"
+    },
+    {
+      "id": "font-jetbrains-mono",
+      "path": "apps/console/public/fonts/jetbrains-mono.woff2",
+      "source": "jetbrains-mono",
+      "version": "144900",
+      "sha256": "076045c8922c6280c0c2ab36a3dc2601c044ee7a477579942d28dddd24f3a75e",
+      "license": "OFL-1.1",
+      "notice": "apps/console/public/THIRD_PARTY_NOTICES.txt#jetbrains-mono"
+    },
+    {
+      "id": "console-gideon-svg",
+      "path": "apps/console/public/gideon.svg",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "fb21ed611334bd7ba8394d7409a84ef300f721a9c69d217b129eb178adeb485a",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-gideon-dark-32-png",
+      "path": "apps/console/public/icons/gideon-dark-32.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "97e9df161972cbde554a9d2548c2b0904b81a84fbb2c524d7e0367f598be1b6d",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-gideon-dark-png",
+      "path": "apps/console/public/icons/gideon-dark.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "5e798f99673922fce62bcd7c74c79be0e057bfa5d68b6e76e77ab4da8575a40a",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-gideon-light-32-png",
+      "path": "apps/console/public/icons/gideon-light-32.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "2d54cd4b2cd2018d319783ce00d2aea4472eea84815aa58f762843b24e476ff9",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-gideon-light-png",
+      "path": "apps/console/public/icons/gideon-light.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "635005f2b6e94190fd31904448e12b7a9e22c2daaae03616a25f252ca6850e21",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-icon-192-png",
+      "path": "apps/console/public/icons/icon-192.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "221ae2430fcb407f78db367e0ce02914b96c4faabfa7a326ac8d9fa1fdbf7a27",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-icon-512-png",
+      "path": "apps/console/public/icons/icon-512.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "5e798f99673922fce62bcd7c74c79be0e057bfa5d68b6e76e77ab4da8575a40a",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-icon-svg",
+      "path": "apps/console/public/icons/icon.svg",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "fb21ed611334bd7ba8394d7409a84ef300f721a9c69d217b129eb178adeb485a",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-personality-gideon-arcade-svg",
+      "path": "apps/console/public/icons/personality-gideon-arcade.svg",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "8116bfdbb0c9fc566dd3010358db631963e72dc68daf58103f7368ff1fe33e9c",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-icons-personality-retro-terminal-svg",
+      "path": "apps/console/public/icons/personality-retro-terminal.svg",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "32e61bf5bab0d1b2fba975c22bdfdd3d622092ce6ce9c794e19484c837af756f",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-illustrations-gideon-research-png",
+      "path": "apps/console/public/illustrations/gideon-research.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "4f0541f836e602d6e0b7e7813e2e3919e733cde21c415f3056946f088a5ebdb6",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-illustrations-gideon-slides-png",
+      "path": "apps/console/public/illustrations/gideon-slides.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "baf04c4f05e811dd667587b8a828ca24b2630333f413ebab7476c3e29a543b3e",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-illustrations-gideon-studio-png",
+      "path": "apps/console/public/illustrations/gideon-studio.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "b8de86067abf72746aa02afca6123d1b55f403798dee92acd2fff1ca18059f56",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-illustrations-gideon-workspace-png",
+      "path": "apps/console/public/illustrations/gideon-workspace.png",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "2e4310671edbdbca7c60dd47eefa86a42366d45da843ad9611b5cf90025621bc",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    },
+    {
+      "id": "console-manifest-webmanifest",
+      "path": "apps/console/public/manifest.webmanifest",
+      "source": "gideon-console",
+      "version": "0.1.0",
+      "sha256": "764e4860dd584bb7dd225b38c13b0002cc436c875eb00664fc60ca415ce4406a",
+      "license": "Apache-2.0",
+      "notice": "LICENSE"
+    }
+  ],
+  "generated_exclusions": [
+    {
+      "path": "apps/console/public/THIRD_PARTY_NOTICES.txt",
+      "source": "customer notice source",
+      "reason": "This is the customer-readable license artifact itself; its component assets and all third-party sources are recorded separately."
+    },
+    {
+      "path": "apps/console/dist/assets/*",
+      "source": "Vite build output",
+      "reason": "Content-hashed JS, CSS, images, fonts, and chunks are emitted from the checked console module graph; emitted scripts and styles are checked by the notice generator."
+    },
+    {
+      "path": "apps/console/dist/sw.js",
+      "source": "service-worker build output",
+      "reason": "The root service worker is generated from apps/console/src/app/background/service-worker.ts and is checked as a distinct bundle input."
+    },
+    {
+      "path": "apps/console/dist/THIRD_PARTY_NOTICES.txt",
+      "source": "notice generator output",
+      "reason": "Generated from the reviewed public notice source and actual bundled module graph."
+    }
+  ]
+}

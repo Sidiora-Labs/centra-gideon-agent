@@ -1,8 +1,21 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { connect, connectFromScan, readStoredGateway, start } from '../www/bootstrap/start.mjs'
 import { ENDPOINT_FIELDS, REGISTRY_STORAGE_KEY } from '../www/connection/registry.mjs'
+
+test('native package sync stages and links the generated third-party notice artifact', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const index = readFileSync(new URL('../www/index.html', import.meta.url), 'utf8')
+
+  assert.match(pkg.scripts['copy:notices'], /\.\.\/console\/dist\/THIRD_PARTY_NOTICES\.txt/)
+  assert.match(pkg.scripts['copy:notices'], /www\/THIRD_PARTY_NOTICES\.txt/)
+  for (const script of ['precap', 'sync', 'build:ios', 'build:android']) {
+    assert.match(pkg.scripts[script], /copy:notices/)
+  }
+  assert.match(index, /href="THIRD_PARTY_NOTICES\.txt"/)
+})
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial))

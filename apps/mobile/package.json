@@ -11,11 +11,13 @@
     "add:android": "cap add android",
     "assets:ios": "npx -y @capacitor/assets generate --ios",
     "assets:android": "npx -y @capacitor/assets generate --android",
-    "sync": "cap sync",
+    "sync": "npm run copy:notices && cap sync",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
-    "build:ios": "cap sync ios && cap build ios",
-    "build:android": "cap sync android && cap build android"
+    "build:ios": "npm run copy:notices && cap sync ios && cap build ios",
+    "build:android": "npm run copy:notices && cap sync android && cap build android",
+    "copy:notices": "node -e \"require('node:fs').copyFileSync('../console/dist/THIRD_PARTY_NOTICES.txt','www/THIRD_PARTY_NOTICES.txt')\"",
+    "precap": "npm run copy:notices"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

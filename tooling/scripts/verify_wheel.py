@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import NoReturn
 
 _SPA_MARKER = "gideon/static/dist/index.html"
+_NOTICES_MARKER = "gideon/static/dist/THIRD_PARTY_NOTICES.txt"
 _READY_PREFIX = "GIDEON_READY:"
 _BOOT_TIMEOUT_S = 90.0
 
@@ -84,6 +85,19 @@ def _assert_spa_in_wheel(wheel: Path) -> None:
             "BuildWithWeb stages apps/console/dist into the package."
         )
     _log(f"OK: wheel carries the SPA — {wheel.name}")
+
+
+def _notice_bytes_in_wheel(wheel: Path) -> bytes:
+    """Return the one customer notice file staged into the installed dashboard."""
+    with zipfile.ZipFile(wheel) as archive:
+        matches = [name for name in archive.namelist() if name.endswith(_NOTICES_MARKER)]
+        if len(matches) != 1:
+            _fail(f"wheel {wheel.name} carries {len(matches)} copies of the notice artifact (want one)")
+        payload = archive.read(matches[0])
+    if not payload:
+        _fail(f"wheel {wheel.name} carries an empty third-party notice artifact")
+    _log(f"OK: wheel carries customer-readable notices — {wheel.name}")
+    return payload
 
 
 def _make_venv(root: Path) -> Path:
@@ -138,19 +152,24 @@ def _read_ready_line(proc: "subprocess.Popen[str]", deadline: float) -> dict:
     _fail("timed out waiting for the gateway READY line")
 
 
-def _http_get(url: str, timeout: float = 10.0) -> tuple[int, str, str]:
+def _http_get_bytes(url: str, timeout: float = 10.0) -> tuple[int, str, bytes]:
     req = urllib.request.Request(url, headers={"Accept": "*/*"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = resp.read(4096).decode("utf-8", "replace")
+            body = resp.read()
             return resp.status, resp.headers.get("Content-Type", ""), body
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.headers.get("Content-Type", "") if exc.headers else "", ""
+        return exc.code, exc.headers.get("Content-Type", "") if exc.headers else "", b""
     except Exception as exc:  # noqa: BLE001
         _fail(f"GET {url} raised {type(exc).__name__}: {exc}")
 
 
-def _boot_and_probe(py: Path, home: Path) -> None:
+def _http_get(url: str, timeout: float = 10.0) -> tuple[int, str, str]:
+    status, content_type, body = _http_get_bytes(url, timeout)
+    return status, content_type, body.decode("utf-8", "replace")
+
+
+def _boot_and_probe(py: Path, home: Path, expected_notices: bytes) -> None:
     env = dict(os.environ)
     env["GIDEON_HOME"] = str(home)
     env["GIDEON_AUTH_MODE"] = "none"
@@ -187,6 +206,15 @@ def _boot_and_probe(py: Path, home: Path) -> None:
         if "text/html" not in ctype.lower() and "<!doctype html" not in body.lower():
             _fail(f"/ did not return HTML (content-type={ctype!r})")
         _log("OK: / → 200 HTML (SPA shell served from the wheel's static/dist)")
+
+        status, ctype, body = _http_get_bytes(f"{base}/THIRD_PARTY_NOTICES.txt")
+        if status != 200:
+            _fail(f"/THIRD_PARTY_NOTICES.txt returned {status} (want 200)")
+        if "text/plain" not in ctype.lower():
+            _fail(f"/THIRD_PARTY_NOTICES.txt did not return text/plain (content-type={ctype!r})")
+        if body != expected_notices:
+            _fail("/THIRD_PARTY_NOTICES.txt bytes differ from the artifact packaged in the wheel")
+        _log("OK: /THIRD_PARTY_NOTICES.txt → 200 text/plain (exact wheel bytes)")
     finally:
         _log("stopping gateway…")
         proc.terminate()
@@ -210,6 +238,7 @@ def main() -> int:
     wheel = _find_wheel(args.wheel)
     _log(f"verifying {wheel}")
     _assert_spa_in_wheel(wheel)
+    notice_bytes = _notice_bytes_in_wheel(wheel)
     _assert_no_node()
 
     scratch = Path(tempfile.mkdtemp(prefix="gideon_verify_wheel_"))
@@ -219,7 +248,7 @@ def main() -> int:
     try:
         py = _make_venv(venv_dir)
         _pip_install_wheel(py, wheel)
-        _boot_and_probe(py, home_dir)
+        _boot_and_probe(py, home_dir, notice_bytes)
     finally:
         if args.keep:
             _log(f"kept scratch dir: {scratch}")

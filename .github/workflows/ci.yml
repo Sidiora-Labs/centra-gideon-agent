@@ -338,6 +338,8 @@ jobs:
 
       - name: npm ci (root)
         run: npm ci
+      - name: Check shipped asset notices
+        run: python tooling/scripts/check_asset_notices.py
       - name: prepare the report directory
         run: mkdir -p reports
       - name: typecheck

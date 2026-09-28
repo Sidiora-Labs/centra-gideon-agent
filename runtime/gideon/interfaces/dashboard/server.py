@@ -17,6 +17,7 @@ from gideon.core.layout import package_path
 from gideon.engine.hooks import ScriptHookStore, set_global_hook_store
 from gideon.interfaces.dashboard import chat, handlers, handlers_inbox, ws
 from gideon.interfaces.dashboard.handlers.doc_comments import setup_doc_comment_routes
+from gideon.interfaces.dashboard.handlers.core import third_party_notices
 from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
 from gideon.interfaces.dashboard.handlers.research_reports import (
     setup_research_report_routes,
@@ -483,6 +484,7 @@ async def start_dashboard(
     app.router.add_get("/gideon.svg", handlers.favicon)
     app.router.add_get("/manifest.webmanifest", handlers.manifest_webmanifest)
     app.router.add_get("/sw.js", handlers.service_worker)
+    app.router.add_get("/THIRD_PARTY_NOTICES.txt", third_party_notices)
 
     from gideon.interfaces.dashboard.handlers import auth as _auth_h
 

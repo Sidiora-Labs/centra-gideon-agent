@@ -32,6 +32,10 @@
           "from": "backend-dist/gideon-backend",
           "to": "backend-dist/gideon-backend",
           "filter": ["**/*"]
+        },
+        {
+          "from": "../console/dist/THIRD_PARTY_NOTICES.txt",
+          "to": "THIRD_PARTY_NOTICES.txt"
         }
       ]
     },
@@ -65,6 +69,10 @@
           "from": "backend-dist/gideon-backend",
           "to": "backend-dist/gideon-backend",
           "filter": ["**/*"]
+        },
+        {
+          "from": "../console/dist/THIRD_PARTY_NOTICES.txt",
+          "to": "THIRD_PARTY_NOTICES.txt"
         }
       ]
     },

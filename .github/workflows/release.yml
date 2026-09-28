@@ -37,6 +37,7 @@ jobs:
     - name: Build the SPA (npm from repo root)
       run: |
         npm ci
+        python tooling/scripts/check_asset_notices.py
         npm run build
     - name: Install uv + build backend
       uses: astral-sh/setup-uv@v7
