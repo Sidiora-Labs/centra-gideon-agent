@@ -1068,6 +1068,7 @@ dependencies = [
     { name = "trafilatura" },
     { name = "tree-sitter" },
     { name = "tree-sitter-language-pack" },
+    { name = "tzdata" },
     { name = "websockets" },
 ]
 

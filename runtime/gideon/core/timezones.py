@@ -32,12 +32,39 @@ class UnknownTimeZone(ValueError):
         super().__init__(message)
 
 
+class TimeZoneDatabaseUnavailable(RuntimeError):
+    """The runtime cannot load the IANA timezone database at all."""
+
+    def __init__(self, *, where: str = ""):
+        self.where = where
+        context = f"{where}: " if where else ""
+        super().__init__(
+            f"{context}the IANA timezone database is unavailable. Reinstall Gideon; "
+            "the base package includes the Python `tzdata` database."
+        )
+
+
+def timezone_database_available() -> bool:
+    """Probe an uncached UTC key, which every complete timezone database contains."""
+    try:
+        uncached = getattr(ZoneInfo, "no_cache", None)
+        if callable(uncached):
+            uncached(UTC_NAME)
+        else:
+            ZoneInfo(UTC_NAME)
+    except Exception:
+        return False
+    return True
+
+
 def zone_or_raise(name: str, *, where: str = "") -> tzinfo:
     normalized = str(name or "").strip()
     if normalized:
         try:
             return ZoneInfo(normalized)
         except Exception as failure:
+            if not timezone_database_available():
+                raise TimeZoneDatabaseUnavailable(where=where) from failure
             raise UnknownTimeZone(normalized, where=where) from failure
     raise UnknownTimeZone("", where=where)
 
@@ -45,7 +72,7 @@ def zone_or_raise(name: str, *, where: str = "") -> tzinfo:
 def is_known_zone(name: str) -> bool:
     try:
         zone_or_raise(name)
-    except Exception:
+    except UnknownTimeZone:
         return False
     return True
 
@@ -84,8 +111,12 @@ class MachineZoneCandidates:
         for source, name in self.read():
             if not name:
                 continue
-            if is_known_zone(name):
-                return name
+            try:
+                if is_known_zone(name):
+                    return name
+            except TimeZoneDatabaseUnavailable:
+                logger.debug("cannot check machine timezone: the IANA database is unavailable")
+                return ""
             logger.debug(
                 "machine timezone from %s is %r, which is not an IANA key", source, name
             )
@@ -107,8 +138,14 @@ def _read_config_name() -> str:
 
 def _config_zone_name() -> str:
     configured = _read_config_name()
-    if not configured or is_known_zone(configured):
+    if not configured:
         return configured
+    try:
+        if is_known_zone(configured):
+            return configured
+    except TimeZoneDatabaseUnavailable:
+        logger.debug("cannot check config.timezone: the IANA database is unavailable")
+        return ""
     logger.warning(
         "config.timezone is %r, which is not an IANA zone name — ignoring it and falling back to this machine's zone. Fix it with `gideon setup`.",
         configured,
@@ -132,7 +169,11 @@ def resolve_zone_name(explicit: str = "") -> tuple[str, str]:
 
 
 def resolve_zone(explicit: str = "") -> tzinfo:
-    name, source = resolve_zone_name(explicit)
+    try:
+        name, source = resolve_zone_name(explicit)
+    except TimeZoneDatabaseUnavailable as exc:
+        logger.warning("%s Timed triggers use UTC until it can be read.", exc)
+        return timezone.utc
     if source != SOURCE_UTC_FALLBACK:
         try:
             return ZoneInfo(name)
@@ -152,6 +193,12 @@ def local_utc_offset_hours() -> float:
 
 
 def unresolved_zone_warning() -> str:
+    if not timezone_database_available():
+        return (
+            "the IANA timezone database is unavailable, so no named zone can be checked "
+            "or loaded and timed triggers fire at UTC. Reinstall Gideon; the base package "
+            "includes the Python `tzdata` database. Then run `gideon doctor` again."
+        )
     if resolve_zone_name()[1] != SOURCE_UTC_FALLBACK:
         return ""
     offset = local_utc_offset_hours()
@@ -171,7 +218,13 @@ def unresolved_zone_warning() -> str:
 def zone_report() -> dict[str, Any]:
     machine = machine_zone_name()
     configured = _read_config_name()
-    acceptable = not configured or is_known_zone(configured)
+    database_available = timezone_database_available()
+    acceptable: bool | None = True
+    if configured:
+        try:
+            acceptable = is_known_zone(configured)
+        except TimeZoneDatabaseUnavailable:
+            acceptable = None
     try:
         selected, source = resolve_zone_name()
     except Exception:
@@ -188,6 +241,7 @@ def zone_report() -> dict[str, Any]:
         config=configured,
         config_ok=acceptable,
         machine=machine,
+        database_available=database_available,
         utc_offset_hours=local_utc_offset_hours(),
         warning=warning,
     )

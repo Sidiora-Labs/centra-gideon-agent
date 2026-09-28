@@ -1450,8 +1450,11 @@ async def _probe_sandbox_cgroup_scopes(ctx: DoctorContext) -> ProbeResult:
 async def _probe_timezone(_ctx: DoctorContext) -> ProbeResult:
     """scheduling — which zone a timed trigger's wall clock is read in (#2520).
 
-    A WARN (`ok=False` at tier 3, so it degrades this card and nothing else) for exactly two
-    states, both of which silently relocate every reminder:
+    A WARN (`ok=False` at tier 3, so it degrades this card and nothing else) when schedules
+    are running in a fallback zone or a configured zone cannot be checked:
+
+      * the IANA timezone database cannot be loaded, so schedules fire at UTC until the
+        runtime's `tzdata` package is restored;
 
       * the machine's zone cannot be determined, so schedules fall back to **UTC**. The detail
         names the CONSEQUENCE in hours — "timed triggers will fire at UTC, which is 7 hour(s)

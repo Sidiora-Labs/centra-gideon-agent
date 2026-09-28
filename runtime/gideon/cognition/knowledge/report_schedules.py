@@ -87,13 +87,21 @@ def _effective_tz(defn: ReportDefinition) -> str:
     unusable `defn.tz` still writes no key rather than raising: a schedule must stay writable
     while its zone is being corrected, and `arm.semantic_spec_issues` names the bad zone.
     """
-    from gideon.core.timezones import UnknownTimeZone, resolve_zone_name
+    from gideon.core.timezones import (
+        TimeZoneDatabaseUnavailable,
+        UnknownTimeZone,
+        resolve_zone_name,
+    )
 
+    declared = str(getattr(defn, "tz", "") or "").strip()
     try:
-        return resolve_zone_name(str(getattr(defn, "tz", "") or "").strip())[0]
+        return resolve_zone_name(declared)[0]
     except UnknownTimeZone as exc:
         logger.warning("report %s: %s", getattr(defn, "id", ""), exc)
         return ""
+    except TimeZoneDatabaseUnavailable as exc:
+        logger.warning("report %s: %s", getattr(defn, "id", ""), exc)
+        return declared
 
 
 def clock_spec(defn: ReportDefinition) -> dict[str, Any]:

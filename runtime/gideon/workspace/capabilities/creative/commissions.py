@@ -17,7 +17,11 @@ from gideon.automation.triggers.models import Trigger
 from gideon.automation.triggers.store import TriggerStore
 from gideon.core.config.loader import config_dir
 from gideon.core.sqlite_compat import sqlite3
-from gideon.core.timezones import UnknownTimeZone, resolve_zone_name
+from gideon.core.timezones import (
+    TimeZoneDatabaseUnavailable,
+    UnknownTimeZone,
+    resolve_zone_name,
+)
 from gideon.integrations.action_providers.base import (
     ActionContext,
     ActionProvider,
@@ -185,6 +189,8 @@ def _cadence(value):
         try:
             zone_name = resolve_zone_name(zone_name)[0]
             anchor = datetime.fromisoformat(text(value.get("dtstart"), 64, True))
+        except TimeZoneDatabaseUnavailable as exc:
+            raise CatalogError(str(exc)) from exc
         except (UnknownTimeZone, ValueError) as exc:
             raise CatalogError("Recurrence start or timezone is invalid") from exc
         if anchor.tzinfo is not None:
@@ -213,6 +219,8 @@ def _cadence(value):
     if zone:
         try:
             spec["timezone"] = resolve_zone_name(text(zone, 64, True))[0]
+        except TimeZoneDatabaseUnavailable as exc:
+            raise CatalogError(str(exc)) from exc
         except UnknownTimeZone as exc:
             raise CatalogError("Cadence timezone is invalid") from exc
     return {**value, "spec": spec}

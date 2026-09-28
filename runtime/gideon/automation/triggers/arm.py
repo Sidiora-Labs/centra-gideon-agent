@@ -244,10 +244,22 @@ class ClockDiagnostics:
         self.issues.append(Issue(path=path, message=message, severity=severity))
 
     def timezone(self) -> None:
-        from gideon.core.timezones import is_known_zone
+        from gideon.core.timezones import TimeZoneDatabaseUnavailable, is_known_zone
 
         name = str(self.spec.get("timezone", "") or "").strip()
-        if name and not is_known_zone(name):
+        if not name:
+            return
+        try:
+            known = is_known_zone(name)
+        except TimeZoneDatabaseUnavailable as failure:
+            self.add(
+                "spec.timezone",
+                f"{name!r} cannot be checked because {failure}. This trigger fires at UTC "
+                "until it is available.",
+                "warning",
+            )
+            return
+        if not known:
             self.add(
                 "spec.timezone",
                 f"{name!r} is not an IANA timezone name — use one like "

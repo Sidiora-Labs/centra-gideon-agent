@@ -368,11 +368,17 @@ def _setup_timezone() -> None:
         "NZST": "Pacific/Auckland",
         "NZDT": "Pacific/Auckland",
     }
-    from gideon.core.timezones import is_known_zone
+    from gideon.core.timezones import TimeZoneDatabaseUnavailable, is_known_zone
 
     max_retries = 3
     for attempt in range(max_retries):
-        if is_known_zone(tz_val):
+        try:
+            known = is_known_zone(tz_val)
+        except TimeZoneDatabaseUnavailable as exc:
+            print(f"  ❌ {exc}")
+            print("  ⏭  Timezone unchanged; restore timezone data before setting it.\n")
+            return
+        if known:
             break
         suggestion = abbrev_to_iana.get(tz_val.upper())
         if suggestion:
