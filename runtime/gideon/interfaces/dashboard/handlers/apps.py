@@ -295,6 +295,21 @@ async def api_apps_list(request: web.Request) -> web.Response:
                     if is_provider
                     else ""
                 ),
+                "providerExecution": (
+                    (manifest.get("provider") or {}).get("execution", "in-process")
+                    if is_provider
+                    else ""
+                ),
+                "sidecarDependencies": (
+                    (manifest.get("dependencies") or {}).get("sidecarDependencies", [])
+                    if isinstance((manifest.get("dependencies") or {}).get("sidecarDependencies", []), list)
+                    else []
+                ),
+                "requires": (
+                    manifest.get("requires", [])
+                    if isinstance(manifest.get("requires", []), list)
+                    else []
+                ),
                 "hasConfig": has_config,
                 "permissions": manifest.get("permissions", {}),
                 "hooks": [

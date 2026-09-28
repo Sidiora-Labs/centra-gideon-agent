@@ -313,6 +313,7 @@ async def api_sidecar_install_status(request: web.Request) -> web.Response:
     status = install.status()
     job = registry.install_job(provider)
     status["job"] = {
+        "id": job.id if job is not None else "",
         "state": job.state if job is not None else "idle",
         "progress": job.progress if job is not None else 0.0,
         "steps": status.pop("steps"),

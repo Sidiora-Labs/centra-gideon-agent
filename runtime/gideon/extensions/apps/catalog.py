@@ -127,7 +127,10 @@ class CatalogEntry:
     sourceKind: str = "bundled"  # noqa: N815 — "bundled" | "git"
     isProvider: bool = False  # noqa: N815
     providerType: str = ""  # noqa: N815
+    providerExecution: str = ""  # noqa: N815
     providerCapabilities: list[str] = field(default_factory=list)  # noqa: N815
+    sidecarDependencies: list[str] = field(default_factory=list)  # noqa: N815
+    requires: list[dict[str, str]] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     pointer: str = ""
     permissions: dict[str, Any] = field(default_factory=dict)
@@ -579,9 +582,12 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
                     sourceKind="git",
                     isProvider=bool(m.provider),
                     providerType=(m.provider.type if m.provider else ""),
+                    providerExecution=(m.provider.execution if m.provider else ""),
                     providerCapabilities=(
                         list(m.provider.capabilities) if m.provider else []
                     ),
+                    sidecarDependencies=list(m.dependencies.sidecarDependencies),
+                    requires=[item.to_dict() for item in m.requires],
                     tags=list(m.tags),
                     quality=(m.quality.to_dict() if m.quality else {}),
                     pointer=f"{url}#{entry.name}",
@@ -1174,9 +1180,12 @@ def _scan_local_sources() -> list[CatalogEntry]:
                     sourceKind=kind,
                     isProvider=bool(m.provider),
                     providerType=(m.provider.type if m.provider else ""),
+                    providerExecution=(m.provider.execution if m.provider else ""),
                     providerCapabilities=(
                         list(m.provider.capabilities) if m.provider else []
                     ),
+                    sidecarDependencies=list(m.dependencies.sidecarDependencies),
+                    requires=[item.to_dict() for item in m.requires],
                     tags=list(m.tags),
                     quality=(m.quality.to_dict() if m.quality else {}),
                     permissions=_perms,
@@ -1274,9 +1283,12 @@ def available_bundled() -> list[CatalogEntry]:
                 sourceKind="native",
                 isProvider=bool(m.provider),
                 providerType=(m.provider.type if m.provider else ""),
+                providerExecution=(m.provider.execution if m.provider else ""),
                 providerCapabilities=(
                     list(m.provider.capabilities) if m.provider else []
                 ),
+                sidecarDependencies=list(m.dependencies.sidecarDependencies),
+                requires=[item.to_dict() for item in m.requires],
                 tags=list(m.tags),
                 quality=(m.quality.to_dict() if m.quality else {}),
                 permissions=_perms,

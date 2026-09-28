@@ -113,6 +113,8 @@ class _Running:
     tasks: set[asyncio.Task] = field(default_factory=set)  # type: ignore[type-arg]
     last_bytes: int = 0
     last_ts: float = 0.0
+    install: Any = None
+    state_lock: bool = False
 
 
 def _apply_progress(job: ModelDownloadJob) -> None:
@@ -404,10 +406,6 @@ class ModelDownloadRegistry:
         """
         if not provider:
             return None, "Missing 'provider'"
-        install = self.install(provider)
-        if install is None:
-            return None, f"{provider!r} declares no sidecar provider to install"
-
         existing_id = self._by_model.get((provider, _INSTALL_MODEL))
         if (
             existing_id
@@ -415,6 +413,19 @@ class ModelDownloadRegistry:
             and existing.state in ("queued", "running")
         ):
             return existing, None
+
+        from gideon.extensions.apps import app_manager
+
+        if not app_manager.acquire_app_state_lock():
+            return None, "app files are being updated or another engine install is running"
+        try:
+            install = self.install(provider)
+        except Exception:
+            app_manager.release_app_state_lock()
+            raise
+        if install is None:
+            app_manager.release_app_state_lock()
+            return None, f"{provider!r} declares no sidecar provider to install"
 
         job = ModelDownloadJob(
             id=self._next_id(),
@@ -424,7 +435,7 @@ class ModelDownloadRegistry:
         )
         self._jobs[job.id] = job
         self._by_model[(provider, _INSTALL_MODEL)] = job.id
-        run = _Running(job=job)
+        run = _Running(job=job, install=install, state_lock=True)
         self._running[job.id] = run
         run.tasks.add(asyncio.ensure_future(self._drive_install(run, install)))
         return job, None
@@ -459,6 +470,11 @@ class ModelDownloadRegistry:
             event = "error"
         finally:
             self._running.pop(job.id, None)
+            if run.state_lock:
+                from gideon.extensions.apps import app_manager
+
+                run.state_lock = False
+                app_manager.release_app_state_lock()
         self._publish(job, event)
 
     def cancel(self, job_id: str) -> bool:
@@ -473,6 +489,13 @@ class ModelDownloadRegistry:
             return False
         run = self._running.pop(job_id, None)
         if run is not None:
+            if job.kind == "sidecar-install" and run.install is not None:
+                run.install.cancel()
+            if run.state_lock:
+                from gideon.extensions.apps import app_manager
+
+                run.state_lock = False
+                app_manager.release_app_state_lock()
             for t in run.tasks:
                 t.cancel()
         if job.state in ("queued", "running"):

@@ -155,6 +155,8 @@ export function DisclosureReview({ review, previous }: { review: AppDisclosure; 
   const rowsFor = (item: AppDisclosure): Array<[string, string[]]> => [
     ['Gateway permissions', Object.entries(item.permissions ?? {}).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value)}`)],
     ['Python packages', (item.pythonDependencies ?? []).map((dependency) => `${dependency.spec}${dependency.coreOwned ? ' (already provided)' : ''}`)],
+    ['Sidecar engine packages', item.sidecarDependencies ?? []],
+    ['External prerequisites', (item.requires ?? []).map((requirement) => `${requirement.name}: ${requirement.why} How: ${requirement.how}`)],
     ['Backend', item.hasBackend ? [`Runs an app backend${item.backendSandbox ? ` (${item.backendSandbox} sandbox)` : ''}`] : []],
     ['Providers', (item.providers ?? []).map((provider) => `${provider.type}: ${provider.implementation} (${provider.execution})`)],
     ['Scheduled jobs', (item.crons ?? []).map((cron) => `${cron.name}${cron.cadence ? ` · ${cron.cadence}` : ''}${cron.scheduled ? '' : ' · not scheduled'}`)],

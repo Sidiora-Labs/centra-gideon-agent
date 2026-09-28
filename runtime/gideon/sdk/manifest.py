@@ -9,6 +9,8 @@ tooling that validates or generates a manifest.
 from gideon.extensions.apps.manifest import (
     AppManifest,
     BackendConfig,
+    Dependencies,
+    ExternalPrerequisite,
     Permissions,
     ProviderConfig,
     SetupConfig,
@@ -20,4 +22,6 @@ __all__ = [
     "Permissions",
     "BackendConfig",
     "SetupConfig",
+    "Dependencies",
+    "ExternalPrerequisite",
 ]

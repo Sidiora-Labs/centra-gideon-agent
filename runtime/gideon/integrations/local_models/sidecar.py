@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -176,6 +177,9 @@ class SidecarRunner:
         self._last_stat: dict[str, Any] = {}
         self._last_reason = ""
         self._log: list[str] = []
+        self._process_lock = threading.Lock()
+        self._install_process: subprocess.Popen[str] | None = None
+        self._cancel_requested = threading.Event()
         self._lock = threading.Lock()
 
     @property
@@ -656,6 +660,17 @@ class SidecarInstall:
     ) -> None:
         self.app = app
         self.requirements = sorted(requirements or [])
+        if len(self.requirements) > 50:
+            raise ValueError("sidecar engine packages may contain at most 50 requirements")
+        from packaging.requirements import InvalidRequirement, Requirement
+
+        for requirement in self.requirements:
+            if not isinstance(requirement, str) or not requirement.strip() or len(requirement) > 500:
+                raise ValueError("sidecar engine requirements must be non-empty and bounded")
+            try:
+                Requirement(requirement)
+            except InvalidRequirement as exc:
+                raise ValueError("sidecar engine package is not a valid PEP 508 requirement") from exc
         self.venv = venv if venv is not None else sidecar_venv_dir(app)
         self.cache_root = cache_root
         self.model = model
@@ -681,6 +696,8 @@ class SidecarInstall:
             return None
         try:
             manifest = AppManifest.from_json_file(manifest_path)
+            if manifest.validate():
+                return None
         except Exception:
             logger.debug(
                 "sidecar install: unreadable manifest for %s", app, exc_info=True
@@ -689,7 +706,7 @@ class SidecarInstall:
         provider = manifest.provider
         if provider is None or provider.execution != EXECUTION_SIDECAR:
             return None
-        return cls(app, requirements=list(manifest.dependencies.pythonDependencies))
+        return cls(app, requirements=list(manifest.dependencies.sidecarDependencies))
 
     @property
     def installed(self) -> bool:
@@ -736,6 +753,8 @@ class SidecarInstall:
         step = next((s for s in self.steps if s.name == name), None)
         if step is None:
             return False
+        if self._cancel_requested.is_set():
+            self._cancel_requested.clear()
         handler = getattr(self, f"_step_{step.name}")
         step.status = "running"
         try:
@@ -766,7 +785,7 @@ class SidecarInstall:
 
     def _step_deps(self) -> tuple[str, str]:
         if not self.requirements:
-            return "skipped", "no pythonDependencies declared"
+            return "skipped", "no sidecar engine packages declared"
         if self._receipt_matches():
             return "skipped", "requirements already installed"
         python = venv_python(self.venv)
@@ -777,6 +796,7 @@ class SidecarInstall:
                 "pip",
                 "install",
                 "--disable-pip-version-check",
+                "--",
                 *self.requirements,
             ],
             timeout=1800,
@@ -804,7 +824,7 @@ class SidecarInstall:
         return sorted(str(r) for r in recorded) == self.requirements
 
     def _run(self, argv: list[str], *, timeout: int) -> None:
-        """Run one install command, capturing its tail. Raises on non-zero exit."""
+        """Run one installer command, stream bounded output, and own its process group."""
         from gideon.security.sandbox import (
             PROFILE_BUILD,
             build_child_env,
@@ -812,24 +832,74 @@ class SidecarInstall:
         )
 
         launch = spawn_shim_argv(list(argv), PROFILE_BUILD)
-        proc = subprocess.run(  # noqa: S603 — core-built argv, no shell
+        proc = subprocess.Popen(  # noqa: S603 — core-built argv, no shell
             launch,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout,
+            bufsize=1,
             env=build_child_env(site="model-sidecar-install", installer="pip"),
-            check=False,
+            start_new_session=(os.name != "nt"),
         )
-        for line in (proc.stdout or "").splitlines()[-_LOG_TAIL_MAX:]:
-            self._note(line)
-        for line in (proc.stderr or "").splitlines()[-_LOG_TAIL_MAX:]:
-            self._note(line)
-        if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        with self._process_lock:
+            self._install_process = proc
+
+        def collect() -> None:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    self._note(line)
+
+        reader = threading.Thread(target=collect, name=f"sidecar-install-{self.app}-log", daemon=True)
+        reader.start()
+        try:
+            try:
+                returncode = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self._stop_install_process(proc)
+                raise
+        finally:
+            reader.join(timeout=2)
+            with self._process_lock:
+                if self._install_process is proc:
+                    self._install_process = None
+        if self._cancel_requested.is_set():
+            raise InterruptedError("sidecar engine installation cancelled")
+        if returncode != 0:
+            tail = self._log[-1:] if self._log else []
             raise RuntimeError(
-                f"{Path(argv[0]).name} exited {proc.returncode}: "
+                f"{Path(argv[0]).name} exited {returncode}: "
                 f"{tail[-1][:160] if tail else 'no output'}"
             )
+
+    def _stop_install_process(self, proc: subprocess.Popen[str]) -> None:
+        if proc.poll() is not None:
+            return
+        try:
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGTERM)
+            else:  # pragma: no cover - Windows process-group path
+                proc.terminate()
+            proc.wait(timeout=1.5)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                if os.name == "posix":
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:  # pragma: no cover - Windows process-group path
+                    proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+
+    def cancel(self) -> None:
+        """Stop the active installer process group before a job detaches."""
+        self._cancel_requested.set()
+        with self._process_lock:
+            proc = self._install_process
+        if proc is not None:
+            self._stop_install_process(proc)
 
     def _note(self, line: str) -> None:
         line = line.rstrip()[:200]

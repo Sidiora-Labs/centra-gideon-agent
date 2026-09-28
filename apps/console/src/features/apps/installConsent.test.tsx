@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { ConsentModal } from './installConsent'
+import { ConsentModal, DisclosureReview } from './installConsent'
 import type { GuardedResult } from '../../shared/data/useGuardedInstall'
+import type { AppDisclosure } from '../../shared/data/api'
 
 
 const scan = (over: Record<string, unknown> = {}) => ({
@@ -14,6 +15,28 @@ const guarded = (over: Partial<GuardedResult> = {}): GuardedResult => ({
 
 const footerButtons = () =>
   screen.getAllByRole('button').map((b) => (b.textContent || '').trim()).filter(Boolean)
+
+describe('the disclosure review names sidecar engines and external prerequisites', () => {
+  it('renders typed app requirements in their distinct rows', () => {
+    const review: AppDisclosure = {
+      permissions: {}, crons: [], pythonDependencies: [{ spec: 'gateway-addon>=1', coreOwned: false }],
+      sidecarDependencies: ['engine-addon>=2'],
+      requires: [{ name: 'Image service', why: 'The app sends requests to it.', how: 'Add its address in Configure.' }],
+      providerExecution: 'sidecar', hasUI: false, uiComponents: '', hasBackend: false, backendSandbox: '',
+      providers: [], onInstall: '', onUpdate: '', onEnable: '', onDisable: '', onUninstall: '', hooks: [],
+      cliSetup: '', cliDoctor: '', sources: [], mcpServers: [], skills: [],
+      runsAsYou: 'This app uses a separate provider engine and an external service.',
+    }
+
+    render(<DisclosureReview review={review} />)
+
+    expect(screen.getByText('Python packages')).toBeTruthy()
+    expect(screen.getByText('Python packages').parentElement?.textContent).toContain('gateway-addon>=1')
+    expect(screen.getByText('Sidecar engine packages').parentElement?.textContent).toContain('engine-addon>=2')
+    expect(screen.getByText('External prerequisites').parentElement?.textContent)
+      .toContain('Image service: The app sends requests to it. How: Add its address in Configure.')
+  })
+})
 
 describe('the consent modal offers an override only when one exists', () => {
   it('a consentable warning keeps Cancel, because there is a pending action to abandon', () => {

@@ -664,6 +664,22 @@ class MarketplaceDependencies:
 
 
 @dataclass
+class ExternalPrerequisite:
+    """One customer-readable requirement outside the app package."""
+
+    name: Any = ""
+    why: Any = ""
+    how: Any = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "why": self.why, "how": self.how}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExternalPrerequisite":
+        return cls(name=data.get("name", ""), why=data.get("why", ""), how=data.get("how", ""))
+
+
+@dataclass
 class Dependencies:
     """External dependencies that Gideon should resolve during install.
 
@@ -689,6 +705,7 @@ class Dependencies:
     )
     commands: list[str] = field(default_factory=list)
     pythonDependencies: list[str] = field(default_factory=list)  # noqa: N815
+    sidecarDependencies: list[str] = field(default_factory=list)  # noqa: N815
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
@@ -701,6 +718,8 @@ class Dependencies:
             d["commands"] = self.commands
         if self.pythonDependencies:
             d["pythonDependencies"] = self.pythonDependencies
+        if self.sidecarDependencies:
+            d["sidecarDependencies"] = self.sidecarDependencies
         return d
 
     @classmethod
@@ -718,6 +737,11 @@ class Dependencies:
             pythonDependencies=[
                 str(p) for p in data.get("pythonDependencies", [])
             ],  # noqa: N815
+            sidecarDependencies=(
+                [str(p) for p in data.get("sidecarDependencies", [])]
+                if isinstance(data.get("sidecarDependencies", []), list)
+                else data.get("sidecarDependencies")
+            ),  # noqa: N815
         )
 
 
@@ -1285,6 +1309,7 @@ _KNOWN_FIELDS = frozenset(
         "tags",
         "platform",
         "dependencies",
+        "requires",
         "provider",
         "providers",
         "sources",
@@ -1344,6 +1369,8 @@ class AppManifest:
 
     dependencies: Dependencies = field(default_factory=Dependencies)
 
+    requires: Any = field(default_factory=list)
+
     platform: PlatformConfig = field(default_factory=PlatformConfig)
 
     provider: ProviderConfig | None = None
@@ -1395,6 +1422,54 @@ class AppManifest:
             errors.append(
                 "mcpServers are owner-managed and cannot be declared by an app"
             )
+
+        if not isinstance(self.requires, list):
+            errors.append("requires must be an array")
+        else:
+            if len(self.requires) > 10:
+                errors.append("requires may contain at most 10 entries")
+            seen_requires: set[str] = set()
+            for index, item in enumerate(self.requires):
+                if not isinstance(item, ExternalPrerequisite):
+                    errors.append(f"requires[{index}] must be an object")
+                    continue
+                values = {"name": item.name, "why": item.why, "how": item.how}
+                for key, limit in (("name", 80), ("why", 300), ("how", 600)):
+                    value = values[key]
+                    if not isinstance(value, str) or not value.strip():
+                        errors.append(f"requires[{index}].{key} must be a non-empty string")
+                    elif len(value.strip()) > limit:
+                        errors.append(f"requires[{index}].{key} must be at most {limit} characters")
+                if isinstance(item.name, str):
+                    normalized = item.name.strip().casefold()
+                    if normalized in seen_requires:
+                        errors.append(f"duplicate prerequisite name: {item.name!r}")
+                    seen_requires.add(normalized)
+
+        sidecar_dependencies = self.dependencies.sidecarDependencies
+        if not isinstance(sidecar_dependencies, list):
+            errors.append("dependencies.sidecarDependencies must be an array")
+        else:
+            if len(sidecar_dependencies) > 50:
+                errors.append("dependencies.sidecarDependencies may contain at most 50 entries")
+            try:
+                from packaging.requirements import InvalidRequirement, Requirement
+            except ImportError:
+                InvalidRequirement = ValueError
+                Requirement = None
+            for index, spec in enumerate(sidecar_dependencies):
+                if not isinstance(spec, str) or not spec.strip() or len(spec) > 500:
+                    errors.append(f"sidecarDependencies[{index}] must be a requirement of at most 500 characters")
+                    continue
+                if Requirement is None:
+                    errors.append("cannot validate sidecarDependencies without packaging")
+                    break
+                try:
+                    Requirement(spec)
+                except InvalidRequirement:
+                    errors.append(f"sidecarDependencies[{index}] is not a valid PEP 508 requirement")
+        if sidecar_dependencies and not any(p.execution == EXECUTION_SIDECAR for p in self.all_providers()):
+            errors.append("sidecarDependencies require a provider with execution 'sidecar'")
 
         hooks = self.extra.get("hooks", [])
         if not isinstance(hooks, list):
@@ -1689,6 +1764,8 @@ class AppManifest:
             d["native"] = True
         if self.tags:
             d["tags"] = self.tags
+        if self.requires:
+            d["requires"] = [item.to_dict() for item in self.requires] if isinstance(self.requires, list) else self.requires
         d.update(self.extra)
         return d
 
@@ -1790,6 +1867,12 @@ class AppManifest:
             cli=cli,
             loggerRoots=[str(r) for r in data.get("loggerRoots", []) if r],
             dependencies=deps,
+            requires=(
+                [ExternalPrerequisite.from_dict(item) if isinstance(item, dict) else item
+                 for item in data.get("requires", [])]
+                if isinstance(data.get("requires", []), list)
+                else data.get("requires")
+            ),
             platform=platform_cfg,
             provider=provider_cfg,
             providers=providers_cfg,

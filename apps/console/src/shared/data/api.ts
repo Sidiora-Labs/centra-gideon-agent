@@ -624,6 +624,9 @@ export interface AppSummary {
   uiComponents?: string
   uiCapabilities?: string[]
   isProvider: boolean; providerType: string; hasConfig: boolean
+  providerExecution?: 'in-process' | 'sidecar'
+  sidecarDependencies?: string[]
+  requires?: Array<{ name: string; why: string; how: string }>
   permissions: AppPermissionsWire
   tags: string[]
   installedAt?: string; updatedAt?: string
@@ -663,6 +666,9 @@ export interface AppCatalogEntry {
   icon: string; heroUrl?: string; author: string
   source: string; sourceKind: 'bundled' | 'native' | 'first-party' | 'local' | 'git'
   isProvider: boolean; providerType: string; tags: string[]
+  providerExecution?: 'in-process' | 'sidecar'
+  sidecarDependencies?: string[]
+  requires?: Array<{ name: string; why: string; how: string }>
   providerCapabilities?: string[]
   pointer?: string
   permissions?: AppPermissionsWire
@@ -695,6 +701,9 @@ export interface AppDisclosure {
   permissions: Record<string, unknown>
   crons: Array<{ name: string; every?: number; cron_expr?: string; cadence?: string; agent?: string; message?: string; scheduled: boolean }>
   pythonDependencies: Array<{ spec: string; coreOwned: boolean }>
+  sidecarDependencies: string[]
+  requires: Array<{ name: string; why: string; how: string }>
+  providerExecution?: 'in-process' | 'sidecar' | ''
   hasUI: boolean; uiComponents: string
   hasBackend: boolean; backendSandbox: string
   providers: Array<{ type: string; implementation: string; execution: string }>
@@ -4153,7 +4162,7 @@ export const api = {
     get<{
       provider: string; installed: boolean; managed: boolean; install_dir: string
       job: {
-        state: string; progress: number
+        id: string; state: string; progress: number
         steps: { name: string; status: string; detail: string }[]
         log_tail: string[]; error: string; reason: string; remediation: string
         weights_progress: number

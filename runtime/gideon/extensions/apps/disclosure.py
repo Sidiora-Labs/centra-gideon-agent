@@ -22,6 +22,15 @@ def describe(manifest: AppManifest) -> dict[str, Any]:
         "permissions": manifest.permissions.to_dict(),
         "crons": _crons(manifest),
         "pythonDependencies": _python_dependencies(manifest),
+        "sidecarDependencies": (
+            list(manifest.dependencies.sidecarDependencies)
+            if isinstance(manifest.dependencies.sidecarDependencies, list)
+            else []
+        ),
+        "requires": _requires(manifest),
+        "providerExecution": (
+            manifest.provider.execution if manifest.provider is not None else ""
+        ),
         "hasUI": bool(manifest.ui.pages or manifest.ui.entry),
         "uiComponents": manifest.ui.components,
         "hasBackend": bool(manifest.backend.entryPoint),
@@ -122,6 +131,16 @@ def _python_dependencies(manifest: AppManifest) -> list[dict[str, Any]]:
             core_owned = False
         result.append({"spec": spec, "coreOwned": core_owned})
     return result
+
+
+def _requires(manifest: AppManifest) -> list[dict[str, str]]:
+    if not isinstance(manifest.requires, list):
+        return []
+    return [
+        item.to_dict()
+        for item in manifest.requires
+        if callable(getattr(item, "to_dict", None))
+    ]
 
 
 def _backend_sandbox(manifest: AppManifest) -> str:

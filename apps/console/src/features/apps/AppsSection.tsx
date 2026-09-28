@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { accentChip } from '../../shared/theme/accent'
 import { motion } from 'framer-motion'
@@ -79,6 +79,7 @@ function installedToStoreItem(a: AppSummary): StoreItem {
     name: a.name, displayName: a.displayName, description: a.description, version: a.version,
     icon: a.icon, heroUrl: a.heroUrl, author: '', source: a.source ?? '', sourceKind: 'bundled',
     isProvider: a.isProvider, providerType: a.providerType, tags: a.tags ?? [],
+    providerExecution: a.providerExecution, sidecarDependencies: a.sidecarDependencies, requires: a.requires,
     installed: true, enabled: a.enabled, hasUI: a.hasUI,
     native: !!a.native, hasConfig: a.hasConfig, origin: a.origin,
     updateAvailable: !!a.updateAvailable, latestVersion: a.latestVersion,
@@ -1126,6 +1127,66 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
   const [updateOpen, setUpdateOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [inNav, setInNavState] = useState(() => isInNav(app.name))
+  const [engineStatus, setEngineStatus] = useState<Awaited<ReturnType<typeof api.sidecarInstallStatus>> | null>(null)
+  const [engineBusy, setEngineBusy] = useState(false)
+  const [engineJobId, setEngineJobId] = useState('')
+  const [engineError, setEngineError] = useState('')
+  const availabilityRefreshed = useRef(false)
+
+  useEffect(() => {
+    if (app.providerExecution !== 'sidecar') {
+      setEngineStatus(null)
+      return
+    }
+    availabilityRefreshed.current = false
+    let active = true
+    const refresh = async () => {
+      try {
+        const status = await api.sidecarInstallStatus(app.name)
+        if (active) {
+          setEngineStatus(status)
+          if (status.job.id) setEngineJobId(status.job.id)
+          if (status.job.state === 'done' && !availabilityRefreshed.current) {
+            availabilityRefreshed.current = true
+            void api.refreshProviderAvailability(app.name).catch(() => {})
+          }
+        }
+      } catch (error) {
+        if (active) setEngineError(error instanceof Error ? error.message : 'Could not read engine status')
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 1200)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [app.name, app.providerExecution])
+
+  async function installEngine() {
+    if (engineBusy) return
+    setEngineBusy(true)
+    setEngineError('')
+    try {
+      const job = await api.startSidecarInstall(app.name)
+      setEngineJobId(job.id)
+      const status = await api.sidecarInstallStatus(app.name)
+      setEngineStatus(status)
+      onChanged()
+    } catch (error) {
+      setEngineError(error instanceof Error ? error.message : 'Engine installation could not start')
+    } finally { setEngineBusy(false) }
+  }
+
+  async function cancelEngineInstall() {
+    const id = engineStatus?.job.id || engineJobId
+    if (!id) return
+    setEngineBusy(true)
+    try {
+      await api.cancelModelDownload(id)
+      const status = await api.sidecarInstallStatus(app.name)
+      setEngineStatus(status)
+    } catch (error) {
+      setEngineError(error instanceof Error ? error.message : 'Engine installation could not be cancelled')
+    } finally { setEngineBusy(false) }
+  }
 
   async function toggle() {
     setBusy(true)
@@ -1169,6 +1230,39 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
         )}
 
         <PermissionList perms={app.permissions} appUI={app} />
+
+        {((app.requires?.length ?? 0) > 0 || (app.sidecarDependencies?.length ?? 0) > 0) && (
+          <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-testid="app-requirements">
+            <div data-type="label-m" className="text-on-surface">What this app needs</div>
+            {app.requires?.map((requirement) => (
+              <div key={requirement.name} className="mt-2" data-type="body-s">
+                <div className="text-on-surface">{requirement.name}</div>
+                <div className="text-on-surface-low">{requirement.why} {requirement.how}</div>
+              </div>
+            ))}
+            {app.providerExecution === 'sidecar' && (
+              <div className="mt-3 border-t border-outline-variant/40 pt-3" data-testid="sidecar-engine-install">
+                <div data-type="label-s" className="text-on-surface">Provider engine</div>
+                <div data-type="body-s" className="mt-1 text-on-surface-low">
+                  {engineStatus?.installed ? 'Engine ready.' : 'Install the engine packages listed by this app into its isolated provider environment.'}
+                </div>
+                {!!app.sidecarDependencies?.length && <ul data-type="label-s" className="mt-1 text-on-surface-low">
+                  {app.sidecarDependencies.map((dependency) => <li key={dependency}>{dependency}</li>)}
+                </ul>}
+                {engineStatus?.job.state === 'running' || engineStatus?.job.state === 'queued' ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span data-type="label-s" className="text-on-surface-low">Installing · {Math.round((engineStatus.job.progress ?? 0) * 100)}%</span>
+                    <Button variant="ghost" size="sm" disabled={engineBusy} onClick={() => void cancelEngineInstall()}>Cancel</Button>
+                  </div>
+                ) : !engineStatus?.installed && <Button className="mt-2" variant="primary" size="sm" disabled={engineBusy} onClick={() => void installEngine()}>
+                  {engineBusy ? 'Starting…' : 'Install engine'}
+                </Button>}
+                {!!engineStatus?.job.log_tail?.length && <pre className="mt-2 max-h-28 overflow-auto rounded bg-surface px-2 py-1 text-[0.6875rem] text-on-surface-low">{engineStatus.job.log_tail.join('\n')}</pre>}
+                {(engineError || engineStatus?.job.error) && <p role="status" data-type="label-s" className="mt-2 text-danger">{engineError || engineStatus?.job.error}</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {app.hasBackend && (
           <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
@@ -1306,6 +1400,19 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
       {
 }
       <QualityBadges quality={item.quality} />
+
+      {((item.requires?.length ?? 0) > 0 || (item.sidecarDependencies?.length ?? 0) > 0) && (
+        <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-testid="store-requirements">
+          <div data-type="label-m" className="text-on-surface">What this app needs</div>
+          {item.requires?.map((requirement) => <div key={requirement.name} className="mt-2" data-type="body-s">
+            <div className="text-on-surface">{requirement.name}</div><div className="text-on-surface-low">{requirement.why} {requirement.how}</div>
+          </div>)}
+          {!!item.sidecarDependencies?.length && <div className="mt-2" data-type="body-s">
+            <div className="text-on-surface">Provider engine packages</div><ul className="text-on-surface-low">{item.sidecarDependencies.map((dependency) => <li key={dependency}>{dependency}</li>)}</ul>
+            <div className="mt-1 text-on-surface-low" data-type="label-s">These are installed only into this app's isolated provider environment.</div>
+          </div>}
+        </div>
+      )}
 
       {(item.tags ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1">

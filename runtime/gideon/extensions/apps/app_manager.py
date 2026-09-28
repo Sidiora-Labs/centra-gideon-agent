@@ -40,9 +40,11 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 import tempfile
 import time
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +77,51 @@ _ROLLBACK_SUFFIX = ".rollback"
 _APP_DATA_DIRNAME = "data"
 _PRESERVED_DATA_SUFFIX = ".data"
 _DATA_STAGE_SUFFIX = ".data.staged"
+
+_APP_STATE_LOCK = threading.Lock()
+_APP_STATE_LOCAL = threading.local()
+
+
+def acquire_app_state_lock() -> bool:
+    """Claim the app/engine state slot for one sidecar-install job."""
+    return _APP_STATE_LOCK.acquire(blocking=False)
+
+
+def release_app_state_lock() -> None:
+    _APP_STATE_LOCK.release()
+
+
+def _serialized_app_state(fn):
+    """Keep code swaps/removal out of a live sidecar engine write."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        nested = bool(getattr(_APP_STATE_LOCAL, "depth", 0))
+        if nested:
+            _APP_STATE_LOCAL.depth += 1
+        elif not _APP_STATE_LOCK.acquire(blocking=False):
+            name = kwargs.get("name", "")
+            if fn.__name__ == "update":
+                name = name or (args[1] if len(args) > 1 else "")
+            else:
+                name = name or (args[0] if args else "")
+            if fn.__name__ == "update":
+                return InstallResult(
+                    ok=False,
+                    name=str(name),
+                    error="app files cannot be updated while its sidecar engine is being written",
+                )
+            return False
+        else:
+            _APP_STATE_LOCAL.depth = 1
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _APP_STATE_LOCAL.depth -= 1
+            if _APP_STATE_LOCAL.depth == 0:
+                del _APP_STATE_LOCAL.depth
+                _APP_STATE_LOCK.release()
+
+    return wrapped
 
 
 class AppLifecycleError(Exception):
@@ -1076,6 +1123,30 @@ def _copy_live_tree(
         raise
 
 
+def _carry_sidecar_venv(rollback: Path, live: Path) -> None:
+    """Rename the app-owned engine state into the replacement before hooks run."""
+    old_venv = rollback / "venv"
+    new_venv = live / "venv"
+    if old_venv.is_symlink():
+        raise AppLifecycleError("cannot update an app with a linked sidecar engine directory")
+    if old_venv.exists():
+        if new_venv.exists() or new_venv.is_symlink():
+            raise AppLifecycleError("the staged app bundle cannot replace its sidecar engine")
+        shutil.move(str(old_venv), str(new_venv))
+
+
+def _return_sidecar_venv(rollback: Path, live: Path) -> None:
+    """Return the original engine to rollback before discarding failed code."""
+    old_venv = rollback / "venv"
+    new_venv = live / "venv"
+    if old_venv.exists() or old_venv.is_symlink():
+        return
+    if new_venv.is_symlink():
+        new_venv.unlink(missing_ok=True)
+    elif new_venv.exists():
+        shutil.move(str(new_venv), str(old_venv))
+
+
 def _discard_preserved_data(name: str) -> None:
     """Drop any parked ``data/`` held for *name*. Never raises."""
     try:
@@ -1128,6 +1199,7 @@ def _restore_preserved_data(name: str, dest: Path) -> tuple[str, Path | None]:
     return fact, parked
 
 
+@_serialized_app_state
 def update(
     source: str | Path,
     name: str | None = None,
@@ -1238,6 +1310,14 @@ def update(
                 error="update needs consent: scanner raised warnings",
             )
 
+        if (staged / "venv").exists() or (staged / "venv").is_symlink():
+            return InstallResult(
+                ok=False,
+                name=name,
+                scan=report,
+                error="an app bundle cannot replace its managed sidecar engine",
+            )
+
         try:
             restart_packages = _install_python_deps(manifest)
         except AppLifecycleError as exc:
@@ -1272,10 +1352,15 @@ def update(
         app_runtime.unload(name, old_manifest)
 
         if rollback.exists():
+            recover_interrupted_updates()
+            if rollback.exists():
+                raise AppLifecycleError("a previous app update could not be recovered")
+        if rollback.exists():
             shutil.rmtree(rollback, ignore_errors=True)
         shutil.move(str(live), str(rollback))
         try:
             shutil.move(str(staged), str(live))
+            _carry_sidecar_venv(rollback, live)
             (live / _APP_DATA_DIRNAME).mkdir(parents=True, exist_ok=True)
             _run_hook(
                 manifest.setup.onUpdate,
@@ -1284,6 +1369,8 @@ def update(
                 env_name="onUpdate",
             )
         except Exception as exc:  # noqa: BLE001 — ANY swap/hook failure → restore
+            if live.exists() and rollback.exists():
+                _return_sidecar_venv(rollback, live)
             shutil.rmtree(live, ignore_errors=True)
             if rollback.exists():
                 shutil.move(str(rollback), str(live))
@@ -1515,6 +1602,17 @@ def recover_interrupted_updates() -> list[str]:
                 recovered.append(name)
                 _audit("update_recover", "restored", name)
             else:
+                old_venv = entry / "venv"
+                live_venv = live / "venv"
+                if old_venv.is_symlink():
+                    logger.warning("cannot reconcile linked sidecar venv in %s", entry)
+                    continue
+                if old_venv.exists():
+                    if live_venv.is_symlink():
+                        live_venv.unlink(missing_ok=True)
+                    elif live_venv.exists():
+                        shutil.rmtree(live_venv, ignore_errors=True)
+                    shutil.move(str(old_venv), str(live_venv))
                 shutil.rmtree(entry, ignore_errors=True)
                 _audit("update_recover", "dropped_stale", name)
         except OSError:
@@ -1649,6 +1747,7 @@ def describe_app_data(name: str) -> dict[str, Any]:
     }
 
 
+@_serialized_app_state
 def uninstall(name: str, *, caller: str = "app_manager") -> bool:
     """Uninstall = DEACTIVATE (keep files). An app the user 'uninstalls' is turned
     OFF, not deleted: its providers deregister, backend stops, MCP servers drop,
@@ -1677,6 +1776,7 @@ def uninstall(name: str, *, caller: str = "app_manager") -> bool:
     return ok
 
 
+@_serialized_app_state
 def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
     """Remove the app's FILES and KEEP its ``data/`` — the middle lifecycle rung.
 
@@ -1811,6 +1911,7 @@ def uninstall_keep_data(name: str, *, caller: str = "app_manager") -> bool:
     return True
 
 
+@_serialized_app_state
 def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
     """Run onUninstall → deregister → consult the dependency ledger → REMOVE FILES.
 
