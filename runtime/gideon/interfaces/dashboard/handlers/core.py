@@ -1065,6 +1065,16 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     except ConfigValueError as exc:
         return _deny(str(exc), exc.resources, exc.status)
 
+    if path_key == "workflows.default_quiet_windows" and value:
+        from gideon.automation.triggers.calendar import parse_default_window
+
+        if parse_default_window(value) is None:
+            return _deny(
+                "must be a valid quiet window, such as 22:00-08:00",
+                f"{path_key}=invalid",
+                400,
+            )
+
     from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
     def patch_config(data: dict) -> dict:

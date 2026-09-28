@@ -26,10 +26,10 @@ export function ProjectionRulesPanel() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  const save = async (next: ProjectionRule[]) => {
+  const save = async (next: ProjectionRule[]): Promise<boolean> => {
     setBusy(true); setErr('')
-    try { await api.setProjectionRules(next); refresh() }
-    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save') }
+    try { await api.setProjectionRules(next); refresh(); return true }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); return false }
     finally { setBusy(false) }
   }
 
@@ -65,7 +65,7 @@ export function ProjectionRulesPanel() {
             </div>
           ) : null}
           <AddRule disabled={busy} onAdd={(r) => save([...list, r])} />
-          {err && <div data-type="body-s" className="flex items-center gap-1.5 text-danger"><AlertTriangle size={13} /> {err}</div>}
+          {err && <div role="status" aria-live="polite" data-type="body-s" className="flex items-center gap-1.5 text-danger"><AlertTriangle size={13} /> {err}</div>}
         </div>
       </Section>
     </div>
@@ -208,14 +208,15 @@ function RuleRow({ rule, disabled, onChange, onRemove }: {
   )
 }
 
-function AddRule({ disabled, onAdd }: { disabled?: boolean; onAdd: (r: ProjectionRule) => void }) {
+function AddRule({ disabled, onAdd }: { disabled?: boolean; onAdd: (r: ProjectionRule) => Promise<boolean> }) {
   const [name, setName] = useState('')
   const [rx, setRx] = useState('')
   const [strat, setStrat] = useState<ProjectionStrategy>('log')
-  const add = () => {
-    if (!rx.trim()) return
-    onAdd({ name: name.trim(), match_regex: rx.trim(), strategy: strat })
-    setName(''); setRx(''); setStrat('log')
+  const add = async () => {
+    if (!rx.trim()) return false
+    if (await onAdd({ name: name.trim(), match_regex: rx.trim(), strategy: strat })) {
+      setName(''); setRx(''); setStrat('log')
+    }
   }
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-outline-variant/50 px-3 py-2.5">

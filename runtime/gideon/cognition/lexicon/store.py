@@ -425,6 +425,10 @@ class _CorrectionRepo:
         )
         return cur.rowcount > 0
 
+    def remove(self, corr_id: str) -> bool:
+        cur = self._c.execute("DELETE FROM corrections WHERE id = ?", (corr_id,))
+        return cur.rowcount > 0
+
 
 # -- timestamp helper ----------------------------------------------------------
 
@@ -529,6 +533,9 @@ class LexiconStore:
 
     def set_correction_auto_apply(self, corr_id: str, auto_apply: bool) -> bool:
         return self._corrections.set_auto_apply(corr_id, auto_apply)
+
+    def delete_correction(self, corr_id: str) -> bool:
+        return self._corrections.remove(corr_id)
 
     def reset(self) -> None:
         """Drop all learned/graph state (the user-facing 'reset' — rebuild repopulates)."""

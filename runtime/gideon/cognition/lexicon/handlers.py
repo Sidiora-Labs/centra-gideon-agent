@@ -77,6 +77,11 @@ async def api_lexicon_update_correction(request: web.Request) -> web.Response:
     )
 
 
+async def api_lexicon_delete_correction(request: web.Request) -> web.Response:
+    """DELETE /api/lexicon/corrections/{id} — remove one learned correction."""
+    return VocabularyHttp.delete_correction(sys.modules[__name__], request)
+
+
 async def api_lexicon_reset(request: web.Request) -> web.Response:
     """POST /api/lexicon/reset — drop all terms + corrections (rebuild repopulates graph).
 

@@ -13,6 +13,7 @@ import { fvs } from '../../shared/theme/fontWeight'
 import { bindChord, chordFromEvent, formatChord, DEFAULT_PUSH_TO_TALK_CHORD } from '../../shared/data/pushToTalk'
 import { desktopBridge } from '../../shared/data/desktopBridge'
 import { ShortcutRecorder } from '../../shared/ui/ShortcutRecorder'
+import { confirmDelete } from '../../shared/ui/dialog'
 import { VoiceProfilesSection } from './VoiceProfilesSection'
 
 export function VoicePanel({ go, query }: { go?: (id: string) => void; query?: Record<string, string> }) {
@@ -306,7 +307,7 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   learned: { label: 'learned', cls: 'bg-ok/15' },
 }
 
-function VocabularySection({ scrollTo }: { scrollTo: boolean }) {
+export function VocabularySection({ scrollTo }: { scrollTo: boolean }) {
   const { data, refresh } = useQuery('settings:lexicon', async () => {
     const [terms, corrections] = await Promise.all([
       api.lexiconTerms().catch(() => ({ terms: [] as LexiconTerm[], total: 0 })),
@@ -420,9 +421,17 @@ function TermRow({ term, onChanged }: { term: LexiconTerm; onChanged: () => void
 
 function CorrectionRow({ corr, onChanged }: { corr: LexiconCorrection; onChanged: () => void }) {
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const toggle = async () => { setBusy(true); try { await api.lexiconSetCorrectionAuto(corr.id, !corr.auto_apply); onChanged() } finally { setBusy(false) } }
+  const remove = async () => {
+    if (!(await confirmDelete('learned correction', `${corr.heard} → ${corr.meant}`))) return
+    setBusy(true); setError('')
+    try { await api.lexiconDeleteCorrection(corr.id); onChanged() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not delete correction') }
+    finally { setBusy(false) }
+  }
   return (
-    <div data-type="body-s" className="flex items-center gap-2 py-2">
+    <div data-type="body-s" className="flex flex-wrap items-center gap-2 py-2">
       <span className="flex-1 truncate">
         <span className="text-on-surface-low line-through">{corr.heard}</span>
         <span className="mx-1.5 text-on-surface-low">→</span>
@@ -435,6 +444,9 @@ function CorrectionRow({ corr, onChanged }: { corr: LexiconCorrection; onChanged
           corr.auto_apply ? 'bg-ok/15' : 'border border-outline-variant/50 text-on-surface-low hover:text-on-surface'}`}>
         <Wand2 size={12} /> {corr.auto_apply ? 'Always' : 'Suggest'}
       </button>
+      <button type="button" onClick={remove} disabled={busy} aria-label={`Delete correction ${corr.heard} to ${corr.meant}`}
+        className="inline-flex h-7 items-center gap-1 rounded px-2 text-danger hover:bg-danger/10 disabled:opacity-40"><Trash2 size={13} /> Delete</button>
+      {error && <p role="alert" className="basis-full text-danger">{error}</p>}
     </div>
   )
 }

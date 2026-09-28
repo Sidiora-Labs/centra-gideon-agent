@@ -4703,6 +4703,8 @@ export const api = {
     post<{ ok: boolean }>('/api/lexicon/corrections', { heard, meant, always }),
   lexiconSetCorrectionAuto: (id: string, auto_apply: boolean) =>
     patch<{ ok: boolean }>(`/api/lexicon/corrections/${encodeURIComponent(id)}`, { auto_apply }),
+  lexiconDeleteCorrection: (id: string) =>
+    del(`/api/lexicon/corrections/${encodeURIComponent(id)}`),
   lexiconReset: () => post<{ ok: boolean }>('/api/lexicon/reset'),
 
   knowledgeItem: (id: string) => get<KnowledgeItem>(`/api/knowledge/items/${encodeURIComponent(id)}`),

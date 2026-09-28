@@ -96,6 +96,15 @@ class VocabularyHttp:
             return cls.success(api)
         return api.web.json_response({"error": "term not found"}, status=404)
 
+    @classmethod
+    def delete_correction(cls, api, request):
+        removed = api.get_lexicon_service().store.delete_correction(
+            request.match_info["id"]
+        )
+        if removed:
+            return cls.success(api)
+        return api.web.json_response({"error": "correction not found"}, status=404)
+
     @staticmethod
     def terms(api, request):
         service = api.get_lexicon_service()
@@ -163,6 +172,7 @@ class VocabularyHttp:
             ("get", "/corrections", api.api_lexicon_corrections),
             ("post", "/corrections", api.api_lexicon_add_correction),
             ("patch", "/corrections/{id}", api.api_lexicon_update_correction),
+            ("delete", "/corrections/{id}", api.api_lexicon_delete_correction),
             ("post", "/reset", api.api_lexicon_reset),
         )
         for method, suffix, handler in endpoints:
