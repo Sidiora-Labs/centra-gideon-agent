@@ -1,3 +1,4 @@
+import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 import { useState, useMemo } from 'react'
 import {
   Bot, Cpu, Hash, Inbox, Bell, Wrench, ListChecks, Webhook, Sparkles,
@@ -50,6 +51,8 @@ export function ProvidersPanel({ query, setQuery }: Pick<RouteProps, 'query' | '
   const { data: providers, status: providersStatus, error: providersError, refresh: refreshProviders } = useQuery(
     'settings:providers', () => api.settingsProviders(), { persist: true },
   )
+  const availabilityPending = providers?.some((provider) => provider.availability?.state === 'checking') ?? false
+  useVisiblePoll(() => { if (availabilityPending) refreshProviders() }, availabilityPending ? 1200 : null)
   const { data: runtimesData, refresh: refreshRuntimes } = useQuery(
     'settings:agent-runtimes', () => api.agentRuntimes().catch(() => [] as AgentRuntime[]), { persist: true },
   )

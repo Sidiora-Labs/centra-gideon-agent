@@ -8,6 +8,7 @@ export interface GuardedResult {
   error?: string
   clientInstall?: { shell?: string; postInstall?: string } | null
   restartRequired?: boolean
+  restartPackages?: string[]
   fixPrompt?: string
   hooks?: Array<{ name: string; event: string; provider: string }>
 }
@@ -35,6 +36,7 @@ export function guardedFromApp(r: AppInstallResult): GuardedResult {
   return { ok: r.ok, needsConsent: !!r.needs_consent, scan: r.scan, error: r.error,
             clientInstall: r.needs_client_install ? (r.client_install ?? {}) : null,
             restartRequired: !!r.restart_required,
+            restartPackages: r.restart_packages ?? [],
             fixPrompt: r.fix_prompt || undefined, hooks }
 }
 
@@ -70,9 +72,12 @@ export function useGuardedInstall(run: (confirm: boolean) => Promise<GuardedResu
       if (r.ok) {
         setBlocked(null)
         if (r.restartRequired) {
+          const packages = r.restartPackages?.length
+            ? ` Changed packages: ${r.restartPackages.join(', ')}.`
+            : ''
           window.dispatchEvent(new CustomEvent('ne:toast', { detail: {
             level: 'info',
-            message: 'Installed — restart the gateway for this app to fully take effect.',
+            message: `Installed — restart the gateway for this app to fully take effect.${packages}`,
           }}))
         }
         return r

@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/providers", handle_list_extensions)
+    app.router.add_post("/api/providers/{name}/availability", handle_refresh_availability)
+    app.on_startup.append(_warm_availability)
+    app.on_cleanup.append(_shutdown_availability)
     app.router.add_get("/api/providers/{name}", handle_get_extension)
     app.router.add_get("/api/providers/{name}/schema", handle_get_schema)
     app.router.add_get("/api/providers/{name}/config", handle_get_config)
@@ -44,17 +47,14 @@ async def handle_list_extensions(request: web.Request) -> web.Response:
     if type_filter:
         extensions = [e for e in extensions if e.provider_config.type == type_filter]
 
-    from gideon.extensions.providers.loader import load_availability
+    from gideon.extensions.providers.availability import get_availability_board
 
+    board = get_availability_board()
     result: list[dict[str, Any]] = []
     for ext in extensions:
-        available, unavailable_reason = True, ""
-        probe = load_availability(ext)
-        if probe is not None:
-            try:
-                available, unavailable_reason = probe()
-            except Exception:
-                logger.debug("availability() raised for %s", ext.name, exc_info=True)
+        availability = board.read(ext.name, ext.provider_config.implementation)
+        available = availability.state not in {"unavailable", "unknown"}
+        unavailable_reason = availability.reason
         result.append(
             {
                 "name": ext.name,
@@ -66,6 +66,7 @@ async def handle_list_extensions(request: web.Request) -> web.Response:
                 "error": ext.error,
                 "available": available,
                 "unavailableReason": unavailable_reason,
+                "availability": availability.to_wire(),
                 "managed": not bool(ext.manifest.native),
                 "provider": {
                     "type": ext.provider_config.type,
@@ -107,6 +108,36 @@ async def handle_list_extensions(request: web.Request) -> web.Response:
         )
 
     return web.json_response({"providers": result})
+
+
+async def _warm_availability(app: web.Application) -> None:
+    from gideon.extensions.providers.availability import get_availability_board
+
+    names = [ext.name for ext in get_provider_registry().list_extensions()]
+    get_availability_board().warm(names)
+
+
+async def _shutdown_availability(app: web.Application) -> None:
+    from gideon.extensions.providers.availability import get_availability_board
+
+    await get_availability_board().shutdown()
+
+
+async def handle_refresh_availability(request: web.Request) -> web.Response:
+    from gideon.extensions.providers.availability import get_availability_board
+    from gideon.http_errors import json_error
+
+    name = request.match_info["name"]
+    request_app = request.get("app", "")
+    if request_app and request_app != name:
+        return json_error("forbidden", message="provider is outside this app's authority", status=403)
+    ext = get_provider_registry().get(name)
+    if ext is None:
+        return json_error("not_found", message="provider not found", status=404)
+    board = get_availability_board()
+    board.recheck(name)
+    availability = board.read(name, ext.provider_config.implementation)
+    return web.json_response({"availability": availability.to_wire()}, status=202)
 
 
 async def handle_get_extension(request: web.Request) -> web.Response:

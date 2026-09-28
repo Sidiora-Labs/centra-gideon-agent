@@ -300,8 +300,10 @@ def register_extension_providers() -> None:
     Idempotent: the provider registry dedupes by app name and each app module guards
     its own module-level registration against re-import.
     """
+    from gideon.extensions.apps import app_python
     from gideon.extensions.providers.registry import get_provider_registry
 
+    app_python.activate()
     registry = get_provider_registry()
 
     try:
@@ -389,6 +391,15 @@ def load_all_extensions() -> None:
             logger.info("Recovered interrupted app updates: %s", recovered)
     except Exception:
         logger.debug("app update recovery failed", exc_info=True)
+
+    try:
+        from gideon.extensions.apps import app_python
+
+        app_python.install_everything()
+        app_python.activate()
+        app_python.collect()
+    except Exception:
+        logger.warning("app Python package repair failed", exc_info=True)
 
     register_extension_providers()
 

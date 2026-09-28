@@ -14,8 +14,16 @@ export function ProviderCard({ ext, runtime, channel, open, onOpenChange, onChan
   const [rechecking, setRechecking] = useState(false)
   const hasConfig = !!ext.enabled && ext.provider?.hasConfigSchema === true
   const unavailable = ext.available === false
+  const availability = ext.availability
+  const canRefreshAvailability = availability !== undefined
   const who = ext.displayName || ext.name
   const managed = ext.managed === true
+
+  const refreshAvailability = async () => {
+    setRechecking(true)
+    try { await api.refreshProviderAvailability(ext.name); onChanged() }
+    finally { setRechecking(false) }
+  }
 
   const toggle = async () => {
     setBusy(true)
@@ -35,7 +43,8 @@ export function ProviderCard({ ext, runtime, channel, open, onOpenChange, onChan
             {(ext.provider?.capabilities ?? []).map((c) => (
               <span key={c} data-type="caption" className="rounded-md bg-surface-high px-1.5 py-0.5 text-on-surface-low">{c}</span>
             ))}
-            {unavailable && <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low"><AlertTriangle size={10} /> unavailable</span>}
+            {availability && <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low">{availability.state === 'checking' ? <Loader2 size={10} className="animate-spin" /> : availability.state === 'available' ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}{availability.state}</span>}
+            {!availability && unavailable && <span data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low"><AlertTriangle size={10} /> unavailable</span>}
           </div>
           {ext.description && <p data-type="body-s" className="mt-0.5 truncate text-on-surface-low">{ext.description}</p>}
         </div>
@@ -43,6 +52,11 @@ export function ProviderCard({ ext, runtime, channel, open, onOpenChange, onChan
         {runtime && !unavailable && <RuntimeChip state={runtime.state} />}
         {
 }
+        {canRefreshAvailability && (
+          <SquareIconButton label={`Check availability: ${who}`} title="Check availability" loading={rechecking} className="shrink-0" onClick={refreshAvailability}>
+            <RefreshCw size={14} />
+          </SquareIconButton>
+        )}
         {runtime && runtime.state === 'needs_login' && runtime.login_command && onSignIn && (
           <button type="button" onClick={() => onSignIn(runtime)} aria-label={`Sign in: ${who}`}
             data-type="caption" className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-surface-high px-2.5 py-1 text-on-surface hover:bg-surface-highest">
@@ -74,8 +88,8 @@ export function ProviderCard({ ext, runtime, channel, open, onOpenChange, onChan
       </div>
 
       { }
-      {unavailable && ext.unavailableReason && (
-        <div data-type="caption" className="mt-2 flex items-start gap-1.5 text-on-surface-low"><AlertTriangle size={12} className="mt-0.5 shrink-0" /> {ext.unavailableReason}</div>
+      {(availability?.reason || (unavailable && ext.unavailableReason)) && (
+        <div data-type="caption" className="mt-2 flex items-start gap-1.5 text-on-surface-low"><AlertTriangle size={12} className="mt-0.5 shrink-0" /> {availability?.reason || ext.unavailableReason}</div>
       )}
       {runtime && runtime.detail && runtime.state !== 'ready' && !unavailable && (
         <div data-type="caption" className="mt-2 flex items-start gap-1.5 text-on-surface-low"><TerminalSquare size={12} className="mt-0.5 shrink-0" /> {runtime.detail}</div>

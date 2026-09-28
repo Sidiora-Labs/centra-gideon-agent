@@ -258,6 +258,9 @@ class BackendSupervisor:
             extra.update(shared_storage_env(name))
 
             env = build_child_env(site="app-backend", extra=extra)
+            from gideon.extensions.apps import app_python
+
+            env.update(app_python.child_env())
             if data_dir is None:
                 env.pop("GIDEON_APP_DATA_DIR", None)
                 env.pop("GIDEON_APP_DATA_DIR", None)
@@ -422,7 +425,9 @@ class BackendSupervisor:
             elif suffix in (".js", ".mjs", ".cjs"):
                 kind = "node"
         if kind in ("python", "asgi"):
-            return [sys.executable, str(entry)]
+            from gideon.extensions.apps import app_python
+
+            return app_python.child_argv(entry)
         if kind == "node":
             return ["node", str(entry)]
         if kind == "bun":

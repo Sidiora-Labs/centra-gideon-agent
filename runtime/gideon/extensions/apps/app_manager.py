@@ -100,6 +100,7 @@ class InstallResult:
     error: str = ""
     needs_consent: bool = False
     restart_required: bool = False
+    restart_packages: list[str] = field(default_factory=list)
     needs_client_install: bool = False
     client_install: dict[str, Any] | None = None
     log_excerpt: str = ""
@@ -138,6 +139,7 @@ class InstallResult:
             "error": self.error,
             "needs_consent": self.needs_consent,
             "restart_required": self.restart_required,
+            "restart_packages": self.restart_packages,
             "needs_client_install": self.needs_client_install,
             "client_install": self.client_install,
             "scan": self.scan.to_dict() if self.scan else None,
@@ -247,6 +249,10 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
         return
     try:
         from gideon.security.sandbox import build_child_env
+        from gideon.extensions.apps import app_python
+
+        env = build_child_env(site="app-setup-hook")
+        env.update(app_python.app_packages_env())
 
         proc = (
             subprocess.run(  # noqa: S602 — intentional: vetted third-party setup hook
@@ -256,7 +262,7 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
                 timeout=max(1, timeout),
                 capture_output=True,
                 text=True,
-                env=build_child_env(site="app-setup-hook"),
+                env=env,
             )
         )
     except subprocess.TimeoutExpired as exc:
@@ -359,98 +365,27 @@ def _reject_core_dependency_conflicts(manifest: AppManifest, reqs: list[str]) ->
             )
 
 
-def _install_python_deps(manifest: AppManifest) -> bool:
-    """Pip-install an app's declared ``pythonDependencies`` into the shared core
-    venv. Core ships lean; the app that needs a heavy lib brings it.
-
-    The venv is shared with the running gateway, so this is admission-gated:
-    :func:`_reject_core_dependency_conflicts` refuses a pin that would move a
-    dependency core itself declares before anything is installed. An app may bring
-    any library core does not own; it may not re-pin one core does.
-
-    Returns True iff a package was actually installed (⇒ the gateway must RESTART
-    to import it — the running process already imported its module set). If every
-    requirement is already satisfied, this is a no-op and returns False. Best-effort
-    on already-satisfied detection; when unsure it installs (pip itself is the
-    final arbiter and skips already-present pins fast).
-    """
+def _install_python_deps(manifest: AppManifest) -> list[str]:
+    """Resolve all app requirements into the shared writable app prefix."""
     reqs = list(manifest.dependencies.pythonDependencies)
     if not reqs:
-        return False
-
+        return []
     _reject_core_dependency_conflicts(manifest, reqs)
+    from gideon.extensions.apps import app_python
 
     try:
-        from importlib.metadata import PackageNotFoundError
-        from importlib.metadata import version as _dist_version
+        return app_python.ensure(manifest.name, reqs, label=manifest.displayName or manifest.name)
+    except app_python.PackageInstallError as exc:
+        raise AppLifecycleError(str(exc), log_excerpt=exc.log_excerpt) from exc
 
-        from packaging.requirements import Requirement
 
-        missing: list[str] = []
-        for spec in reqs:
-            try:
-                req = Requirement(spec)
-                have = _dist_version(req.name)
-                if req.specifier and not req.specifier.contains(have, prereleases=True):
-                    missing.append(spec)
-            except PackageNotFoundError:
-                missing.append(spec)
-            except Exception:  # noqa: BLE001 — unparseable spec → let pip decide
-                missing.append(spec)
-    except Exception:  # noqa: BLE001 — packaging/metadata unavailable → install all
-        missing = reqs
-
-    if not missing:
-        logger.info(
-            "app %s: all %d python deps already satisfied", manifest.name, len(reqs)
-        )
-        return False
-
-    from gideon.operations._installer import (
-        NoInstallerError,
-        install_argv,
-        installer_name,
-    )
-    from gideon.security.sandbox import build_child_env
-
-    from gideon.core.config.loader import config_dir
-
-    home = config_dir()
-    scratch_root = home / "tmp"
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    child_env = build_child_env(site="app-python-install", installer="pip")
-    child_env.update(PIP_NO_CACHE_DIR="1", UV_NO_CACHE="1")
-
+def _collect_app_python() -> None:
     try:
-        argv = install_argv(["--disable-pip-version-check", *missing])
-    except NoInstallerError as exc:
-        raise AppLifecycleError(str(exc)) from exc
+        from gideon.extensions.apps import app_python
 
-    logger.info(
-        "app %s: installing python deps %s via %s",
-        manifest.name,
-        missing,
-        installer_name(),
-    )
-    try:
-        with tempfile.TemporaryDirectory(prefix="app-python-install-", dir=scratch_root) as scratch:
-            proc = subprocess.run(  # noqa: S603 — deps come from a scanned+vetted manifest
-                argv,
-                timeout=_PIP_TIMEOUT,
-                capture_output=True,
-                text=True,
-                env={**child_env, "TMPDIR": scratch},
-            )
-    except subprocess.TimeoutExpired as exc:
-        raise AppLifecycleError(
-            f"python dependency install timed out after {_PIP_TIMEOUT}s: {missing}"
-        ) from exc
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip()[-400:]
-        raise AppLifecycleError(
-            f"dependency install failed for {missing}: {tail}", log_excerpt=tail
-        )
-    return True
+        app_python.collect()
+    except Exception:
+        logger.debug("app package collection failed", exc_info=True)
 
 
 def _core_version_gate(manifest: AppManifest, *, action: str) -> None:
@@ -807,16 +742,9 @@ def install(
                 scan=report,
                 error=f"app {name!r} already installed (use update)",
             )
-        shutil.move(str(staged), str(dest))
-
-        data_fact, parked = _restore_preserved_data(name, dest)
-
-        (dest / _APP_DATA_DIRNAME).mkdir(parents=True, exist_ok=True)
-
         try:
-            restart_required = _install_python_deps(manifest)
+            restart_packages = _install_python_deps(manifest)
         except AppLifecycleError as exc:
-            shutil.rmtree(dest, ignore_errors=True)
             _audit("install", "error", name, caller=caller, error=str(exc))
             return InstallResult(
                 ok=False,
@@ -825,6 +753,11 @@ def install(
                 error=str(exc),
                 log_excerpt=exc.log_excerpt,
             )
+        shutil.move(str(staged), str(dest))
+
+        data_fact, parked = _restore_preserved_data(name, dest)
+
+        (dest / _APP_DATA_DIRNAME).mkdir(parents=True, exist_ok=True)
 
         try:
             _run_hook(
@@ -887,13 +820,15 @@ def install(
             ),
         )
         return InstallResult(
-            ok=True, name=name, scan=report, restart_required=restart_required
+            ok=True, name=name, scan=report, restart_required=bool(restart_packages),
+            restart_packages=restart_packages,
         )
     except AppLifecycleError as exc:
         _audit("install", "error", name, caller=caller, error=str(exc))
         return InstallResult(ok=False, name=name, error=str(exc))
     finally:
         shutil.rmtree(staged, ignore_errors=True)
+        _collect_app_python()
 
 
 def _rollback_dir(name: str) -> Path:
@@ -1227,6 +1162,18 @@ def update(
                 error="update needs consent: scanner raised warnings",
             )
 
+        try:
+            restart_packages = _install_python_deps(manifest)
+        except AppLifecycleError as exc:
+            _audit("update", "error", name, caller=caller, error=str(exc))
+            return InstallResult(
+                ok=False,
+                name=name,
+                scan=report,
+                error=str(exc),
+                log_excerpt=exc.log_excerpt,
+            )
+
         old_data = live / _APP_DATA_DIRNAME
         if old_data.is_dir():
             new_data = staged / _APP_DATA_DIRNAME
@@ -1279,7 +1226,6 @@ def update(
             )
 
         shutil.rmtree(rollback, ignore_errors=True)
-        restart_required = _install_python_deps(manifest)
         meta = _read_installed(name)
         if meta is not None:
             meta.version = manifest.version
@@ -1301,13 +1247,15 @@ def update(
             detail=_scan_detail(report, consent=confirm),
         )
         return InstallResult(
-            ok=True, name=name, scan=report, restart_required=restart_required
+            ok=True, name=name, scan=report, restart_required=bool(restart_packages),
+            restart_packages=restart_packages,
         )
     except AppLifecycleError as exc:
         _audit("update", "error", name, caller=caller, error=str(exc))
         return InstallResult(ok=False, name=name, error=str(exc))
     finally:
         shutil.rmtree(staged, ignore_errors=True)
+        _collect_app_python()
 
 
 _SEED_MARKER_FILENAME = ".seeded-builtins.json"
@@ -1883,6 +1831,7 @@ def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
                 "app %s: dependency-ledger uninstall failed", name, exc_info=True
             )
     shutil.rmtree(app_dir(name), ignore_errors=True)
+    _collect_app_python()
     _discard_preserved_data(name)
     _audit("force_uninstall", "ok", name, caller=caller)
     return True

@@ -472,6 +472,9 @@ class WorkerSupervisor:
         extra.update(shared_storage_env(rec.app))
 
         env = build_child_env(site="app-worker", extra=extra)
+        from gideon.extensions.apps import app_python
+
+        env.update(app_python.child_env())
         if not storage_ok:
             env.pop("GIDEON_APP_DATA_DIR", None)
             env.pop("GIDEON_APP_DATA_DIR", None)

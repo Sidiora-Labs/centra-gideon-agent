@@ -51,6 +51,9 @@ async def api_providers_list(request: web.Request) -> web.Response:
     registry = get_default_registry()
     entries = registry.list_entries()
 
+    from gideon.extensions.providers.connection import entry_fingerprint, get_connection_board
+
+    board = get_connection_board()
     result: list[dict[str, Any]] = []
     for entry in entries:
         if entry.type == "acp_agent":
@@ -74,6 +77,11 @@ async def api_providers_list(request: web.Request) -> web.Response:
         except Exception:
             capabilities = sorted(c.value for c in entry.declared_capabilities)
 
+        connection = board.read(
+            entry.name,
+            entry_fingerprint(entry),
+            lambda e=entry: registry.build_catalog(e),
+        )
         result.append(
             {
                 "name": entry.name,
@@ -81,6 +89,7 @@ async def api_providers_list(request: web.Request) -> web.Response:
                 "model": entry.model,
                 "capabilities": capabilities,
                 "credential_status": cred_status,
+                "connection": connection.to_wire(),
             }
         )
 
@@ -1041,31 +1050,23 @@ async def api_provider_test(request: web.Request) -> web.Response:
         except Exception:
             return web.json_response({"error": "not found"}, status=404)
 
+    from gideon.extensions.providers.connection import entry_fingerprint, get_connection_board, measure
+
     catalog = registry.build_catalog(entry)
-    if catalog is None:
+    answer = await measure(catalog)
+    board = get_connection_board()
+    board.record(name, entry_fingerprint(entry), answer)
+    if answer.state == "untestable":
         return web.json_response(
             {
                 "ok": True,
                 "status": "no_probe",
-                "message": "No connectivity probe available for this provider type",
+                "message": answer.detail,
             }
         )
-
-    result = await catalog.test_connection()
-    if result.ok:
-        msg = result.detail or (
-            f"Connected — {result.model_count} model(s) available"
-            if result.model_count is not None
-            else "Connected"
-        )
-        return web.json_response({"ok": True, "status": "connected", "message": msg})
-    return web.json_response(
-        {
-            "ok": False,
-            "status": "error",
-            "message": result.detail or "Connection test failed",
-        }
-    )
+    if answer.state == "connected":
+        return web.json_response({"ok": True, "status": "connected", "message": answer.detail})
+    return web.json_response({"ok": False, "status": "error", "message": answer.detail})
 
 
 async def api_agent_runners_list(request: web.Request) -> web.Response:

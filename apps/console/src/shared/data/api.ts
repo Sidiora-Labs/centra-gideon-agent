@@ -688,6 +688,7 @@ export interface AppInstallResult {
   needs_client_install?: boolean
   client_install?: { shell?: string; postInstall?: string } | null
   restart_required?: boolean
+  restart_packages?: string[]
   log_excerpt?: string
   fix_prompt?: string
   hooks?: AppHookSummary[]
@@ -2855,9 +2856,10 @@ export interface DashboardStatus {
   stats?: SystemAgentStats
 }
 
+export interface ProviderAvailability { state: 'checking' | 'available' | 'unavailable' | 'unknown'; reason: string; checkedAt: number | null }
 export interface SettingsProvider {
   name: string; displayName?: string; description?: string; version?: string; author?: string
-  enabled: boolean; error?: string; available?: boolean; unavailableReason?: string
+  enabled: boolean; error?: string; available?: boolean; unavailableReason?: string; availability?: ProviderAvailability
   managed?: boolean
   provider?: { type?: string; entity?: string; capabilities?: string[]; multiInstance?: boolean; hasConfigSchema?: boolean }
   tags?: string[]
@@ -2894,7 +2896,7 @@ export interface ProviderSchemaProp extends SchemaProp {
 }
 export interface ProviderSchema { type?: string; properties?: Record<string, ProviderSchemaProp>; required?: string[] }
 export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean; _secret_set?: string[] }
-export interface ModelProvider { name: string; type: string; model?: string; capabilities: string[]; credential_status: string }
+export interface ModelProvider { name: string; type: string; model?: string; capabilities: string[]; credential_status: string; connection?: { state: 'checking' | 'connected' | 'failed' | 'untestable'; detail: string; rejected_credential: boolean; checked_at: number | null } }
 export interface ModelProviderType {
   type: string
   label: string
@@ -4005,6 +4007,7 @@ export const api = {
 
   models: () => get<ModelItem[]>('/api/models/chat'),
   settingsProviders: () => get<{ providers: SettingsProvider[] }>('/api/providers').then((d) => d.providers),
+  refreshProviderAvailability: (name: string) => post<{ availability: ProviderAvailability }>(`/api/providers/${encodeURIComponent(name)}/availability`),
   providerSchema: (name: string) => get<{ schema: ProviderSchema }>(`/api/providers/${encodeURIComponent(name)}/schema`).then((d) => d.schema),
   providerConfig: (name: string) => get<{ config: Record<string, unknown>; _secret_set?: string[] }>(`/api/providers/${encodeURIComponent(name)}/config`),
   saveProviderConfig: (name: string, config: Record<string, unknown>) =>

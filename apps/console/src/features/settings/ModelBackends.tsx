@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 import { MoreRow } from '../../shared/ui/MoreRow'
 import {
   Plus, Cpu, Wifi, Pencil, Trash2, X, Eye, EyeOff,
@@ -46,6 +47,8 @@ export function RemoteModelProviders() {
     for (const r of rows) map[r.name] = [...(map[r.name] ?? []), ...(r.models ?? [])]
     return { providers: provs, available: map }
   }, { persist: true })
+  const connectionPending = data?.providers.some((provider) => provider.connection?.state === 'checking') ?? false
+  useVisiblePoll(() => { if (connectionPending) { invalidateKeys('settings:remote-model-providers'); refresh() } }, connectionPending ? 1200 : null)
   const reload = () => { invalidateKeys('settings:remote-model-providers'); refresh() }
   const available = data?.available ?? {}
 
@@ -77,18 +80,19 @@ export function RemoteModelProviders() {
   )
 }
 
-function CredBadge({ status }: { status: string }) {
-  const ok = status === 'ok'
-  const missing = status === 'missing'
-  const color = ok ? 'var(--color-success)' : missing ? 'var(--color-danger)' : 'var(--color-on-surface-low)'
+function ConnectionBadge({ state }: { state?: ModelProvider['connection'] }) {
+  const connected = state?.state === 'connected'
+  const failed = state?.state === 'failed'
+  const color = connected ? 'var(--color-success)' : failed ? 'var(--color-danger)' : 'var(--color-on-surface-low)'
+  const label = state?.state ?? 'checking'
   return (
-    <span data-type="caption" className="inline-flex shrink-0 items-center gap-1" style={{ color }}>
-      {ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />} {ok ? 'Configured' : missing ? 'Missing key' : 'Unconfigured'}
+    <span data-type="caption" className="inline-flex shrink-0 items-center gap-1" style={{ color }} title={state?.detail || undefined}>
+      {connected ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />} {label}
     </span>
   )
 }
 
-function InstanceCard({ provider, models, onChanged }: { provider: ModelProvider; models: AvailableModel[]; onChanged: () => void }) {
+export function InstanceCard({ provider, models, onChanged }: { provider: ModelProvider; models: AvailableModel[]; onChanged: () => void }) {
   const [editing, setEditing] = useState(false)
   const [showModels, setShowModels] = useState(false)
   const [test, setTest] = useState<ProviderTestResult | null>(null)
@@ -97,7 +101,7 @@ function InstanceCard({ provider, models, onChanged }: { provider: ModelProvider
 
   const runTest = async () => {
     setTesting(true); setTest(null)
-    try { setTest(await api.testModelProvider(provider.name)) }
+    try { setTest(await api.testModelProvider(provider.name)); onChanged() }
     catch (e) { setTest({ ok: false, message: e instanceof Error ? e.message : 'Test failed' }) }
     setTesting(false)
   }
@@ -130,7 +134,7 @@ function InstanceCard({ provider, models, onChanged }: { provider: ModelProvider
             </div>
           )}
         </div>
-        <CredBadge status={provider.credential_status} />
+        <ConnectionBadge state={provider.connection} />
         <div className="flex shrink-0 items-center gap-0.5">
           {
 }
