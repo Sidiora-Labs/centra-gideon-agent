@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Play, Sparkles, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Play, Sparkles, RotateCcw, Pencil, Copy } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { Loading } from '../../shared/ui/ListScaffold'
 import { QuietButton } from '../../shared/ui/QuietButton'
@@ -22,6 +22,8 @@ import {
 import { notify } from '../../app/shell/appSdk'
 import { confirm } from '../../shared/ui/dialog'
 import { roundPlan, roundPlanText, roundPlanWithInputs } from './roundPlan'
+import { WorkflowDefEditor } from './WorkflowDefEditor'
+import { restoreEntry, workflowEditAction } from './defEditing'
 
 interface FlatNode { depth: number; kind: string; id: string; label: string; summary: string }
 
@@ -81,6 +83,8 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
   const [ledger, setLedger] = useState<WorkflowLedgerRow[] | null>(null)
   const [refining, setRefining] = useState(false)
   const [publishSaving, setPublishSaving] = useState(false)
+  const [revision, setRevision] = useState('')
+  const [editor, setEditor] = useState<{ definition: WorkflowDef; copyFrom?: string; restoreVersion?: number; expectedRevision?: number } | null>(null)
 
   const loadVersions = useCallback(() => {
     api.workflowVersions(name)
@@ -102,7 +106,7 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
     let alive = true
     setLoading(true)
     api.workflowDef(name)
-      .then((d) => { if (alive) setDef(d.definition) })
+      .then((d) => { if (alive) { setDef(d.definition); setRevision(d.revision) } })
       .catch(() => { if (alive) setDef(null) })
       .finally(() => { if (alive) setLoading(false) })
     loadVersions()
@@ -181,14 +185,19 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
     }
   }, [def, name])
 
-  const rollback = useCallback(async (version: number) => {
-    try {
-      await api.repinWorkflowVersion(name, version)
-      loadVersions()
-    } catch (e) {
-      notify(e instanceof Error ? e.message : 'Could not roll back', 'error')
-    }
-  }, [name, loadVersions])
+  if (editor && def) return <WorkflowDefEditor
+    definition={editor.definition}
+    revision={revision}
+    expectedRevision={editor.expectedRevision}
+    copyFrom={editor.copyFrom}
+    restoreVersion={editor.restoreVersion}
+    onBack={() => setEditor(null)}
+    onSaved={(savedName) => {
+      setEditor(null)
+      if (savedName !== name) { onBack(); return }
+      api.workflowDef(name).then((result) => { setDef(result.definition); setRevision(result.revision); loadVersions() })
+    }}
+  />
 
   return (
     <div className="flex h-full flex-col">
@@ -202,6 +211,9 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
         </div>}
         right={def ? (
           <HeaderActions>
+            <QuietButton onClick={() => setEditor({ definition: def, expectedRevision: def.version, ...(workflowEditAction(def.source) === 'copy' ? { copyFrom: name } : {}) })} title={workflowEditAction(def.source) === 'copy' ? 'Create an editable copy' : 'Edit this workflow'}>
+              {workflowEditAction(def.source) === 'copy' ? <Copy size={13} /> : <Pencil size={13} />}{workflowEditAction(def.source) === 'copy' ? 'Edit a copy' : 'Edit'}
+            </QuietButton>
             {
 }
             <QuietButton
@@ -355,8 +367,13 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
                         {v.version === pinned ? (
                           <span data-type="caption" className="shrink-0 text-on-surface-low">pinned</span>
                         ) : (
-                          <QuietButton onClick={() => rollback(v.version)} title={`Roll back to v${v.version}`}>
-                            <RotateCcw size={12} /> Roll back
+                          <QuietButton onClick={async () => {
+                            try {
+                              const old = await api.workflowVersion(name, v.version)
+                              setEditor({ definition: old.definition, expectedRevision: def.version, ...restoreEntry(v.version) })
+                            } catch (error) { notify(error instanceof Error ? error.message : 'Could not open this version', 'error') }
+                          }} title={`Restore v${v.version} as a new version`}>
+                            <RotateCcw size={12} /> Restore as new version
                           </QuietButton>
                         )}
                       </div>

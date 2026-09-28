@@ -51,6 +51,8 @@ _STATUS_MAP: dict[str, tuple[int, str]] = {
     "WF_DEF_NAME_RESERVED": (409, "name_reserved"),
     "WF_DEF_ROOT_REQUIRED": (400, "invalid_request"),
     "WF_DEF_INVALID": (422, "validation_failed"),
+    "WF_HIDDEN_VALUE_UNMATCHED": (422, "validation_failed"),
+    "WF_DEF_BASE_NOT_FOUND": (404, "not_found"),
     "WF_DEF_MACRO_INVALID": (422, "macro_invalid"),
     "WF_DEF_INLINE_SECRET": (422, "inline_secret"),
     "WF_DEF_NO_WRITABLE_PROVIDER": (409, "read_only"),
@@ -259,6 +261,20 @@ async def api_def_save(request: web.Request) -> web.Response:
     create_only = body.get("create_only", False)
     if not isinstance(create_only, bool):
         return web.json_response({"error": {"code": "invalid_request", "message": "create_only must be a boolean"}}, status=400)
+    based_on_version = body.get("based_on_version")
+    if based_on_version is not None and (not isinstance(based_on_version, int) or isinstance(based_on_version, bool) or based_on_version < 1):
+        return web.json_response({"error": {"code": "invalid_request", "message": "based_on_version must be a positive integer"}}, status=400)
+    if not create_only:
+        from gideon.stale_write import stale_write_refusal
+        current = await service.get_def(str(body.get("name", "") or ""))
+        if current.get("ok"):
+            refusal = stale_write_refusal(request, current.get("definition"), what="this workflow definition")
+            if refusal is not None:
+                return refusal
+            if expected_revision is None:
+                expected_revision = int((current.get("definition") or {}).get("version", 1) or 1)
+        elif expected_revision is not None:
+            return _reply(current)
     result = await service.author_def(
         name=str(body.get("name", "") or ""),
         root=root,
@@ -274,8 +290,13 @@ async def api_def_save(request: web.Request) -> web.Response:
         workspace=(
             body.get("workspace") if isinstance(body.get("workspace"), dict) else None
         ),
+        runtime_hints=(body.get("runtime_hints") if isinstance(body.get("runtime_hints"), dict) else None),
+        defaults=(body.get("defaults") if isinstance(body.get("defaults"), dict) else None),
+        on_overlap=(str(body.get("on_overlap")) if body.get("on_overlap") is not None else None),
         expected_revision=expected_revision,
         create_only=create_only,
+        based_on=str(body.get("based_on", "") or ""),
+        based_on_version=based_on_version,
     )
     _audit(
         request,
@@ -541,6 +562,29 @@ async def api_def_version_diff(request: web.Request) -> web.Response:
             status=400,
         )
     return web.json_response({"a": a, "b": b, "ops": versions.diff(name, a, b)})
+
+
+async def api_def_version_detail(request: web.Request) -> web.Response:
+    """Return one immutable, secret-stripped workflow version for restore-as-new."""
+    from gideon.automation.workflows import versions
+    from gideon.automation.workflows import secrets as workflow_secrets
+    name = request.match_info.get("name", "")
+    raw_version = request.match_info.get("version", "")
+    try:
+        version = int(raw_version)
+    except (TypeError, ValueError):
+        return web.json_response({"error": {"code": "invalid_request", "message": "version must be an integer"}}, status=400)
+    current = await service.get_def(name)
+    if version < 1 or not current.get("ok"):
+        return web.json_response({"error": {"code": "not_found", "message": "workflow version not found"}}, status=404)
+    record = versions.get_version(name, version)
+    if record is None and int((current.get("definition") or {}).get("version", 0) or 0) == version:
+        definition = current["definition"]
+    elif record is not None:
+        definition = workflow_secrets.strip_secrets(record.spec)
+    else:
+        return web.json_response({"error": {"code": "not_found", "message": "workflow version not found"}}, status=404)
+    return web.json_response({"name": name, "version": version, "definition": definition})
 
 
 async def api_def_repin(request: web.Request) -> web.Response:
@@ -1511,6 +1555,7 @@ def register_workflow_routes(app: web.Application) -> None:
     app.router.add_post("/api/workflows", api_def_save)
     app.router.add_get("/api/workflows/{name}/versions", api_def_versions)
     app.router.add_get("/api/workflows/{name}/versions/diff", api_def_version_diff)
+    app.router.add_get("/api/workflows/{name}/versions/{version}", api_def_version_detail)
     app.router.add_post("/api/workflows/{name}/versions/repin", api_def_repin)
     app.router.add_get("/api/workflows/{name}/ledger", api_def_ledger)
     app.router.add_post("/api/workflows/{name}/refine", api_def_refine)

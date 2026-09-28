@@ -1076,6 +1076,10 @@ export interface WorkflowDef {
   root: WorkflowNode
   inputs?: Record<string, WorkflowInputParam>
   tags?: string[]
+  defaults?: Record<string, unknown>
+  runtime_hints?: Record<string, unknown>
+  on_overlap?: string
+  workspace?: Record<string, unknown>
   metadata?: {
     risk?: string
     requirements?: Record<string, string[]>
@@ -5284,9 +5288,9 @@ export const api = {
       '/api/workflows/surfacing',
     ),
   workflowDef: (name: string) =>
-    get<{ definition: WorkflowDef; provider: string }>(`/api/workflows/${encodeURIComponent(name)}`),
-  saveWorkflowDef: (body: { name: string; root: WorkflowNode; description?: string; inputs?: Record<string, unknown>; tags?: string[]; metadata?: Record<string, unknown>; save?: boolean }) =>
-    post<{ saved: boolean; definition?: WorkflowDef; valid: boolean; issues: Array<{ code: string; message: string; path?: string; severity?: string }>; levels?: string[][] }>('/api/workflows', body),
+    get<{ definition: WorkflowDef; provider: string; revision: string }>(`/api/workflows/${encodeURIComponent(name)}`),
+  saveWorkflowDef: (body: { name: string; root: WorkflowNode; description?: string; inputs?: Record<string, unknown>; tags?: string[]; metadata?: Record<string, unknown>; workspace?: Record<string, unknown>; runtime_hints?: Record<string, unknown>; defaults?: Record<string, unknown>; on_overlap?: string; save?: boolean; expected_revision?: number; create_only?: boolean; based_on?: string; based_on_version?: number }, basedOn?: string) =>
+    post<{ saved: boolean; definition?: WorkflowDef; valid: boolean; issues: Array<{ code: string; message: string; path?: string; severity?: string }>; levels?: string[][] }>('/api/workflows', body, basedOn),
   publishWorkflowToA2A: (name: string, published: boolean) =>
     post<{ ok: boolean; name: string; a2a_published: boolean }>(`/api/workflows/${encodeURIComponent(name)}/a2a-publish`, { published }),
   deleteWorkflowDef: (name: string) => del(`/api/workflows/${encodeURIComponent(name)}`),
@@ -5294,6 +5298,10 @@ export const api = {
   workflowVersions: (name: string) =>
     get<{ versions: WorkflowVersionRow[]; pinned: number; maturity: WorkflowMaturity }>(
       `/api/workflows/${encodeURIComponent(name)}/versions`,
+    ),
+  workflowVersion: (name: string, version: number) =>
+    get<{ name: string; version: number; definition: WorkflowDef }>(
+      `/api/workflows/${encodeURIComponent(name)}/versions/${version}`,
     ),
   workflowVersionDiff: (name: string, a: number, b: number) =>
     get<{ a: number; b: number; ops: WorkflowVersionOp[] }>(

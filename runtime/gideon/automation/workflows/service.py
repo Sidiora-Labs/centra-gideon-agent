@@ -267,8 +267,11 @@ async def get_def(name: str) -> dict[str, Any]:
             if isinstance(found, dict)
             else getattr(found, "to_dict", lambda: {})()
         )
+        from gideon.stale_write import revision_of
+        projected = secrets.strip_secrets(raw)
         return _ok(
-            definition=secrets.strip_secrets(raw),
+            definition=projected,
+            revision=revision_of(projected),
             provider=provider_name,
             default_eligibility=_default_eligibility(name),
         )
@@ -362,8 +365,13 @@ async def author_def(
     provenance: str = "chat",
     strict: bool = True,
     workspace: dict[str, Any] | None = None,
+    runtime_hints: dict[str, Any] | None = None,
+    defaults: dict[str, Any] | None = None,
+    on_overlap: str | None = None,
     expected_revision: int | None = None,
     create_only: bool = False,
+    based_on: str = "",
+    based_on_version: int | None = None,
 ) -> dict[str, Any]:
     """Validate a spec and (optionally) save it.
 
@@ -395,18 +403,56 @@ async def author_def(
             "upgrade, while a shadow of a bundled name would be ignored at run time.",
             provider=reserved_by,
         )
-    spec = {
-        "name": name,
-        "description": description,
-        "root": root or {},
-        "inputs": inputs or {},
-        "tags": tags or [],
-        "provenance": provenance,
-    }
-    if isinstance(workspace, dict) and workspace:
-        spec[provisioning.WORKSPACE_KEY] = dict(workspace)
-    if metadata:
-        spec["metadata"] = models.DefMetadata.from_dict(metadata).to_dict()
+    base_document: dict[str, Any] = {}
+    if based_on_version is not None:
+        from gideon.automation.workflows import versions
+        record = versions.get_version(based_on or name, based_on_version)
+        if record is None:
+            return _service_failure("WF_DEF_BASE_NOT_FOUND", "the selected workflow base version is unavailable")
+        base_document = record.spec
+    elif based_on:
+        base_raw = await _raw_def(based_on)
+        if base_raw is None:
+            return _service_failure("WF_DEF_BASE_NOT_FOUND", "the selected workflow base is unavailable")
+        base_document = base_raw if isinstance(base_raw, dict) else getattr(base_raw, "to_dict", lambda: {})()
+    elif expected_revision is not None:
+        base_raw = await _raw_def(name)
+        if base_raw is not None:
+            base_document = base_raw if isinstance(base_raw, dict) else getattr(base_raw, "to_dict", lambda: {})()
+
+    editable = {"name": name, "description": description, "root": root or {}, "inputs": inputs or {}, "tags": tags or [], "provenance": provenance}
+    if isinstance(metadata, dict): editable["metadata"] = metadata
+    if isinstance(workspace, dict): editable[provisioning.WORKSPACE_KEY] = workspace
+    if isinstance(runtime_hints, dict): editable["runtime_hints"] = runtime_hints
+    if isinstance(defaults, dict): editable["defaults"] = defaults
+    if on_overlap is not None: editable["on_overlap"] = on_overlap
+    try:
+        spec, unmatched_hidden = secrets.restore_hidden_values(editable, base_document)
+    except Exception as exc:
+        from gideon.security.security import MaskConflict
+        if not isinstance(exc, MaskConflict):
+            raise
+        return _service_failure("WF_HIDDEN_VALUE_UNMATCHED", str(exc), issues=[{"code": "WF_HIDDEN_VALUE_UNMATCHED", "message": str(exc), "path": "root"}])
+    if unmatched_hidden:
+        issues = [{"code": "WF_HIDDEN_VALUE_UNMATCHED", "message": f"Hidden value {row['key']!r} has no value in the selected base.", "path": row["path"]} for row in unmatched_hidden]
+        return _service_failure("WF_HIDDEN_VALUE_UNMATCHED", "One or more hidden values no longer match the selected workflow base.", issues=issues)
+
+    # Preserve the full editable document while normalization remains owned by this authoring path.
+    spec.update({"name": name, "description": description, "provenance": provenance})
+    spec["root"] = spec.get("root", root or {})
+    spec["inputs"] = spec.get("inputs", inputs or {})
+    spec["tags"] = spec.get("tags", tags or [])
+    for key, value in (("runtime_hints", runtime_hints), ("defaults", defaults), ("on_overlap", on_overlap)):
+        if key not in spec and value is not None:
+            spec[key] = value
+    stored_workspace = spec.get(provisioning.WORKSPACE_KEY)
+    if isinstance(stored_workspace, dict) and stored_workspace:
+        spec[provisioning.WORKSPACE_KEY] = dict(stored_workspace)
+    stored_metadata = spec.get("metadata")
+    if isinstance(stored_metadata, dict) and stored_metadata:
+        normalized_metadata = dict(stored_metadata)
+        normalized_metadata.update(models.DefMetadata.from_dict(stored_metadata).to_dict())
+        spec["metadata"] = normalized_metadata
 
     try:
         spec = macros.expand_spec(spec)
@@ -468,9 +514,9 @@ async def author_def(
         from gideon.automation.workflows.native_defs import DefinitionNameConflict, DefinitionRevisionConflict
 
         if isinstance(exc, DefinitionNameConflict):
-            return _service_failure("WF_DEF_ALREADY_EXISTS", str(exc), current_revision=exc.current_revision)
+            return _service_failure("WF_DEF_ALREADY_EXISTS", str(exc))
         if isinstance(exc, DefinitionRevisionConflict):
-            return _service_failure("WF_DEF_VERSION_MISMATCH", str(exc), current_revision=exc.current_revision)
+            return _service_failure("WF_DEF_VERSION_MISMATCH", str(exc))
         return _service_failure(
             "WF_DEF_SAVE_FAILED", f"could not save the definition: {exc}"
         )

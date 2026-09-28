@@ -83,7 +83,8 @@ def is_secret_binding(value: Any) -> bool:
 
 
 def strip_secrets(spec: Any) -> Any:
-    return _CredentialDocument().read(spec)
+    from gideon.security.security import redact_values_for_display
+    return redact_values_for_display(_CredentialDocument().read(spec))
 
 
 def _by_node_id(
@@ -100,7 +101,65 @@ def _by_node_id(
 
 
 def reinject_secrets(incoming: Any, stored: Any) -> Any:
-    return _CredentialDocument(_by_node_id(stored)).write(incoming)
+    return restore_hidden_values(incoming, stored)[0]
+
+
+def restore_hidden_values(incoming: Any, stored: Any) -> tuple[Any, list[dict[str, str]]]:
+    """Restore presence flags against the exact named base document, at every depth.
+
+    Paths use the workflow engine's root/children/body/cases/default grammar where possible.
+    A true flag with no matching stored value is returned as an issue; it is never written.
+    """
+    from gideon.security.security import keep_masked_values
+    incoming = keep_masked_values(incoming, stored)
+    unmatched: list[dict[str, str]] = []
+
+    def step_path(path: str, key: str, index: int | None = None) -> str:
+        if path == "root":
+            if key == "children" and index is not None: return f"root.children[{index}]"
+            if key in {"body", "default"}: return f"root.{key}"
+            if key == "cases" and index is not None: return f"root.cases[{index}]"
+        if path.startswith("root"):
+            if key == "children" and index is not None: return f"{path}.children[{index}]"
+            if key in {"body", "default"}: return f"{path}.{key}"
+            if key == "cases" and index is not None: return f"{path}.cases[{index}]"
+        return path
+
+    def visit(value: Any, base: Any, path: str = "") -> Any:
+        if isinstance(value, dict):
+            base_map = base if isinstance(base, dict) else {}
+            result: dict[str, Any] = {}
+            for key, child in value.items():
+                if key.startswith("_has_"):
+                    original_key = key[5:]
+                    if child is True:
+                        if original_key in base_map:
+                            result[original_key] = base_map[original_key]
+                        else:
+                            node_path = path or "root"
+                            unmatched.append({"path": node_path, "key": original_key})
+                    continue
+                if key == "children" and isinstance(child, list):
+                    result[key] = [visit(item, (base_map.get(key) or [])[idx] if isinstance(base_map.get(key), list) and idx < len(base_map[key]) else None,
+                                         step_path(path or "root", key, idx)) for idx, item in enumerate(child)]
+                elif key in {"body", "default"}:
+                    result[key] = visit(child, base_map.get(key), step_path(path or "root", key))
+                elif key == "cases" and isinstance(child, dict):
+                    result[key] = {label: visit(item, (base_map.get(key) or {}).get(label) if isinstance(base_map.get(key), dict) else None,
+                                                step_path(path or "root", key, label)) for label, item in child.items()}
+                elif key == "root":
+                    result[key] = visit(child, base_map.get(key), "root")
+                elif key in {"inputs", "defaults"}:
+                    result[key] = visit(child, base_map.get(key), key)
+                else:
+                    result[key] = visit(child, base_map.get(key), path)
+            return result
+        if isinstance(value, list):
+            base_list = base if isinstance(base, list) else []
+            return [visit(child, base_list[idx] if idx < len(base_list) else None, path) for idx, child in enumerate(value)]
+        return value
+
+    return visit(incoming, stored), unmatched
 
 
 def _reinject(node: Any, stored_configs: dict[str, dict[str, Any]]) -> Any:

@@ -70,6 +70,8 @@ class DefinitionDraft:
         )
         if isinstance(fields.get("defaults"), dict):
             result["defaults"] = fields["defaults"]
+        if isinstance(fields.get("runtime_hints"), dict):
+            result["runtime_hints"] = fields["runtime_hints"]
         if "on_overlap" in fields:
             result["on_overlap"] = str(fields["on_overlap"])
         workspace = fields.get(provisioning.WORKSPACE_KEY)
