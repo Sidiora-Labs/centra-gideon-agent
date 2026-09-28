@@ -19,7 +19,7 @@ import { reportingWrite } from '../../app/shell/reportingWrite'
 import { notify } from '../../app/shell/appSdk'
 import { useQueryParam, useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { api, type ToolItem, type McpServer, type ImportableMcpServer, type ToolLoadFailure, type McpPoolStats, type ToolGroupsData } from '../../shared/data/api'
+import { api, type ToolItem, type McpServer, type ImportableMcpServer, type ToolLoadFailure, type McpPoolStats, type McpTransport, type McpServerUpdate, type ToolGroupsData } from '../../shared/data/api'
 import { isKnownTrustTier, trustTierHint, trustTierLabel } from '../../shared/data/trustTier'
 import { schemaProps } from './schema'
 import { ToolInspector } from './ToolInspector'
@@ -82,6 +82,7 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
 
   const [probing, setProbing] = useState(false)
   const [addOpen, setAddOpen] = useQueryFlag(query, setQuery, 'add')
+  const [editingServer, setEditingServer] = useState<McpServer | null>(null)
   const load = () => { invalidateKeys('tools:index'); refresh() }
 
   async function reprobe() {
@@ -98,6 +99,7 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
   }
 
   const [reconnecting, setReconnecting] = useState<string | null>(null)
+  const [allowing, setAllowing] = useState<string | null>(null)
   async function reconnectServer(s: McpServer) {
     setReconnecting(s.name)
     try { await api.reconnectMcp(s.name) } catch {   }
@@ -114,6 +116,21 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
       notify(msg, 'error')
     }
     setTimeout(load, 400)
+  }
+
+  async function allowServer(s: McpServer) {
+    if (!s.allowRevision || !s.allowQuestion) return
+    if (!(await confirm({ title: `Allow MCP server "${s.name}"?`, body: s.allowQuestion, danger: true, confirmLabel: 'Allow server' }))) return
+    setAllowing(s.name)
+    try {
+      await api.allowMcpServer(s.name, s.allowRevision, s.allowQuestion)
+      load()
+    } catch (e) {
+      let msg = e instanceof Error ? e.message : 'Failed to allow MCP server'
+      try { const p = JSON.parse(msg); msg = p.error || msg } catch { }
+      notify(msg, 'error')
+      load()
+    } finally { setAllowing(null) }
   }
 
   async function toggleTool(g: Group, t: ToolItem) {
@@ -229,13 +246,14 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
               {!filtered && loadFailures.length > 0 && <LoadFailures failures={loadFailures} />}
               {!filtered && groupsInfo && <ToolGroupsTile data={groupsInfo} onChanged={load} />}
               {!filtered && <McpPoolTile stats={poolStats} />}
-              {groups?.map((g) => <GroupBlock key={g.key} g={g} onOpen={setOpenName} onToggleServer={toggleServer} onRemoveServer={removeServer} onToggleTool={toggleTool} onToggleProvider={toggleProvider} onReconnect={reconnectServer} reconnecting={reconnecting} />)}
+              {groups?.map((g) => <GroupBlock key={g.key} g={g} onOpen={setOpenName} onToggleServer={toggleServer} onRemoveServer={removeServer} onAllowServer={allowServer} onEditServer={setEditingServer} allowing={allowing} onToggleTool={toggleTool} onToggleProvider={toggleProvider} onReconnect={reconnectServer} reconnecting={reconnecting} />)}
               {!filtered && importable.length > 0 && <ImportSuggestions servers={importable} onImported={() => setTimeout(load, 300)} />}
             </div>
           )}
         </div>
 
         {addOpen && <AddToolServerModal onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); setTimeout(load, 300) }} />}
+        {editingServer && <EditToolServerModal server={editingServer} onClose={() => setEditingServer(null)} onSaved={() => { setEditingServer(null); load() }} />}
       </>
     </WorkbenchLayout>
   )
@@ -284,7 +302,7 @@ export function providerBadge(g: Pick<Group, 'providerLocked' | 'tier'>): { labe
   return { label: trustTierLabel(g.tier), title: trustTierHint(g.tier) }
 }
 
-export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggleTool, onToggleProvider, onReconnect, reconnecting }: { g: Group; onOpen: (name: string) => void; onToggleServer: (s: McpServer) => void; onRemoveServer: (s: McpServer) => void; onToggleTool: (g: Group, t: ToolItem) => void; onToggleProvider: (g: Group) => void; onReconnect: (s: McpServer) => void; reconnecting: string | null }) {
+export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowServer, onEditServer, allowing, onToggleTool, onToggleProvider, onReconnect, reconnecting }: { g: Group; onOpen: (name: string) => void; onToggleServer: (s: McpServer) => void; onRemoveServer: (s: McpServer) => void; onAllowServer: (s: McpServer) => void; onEditServer: (s: McpServer) => void; allowing: string | null; onToggleTool: (g: Group, t: ToolItem) => void; onToggleProvider: (g: Group) => void; onReconnect: (s: McpServer) => void; reconnecting: string | null }) {
   const health = g.server ? serverHealth(g.server) : null
   const nativeToggleable = g.kind === 'native' && !g.providerLocked
   const badge = g.kind === 'native' ? providerBadge(g) : null
@@ -309,6 +327,8 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onToggle
         )}
         {g.server && (
           <div className="ml-auto flex items-center gap-1">
+            {g.server.allowed === false && g.server.allowRevision && g.server.allowQuestion && <Button variant="secondary" size="sm" loading={allowing === g.server.name} onClick={() => onAllowServer(g.server!)}>Review and allow</Button>}
+            {!g.server.name.includes(':') && <Button variant="secondary" size="sm" onClick={() => onEditServer(g.server!)}>Edit</Button>}
             {
 }
             <SquareIconButton label={`Reconnect ${g.server.name}`} title="Reconnect this server"
@@ -429,13 +449,13 @@ function Toggle({ on }: { on: boolean }) {
   return <SharedToggle on={on} readOnly decorative size="sm" />
 }
 
-function ImportSuggestions({ servers, onImported }: { servers: ImportableMcpServer[]; onImported: () => void }) {
+export function ImportSuggestions({ servers, onImported }: { servers: ImportableMcpServer[]; onImported: () => void }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
 
   const importOne = async (s: ImportableMcpServer) => {
-    setBusy(s.name)
-    try { await api.importMcpServer(s.name); onImported() } finally { setBusy(null) }
+    setBusy(s.id)
+    try { await api.importMcpServer(s.id); onImported() } finally { setBusy(null) }
   }
 
   return (
@@ -448,23 +468,26 @@ function ImportSuggestions({ servers, onImported }: { servers: ImportableMcpServ
       {open && (
         <>
           <p data-type="caption" className="mb-2 text-on-surface-low leading-snug">
-            These MCP servers are configured in another backend but not in Gideon. Import one to copy its
-            configuration here so your agents can use it.
+            These MCP servers are configured in another backend but not in Gideon. Import reads the selected
+            configuration on the server; sensitive values stay hidden from this page.
           </p>
           <div className="flex flex-col gap-2">
             {servers.map((s) => (
-              <div key={s.name} className="flex items-center gap-3 rounded-lg bg-surface-container px-m py-2.5">
+              <div key={s.id} className="flex items-center gap-3 rounded-lg bg-surface-container px-m py-2.5">
                 <Server size={15} className="shrink-0 text-on-surface-low" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-mono text-on-surface text-[0.8125rem]" title={s.name}>{s.name}</span>
                     <span data-type="caption" className="rounded-pill bg-surface-high px-1.5 py-0.5 text-on-surface-low">{s.backend}</span>
                   </div>
-                  {
-}
-                  <p className="mt-0.5 truncate font-mono text-on-surface-low text-[0.75rem]" title={s.url || [s.command, ...(s.args ?? [])].join(' ')}>{s.url || [s.command, ...(s.args ?? [])].join(' ')}</p>
+                  <p className="mt-0.5 truncate font-mono text-on-surface-low text-[0.75rem]" title={[s.transport, s.display_url, s.display_command, ...(s.display_args ?? [])].filter(Boolean).join(' ')}>
+                    {s.transport === 'stdio' ? [s.display_command, ...(s.display_args ?? [])].filter(Boolean).join(' ') : s.display_url}
+                  </p>
+                  <p data-type="caption" className="mt-1 text-on-surface-low">
+                    {(s.env ?? []).filter((entry) => entry.configured).length} configured environment values · {(s.headers ?? []).filter((entry) => entry.configured).length} configured headers{s.secrets_skipped ? ` · ${s.secrets_skipped} sensitive fields omitted` : ''}
+                  </p>
                 </div>
-                <Button variant="secondary" size="sm" onClick={() => importOne(s)} loading={busy === s.name}><Download size={13} /> Import
+                <Button variant="secondary" size="sm" onClick={() => importOne(s)} loading={busy === s.id}><Download size={13} /> Import
                 </Button>
               </div>
             ))}
@@ -475,13 +498,112 @@ function ImportSuggestions({ servers, onImported }: { servers: ImportableMcpServ
   )
 }
 
+export interface McpServerEditDraft {
+  mode: 'stdio' | 'remote'
+  command?: string
+  url?: string
+  transport?: McpTransport
+  args?: string
+  env?: string
+  headers?: string
+  clearArgs?: boolean
+  clearEnv?: boolean
+  clearHeaders?: boolean
+}
+
+export function buildMcpServerEditPatch(server: McpServer, draft: McpServerEditDraft): McpServerUpdate | null {
+  const currentRemote = !!server.url
+  const body: McpServerUpdate = {}
+  if (draft.mode === 'remote') {
+    const url = draft.url?.trim() ?? ''
+    if (!currentRemote) {
+      if (!url) return null
+      body.url = url
+      body.command = ''
+    } else if (url) body.url = url
+    if (draft.transport && draft.transport !== server.transport) body.transport = draft.transport
+    const headers: Record<string, string> = {}
+    for (const line of (draft.headers ?? '').split('\n')) {
+      const i = line.indexOf(':')
+      if (i > 0 && line.slice(i + 1).trim()) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+    }
+    if (draft.clearHeaders) body.headers = {}
+    else if (Object.keys(headers).length) body.headers = headers
+  } else {
+    const command = draft.command?.trim() ?? ''
+    if (currentRemote) {
+      if (!command) return null
+      body.command = command
+      body.url = ''
+    } else if (command) body.command = command
+    const args = draft.args?.trim() ?? ''
+    if (draft.clearArgs) body.args = []
+    else if (args) body.args = args.split(/\s+/)
+  }
+  const env: Record<string, string> = {}
+  for (const line of (draft.env ?? '').split('\n')) {
+    const i = line.indexOf('=')
+    if (i > 0 && line.slice(i + 1).trim()) env[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  if (draft.clearEnv) body.env = {}
+  else if (Object.keys(env).length) body.env = env
+  return Object.keys(body).length ? body : null
+}
+
+export function EditToolServerModal({ server, onClose, onSaved }: { server: McpServer; onClose: () => void; onSaved: () => void }) {
+  const [mode, setMode] = useState<'stdio' | 'remote'>(server.url ? 'remote' : 'stdio')
+  const [command, setCommand] = useState('')
+  const [url, setUrl] = useState('')
+  const [transport, setTransport] = useState<McpTransport>(server.transport?.trim().toLowerCase() === 'sse' ? 'sse' : 'streamable_http')
+  const [args, setArgs] = useState('')
+  const [env, setEnv] = useState('')
+  const [headers, setHeaders] = useState('')
+  const [clearArgs, setClearArgs] = useState(false)
+  const [clearEnv, setClearEnv] = useState(false)
+  const [clearHeaders, setClearHeaders] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  async function save() {
+    const patch = buildMcpServerEditPatch(server, { mode, command, url, transport, args, env, headers, clearArgs, clearEnv, clearHeaders })
+    if (!patch) { setErr(mode !== (server.url ? 'remote' : 'stdio') ? 'Enter the new connection address before switching.' : 'Enter a change or choose a clear option.'); return }
+    setSaving(true); setErr('')
+    try { await api.addMcpServer(server.name, patch); onSaved() }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to update server'); setSaving(false) }
+  }
+  return <Modal title={`Edit ${server.name}`} icon={<Server size={18} className="text-primary" />} onClose={onClose}>
+    <div className="flex flex-col gap-3">
+      <p data-type="caption" className="text-on-surface-low">Current settings are retained when left blank. Secret values are never shown; enter a replacement or clear the setting.</p>
+      <Field label="Connection"><Segmented value={mode} onChange={(value) => setMode(value as 'stdio' | 'remote')} options={[{ key: 'stdio', label: 'Command' }, { key: 'remote', label: 'Remote URL' }]} /></Field>
+      {mode === 'remote' ? <>
+        <Field label="New server URL" hint={server.url ? 'Leave blank to keep the current URL.' : 'Required to switch this server to a remote connection.'}><TextInput value={url} onChange={setUrl} placeholder="https://mcp.example.com/mcp" size="md" surface="high" mono /></Field>
+        <Field label="Transport"><Segmented value={transport} onChange={(value) => setTransport(value as McpTransport)} options={[{ key: 'streamable_http', label: 'Streamable HTTP' }, { key: 'sse', label: 'SSE' }]} /></Field>
+        <Field label="New headers" hint="Enter replacement values only. Leave blank to retain existing headers."><TextArea value={headers} onChange={setHeaders} rows={3} placeholder="Authorization: Bearer token" mono size="md" /></Field>
+        {!!server.headers?.length && <label className="flex items-center gap-2 text-on-surface-low"><input type="checkbox" checked={clearHeaders} onChange={(e) => setClearHeaders(e.target.checked)} /> Clear saved headers</label>}
+      </> : <>
+        <p data-type="caption" className="text-on-surface-low">Current command: <span className="font-mono">{server.command || 'not available'}</span>. Enter a replacement to change it.</p>
+        <Field label="New command"><TextInput value={command} onChange={setCommand} placeholder="npx" size="md" surface="high" mono /></Field>
+        <Field label="New arguments" hint="Space-separated. Leave blank to retain current arguments."><TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono /></Field>
+        {!!server.args?.length && <label className="flex items-center gap-2 text-on-surface-low"><input type="checkbox" checked={clearArgs} onChange={(e) => setClearArgs(e.target.checked)} /> Clear saved arguments</label>}
+      </>}
+      <Field label="New environment values" hint="One KEY=value per line. Blank retains current values."><TextArea value={env} onChange={setEnv} rows={2} placeholder="LOG_LEVEL=info" mono size="md" /></Field>
+      {!!server.env?.length && <label className="flex items-center gap-2 text-on-surface-low"><input type="checkbox" checked={clearEnv} onChange={(e) => setClearEnv(e.target.checked)} /> Clear saved environment values</label>}
+      {err && <p role="alert" className="text-danger">{err}</p>}
+      <div className="flex gap-2"><Button size="sm" onClick={save} loading={saving}>Save changes</Button><Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button></div>
+    </div>
+  </Modal>
+}
+
 
 function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [kind, setKind] = useState<'mcp' | 'openai'>('mcp')
+  const [mode, setMode] = useState<'stdio' | 'remote'>('stdio')
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [args, setArgs] = useState('')
   const [env, setEnv] = useState('')
+  const [url, setUrl] = useState('')
+  const [transport, setTransport] = useState<McpTransport>('streamable_http')
+  const [headers, setHeaders] = useState('')
   const [oaName, setOaName] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -498,19 +620,31 @@ function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded
 
   const submitMcp = async () => {
     if (!validName) { setErr('Name must be letters, digits, dashes, underscores (1–64).'); return }
-    if (!command.trim()) { setErr('Command is required (e.g. npx, node, uvx).'); return }
-    const envObj: Record<string, string> = {}
-    for (const line of env.split('\n')) {
-      const i = line.indexOf('=')
-      if (i > 0) envObj[line.slice(0, i).trim()] = line.slice(i + 1).trim()
-    }
-    setSaving(true); setErr('')
-    try {
-      await api.addMcpServer(name.trim(), {
+    let body: McpServerUpdate
+    if (mode === 'remote') {
+      if (!url.trim()) { setErr('Server URL is required.'); return }
+      const remoteHeaders: Record<string, string> = {}
+      for (const line of headers.split('\n')) {
+        const i = line.indexOf(':')
+        if (i > 0) remoteHeaders[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+      }
+      body = { url: url.trim(), transport, ...(Object.keys(remoteHeaders).length ? { headers: remoteHeaders } : {}) }
+    } else {
+      if (!command.trim()) { setErr('Command is required (e.g. npx, node, uvx).'); return }
+      const envObj: Record<string, string> = {}
+      for (const line of env.split('\n')) {
+        const i = line.indexOf('=')
+        if (i > 0) envObj[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+      }
+      body = {
         command: command.trim(),
         args: args.trim() ? args.trim().split(/\s+/) : undefined,
         env: Object.keys(envObj).length ? envObj : undefined,
-      })
+      }
+    }
+    setSaving(true); setErr('')
+    try {
+      await api.addMcpServer(name.trim(), body)
       onAdded()
     } catch (e) { setErr(apiErr(e)); setSaving(false) }
   }
@@ -531,7 +665,7 @@ function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded
     } catch (e) { setErr(apiErr(e)); setSaving(false) }
   }
 
-  const canSubmit = kind === 'mcp' ? (!!name && !!command.trim()) : !!endpoint.trim()
+  const canSubmit = kind === 'mcp' ? (!!name && (mode === 'remote' ? !!url.trim() : !!command.trim())) : !!endpoint.trim()
 
   return (
     <Modal title="Add tool server" icon={<Server size={18} className="text-primary" />} onClose={onClose}>
@@ -544,17 +678,30 @@ function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded
           <Field label="Name" hint="A unique handle (letters, digits, dashes, underscores).">
             <TextInput value={name} onChange={setName} placeholder="filesystem-mcp" size="md" surface="high" />
           </Field>
-          <Field label="Command" hint="The executable that starts the server over stdio.">
-            <TextInput value={command} onChange={setCommand} placeholder="npx" size="md" surface="high" mono />
+          <Field label="Connection">
+            <Segmented value={mode} onChange={(value) => { setMode(value as 'stdio' | 'remote'); setErr('') }} options={[{ key: 'stdio', label: 'Command' }, { key: 'remote', label: 'Remote URL' }]} />
           </Field>
-          <Field label="Arguments" hint="Space-separated args passed to the command (optional).">
-            <TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono />
-          </Field>
-          <Field label="Environment" hint="One KEY=value per line (optional).">
-            {
-}
-            <TextArea value={env} onChange={setEnv} rows={2} placeholder="API_KEY=sk-…" mono size="md" />
-          </Field>
+          {mode === 'stdio' ? (<>
+            <Field label="Command" hint="The executable that starts the server over stdio.">
+              <TextInput value={command} onChange={setCommand} placeholder="npx" size="md" surface="high" mono />
+            </Field>
+            <Field label="Arguments" hint="Space-separated args passed to the command (optional).">
+              <TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono />
+            </Field>
+            <Field label="Environment" hint="One KEY=value per line. Values are saved server-side.">
+              <TextArea value={env} onChange={setEnv} rows={2} placeholder="API_KEY=sk-…" mono size="md" />
+            </Field>
+          </>) : (<>
+            <Field label="Server URL" hint="The MCP endpoint Gideon connects to.">
+              <TextInput value={url} onChange={setUrl} placeholder="https://mcp.example.com/mcp" size="md" surface="high" mono />
+            </Field>
+            <Field label="Transport">
+              <Segmented value={transport} onChange={(value) => setTransport(value as McpTransport)} options={[{ key: 'streamable_http', label: 'Streamable HTTP' }, { key: 'sse', label: 'SSE' }]} />
+            </Field>
+            <Field label="Headers" hint="Optional secret headers, one Name: value per line. Values are stored server-side.">
+              <TextArea value={headers} onChange={setHeaders} rows={3} placeholder="Authorization: Bearer token" mono size="md" />
+            </Field>
+          </>)}
         </>) : (<>
           <Field label="Name" hint="A label for this tool server (optional — defaults to the endpoint).">
             <TextInput value={oaName} onChange={setOaName} placeholder="my-tools" size="md" surface="high" />
@@ -583,4 +730,3 @@ function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded
     </Modal>
   )
 }
-

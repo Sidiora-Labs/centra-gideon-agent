@@ -24,6 +24,7 @@ import asyncio
 import logging
 import re
 import time
+from urllib.parse import urlsplit
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -40,6 +41,78 @@ _IDLE_TTL_SECS = 600.0
 _SWEEP_INTERVAL_SECS = 120.0
 _BREAKER_THRESHOLD = 3
 _BREAKER_COOLDOWN_SECS = 60.0
+
+
+def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoint=""):
+    """Create MCP's HTTP client with the shared egress decision on every request."""
+    import httpx
+
+    from gideon.security.net.guard import evaluate
+    from gideon.security.net.policy import STRICT, egress_policy_for
+    from gideon.security.net.client import EgressBlocked, _audit
+
+    policy = egress_policy_for(STRICT)
+    base = urlsplit(endpoint)
+
+    def same_origin(candidate):
+        target = urlsplit(candidate)
+        if target.hostname is None or base.hostname is None:
+            return False
+        source_port = base.port or (443 if base.scheme == "https" else 80)
+        target_port = target.port or (443 if target.scheme == "https" else 80)
+        same_port = target_port == source_port or (
+            base.scheme == "http" and target.scheme == "https"
+            and source_port == 80 and target_port == 443
+        )
+        return target.hostname.lower() == base.hostname.lower() and same_port and (
+            target.scheme == base.scheme or (base.scheme == "http" and target.scheme == "https")
+        )
+
+    class GuardedTransport(httpx.AsyncBaseTransport):
+        def __init__(self):
+            self._transport = httpx.AsyncHTTPTransport()
+
+        async def handle_async_request(self, request):
+            parsed = urlsplit(str(request.url))
+            if parsed.username or parsed.password or parsed.fragment:
+                raise ValueError("MCP remote URL must not contain userinfo or a fragment")
+            if not same_origin(str(request.url)):
+                raise ValueError("MCP remote transport refused a cross-origin redirect or endpoint")
+            decision = evaluate(str(request.url), policy)
+            audit_origin = f"{parsed.scheme}://{parsed.netloc}"
+            if not decision.allow:
+                _audit(audit_origin, policy, outcome="denied", reason=decision.reason)
+                raise EgressBlocked(decision)
+            _audit(audit_origin, policy, outcome="allowed")
+            if not policy.pin_resolved_ip or not decision.pinned_ips:
+                return await self._transport.handle_async_request(request)
+            original_host = request.url.host
+            original_authority = request.url.netloc.decode("ascii")
+            ip = decision.pinned_ips[0]
+            extensions = dict(request.extensions)
+            extensions["sni_hostname"] = original_host
+            pinned = httpx.Request(
+                request.method,
+                request.url.copy_with(host=ip),
+                headers=request.headers,
+                stream=request.stream,
+                extensions=extensions,
+            )
+            pinned.headers["host"] = original_authority
+            response = await self._transport.handle_async_request(pinned)
+            response._request = request
+            return response
+
+        async def aclose(self):
+            await self._transport.aclose()
+
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout or httpx.Timeout(_CONNECT_TIMEOUT_SECS, read=300),
+        auth=auth,
+        transport=GuardedTransport(),
+        trust_env=False,
+    )
 
 
 def approval_window_secs() -> float:
@@ -303,7 +376,11 @@ class McpServerConn:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            self._error = str(exc)[:300] or exc.__class__.__name__
+            from gideon.security.security import redact_credentials, redact_exfiltration_urls
+
+            safe_error, _ = redact_exfiltration_urls(str(exc))
+            safe_error, _ = redact_credentials(safe_error)
+            self._error = safe_error[:300] or exc.__class__.__name__
             logger.warning(
                 "MCP server '%s' connection failed: %s", self.name, self._error
             )
@@ -335,17 +412,23 @@ class McpServerConn:
                 if not str(url).startswith("https://"):
                     raise ValueError("MCP OAuth requires HTTPS")
                 auth = oauth_provider(self.name, str(url), spec)
-            transport = (spec.get("transport") or "").lower()
-            if transport in ("http", "streamable-http", "streamable_http"):
+            transport = normalize_transport(spec)
+            if transport == "streamable-http":
                 from mcp.client.streamable_http import streamablehttp_client
 
                 read, write, _ = await stack.enter_async_context(
-                    streamablehttp_client(url, headers=headers, auth=auth)
+                    streamablehttp_client(
+                        url, headers=headers, auth=auth,
+                        httpx_client_factory=lambda **kw: _remote_http_client_factory(endpoint=str(url), **kw),
+                    )
                 )
                 return read, write
             from mcp.client.sse import sse_client
 
-            read, write = await stack.enter_async_context(sse_client(url, headers=headers, auth=auth))
+            read, write = await stack.enter_async_context(
+                sse_client(url, headers=headers, auth=auth,
+                           httpx_client_factory=lambda **kw: _remote_http_client_factory(endpoint=str(url), **kw))
+            )
             return read, write
 
         import os
@@ -455,6 +538,26 @@ def _is_poolable(spec: dict[str, Any]) -> bool:
     servers (a browser with a logged-in page, a shell with a cwd) must default to
     per-session isolation so one session's state can't leak into another's."""
     return bool(spec.get("poolable", False))
+
+
+def normalize_transport(spec: dict[str, Any]) -> str:
+    """Return the one runtime transport name accepted by discovery and clients."""
+    url = spec.get("url") or spec.get("endpoint")
+    command = spec.get("command")
+    transport = str(spec.get("transport") or "").strip().lower().replace("_", "-")
+    if url:
+        if command:
+            raise ValueError("MCP server cannot define both command and URL")
+        if transport in ("", "sse"):
+            return "sse"
+        if transport in ("http", "streamable-http"):
+            return "streamable-http"
+        raise ValueError("unsupported MCP remote transport")
+    if not command:
+        raise ValueError("MCP server needs one command or URL")
+    if transport not in ("", "stdio"):
+        raise ValueError("unsupported MCP command transport")
+    return "stdio"
 
 
 def _spec_hash(spec: dict[str, Any]) -> str:

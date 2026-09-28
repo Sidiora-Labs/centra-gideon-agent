@@ -246,6 +246,10 @@ def display(server: Any) -> dict[str, Any]:
     shown["args"] = [redact_exfiltration_urls(redact_credentials(arg)[0])[0] for arg in shown["args"]]
     shown["url"], _ = redact_credentials(shown["url"])
     shown["url"], _ = redact_exfiltration_urls(shown["url"])
+    from gideon.integrations.mcp_secret_refs import safe_display_args, safe_display_url
+
+    shown["args"] = safe_display_args(shown["args"])
+    shown["url"] = safe_display_url(shown["url"])
     return shown
 
 

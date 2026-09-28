@@ -165,10 +165,12 @@ class McpServerInfo:
             allow_revision = ""
             allow_question = mcp_grants.WAITING_REASON
             display = {"command": "", "args": [], "url": "", "transport": "", "env": [], "headers": [], "header_credentials": [], "oauth": [], "poolable": False}
+        from gideon.integrations.mcp_secret_refs import safe_display_args, safe_display_url
+
         d: dict[str, Any] = {
             "name": self.name,
             "command": display["command"],
-            "args": display["args"],
+            "args": safe_display_args(display["args"]),
             "transport": display["transport"],
             "env": display["env"],
             "headers": display["headers"],
@@ -185,7 +187,7 @@ class McpServerInfo:
             "allowQuestion": allow_question,
         }
         if self.url:
-            d["url"] = display["url"]
+            d["url"] = safe_display_url(display["url"])
         if self.cwd:
             d["cwd"] = self.cwd
         if self.disabled_tools:
@@ -472,68 +474,27 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
     if not _server_allowed(server):
         return _wait_for_owner(server)
     server.status = "probing"
+    conn = None
     try:
-        init_body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "gideon-probe", "version": "1.0.0"},
-            },
-        }
-        headers = dict(server.headers)
-        if server.source in {"mcp.json", "agent"}:
-            from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+        from gideon.integrations.mcp_client import McpServerConn, _gideon_mcp_specs
 
-            headers = resolve_server_credentials(server.name, {"headers": headers}).get("headers", {})
-        hdrs = {
-            **headers,
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-
-        timeout = aiohttp.ClientTimeout(total=_get_probe_timeout())
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(server.url, json=init_body, headers=hdrs) as resp:
-                if resp.status != 200:
-                    server.status = "error"
-                    server.error = f"HTTP {resp.status}"
-                    _cache_probe(server)
-                    return server
-                data = await _read_jsonrpc_response(resp)
-                if data.get("error"):
-                    server.status = "error"
-                    err = data["error"]
-                    server.error = (
-                        err.get("message", "unknown error")
-                        if isinstance(err, dict)
-                        else str(err)
-                    )
-                    _cache_probe(server)
-                    return server
-
-            list_body = {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/list",
-                "params": {},
-            }
-            async with session.post(server.url, json=list_body, headers=hdrs) as resp:
-                if resp.status == 200:
-                    data = await _read_jsonrpc_response(resp)
-                    tools_data = data.get("result", {}).get("tools", [])
-                    server.tools = [
-                        {
-                            "name": t.get("name", ""),
-                            "description": t.get("description", ""),
-                            "inputSchema": t.get("inputSchema", {}),
-                        }
-                        for t in tools_data
-                        if isinstance(t, dict) and t.get("name")
-                    ]
-
+        spec = _gideon_mcp_specs().get(server.name)
+        if not isinstance(spec, dict):
+            raise ValueError("MCP server is no longer configured")
+        conn = McpServerConn(server.name, spec, scope=server.source)
+        tools = await conn.list_tools()
+        if conn.error:
+            server.status = "error"
+            server.error = conn.error[:200]
+        else:
+            server.tools = [
+                {"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema}
+                for tool in tools
+            ]
+            server.status = "ok"
+        if server.status != "ok":
+            _cache_probe(server)
+            return server
         server.status = "ok"
     except asyncio.TimeoutError:
         server.status = "error"
@@ -543,6 +504,9 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
         server.status = "error"
         server.error = str(exc)[:200]
         logger.warning("MCP probe failed [%s]: %s", server.name, server.error)
+    finally:
+        if conn is not None:
+            await conn.shutdown()
 
     _cache_probe(server)
     return server
@@ -841,8 +805,9 @@ def discover_importable_servers() -> list[dict[str, Any]]:
     Claude-Code-only server). The UI offers each as an explicit "Import" action
     backed by ``/api/mcp/apply``, which copies the spec into the Gideon scope.
 
-    Each entry: ``{name, backend, command, args, env, url, headers}`` — enough
-    to render the suggestion and round-trip the spec on import.
+    Each entry contains a random process-local selection ID and safe display
+    metadata. Executable values remain on the server and are revalidated when
+    the owner selects an entry.
     """
     # Servers already known to Gideon (own scope + legacy global + agent config)
     # are not "importable" — they're already first-class.
@@ -870,24 +835,27 @@ def discover_importable_servers() -> list[dict[str, Any]]:
             if not (spec.get("command") or spec.get("url")):
                 continue
             seen.add(name)
-            from gideon.cognition.onboarding_import.floors import strip_secrets
+            env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+            headers = spec.get("headers") if isinstance(spec.get("headers"), dict) else {}
+            from gideon.integrations.mcp_secret_refs import issue_import_id, safe_import_projection
 
-            safe_env, skipped = strip_secrets(spec.get("env", {}))
-            headers = spec.get("headers", {})
-            if isinstance(headers, dict):
-                skipped += len(headers)
-            else:
-                headers = {}
+            safe_env, skipped = {}, 0
+            try:
+                from gideon.cognition.onboarding_import.floors import strip_secrets
+
+                safe_env, skipped = strip_secrets(env)
+            except Exception:
+                skipped = len(env)
+            skipped += len(headers)
             out.append(
                 {
-                    "name": name,
-                    "backend": backend,
-                    "command": spec.get("command", ""),
-                    "args": spec.get("args", []),
-                    "env": safe_env if isinstance(safe_env, dict) else {},
-                    "url": spec.get("url", ""),
-                    "headers": {},
-                    "secrets_skipped": skipped,
+                    "id": issue_import_id(path, backend, name, spec),
+                    **safe_import_projection(
+                        name=name,
+                        backend=backend,
+                        spec=spec,
+                        secrets_skipped=skipped,
+                    ),
                 }
             )
     return out

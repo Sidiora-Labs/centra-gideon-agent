@@ -5,15 +5,12 @@ import json
 import logging
 import os
 import re
-import shutil
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
 from aiohttp import web
 
-from gideon.core.cancellation import run_with_timeout
 from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -684,10 +681,8 @@ async def api_mcp_importable(request: web.Request) -> web.Response:
     """GET /api/mcp/importable — MCP servers configured in an external backend
     (e.g. Claude Code) that aren't yet in any Gideon scope.
 
-    These are NOT loaded by Gideon — the native loop can't reach a
-    backend-only server. The Tools UI lists them as import suggestions; choosing
-    one POSTs ``/api/mcp/apply`` with ``gideon: true`` to copy the spec
-    into ``~/.gideon/mcp.json`` so it becomes a first-class Gideon server.
+    Executable values stay on the server. The response contains only a short-lived
+    opaque selection ID and redacted display metadata.
     """
     from gideon.integrations.mcp_discovery import discover_importable_servers
 
@@ -974,33 +969,6 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
 
     logger.info("MCP remove: %s", name)
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "gideon",
-            "skills",
-            "mcp",
-            "uninstall",
-            name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await run_with_timeout(proc, 30)
-        rc = proc.returncode
-        out = (stdout or b"").decode(errors="replace").strip()
-        err = (stderr or b"").decode(errors="replace").strip()
-        logger.info(
-            "MCP uninstall via marketplace: rc=%d out=%s err=%s",
-            rc,
-            out[:100],
-            err[:100],
-        )
-    except FileNotFoundError:
-        logger.debug("gideon CLI not in PATH")
-    except asyncio.TimeoutError:
-        logger.warning("marketplace mcp uninstall timed out for %s", name)
-    except Exception as exc:
-        logger.warning("marketplace mcp uninstall failed for %s: %s", name, exc)
-
     async with _get_mcp_lock():
         try:
             data = json.loads(_GLOBAL_MCP_JSON.read_text(encoding="utf-8"))
@@ -1103,6 +1071,9 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
                 except (TypeError, ValueError):
                     pass
             _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
+            from gideon.integrations.mcp_client import get_mcp_client_registry
+
+            get_mcp_client_registry()
         sel().log_api_access(
             caller="dashboard",
             operation="mcp_server_remove",
@@ -1121,27 +1092,38 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
-    command = body.get("command", "")
-    url = body.get("url", body.get("endpoint", ""))
-    if bool(command) == bool(url):
-        return web.json_response({"error": "specify exactly one command or remote URL"}, status=400)
-
-    entry: dict[str, Any] = {"url": url} if url else {"command": command}
-    for field in ("args", "env", "headers", "oauth", "transport"):
-        if field in body:
-            entry[field] = body[field]
-
-    from gideon.extensions.providers.mcp_instances import store_server_credentials
-    from gideon.core.config.secret_refs import SecretOwner, purge_unused
-
     async with _get_mcp_lock():
         data = _load_json_for_update(_canonical_mcp_json())
         servers = data.setdefault("mcpServers", {})
         previous = servers.get(name)
         previous = previous if isinstance(previous, dict) else {}
-        for field in ("env", "headers", "oauth"):
-            if field not in body and field in previous:
-                entry[field] = previous[field]
+        has_new_endpoint = "command" in body or "url" in body or "endpoint" in body
+        if not previous and not has_new_endpoint:
+            return web.json_response({"error": "a new server needs a command or remote URL"}, status=400)
+        if "command" in body and ("url" in body or "endpoint" in body):
+            return web.json_response({"error": "specify only one command or remote URL"}, status=400)
+        entry = dict(previous)
+        if "command" in body:
+            command = body.get("command")
+            if not isinstance(command, str):
+                return web.json_response({"error": "command must be a string"}, status=400)
+            entry.pop("url", None)
+            entry["command"] = command
+        if "url" in body or "endpoint" in body:
+            url = body.get("url", body.get("endpoint"))
+            if not isinstance(url, str):
+                return web.json_response({"error": "url must be a string"}, status=400)
+            entry.pop("command", None)
+            entry["url"] = url
+        for field in ("args", "env", "headers", "oauth", "transport"):
+            if field in body:
+                entry[field] = body[field]
+        if bool(entry.get("command")) == bool(entry.get("url")):
+            return web.json_response({"error": "specify exactly one command or remote URL"}, status=400)
+
+        from gideon.integrations.mcp_secret_refs import store_server_credentials
+        from gideon.core.config.secret_refs import SecretOwner, purge_unused
+
         try:
             entry = store_server_credentials(name, entry, previous=previous)
             servers[name] = entry
@@ -1161,16 +1143,53 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
         }
         purge_unused(SecretOwner("MCP", name), retained)
 
+        if previous:
+            from gideon.security.mcp_grants import revoke
+
+            try:
+                revoke({**previous, "name": name, "source": "mcp.json"})
+            except (TypeError, ValueError):
+                pass
+            old_url = str(previous.get("url") or previous.get("endpoint") or "")
+            new_url = str(entry.get("url") or entry.get("endpoint") or "")
+            if old_url and old_url != new_url:
+                from gideon.integrations.mcp_oauth import purge_server
+
+                purge_server(name, old_url)
+
     _sync_mcp_to_agent(name, True)
 
-    logger.info("MCP register via REST: %s command=%s", name, command)
+    logger.info("MCP register via REST: %s transport=%s", name, entry.get("transport", "stdio"))
     sel().log_api_access(
         caller="dashboard",
         operation="mcp_server_register",
         outcome="completed",
         resources=name,
     )
-    return web.json_response({"ok": True, "name": name}, status=200)
+    from gideon.integrations.mcp_discovery import McpServerInfo
+
+    info = McpServerInfo(
+        name=name,
+        command=entry.get("command", ""),
+        args=entry.get("args", []),
+        env=entry.get("env", {}),
+        url=entry.get("url", ""),
+        headers=entry.get("headers", {}),
+        transport=entry.get("transport", ""),
+        source="mcp.json",
+    )
+    from gideon.security import mcp_grants
+
+    row = info.to_dict()
+    row.update({
+        "allowed": False,
+        "allowRevision": mcp_grants.revision({**entry, "name": name, "source": "mcp.json"}),
+        "allowQuestion": mcp_grants.question({**entry, "name": name, "source": "mcp.json"}),
+    })
+    from gideon.integrations.mcp_client import get_mcp_client_registry
+
+    get_mcp_client_registry()
+    return web.json_response({"ok": True, "name": name, "server": row}, status=200)
 
 
 async def api_mcp_server_allow(request: web.Request) -> web.Response:
@@ -1577,6 +1596,54 @@ async def api_mcp_apply(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
+    if "import_id" in body:
+        if set(body) != {"import_id"}:
+            return web.json_response({"error": "select one server using only import_id"}, status=400)
+        from gideon.integrations.mcp_secret_refs import select_import, store_server_credentials
+        from gideon.integrations.mcp_discovery import McpServerInfo
+        from gideon.security import mcp_grants
+        from gideon.core.config.secret_refs import SecretOwner, purge_unused
+
+        try:
+            name, selected = select_import(body.get("import_id"))
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        if not _is_valid_mcp_name(name):
+            return web.json_response({"error": "imported MCP server name is invalid"}, status=400)
+        allowed_fields = {"command", "args", "env", "cwd", "url", "transport", "headers", "oauth"}
+        entry = {key: value for key, value in selected.items() if key in allowed_fields}
+        if bool(entry.get("command")) == bool(entry.get("url")):
+            return web.json_response({"error": "import must define one command or remote URL"}, status=400)
+
+        async with _get_mcp_lock():
+            try:
+                data = _load_json_for_update(_canonical_mcp_json())
+            except ConfigUnreadable as exc:
+                return web.json_response({"error": str(exc)}, status=409)
+            servers = data.setdefault("mcpServers", {})
+            if name in servers or _server_in_agent_config(name):
+                return web.json_response({"error": "server is already configured; refresh the list"}, status=409)
+            try:
+                entry = store_server_credentials(name, entry)
+                grant_server = {**entry, "name": name, "source": "mcp.json"}
+                revision = mcp_grants.revision(grant_server)
+                question = mcp_grants.question(grant_server)
+                servers[name] = entry
+                _atomic_write(_canonical_mcp_json(), data)
+            except (OSError, ValueError, TypeError) as exc:
+                purge_unused(SecretOwner("MCP", name), _mcp_auth_values(entry))
+                return web.json_response({"error": str(exc)}, status=400)
+        _sync_mcp_to_agent(name, True)
+        info = McpServerInfo(
+            name=name, command=entry.get("command", ""), args=entry.get("args", []),
+            env=entry.get("env", {}), url=entry.get("url", ""),
+            headers=entry.get("headers", {}), transport=entry.get("transport", ""),
+            source="mcp.json",
+        )
+        row = info.to_dict()
+        row.update({"allowed": False, "allowRevision": revision, "allowQuestion": question})
+        return web.json_response({"ok": True, "name": name, "server": row})
+
     changes = body.get("changes")
     if not isinstance(changes, list):
         return web.json_response({"error": "changes must be a list"}, status=400)
@@ -1601,6 +1668,10 @@ async def api_mcp_apply(request: web.Request) -> web.Response:
 
             outcome: dict[str, Any] = {"name": name, "actions": {}}
 
+            if change.get("gideon") and name not in _load_json_or_empty(_canonical_mcp_json()).get("mcpServers", {}):
+                results.append({"name": name, "error": "new MCP servers must be selected by opaque import_id"})
+                continue
+
             if change.get("uninstall"):
                 outcome["actions"]["gideon"] = (
                     "removed" if _remove_gideon_entry(name) else "noop"
@@ -1615,21 +1686,6 @@ async def api_mcp_apply(request: web.Request) -> web.Response:
                 _remove_from_agent_file(
                     Path.home() / ".claude" / "agents" / "gideon.mcp.json", name
                 )
-                mkt_cli = shutil.which("gideon")
-                if mkt_cli:
-                    try:
-                        await asyncio.to_thread(
-                            subprocess.run,
-                            [mkt_cli, "skills", "mcp", "uninstall", name],
-                            capture_output=True,
-                            text=True,
-                            timeout=30,
-                        )
-                        outcome["actions"]["marketplace"] = "uninstall_attempted"
-                    except Exception as exc:
-                        _urls_clean, _ = redact_exfiltration_urls(str(exc))
-                        _redacted, _ = redact_credentials(_urls_clean)
-                        outcome["actions"]["marketplace_error"] = _redacted
                 sel().log_api_access(
                     caller="dashboard",
                     operation="mcp_uninstall",

@@ -1535,6 +1535,8 @@ export interface AlwaysOnResponse {
 export interface McpServer {
   name: string; command?: string; args?: string[]; status: string; tools: Array<string | { name: string; description?: string }>
   error?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
+  url?: string; transport?: string; env?: string[]; headers?: string[]; header_credentials?: string[]; oauth?: string[]
+  allowed?: boolean; allowRevision?: string; allowQuestion?: string
 }
 export interface McpPoolStats {
   available: boolean
@@ -1543,8 +1545,16 @@ export interface McpPoolStats {
   evicted?: number; reused?: number
 }
 export interface ImportableMcpServer {
-  name: string; backend: string; command?: string; args?: string[]
-  env?: Record<string, string>; url?: string; headers?: Record<string, string>
+  id: string; name: string; backend: string; transport: string
+  display_command: string; display_args: string[]; display_url: string
+  env: Array<{ name: string; configured: boolean }>
+  headers: Array<{ name: string; configured: boolean }>
+  secrets_skipped: number
+}
+export interface McpImportResult { ok: boolean; name: string; server: McpServer }
+export interface McpServerUpdate {
+  command?: string; args?: string[]; env?: Record<string, string>; url?: string
+  headers?: Record<string, string>; oauth?: Record<string, string | number | boolean | null>; transport?: string
 }
 export interface ToolInvokeResult { ok: boolean; output?: string; error?: string }
 export type HookEnforcement = 'enforcing' | 'not_enforcing' | 'advisory'
@@ -4732,12 +4742,14 @@ export const api = {
   probeMcp: () => post<{ ok?: boolean }>('/api/mcp/probe'),
   reconnectMcp: (name: string) => post<McpServer>(`/api/mcp/probe/${encodeURIComponent(name)}`),
   toggleAllMcp: (enabled: boolean) => post('/api/mcp/toggle-all', { enabled }),
-  addMcpServer: (name: string, body: { command: string; args?: string[]; env?: Record<string, string> }) =>
-    put<{ ok?: boolean; name: string }>(`/api/mcp/servers/${encodeURIComponent(name)}`, body),
+  addMcpServer: (name: string, body: McpServerUpdate) =>
+    put<{ ok?: boolean; name: string; server?: McpServer }>(`/api/mcp/servers/${encodeURIComponent(name)}`, body),
   removeMcpServer: (name: string) => del(`/api/mcp/servers/${encodeURIComponent(name)}`),
   importableMcp: () => get<{ servers: ImportableMcpServer[] }>('/api/mcp/importable').then((r) => r.servers),
-  importMcpServer: (name: string) =>
-    post('/api/mcp/apply', { changes: [{ name, gideon: true, globalMcp: false, ccGlobal: true }] }),
+  importMcpServer: (id: string) =>
+    post<McpImportResult>('/api/mcp/apply', { import_id: id }),
+  allowMcpServer: (name: string, revision: string, question: string) =>
+    post<{ ok: boolean; name: string; allowed: true; revision: string }>(`/api/mcp/servers/${encodeURIComponent(name)}/allow`, { revision, question, confirmed: true }),
 
   system: () => get<SystemInfo>('/api/system'),
   authStatus: () => get<AuthStatus>('/api/auth-status'),
