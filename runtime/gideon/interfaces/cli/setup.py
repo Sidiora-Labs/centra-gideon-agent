@@ -147,7 +147,9 @@ def _setup(
 
             raise CliRefusal("a credential name is letters, digits and underscores")
     if only_app:
-        run_app_setup_steps(only_app=only_app)
+        failures = run_app_setup_steps(only_app=only_app)
+        if failures:
+            sys.exit(1)
         return
 
     from gideon.engine.agent import (
@@ -198,13 +200,19 @@ def _setup(
         _print_dashboard_pointer()
         return
 
-    run_app_setup_steps()
+    app_failures = run_app_setup_steps()
 
     _setup_timezone()
 
     _maybe_setup_dashboard_url()
 
     _maybe_setup_custom_domain()
+
+    if app_failures:
+        print("\nSetup finished, but these app steps did not run:")
+        for failure in app_failures:
+            print(f"  ⚠️  {failure}")
+        sys.exit(1)
 
     print("\nDone! Try: gideon doctor && gideon gateway")
     _print_dashboard_pointer()

@@ -21,12 +21,16 @@ setup/doctor code at the user's explicit request is within the existing trust
 model — the app already passed the install-time supply-chain scan.
 """
 
-import importlib.util
 import logging
 import threading
 from typing import Any, Callable
 
 from gideon.extensions.apps.manager import app_dir, list_apps
+from gideon.extensions.apps.native_contract import (
+    app_dir_on_path,
+    load_bundle_module,
+)
+from gideon.security.security import redact_credentials
 from gideon.sdk.cli import DoctorLine, SetupContext
 
 logger = logging.getLogger(__name__)
@@ -63,18 +67,7 @@ def _import_app_callable(app_name: str, ref: str) -> Callable[..., Any]:
     module_path, func_name = module_path.strip(), func_name.strip()
     if not module_path or not func_name:
         raise ValueError(f"cli entry {ref!r} must be 'module:function'")
-    base = app_dir(app_name)
-    file_path = base / (module_path.replace(".", "/") + ".py")
-    if not file_path.is_file():
-        raise FileNotFoundError(f"{file_path} not found for app {app_name!r}")
-    mod_name = (
-        f"_gideon_app_{app_name.replace('-', '_')}__{module_path.replace('.', '_')}"
-    )
-    spec = importlib.util.spec_from_file_location(mod_name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_bundle_module(app_dir(app_name), app_name, module_path)
     fn = getattr(module, func_name, None)
     if not callable(fn):
         raise AttributeError(
@@ -83,7 +76,13 @@ def _import_app_callable(app_name: str, ref: str) -> Callable[..., Any]:
     return fn
 
 
-def run_app_setup_steps(only_app: str = "") -> None:
+def _failure_reason(exc: Exception) -> str:
+    """Describe an app failure without allowing credential-shaped text into output."""
+    reason, _ = redact_credentials(str(exc))
+    return f"{type(exc).__name__}: {reason}"
+
+
+def run_app_setup_steps(only_app: str = "") -> list[str]:
     """Run each installed + enabled app's ``cli.setup`` step (alphabetical).
 
     ``only_app`` restricts the run to that one app (``gideon setup --app``).
@@ -97,10 +96,13 @@ def run_app_setup_steps(only_app: str = "") -> None:
     if only_app:
         steps = [(n, r) for (n, r) in steps if n == only_app]
         if not steps:
+            reason = f"ValueError: no enabled app named {only_app!r} declares cli.setup"
             print(
-                f"  ⚠️  No installed+enabled app named {only_app!r} declares a cli.setup step."
+                f"  ⚠️  {only_app}: {reason}"
             )
-            return
+            return [f"{only_app}: {reason}"]
+
+    failures: list[str] = []
 
     def _safe_input(prompt: str) -> str:
         """Prompt, but return "" on a non-interactive run (closed/empty stdin)
@@ -117,13 +119,16 @@ def run_app_setup_steps(only_app: str = "") -> None:
         try:
             fn = _import_app_callable(app_name, ref)
         except Exception as exc:  # noqa: BLE001 — one bad app must not abort setup
-            print(f"  ⚠️  {app_name}: setup step unavailable — {exc}")
+            reason = _failure_reason(exc)
+            failure = f"{app_name}: {reason}"
+            failures.append(failure)
+            print(f"  ⚠️  {failure} (setup step unavailable)")
             sel().log_api_access(
                 caller="cli:setup",
                 operation=f"app_cli_setup:{app_name}",
                 outcome="error",
                 source="cli",
-                error=str(exc),
+                error=type(exc).__name__,
             )
             continue
         ctx = SetupContext(
@@ -134,7 +139,8 @@ def run_app_setup_steps(only_app: str = "") -> None:
             input=_safe_input,
         )
         try:
-            fn(ctx)
+            with app_dir_on_path(app_dir(app_name)):
+                fn(ctx)
             sel().log_api_access(
                 caller="cli:setup",
                 operation=f"app_cli_setup:{app_name}",
@@ -142,14 +148,18 @@ def run_app_setup_steps(only_app: str = "") -> None:
                 source="cli",
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"  ⚠️  {app_name}: setup step failed — {exc}")
+            reason = _failure_reason(exc)
+            failure = f"{app_name}: {reason}"
+            failures.append(failure)
+            print(f"  ⚠️  {failure} (setup step failed)")
             sel().log_api_access(
                 caller="cli:setup",
                 operation=f"app_cli_setup:{app_name}",
                 outcome="error",
                 source="cli",
-                error=str(exc),
+                error=type(exc).__name__,
             )
+    return failures
 
 
 def _run_probe_with_timeout(fn: Callable[[], Any], timeout: float) -> Any:
@@ -184,10 +194,15 @@ def run_app_doctor_probes() -> list[str]:
         print(f"\n{app_name}")
         try:
             fn = _import_app_callable(app_name, ref)
-            lines = _run_probe_with_timeout(lambda: fn(), _DOCTOR_TIMEOUT_SECS)
+            def _invoke_probe() -> Any:
+                with app_dir_on_path(app_dir(app_name)):
+                    return fn()
+
+            lines = _run_probe_with_timeout(_invoke_probe, _DOCTOR_TIMEOUT_SECS)
         except Exception as exc:  # noqa: BLE001
-            print(f"  {_STATUS_GLYPH['fail']} probe error: {exc}")
-            issues.append(f"{app_name} doctor probe error")
+            reason = _failure_reason(exc)
+            print(f"  {_STATUS_GLYPH['fail']} probe error: {reason}")
+            issues.append(f"{app_name}: {reason}")
             continue
         if not isinstance(lines, list):
             print(

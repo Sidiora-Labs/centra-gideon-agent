@@ -10,7 +10,9 @@ Fixture apps are written under a tmp ``apps/<name>/`` (installed.json + app.json
 a real module .py) mirroring what ``manager.list_apps()`` + ``app_dir()`` read.
 """
 
+import io
 import json
+import sys
 
 import pytest
 
@@ -21,6 +23,8 @@ from gideon.extensions.apps import manager
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     """Point the apps dir at tmp_path so list_apps()/app_dir() read our fixtures."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setattr(manager, "config_dir", lambda: tmp_path)
     from gideon.core.config import loader as cfg_loader
 
@@ -63,18 +67,25 @@ def test_setup_step_runs_and_receives_context(_isolate):
         ),
         cli={"setup": "cli_setup:run"},
     )
-    app_cli.run_app_setup_steps()
+    failures = app_cli.run_app_setup_steps()
+    assert failures == []
     env = (_isolate / ".env").read_text(encoding="utf-8")
     assert "CFG_APP_TOKEN=xyz" in env
 
 
 def test_setup_step_that_raises_does_not_abort(_isolate, capsys):
-    _install_app(
+    bad_dir = _install_app(
         _isolate,
         "a-bad",
         module_file="cli_setup.py",
-        module_body="def run(ctx):\n    raise RuntimeError('boom')\n",
+        module_body="def run(ctx):\n    from support import VALUE\n    raise RuntimeError(VALUE + ' boom')\n",
         cli={"setup": "cli_setup:run"},
+    )
+    _add_support_package(bad_dir)
+    _install_app(
+        _isolate,
+        "b-missing",
+        cli={"setup": "missing_setup:run"},
     )
     _install_app(
         _isolate,
@@ -83,10 +94,13 @@ def test_setup_step_that_raises_does_not_abort(_isolate, capsys):
         module_body="def run(ctx):\n    ctx.print('z-good ran')\n",
         cli={"setup": "cli_setup:run"},
     )
-    app_cli.run_app_setup_steps()
+    failures = app_cli.run_app_setup_steps()
     out = capsys.readouterr().out
     assert "a-bad" in out and "boom" in out
+    assert any("a-bad: RuntimeError: from-app-package boom" == failure for failure in failures)
+    assert any("b-missing: ImportError:" in failure and "missing_setup" in failure for failure in failures)
     assert "z-good ran" in out
+    assert str(bad_dir.resolve()) not in sys.path
 
 
 def test_setup_only_app_filter(_isolate, capsys):
@@ -181,5 +195,106 @@ def test_malformed_cli_ref_is_a_warning_not_a_crash(_isolate, capsys):
         module_body="def run(ctx):\n    ctx.print('never')\n",
         cli={"setup": "not_a_valid_ref"},
     )
-    app_cli.run_app_setup_steps()
+    failures = app_cli.run_app_setup_steps()
     assert "bad-ref" in capsys.readouterr().out
+    assert any("bad-ref: ValueError:" in failure for failure in failures)
+
+
+def _add_support_package(app_dir, package="support"):
+    support = app_dir / package
+    support.mkdir()
+    (support / "__init__.py").write_text("from .value import VALUE\n", encoding="utf-8")
+    (support / "value.py").write_text("VALUE = 'from-app-package'\n", encoding="utf-8")
+
+
+def test_setup_and_doctor_callbacks_resolve_app_package(_isolate, capsys):
+    setup_dir = _install_app(
+        _isolate,
+        "package-setup",
+        module_file="cli_setup.py",
+        module_body=(
+            "from setup_import_support import VALUE as IMPORTED\n"
+            "def run(ctx):\n"
+            "    from setup_callback_support import VALUE\n"
+            "    ctx.print(f'{IMPORTED}:{VALUE}')\n"
+        ),
+        cli={"setup": "cli_setup:run"},
+    )
+    _add_support_package(setup_dir, "setup_import_support")
+    _add_support_package(setup_dir, "setup_callback_support")
+    doctor_dir = _install_app(
+        _isolate,
+        "package-doctor",
+        module_file="cli_doctor.py",
+        module_body=(
+            "from gideon.sdk.cli import DoctorLine\n"
+            "def probe():\n"
+            "    from doctor_callback_support import VALUE\n"
+            "    return [DoctorLine('app package', 'ok', VALUE)]\n"
+        ),
+        cli={"doctor": "cli_doctor:probe"},
+    )
+    _add_support_package(doctor_dir, "doctor_callback_support")
+
+    assert app_cli.run_app_setup_steps() == []
+    issues = app_cli.run_app_doctor_probes()
+    output = capsys.readouterr().out
+    assert "from-app-package:from-app-package" in output
+    assert "app package  from-app-package" in output
+    assert issues == []
+    assert str(setup_dir.resolve()) not in sys.path
+    assert str(doctor_dir.resolve()) not in sys.path
+
+
+def test_same_app_module_name_reloads_for_a_different_home(tmp_path):
+    from gideon.extensions.apps.native_contract import load_bundle_module
+
+    first = tmp_path / "first" / "apps" / "shared"
+    second = tmp_path / "second" / "apps" / "shared"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "cli_setup.py").write_text("VALUE = 'first-home'\n", encoding="utf-8")
+    (second / "cli_setup.py").write_text("VALUE = 'second-home'\n", encoding="utf-8")
+
+    first_module = load_bundle_module(first, "shared", "cli_setup")
+    second_module = load_bundle_module(second, "shared", "cli_setup")
+    assert first_module.VALUE == "first-home"
+    assert second_module.VALUE == "second-home"
+    assert first_module is not second_module
+
+
+def test_targeted_setup_failure_exits_nonzero_without_done(_isolate, capsys):
+    from gideon.interfaces.cli import setup
+
+    _install_app(
+        _isolate,
+        "targeted-failure",
+        module_file="cli_setup.py",
+        module_body="def run(ctx):\n    raise RuntimeError('targeted boom')\n",
+        cli={"setup": "cli_setup:run"},
+    )
+    with pytest.raises(SystemExit) as raised:
+        setup._setup(only_app="targeted-failure")
+    assert raised.value.code == 1
+    output = capsys.readouterr().out
+    assert "targeted-failure: RuntimeError: targeted boom" in output
+    assert "Done!" not in output
+
+
+def test_full_setup_failure_exits_nonzero_without_done(_isolate, monkeypatch, capsys):
+    from gideon.interfaces.cli import setup
+
+    _install_app(
+        _isolate,
+        "full-failure",
+        module_file="cli_setup.py",
+        module_body="def run(ctx):\n    raise RuntimeError('full boom')\n",
+        cli={"setup": "cli_setup:run"},
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n" * 20))
+    with pytest.raises(SystemExit) as raised:
+        setup._setup()
+    assert raised.value.code == 1
+    output = capsys.readouterr().out
+    assert "full-failure: RuntimeError: full boom" in output
+    assert "Done!" not in output

@@ -41,10 +41,11 @@ the workspace ``apps/`` dir is absent).
 from __future__ import annotations
 
 import ast
+from contextlib import contextmanager
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 NATIVE_DIR = Path(__file__).resolve().parent / "native"
 
@@ -109,6 +110,17 @@ def namespaced_module_name(app_name: str, module_path: str) -> str:
     return f"_gideon_app_{app_name.replace('-', '_')}__{module_path.replace('.', '_')}"
 
 
+@contextmanager
+def app_dir_on_path(ext_dir: Path) -> Iterator[None]:
+    """Expose one app directory only for the duration of its code execution."""
+    original = sys.path[:]
+    sys.path.insert(0, str(ext_dir.resolve()))
+    try:
+        yield
+    finally:
+        sys.path[:] = original
+
+
 def load_bundle_module(ext_dir: Path, app_name: str, module_path: str) -> Any:
     """Import an app's own module from its directory, under a namespaced name.
 
@@ -118,29 +130,28 @@ def load_bundle_module(ext_dir: Path, app_name: str, module_path: str) -> Any:
     so an ``isinstance`` across two reads would start failing. A changed module needs a
     gateway restart, which is what the install/update docs already promise.
     """
-    unique_name = namespaced_module_name(app_name, module_path)
-    cached = sys.modules.get(unique_name)
-    if cached is not None:
-        return cached
     file_path = bundle_module_file(ext_dir, module_path)
     if file_path is None:
         raise ImportError(f"no bundle-local module {module_path!r} in {ext_dir}")
+    file_path = file_path.resolve(strict=True)
+    unique_name = namespaced_module_name(app_name, module_path)
+    cached = sys.modules.get(unique_name)
+    if cached is not None:
+        cached_file = getattr(cached, "__file__", None)
+        if cached_file and Path(cached_file).resolve() == file_path:
+            return cached
+        sys.modules.pop(unique_name, None)
     spec = importlib.util.spec_from_file_location(unique_name, file_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {module_path!r} from {file_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[unique_name] = module
-    added = str(ext_dir) not in sys.path
-    if added:
-        sys.path.insert(0, str(ext_dir))
     try:
-        spec.loader.exec_module(module)
+        with app_dir_on_path(ext_dir):
+            spec.loader.exec_module(module)
     except BaseException:
         sys.modules.pop(unique_name, None)
         raise
-    finally:
-        if added and str(ext_dir) in sys.path:
-            sys.path.remove(str(ext_dir))
     return module
 
 
