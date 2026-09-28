@@ -264,7 +264,11 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
     exempt (``tool_prefs.is_disabled`` handles that), so the primitives stay reachable.
     """
     from gideon.integrations.tool_providers.base import ToolProvider
-    from gideon.integrations.tool_providers.registry import get_provider, list_providers
+    from gideon.integrations.tool_providers.registry import (
+        get_ownership_refusals,
+        list_providers,
+        resolve_tool_catalog,
+    )
 
     try:
         body = await read_json_body(request)
@@ -326,6 +330,7 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
     )
 
     provider: ToolProvider | None = None
+    sources = list_providers()
     if provider_name == "gideon-filesystem" or (
         not provider_name and tool_name in PLATFORM_TOOL_NAMES
     ):
@@ -344,34 +349,34 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
                 "Platform tool workspace could not be resolved", exc_info=True
             )
             return json_error("workspace_unresolved", status=503, ok=False)
-        provider = create_platform_tools_provider(cwd=cwd)
-    elif provider_name:
-        provider = get_provider(provider_name)
-        if provider is None:
-            return web.json_response(
-                {"ok": False, "error": f"unknown tool provider: {provider_name}"},
-                status=404,
-            )
-    else:
-        for p in list_providers():
-            try:
-                if any(t.name == tool_name for t in await p.list_tools()):
-                    provider = p
-                    break
-            except Exception:
-                continue
+        platform_provider = create_platform_tools_provider(cwd=cwd)
+        sources.append(platform_provider)
+    catalog = await resolve_tool_catalog(sources)
+    provider = catalog.providers.get(tool_name)
+    if provider_name and provider is not None and provider.name != provider_name:
+        provider = None
     if provider is None:
+        refusal = next(
+            (
+                item
+                for item in get_ownership_refusals()
+                if item.get("provider") == provider_name
+                or item.get("tool") == tool_name
+            ),
+            None,
+        )
+        if refusal is not None:
+            return web.json_response(
+                {"ok": False, "error": "tool_ownership_refused", "refusal": refusal},
+                status=409,
+            )
         return web.json_response(
             {"ok": False, "error": f"tool not found: {tool_name}"}, status=404
         )
 
-    _tool_def = None
-    try:
-        _tool_def = next(
-            (t for t in await provider.list_tools() if t.name == tool_name), None
-        )
-    except Exception:  # noqa: BLE001 — a broken provider must not turn into a 500 here
-        _tool_def = None
+    _tool_def = next(
+        (tool for tool in catalog.definitions if tool.name == tool_name), None
+    )
 
     from gideon.integrations.tool_providers import tool_prefs
 

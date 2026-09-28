@@ -217,30 +217,27 @@ class _ToolInventory:
     async def discover(cls, providers: list[Any], unattended: bool) -> "_ToolInventory":
         from gideon.integrations.tool_providers import tool_prefs
         from gideon.integrations.tool_providers.base import is_interactive_tool
+        from gideon.integrations.tool_providers.registry import resolve_tool_catalog
 
         disabled = tool_prefs.load_disabled()
         disabled_providers = tool_prefs.load_disabled_providers()
         inventory = cls([], {}, {})
-        for provider in providers:
+        catalog = await resolve_tool_catalog(providers)
+        for definition in catalog.definitions:
+            provider = catalog.providers[definition.name]
             owner = getattr(provider, "name", "") or ""
             if owner in disabled_providers:
                 logger.info("native provider disabled: %s", owner)
                 continue
-            try:
-                definitions = await provider.list_tools()
-            except Exception:
-                logger.debug("Cannot discover native provider %s", owner, exc_info=True)
+            tagged = getattr(definition, "provider", "") or owner
+            if tool_prefs.is_disabled(
+                tagged, definition.name, disabled, disabled_providers
+            ):
+                logger.info("native tool disabled: %s", definition.name)
                 continue
-            for definition in definitions:
-                tagged = getattr(definition, "provider", "") or owner
-                if tool_prefs.is_disabled(
-                    tagged, definition.name, disabled, disabled_providers
-                ):
-                    logger.info("native tool disabled: %s", definition.name)
-                    continue
-                inventory.definitions.append(definition)
-                inventory.providers[definition.name] = provider
-                inventory.owners[definition.name] = tagged
+            inventory.definitions.append(definition)
+            inventory.providers[definition.name] = provider
+            inventory.owners[definition.name] = tagged
         if unattended:
             omitted = {
                 entry.name
