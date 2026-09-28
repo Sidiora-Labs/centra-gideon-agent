@@ -297,6 +297,22 @@ def _active_chat_model_ids() -> set[str]:
     return out
 
 
+def _chat_ref_for_model(model: str) -> str:
+    """Return the configured provider-qualified chat ref for a named model id."""
+    if not model:
+        return ""
+    try:
+        from gideon.extensions.providers.use_cases import active_model_refs, split_ref
+
+        for ref in active_model_refs("chat"):
+            parsed = split_ref(ref)
+            if ref == model or (parsed and parsed[1] == model):
+                return ref
+    except Exception:
+        logger.debug("chat model ref lookup failed", exc_info=True)
+    return model
+
+
 def _strip_provider_prefix(model: str) -> str:
     """Strip a leading ``<provider>:`` from a model ref so the bare id reaches
     the SDK. A chat session stores its model as the active_models ref form
@@ -380,16 +396,27 @@ def _build_native_runtime(
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
 
-    model_override = _reconcile_agent_model(model_override or "") or None
-
     from gideon.extensions.providers.use_cases import CHAT_SUBCATEGORIES
 
     inner_axis = model_axis if model_axis in CHAT_SUBCATEGORIES else "chat"
+    profile = None
+    try:
+        from gideon.core.config.loader import AppConfig
+
+        cfg = AppConfig.load()
+        profile = (cfg.agents or {}).get(agent) if agent else None
+    except Exception:
+        logger.debug("native agent profile lookup failed", exc_info=True)
+    profile_model = str(getattr(profile, "model", "") or "")
+    requested_model = str(model_override or profile_model or "")
+    available_model = _reconcile_agent_model(requested_model)
+    bound_ref = _chat_ref_for_model(available_model) if available_model else ""
+    provider_model_override = bound_ref or None
     model_provider = resolve_provider_for_use_case(
         inner_axis,
         session_key=session_key,
         agent=agent,
-        model_override=model_override,
+        model_override=provider_model_override,
         cwd=cwd,
         _force_model_axis=True,
         _model_axis_only=True,
@@ -404,33 +431,39 @@ def _build_native_runtime(
             f"(Settings → Models), not an ACP agent runtime."
         )
 
-    system_prompt = ""
-    model = _strip_provider_prefix(_reconcile_agent_model(model_override or ""))
+    system_prompt = str(getattr(profile, "system_prompt", "") or "")
+    model = _strip_provider_prefix(available_model)
     tools: list[str] = []
     skills: list[str] = []
     hook_ids: list[str] = []
-    try:
-        from gideon.core.config.loader import AppConfig
-
-        cfg = AppConfig.load()
-        prof = (cfg.agents or {}).get(agent) if agent else None
-        if prof is not None:
-            system_prompt = getattr(prof, "system_prompt", "") or ""
-            model = _strip_provider_prefix(
-                _reconcile_agent_model(model_override or "")
-            ) or _strip_provider_prefix(
-                _reconcile_agent_model(getattr(prof, "model", "") or "")
-            )
-            tools = list(getattr(prof, "tools", []) or [])
-            skills = list(getattr(prof, "skills", []) or [])
-            hook_ids = list(getattr(prof, "triggers", []) or [])
-    except Exception:
-        pass
+    if profile is not None:
+        tools = list(getattr(profile, "tools", []) or [])
+        skills = list(getattr(profile, "skills", []) or [])
+        hook_ids = list(getattr(profile, "triggers", []) or [])
 
     if not model:
         model = _fallback_chat_model(
             provider_hint=_provider_entry_name(model_provider, use_case=inner_axis),
             use_case=inner_axis,
+        )
+
+    substitution = None
+    if requested_model and not available_model:
+        from gideon.integrations.llm.base import ModelSubstitution
+
+        who = "this chat's model" if model_override else f"{agent}'s model"
+        fix = (
+            "Pick a different model in the composer's model selector, or add it in "
+            "Settings → Models"
+            if model_override
+            else f"Pick another model for {agent} on the Agents page, or add it in Settings → Models"
+        )
+        substitution = ModelSubstitution(
+            requested=requested_model,
+            served=str(getattr(model_provider, "served_model_ref", "") or ""),
+            why="it is not one of the chat models set up in Settings → Models",
+            fix=fix,
+            who=who,
         )
 
     definition = AgentRuntimeDefinition(
@@ -495,7 +528,7 @@ def _build_native_runtime(
 
     tool_providers = [platform, *_list_tool_providers(), McpDelegatedToolProvider(session_key or "")]
 
-    return NativeAgentRuntime(  # type: ignore[return-value]  # CI-2
+    runtime = NativeAgentRuntime(  # type: ignore[assignment]  # CI-2
         definition=definition,
         model_provider=model_provider,  # type: ignore[arg-type]
         tool_providers=tool_providers,
@@ -509,6 +542,12 @@ def _build_native_runtime(
         tool_groups=list(tool_groups) if tool_groups is not None else None,
         surface=inner_axis,
     )
+    runtime.model_substitution = substitution
+    runtime._configured_substitution = substitution
+    runtime._preferred_model_ref = str(
+        getattr(model_provider, "served_model_ref", "") or ""
+    )
+    return runtime  # type: ignore[return-value]  # CI-2
 
 
 def resolve_provider_for_use_case(
@@ -971,6 +1010,12 @@ def _resolve_from_config_registry(
         )
         return None
 
+    served_ref = f"{candidate.name}:{served_model}"
+    try:
+        built.served_model_ref = served_ref
+    except Exception:
+        logger.debug("provider does not expose served-model identity", exc_info=True)
+
     if guard_use_case:
         from gideon.security.guardrails import wrap_model_call_guard
         from gideon.security.guardrails.breaker import get_breaker
@@ -1014,7 +1059,7 @@ def _resolve_from_config_registry(
                         _timeout_kw["timeout_secs"] = _secs
             except Exception:  # noqa: BLE001 — fail-open to the guard's own default
                 logger.debug("routing local timeout read failed", exc_info=True)
-        return wrap_model_call_guard(
+        guarded = wrap_model_call_guard(
             built,
             use_case=guard_use_case,
             provider_name=candidate.name,
@@ -1027,6 +1072,8 @@ def _resolve_from_config_registry(
             routed_fallback=guard_routed_fallback,
             **_timeout_kw,
         )
+        guarded.served_model_ref = served_ref
+        return guarded
     return built
 
 

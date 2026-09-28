@@ -24,6 +24,7 @@ EVENT_COMPLETE = "complete"
 EVENT_COMPACTION_STATUS = "compaction_status"
 EVENT_CLEAR_STATUS = "clear_status"
 EVENT_AGENT_SWITCHED = "agent_switched"
+EVENT_MODEL_SUBSTITUTION = "model_substitution"
 
 
 @dataclass
@@ -81,3 +82,5 @@ class AgentEvent:
     event_count: int = 0
     tool_call_count: int = 0
     tool_meta: dict[str, Any] = field(default_factory=dict)
+    #: The provider entry and model that answered this native turn, as ``entry:model``.
+    served_model_ref: str = ""

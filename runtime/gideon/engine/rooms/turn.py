@@ -27,6 +27,7 @@ from gideon.engine.rooms.store import (
 )
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
+    EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
 )
@@ -238,6 +239,9 @@ class RoomTurns:
                 try:
                     self.state.sessions.set_approval_policy(key, "ask")
                     approver = RoomApprover(self.state, identity="human")
+                    announce_failover = getattr(provider, "announce_failover", None)
+                    if callable(announce_failover):
+                        announce_failover()
                     async for event in provider.stream(
                         turn.prompt(self.store.messages(room_id, limit=100))
                     ):
@@ -259,9 +263,30 @@ class RoomTurns:
                                 last_update = time.monotonic()
                         elif event.kind == EVENT_COMPLETE:
                             spend.record(event)
+                            from gideon.operations.usage_ledger import record_from_event
+
+                            record_from_event(
+                                event,
+                                source="room",
+                                session_key=key,
+                                agent=member.agent,
+                                provider=str(getattr(provider, "provider_id", "") or "native"),
+                                model="",
+                                estimate_if_missing=True,
+                            )
                             if event.stop_reason in {"error", "failed"}:
                                 raise RuntimeError(
                                     event.text or "Member could not complete the turn"
+                                )
+                        elif event.kind == EVENT_MODEL_SUBSTITUTION:
+                            notice = str(event.text or "").strip()
+                            if notice:
+                                self.store.append(
+                                    room_id,
+                                    "system",
+                                    redact_field(notice),
+                                    speaker="system",
+                                    turn_id=turn_id,
                                 )
                         elif event.kind == "error":
                             raise RuntimeError(
@@ -291,6 +316,19 @@ class RoomTurns:
                 except asyncio.CancelledError:
                     await provider.cancel()
                     raise
+                except Exception as exc:
+                    from gideon.engine.agents.native.failover import NoModelAnswered
+
+                    if not isinstance(exc, NoModelAnswered):
+                        raise
+                    self.store.append(
+                        room_id,
+                        "system",
+                        redact_field(exc.sentence(room_member=member.name)),
+                        speaker="system",
+                        turn_id=turn_id,
+                    )
+                    saved = True
                 finally:
                     if not saved and chunks:
                         answer = redact_field("".join(chunks))

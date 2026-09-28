@@ -505,6 +505,14 @@ def record_from_event(
     model: str = "",
     estimate_if_missing: bool = True,
 ) -> None:
+    served_ref = str(getattr(event, "served_model_ref", "") or "").strip()
+    if served_ref:
+        if ":" in served_ref:
+            responder_provider, responder_model = served_ref.split(":", 1)
+            if responder_provider and responder_model:
+                provider, model = responder_provider, responder_model
+        else:
+            model = served_ref
     accounting = EventAccounting(event, model, estimate_if_missing)
     record_turn(accounting.record(source, session_key, agent, provider))
 

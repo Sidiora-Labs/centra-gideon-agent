@@ -1558,6 +1558,21 @@ class RunController:
                 continue
             node = dict(_walk(self.root)).get(spec_path(path))
             node_id = node.id if node else ""
+            inst.served_model_ref = str(getattr(info, "served_model_ref", "") or "")
+            inst.model_substitutions = [
+                dict(record) for record in (getattr(info, "model_substitutions", None) or [])
+                if isinstance(record, dict)
+            ]
+            if inst.model_substitutions:
+                metadata = {
+                    "node_id": node_id,
+                    "instance_path": path,
+                    "node_epoch": inst.epoch,
+                    "served_model_ref": inst.served_model_ref,
+                    "model_substitutions": inst.model_substitutions,
+                }
+                self.journal.write("model_substitution", **metadata)
+                self._publish("workflow_model_substitution", metadata)
             if inst.subagent_claim_holder:
                 _release_claim(claim_key(self.run.id, node_id), inst.subagent_claim_holder)
                 inst.subagent_claim_holder = ""
@@ -1704,6 +1719,8 @@ class RunController:
                     "status": inst.state.value,
                     "node_epoch": inst.epoch,
                     "degraded_reason": inst.degraded_reason,
+                    "served_model_ref": inst.served_model_ref,
+                    "model_substitutions": inst.model_substitutions,
                 },
             )
             settled = True

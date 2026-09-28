@@ -38,6 +38,7 @@ from gideon.integrations.acp.types import (
 )
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
@@ -1820,6 +1821,7 @@ async def run_chat(
     session._declared_file_change_idx = {}
     session._memory_citations = []
     session._skills_used = []
+    _turn_model_substitutions: list[dict[str, str]] = []
 
     if _prompt_depth == 0:
         try:
@@ -2493,6 +2495,9 @@ async def run_chat(
             if is_slash
             else client.stream(full_message)
         )
+        announce_failover = getattr(client, "announce_failover", None)
+        if callable(announce_failover):
+            announce_failover()
         state.broadcast_ws(
             "chat_status", {"session": session.key, "status": "Thinking…"}
         )
@@ -3627,9 +3632,42 @@ async def run_chat(
                         {"session": session.key, "agent": new_agent},
                     )
                     needs_session_reset = True
+            elif event.kind == EVENT_MODEL_SUBSTITUTION:
+                raw_notice = str(getattr(event, "text", "") or "").strip()
+                safe_notice, _ = redact_exfiltration_urls(raw_notice)
+                safe_notice, _ = redact_credentials(safe_notice)
+                metadata = getattr(event, "tool_meta", None)
+                record = metadata.get("model_substitution", {}) if isinstance(metadata, dict) else {}
+                if isinstance(record, dict):
+                    _turn_model_substitutions.append(
+                        {str(key): str(value) for key, value in record.items()}
+                    )
+                else:
+                    record = {}
+                if safe_notice:
+                    session.append(
+                        "system",
+                        safe_notice,
+                        "msg msg-info",
+                        meta={"model_substitution": record},
+                    )
+                    state.broadcast_ws(
+                        "chat_message",
+                        {
+                            "session": session.key,
+                            "role": "system",
+                            "content": safe_notice,
+                            "model_substitution": record,
+                        },
+                    )
             elif event.kind == EVENT_COMPLETE:
                 _turn_context_usage = getattr(event, "context_usage", None)
-                if event.input_tokens or event.output_tokens:
+                if (
+                    event.input_tokens
+                    or event.output_tokens
+                    or event.cost_usd
+                    or getattr(event, "served_model_ref", "")
+                ):
                     stats = Stats()
                     stats.inc_input_tokens(event.input_tokens)
                     stats.inc_output_tokens(event.output_tokens)
@@ -3650,6 +3688,12 @@ async def run_chat(
                     if event.duration_ms:
                         stats.inc_duration_ms(event.duration_ms)
                     _record_model = session.model
+                    _record_provider = provider_kind or ""
+                    served_ref = str(getattr(event, "served_model_ref", "") or "")
+                    if ":" in served_ref:
+                        _record_provider, _record_model = served_ref.split(":", 1)
+                    elif served_ref:
+                        _record_model = served_ref
                     if not _record_model:
                         _prov_model = (
                             getattr(getattr(client, "client", None), "_model", "") or ""
@@ -3677,7 +3721,7 @@ async def run_chat(
                         session_key=session_key,
                         source=getattr(session, "_app", "") or "chat",
                         agent=session.agent or "",
-                        provider=provider_kind or "",
+                        provider=_record_provider,
                         model=_record_model or "",
                     )
                     from gideon.operations.pricing import has_pricing as _has_pricing
@@ -3799,6 +3843,21 @@ async def run_chat(
         if assistant_text:
             _flush_segment(state, session, assistant_text, broadcast=False)
             _persist_turn_summary(session, assistant_text)
+        if _turn_model_substitutions:
+            last_assistant = next(
+                (
+                    item
+                    for item in reversed(session.messages)
+                    if item.get("role") == "assistant"
+                ),
+                None,
+            )
+            if last_assistant is not None:
+                meta = last_assistant.get("meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                meta["model_substitutions"] = _turn_model_substitutions
+                last_assistant["meta"] = meta
         save_session_to_history(state, session)
         if _prompt_depth == 0:
             session._prompt_busy_retries = 0
@@ -4009,7 +4068,10 @@ async def run_chat(
             await _fire(HOOK_EVENT_ERROR, _err_text)
     except Exception as exc:
         logger.exception("Dashboard chat error in session %s", session.key)
-        _err_text, _ = redact_exfiltration_urls(humanize_provider_error(exc))
+        from gideon.engine.agents.native.failover import NoModelAnswered
+
+        error_text = str(exc) if isinstance(exc, NoModelAnswered) else humanize_provider_error(exc)
+        _err_text, _ = redact_exfiltration_urls(error_text)
         _err_text, _ = redact_credentials(_err_text)
         session.append("error", _err_text, "msg msg-err")
         session._last_turn_errored = True

@@ -38,6 +38,7 @@ from gideon.engine.subagent_persistence import (
 )
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
@@ -212,6 +213,8 @@ class SubagentInfo:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    served_model_ref: str = ""
+    model_substitutions: list[dict[str, str]] = field(default_factory=list)
     cwd: str = ""
     sandbox: str = "none"
     extra_env: dict[str, str] = field(default_factory=dict)
@@ -930,10 +933,14 @@ class DelegationSupervisor:
         )
         handlers = {
             EVENT_TEXT_CHUNK: self._consume_text,
+            EVENT_MODEL_SUBSTITUTION: self._consume_model_substitution,
             EVENT_PERMISSION_REQUEST: self._consume_permission,
             EVENT_TOOL_CALL: self._consume_tool,
             EVENT_COMPLETE: self._consume_completion,
         }
+        announce_failover = getattr(client, "announce_failover", None)
+        if callable(announce_failover):
+            announce_failover()
         async for event in client.stream(prompt):
             consume = handlers.get(event.kind)
             if consume is not None and not await consume(run, event):
@@ -951,6 +958,34 @@ class DelegationSupervisor:
                 "…(truncated)\n" + run.info.streaming_text[-40_000:]
             )
         await self._fire_event("subagent_chunk", run.info, {"text": safe})
+        return True
+
+    async def _consume_model_substitution(
+        self, run: _ExecutionPass, event: LLMEvent
+    ) -> bool:
+        info = run.info
+        metadata = getattr(event, "tool_meta", None)
+        record = metadata.get("model_substitution") if isinstance(metadata, dict) else None
+        if not isinstance(record, dict):
+            return True
+        safe_record = {
+            str(key): _redact(str(value)) for key, value in record.items()
+        }
+        info.model_substitutions.append(safe_record)
+        info.served_model_ref = str(getattr(event, "served_model_ref", "") or safe_record.get("served", ""))
+        try:
+            update_state(
+                info.id,
+                served_model_ref=info.served_model_ref,
+                model_substitutions=info.model_substitutions,
+            )
+        except Exception:
+            logger.debug("Could not persist subagent model substitution", exc_info=True)
+        await self._fire_event(
+            "subagent_model_substitution",
+            info,
+            {"notice": _redact(str(getattr(event, "text", "") or "")), **safe_record},
+        )
         return True
 
     async def _consume_permission(self, run: _ExecutionPass, event: LLMEvent) -> bool:
@@ -1062,14 +1097,18 @@ class DelegationSupervisor:
 
     async def _consume_completion(self, run: _ExecutionPass, event: LLMEvent) -> bool:
         info = run.info
+        served_ref = str(getattr(event, "served_model_ref", "") or "")
+        if served_ref:
+            info.served_model_ref = served_ref
+        billed_model = served_ref.split(":", 1)[1] if ":" in served_ref else (served_ref or info.model)
         info.input_tokens = int(getattr(event, "input_tokens", 0) or 0)
         info.output_tokens = int(getattr(event, "output_tokens", 0) or 0)
         price = float(getattr(event, "cost_usd", 0.0) or 0.0)
-        if not price and info.model:
+        if not price and billed_model:
             from gideon.operations.pricing import estimate_cost
 
             price = estimate_cost(
-                info.model,
+                billed_model,
                 input_tokens=info.input_tokens,
                 output_tokens=info.output_tokens,
                 cache_read_tokens=int(getattr(event, "cache_read_tokens", 0) or 0),
@@ -1083,6 +1122,11 @@ class DelegationSupervisor:
         except (AttributeError, TypeError):
             pass
         self._record_subagent_usage(info, run.session_key, event)
+        if served_ref:
+            try:
+                update_state(info.id, served_model_ref=served_ref)
+            except Exception:
+                logger.debug("Could not persist subagent responder identity", exc_info=True)
         return False
 
     def _finish_output(self, run: _ExecutionPass) -> None:
@@ -1157,6 +1201,8 @@ class DelegationSupervisor:
             agent=_redact(info.agent),
             result=_done_result(info.result),
             memory_receipt=info.memory_receipt,
+            served_model_ref=info.served_model_ref,
+            model_substitutions=info.model_substitutions,
         )
         if usage:
             result.update(

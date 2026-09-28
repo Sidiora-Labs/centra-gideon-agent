@@ -54,6 +54,7 @@ from gideon.integrations.acp.types import (
 )
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
+    EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
@@ -86,6 +87,11 @@ from gideon.security.guardrails.loop_breaker import (
     structural_note,
     warn_note,
 )
+from gideon.engine.agents.native.failover import (
+    FAILOVER_MODES,
+    ModelFailover,
+    NoModelAnswered,
+)
 
 if TYPE_CHECKING:
     from gideon.engine.agents.native.tool_retrieval import ToolRetriever
@@ -101,6 +107,13 @@ _TOOL_NAME_SANITIZE_MAX = 64
 
 _INFERENCE_RETRY_BACKOFF_SECS = 0.5
 _MAX_INFERENCE_RECOVERIES_PER_TURN = 3
+
+
+def _safe_model_failure(error: BaseException) -> str:
+    from gideon.integrations.llm_helpers import humanize_provider_error
+    from gideon.security.security import redact_field
+
+    return redact_field(humanize_provider_error(error))
 
 
 def _inference_failure_mode(exc: BaseException) -> FailureMode:
@@ -319,10 +332,14 @@ class _TurnTotals:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     last_context_usage: ContextUsage | None = None
+    served_model_ref: str = ""
 
     def account(self, response: "_ModelExchange") -> None:
         self.calls += len(response.calls)
         self.model_calls += response.attempts
+        self.served_model_ref = str(
+            getattr(response.runtime._model, "served_model_ref", "") or ""
+        )
         self.last_context_usage = (
             response.usage.context_usage if response.usage is not None else None
         )
@@ -339,6 +356,7 @@ class _TurnTotals:
     def finish(self, reason: str, context_pct: float | None) -> AgentEvent:
         return AgentEvent(
             kind=EVENT_COMPLETE,
+            served_model_ref=self.served_model_ref,
             stop_reason=reason,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
@@ -379,11 +397,15 @@ class _ModelExchange:
         self.totals.events += 1
         if event.kind == EVENT_TOOL_CALL:
             self.calls.append(event)
+            self.runtime._turn_output_visible = True
+        elif event.kind in (EVENT_TOOL_RESULT, EVENT_PERMISSION_REQUEST):
+            self.runtime._turn_output_visible = True
         elif event.kind == EVENT_COMPLETE:
             self.usage = event
             self.usages.append(event)
         elif event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK):
             self.visible = True
+            self.runtime._turn_output_visible = True
             if event.kind == EVENT_TEXT_CHUNK:
                 self.fragments.append(event.text)
             else:
@@ -451,14 +473,30 @@ class _ModelExchange:
             started = now_ms()
             self.attempts += 1
             try:
+                request_messages = runtime._messages_with_staged_images(messages)
                 async for event in runtime._model.complete(
-                    messages,
+                    request_messages,
                     tools=tools,
                     model=(runtime._definition.model or None) if runtime._active_fallback is None else None,
                     reasoning_effort=runtime._reasoning_effort,
                 ):
                     if runtime._cancelled:
                         break
+                    if (
+                        not runtime._substitution_announced
+                        and (event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK, EVENT_TOOL_CALL)
+                             and (event.kind == EVENT_TOOL_CALL or bool(event.text)))
+                    ):
+                        substitution = runtime._substitution_for_current_model()
+                        if substitution is not None:
+                            runtime._substitution_announced = True
+                            record = substitution.to_dict()
+                            yield AgentEvent(
+                                kind=EVENT_MODEL_SUBSTITUTION,
+                                text=substitution.notice(),
+                                tool_meta={"model_substitution": record},
+                                served_model_ref=substitution.served,
+                            )
                     if self.accept(event):
                         yield event
             except asyncio.CancelledError:
@@ -494,9 +532,10 @@ class _ModelExchange:
                     if retry_error is not error:
                         raise
                     if (
-                        not self.visible and not self.calls
+                        not runtime._turn_output_visible
                         and self.totals.recoveries < _MAX_INFERENCE_RECOVERIES_PER_TURN
-                        and await runtime._advance_model_fallback(failure)
+                        and failure in FAILOVER_MODES
+                        and await runtime._advance_model_fallback(failure, error)
                     ):
                         self.retried = True
                         self.totals.recoveries += 1
@@ -510,6 +549,8 @@ class _ModelExchange:
                             generation=runtime._cache_generation, max_markers=3,
                         )
                         continue
+                    if runtime._announce_failover and runtime._fallback_failures:
+                        raise NoModelAnswered(runtime._fallback_failures) from error
                     raise
                 logger.warning(
                     "native inference failed (%s); retrying exchange %d "
@@ -569,6 +610,19 @@ class NativeAgentRuntime(AgentProvider):
     ) -> None:
         self._definition, self._model = definition, model_provider
         self._active_fallback: str | None = None
+        self._preferred_model = model_provider
+        self._preferred_model_ref = str(
+            getattr(model_provider, "served_model_ref", "")
+            or getattr(definition, "model", "")
+            or getattr(model_provider, "_model", "")
+        )
+        self._announce_failover = False
+        self._substitution_announced = False
+        self._turn_output_visible = False
+        self._fallback_failures: list[tuple[str, str]] = []
+        self._staged_images: list[dict[str, Any]] = []
+        self.model_substitution = None
+        self._configured_substitution = None
         self._agent_id = getattr(definition, "name", "") or ""
         self._project_id, self._reasoning_effort = (
             project_id or "",
@@ -805,16 +859,35 @@ class NativeAgentRuntime(AgentProvider):
         except Exception:
             logger.debug("Could not record native inference attempt", exc_info=True)
 
-    async def _advance_model_fallback(self, failure: FailureMode) -> bool:
-        if self._cancelled or not is_retryable(failure):
+    def announce_failover(self) -> None:
+        """Opt this caller into structured substitution events before model output."""
+        self._announce_failover = True
+
+    async def _image_compatible(self, served_ref: str) -> bool:
+        if not self._staged_images:
+            return True
+        try:
+            from gideon.extensions.providers.image_input import image_input
+
+            return (await image_input(served_ref)).accepted
+        except Exception:
+            logger.debug("Could not establish image compatibility for %s", served_ref, exc_info=True)
+            return False
+
+    async def _advance_model_fallback(
+        self, failure: FailureMode, error: BaseException
+    ) -> bool:
+        if self._cancelled or failure not in FAILOVER_MODES or not self._announce_failover:
             return False
         try:
             from gideon.extensions.providers.provider_bridge import resolve_provider_for_use_case
             from gideon.extensions.providers.use_cases import resolution_chain
 
             chain = resolution_chain("chat")
-            current = self._active_fallback or (self._definition.model or getattr(self._model, "_model", ""))
+            current = self._active_fallback or self._preferred_model_ref
             current_id = str(current).split(":", 1)[-1]
+            if not self._fallback_failures or self._fallback_failures[-1][0] != current:
+                self._fallback_failures.append((current, _safe_model_failure(error)))
             position = next(
                 (index for index, ref in enumerate(chain)
                  if ref == current or ref.split(":", 1)[-1] == current_id),
@@ -823,21 +896,79 @@ class NativeAgentRuntime(AgentProvider):
             if position is None or position + 1 >= len(chain):
                 return False
             for ref in chain[position + 1:]:
+                if not await self._image_compatible(ref):
+                    self._fallback_failures.append((ref, "it cannot receive the attached image"))
+                    continue
                 try:
                     candidate = resolve_provider_for_use_case("chat", model_override=ref, _force_model_axis=True)
                     await candidate.start()
-                except Exception:
+                    if self._tool_schema and not getattr(candidate, "supports_tools", False):
+                        await self._close_replaced_model(candidate)
+                        self._fallback_failures.append((ref, "it does not support the configured tools"))
+                        continue
+                except Exception as candidate_error:
+                    self._fallback_failures.append((ref, _safe_model_failure(candidate_error)))
                     logger.warning("Native fallback candidate %s unavailable", ref, exc_info=True)
                     continue
                 previous = self._model
                 self._model = candidate
                 self._active_fallback = ref
-                await self._close_replaced_model(previous)
+                candidate.served_model_ref = ref
+                if previous is not self._preferred_model:
+                    await self._close_replaced_model(previous)
                 logger.warning("Native inference switched to configured fallback %s", ref)
                 return True
         except Exception:
             logger.warning("Native provider fallback failed", exc_info=True)
         return False
+
+    def _substitution_for_current_model(self):
+        from gideon.integrations.llm.base import ModelSubstitution
+
+        configured = self._configured_substitution
+        served = str(getattr(self._model, "served_model_ref", "") or "")
+        if configured is not None and not self._active_fallback:
+            return configured
+        if not self._active_fallback or not self._fallback_failures:
+            return None
+        who = str(getattr(configured, "who", "") or getattr(self._definition, "name", ""))
+        requested = str(getattr(configured, "requested", "") or self._preferred_model_ref)
+        fix = str(getattr(configured, "fix", "") or "Review the chat model order in Settings → Models.")
+        return ModelFailover(
+            requested=requested,
+            who=who,
+            fix=fix,
+        ).substitution(served or self._active_fallback, self._fallback_failures)
+
+    def _messages_with_staged_images(self, messages: list[dict]) -> list[dict]:
+        if not self._staged_images:
+            return messages
+        adapted: list[dict] = [dict(message) for message in messages]
+        position = next(
+            (index for index in range(len(adapted) - 1, -1, -1)
+             if adapted[index].get("role") == "user"),
+            None,
+        )
+        if position is None:
+            return adapted
+        message = adapted[position]
+        content = message.get("content")
+        parts = list(content) if isinstance(content, list) else [{"type": "text", "text": str(content or "")}]
+        image_content = getattr(self._model, "_image_content", None)
+        for neutral_image in self._staged_images:
+            data_url = str(
+                (neutral_image.get("image_url") or {}).get("url", "")
+                if isinstance(neutral_image.get("image_url"), dict)
+                else ""
+            )
+            if not data_url:
+                continue
+            part = image_content(data_url) if callable(image_content) else None
+            if part is None:
+                part = copy.deepcopy(neutral_image)
+            parts.append(part)
+        message["content"] = parts
+        return adapted
 
     @staticmethod
     async def _close_replaced_model(provider: "ModelProvider") -> None:
@@ -874,6 +1005,17 @@ class NativeAgentRuntime(AgentProvider):
 
     async def stream(self, message: str) -> AsyncIterator[AgentEvent]:
         self._cancel.begin_turn()
+        if self._active_fallback:
+            prior = self._model
+            self._model = self._preferred_model
+            self._active_fallback = None
+            await self._close_replaced_model(prior)
+        if self._configured_substitution is not None and not self._announce_failover:
+            self._cancel.end_turn()
+            raise RuntimeError("This caller cannot surface the configured model substitution")
+        self._fallback_failures = []
+        self._substitution_announced = False
+        self._turn_output_visible = False
         if self._next_reasoning_effort is not None:
             self._reasoning_effort = self._next_reasoning_effort
             self._next_reasoning_effort = None
@@ -888,6 +1030,12 @@ class NativeAgentRuntime(AgentProvider):
             )
         totals = _TurnTotals()
         try:
+            if self._staged_images and not await self._image_compatible(self._preferred_model_ref):
+                incompatible = RuntimeError("The preferred model cannot receive the attached image.")
+                if not self._announce_failover or not await self._advance_model_fallback(
+                    FailureMode.PROVIDER_ERROR, incompatible
+                ):
+                    raise NoModelAnswered(self._fallback_failures or [(self._preferred_model_ref, str(incompatible))])
             for _ in range(self._max_turns):
                 if self._cancelled:
                     yield totals.finish(
@@ -921,6 +1069,8 @@ class NativeAgentRuntime(AgentProvider):
                     return
                 async for event in self._execute_tool_batch(tool_calls):
                     totals.events += 1
+                    if event.kind in (EVENT_TOOL_RESULT, EVENT_PERMISSION_REQUEST):
+                        self._turn_output_visible = True
                     yield event
                 if self._pending_revisions:
                     corrections = self._pending_revisions[:]
@@ -938,6 +1088,7 @@ class NativeAgentRuntime(AgentProvider):
                     yield AgentEvent(kind=EVENT_TEXT_CHUNK, text="")
             yield totals.finish("max_turns", self._last_context_pct)
         finally:
+            self._staged_images.clear()
             self._cancel.end_turn()
 
     def _prepare_turn_tools(self, message: str) -> tuple[list[dict] | None, str]:
@@ -1588,8 +1739,22 @@ class NativeAgentRuntime(AgentProvider):
         return True
 
     def stage_image_part(self, data_url: str) -> bool:
-        receiver = getattr(self._model, "stage_image_part", None)
-        return bool(receiver(data_url)) if callable(receiver) else False
+        if (
+            not isinstance(data_url, str)
+            or not data_url.startswith("data:image/")
+            or ";base64," not in data_url
+            or len(data_url) > 20_000_000
+        ):
+            return False
+        self._staged_images.append(
+            {"type": "image_url", "image_url": {"url": data_url}}
+        )
+        return True
+
+    @property
+    def staged_image_parts(self) -> tuple[dict[str, Any], ...]:
+        """Immutable neutral image parts retained for every internal model attempt."""
+        return tuple(copy.deepcopy(part) for part in self._staged_images)
 
     def drain_tool_outcomes(self) -> list[tuple[str, str]]:
         outcomes = self._tool_outcomes[:]

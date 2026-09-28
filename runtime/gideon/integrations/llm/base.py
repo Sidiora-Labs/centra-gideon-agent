@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +12,7 @@ from gideon.integrations.llm.events import (
     EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
+    EVENT_MODEL_SUBSTITUTION,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -21,6 +23,36 @@ from gideon.integrations.llm.events import AgentEvent as LLMEvent
 from gideon.integrations.llm.prompt_cache import PromptCache
 
 CancelOutcome = Literal["acked", "timeout", "no_turn", "error"]
+
+
+@dataclass(frozen=True)
+class ModelSubstitution:
+    """A named model could not serve and a configured model answered instead."""
+
+    requested: str
+    served: str
+    why: str
+    fix: str = ""
+    who: str = ""
+
+    def sentence(self) -> str:
+        whose = f"{self.who} " if self.who else ""
+        line = f"ran on {self.served} instead of {whose}{self.requested}: {self.why}"
+        return f"{line}. {self.fix}" if self.fix else line
+
+    def notice(self) -> str:
+        sentence = self.sentence()
+        return sentence[:1].upper() + sentence[1:] + "."
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "requested": self.requested,
+            "served": self.served,
+            "why": self.why,
+            "fix": self.fix,
+            "who": self.who,
+            "sentence": self.sentence(),
+        }
 
 
 def _last_user_text(messages: list[dict]) -> str:
@@ -38,6 +70,7 @@ async def _forward_events(events: AsyncIterator[LLMEvent]) -> AsyncIterator[LLME
 class ModelProvider(ABC):
     supports_tools: bool = False
     prompt_cache: PromptCache = PromptCache.NONE
+    served_model_ref: str = ""
 
     @property
     def sampling_temperature(self) -> float | None:

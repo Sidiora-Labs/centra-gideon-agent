@@ -700,6 +700,8 @@ class NodeInstance:
     #: liveness stays owned by `DelegationSupervisor.get` -- and it is per-INSTANCE because a
     subagent_id: str = ""
     subagent_claim_holder: str = ""
+    served_model_ref: str = ""
+    model_substitutions: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return RecordCodecs.write("NodeInstance", self)
