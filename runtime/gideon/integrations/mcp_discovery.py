@@ -129,7 +129,11 @@ class McpServerInfo:
     env: dict[str, str] = field(default_factory=dict)
     cwd: str = ""
     url: str = ""
+    transport: str = ""
     headers: dict[str, str] = field(default_factory=dict)
+    oauth: dict[str, Any] = field(default_factory=dict)
+    allowElicitation: bool = False  # noqa: N815
+    poolable: bool = False
     status: str = "unknown"
     tools: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
@@ -149,20 +153,39 @@ class McpServerInfo:
         return bool(self.url) and not self.command
 
     def to_dict(self) -> dict[str, Any]:
+        from gideon.security import mcp_grants
+
+        try:
+            allowed = mcp_grants.allowed(self)
+            allow_revision = mcp_grants.revision(self)
+            allow_question = mcp_grants.question(self)
+            display = mcp_grants.display(self)
+        except (mcp_grants.McpGrantDefinitionError, TypeError, ValueError):
+            allowed = False
+            allow_revision = ""
+            allow_question = mcp_grants.WAITING_REASON
+            display = {"command": "", "args": [], "url": "", "transport": "", "env": [], "headers": [], "header_credentials": [], "oauth": [], "poolable": False}
         d: dict[str, Any] = {
             "name": self.name,
-            "command": self.command,
-            "args": self.args or [],
+            "command": display["command"],
+            "args": display["args"],
+            "transport": display["transport"],
+            "env": display["env"],
+            "headers": display["headers"],
+            "header_credentials": display["header_credentials"],
+            "oauth": display["oauth"],
+            "poolable": display["poolable"],
             "status": self.status,
             "tools": self.tools,
             "error": self.error,
             "source": self.source,
             "presence": dict(self.presence),
+            "allowed": allowed,
+            "allowRevision": allow_revision,
+            "allowQuestion": allow_question,
         }
         if self.url:
-            d["url"] = self.url
-            if self.headers:
-                d["headers"] = self.headers
+            d["url"] = display["url"]
         if self.cwd:
             d["cwd"] = self.cwd
         if self.disabled_tools:
@@ -287,7 +310,11 @@ def _server_from_spec(name: str, spec: dict, source: str) -> McpServerInfo:
         env=spec.get("env", {}),
         cwd=spec.get("cwd", ""),
         url=spec.get("url", ""),
+        transport=spec.get("transport", ""),
         headers=spec.get("headers", {}),
+        oauth=spec.get("oauth", {}),
+        allowElicitation=spec.get("allowElicitation") is True,
+        poolable=spec.get("poolable") is True,
         source=source,
     )
 
@@ -343,8 +370,18 @@ def list_servers() -> list[McpServerInfo]:
     servers: dict[str, McpServerInfo] = {}
     disabled_in_agent: set[str] = set()
 
+    by_source = _load_mcp_json_by_source()
+    owner_server_names = {
+        name
+        for scope in (SCOPE_GIDEON, SCOPE_LEGACY_GLOBAL)
+        for name in by_source.get(scope, {})
+    }
     agent_cfg = _load_agent_config()
     for name, spec in agent_cfg.get("mcpServers", {}).items():
+        # The canonical MCP document is the source the native client executes.
+        # Generated agent copies must not shadow it for status or consent.
+        if name in owner_server_names:
+            continue
         if isinstance(spec, dict):
             if spec.get("disabled"):
                 disabled_in_agent.add(name)
@@ -352,7 +389,6 @@ def list_servers() -> list[McpServerInfo]:
                 _fix_stale_managed_command(name, spec)
                 servers[name] = _server_from_spec(name, spec, "agent")
 
-    by_source = _load_mcp_json_by_source()
     disabled_tools_claimed: set[str] = set()
     for scope in (SCOPE_GIDEON, SCOPE_LEGACY_GLOBAL):
         for name, spec in by_source.get(scope, {}).items():
@@ -397,6 +433,12 @@ def list_servers() -> list[McpServerInfo]:
         s.status = status
         s.tools = tools
         s.error = error
+        if not _server_allowed(s):
+            s.status = "waiting"
+            s.tools = []
+            from gideon.security.mcp_grants import WAITING_REASON
+
+            s.error = WAITING_REASON
 
     return list(servers.values())
 
@@ -427,6 +469,8 @@ async def _read_jsonrpc_response(resp: aiohttp.ClientResponse) -> dict:
 
 async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
     """Probe a remote Streamable HTTP MCP server via POST."""
+    if not _server_allowed(server):
+        return _wait_for_owner(server)
     server.status = "probing"
     try:
         init_body = {
@@ -531,6 +575,8 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
 
     Updates server.status and server.tools in place and returns it.
     """
+    if not _server_allowed(server):
+        return _wait_for_owner(server)
     if server.is_remote:
         return await _probe_remote(server)
 
@@ -682,6 +728,22 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
         if proc is not None and proc.returncode is None:
             await terminate_and_reap(proc, grace=5)
 
+    _cache_probe(server)
+    return server
+
+
+def _server_allowed(server: McpServerInfo) -> bool:
+    from gideon.security.mcp_grants import allowed
+
+    return allowed(server)
+
+
+def _wait_for_owner(server: McpServerInfo) -> McpServerInfo:
+    from gideon.security.mcp_grants import WAITING, WAITING_REASON
+
+    server.status = WAITING
+    server.tools = []
+    server.error = WAITING_REASON
     _cache_probe(server)
     return server
 

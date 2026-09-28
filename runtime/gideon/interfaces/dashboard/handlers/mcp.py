@@ -30,6 +30,22 @@ _VALID_MCP_NAME_RE = re.compile(r"^[@a-zA-Z0-9][@a-zA-Z0-9/_.-]*$")
 _MAX_MCP_NAME_LEN = 128
 
 
+def _mcp_owner(request: web.Request):
+    from gideon.security.approval_answer import OWNER, of_request
+
+    principal = of_request(request)
+    return principal if principal.kind == OWNER and principal.name else None
+
+
+def _mcp_owner_required(request: web.Request) -> web.Response | None:
+    if _mcp_owner(request) is None:
+        return web.json_response(
+            {"error": "Only the authenticated owner may change MCP servers."},
+            status=403,
+        )
+    return None
+
+
 def _redact_mcp_projection(value: Any) -> Any:
     """Mask displayed MCP content while keeping server and credential references stable."""
     if isinstance(value, list):
@@ -49,7 +65,7 @@ def _is_valid_mcp_name(name: str) -> bool:
         return False
     if ".." in name:
         return False
-    return bool(_VALID_MCP_NAME_RE.match(name))
+    return "/" not in name and bool(_VALID_MCP_NAME_RE.match(name))
 
 
 def _canonical_mcp_json() -> Path:
@@ -224,6 +240,23 @@ def _store_mcp_spec(name: str, spec: dict[str, Any], previous: dict[str, Any] | 
     return store_server_credentials(name, spec, previous=previous)
 
 
+def _owner_allowed_mcp_spec(name: str, spec: dict[str, Any] | None) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    from gideon.security.mcp_grants import allowed
+    from gideon.security.mcp_grants import revision
+
+    current = _load_json_or_empty(_canonical_mcp_json()).get("mcpServers", {}).get(name)
+    if not isinstance(current, dict):
+        return False
+    candidate = {**current, "name": name, "source": "mcp.json"}
+    proposed = {**spec, "name": name, "source": "mcp.json"}
+    try:
+        return revision(candidate) == revision(proposed) and allowed(candidate)
+    except (TypeError, ValueError):
+        return False
+
+
 def _purge_unused_mcp_credentials(name: str, spec: dict[str, Any] | None) -> None:
     from gideon.core.config.secret_refs import SecretOwner, purge_unused
 
@@ -264,19 +297,23 @@ def _sync_mcp_to_agent(name: str, enabled: bool, *, remove: bool = False) -> Non
         mcp_servers = cfg.setdefault("mcpServers", {})
         tool_ref = f"@{name}"
         changed = False
-        source_spec = None
-        if name not in mcp_servers:
-            source_spec = _find_server_spec_anywhere(name)
-            if source_spec:
-                stored_spec = _store_mcp_spec(name, source_spec)
+        source_spec = _load_json_or_empty(_canonical_mcp_json()).get("mcpServers", {}).get(name)
+        if not _owner_allowed_mcp_spec(name, source_spec):
+            changed = mcp_servers.pop(name, None) is not None
+            remove = True
+        else:
+            candidate = {k: v for k, v in source_spec.items() if k != "disabled"}
+            stored_spec = _store_mcp_spec(name, candidate)
+            if mcp_servers.get(name) != stored_spec:
                 mcp_servers[name] = stored_spec
                 changed = True
-            else:
-                return
         for key in ("tools", "allowedTools"):
             lst = cfg.setdefault(key, [])
-            if tool_ref not in lst:
+            if not remove and tool_ref not in lst:
                 lst.append(tool_ref)
+                changed = True
+            elif remove and tool_ref in lst:
+                lst[:] = [item for item in lst if item != tool_ref]
                 changed = True
         if not changed:
             return
@@ -334,12 +371,18 @@ def _sync_mcp_to_agent_batch(names: list[str], enabled: bool) -> None:
         except (FileNotFoundError, json.JSONDecodeError):
             gdata = {}
         for name in names:
-            if name not in mcp_servers:
-                spec = gdata.get("mcpServers", {}).get(name, {})
-                if not isinstance(spec, dict) or not spec:
-                    continue
-                candidate = {k: v for k, v in spec.items() if k != "disabled"}
-                stored_spec = _store_mcp_spec(name, candidate)
+            spec = gdata.get("mcpServers", {}).get(name, {})
+            if not isinstance(spec, dict) or not _owner_allowed_mcp_spec(name, spec):
+                if mcp_servers.pop(name, None) is not None:
+                    changed = True
+                for field in ("tools", "allowedTools"):
+                    before = cfg.get(field, [])
+                    cfg[field] = [item for item in before if item != f"@{name}"]
+                    changed |= cfg[field] != before
+                continue
+            candidate = {k: v for k, v in spec.items() if k != "disabled"}
+            stored_spec = _store_mcp_spec(name, candidate)
+            if mcp_servers.get(name) != stored_spec:
                 mcp_servers[name] = stored_spec
                 staged_specs[name] = (candidate, stored_spec)
                 changed = True
@@ -664,6 +707,9 @@ async def api_mcp_sync(request: web.Request) -> web.Response:
        (ACP agent only reads the global config).
     3. Resets all sessions so changes take effect.
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     from gideon.integrations.mcp_discovery import (
         discover_servers_to_sync,
         register_servers_for_cc,
@@ -715,6 +761,9 @@ async def api_mcp_toggle(request: web.Request) -> web.Response:
     1. Sets ``disabled`` in ``~/.gideon/mcp.json`` (ACP runtime).
     2. Syncs ``tools``/``allowedTools`` in ``gideon.json`` (non-ACP mode).
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     try:
         body = await read_json_body(request)
     except Exception:
@@ -786,6 +835,9 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
 
     Updates ``disabledTools`` in ``~/.gideon/mcp.json``.
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     try:
         body = await read_json_body(request)
     except Exception:
@@ -853,6 +905,9 @@ async def api_mcp_toggle_tool(request: web.Request) -> web.Response:
 
 async def api_mcp_toggle_all(request: web.Request) -> web.Response:
     """POST /api/mcp/toggle-all — enable or disable all MCP servers."""
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     try:
         body = await read_json_body(request)
     except Exception:
@@ -904,6 +959,9 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
     Removes from ``~/.gideon/mcp.json``
     and syncs gideon.json.
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     try:
         body = await read_json_body(request)
     except Exception:
@@ -964,6 +1022,13 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
             _sync_mcp_to_agent(name, False, remove=True)
 
     if removed:
+        if isinstance(removed_spec, dict):
+            from gideon.security.mcp_grants import revoke
+
+            try:
+                revoke({**removed_spec, "name": name, "source": "mcp.json"})
+            except (TypeError, ValueError):
+                pass
         _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
 
     return web.json_response({"ok": True, "name": name, "removed": removed})
@@ -981,6 +1046,9 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
 
     DELETE removes the server from the config.
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     name = request.match_info["name"]
     if not name or not name.strip():
         return web.json_response({"error": "server name is required"}, status=400)
@@ -1027,6 +1095,13 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
         _sync_mcp_to_agent(name, False, remove=True)
         removed = removed or in_agent
         if removed:
+            if isinstance(removed_spec, dict):
+                from gideon.security.mcp_grants import revoke
+
+                try:
+                    revoke({**removed_spec, "name": name, "source": "mcp.json"})
+                except (TypeError, ValueError):
+                    pass
             _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
         sel().log_api_access(
             caller="dashboard",
@@ -1096,6 +1171,60 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
         resources=name,
     )
     return web.json_response({"ok": True, "name": name}, status=200)
+
+
+async def api_mcp_server_allow(request: web.Request) -> web.Response:
+    """Allow the exact current owner-managed MCP definition after explicit review."""
+    principal = _mcp_owner(request)
+    if principal is None:
+        return web.json_response(
+            {"error": "Only the authenticated owner may allow an MCP server."},
+            status=403,
+        )
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
+    name = request.match_info["name"].strip()
+    from gideon.security import mcp_grants
+    async with _get_mcp_lock():
+        try:
+            current = _load_json_for_update(_canonical_mcp_json()).get("mcpServers", {}).get(name)
+        except ConfigUnreadable as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        if not isinstance(current, dict):
+            return web.json_response({"error": "MCP server not found"}, status=404)
+        server = {**current, "name": name, "source": "mcp.json"}
+        try:
+            revision = mcp_grants.revision(server)
+            question = mcp_grants.question(server)
+        except (mcp_grants.McpGrantDefinitionError, TypeError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if body.get("revision") != revision:
+            return web.json_response(
+                {"error": "MCP definition changed; review the current definition again", "revision": revision, "question": question},
+                status=409,
+            )
+        if body.get("question") != question or body.get("confirmed") is not True:
+            return web.json_response(
+                {"error": "Explicit confirmation of the current MCP question is required", "revision": revision, "question": question},
+                status=409,
+            )
+        try:
+            mcp_grants.give(server, principal)
+        except (PermissionError, OSError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+    try:
+        from gideon.engine.agent import rebuild_agent_config
+
+        await asyncio.to_thread(rebuild_agent_config)
+    except Exception:
+        logger.warning("MCP owner grant saved but agent config refresh failed", exc_info=True)
+    return web.json_response(
+        {"ok": True, "name": name, "allowed": True, "revision": revision}
+    )
 
 
 _CC_GLOBAL_JSON = _HomeMcpPath(".claude.json")
@@ -1323,6 +1452,13 @@ def _set_scope_entry(
     present = name in servers and isinstance(servers[name], dict)
 
     if enabled:
+        if spec is None:
+            spec = _find_server_spec_anywhere(name)
+        if not _owner_allowed_mcp_spec(name, spec):
+            if present:
+                del servers[name]
+                _atomic_write(path, data)
+            return "waiting_for_owner"
         if present:
             s = servers[name]
             if isinstance(s, dict) and s.get("disabled") is True:
@@ -1330,10 +1466,6 @@ def _set_scope_entry(
                 _atomic_write(path, data)
                 return "enabled"
             return "noop"
-        if spec is None:
-            spec = _find_server_spec_anywhere(name)
-        if spec is None:
-            return "missing_spec"
         from gideon.cognition.onboarding_import.floors import strip_secrets
 
         safe_spec, _ = strip_secrets(spec)
@@ -1436,6 +1568,9 @@ async def api_mcp_apply(request: web.Request) -> web.Response:
     ``~/.claude/agents/gideon.md`` + ``gideon.mcp.json``) reflect the
     new merged state.  Returns a summary with per-change outcomes.
     """
+    denied = _mcp_owner_required(request)
+    if denied is not None:
+        return denied
     try:
         body = await read_json_body(request)
     except Exception:

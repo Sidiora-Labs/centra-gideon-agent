@@ -207,6 +207,7 @@ from gideon.interfaces.dashboard.handlers.mcp import (
     api_mcp_probe_one,
     api_mcp_remove,
     api_mcp_server_detail,
+    api_mcp_server_allow,
     api_mcp_servers,
     api_mcp_sync,
     api_mcp_toggle,

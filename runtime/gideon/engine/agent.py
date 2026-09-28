@@ -742,15 +742,37 @@ class _ConfigAssembly:
         self.shared = _load_json(_USER_DIR / "mcp.json").get("mcpServers", {})
 
     def overlay(self) -> None:
+        from gideon.security.mcp_grants import allowed
+
+        installed = self.config.setdefault("mcpServers", {})
+        if not isinstance(installed, dict):
+            installed = {}
+            self.config["mcpServers"] = installed
+        managed = {}
+        for name, declared in _MANAGED_MCP_SERVERS.items():
+            command = declared.get("command", "")
+            command_fn = declared.get("command_fn")
+            if not command and callable(command_fn):
+                command = command_fn()
+            raw_args = declared.get("args", [])
+            args = raw_args if isinstance(raw_args, (list, tuple)) else ()
+            managed[name] = {"command": command, "args": list(args)}
+            if "autoApprove" in declared:
+                auto_approve = declared["autoApprove"]
+                managed[name]["autoApprove"] = (
+                    list(auto_approve) if isinstance(auto_approve, (list, tuple)) else []
+                )
+        admitted: dict[str, dict] = {}
         for name, specification in self.shared.items():
             if name in _MANAGED_MCP_SERVERS or not isinstance(specification, dict):
                 continue
-            servers = self.config.setdefault("mcpServers", {})
-            installed = servers.get(name)
-            if isinstance(installed, dict):
-                installed.update(specification)
-            else:
-                servers[name] = specification
+            candidate = {**specification, "name": name, "source": "mcp.json"}
+            if allowed(candidate):
+                admitted[name] = specification
+        # The installed file is a generated execution config. Rebuild its external
+        # server set from the canonical file and current owner grants so stale or
+        # agent-authored copies never remain executable after edit/revoke.
+        self.config["mcpServers"] = {**managed, **admitted}
 
     def resolve(self) -> None:
         servers = {}

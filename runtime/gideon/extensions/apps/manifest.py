@@ -1391,6 +1391,11 @@ class AppManifest:
         if not self.description:
             errors.append("missing required field: description")
 
+        if self.mcpServers:
+            errors.append(
+                "mcpServers are owner-managed and cannot be declared by an app"
+            )
+
         hooks = self.extra.get("hooks", [])
         if not isinstance(hooks, list):
             errors.append("hooks must be an array")

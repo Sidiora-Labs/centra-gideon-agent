@@ -311,6 +311,15 @@ class McpServerConn:
 
     async def _open_transport(self, stack: Any):
         """Enter the right transport context for this server's spec."""
+        from gideon.security.mcp_grants import allowed
+
+        current = _gideon_mcp_specs().get(self.name)
+        if (
+            current is None
+            or _spec_hash(current) != _spec_hash(self.spec)
+            or not allowed({"name": self.name, **current})
+        ):
+            raise PermissionError("MCP server is not allowed in its current definition")
         from gideon.extensions.providers.mcp_instances import resolve_server_credentials
 
         spec = resolve_server_credentials(self.name, self.spec)
@@ -671,11 +680,18 @@ def _gideon_mcp_specs() -> dict[str, dict[str, Any]]:
 
     data = _load()
     servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
-    return (
-        {k: v for k, v in servers.items() if isinstance(v, dict)}
-        if isinstance(servers, dict)
-        else {}
-    )
+    if not isinstance(servers, dict):
+        return {}
+    from gideon.security.mcp_grants import allowed
+
+    admitted: dict[str, dict[str, Any]] = {}
+    for name, spec in servers.items():
+        if not isinstance(name, str) or not isinstance(spec, dict):
+            continue
+        candidate = {**spec, "name": name, "source": "mcp.json"}
+        if allowed(candidate):
+            admitted[name] = {**spec, "source": "mcp.json"}
+    return admitted
 
 
 def get_mcp_client_registry() -> McpClientRegistry | None:
