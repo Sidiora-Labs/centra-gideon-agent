@@ -1,13 +1,17 @@
 """Read-only source survey stages and secret-eliding tree projection."""
 
 
+class _SanitizedDict(dict):
+    withheld_count: int = 0
+
+
 class SecretTree:
     @classmethod
     def project(cls, api, value):
         if not isinstance(value, (dict, list)):
             return value, 0
         if isinstance(value, dict):
-            clean: dict = {}
+            clean = _SanitizedDict()
             removed = 0
             for key, child in value.items():
                 if isinstance(key, str) and api._SECRET_KEY_RE.search(key):
@@ -16,6 +20,7 @@ class SecretTree:
                 filtered, count = cls.project(api, child)
                 removed += count
                 clean[key] = filtered
+            clean.withheld_count = removed
             return clean, removed
         clean_list = []
         removed = 0
@@ -130,6 +135,7 @@ class SourceCapture:
                     key=str(name),
                     title=str(name),
                     payload=specification,
+                    secrets_skipped=getattr(specification, "withheld_count", 0),
                 )
             )
 
@@ -138,7 +144,7 @@ class SourceCapture:
         if isinstance(content, dict):
             self.servers(content.get("mcpServers"))
 
-    def settings(self, filename, content):
+    def settings(self, filename, content, *, withheld=None):
         if isinstance(content, dict) and content:
             self.result.items.append(
                 self.api.ImportItem(
@@ -147,6 +153,7 @@ class SourceCapture:
                     key=filename,
                     title=f"{self.api.DISPLAY_NAME} settings",
                     payload=content,
+                    secrets_skipped=getattr(content, "withheld_count", 0) if withheld is None else withheld,
                 )
             )
 
@@ -157,11 +164,8 @@ class SourceCapture:
         eligible = sorted(path for path in directory.iterdir() if path.is_dir())
         for skill in eligible:
             if (skill / "SKILL.md").is_file():
-                self.result.secrets_skipped += sum(
-                    1
-                    for path in skill.rglob("*")
-                    if path.is_file() and self.api.refuses(path)
-                )
+                skipped = sum(1 for path in skill.rglob("*") if path.is_file() and self.api.refuses(path))
+                self.result.secrets_skipped += skipped
                 self.result.items.append(
                     self.api.ImportItem(
                         source=self.api.NAME,
@@ -169,6 +173,7 @@ class SourceCapture:
                         key=skill.name,
                         title=skill.name,
                         path=str(skill),
+                        secrets_skipped=skipped,
                     )
                 )
 
@@ -209,9 +214,12 @@ class SourceCapture:
 
     def partition_config(self, config, name):
         settings = dict(config)
+        withheld = getattr(config, "withheld_count", 0)
         for key in self.api._MCP_KEYS:
-            self.servers(settings.pop(key, None))
-        self.settings(name, settings)
+            servers = settings.pop(key, None)
+            withheld -= getattr(servers, "withheld_count", 0)
+            self.servers(servers)
+        self.settings(name, settings, withheld=max(0, withheld))
 
     @classmethod
     def codex(cls, api, root):

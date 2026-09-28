@@ -164,7 +164,12 @@ async def test_the_scan_writes_nothing_to_the_home(make_client, home):
 
 
 async def _import(client, **body):
-    resp = await client.post("/api/onboarding/import", json=body)
+    scan = await (await client.get("/api/onboarding/import")).json()
+    items = [item for source in scan["sources"] for item in source["items"]]
+    fingerprints = [item["fingerprint"] for item in items if
+                    ("sources" not in body or item["source"] in body["sources"]) and
+                    ("categories" not in body or item["category"] in body["categories"])]
+    resp = await client.post("/api/onboarding/import", json={"fingerprints": fingerprints})
     return resp.status, await resp.json()
 
 
@@ -245,7 +250,8 @@ async def test_a_write_failure_is_reported_with_the_secret_redacted(
 
     monkeypatch.setattr("gideon.cognition.onboarding_import.run_import", boom)
     async with make_client() as client:
-        resp = await client.post("/api/onboarding/import", json={})
+        scan = await (await client.get("/api/onboarding/import")).json()
+        resp = await client.post("/api/onboarding/import", json={"fingerprints": [scan["sources"][0]["items"][0]["fingerprint"]]})
         assert resp.status == 500
         raw = await resp.text()
         body = json.loads(raw)
@@ -280,8 +286,7 @@ async def test_an_unknown_source_is_refused_before_anything_is_read(make_client,
         resp = await client.post("/api/onboarding/import", json={"sources": ["nope"]})
         body = await resp.json()
     assert resp.status == 400
-    assert "nope" in body["error"]["message"]
-    assert "claude_code" in body["error"]["message"]
+    assert "fingerprints" in body["error"]["message"]
     assert not (home / "mcp.json").exists(), "a refused request must write nothing"
 
 
@@ -293,7 +298,7 @@ async def test_an_unknown_category_is_refused(make_client):
         )
         body = await resp.json()
     assert resp.status == 400
-    assert "passwords" in body["error"]["message"]
+    assert "fingerprints" in body["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -313,7 +318,7 @@ async def test_an_empty_selection_is_refused_rather_than_importing_nothing(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "body,code",
-    [({"sources": "claude_code"}, "bad_request"), ([], "invalid_body")],
+    [({"sources": "claude_code"}, "invalid_request"), ([], "invalid_body")],
 )
 async def test_a_malformed_body_is_a_400_not_a_500(make_client, body, code):
     async with make_client() as client:
@@ -371,3 +376,22 @@ def test_the_gateway_builder_mounts_the_import_routes():
     assert "register_pack_routes" in called
     assert "register_nothing_at_all_routes" not in called
     assert "register_onboarding_import_routes" in called
+
+
+@pytest.mark.asyncio
+async def test_commit_accepts_only_rescanned_fingerprints(make_client, home):
+    async with make_client() as client:
+        scan = await (await client.get("/api/onboarding/import")).json()
+        items = [item for source in scan["sources"] for item in source["items"]]
+        chosen = next(item for item in items if item["category"] == "mcp_servers")
+        for extra in [{"sources": [chosen["source"]]}, {"categories": [chosen["category"]]}, {"path": "/tmp/other"}, {"text": "replacement"}, {"items": [chosen]}]:
+            response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"]], **extra})
+            assert response.status == 400
+        response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"], chosen["fingerprint"], "0" * 16]})
+        report = await response.json()
+        assert response.status == 200
+        assert len(report["results"]) == 1
+        assert report["results"][0]["fingerprint"] == chosen["fingerprint"]
+        assert report["missing"] == ["0" * 16]
+        assert len(report["unselected"]) == len(items) - 1
+        assert not (home / "skills" / "imported").exists()

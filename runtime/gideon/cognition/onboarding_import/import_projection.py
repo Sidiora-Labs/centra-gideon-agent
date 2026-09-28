@@ -1,6 +1,12 @@
 """Import record projections, selection plans and source descriptors."""
 
 
+def _offered_rows(rows):
+    from gideon.cognition.onboarding_import.model import offer
+
+    return [offer(item, plan) for item, plan in rows]
+
+
 class RecordProjection:
     plans = {
         "item": (
@@ -10,6 +16,8 @@ class RecordProjection:
             "key",
             ("title", lambda row: row.title or row.key),
             "redactions",
+            "secrets_skipped",
+            ("preselected", lambda row: row.preselect),
         ),
         "scan": (
             "source",
@@ -18,6 +26,7 @@ class RecordProjection:
             "present",
             ("counts", lambda row: row.counts()),
             ("items", lambda row: [item.to_dict() for item in row.items]),
+            ("not_imported", lambda row: list(row.not_imported)),
             "secrets_skipped",
             "redactions",
             ("notes", lambda row: list(row.notes)),
@@ -34,6 +43,8 @@ class RecordProjection:
         "report": (
             ("counts", lambda row: row.counts()),
             ("results", lambda row: [item.to_dict() for item in row.results]),
+            ("unselected", lambda row: _offered_rows(row.unselected)),
+            ("missing", lambda row: list(row.missing)),
             "secrets_skipped",
             "redactions",
             ("notes", lambda row: list(row.notes)),

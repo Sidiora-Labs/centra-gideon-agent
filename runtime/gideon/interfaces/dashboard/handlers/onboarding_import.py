@@ -1,36 +1,4 @@
-"""HTTP API for onboarding import — ``/api/onboarding/import`` (PEP-5).
-
-The onboarding step's two calls, and nothing else.
-
-``GET``
-    Scan every registered source and answer what could be adopted, per source and
-    per category. Read-only in both directions: it never writes to the foreign
-    root, and it never writes to our home. Items this importer has ALREADY written
-    come back ``existing: true``, which is what lets a re-entered first run offer
-    nothing twice.
-
-``POST``
-    Re-scan, import the user's picks, and answer the per-item outcome report.
-
-**The POST re-scans; it never accepts items from the client.** An
-:class:`~gideon.cognition.onboarding_import.ImportItem` carries a filesystem ``path``
-(skills) and a file body, so honouring a client-supplied one would let any caller
-name any directory and have it copied into the home. The wire therefore carries
-only the two SELECTION axes — source names and category names — and both are
-validated against their closed registries before a single byte is read.
-
-**Nothing is swallowed.** ``conflict`` and ``rejected`` are ordinary rows of the
-report the step renders, so a destination that already held something different is
-*shown*, not hidden behind a success count. A writer that raises outright (an
-unreadable destination, a full disk) answers ``500 onboarding_import_failed``
-carrying the failure's own sentence rather than an empty 200. Retrying after either
-is safe: the fingerprint ledger records each write as it lands, so whatever already
-arrived comes back as ``existing``.
-
-The scan and the import both do synchronous filesystem work, so both run through
-:func:`asyncio.to_thread` — a first-run directory walk must not stall the gateway's
-event loop.
-"""
+"""Destination-derived import previews and fingerprint-only commits."""
 
 from __future__ import annotations
 
@@ -70,7 +38,8 @@ def _scan_with_ledger() -> tuple[list, set[str]]:
     from gideon.cognition.onboarding_import import already_imported, scan_all
 
     results = scan_all()
-    return results, already_imported(results)
+    from gideon.cognition.onboarding_import import plans
+    return results, plans(results)
 
 
 async def api_onboarding_import_scan(request: web.Request) -> web.Response:
@@ -103,7 +72,10 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
         payload = result.to_dict()
         payload["detected"] = result.source in found
         for item in payload["items"]:
-            item["existing"] = item["fingerprint"] in known
+            plan = known[item["fingerprint"]]
+            item.update(state=plan.state.value, destination=plan.destination, detail=plan.detail,
+                        existing=plan.state.value == "existing",
+                        preselected=item["preselected"] and plan.state.value == "new")
         sources.append(payload)
 
     return web.json_response(
@@ -114,94 +86,37 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
     )
 
 
-def _selection(
-    body: dict, key: str, known: set[str]
-) -> tuple[list[str] | None, web.Response | None]:
-    """Validate one selection axis. ``None`` means "every one of them".
+def _fingerprints(body: dict) -> list[str]:
+    import re
 
-    An ABSENT key is "all" (what a CLI wants); a supplied list is exactly those
-    names. An empty list is refused rather than silently importing nothing — a
-    request that asks for no work and gets a cheerful ``0 imported`` back is the
-    swallowed-write shape this endpoint exists to avoid.
-    """
-    if key not in body:
-        return None, None
-    value = body[key]
-    if not isinstance(value, list) or not all(
-        isinstance(entry, str) for entry in value
-    ):
-        return None, json_error(
-            "bad_request", message=f"'{key}' must be a list of names", status=400
-        )
-    if not value:
-        return None, json_error(
-            "invalid_request",
-            message=f"Choose at least one entry for '{key}' — an empty list imports nothing.",
-            status=400,
-        )
-    unknown = sorted(set(value) - known)
-    if unknown:
-        return None, json_error(
-            "bad_request",
-            message=(
-                f"unknown {key[:-1]}(s): {', '.join(unknown)} "
-                f"(known: {', '.join(sorted(known))})"
-            ),
-            status=400,
-        )
-    return value, None
+    if set(body) != {"fingerprints"}:
+        raise ValueError("Choose individual item fingerprints only")
+    entries = body["fingerprints"]
+    if not isinstance(entries, list) or not entries or len(entries) > 10000:
+        raise ValueError("Choose between 1 and 10000 item fingerprints")
+    if any(not isinstance(entry, str) or re.fullmatch(r"[0-9a-f]{16}", entry) is None for entry in entries):
+        raise ValueError("Each fingerprint must be 16 lowercase hexadecimal characters")
+    return list(dict.fromkeys(entries))
 
 
 async def api_onboarding_import_run(request: web.Request) -> web.Response:
-    """POST /api/onboarding/import — import the picked categories and report outcomes.
-
-    Body: ``{"sources": [name, …], "categories": [name, …]}``. Either key may be
-    omitted to mean "all of them". Answers the
-    :class:`~gideon.cognition.onboarding_import.ImportReport` — per-item outcomes plus
-    the withheld-secret counts — with ``200`` even when every row is a ``conflict``:
-    a conflict is a real answer the step renders, not a request failure.
-    """
-    from gideon.cognition.onboarding_import import (
-        ImportCategory,
-        list_sources,
-        run_import,
-        scan_all,
-    )
+    from gideon.cognition.onboarding_import import run_import, scan_all
 
     try:
         body = await read_json_body(request)
     except RequestBodyTypeError:
         return json_error("invalid_body", status=400)
-    except Exception:  # noqa: BLE001 — an unparsable body is a 400, never a 500
+    except Exception:
         return json_error("invalid_json", status=400)
-
-    sources, refusal = _selection(body, "sources", {src.name for src in list_sources()})
-    if refusal is not None:
-        return refusal
-    categories, refusal = _selection(
-        body, "categories", {category.value for category in ImportCategory}
-    )
-    if refusal is not None:
-        return refusal
-
-    def _run():
-        return run_import(scan_all(), categories=categories, sources=sources)
-
     try:
-        report = await asyncio.to_thread(_run)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 — a write fault is reported, never swallowed
+        fingerprints = _fingerprints(body)
+    except ValueError as exc:
+        return json_error("invalid_request", message=str(exc), status=400)
+    try:
+        report = await asyncio.to_thread(lambda: run_import(scan_all(), fingerprints=fingerprints))
+    except Exception as exc:
         logger.warning("onboarding import: write failed", exc_info=True)
-        return json_error(
-            "onboarding_import_failed",
-            message=(
-                f"The import stopped after a write failed: {_redacted(exc)}. "
-                "Anything already imported was recorded, so importing again is safe."
-            ),
-            status=500,
-        )
-
+        return json_error("onboarding_import_failed", message=f"The import stopped after a write failed: {_redacted(exc)}. Anything already imported was recorded, so importing again is safe.", status=500)
     return web.json_response(report.to_dict())
 
 

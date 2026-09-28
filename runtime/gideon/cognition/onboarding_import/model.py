@@ -59,6 +59,26 @@ class WriteOutcome(str, Enum):
     REJECTED = "rejected"
 
 
+class ItemState(str, Enum):
+    NEW = "new"
+    EXISTING = "existing"
+    CONFLICT = "conflict"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class Plan:
+    state: ItemState
+    destination: str
+    detail: str = ""
+
+
+def offer(item: ImportItem, plan: Plan) -> dict:
+    return {**item.to_dict(), "state": plan.state.value,
+            "destination": plan.destination, "detail": plan.detail,
+            "preselected": item.preselect and plan.state is ItemState.NEW}
+
+
 def fingerprint_of(source: str, category: ImportCategory | str, key: str) -> str:
     """``sha256(source\\0category\\0key)`` — the idempotence key.
 
@@ -87,9 +107,11 @@ class ImportItem:
     key: str
     title: str = ""
     text: str = ""
-    payload: dict = field(default_factory=dict)
+    payload: dict = field(default_factory=dict, repr=False)
     path: str = ""
     redactions: int = 0
+    secrets_skipped: int = 0
+    preselect: bool = True
 
     @property
     def fingerprint(self) -> str:
@@ -142,6 +164,7 @@ class ScanResult:
     secrets_skipped: int = 0
     redactions: int = 0
     notes: list[str] = field(default_factory=list)
+    not_imported: list[dict] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         """Per-category item counts — what the onboarding checkboxes show."""
@@ -165,7 +188,14 @@ class ScanResult:
         self.notes[len(self.notes) :] = messages
 
     def to_dict(self) -> dict:
-        return RecordProjection.render("scan", self)
+        result = RecordProjection.render("scan", self)
+        if self.secrets_skipped:
+            result["not_imported"].append({"what": "Credential values or files", "count": self.secrets_skipped,
+                                            "why": "Credentials are not imported"})
+        if self.redactions:
+            result["not_imported"].append({"what": "Credential-like strings", "count": self.redactions,
+                                            "why": "Removed from imported text"})
+        return result
 
 
 @dataclass(frozen=True)
@@ -192,6 +222,8 @@ class ImportReport:
     secrets_skipped: int = 0
     redactions: int = 0
     notes: list[str] = field(default_factory=list)
+    unselected: list[tuple[ImportItem, Plan]] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         return RecordProjection.tally(self.results, "outcome", WriteOutcome)

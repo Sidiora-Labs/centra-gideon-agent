@@ -462,3 +462,103 @@ def test_the_note_says_how_much_never_what():
         assert (
             "/" not in note and "=" not in note and '"' not in note and "'" not in note
         )
+
+
+def test_a_pick_imports_exactly_the_chosen_items(claude_root, home):
+    from gideon.cognition.onboarding_import import ItemState
+
+    scans = [scan_source("claude_code", claude_root)]
+    memory = next(item.fingerprint for item in scans[0].items if item.category is ImportCategory.MEMORIES)
+    weather = next(item.fingerprint for item in scans[0].items if item.category is ImportCategory.MCP_SERVERS)
+    report = run_import(scans, fingerprints=[memory, weather])
+    assert sorted(row.fingerprint for row in report.results) == sorted([memory, weather])
+    assert {row.outcome for row in report.results} == {WriteOutcome.IMPORTED}
+    assert mcp_config_path().is_file()
+    assert not (home / "skills" / "imported").exists()
+    assert not (home / "workspace" / "memory" / "imported" / "claude_code" / "CLAUDE.md").exists()
+    left = {item.fingerprint: plan.state for item, plan in report.unselected}
+    assert set(left) == {item.fingerprint for item in scans[0].items} - {memory, weather}
+    assert set(left.values()) == {ItemState.NEW}
+    assert report.missing == []
+
+
+def test_a_chosen_fingerprint_the_scan_lacks_is_reported_missing(claude_root, home):
+    scans = [scan_source("claude_code", claude_root)]
+    weather = next(item.fingerprint for item in scans[0].items if item.category is ImportCategory.MCP_SERVERS)
+    stranger = fingerprint_of("claude_code", ImportCategory.SKILLS, "not-on-this-machine")
+    report = run_import(scans, fingerprints=[stranger, weather, stranger])
+    assert [row.fingerprint for row in report.results] == [weather]
+    assert report.missing == [stranger]
+    assert not (home / "skills" / "imported").exists()
+
+
+def test_the_plan_says_before_the_import_what_the_import_then_does(claude_root, home):
+    import shutil
+    from gideon.cognition.onboarding_import import ItemState, plans
+
+    mcp_config_path().parent.mkdir(parents=True, exist_ok=True)
+    mcp_config_path().write_text(json.dumps({"mcpServers": {"weather": {"command": "mine"}}}), encoding="utf-8")
+    first = [scan_source("claude_code", claude_root)]
+    staged = next(item.fingerprint for item in first[0].items if item.category is ImportCategory.SETTINGS)
+    run_import(first, fingerprints=[staged])
+    scans = [scan_source("claude_code", claude_root)]
+    skill = next(item for item in scans[0].items if item.category is ImportCategory.SKILLS)
+    shutil.rmtree(skill.path)
+    before = plans(scans)
+    assert {plan.state for plan in before.values()} == {ItemState.NEW, ItemState.CONFLICT, ItemState.EXISTING, ItemState.REJECTED}
+    report = run_import(scans)
+    for row in report.results:
+        planned = before[row.fingerprint]
+        assert row.outcome.value == ("imported" if planned.state is ItemState.NEW else planned.state.value)
+        assert row.destination == planned.destination
+        if planned.state is not ItemState.NEW:
+            assert row.detail == planned.detail
+
+
+def test_planning_writes_nothing_to_the_home(claude_root, home):
+    from gideon.cognition.onboarding_import import plans
+
+    scans = [scan_source("claude_code", claude_root)]
+    before = {str(path.relative_to(home)): path.read_bytes() if path.is_file() else None for path in home.rglob("*")}
+    assert len(plans(scans)) == len(scans[0].items)
+    assert {str(path.relative_to(home)): path.read_bytes() if path.is_file() else None for path in home.rglob("*")} == before
+
+
+def test_destination_changed_after_preview_is_preserved(claude_root, home):
+    from gideon.cognition.onboarding_import import ItemState, plans
+
+    scans = [scan_source("claude_code", claude_root)]
+    weather = next(item for item in scans[0].items if item.category is ImportCategory.MCP_SERVERS)
+    assert plans(scans)[weather.fingerprint].state is ItemState.NEW
+    contents = json.dumps({"mcpServers": {"weather": {"command": "mine"}}})
+    mcp_config_path().parent.mkdir(parents=True, exist_ok=True)
+    mcp_config_path().write_text(contents)
+    report = run_import(scans, fingerprints=[weather.fingerprint])
+    assert report.results[0].outcome is WriteOutcome.CONFLICT
+    assert mcp_config_path().read_text() == contents
+
+
+def test_each_structured_item_reports_its_own_withheld_count(tmp_path):
+    from gideon.cognition.onboarding_import import plans, offer
+
+    root = tmp_path / "codex-counts"
+    root.mkdir()
+    (root / "config.json").write_text(json.dumps({
+        "model": "current",
+        "api_key": "setting-credential",
+        "mcp_servers": {
+            "weather": {"command": "weather", "env": {"API_TOKEN": "weather-credential"}},
+            "other": {"command": "other", "headers": {"Authorization": "other-credential"},
+                      "env": {"PASSWORD": "second-credential"}},
+        },
+    }))
+    scan = scan_source("codex", root)
+    assert scan.secrets_skipped == 4
+    by_key = {item.key: item for item in scan.items}
+    assert {key: item.secrets_skipped for key, item in by_key.items()} == {
+        "weather": 1, "other": 2, "config.json": 1,
+    }
+    preview = [offer(item, plans([scan])[item.fingerprint]) for item in scan.items]
+    wire = json.dumps(preview)
+    assert "credential" not in wire
+    assert all("secrets_skipped" in row for row in preview)

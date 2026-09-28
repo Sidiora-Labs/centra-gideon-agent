@@ -26,6 +26,7 @@ touches our home.
 from __future__ import annotations
 
 from gideon.cognition.onboarding_import.engine import (
+    plans,
     already_imported,
     detected,
     run_import,
@@ -34,6 +35,9 @@ from gideon.cognition.onboarding_import.engine import (
     select_items,
 )
 from gideon.cognition.onboarding_import.model import (
+    ItemState,
+    Plan,
+    offer,
     ImportCategory,
     ImportItem,
     ImportReport,
@@ -49,6 +53,10 @@ from gideon.cognition.onboarding_import.registry import (
 )
 
 __all__ = [
+    "ItemState",
+    "Plan",
+    "plans",
+    "offer",
     "ImportCategory",
     "ImportItem",
     "ImportReport",

@@ -3055,11 +3055,14 @@ export interface OnboardingStatePatch {
 export interface OnboardingImportItem {
   fingerprint: string; source: string; category: string; key: string; title: string
   redactions: number; existing: boolean
+  state?: 'new' | 'existing' | 'conflict' | 'rejected'
+  destination?: string; detail?: string; preselected?: boolean; secrets_skipped?: number
 }
 export interface OnboardingImportSource {
   source: string; display_name: string; root: string; present: boolean; detected: boolean
   counts: Record<string, number>
   items: OnboardingImportItem[]
+  not_imported?: Array<{ what: string; count: number; why: string }>
   secrets_skipped: number; redactions: number
   notes: string[]
 }
@@ -3077,6 +3080,9 @@ export interface OnboardingImportReport {
   results: OnboardingImportOutcome[]
   secrets_skipped: number; redactions: number
   notes: string[]
+  unselected?: OnboardingImportItem[]
+  missing?: string[]
+
 }
 export interface ChatModelOption { name: string; model_id: string; provider: string; description?: string }
 export interface SavedAgent {
@@ -4133,7 +4139,7 @@ export const api = {
   saveOnboardingState: (patch: OnboardingStatePatch) =>
     post<{ ok: boolean; state: OnboardingState }>('/api/onboarding/state', patch),
   onboardingImportScan: () => get<OnboardingImportScan>('/api/onboarding/import'),
-  runOnboardingImport: (body: { sources: string[]; categories: string[] }) =>
+  runOnboardingImport: (body: { fingerprints: string[] }) =>
     post<OnboardingImportReport>('/api/onboarding/import', body),
   chatModels: () => get<ChatModelOption[]>('/api/models/chat'),
   setActiveModel: (useCase: string, models: string[]) => put<{ ok?: boolean }>(`/api/models/active/${encodeURIComponent(useCase)}`, { models }),

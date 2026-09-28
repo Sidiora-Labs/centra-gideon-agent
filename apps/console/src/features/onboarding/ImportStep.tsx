@@ -1,14 +1,15 @@
-import { useSetupImport } from './importSetupState'
+import { useState } from 'react'
+import { useSetupImport, writableImportItem } from './importSetupState'
 import { motion } from 'framer-motion'
 import { AlertTriangle, ArrowRight, Check, Loader2, ShieldCheck } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { InlineError } from '../../shared/ui/InlineError'
 import { TextLink } from '../../shared/ui/TextLink'
-import { Checkbox } from '../../shared/ui/forms'
 import { LoadError, LoadingStatus } from '../../shared/ui/ListScaffold'
-import { listItemEnter, spring, stagger } from '../../shared/theme/motion'
+import { stagger } from '../../shared/theme/motion'
 import { fvs } from '../../shared/theme/fontWeight'
 import {
+  type OnboardingImportItem,
   type OnboardingImportReport,
   type OnboardingImportSource,
 } from '../../shared/data/api'
@@ -22,14 +23,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   conversations: 'Conversations',
 }
 
-const CATEGORY_BLURB: Record<string, string> = {
-  instructions: 'Your CLAUDE.md / AGENTS.md conventions, saved as memories.',
-  memories: 'Notes the other tool was already remembering for you.',
-  mcp_servers: 'MCP server definitions, added to your MCP config.',
-  skills: 'Skills, copied in and re-scanned like a Store install.',
-  settings: 'Staged for you to review — never merged into live config.',
-  conversations: 'Earlier chats, including tool exchanges, kept in separate searchable sessions.',
-}
 
 export function labelOfCategory(category: string): string {
   return Object.prototype.hasOwnProperty.call(CATEGORY_LABEL, category) ? CATEGORY_LABEL[category] : category.split('_').join(' ')
@@ -46,8 +39,8 @@ export function ImportStep({ onDone, onSkip }: {
 
   onSkip: () => void
 }) {
-  const { scan, scanError, pickedSources, pickedCategories, busy, report, failure, detected,
-    offered, tally, nothingPicked, load, run, pickSource, pickCategory } = useSetupImport()
+  const { scan, scanError, pickedItems, busy, report, failure, detected,
+    nothingPicked, load, run, pickItems } = useSetupImport()
 
   const announcement = report
     ? `Import finished: ${summaryOfReport(report)}.`
@@ -91,28 +84,11 @@ export function ImportStep({ onDone, onSkip }: {
                 variants={{ animate: { transition: stagger(0.05) } }}>
                 {detected.map((source) => (
                   <SourceCard key={source.source} source={source}
-                    picked={!!pickedSources[source.source]}
-                    onPick={(value) => pickSource(source.source, value)} />
+                    picked={pickedItems}
+                    onPick={pickItems} />
                 ))}
               </motion.div>
 
-              <div className="flex flex-col gap-2">
-                <span className="text-on-surface text-[0.8125rem]" style={fvs(550)}>
-                  What to bring over
-                </span>
-                {offered.length === 0
-                  ? <p className="text-on-surface-low text-[0.8125rem]">
-                      Nothing to bring over from the tools you picked.
-                    </p>
-                  : offered.map((category) => {
-                    const { total, existing } = tally(category)
-                    return (
-                      <CategoryRow key={category} category={category} total={total}
-                        existing={existing} picked={!!pickedCategories[category]}
-                        onPick={(value) => pickCategory(category, value)} />
-                    )
-                  })}
-              </div>
 
               {failure && (
                 <div className="flex flex-col gap-2">
@@ -127,7 +103,7 @@ export function ImportStep({ onDone, onSkip }: {
               <div className="flex items-center gap-m">
                 <Button variant="primary" size="md" loading={busy}
                   disabled={nothingPicked}
-                  disabledReason="Pick a tool and at least one thing to bring over"
+                  disabledReason="Pick at least one individual item to bring over"
                   onClick={run}>
                   {failure ? 'Try again' : 'Import selected'}
                   <ArrowRight size={16} aria-hidden="true" />
@@ -160,65 +136,62 @@ function Nothing({ looked, onContinue }: {
   )
 }
 
-function SourceCard({ source, picked, onPick }: {
-  source: OnboardingImportSource
-  picked: boolean
-  onPick: (v: boolean) => void
+function PickGroup({ items, picked, onPick, label }: {
+  items: OnboardingImportItem[]; picked: Record<string, boolean>
+  onPick: (items: OnboardingImportItem[], value: boolean) => void; label: string
 }) {
-  const total = source.items.length
-  return (
-    <motion.div variants={listItemEnter} layout transition={spring.spatialFast}
-      className="flex items-start gap-2 rounded-xl border border-outline/25 bg-surface-high p-m">
-      <Checkbox checked={picked} onChange={onPick} className="mt-0.5"
-        ariaLabel={`Import from ${source.display_name}`} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-on-surface text-[0.875rem]" style={fvs(550)}>{source.display_name}</span>
-          <span className="text-on-surface-low text-[0.75rem]">
-            {total} {total === 1 ? 'thing' : 'things'} found
-          </span>
-        </div>
-        <p className="mt-0.5 break-all font-mono text-on-surface-low text-[0.75rem]">{source.root}</p>
-        {source.secrets_skipped > 0 && (
-          <p className="mt-1 flex items-start gap-1.5 text-on-surface-var text-[0.75rem]">
-            <ShieldCheck size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-ok" />
-
-            {source.secrets_skipped} credential value{source.secrets_skipped === 1 ? '' : 's'} or file{source.secrets_skipped === 1 ? '' : 's'} will not be imported.
-          </p>
-        )}
-      </div>
-    </motion.div>
-  )
+  const eligible = items.filter(writableImportItem)
+  const chosen = eligible.filter(item => picked[item.fingerprint]).length
+  return <input type="checkbox" aria-label={label} checked={!!eligible.length && chosen === eligible.length}
+    disabled={!eligible.length} ref={element => { if (element) element.indeterminate = chosen > 0 && chosen < eligible.length }}
+    onChange={event => onPick(eligible, event.target.checked)} />
 }
 
-function CategoryRow({ category, total, existing, picked, onPick }: {
-  category: string
-  total: number
-  existing: number
-  picked: boolean
-  onPick: (v: boolean) => void
+function ImportGroup({ category, items, picked, onPick }: {
+  category: string; items: OnboardingImportItem[]; picked: Record<string, boolean>
+  onPick: (items: OnboardingImportItem[], value: boolean) => void
 }) {
-  const label = labelOfCategory(category)
-  return (
-    <div className="flex items-start gap-2">
-      <Checkbox checked={picked} onChange={onPick} className="mt-0.5"
-        ariaLabel={`Bring over ${label} (${total})`} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-on-surface text-[0.8125rem]">{label}</span>
-          <span className="text-on-surface-low text-[0.75rem]">{total}</span>
-          {existing > 0 && (
-            <span className="text-[0.75rem]" style={{ color: 'var(--color-success)' }}>
-              {existing} already imported
-            </span>
-          )}
+  const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(0)
+  const matching = items.filter(item => `${item.title} ${item.key} ${item.detail ?? ''}`.toLowerCase().includes(filter.toLowerCase()))
+  const pages = Math.max(1, Math.ceil(matching.length / 40))
+  const shownPage = Math.min(page, pages - 1)
+  return <div className="grid gap-s">
+    <div className="flex items-center gap-s"><PickGroup items={items} picked={picked} onPick={onPick}
+      label={`Bring over ${labelOfCategory(category)} (${items.length})`} />
+      <details className="min-w-0 flex-1"><summary>{labelOfCategory(category)} · {items.length} items</summary>
+        <div className="grid gap-s py-s">
+          <label>Filter {labelOfCategory(category)}<input type="search" className="w-full rounded-lg border border-outline-var bg-surface p-s"
+            value={filter} onChange={event => { setFilter(event.target.value); setPage(0) }} /></label>
+          {matching.slice(shownPage * 40, (shownPage + 1) * 40).map(item => <label key={item.fingerprint} className="flex items-start gap-s text-[0.8125rem]">
+            <input type="checkbox" aria-label={`Import ${item.title}`} checked={!!picked[item.fingerprint] && writableImportItem(item)}
+              disabled={!writableImportItem(item)} onChange={event => onPick([item], event.target.checked)} />
+            <span className="min-w-0 break-words">{item.title}<span className="block text-on-surface-low">{item.state ?? (item.existing ? 'existing' : 'new')}{item.destination ? ` → ${item.destination}` : ''}{item.detail ? ` · ${item.detail}` : ''}</span>
+              {!!((item.secrets_skipped ?? 0) + item.redactions) && <span className="block">{(item.secrets_skipped ?? 0) + item.redactions} credential values withheld</span>}</span>
+          </label>)}
+          {!matching.length && <p>No matching items</p>}
+          {pages > 1 && <div className="flex items-center gap-s"><Button size="sm" variant="secondary" disabled={!shownPage} onClick={() => setPage(shownPage - 1)}>Previous</Button><span>Page {shownPage + 1} of {pages}</span><Button size="sm" variant="secondary" disabled={shownPage + 1 >= pages} onClick={() => setPage(shownPage + 1)}>Next</Button></div>}
         </div>
-        <p className="text-on-surface-low text-[0.75rem]">
-          {CATEGORY_BLURB[category] ?? `Imported as ${label.toLowerCase()}.`}
-        </p>
+      </details>
+    </div>
+  </div>
+}
+
+function SourceCard({ source, picked, onPick }: {
+  source: OnboardingImportSource; picked: Record<string, boolean>
+  onPick: (items: OnboardingImportItem[], value: boolean) => void
+}) {
+  const categories = [...new Set(source.items.map(item => item.category))]
+  return <section className="grid gap-s rounded-xl border border-outline/25 bg-surface-high p-m">
+    <div className="flex items-start gap-s"><PickGroup items={source.items} picked={picked} onPick={onPick} label={`Import from ${source.display_name}`} />
+      <div><span style={fvs(550)}>{source.display_name}</span><span className="ml-2 text-on-surface-low">{source.items.length} things found</span>
+        <p className="break-all text-[0.75rem] text-on-surface-low">{source.root}</p>
+        {!!source.secrets_skipped && <p>{source.secrets_skipped} credential value{source.secrets_skipped === 1 ? '' : 's'} or file{source.secrets_skipped === 1 ? '' : 's'} will not be imported.</p>}
       </div>
     </div>
-  )
+    {categories.map(category => <ImportGroup key={category} category={category} items={source.items.filter(item => item.category === category)} picked={picked} onPick={onPick} />)}
+    {source.not_imported?.map(row => <p key={row.what}>{row.what}: {row.count} not imported · {row.why}</p>)}
+  </section>
 }
 
 function Report({ report, onContinue }: {
@@ -230,7 +203,7 @@ function Report({ report, onContinue }: {
     return groups
   }, {} as Record<string, OnboardingImportReport['results']>)
   const imported = outcomes.imported ?? []
-  const reviews = [{ key: 'conflict', title: 'Kept what you already had', tone: 'text-warn' }, { key: 'rejected', title: 'Refused for safety', tone: 'text-danger' }]
+  const reviews = [{ key: 'existing', title: 'Already here', tone: 'text-on-surface-low' }, { key: 'conflict', title: 'Kept what you already had', tone: 'text-warn' }, { key: 'rejected', title: 'Refused for safety', tone: 'text-danger' }]
   return (
     <div className="grid gap-l">
       <p className="flex items-center gap-1.5 text-[0.875rem]" style={{ color: 'var(--color-success)' }}>
@@ -252,6 +225,9 @@ function Report({ report, onContinue }: {
 
       {reviews.filter(review => outcomes[review.key]?.length).map(review =>
         <OutcomeList key={review.key} title={review.title} tone={review.tone} rows={outcomes[review.key]} />)}
+
+      {!!report.unselected?.length && <p>{report.unselected.length} items left unselected.</p>}
+      {report.missing?.map(fingerprint => <p key={fingerprint}>Selected item {fingerprint} is missing; preview again.</p>)}
 
       {report.notes.length > 0 && (
         <ul className="flex flex-col gap-1">

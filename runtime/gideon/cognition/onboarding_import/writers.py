@@ -56,6 +56,8 @@ from gideon.cognition.onboarding_import.floors import refuses
 from gideon.cognition.onboarding_import.model import (
     ImportCategory,
     ImportItem,
+    ItemState,
+    Plan,
     ImportReport,
     WriteOutcome,
     WriteResult,
@@ -275,6 +277,9 @@ _WRITERS: dict[ImportCategory, Callable[[ImportItem], WriteResult]] = {
 
 
 def write_item(item: ImportItem) -> WriteResult:
+    plan = plan_item(item)
+    if plan.state is not ItemState.NEW:
+        return _result(item, WriteOutcome(plan.state.value), plan.destination, plan.detail)
     return ImportBatch.dispatch(sys.modules[__name__], item)
 
 
@@ -289,3 +294,76 @@ def import_report(items: list[ImportItem], *, secrets_skipped: int = 0) -> Impor
         withheld_notes(secrets_skipped=secrets_skipped, redactions=report.redactions)
     )
     return report
+
+
+def _file_plan(path: Path, content: str) -> Plan:
+    destination = _rel_to_home(path)
+    if not path.exists():
+        return Plan(ItemState.NEW, destination)
+    try:
+        same = path.is_file() and path.read_text(encoding="utf-8") == content
+    except OSError:
+        same = False
+    return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
+                "already imported, unchanged" if same else "different content is already here; the existing item is kept")
+
+
+def plan_item(item: ImportItem) -> Plan:
+    if item.category in (ImportCategory.INSTRUCTIONS, ImportCategory.MEMORIES):
+        return _file_plan(_memory_doc_path(item), item.text + ("" if item.text.endswith("\n") else "\n"))
+    if item.category is ImportCategory.SETTINGS:
+        content = json.dumps({"source": item.source, "key": item.key, "settings": item.payload}, indent=2, sort_keys=True) + "\n"
+        return _file_plan(staged_settings_path(item.source, item.key), content)
+    if item.category is ImportCategory.MCP_SERVERS:
+        destination = f"{_rel_to_home(mcp_config_path())}#mcpServers.{item.key}"
+        try:
+            data = json.loads(mcp_config_path().read_text(encoding="utf-8")) if mcp_config_path().exists() else {}
+            if not isinstance(data, dict):
+                raise ValueError("invalid MCP configuration")
+        except (OSError, ValueError):
+            return Plan(ItemState.CONFLICT, destination, "the existing mcp.json could not be parsed; it is kept")
+        servers = data.get("mcpServers")
+        existing = servers.get(item.key) if isinstance(servers, dict) else None
+        if existing is None:
+            return Plan(ItemState.NEW, destination)
+        try:
+            from gideon.extensions.providers import mcp_instances
+            resolver = getattr(mcp_instances, "resolve_server_credentials", None)
+            same = (resolver(item.key, existing) == resolver(item.key, item.payload)) if resolver else existing == item.payload
+        except (ValueError, PermissionError):
+            same = False
+        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
+                    "already configured identically" if same else "an MCP server of this name is configured differently; it is kept")
+    if item.category is ImportCategory.SKILLS:
+        target = imported_skills_dir(item.source) / item.key
+        destination = _rel_to_home(target)
+        source = Path(item.path) if item.path else None
+        if source is None or not source.is_dir() or refuses(source):
+            return Plan(ItemState.REJECTED, destination, "source skill directory is missing or sensitive")
+        if target.exists():
+            ours = _ours(item.fingerprint)
+            return Plan(ItemState.EXISTING if ours else ItemState.CONFLICT, destination,
+                        "already imported" if ours else "a skill of this name is already here; it is kept")
+        from gideon.security.supply_chain import TrustTier, Verdict, scan_dir
+        verdict = scan_dir(source, TrustTier.COMMUNITY).verdict
+        if verdict in (Verdict.WARNING, Verdict.DANGEROUS):
+            return Plan(ItemState.REJECTED, destination, "the skill supply-chain scan requires review before import")
+        return Plan(ItemState.NEW, destination)
+    if item.category is ImportCategory.CONVERSATIONS:
+        from gideon.cognition.history import ConversationLog
+        rows = item.payload.get("messages")
+        if not isinstance(rows, list) or not rows:
+            return Plan(ItemState.REJECTED, "", "conversation has no readable messages")
+        path = ConversationLog()._path(f"imported_{item.source}_{item.fingerprint}")
+        destination = _rel_to_home(path)
+        if not path.exists():
+            return Plan(ItemState.NEW, destination)
+        try:
+            with path.open(encoding="utf-8") as handle:
+                metadata = json.loads(handle.readline())
+            same = metadata.get("import_source") == item.source and metadata.get("import_key") == item.key
+        except (OSError, ValueError, AttributeError):
+            same = False
+        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
+                    "already imported" if same else "a conversation is already here; it is kept")
+    raise KeyError(f"no planner for import category {item.category!r}")
