@@ -112,6 +112,8 @@ class BoardProjection:
             collapsed=bool(payload.get("collapsed", False)),
             attention=bool(payload.get("attention", False)),
             resumable=bool(payload.get("resumable", False)),
+            source=str(payload.get("source") or ""),
+            kind=str(payload.get("kind") or ""),
             state=state,
             claim=claim,
         )
@@ -125,6 +127,8 @@ class BoardProjection:
             state=state,
             origin="manual",
             project_id=project_id,
+            source="loop",
+            kind=str(getattr(record, "kind", "") or ""),
             resumable=state is containers.BoardState.SUSPENDED,
             attention=state is containers.BoardState.NEEDS_INPUT,
         ).to_dict()
@@ -139,6 +143,7 @@ class BoardProjection:
             state=state,
             origin="task",
             project_id=project_id,
+            source="task",
             attention=state is containers.BoardState.NEEDS_INPUT,
         ).to_dict()
 

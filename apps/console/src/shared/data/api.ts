@@ -1002,6 +1002,7 @@ export type WorkState = 'needs_input' | 'working' | 'queued' | 'suspended' | 're
 export interface WorkClaim { holder: string; expires_at: number; taken_at: number; renewals: number }
 export interface WorkRow {
   run_id: string; title: string; state: WorkState; origin: string; project_id: string
+  source?: string; kind?: string
   claim: WorkClaim | null; collapsed: boolean; attention: boolean; resumable: boolean
 }
 export interface WorkGroup { state: WorkState; count: number; attention: number; rows: WorkRow[] }
@@ -1019,6 +1020,7 @@ export interface TaskItem {
   author?: string
   labels?: string[]; depends_on?: string[]; due?: string; url?: string
   created_at?: string; updated_at?: string
+  due_reminder?: boolean
   task_list?: string
   dependencies?: TaskDependency[]
   exit_criteria?: ExitCriterion[]

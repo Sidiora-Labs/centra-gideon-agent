@@ -222,6 +222,7 @@ _PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
     ("planning", "proposal"): "gideon.cognition.planning.scratchpad",
     ("system", "agent_request"): "gideon.automation.workflows",
     ("system", "digest"): "gideon.workspace.notification_rules",
+    ("tasks", "due"): "gideon.engine.tasks.due_notices",
     (
         "system",
         "usage_recap",
@@ -278,6 +279,7 @@ _KINDS: tuple[NotificationKind, ...] = (
     _built_in("cron", "result", "Scheduled job result", "immediate", SEV_INFO),
     _built_in("cron", "failed", "Scheduled job failed", "immediate", SEV_ERROR),
     _built_in("heartbeat", "status", "Heartbeat", "immediate", SEV_INFO),
+    _built_in("tasks", "due", "Task due", "immediate", SEV_INFO, attention=True),
     _built_in("loop", "complete", "Loop complete", "immediate", SEV_INFO),
     _built_in("loop", "failed", "Loop failed", "immediate", SEV_ERROR),
     _built_in("loop", "stalled", "Loop stalled or blocked", "immediate", SEV_WARNING),
@@ -409,6 +411,7 @@ _LEGACY_FLAT: dict[str, tuple[str, str]] = {
 }
 
 _ATTENTION_FLAT: dict[str, tuple[str, str]] = {
+    "task_due": ("tasks", "due"),
     "personal_domain_alert": ("personal", "domain_alert"),
     "cron_failed": ("cron", "failed"),
     "loop_complete": ("loop", "complete"),
@@ -438,6 +441,7 @@ for _k in _KINDS:
 CRON = "cron"
 CRON_FAILED = "cron_failed"
 HEARTBEAT = "heartbeat"
+TASK_DUE = "task_due"
 INBOX_ALERT = "inbox_alert"
 AGENT = "agent"
 SUBAGENT = "subagent"
@@ -462,6 +466,7 @@ WIRE_CONSTANTS: tuple[str, ...] = (
     CRON,
     CRON_FAILED,
     HEARTBEAT,
+    TASK_DUE,
     INBOX_ALERT,
     AGENT,
     SUBAGENT,

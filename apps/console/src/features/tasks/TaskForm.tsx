@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type TaskItem, type ExitCriterion, type ActionPlanItem, type ProjectItem, type TaskListItem } from '../../shared/data/api'
 import { getActiveProject } from '../../shared/data/activeProject'
 import { STATUSES, PRIORITIES } from './taskMeta'
-import { Field, TextInput, TextArea, DateInput, Segmented, ChipInput, Select } from '../../shared/ui/forms'
+import { Field, TextInput, TextArea, DateInput, Segmented, ChipInput, Select, Checkbox } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
 import { ChecklistEditor, DependencyEditor, NotesEditor } from './formControls'
 import { chooseTaskProject, useTaskOperation, type TaskDraft } from './taskEditorState'
@@ -29,6 +29,7 @@ export function TaskForm({ draft, onChange, compact, allTasks = [] }: { draft: T
         <ProjectListPicker key={draft.id ?? 'new'} taskListId={draft.task_list_id ?? ''} onSelection={(projectId, taskListId) => patch({ task_list_id: taskListId, ...(!draft.id ? { project_id: projectId } : {}) })} />
         <Field label="Assignee"><TextInput value={draft.assignee ?? ''} onChange={value => set('assignee', value)} placeholder="Who owns it" /></Field>
         <Field label="Due"><DateInput value={draft.due ?? ''} onChange={value => set('due', value)} /></Field>
+        {draft.due && <Field label="Due reminder"><label className="flex min-h-10 items-center gap-2 text-[0.8125rem] text-on-surface-var"><Checkbox ariaLabel="Remind me about this task's due date" checked={draft.due_reminder ?? true} onChange={value => set('due_reminder', value)} />Remind me</label></Field>}
       </div>
       <Field label="Tags"><ChipInput values={draft.labels ?? []} onChange={value => set('labels', value)} placeholder="Add a tag, Enter" max={10} /></Field>
     </EditorSection>

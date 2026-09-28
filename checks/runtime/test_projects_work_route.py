@@ -92,6 +92,11 @@ async def test_runs_loops_and_tasks_all_appear_on_one_board(tmp_path):
         assert body["completeness"] == "complete"
         titles = {row["title"] for group in body["board"] for row in group["rows"]}
         assert {"analyze", "Loopy", "Do the thing"} <= titles
+        rows = {row["title"]: row for group in body["board"] for row in group["rows"]}
+        assert rows["analyze"]["source"] == "workflow"
+        assert rows["Loopy"]["source"] == "loop"
+        assert rows["Loopy"]["kind"] == "goal"
+        assert rows["Do the thing"]["source"] == "task"
 
 
 @pytest.mark.asyncio

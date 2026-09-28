@@ -76,7 +76,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
       <span data-type="body-s" className={chipStyle} style={{ color: pm.tone, background: `color-mix(in srgb, ${pm.tone} 16%, transparent)` }}>{pm.label}</span>
       {task.project && <span data-type="body-s" className={chipStyle} style={accentChip}><FolderKanban size={13} /> {task.project}</span>}
       {task.assignee && <span data-type="body-s" className={`${chipStyle} bg-surface-high text-on-surface-var`}>@{task.assignee}</span>}
-      {due && <span data-type="body-s" className={chipStyle} style={{ color: due.tone, background: `color-mix(in srgb, ${due.tone} 14%, transparent)` }}>{due.label}</span>}
+      {due && <span data-type="body-s" className={chipStyle} style={{ color: due.tone, background: `color-mix(in srgb, ${due.tone} 14%, transparent)` }}>{due.label}</span>}{task.due && task.due_reminder === false && <span data-type="body-s" className={chipStyle}>No reminder</span>}
     </div>
     {!!task.labels?.length && <div className="flex flex-wrap gap-1.5">{task.labels.map(label => <span key={label} data-type="caption" className="rounded-md border border-outline-variant/30 px-2 py-1 text-on-surface-var">{label}</span>)}</div>}
     {(blockKind || task.block_reason?.is_blocked) && <div data-type="body-s" className="rounded-md border-l-2 border-warn bg-warn/10 p-m">

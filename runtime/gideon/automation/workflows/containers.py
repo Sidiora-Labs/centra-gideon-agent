@@ -152,12 +152,14 @@ class BoardRow:
     collapsed: bool = False
     attention: bool = False
     resumable: bool = False
+    source: str = ""
+    kind: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             **{key: getattr(self, key) for key in ("run_id", "title")},
             "state": self.state.value,
-            **{key: getattr(self, key) for key in ("origin", "project_id")},
+            **{key: getattr(self, key) for key in ("origin", "project_id", "source", "kind")},
             "claim": self.claim.to_dict() if self.claim else None,
             **{
                 key: getattr(self, key)
@@ -226,6 +228,7 @@ class RunProjection:
             attention=state is BoardState.NEEDS_INPUT
             and origin not in UNATTENDED_ORIGINS,
             resumable=state is BoardState.SUSPENDED,
+            source="workflow",
         )
         if claim_record and not claim_record.expired(now):
             row.claim = claim_record

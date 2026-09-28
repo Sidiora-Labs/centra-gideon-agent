@@ -45,6 +45,7 @@ _CREATE_DEFAULTS = {
     "priority": "medium",
     "labels": [],
     "due": "",
+    "due_reminder": True,
     "order": 0.0,
     "exit_criteria": [],
     "action_plan": [],

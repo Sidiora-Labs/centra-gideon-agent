@@ -1,8 +1,10 @@
 """Project archive HTTP transfer and temporary upload ownership."""
 
 import asyncio
+import json
 import logging
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from aiohttp import web
@@ -157,10 +159,25 @@ class ProjectImport:
                 {**payload, "error": "the archive contributed nothing importable"},
                 status=400,
             )
-        project = store.create_project(plan.project_name)
+        record = contents.contents.get("project.json", b"")
+        try:
+            imported_record = json.loads(record.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            imported_record = {}
+        if not isinstance(imported_record, dict):
+            imported_record = {}
+        portable = {
+            name: imported_record.get(name, "")
+            for name in ("brief", "agent_instructions_template")
+            if isinstance(imported_record.get(name, ""), str)
+        }
+        project = store.create_project(plan.project_name, **portable)
+        project_files = replace(
+            plan, accepted=[relative for relative in plan.accepted if relative != "project.json"]
+        )
         written = await asyncio.to_thread(
             archive.commit_import,
-            plan,
+            project_files,
             contents,
             project_root=config_dir() / "projects" / project.id,
         )

@@ -1,4 +1,4 @@
-import { useEffect, useId, useReducer, useState } from 'react'
+import { useEffect, useId, useReducer, useRef, useState } from 'react'
 import { useProjectCollection } from './projectCollectionState'
 import { useProjectDetailState } from './projectDetailState'
 import { useProjectPeek, useProjectDirectory, projectDirectoryError } from './projectPanelState'
@@ -29,6 +29,7 @@ import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { setActiveProject } from '../../shared/data/activeProject'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { ProjectHub, ProjectHubPane } from './ProjectHub'
+import { loopRoute } from '../../shared/data/loopKind'
 
 export function ProjectsSection({ sub, navigate, query, setQuery }: RouteProps) {
   const route = sub || ''
@@ -40,6 +41,8 @@ export function ProjectsSection({ sub, navigate, query, setQuery }: RouteProps) 
 
 function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => void } & Pick<RouteProps, 'query' | 'setQuery'>) {
   const { projects, loading, loadErr, refresh, creating, setCreating, busy, err, setErr, activeId, create, del, setStatus } = useProjectCollection(onOpen)
+  const importPicker = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
 
   const [q, setQ] = useQueryParam(query, setQuery, 'q', '', { replace: true })
 
@@ -53,7 +56,21 @@ function ProjectListPage({ onOpen, query, setQuery }: { onOpen: (id: string) => 
       <TopBar
         keepCornerPadding
         left={<div className="flex items-center gap-2"><FolderKanban size={18} className="text-primary" /><PageTitle>Projects</PageTitle></div>}
-        right={<HeaderActions><HeaderControl icon={Plus} label="New project" onClick={() => setCreating(true)} variant="primary" priority="primary" /></HeaderActions>} />
+        right={<HeaderActions><HeaderControl icon={ArchiveRestore} label={importing ? 'Importing project' : 'Import project'} onClick={() => importPicker.current?.click()} /><HeaderControl icon={Plus} label="New project" onClick={() => setCreating(true)} variant="primary" priority="primary" /></HeaderActions>} />
+      <input ref={importPicker} type="file" accept=".zip,application/zip" className="sr-only" aria-label="Choose a project archive" onChange={async event => {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (!file || importing) return
+        setImporting(true); setErr(null)
+        try {
+          const result = await api.projectImport(file)
+          if (!result.project_id) throw new Error(result.error || 'The archive did not create a project')
+          invalidateKeys('projects:list')
+          onOpen(result.project_id)
+        } catch (failure) {
+          setErr(failure instanceof Error ? failure.message : 'Could not import the project')
+        } finally { setImporting(false) }
+      }} />
 
       {!!projects?.length && (
         <ListControls search={{ value: q, onChange: setQ, placeholder: 'Search projects', label: 'Search projects' }}
@@ -299,6 +316,26 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
     navigate(`loop?project=${encodeURIComponent(id)}` + (kind ? `&kind=${kind}` : ''))
   }
   const launchChat = () => { setActiveProject(id); navigate(`chat?project=${encodeURIComponent(id)}`) }
+  const resumeWork = async (row: WorkRow) => {
+    setErr(null)
+    try {
+      const source = row.source || (row.origin === 'task' ? 'task' : 'loop')
+      if (source === 'workflow') {
+        await api.resumeWorkflowRun(row.run_id, {})
+        invalidateKeys('workflows:runs')
+        navigate(`workflows/runs/${encodeURIComponent(row.run_id)}`)
+      } else if (source === 'task') {
+        navigate(`tasks?open=${encodeURIComponent(row.run_id)}`)
+      } else {
+        await api.uLoopAction(row.run_id, 'resume')
+        invalidateKeys(`projects:work:${id}`)
+        invalidateKeys('loops:')
+        navigate(loopRoute({ id: row.run_id, kind: row.kind }))
+      }
+    } catch (failure) {
+      setErr(failure instanceof Error ? failure.message : 'Could not resume this work')
+    }
+  }
 
   const NEW_KINDS: { kind?: LoopKind; label: string; hint: string; icon: LucideIcon }[] = [
     { kind: undefined, label: 'Loop', hint: 'A generic iterative loop', icon: Repeat },
@@ -354,6 +391,7 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
         )}
       </Popover>
       <HeaderControl icon={MessageSquare} label="Chat" onClick={launchChat} />
+      <HeaderControl icon={Target} label="Plan a project" onClick={() => { setActiveProject(id); navigate(`workflows?start_project_plan=${encodeURIComponent(id)}`) }} />
       <HeaderControl icon={project.status === 'archived' ? ArchiveRestore : Archive}
         label={project.status === 'archived' ? 'Restore' : 'Archive'}
         onClick={() => patch({ status: project.status === 'archived' ? 'active' : 'archived' })} />
@@ -410,8 +448,7 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
         <ProjectHub>
 
           <ProjectHubPane title={`Work · ${workCount}`}>
-            <WorkBoardColumn work={work} loading={workLoading}
-              onResume={(runId) => navigate(`loop/${runId}`)} />
+            <WorkBoardColumn work={work} loading={workLoading} onResume={row => { void resumeWork(row) }} />
           </ProjectHubPane>
 
           <ProjectHubPane title={`Tasks · ${lists?.length ?? 0} list${(lists?.length ?? 0) === 1 ? '' : 's'}`}>
@@ -453,7 +490,7 @@ const WORK_STATE_LABEL: Record<WorkState, string> = {
 }
 
 export function WorkBoardColumn({ work, loading, onResume }: {
-  work: WorkBoard | undefined; loading: boolean; onResume: (runId: string) => void
+  work: WorkBoard | undefined; loading: boolean; onResume: (row: WorkRow) => void
 }) {
   if (!work && loading) return <ListSkeleton rows={4} />
   const groups = work?.board ?? []
@@ -467,7 +504,7 @@ export function WorkBoardColumn({ work, loading, onResume }: {
     {!groups.length && !incomplete.length && <p className="text-[0.8125rem] text-on-surface-low">No work here yet — use <span className="text-on-surface-var">New</span> above to launch a loop, or start a chat.</p>}
     {groups.map(group => <section key={group.state} data-testid={`work-group-${group.state}`} className="grid gap-s">
       <WorkGroupLabel text={WORK_STATE_LABEL[group.state]} count={group.count} tone={group.state === 'needs_input' ? 'ok' : 'muted'} />
-      {group.rows.map(row => <WorkRowCard key={`${row.origin}:${row.run_id}`} row={row} onResume={() => onResume(row.run_id)} />)}
+      {group.rows.map(row => <WorkRowCard key={`${row.origin}:${row.run_id}`} row={row} onResume={() => onResume(row)} />)}
     </section>)}
   </div>
 }

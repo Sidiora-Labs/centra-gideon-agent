@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Search, Sparkles, Trash2, Workflow } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { EmptyState, ListRow, Loading, LoadError } from '../../shared/ui/ListScaffold'
@@ -18,7 +18,7 @@ import { coerceInputs, inputFields, startsWithoutInput } from './templateStart'
 import { preflightRemediations } from './preflightRemediation'
 import { rankWorkflowDefinitions } from './templateSuggest'
 import { roundPlan, roundPlanText, roundPlanWithInputs } from './roundPlan'
-import { workflowPresets } from './workflowPresets'
+import { PROJECT_PLANNING_PRESET, workflowPresets } from './workflowPresets'
 import { cadenceLabel, findingsByDef, freshnessLook, modeLook, needsAttention, packChips } from './surfacingMeta'
 import { PageTitle } from '../../shared/ui/PageTitle'
 
@@ -28,6 +28,7 @@ const TABS = [
 ]
 
 export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: RouteProps) {
+  const startedProjectPlan = useRef('')
   const [tab, setTab] = useQueryParam(routeQuery, setQuery, 'tab', 'runs', { replace: true })
   const [q, setQ] = useQueryParam(routeQuery, setQuery, 'q', '', { replace: true })
   const [discovery, setDiscovery] = useState<{ intent: string; choices: WorkflowDefSummary[]; details: Record<string, WorkflowDef> } | null>(null)
@@ -76,7 +77,7 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
     return [...matched].sort((a, b) => rank(a.name) - rank(b.name))
   }, [defs, q, surfacing, byDef])
 
-  const start = useCallback(async (name: string) => {
+  const start = useCallback(async (name: string, projectId?: string) => {
     let def: WorkflowDef | null = null
     try {
       def = (await api.workflowDef(name)).definition
@@ -109,7 +110,7 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
     }
 
     try {
-      const res = await api.startWorkflowRun(inputs ? { name, inputs } : { name })
+      const res = await api.startWorkflowRun({ name, ...(inputs ? { inputs } : {}), ...(projectId ? { project_id: projectId } : {}) })
       navigate(`workflows/runs/${res.run_id}`)
     } catch (e) {
       const base = e instanceof Error ? e.message : 'Could not start the workflow'
@@ -117,6 +118,15 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
       notify(fixes.length ? `${base} — ${fixes.join('; ')}` : base, 'error')
     }
   }, [navigate])
+
+  useEffect(() => {
+    const projectId = routeQuery.start_project_plan || ''
+    if (!projectId) { startedProjectPlan.current = ''; return }
+    if (startedProjectPlan.current === projectId) return
+    startedProjectPlan.current = projectId
+    setQuery({ start_project_plan: null }, { replace: true })
+    void start(PROJECT_PLANNING_PRESET, projectId)
+  }, [routeQuery.start_project_plan, setQuery, start])
 
   const startFromTemplate = useCallback(async () => {
     const intent = await promptInput({

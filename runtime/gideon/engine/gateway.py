@@ -678,6 +678,11 @@ class RuntimeCoordinator:
 
         await AutomationRoutes(self, logger).clock()
 
+    async def _due_notice_loop(self) -> None:
+        from gideon.engine.tasks.due_notices import run
+
+        await run(self.dashboard_state)
+
     def _push_trigger_refresh(self) -> None:
         state = getattr(self, "dashboard_state", None)
         try:

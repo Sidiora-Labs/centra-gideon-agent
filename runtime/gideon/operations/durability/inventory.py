@@ -664,6 +664,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         merge=MERGE_UNION_BY_ID,
         tombstones=True,
         help="tasks, task lists, and task comments",
+        derived_within=("_due_notices.json",),
     ),
     StateEntry(
         id="projects",

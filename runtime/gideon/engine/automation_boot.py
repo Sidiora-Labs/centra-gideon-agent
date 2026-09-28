@@ -189,6 +189,10 @@ class AutomationBoot:
         from gideon.automation.triggers.event_fire import attach
         from gideon.automation.triggers.store import TriggerStore
 
+        if self.runtime.dashboard_state is not None:
+            due_notices = asyncio.create_task(self.runtime._due_notice_loop())
+            self.runtime._handler_tasks.add(due_notices)
+            due_notices.add_done_callback(self.runtime._handler_tasks.discard)
         if self.runtime._no_crons:
             self.runtime._event_router = attach(
                 TriggerStore(base_dir=self.home()),

@@ -51,7 +51,7 @@ describe('WorkBoardColumn', () => {
     expect(screen.getByText('Still here')).toBeTruthy()
   })
 
-  it('offers Resume on a suspended (resumable) row and calls back with the run id', () => {
+  it('offers Resume on a suspended (resumable) row and returns its routing fields', () => {
     const onResume = vi.fn()
     const wb = board({
       board: [group('suspended', [row({ run_id: 'sus1', title: 'Paused work', state: 'suspended', resumable: true })])],
@@ -59,7 +59,7 @@ describe('WorkBoardColumn', () => {
     render(<WorkBoardColumn work={wb} loading={false} onResume={onResume} />)
     const btn = screen.getByTitle('Resume this suspended work')
     fireEvent.click(btn)
-    expect(onResume).toHaveBeenCalledWith('sus1')
+    expect(onResume).toHaveBeenCalledWith(wb.board[0].rows[0])
   })
 
   it('renders a claim badge naming the holder', () => {

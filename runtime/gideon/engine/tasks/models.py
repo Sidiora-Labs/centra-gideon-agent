@@ -174,6 +174,7 @@ class Task:
     priority: TaskPriority = TaskPriority.MEDIUM
     labels: list[str] = field(default_factory=list)
     due: str = ""
+    due_reminder: bool = True
     order: float = 0.0
     exit_criteria: list[dict] = field(default_factory=list)
     action_plan: list[dict] = field(default_factory=list)
@@ -341,6 +342,16 @@ def _as_number(value: Any, *, strict: bool) -> float:
         return admission.refuse(f"expected a number, got {value!r}", 0.0)
 
 
+def _as_bool(value: Any, *, strict: bool) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    return FieldAdmission(strict).refuse(
+        f"expected a boolean, got {type(value).__name__}", True
+    )
+
+
 def _as_text_list(value: Any, *, strict: bool) -> list[str]:
     if value is None:
         return []
@@ -453,6 +464,7 @@ TASK_FIELD_COERCERS: dict[str, Any] = {
     "priority": _as_priority,
     "labels": _as_text_list,
     "due": _as_text,
+    "due_reminder": _as_bool,
     "order": _as_number,
     "exit_criteria": _as_dict_list(normalize_exit_criterion),
     "action_plan": _as_dict_list(normalize_action_plan_item, indexed=True),

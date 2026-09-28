@@ -6,7 +6,7 @@ import { isExitComplete } from './taskMeta'
 
 export type TaskDraft = Partial<TaskItem> & { title: string; depends_on?: string[]; project_id?: string }
 export function emptyDraft(): TaskDraft {
-  return { title: '', description: '', status: 'open', priority: 'medium', labels: [], task_list_id: '', assignee: '', due: '', exit_criteria: [], action_plan: [], notes: [], research_notes: [], execution_notes: [], agent_instructions_template: '', depends_on: [] }
+  return { title: '', description: '', status: 'open', priority: 'medium', labels: [], task_list_id: '', assignee: '', due: '', due_reminder: true, exit_criteria: [], action_plan: [], notes: [], research_notes: [], execution_notes: [], agent_instructions_template: '', depends_on: [] }
 }
 export function toDraft(task: TaskItem): TaskDraft {
   const draft = { ...emptyDraft(), ...task, depends_on: prereqIds(task) }
