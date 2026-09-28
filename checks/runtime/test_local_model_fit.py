@@ -29,7 +29,6 @@ or ``hide_unrunnable_default()``, and every reserve is passed explicitly.
 from __future__ import annotations
 
 import shutil
-from types import SimpleNamespace
 
 import pytest
 
@@ -51,11 +50,6 @@ def _no_leaked_gpu_probe():
     clear()
     yield
     clear()
-
-
-def _usage(free_bytes: int) -> SimpleNamespace:
-    """A ``shutil.disk_usage`` stand-in — only ``.free`` is ever read."""
-    return SimpleNamespace(total=free_bytes * 2, used=free_bytes, free=free_bytes)
 
 
 def _host(
@@ -409,68 +403,32 @@ def test_family_key_splits_an_ollama_style_id_and_leaves_a_bare_name_alone():
     assert fit.family_key("") == ""
 
 
-def test_disk_precheck_refuses_with_a_typed_reason_naming_both_numbers(monkeypatch):
-    """A refusal the user cannot act on without a second lookup is a bad refusal."""
-    monkeypatch.setattr(shutil, "disk_usage", lambda _p: _usage(1 * _GB))
+def test_disk_precheck_refuses_with_actual_free_space_and_a_typed_reason(tmp_path):
+    free = shutil.disk_usage(tmp_path).free
+    need_mb = free / _MB + 2048
+    result = fit.disk_precheck(need_mb, tmp_path / "new" / "cache")
 
-    result = fit.disk_precheck(10240.0, "/tmp/does-not-matter")
-
-    assert result.ok is False
-    assert result.measured is True
-    assert result.need_bytes == int(10240 * _MB)
-    assert result.free_bytes == 1 * _GB
-    assert result.reason.startswith("insufficient_disk_space")
-    assert "10.0" in result.reason
-    assert "1.0" in result.reason
-    assert result.warning == ""
+    assert not result.ok and result.measured
+    assert result.need_bytes > result.free_bytes > 0
+    assert result.code == "insufficient_disk_space"
+    assert result.reason.startswith("Not enough free disk space for this download: it needs ")
+    assert ", and " in result.reason and result.reason.endswith(" is free.")
+    assert not result.warning
 
 
-def test_disk_precheck_allows_a_download_that_comfortably_fits(monkeypatch):
-    """The ordinary case carries no reason and no warning to render."""
-    monkeypatch.setattr(shutil, "disk_usage", lambda _p: _usage(500 * _GB))
-
-    result = fit.disk_precheck(2900.0)
-
-    assert result.ok is True
-    assert result.measured is True
-    assert result.reason == ""
-    assert result.warning == ""
+def test_disk_precheck_accepts_zero_bytes_on_the_actual_filesystem(tmp_path):
+    result = fit.disk_precheck(0, tmp_path)
+    assert result.ok and result.measured
+    assert result.need_bytes == 0 and result.free_bytes > 0
+    assert not result.reason and not result.warning
 
 
-def test_disk_precheck_skips_with_a_warning_when_the_filesystem_cannot_be_measured(
-    monkeypatch,
-):
-    """Blocking a good download because a probe failed is the worse error.
-
-    ``ok=True`` here means "not refused", NOT "verified to fit" — the two are told apart by
-    ``measured``, and the unmeasured one must carry a warning the surface can show. An
-    ``ok=True, measured=False`` result with an empty warning is a silent unchecked download.
-    """
-
-    def _boom(_path):
-        raise OSError("filesystem went away")
-
-    monkeypatch.setattr(shutil, "disk_usage", _boom)
-
-    result = fit.disk_precheck(10240.0, "/tmp/unmeasurable")
-
-    assert result.ok is True
-    assert result.measured is False
-    assert result.warning != ""
-    assert result.reason == ""
-    assert result.free_bytes == 0
-    assert result.need_bytes == int(10240 * _MB)
-
-
-def test_disk_precheck_of_an_unknown_size_is_allowed_rather_than_refused(monkeypatch):
-    """A card with no size cannot be refused for space it never claimed to need."""
-    monkeypatch.setattr(shutil, "disk_usage", lambda _p: _usage(0))
-
-    result = fit.disk_precheck(0.0)
-
-    assert result.ok is True
-    assert result.measured is True
-    assert result.need_bytes == 0
+def test_disk_precheck_warns_for_a_broken_cache_symlink(tmp_path):
+    target = tmp_path / "cache"
+    target.symlink_to(tmp_path / "missing-drive")
+    result = fit.disk_precheck(10, target / "models")
+    assert result.ok and not result.measured
+    assert result.free_bytes == 0 and result.warning
 
 
 def test_assess_takes_a_given_host_and_reserve_without_probing_the_machine():

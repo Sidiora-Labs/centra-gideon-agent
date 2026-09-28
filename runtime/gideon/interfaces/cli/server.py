@@ -442,9 +442,10 @@ def _update_git(proj: str) -> None:
     """
     git_dir = self_update.git_root(proj)
     if not git_dir:
-        print(f"❌ No git repo at {proj}")
-        sys.exit(1)
-    print(f"  📂 {git_dir}")
+        from gideon.interfaces.cli.commands import CliRefusal
+
+        raise CliRefusal(f"No git repo at {proj}")
+    print(f"  📂 {git_dir}", file=sys.stderr)
 
     if not AppConfig.load().dashboard.update_dev_mode:
         latest = _latest_release_version()
@@ -456,13 +457,12 @@ def _update_git(proj: str) -> None:
             return
 
     branch = self_update.resolve_default_branch(git_dir)
-    print("  ⬇️  git fetch…")
+    print("  ⬇️  git fetch…", file=sys.stderr)
     fetched = self_update.git_fetch(git_dir, branch)
     if fetched.returncode != 0:
-        print(
-            f"  ❌ git fetch origin {branch} failed:\n{(fetched.stderr or '').strip()}"
-        )
-        sys.exit(1)
+        from gideon.interfaces.cli.commands import CliRefusal
+
+        raise CliRefusal(f"git fetch origin {branch} failed: {(fetched.stderr or '').strip()}")
 
     if self_update.git_is_up_to_date(git_dir, branch):
         print("\n✅ Already up to date!")
@@ -476,11 +476,12 @@ def _update_git(proj: str) -> None:
                 print("  Aborted.")
             sys.exit(0 if interactive else 1)
 
-    print(f"  🔄 git reset --hard origin/{branch}…")
+    print(f"  🔄 git reset --hard origin/{branch}…", file=sys.stderr)
     reset = self_update.git_reset_hard(git_dir, branch)
     if reset.returncode != 0:
-        print(f"  ❌ git reset failed:\n{(reset.stderr or '').strip()}")
-        sys.exit(1)
+        from gideon.interfaces.cli.commands import CliRefusal
+
+        raise CliRefusal(f"git reset failed: {(reset.stderr or '').strip()}")
 
     pkg_root = self_update.package_root(git_dir)
     build_frontend_sync(Path(pkg_root))
@@ -590,15 +591,17 @@ def _install(args: list[str], *, cwd: str, label: str) -> None:
     try:
         argv = install_argv(args)
     except NoInstallerError as exc:
-        print(f"  ❌ {exc}")
-        sys.exit(1)
+        from gideon.interfaces.cli.commands import CliRefusal
 
-    print(f"  🔨 {installer_name()} {label}")
+        raise CliRefusal(str(exc)) from None
+
+    print(f"  🔨 {installer_name()} {label}", file=sys.stderr)
     result = subprocess.run(argv, cwd=cwd or None, capture_output=True, text=True)
     if result.returncode != 0:
         summary = self_update.installer_error_summary(result.stderr or "", limit=500)
-        print(f"  ❌ Install failed: {summary}" if summary else "  ❌ Install failed")
-        sys.exit(1)
+        from gideon.interfaces.cli.commands import CliRefusal
+
+        raise CliRefusal(f"Install failed: {summary}" if summary else "Install failed")
 
 
 def _update() -> None:
@@ -624,17 +627,16 @@ def _update() -> None:
     printed text is unambiguous about who must act; scripts that need the
     distinction should read `apply_method` from `GET /api/update/check`.
     """
-    print("Updating Gideon…\n")
-
     kind = self_update.detect_install_kind()
     if kind not in _UPDATE_HANDLED_KINDS:
-        print(
-            f"❌ Unrecognized install kind: {kind!r} — refusing to guess how to update it."
+        from gideon.interfaces.cli.commands import CliRefusal
+
+        raise CliRefusal(
+            f"Unrecognized install kind: {kind!r} — refusing to guess how to update it. "
+            "Check GIDEON_INSTALL_KIND or update using the method for this installation."
         )
-        print("   Check GIDEON_INSTALL_KIND, or update the way you installed:")
-        print("   pip/pipx/uv tool → upgrade the `gideon` package;")
-        print("   container → docker compose pull && up -d; git checkout → git pull.")
-        sys.exit(1)
+
+    print("Updating Gideon…\n", file=sys.stderr)
 
     if kind == "git":
         _update_git(self_update.project_dir())

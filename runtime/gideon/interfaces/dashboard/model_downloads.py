@@ -81,6 +81,7 @@ class ModelDownloadJob:
     downloaded_bytes: int = 0
     error: str = ""
     reason: str = ""
+    warning: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +97,7 @@ class ModelDownloadJob:
             "downloaded_bytes": self.downloaded_bytes,
             "error": self.error,
             "reason": self.reason,
+            "warning": self.warning,
         }
 
 
@@ -107,6 +109,7 @@ class _Running:
 
     job: ModelDownloadJob
     baseline: int = 0
+    repair: bool = False
     tasks: set[asyncio.Task] = field(default_factory=set)  # type: ignore[type-arg]
     last_bytes: int = 0
     last_ts: float = 0.0
@@ -261,7 +264,7 @@ def _model_exists(name: str, model: str) -> bool:
     )
 
 
-async def _run_fetch(name: str, model: str) -> None:
+async def _run_fetch(name: str, model: str, *, repair: bool = False) -> None:
     """Perform the actual (blocking) download for ``provider``/``model``. Resolves the
     named provider from the local-model registry and drives its ``download_model``.
     Raises on failure / no such provider installed."""
@@ -270,9 +273,18 @@ async def _run_fetch(name: str, model: str) -> None:
         raise RuntimeError(
             f"No provider named {name!r} installed — install its app first"
         )
+    if repair:
+        from gideon.integrations.local_models import layouts
+
+        deleted = await provider.delete_model(model)
+        removed = layouts.delete_all_layouts(_cache_root(name), model)
+        if not deleted and not removed:
+            raise RuntimeError(f"Could not remove incomplete model '{model}' before repair")
     ok = await provider.download_model(model)
     if not ok:
         raise RuntimeError(f"Failed to download model '{model}' from {name}")
+    if repair and (not _is_downloaded(name, model) or _is_truncated(name, model)):
+        raise RuntimeError(f"Model '{model}' is still incomplete after repair")
 
 
 class ModelDownloadRegistry:
@@ -308,7 +320,7 @@ class ModelDownloadRegistry:
         return list(self._jobs.values())
 
     def start(
-        self, provider: str, model: str
+        self, provider: str, model: str, *, warning: str = ""
     ) -> tuple[ModelDownloadJob | None, str | None]:
         """Begin (or re-use) a download for ``provider``/``model``.
 
@@ -317,13 +329,8 @@ class ModelDownloadRegistry:
         ``(provider, model)`` is returned as-is (dedupe); a model already downloaded
         **intact** yields an immediately-``done`` job.
 
-        "Intact" is load-bearing. This route is also the Repair action for a
-        ``integrity="truncated"`` row, and a truncated model satisfies "is it downloaded"
-        (real bytes are present — just not enough of them), so skipping on that alone made
-        Repair answer ``202 {"state": "done", "downloaded_bytes": <full size>}`` in
-        milliseconds while re-fetching nothing. Measured on a 1800 MB card holding 3 MB: the
-        button reported success and the truncated chip was still there on reload — the
-        dead-click the issue describes, wearing a green tick.
+        The Repair action re-fetches a model whose integrity is ``truncated`` even
+        when some model bytes are already present.
         """
         if not provider:
             return None, "Missing 'provider'"
@@ -347,17 +354,20 @@ class ModelDownloadRegistry:
             provider=provider,
             model=model,
             total_bytes=_expected_size_bytes(provider, model),
+            warning=warning,
         )
         self._jobs[job.id] = job
         self._by_model[(provider, model)] = job.id
 
-        if _is_downloaded(provider, model) and not _is_truncated(provider, model):
+        downloaded = _is_downloaded(provider, model)
+        repair = downloaded and _is_truncated(provider, model)
+        if downloaded and not repair:
             job.state = "done"
             job.downloaded_bytes = job.total_bytes
             _apply_progress(job)
             return job, None
 
-        run = _Running(job=job, baseline=_dir_size(_cache_root(provider)))
+        run = _Running(job=job, baseline=_dir_size(_cache_root(provider)), repair=repair)
         self._running[job.id] = run
         run.tasks.add(asyncio.ensure_future(self._drive(run)))
         return job, None
@@ -487,7 +497,7 @@ class ModelDownloadRegistry:
         poller = asyncio.ensure_future(self._poll(run))
         run.tasks.add(poller)
         try:
-            await _run_fetch(job.provider, job.model)
+            await _run_fetch(job.provider, job.model, repair=run.repair)
             job.state = "done"
             job.downloaded_bytes = job.total_bytes or _measure(run)
             job.speed_bps = 0
@@ -500,11 +510,14 @@ class ModelDownloadRegistry:
             Exception
         ) as exc:  # noqa: BLE001 — surface any provider failure to the UI
             logger.warning(
-                "Model download failed (%s/%s): %s", job.provider, job.model, exc
+                "Model download failed (%s/%s) with %s",
+                job.provider,
+                job.model,
+                type(exc).__name__,
             )
             job.state = "error"
-            job.error = str(exc)
             job.reason = _classify_error(exc)
+            job.error = _failure_guidance(job.reason)
             job.speed_bps = 0
             job.eta_s = 0
             event = "error"
@@ -568,10 +581,19 @@ def _classify_error(exc: Exception) -> str:
     carries the human detail; ``reason`` only promises a machine label when sure.
     """
     text = str(exc).lower()
+    kind = type(exc).__name__.lower()
     if isinstance(exc, OSError) and getattr(exc, "errno", None) == 28:
         return "disk_full"
     if "no space" in text or "disk full" in text:
         return "disk_full"
+    if "pin" in text and any(term in text for term in ("bad", "invalid", "mismatch", "verify")):
+        return "bad_certificate_pin"
+    if "proxy" in kind or "proxy" in text:
+        return "proxy_error"
+    if any(term in kind or term in text for term in ("ssl", "tls", "certificate")):
+        return "tls_error"
+    if "httperror" in kind or getattr(exc, "status_code", None) or getattr(exc, "code", None):
+        return "http_error"
     if any(
         w in text
         for w in ("connection", "timed out", "timeout", "network", "dns", "unreachable")
@@ -583,4 +605,19 @@ def _classify_error(exc: Exception) -> str:
         return "gated"
     if "not found" in text or "404" in text:
         return "not_found"
-    return ""
+    return "download_failed"
+
+
+def _failure_guidance(reason: str) -> str:
+    """Return safe, actionable copy without echoing provider exception contents."""
+    return {
+        "disk_full": "The download ran out of disk space. Free space in the model cache and retry.",
+        "network": "The download connection failed. Check your network and retry.",
+        "proxy_error": "The proxy connection failed. Check the configured proxy and retry; keep proxy credentials in Gideon's credential store.",
+        "tls_error": "The secure connection failed. Check the system clock and trusted certificates, then retry.",
+        "bad_certificate_pin": "The certificate pin did not match. Check the network's TLS inspection settings; do not disable certificate verification.",
+        "http_error": "The model source returned an HTTP error. Check source availability and access, then retry.",
+        "gated": "Access to this model is restricted. Confirm the model terms and token access, then retry.",
+        "not_found": "The model was not found at its source. Check the model name and retry.",
+        "download_failed": "The model download failed. Check Gideon's logs for details and retry.",
+    }.get(reason, "The model download failed. Check Gideon's logs for details and retry.")

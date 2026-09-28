@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import {
   Check, MessageSquare, Boxes, Mic, Volume2, Eye, ImagePlus,
@@ -6,8 +6,7 @@ import {
   Moon, Network, RefreshCcw, ArrowUp, ArrowDown, X, AlertTriangle, Wrench,
   Trash2, Gavel, KeyRound, Wifi, CheckCircle2, type LucideIcon,
 } from 'lucide-react'
-import { api, type AvailableModel, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
-import { humanBytes } from '../../shared/data/chunkedUpload'
+import { api, type AvailableModel, type DownloadJob, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
 import {
   occupantDetail, pressureDetail, pressureTone, reclaimableCount, sortOccupants,
 } from '../../shared/data/residency'
@@ -29,6 +28,15 @@ import { reportingWrite } from '../../app/shell/reportingWrite'
 import { TextInput } from '../../shared/ui/forms'
 import { MetaChip } from '../../shared/ui/MetaChip'
 import { StatusPill } from '../../shared/ui/StatusPill'
+import { useModelDownloads } from './useModelDownloads'
+
+const modelBytes = (bytes: number) => {
+  const gib = 1024 ** 3
+  const mib = 1024 ** 2
+  if (bytes >= gib) return `${(bytes / gib).toFixed(1)} GiB`
+  if (bytes >= mib) return `${(bytes / mib).toFixed(1)} MiB`
+  return `${Math.round(bytes / 1024)} KiB`
+}
 
 const USE_CASE_META: Record<string, { label: string; group?: string; description: string; chain: boolean; icon: LucideIcon; fallback?: string }> = {
   chat: { label: 'Chat', description: 'Conversational models for chat and agent interactions. Order matters: the first model is the default; later ones are fallbacks used when an earlier provider is down.', chain: true, icon: MessageSquare },
@@ -134,6 +142,7 @@ function ModelChips({ model, onRepair, repairing }: {
           </StatusPill>
           <Button type="button" variant="secondary" size="xs" onClick={onRepair} loading={repairing}
             loadingLabel="Repairing…"
+            ariaLabel={repairing ? 'repairing…' : undefined}
             title="Re-download this model's weights.">
             <Wrench size={11} /> Repair
           </Button>
@@ -158,7 +167,7 @@ function ReclaimButton({ onReclaimed }: { onReclaimed: () => void }) {
 
   const reclaim = async () => {
     const ok = await confirm({
-      title: `Reclaim ${humanBytes(totalBytes)}?`,
+      title: `Reclaim ${modelBytes(totalBytes)}?`,
       body: 'Deletes partial-download leftovers (.part / .tmp / .incomplete files) from cancelled or interrupted fetches. Fully downloaded models are untouched.',
       confirmLabel: 'Reclaim',
     })
@@ -174,7 +183,7 @@ function ReclaimButton({ onReclaimed }: { onReclaimed: () => void }) {
   return (
     <Button variant="tonal" size="xs" loading={busy} onClick={reclaim}
       title="Delete partial-download leftovers from cancelled or interrupted fetches.">
-      <Trash2 size={13} /> Reclaim {humanBytes(totalBytes)}
+      <Trash2 size={13} /> Reclaim {modelBytes(totalBytes)}
     </Button>
   )
 }
@@ -196,6 +205,7 @@ export function ModelsPanel() {
   const active = data?.active ?? {}
 
   const reloadActive = () => { invalidateKeys('settings:models'); refresh() }
+  const { jobs: downloadJobs, start: startDownload, cancel: cancelDownload } = useModelDownloads(null, reloadActive)
 
   if (!allModels) return <ListSkeleton rows={6} />
 
@@ -221,7 +231,7 @@ export function ModelsPanel() {
           return (
             <div key={uc}>
               {showGroupHeader && <div data-type="caption" className="mb-1.5 mt-3 px-1 text-on-surface-low uppercase tracking-wide">{meta.group}</div>}
-              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} allModels={allModels} health={health ?? []} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
+              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} allModels={allModels} health={health ?? []} downloadJobs={downloadJobs} startDownload={startDownload} cancelDownload={cancelDownload} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
             </div>
           )
         })}
@@ -468,16 +478,26 @@ function HealthDot({ provider, health }: { provider: string; health: ProviderHea
   return <span role="img" className="size-2 shrink-0 rounded-pill" style={{ background: color }} title={label} aria-label={label} />
 }
 
-function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChanged }: {
+function UseCaseRow({ useCase, activeModels, allModels, health, downloadJobs, startDownload, cancelDownload, judgeRec, onChanged }: {
   useCase: string; activeModels: string[]; allModels: AvailableModel[]; health: ProviderHealth[]
+  downloadJobs: Record<string, DownloadJob>
+  startDownload: (model: string, providerOverride?: string) => Promise<void>
+  cancelDownload: (model: string, providerOverride?: string) => Promise<void>
   judgeRec?: JudgeBenchRecommendation; onChanged: () => void
 }) {
   const [saving, setSaving] = useState(false)
   const [query, setQuery] = useState('')
   const [reindex, setReindex] = useState<import('../../shared/data/api').ReindexJob | null>(null)
-  const [repairing, setRepairing] = useState<string | null>(null)
-  const meta = USE_CASE_META[useCase] ?? { label: useCase, description: '', chain: false, icon: Boxes }
+  const [repairErrors, setRepairErrors] = useState<Record<string, string>>({})
+  const repairRows = useRef<Record<string, HTMLDivElement | null>>({})
   const capable = useMemo(() => capableModels(useCase, allModels, activeModels), [allModels, useCase, activeModels])
+  useEffect(() => {
+    for (const [key, job] of Object.entries(downloadJobs)) {
+      if (capable.some((model) => `${model.provider}:${model.id}` === key)
+        && ['queued', 'running'].includes(job.state)) repairRows.current[key]?.scrollIntoView?.({ block: 'nearest' })
+    }
+  }, [downloadJobs, capable])
+  const meta = USE_CASE_META[useCase] ?? { label: useCase, description: '', chain: false, icon: Boxes }
   const matched = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return capable
@@ -545,13 +565,12 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
   }
   const repair = async (m: AvailableModel) => {
     const ref = `${m.provider}:${m.id}`
-    setRepairing(ref)
+    setRepairErrors((old) => { const next = { ...old }; delete next[ref]; return next })
     try {
-      await api.startModelDownload(m.provider, m.id)
-      onChanged()
+      await startDownload(m.id, m.provider)
     } catch (e) {
-      notify(`Couldn't re-download ${m.id}: ${String((e as Error)?.message || e)}`, 'error')
-    } finally { setRepairing(null) }
+      setRepairErrors((old) => ({ ...old, [ref]: String((e as Error)?.message || e) }))
+    }
   }
 
   return (
@@ -682,8 +701,14 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
             const ref = `${m.provider}:${m.id}`
             const on = activeModels.includes(ref)
             const notDownloaded = m.downloaded === false
+            const downloadJob = downloadJobs[ref]
+            const repairing = downloadJob != null && ['queued', 'running'].includes(downloadJob.state)
+            const showRepairJob = downloadJob != null && (repairing || downloadJob.state === 'error')
+            const repairWarning = (downloadJob as (typeof downloadJob & { warning?: string }) | undefined)?.warning
+            const modelDisplayName = 'display_name' in m && typeof m.display_name === 'string' ? m.display_name : m.name
             return (
-              <div key={ref}
+              <div key={ref}>
+              <div
                 className="flex items-center gap-2.5 rounded-md pr-3 transition-colors hover:bg-surface-high"
                 style={on ? { background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' } : undefined}>
                 <button type="button" onClick={() => toggle(ref)} disabled={saving}
@@ -694,7 +719,7 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
                   </span>
                   <span data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface font-mono">{m.name}</span>
                 </button>
-                <ModelChips model={m} onRepair={() => repair(m)} repairing={repairing === ref} />
+                <ModelChips model={m} onRepair={() => repair(m)} repairing={repairing} />
                 {on && notDownloaded && (
                   <StatusPill tone="warn" className="gap-1 py-0.5"
                     title="Bound but not downloaded — download it in Providers to activate.">
@@ -702,6 +727,29 @@ function UseCaseRow({ useCase, activeModels, allModels, health, judgeRec, onChan
                   </StatusPill>
                 )}
                 <MetaChip>{m.provider}</MetaChip>
+              </div>
+              {(showRepairJob || repairErrors[ref]) && (
+                <div ref={(el) => { repairRows.current[ref] = el }} data-testid="model-repair" className="ml-9 mt-1 rounded-md bg-surface-high px-3 py-2" aria-live="polite">
+                  {downloadJob && repairing && <>
+                    <div data-type="caption" className="text-on-surface">
+                      {downloadJob.state === 'queued' ? 'Repair queued' : `Downloading ${modelDisplayName} — ${Math.round(downloadJob.downloaded_bytes / 1048576)} MiB of ${Math.round(downloadJob.total_bytes / 1048576)} MiB${downloadJob.eta_s > 0 ? `, about ${Math.max(1, Math.round(downloadJob.eta_s / 60))} min left` : ''}`}
+                    </div>
+                    <div className="mt-1"><WavyProgress width={200} value={downloadJob.progress} label={`Repairing ${m.name}`} /></div>
+                    {repairWarning && <div data-type="caption" className="mt-1 text-on-surface-low">{repairWarning}</div>}
+                    <Button type="button" variant="ghost" size="xs" className="mt-1"
+                      ariaLabel="Cancel the model download"
+                      onClick={async () => {
+                        try { await cancelDownload(m.id, m.provider) }
+                        catch (error) { setRepairErrors((old) => ({ ...old, [ref]: `Couldn't cancel this repair: ${String((error as Error)?.message || error)}` })) }
+                      }}>Cancel</Button>
+                  </>}
+                  {downloadJob?.state === 'error' && <>
+                    <div role="alert" data-type="caption" className="text-danger">{downloadJob.error || 'Repair failed.'}</div>
+                    {repairWarning && <div data-type="caption" className="mt-1 text-on-surface-low">{repairWarning}</div>}
+                  </>}
+                  {repairErrors[ref] && <div role="alert" data-type="caption" className="text-danger">{repairErrors[ref]}</div>}
+                </div>
+              )}
               </div>
             )
               })}

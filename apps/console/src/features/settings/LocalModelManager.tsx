@@ -135,7 +135,8 @@ export function LocalModelManager({
   const hiddenCount = showSearch ? 0 : models.length - rows.length
 
   const renderRow = (m: AvailableModel) => {
-    const job = jobs[m.name]
+    const job = jobs[`${provider}:${m.name}`]
+    const warning = (job as (typeof job & { warning?: string }) | undefined)?.warning
     const downloading = job?.state === 'running' || job?.state === 'queued'
     const err = errors[m.name] || (job?.state === 'error' ? job.error : '')
     const frac = job && job.total_bytes > 0 ? job.progress : undefined
@@ -162,8 +163,8 @@ export function LocalModelManager({
             </div>
             <div data-type="caption" className="truncate text-on-surface-low">
               {downloading
-                ? `${job?.state === 'queued' ? 'queued' : 'downloading'}${job?.downloaded_bytes ? ` · ${MB(job.downloaded_bytes)}${sizeMb ? ` / ${sizeMb}` : ''} MB` : ''}`
-                : <>{m.description || (m.capabilities?.length ? m.capabilities.join(', ') : '')}{stated.mb ? ` · ${stated.mb} MB` : ''}{stated.familyMedianMb ? ` · family median ~${stated.familyMedianMb} MB` : ''}</>}
+                ? `${job?.state === 'queued' ? 'queued' : 'downloading'}${job?.downloaded_bytes ? ` · ${MB(job.downloaded_bytes)}${sizeMb ? ` / ${sizeMb}` : ''} MiB` : ''}`
+                : <>{m.description || (m.capabilities?.length ? m.capabilities.join(', ') : '')}{stated.mb ? ` · ${stated.mb} MiB` : ''}{stated.familyMedianMb ? ` · family median ~${stated.familyMedianMb} MiB` : ''}</>}
             </div>
             {stepDown && !downloading && (
               <Button variant="ghost-accent" size="xs" className="-ml-m mt-0.5"
@@ -190,6 +191,7 @@ export function LocalModelManager({
                   : <WavyProgress width={200} value={frac} label={`Downloading ${m.name}`} />}
               </div>
             )}
+            {warning && <div data-type="caption" className="mt-1 text-on-surface-low">{warning}</div>}
           </div>
           {downloading ? (
             <SquareIconButton icon={X} iconSize={13} label={`Cancel ${m.name}`} title="Cancel"

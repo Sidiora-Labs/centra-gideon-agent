@@ -330,6 +330,7 @@ HTTP_ERROR_CODES: dict[str, str] = {
         "A policy override key is not in the overridable set; the detail names the "
         "offending keys and the keys a run may override."
     ),
+    "insufficient_disk_space": "There is not enough free disk space for this download.",
 }
 
 

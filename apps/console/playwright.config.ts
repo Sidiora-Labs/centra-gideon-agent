@@ -47,6 +47,9 @@ export default defineConfig({
   },
   use: {
     baseURL: BASE_URL,
+    ...(process.env.PW_CHROMIUM_EXECUTABLE_PATH
+      ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_EXECUTABLE_PATH } }
+      : {}),
     trace: 'on-first-retry',
     viewport: { width: 1280, height: 900 },
     storageState: STORAGE_STATE,

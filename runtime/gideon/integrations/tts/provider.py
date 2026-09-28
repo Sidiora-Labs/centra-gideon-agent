@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from gideon.integrations.local_models.provider import LocalModel, LocalModelProvider
@@ -68,7 +69,19 @@ class LocalTtsProvider(TtsProvider, LocalModelProvider):
 
     async def list_models(self) -> list[LocalModel]:
         voices = await self.list_voices()
-        return list(map(_voice_model, voices))
+        models = list(map(_voice_model, voices))
+        try:
+            cache_dir = self.cache_dir()
+        except OSError:
+            cache_dir = None
+        if cache_dir:
+            from gideon.integrations.local_models import layouts
+
+            cache_root = Path(cache_dir)
+            for model in models:
+                if model.downloaded and layouts.is_downloaded(cache_root, model.name):
+                    self._apply_disk_state(model, cache_root, layouts)
+        return models
 
     async def download_model(self, model_name: str) -> bool:
         return await self.download_voice(model_name)

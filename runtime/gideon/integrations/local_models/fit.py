@@ -93,6 +93,7 @@ class DiskPrecheck:
     measured: bool
     need_bytes: int
     free_bytes: int
+    code: str = ""
     reason: str = ""
     warning: str = ""
 
@@ -282,23 +283,32 @@ def fit_verdict(
             "red",
             need,
             budget_bytes,
-            f"needs ~{_gb(need)} GB, this machine has ~{_gb(budget_bytes)} GB free for models",
+            f"needs ~{_gb(need)}, this machine has ~{_gb(budget_bytes)} free for models",
         )
     if need > budget_bytes * GREEN_HEADROOM:
         return FitAssessment(
             "yellow",
             need,
             budget_bytes,
-            f"fits, but uses most of the ~{_gb(budget_bytes)} GB available",
+            f"fits, but uses most of the ~{_gb(budget_bytes)} available",
         )
     return FitAssessment(
-        "green", need, budget_bytes, f"fits comfortably in ~{_gb(budget_bytes)} GB"
+        "green", need, budget_bytes, f"fits comfortably in ~{_gb(budget_bytes)}"
     )
 
 
 def _gb(value: int) -> str:
-    """Bytes → a one-decimal GB string for user-facing reasons."""
-    return f"{value / _BYTES_PER_GB:.1f}"
+    """Bytes → a one-decimal GiB string for user-facing reasons."""
+    return f"{value / _BYTES_PER_GB:.1f} GiB"
+
+
+def size_text(value: int) -> str:
+    """Format bytes in binary units for user-facing messages."""
+    if value >= _BYTES_PER_GB:
+        return f"{value / _BYTES_PER_GB:.1f} GiB"
+    if value >= _BYTES_PER_MB:
+        return f"{value / _BYTES_PER_MB:.1f} MiB"
+    return f"{value / 1024:.1f} KiB"
 
 
 def family_key(name: str) -> str:
@@ -351,7 +361,24 @@ def disk_precheck(need_mb: float, target_dir: str | Path | None = None) -> DiskP
     """
     need = int(max(0.0, float(need_mb or 0)) * _BYTES_PER_MB)
     try:
-        free = shutil.disk_usage(str(target_dir) if target_dir else "/").free
+        if target_dir is None:
+            raise OSError("cache filesystem is unknown")
+        probe = Path(target_dir)
+        while not probe.exists():
+            if probe.is_symlink():
+                raise OSError("broken symlink in cache path")
+            parent = probe.parent
+            if parent == probe:
+                raise OSError("no existing cache ancestor")
+            probe = parent
+        while not probe.is_dir():
+            if probe.is_symlink() and not probe.exists():
+                raise OSError("broken symlink in cache path")
+            parent = probe.parent
+            if parent == probe:
+                raise OSError("no existing directory ancestor")
+            probe = parent
+        free = shutil.disk_usage(str(probe)).free
     except (
         Exception
     ):  # noqa: BLE001 — an unmeasurable disk skips the check, never blocks
@@ -371,7 +398,11 @@ def disk_precheck(need_mb: float, target_dir: str | Path | None = None) -> DiskP
             measured=True,
             need_bytes=need,
             free_bytes=free,
-            reason=f"insufficient_disk_space: needs {_gb(need)} GB, {_gb(free)} GB free",
+            code="insufficient_disk_space",
+            reason=(
+                f"Not enough free disk space for this download: it needs {size_text(need)}, "
+                f"and {size_text(free)} is free."
+            ),
         )
     return DiskPrecheck(ok=True, measured=True, need_bytes=need, free_bytes=free)
 

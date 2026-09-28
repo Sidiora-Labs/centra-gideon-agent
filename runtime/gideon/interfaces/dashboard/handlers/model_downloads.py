@@ -48,23 +48,36 @@ async def api_model_download_start(request: web.Request) -> web.Response:
     try:
         body = await read_json_body(request)
     except Exception:
-        return web.json_response({"error": "Invalid JSON body"}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_json", "message": "Invalid JSON body"}}, status=400
+        )
     if not isinstance(body, dict):
-        return web.json_response({"error": "JSON body must be an object"}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_body", "message": "JSON body must be an object"}}, status=400
+        )
 
     provider = str(body.get("provider", ""))
     model = str(body.get("model", ""))
+    if not provider or not model:
+        field = "provider" if not provider else "model"
+        return web.json_response(
+            {"error": {"code": "invalid_request", "message": f"Missing '{field}'"}}, status=400
+        )
 
     precheck = await _download_precheck(_registry(request), provider, model)
     if precheck is not None and not precheck.ok:
-        return web.json_response({"error": precheck.reason}, status=400)
+        return web.json_response(
+            {"error": {"code": precheck.code, "message": precheck.reason}}, status=400
+        )
 
-    job, error = _registry(request).start(provider, model)
+    job, error = _registry(request).start(
+        provider, model, warning=precheck.warning if precheck is not None else ""
+    )
     if error is not None:
-        return web.json_response({"error": error}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_request", "message": error}}, status=400
+        )
     payload = job.to_dict()
-    if precheck is not None and precheck.warning:
-        payload["warning"] = precheck.warning
     return web.json_response(payload, status=202)
 
 
@@ -91,7 +104,7 @@ async def _download_precheck(reg, provider_name: str, model: str):
     try:
         for lm in await catalog_for(provider):
             if lm.name == model:
-                if lm.downloaded:
+                if lm.downloaded and str(getattr(lm, "integrity", "") or "") != "truncated":
                     return None
                 need_mb = float(lm.size_mb or 0)
                 break

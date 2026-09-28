@@ -1582,6 +1582,7 @@ from gideon.interfaces.cli.app_new import add_parser as _add_app_parser  # noqa:
 from gideon.interfaces.cli.app_new import app_cmd as _app_cmd  # noqa: E402
 from gideon.interfaces.cli.chat import _chat  # noqa: E402
 from gideon.interfaces.cli.commands import (
+    CliRefusal,
     _ablation,
     _automation,
     _cron,
@@ -1714,8 +1715,7 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         try:
             mp = get_default_skills_registry().get(marketplace_name)
         except KeyError:
-            print(f"❌ Marketplace '{marketplace_name}' not registered")
-            return
+            raise CliRefusal(f"Marketplace '{marketplace_name}' not registered") from None
         results = mp.search(query)
         if not results:
             print(f"No results for '{query}' on {marketplace_name}")
@@ -1741,8 +1741,7 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         try:
             registry.get(marketplace_name)
         except KeyError:
-            print(f"❌ Marketplace '{marketplace_name}' not registered")
-            return
+            raise CliRefusal(f"Marketplace '{marketplace_name}' not registered") from None
         try:
             result = registry.install_guarded(
                 marketplace_name, skill_id, target, force=force
@@ -1753,27 +1752,9 @@ def _handle_skills(args) -> None:  # noqa: ANN001
             )
             print(f"✅ Installed: {result.path}{note}")
         except SkillInstallRefused as exc:
-            print(f"❌ Install refused: {exc}")
-            if not exc.dangerous:
-                print(
-                    "   This is an overridable warning — re-run with --force to install anyway."
-                )
-            else:
-                print("   This is a dangerous verdict — it cannot be force-installed.")
-            for f in exc.report.findings[:_SKILL_FINDINGS_SHOWN]:
-                print(
-                    f"     - [{f.severity.value}] {f.rule} in {f.path or '(content)'}: {f.evidence[:80]}"  # noqa: E501
-                )
-                gloss = rule_gloss(f.rule)
-                if gloss:
-                    print(f"       {gloss}")
-            hidden = len(exc.report.findings) - _SKILL_FINDINGS_SHOWN
-            if hidden > 0:
-                print(
-                    f"     +{hidden} more finding{'' if hidden == 1 else 's'} not shown"
-                )
+            raise CliRefusal(f"Install refused: {exc}") from None
         except Exception as exc:
-            print(f"❌ Install failed: {exc}")
+            raise CliRefusal(f"Install failed: {exc}") from None
         return
 
     if cmd == "remove":
@@ -1787,7 +1768,7 @@ def _handle_skills(args) -> None:  # noqa: ANN001
                 removed = True
                 break
         if not removed:
-            print(f"❌ Skill '{name}' not found")
+            raise CliRefusal(f"Skill '{name}' not found")
         return
 
     if cmd == "curate":
@@ -1813,19 +1794,24 @@ def _handle_skills(args) -> None:  # noqa: ANN001
             print("No installed skills to verify.")
             return
         tampered = 0
+        lines = []
         for d in dirs:
             rep = verify_skill_integrity(d)
             mark = "·" if rep.unlocked else ("✅" if rep.ok else "⚠️")
-            print(f"  {mark} {rep.summary()}")
+            lines.append(f"  {mark} {rep.summary()}")
             for f in rep.mutated:
-                print(f"       mutated: {f}")
+                lines.append(f"       mutated: {f}")
             for f in rep.missing:
-                print(f"       missing: {f}")
+                lines.append(f"       missing: {f}")
             for f in rep.added:
-                print(f"       added:   {f}")
+                lines.append(f"       added:   {f}")
             if not rep.ok and not rep.unlocked:
                 tampered += 1
-        print(f"\n{len(dirs)} skill(s) checked, {tampered} tampered.")
+        lines.append(f"\n{len(dirs)} skill(s) checked, {tampered} tampered.")
+        report = "\n".join(lines)
+        if tampered:
+            raise CliRefusal(report)
+        print(report)
         return
 
     print("Usage: gideon skills [list|search|install|remove|curate|verify]")

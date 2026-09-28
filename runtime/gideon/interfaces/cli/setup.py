@@ -140,6 +140,12 @@ def _setup(
     ``only_app`` runs ONLY that installed app's ``cli.setup`` step, skipping the
     core steps and every other app (``gideon setup --app <name>``).
     """
+    if credential:
+        cred_name = credential.partition("=")[0]
+        if not cred_name or not cred_name.replace("_", "a").isalnum() or cred_name[0].isdigit():
+            from gideon.interfaces.cli.commands import CliRefusal
+
+            raise CliRefusal("a credential name is letters, digits and underscores")
     if only_app:
         run_app_setup_steps(only_app=only_app)
         return
@@ -263,8 +269,10 @@ def _setup_noninteractive(
                 descriptors[cred_name] = {"type": "api_key", "value": cred_val}
                 store.save(descriptors)
                 print(f"  ✅ Credential stored: {cred_name}")
-            except Exception as exc:
-                print(f"  ❌ Could not store credential {cred_name!r}: {exc}")
+            except Exception:
+                from gideon.interfaces.cli.commands import CliRefusal
+
+                raise CliRefusal(f"Could not store credential {cred_name!r}") from None
         elif cred_name:
             print(
                 f"  ⚠️  --credential {cred_name!r}: no value provided and env var not set"

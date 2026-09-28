@@ -28,6 +28,15 @@ from gideon.security.security import (
 from gideon.security.sel import sel
 
 
+class CliRefusal(SystemExit):
+    """A refused CLI operation mapped to one stderr reason and exit status 1."""
+
+    def __init__(self, reason: str = "") -> None:
+        if reason:
+            print(reason if reason.startswith("Error:") else f"Error: {reason}", file=sys.stderr)
+        super().__init__(1)
+
+
 def _spawn(args: argparse.Namespace) -> None:
     """Dispatch spawn subcommands: run, list."""
     base = f"http://localhost:{args.port}"
@@ -309,17 +318,15 @@ def _cron(args: argparse.Namespace) -> None:
         approval_mode = getattr(args, "approval_mode", "") or ""
         if channel:
             if len(channel) > CHANNEL_MAX_LEN or not CHANNEL_ID_RE.match(channel):
-                print(
-                    f"Error: invalid channel ID format (expected {CHANNEL_ID_RE.pattern.strip('^$')})"  # noqa: E501
+                raise CliRefusal(
+                    f"invalid channel ID format (expected {CHANNEL_ID_RE.pattern.strip('^$')})"
                 )
-                return
         if cron_expr:
             spec = {"kind": "cron", "expr": cron_expr}
         elif every:
             spec = {"kind": "interval", "interval_secs": int(every)}
         else:
-            print("Provide --every or --cron")
-            return
+            raise CliRefusal("Provide --every or --cron")
 
         workflow = {
             "inline": {
@@ -341,7 +348,6 @@ def _cron(args: argparse.Namespace) -> None:
             created_by="user",
         )
         if not result.ok:
-            print(result.text)
             sel().log_api_access(
                 caller="cli",
                 operation="cron.add",
@@ -350,7 +356,7 @@ def _cron(args: argparse.Namespace) -> None:
                 resources=f"name={args.name}",
                 error=result.text,
             )
-            return
+            raise CliRefusal(result.text)
         trigger_id = str((result.data.get("trigger") or {}).get("id") or "")
         if channel:
             _tools.update(
@@ -377,10 +383,9 @@ def _cron(args: argparse.Namespace) -> None:
                 if val is None:
                     continue
                 if len(val) > CHANNEL_MAX_LEN or not CHANNEL_ID_RE.match(val):
-                    print(
-                        f"Error: invalid channel ID format (expected {CHANNEL_ID_RE.pattern.strip('^$')})"  # noqa: E501
+                    raise CliRefusal(
+                        f"invalid channel ID format (expected {CHANNEL_ID_RE.pattern.strip('^$')})"
                     )
-                    return
                 patch["delivery"] = f"channel:{val}"
             elif field == "name":
                 patch["name"] = val
@@ -392,13 +397,11 @@ def _cron(args: argparse.Namespace) -> None:
                 spec_update = {"kind": "cron", "expr": val}
         approval = getattr(args, "approval_mode", None)
         if not patch and not spec_update and approval is None:
-            print("Provide at least one field to update")
-            return
+            raise CliRefusal("Provide at least one field to update")
         if getattr(args, "every_secs", None) is not None and (
             getattr(args, "cron_expr", None) is not None
         ):
-            print("Provide --every or --cron, not both")
-            return
+            raise CliRefusal("Provide --every or --cron, not both")
 
         existing = store.get(args.job_id)
         if existing is None:
@@ -409,8 +412,7 @@ def _cron(args: argparse.Namespace) -> None:
                 source="cli",
                 resources=f"job_id={args.job_id} reason=not_found",
             )
-            print(f"Job not found: {args.job_id}")
-            return
+            raise CliRefusal(f"Job not found: {args.job_id}")
 
         if spec_update:
             current = (
@@ -421,7 +423,13 @@ def _cron(args: argparse.Namespace) -> None:
                 for k, v in current.items()
                 if k in ("timezone", "skip_dates", "strict")
             }
-            patch["spec"] = {**carried, **spec_update}
+            candidate_spec = {**carried, **spec_update}
+            if candidate_spec.get("kind") == "cron":
+                from croniter import croniter
+
+                if not croniter.is_valid(str(candidate_spec.get("expr") or "")):
+                    raise CliRefusal("invalid cron expression; provide a schedule that can fire")
+            patch["spec"] = candidate_spec
 
         if "message" in patch or approval is not None:
             action_wf: dict = dict(existing.trigger.workflow or {})
@@ -455,18 +463,44 @@ def _cron(args: argparse.Namespace) -> None:
             resources=f"job_id={args.job_id} fields={','.join(sorted(patch))}",
             error="" if result.ok else result.text,
         )
+        if not result.ok:
+            raise CliRefusal(result.text)
         print(result.text)
 
     elif action == "remove":
         result = _tools.delete(store, trigger_id=args.job_id, confirm=True)
-        print(result.text if result.ok else f"Job not found: {args.job_id}")
+        if not result.ok:
+            raise CliRefusal(f"Job not found: {args.job_id}")
+        print(result.text)
 
     elif action == "pause":
         result = _tools.set_paused(store, trigger_id=args.job_id, paused=True)
-        print(result.text if result.ok else f"Job not found: {args.job_id}")
+        if not result.ok:
+            raise CliRefusal(f"Job not found: {args.job_id}")
+        print(result.text)
 
     elif action == "resume":
+        existing = store.get(args.job_id)
+        if existing is not None:
+            from gideon.automation.triggers.screen import (
+                capability_allows,
+                capabilities_for_action,
+            )
+
+            requested = capabilities_for_action(existing.trigger)
+            for provider in requested.get("providers", []):
+                decision = capability_allows(
+                    existing.trigger.capabilities, key="providers", value=provider
+                )
+                if not decision.allowed:
+                    label = "Bash Command" if provider == "bash" else provider
+                    raise CliRefusal(
+                        f"is not allowed to use the “{label}” action, so it was not switched on. "
+                        "It can be allowed only on the Triggers page."
+                    )
         result = _tools.set_paused(store, trigger_id=args.job_id, paused=False)
+        if not result.ok:
+            raise CliRefusal(result.text)
         print(result.text)
 
     elif action == "trigger":
@@ -481,7 +515,9 @@ def _cron(args: argparse.Namespace) -> None:
             resources=f"job_id={args.job_id}",
             error="" if ok else message,
         )
-        print(message if ok else f"Error: {message}")
+        if not ok:
+            raise CliRefusal(message)
+        print(message)
 
     else:
         print("Usage: gideon cron {list|add|update|remove|pause|resume|trigger}")
@@ -553,7 +589,7 @@ def _security(args: argparse.Namespace) -> None:
         elif total == valid:
             print(f"✅ HMAC chain intact: {total} entries verified.")
         else:
-            print(
+            raise CliRefusal(
                 f"⚠️  HMAC chain COMPROMISED: {valid}/{total} entries valid, {total - valid} tampered."  # noqa: E501
             )
     else:
@@ -585,9 +621,9 @@ async def _run_eval(args: argparse.Namespace) -> None:
                     for f in scenarios_dir.iterdir()
                     if f.suffix in (".json", ".yaml", ".yml")
                 )
-                print(f"Error: scenario '{name}' not found.")
-                print(f"Available scenarios: {', '.join(available)}")
-                return
+                raise CliRefusal(
+                    f"scenario '{name}' not found. Available scenarios: {', '.join(available)}"
+                )
             scenarios.append(load_scenario(resolved))
     else:
         scenarios = [load_scenario(scenarios_dir / "smoke_test.json")]
@@ -1360,7 +1396,7 @@ def _learn(args: argparse.Namespace) -> None:
             if svc.delete_lesson(args.query):
                 print(f"Removed lessons matching: {args.query}")
             else:
-                print(f"No lessons match: {args.query}")
+                raise CliRefusal(f"No lessons match: {args.query}")
 
         else:
             print("Usage: gideon learn {add|list|remove}")
@@ -1452,18 +1488,16 @@ def _memory_cmd(args: argparse.Namespace) -> None:
         elif action == "import":
             import_file = getattr(args, "file", None)
             if not import_file:
-                print("Usage: gideon memory import <file>")
-                return
+                raise CliRefusal("Usage: gideon memory import <file>")
             path = Path(import_file)
             if not path.is_file():
-                print(f"File not found: {import_file}")
-                return
-            data = json.loads(safe_read_file(str(path)))
+                raise CliRefusal(f"File not found: {import_file}")
+            try:
+                data = json.loads(safe_read_file(str(path)))
+            except (OSError, ValueError):
+                raise CliRefusal(f"Could not read a JSON export from {import_file}") from None
             if not isinstance(data, dict):
-                print(
-                    f"Error: {import_file} must contain a JSON object", file=sys.stderr
-                )
-                return
+                raise CliRefusal(f"{import_file} must contain a JSON object")
             counts = store.import_memory(data)
             print("Import complete:")
             print(f"  Semantic: {counts['semantic']}")
