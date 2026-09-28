@@ -21,6 +21,12 @@ def _make_voice_app(state):
     return app
 
 
+@pytest.fixture(autouse=True)
+def _isolated_voice_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+
+
 class TestVoiceSynthesize:
     @pytest.mark.asyncio
     async def test_synthesize_empty_text_rejected(self, tmp_path, monkeypatch):
@@ -31,6 +37,26 @@ class TestVoiceSynthesize:
         async with TestClient(TestServer(_make_voice_app(state))) as client:
             resp = await client.post(
                 "/api/voice/synthesize", json={"text": "", "session": "s1"}
+            )
+            assert resp.status == 400
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("request_id", ["", 17, "x" * 129])
+    async def test_request_id_must_be_a_bounded_non_empty_string(self, tmp_path, request_id):
+        from gideon.cognition.history import ConversationLog
+        from gideon.core.config import AppConfig
+        from gideon.engine.session import ConversationDirectory
+        from gideon.interfaces.dashboard.state import ConsoleState
+
+        state = ConsoleState(
+            sessions=ConversationDirectory(AppConfig()),
+            start_time=0.0,
+            conversation_log=ConversationLog(base_dir=tmp_path / "sessions"),
+        )
+        async with TestClient(TestServer(_make_voice_app(state))) as client:
+            resp = await client.post(
+                "/api/voice/synthesize",
+                json={"text": "Hello", "session": "s1", "request_id": request_id},
             )
             assert resp.status == 400
 
@@ -131,7 +157,7 @@ class TestTheEnabledToggleIsHonored:
             assert resp.status == 503
             body = await resp.json()
             assert body["error"]["code"] == "tts_disabled"
-            assert "Speak replies aloud" in body["error"]["message"]
+            assert "enable text-to-speech" in body["error"]["message"]
         provider.assert_not_called()
 
     @pytest.mark.asyncio
@@ -191,3 +217,24 @@ class TestTheEnabledToggleIsHonored:
             "text we refused to speak was marked as ours, so the echo filter would drop a "
             "phrase the USER said that happened to match it"
         )
+
+
+@pytest.mark.asyncio
+async def test_empty_actual_tts_binding_reports_unbound(tmp_path):
+    from gideon.cognition.history import ConversationLog
+    from gideon.core.config import AppConfig
+    from gideon.engine.session import ConversationDirectory
+    from gideon.interfaces.dashboard.state import ConsoleState
+
+    state = ConsoleState(
+        sessions=ConversationDirectory(AppConfig()),
+        start_time=0.0,
+        conversation_log=ConversationLog(base_dir=tmp_path / "sessions"),
+    )
+    async with TestClient(TestServer(_make_voice_app(state))) as client:
+        response = await client.post(
+            "/api/voice/synthesize", json={"text": "Hello", "session": "s1"},
+        )
+        body = await response.json()
+    assert response.status == 503
+    assert body["error"]["code"] == "tts_unbound"

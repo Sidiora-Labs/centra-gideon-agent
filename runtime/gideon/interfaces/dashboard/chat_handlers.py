@@ -448,7 +448,8 @@ async def _maybe_cancel_and_replace(
         qid = session.queue_append(message)
         state.broadcast_ws(
             "chat_done",
-            {"session": session.key, **session.stream_cursor(), "superseded": True, "superseded_by": qid},
+            {"session": session.key, **session.stream_cursor(), "superseded": True,
+             "superseded_by": qid, "last_turn_outcome": "stopped"},
         )
         sel().log_tool_invocation(
             session_key=_history_key_for(session.key),
@@ -872,6 +873,29 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
         "stream_turn": snapshot_turn,
         "stream_seq": snapshot_seq,
     }
+    snapshot_outcome = getattr(session, "_last_turn_outcome", None)
+    if snapshot_running or snapshot_outcome not in {"complete", "stopped", "error"}:
+        snapshot_outcome = None
+        latest_user = max(
+            (index for index, message in enumerate(messages) if message.get("role") == "user"),
+            default=-1,
+        )
+        for message in reversed(messages[latest_user + 1 :]):
+            meta = message.get("meta")
+            candidate = meta.get("last_turn_outcome") if isinstance(meta, dict) else None
+            if candidate in {"complete", "stopped", "error"}:
+                snapshot_outcome = candidate
+                break
+            cls_value = message.get("cls", "")
+            if isinstance(cls_value, str):
+                try:
+                    stop_value = json.loads(cls_value)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(stop_value, dict) and stop_value.get("kind") == "stop_event":
+                    if stop_value.get("state") == "stopped" or stop_value.get("outcome") in {"soft", "hard"}:
+                        snapshot_outcome = "stopped"
+                        break
 
     forked_from = getattr(session, "forked_from", "") or ""
     forked_from_title = ""
@@ -897,6 +921,7 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             "key": session.key,
             "title": session.title,
             "running": snapshot_running,
+            "last_turn_outcome": snapshot_outcome,
             "stream_cursor": stream_cursor,
             "stopping": session._stopping,
             "messages": prepared,
@@ -959,6 +984,18 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             ),
         }
     )
+
+
+async def _accepted_chat_action(request: web.Request, payload: dict[str, Any]) -> web.Response:
+    detail = await api_chat_session_detail(request)
+    if detail.status >= 400:
+        return detail
+    try:
+        snapshot = json.loads(detail.body or b"{}")
+    except (TypeError, ValueError):
+        logger.error("Chat action detail snapshot was not valid JSON")
+        return web.json_response({"error": "Could not read the accepted chat state"}, status=500)
+    return web.json_response({**payload, "snapshot": snapshot})
 
 
 async def api_chat_session_create(request: web.Request) -> web.Response:
@@ -1129,7 +1166,7 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
             session._stop_state = "idle"
             state.push_sessions_update()
 
-        await state.sessions.stop_turn(
+        outcome = await state.sessions.stop_turn(
             _history_key_for(name), force=True, on_hard=_on_hard_force
         )
         sel().log_tool_invocation(
@@ -1141,12 +1178,16 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
             outcome="hard",
             metadata={"session": name, "force": True},
         )
-        return web.json_response({"ok": True})
+        stopped = outcome in {"soft", "hard"}
+        return await _accepted_chat_action(
+            request,
+            {"ok": True, "stopped": stopped, "last_turn_outcome": "stopped" if stopped else None},
+        )
 
     if session._stop_state != "idle" or not session.running:
         if not session.running:
             logger.info("Stop: session %s not running, ignoring", name)
-        return web.json_response({"ok": True})
+        return await _accepted_chat_action(request, {"ok": True, "stopped": False})
 
     session._stop_state = "soft_pending"
     session._queue.clear()
@@ -1202,7 +1243,11 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
         outcome=outcome,
         metadata={"session": name, "force": False},
     )
-    return web.json_response({"ok": True})
+    stopped = outcome in {"soft", "hard"}
+    return await _accepted_chat_action(
+        request,
+        {"ok": True, "stopped": stopped, "last_turn_outcome": "stopped" if stopped else None},
+    )
 
 
 async def api_chat_image_input(request: web.Request) -> web.Response:

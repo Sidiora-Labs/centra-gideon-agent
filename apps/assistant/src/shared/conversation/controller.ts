@@ -1,7 +1,7 @@
 import { gatewayJson, GatewayError } from '../transport.web'
 import type { OwnerScope } from '../auth.web'
 import type { ChatDetail, ChatHistoryMessage, ChatSocketEvent, ConversationMessage, ConversationState,
-  ConversationStreamCursor } from './types'
+  ConversationStreamCursor, SpeechPlayback } from './types'
 
 function messageId(session: string, message: ChatHistoryMessage, index: number): string {
   const sourceId = message.meta?.id
@@ -122,7 +122,7 @@ function streamCursor(value: unknown): ConversationStreamCursor | null {
 
 const EMPTY: ConversationState = {
   scope: null, sessionId: null, title: '', messages: [], draft: '', phase: 'signed-out',
-  connected: false, running: false, error: '',
+  connected: false, running: false, lastTurnOutcome: null, error: '',
 }
 
 export class ConversationController {
@@ -140,6 +140,12 @@ export class ConversationController {
   private lastChunkSeq = 0
   private streamCursor: ConversationStreamCursor | null = null
   private closed = false
+  private speechListeners = new Set<(playback: SpeechPlayback) => void>()
+  private speechErrorListeners = new Set<(message: string) => void>()
+  private pendingSpeechOwner: { sessionId: string; clientTs: string } | null = null
+  private spokenReplies = new Set<string>()
+  private activeSpeechRequestId: string | null = null
+  private speechRequestSequence = 0
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -147,6 +153,75 @@ export class ConversationController {
   }
 
   snapshot = (): ConversationState => this.state
+
+  subscribeSpeech = (listener: (playback: SpeechPlayback) => void): (() => void) => {
+    this.speechListeners.add(listener)
+    return () => this.speechListeners.delete(listener)
+  }
+
+  subscribeSpeechError = (listener: (message: string) => void): (() => void) => {
+    this.speechErrorListeners.add(listener)
+    return () => this.speechErrorListeners.delete(listener)
+  }
+
+  private publishSpeech(playback: SpeechPlayback): void {
+    for (const listener of this.speechListeners) listener(playback)
+  }
+
+  private publishSpeechError(message: string): void {
+    for (const listener of this.speechErrorListeners) listener(message)
+  }
+
+  private stopSpeech(): void {
+    this.activeSpeechRequestId = null
+    this.publishSpeech(null)
+  }
+
+  private async speakCompletedReply(detail: ChatDetail): Promise<void> {
+    const owner = this.pendingSpeechOwner
+    if (!owner || owner.sessionId !== detail.key) return
+    if (detail.last_turn_outcome === 'stopped' || detail.last_turn_outcome === 'error') {
+      this.pendingSpeechOwner = null
+      return
+    }
+    if (detail.last_turn_outcome !== 'complete') return
+    const userIndex = detail.messages.findIndex(message => message.role === 'user' && message.ts === owner.clientTs)
+    if (userIndex < 0 || detail.messages.slice(userIndex + 1).some(message => message.role === 'error')) {
+      this.pendingSpeechOwner = null
+      return
+    }
+    const assistant = [...detail.messages].slice(userIndex + 1).reverse()
+      .find(message => message.role === 'assistant' && message.ts)
+    if (!assistant?.ts || !assistant.content.trim()) {
+      this.pendingSpeechOwner = null
+      return
+    }
+    const replyKey = `${detail.key}:${assistant.ts}`
+    if (this.spokenReplies.has(replyKey)) {
+      this.pendingSpeechOwner = null
+      return
+    }
+    this.pendingSpeechOwner = null
+    this.spokenReplies.add(replyKey)
+    try {
+      const response = await gatewayJson<{ settings?: Record<string, unknown> }>(
+        '/api/models/use-cases/tts/settings',
+      )
+      const settings = response.settings ?? {}
+      if (settings.enabled !== true || settings.auto_speak !== true) return
+      if (this.state.sessionId !== detail.key || this.state.lastTurnOutcome !== 'complete') return
+      this.stopSpeech()
+      this.speechRequestSequence++
+      const requestId = `${Date.now().toString(36)}-${this.speechRequestSequence.toString(36)}`
+      this.activeSpeechRequestId = requestId
+      await gatewayJson('/api/voice/synthesize', {
+        method: 'POST', body: { text: assistant.content, session: detail.key, request_id: requestId },
+      })
+    } catch (error) {
+      this.activeSpeechRequestId = null
+      this.publishSpeechError(String((error as Error).message || error))
+    }
+  }
 
   private update(patch: Partial<ConversationState>): void {
     this.state = { ...this.state, ...patch }
@@ -174,6 +249,9 @@ export class ConversationController {
     this.queuedLiveEvents = []
     this.submitting = false
     this.submitToken++
+    this.stopSpeech()
+    this.pendingSpeechOwner = null
+    this.spokenReplies.clear()
     this.lastChunkSeq = 0
     this.streamCursor = null
     this.update(scope ? { ...EMPTY, scope, phase: 'idle' } : EMPTY)
@@ -206,13 +284,15 @@ export class ConversationController {
     this.generation++
     this.loadToken++
     this.clearConnection()
+    this.stopSpeech()
+    if (changed) this.pendingSpeechOwner = null
     this.loading = false
     this.dirtyDuringLoad = false
     this.queuedLiveEvents = []
     this.lastChunkSeq = 0
     this.streamCursor = null
     this.update({ sessionId, title: '', messages: [], draft: changed ? '' : this.state.draft,
-      phase: 'loading', running: false, error: '' })
+      phase: 'loading', running: false, lastTurnOutcome: changed ? null : this.state.lastTurnOutcome, error: '' })
     this.connect()
     await this.refresh()
   }
@@ -232,7 +312,9 @@ export class ConversationController {
       this.streamCursor = streamCursor(detail.stream_cursor)
       this.lastChunkSeq = this.streamCursor?.stream_seq ?? 0
       this.update({ title: detail.title, messages: canonicalMessages(detail), running: detail.running,
+        lastTurnOutcome: detail.last_turn_outcome ?? null,
         phase: detail.running ? 'sending' : 'ready', error: '' })
+      void this.speakCompletedReply(detail)
     } catch (error) {
       if (generation === this.generation && loadToken === this.loadToken) this.update({ phase: 'failed', error: String((error as Error).message || error) })
     } finally {
@@ -277,7 +359,9 @@ export class ConversationController {
       )
       if (!accepted.ok || (accepted.session && accepted.session !== sessionId)) throw new Error('Gideon did not confirm the send')
       if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
-      this.update({ draft: this.state.draft === submittedDraft ? '' : this.state.draft, phase: 'sending', running: true })
+      this.stopSpeech()
+      this.pendingSpeechOwner = { sessionId, clientTs }
+      this.update({ draft: this.state.draft === submittedDraft ? '' : this.state.draft, phase: 'sending', running: true, lastTurnOutcome: null })
       await this.refresh()
     } catch (error) {
       if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
@@ -286,8 +370,11 @@ export class ConversationController {
           const detail = await gatewayJson<ChatDetail>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`)
           if (generation !== this.generation || scope.cacheKey !== this.state.scope?.cacheKey || sessionId !== this.state.sessionId) return
           if (receivedPrompt(detail, clientTs)) {
+            this.pendingSpeechOwner = { sessionId, clientTs }
             this.update({ draft: this.state.draft === submittedDraft ? '' : this.state.draft, messages: canonicalMessages(detail),
-              running: detail.running, phase: detail.running ? 'sending' : 'ready', error: '' })
+              running: detail.running, lastTurnOutcome: detail.last_turn_outcome ?? null,
+              phase: detail.running ? 'sending' : 'ready', error: '' })
+            void this.speakCompletedReply(detail)
             return
           }
         } catch {
@@ -307,6 +394,15 @@ export class ConversationController {
     const sessionlessApprovalResolution = event.type === 'approval_resolved'
       && event.data.session === undefined
     if (!scope || !sessionId || (event.data.session !== sessionId && !sessionlessApprovalResolution)) return
+    if (event.type === 'voice_complete') {
+      const requestId = event.data.request_id
+      const audio = event.data.audio
+      if (typeof requestId === 'string' && requestId === this.activeSpeechRequestId && typeof audio === 'string') {
+        this.publishSpeech({ session: sessionId, requestId, audio })
+        this.activeSpeechRequestId = null
+      }
+      return
+    }
     if (this.loading) {
       if (event.type === 'chat_user_message' || event.type === 'chat_done'
         || (event.type === 'chat_message' && event.data.role === 'error')) this.dirtyDuringLoad = true
@@ -335,7 +431,7 @@ export class ConversationController {
         if (!reconciled) return
         this.streamCursor = reconciled.cursor
         this.lastChunkSeq = incomingCursor.stream_seq
-        this.update({ messages: reconciled.messages, running: true, phase: 'sending' })
+        this.update({ messages: reconciled.messages, running: true, lastTurnOutcome: null, phase: 'sending' })
         return
       } else {
         if (terminalSnapshot || seq <= this.lastChunkSeq) return
@@ -350,7 +446,7 @@ export class ConversationController {
         const streaming = messages[streamingIndex]
         messages[streamingIndex] = { ...streaming, content: streaming.content + content }
       } else messages.push({ id: `${sessionId}:live`, role: 'assistant', content, streaming: true })
-      this.update({ messages, running: true, phase: 'sending' })
+      this.update({ messages, running: true, lastTurnOutcome: null, phase: 'sending' })
     } else if (event.type === 'tool_call' || event.type === 'tool_result') {
       const messages = reconcileToolEvent(sessionId, this.state.messages, event)
       if (messages === this.state.messages) return
@@ -443,6 +539,9 @@ export class ConversationController {
     this.closed = true
     this.generation++
     this.clearConnection()
+    this.stopSpeech()
     this.listeners.clear()
+    this.speechListeners.clear()
+    this.speechErrorListeners.clear()
   }
 }

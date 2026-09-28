@@ -49,7 +49,7 @@ export function VoicePanel({ go, query }: { go?: (id: string) => void; query?: R
 }
       <UseCaseVoiceSection
         title="Text-to-speech" hint="Speak agent replies aloud." useCase="tts"
-        enableLabel="Speak replies aloud" boundModel={(active['tts'] ?? [])[0] ?? ''}
+        enableLabel="Enable text-to-speech" boundModel={(active['tts'] ?? [])[0] ?? ''}
         settings={ttsSettings} setSettings={setTtsSettings} go={go}
         extras={(s, save, boundModel) => {
           const speed = typeof s.speed === 'number' ? s.speed : 1.0
@@ -257,6 +257,14 @@ function UseCaseVoiceSection({
               disabledReason="No model is bound for this use case — bind one in Models first" />
           </div>
         </Row>
+
+        {useCase === 'tts' && (
+          <Row label="Automatically speak completed replies" hint="When enabled, only replies completed in this tab are spoken. This is separate from making text-to-speech available.">
+            <Toggle on={Boolean(settings.auto_speak)} onChange={(v) => saveSettings({ auto_speak: v })}
+              label="Automatically speak completed replies" disabled={!bound || !enabled}
+              disabledReason={!bound ? 'No model is bound for this use case — bind one in Models first' : 'Enable text-to-speech first'} />
+          </Row>
+        )}
 
         { }
         <Row label="Model" hint={`Bound to the ${useCase.toUpperCase()} use case — change it in Models.`}>

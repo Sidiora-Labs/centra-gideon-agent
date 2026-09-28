@@ -15,6 +15,7 @@ from aiohttp import web
 
 from gideon.core.config import AppConfig
 from gideon.core.http_request import read_json_body
+from gideon.extensions.providers.use_cases import active_model_refs
 from gideon.http_errors import json_error
 from gideon.integrations.tts.registry import active_voice_params
 from gideon.integrations.voice.duplex import clean_for_speech
@@ -74,6 +75,11 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
     session_name = body.get("session", "")
     if not isinstance(session_name, str):
         session_name = ""
+    request_id = body.get("request_id")
+    if request_id is not None and (
+        not isinstance(request_id, str) or not request_id or len(request_id) > 128
+    ):
+        return web.json_response({"error": "request_id must be a non-empty string of at most 128 characters"}, status=400)
     if not text:
         return web.json_response({"error": "text required"}, status=400)
 
@@ -97,15 +103,22 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
             {"error": exc.message, "reason": exc.reason}, status=exc.status
         )
     if params is None:
-        return web.json_response(
-            {"error": "No TTS voice selected — choose one in Settings → Models"},
+        if not active_model_refs("tts"):
+            return json_error(
+                "tts_unbound",
+                message="Text-to-speech needs a voice. Choose one in Settings → Models.",
+                status=503,
+            )
+        return json_error(
+            "tts_unavailable",
+            message="The selected text-to-speech voice is unavailable. Check its provider in Settings → Models.",
             status=503,
         )
     if not params.get("enabled", False):
         return json_error(
             "tts_disabled",
             message=(
-                "Text-to-speech is switched off. Turn on “Speak replies aloud” in "
+                "Text-to-speech is switched off. To enable text-to-speech, use "
                 "Settings → Speech & Transcription."
             ),
             status=503,
@@ -137,6 +150,7 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
                     "index": idx,
                     "sentence": sentence,
                     "audio": base64.b64encode(wav_bytes).decode(),
+                    **({"request_id": request_id} if request_id is not None else {}),
                 },
             )
 
@@ -152,6 +166,7 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
                         "session": session_name,
                         "audio": base64.b64encode(final_bytes).decode(),
                         "chunks": len(chunk_paths),
+                        **({"request_id": request_id} if request_id is not None else {}),
                     },
                 )
 

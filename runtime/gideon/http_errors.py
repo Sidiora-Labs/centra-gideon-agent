@@ -285,9 +285,11 @@ HTTP_ERROR_CODES: dict[str, str] = {
     "onboarding_import_failed": "Scanning for or importing from another agent tool failed.",
     "tool_disabled": "The tool is disabled on the Tools page and will not be executed.",
     "tts_disabled": (
-        "Text-to-speech is switched off. Fix: turn on “Speak replies aloud” in "
+        "Text-to-speech is switched off. Fix: enable text-to-speech in "
         "Settings → Speech & Transcription."
     ),
+    "tts_unbound": "Text-to-speech needs a voice. Choose one in Settings → Models.",
+    "tts_unavailable": "The selected text-to-speech voice is unavailable. Check its provider in Settings → Models.",
     "capture_import_failed": "Staging an exported agent log into the capture store failed.",
     "secret_name_invalid": "A secret's name must look like an environment variable — letters, "
     "digits and underscores, not starting with a digit.",

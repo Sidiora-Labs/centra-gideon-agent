@@ -15,13 +15,13 @@ describe('a failed cancel tells the user the work did not stop', () => {
       /import \{ reportActionFailure, reportingWrite \} from '\.\.\/app\/shell\/reportingWrite'/,
     )
     const shared = readFileSync(join(process.cwd(), "src/app/shell/reportingWrite.ts"), 'utf8')
-    expect(shared).toMatch(/^export const reportActionFailure = \(what: string\) => \(e: unknown\) => \{$/m)
-    expect(shared).toContain("notify(failureSentence(what, e), 'error')")
+    expect(shared).toMatch(/^export const reportActionFailure = \(what: string\) => \(error: unknown\): void => \{$/m)
+    expect(shared).toContain("notify(failureSentence(what, error), 'error')")
     expect(shared, 'the sentence has exactly one composer').toMatch(
-      /function failureSentence\(what: string, e: unknown\): string/,
+      /function failureSentence\(what: string, error: unknown\): string/,
     )
     expect(shared, 'and it filters the unusable text rather than printing it')
-      .toMatch(/const detail = readableErrText\(e\)/)
+      .toMatch(/const detail = readableErrText\(error\)/)
     const walk = (dir: string, out: string[] = []): string[] => {
       for (const name of readdirSync(dir)) {
         const abs = join(dir, name)
@@ -43,7 +43,9 @@ describe('a failed cancel tells the user the work did not stop', () => {
     for (const call of STOPS) {
       for (const m of scan.matchAll(new RegExp(`api\\.${call}\\(`, 'g'))) {
         const chain = scan.slice(m.index!, m.index! + 200)
-        if (!/\.catch\(reportActionFailure\('/.test(chain)) {
+        const handledStop = call === 'stopChat'
+          && raw.includes("reportActionFailure('stop this turn')(error)")
+        if (!handledStop && !/\.catch\(reportActionFailure\('/.test(chain)) {
           missing.push(`${call}:${scan.slice(0, m.index).split('\n').length}`)
         }
       }
@@ -82,10 +84,14 @@ describe('a failed cancel tells the user the work did not stop', () => {
     }
   })
 
-  it('the optimistic flips are still there — the premise of the whole finding', () => {
-    expect(raw, 'stop() still claims the turn ended before the call').toMatch(
-      /markStreaming\(false\)\s*\n\s*if \(sessionRef\.current\) await api\.stopChat/,
-    )
+  it('does not claim a stop until the accepted server snapshot arrives', () => {
+    const stopBody = raw.slice(raw.indexOf('async function stop()'), raw.indexOf('const [feedbackTarget'))
+    expect(stopBody).toContain('await api.stopChat(key)')
+    expect(stopBody).toContain('adoptAcceptedActionSnapshot(key, generation, response)')
+    expect(stopBody).not.toMatch(/markStreaming\(false\)/)
+    expect(raw).toContain('const response = await api.regenerate(s)')
+    expect(raw).toContain('const response = await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind)')
+    expect(raw).toContain('acceptedActionSnapshot(response)')
     expect(raw, 'the queue row still vanishes first').toMatch(
       /setQueued\(\(prev\) => prev\.filter\(\(q\) => q\.id !== id\)\); const s = sessionRef\.current/,
     )

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.interfaces.dashboard.chat_handlers import _accepted_chat_action
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_runner import run_chat
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
@@ -127,7 +128,7 @@ async def api_chat_session_regenerate(request: web.Request) -> web.Response:
 
         task.add_done_callback(_clear_pending_on_done)
     state.push_sessions_update()
-    return web.json_response({"ok": True})
+    return await _accepted_chat_action(request, {"ok": True})
 
 
 async def api_chat_session_switch_variant(request: web.Request) -> web.Response:
@@ -325,4 +326,4 @@ async def api_chat_session_edit_resend(request: web.Request) -> web.Response:
         task.add_done_callback(_on_done)
 
     state.push_sessions_update()
-    return web.json_response({"ok": True, "rewound": retained})
+    return await _accepted_chat_action(request, {"ok": True, "rewound": retained})

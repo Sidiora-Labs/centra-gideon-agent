@@ -887,6 +887,29 @@ export interface ChatHistoryMsg {
   meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; input?: string; purpose?: string; output?: string; done?: boolean; tool?: string; files?: string[]; memory_citations?: { n: number; id: string | null; preview?: string }[]; skills_used?: { name: string; state: string; loaded_tokens: number }[]; file_changes?: ChatFileChange[] }
 }
 
+export type ChatTurnOutcome = 'complete' | 'stopped' | 'error'
+export interface ChatSessionDetail {
+  key: string; title: string; messages: ChatHistoryMsg[]; running?: boolean
+  stream_cursor?: { stream_epoch: string; stream_turn: number; stream_seq: number }
+  last_turn_outcome?: ChatTurnOutcome | null
+  pending_approval?: boolean; agent?: string; model?: string; mode?: string
+  acp_provider?: string; acp_provider_agent?: string; reasoning_effort?: string
+  task_mode?: TaskMode; approval?: ApprovalMode; memory_mode?: string
+  queue?: { id: string; content: string }[]
+  side?: { open: boolean; messages: { role: string; content: string }[] } | null
+  forked_from?: string; forked_from_title?: string
+  created_by_app_name?: string; created_by_app_route?: string
+  natural_voice?: string; natural_voice_agent_default?: boolean
+  natural_voice_effective?: boolean; natural_voice_source?: string
+}
+export interface ChatActionAccepted {
+  ok: boolean
+  snapshot: ChatSessionDetail
+  last_turn_outcome?: ChatTurnOutcome | null
+  stopped?: boolean
+  rewound?: number
+}
+
 export interface NotificationItem {
   kind: string; title: string; body: string; ts: string
   job_id?: string; loop_id?: string; loop_kind?: string; acked: boolean
@@ -4242,11 +4265,7 @@ export const api = {
   deleteTagColumn: (id: string) => del(`/api/chat/tag-columns/${encodeURIComponent(id)}`),
   reorderTagColumns: (ids: string[]) => put('/api/chat/tag-columns/order', { ids }),
   dropSessionToColumn: (session: string, columnId: string) => post(`/api/chat/sessions/${encodeURIComponent(session)}/drop`, { column_id: columnId }),
-  chatSessionDetail: (key: string) => get<{ key: string; title: string; messages: ChatHistoryMsg[]; running?: boolean; pending_approval?: boolean; agent?: string; model?: string; mode?: string; acp_provider?: string; acp_provider_agent?: string; reasoning_effort?: string; task_mode?: TaskMode; approval?: ApprovalMode; memory_mode?: string; queue?: { id: string; content: string }[]; side?: { open: boolean; messages: { role: string; content: string }[] } | null
-    forked_from?: string; forked_from_title?: string
-    created_by_app_name?: string; created_by_app_route?: string
-    natural_voice?: string; natural_voice_agent_default?: boolean
-    natural_voice_effective?: boolean; natural_voice_source?: string }>(`/api/chat/sessions/${encodeURIComponent(key)}`),
+  chatSessionDetail: (key: string) => get<ChatSessionDetail>(`/api/chat/sessions/${encodeURIComponent(key)}`),
   deleteChatSession: (key: string) => del(`/api/chat/sessions/${encodeURIComponent(key)}`),
   setSessionNaturalVoice: (session: string, choice: '' | 'on' | 'off') =>
     patch<{ ok: boolean; natural_voice: string; natural_voice_agent_default: boolean; natural_voice_effective: boolean; natural_voice_source: string }>(
@@ -4330,7 +4349,7 @@ export const api = {
   sendChat: (message: string, session: string, meta?: object, queue_mode?: string, input_origin?: string) =>
     post<{ ok: boolean; session?: string; queued?: boolean; steered?: boolean }>('/api/chat?ws=1', { message, session, meta, ...(queue_mode ? { queue_mode } : {}), ...(input_origin ? { input_origin } : {}) }),
   cancelQueued: (session: string, queueId: string) => del(`/api/chat/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(queueId)}`),
-  stopChat: (session: string, force = false) => post(`/api/chat/sessions/${session}/stop${force ? '?force=true' : ''}`),
+  stopChat: (session: string, force = false) => post<ChatActionAccepted>(`/api/chat/sessions/${encodeURIComponent(session)}/stop${force ? '?force=true' : ''}`),
   approve: (session: string, action: string, request_id?: string, revision?: string) =>
     post<{ ok: boolean; mode?: ApprovalMode; approval_screening?: ApprovalScreeningVerdict }>(
       `/api/chat/sessions/${session}/approve`, { action, request_id, revision }),
@@ -4358,11 +4377,11 @@ export const api = {
   generateTitle: (session: string) =>
     post<{ ok: boolean; title?: string }>(`/api/chat/sessions/${encodeURIComponent(session)}/generate-title`),
 
-  regenerate: (session: string) => post<{ ok: boolean }>(`/api/chat/sessions/${session}/regenerate`),
+  regenerate: (session: string) => post<ChatActionAccepted>(`/api/chat/sessions/${encodeURIComponent(session)}/regenerate`),
   switchVariant: (session: string, index: number) =>
     post<{ ok: boolean; index: number }>(`/api/chat/sessions/${session}/switch-variant`, { index }),
   editResend: (session: string, content: string, ts?: string, index?: number, client_ts?: string, rewind?: boolean) =>
-    post<{ ok: boolean; rewound: number }>(`/api/chat/sessions/${session}/edit-resend`,
+    post<ChatActionAccepted>(`/api/chat/sessions/${encodeURIComponent(session)}/edit-resend`,
       { content, ...(ts ? { ts } : {}), ...(index !== undefined ? { index } : {}), ...(client_ts ? { client_ts } : {}), ...(rewind ? { rewind: true } : {}) }),
   interruptChat: (session: string, queueId?: string) =>
     post<{ ok: boolean }>(`/api/chat/sessions/${session}/interrupt`, queueId ? { queue_id: queueId } : {}),
@@ -4370,7 +4389,7 @@ export const api = {
     post<{ ok: boolean; key: string; title: string; messages: number; prompt?: string }>(`/api/chat/sessions/${session}/fork`, at_message_index != null ? { at_message_index } : {}),
   forkRewound: (session: string, index: number, snapshot_index?: number) =>
     post<{ ok: boolean; key: string; title: string; messages: number }>(`/api/chat/sessions/${session}/fork-rewound`, { index, ...(snapshot_index != null ? { snapshot_index } : {}) }),
-  voiceSynthesize: (text: string, session = '') => post<{ ok: boolean; chunks: number }>('/api/voice/synthesize', { text, session }),
+  voiceSynthesize: (text: string, session = '', requestId?: string) => post<{ ok: boolean; chunks: number }>('/api/voice/synthesize', { text, session, ...(requestId ? { request_id: requestId } : {}) }),
 
   voiceProfiles: () => get<{ profiles: VoiceProfile[]; bindings: VoiceBindings }>('/api/voice/profiles'),
   voiceProfileCreate: (body: VoiceProfileDraft) => post<VoiceProfile>('/api/voice/profiles', body),

@@ -1870,6 +1870,7 @@ async def run_chat(
     )
     if _prompt_depth == 0:
         session.begin_stream()
+        session._last_turn_outcome = None
     session._last_turn_errored = False
     if _prompt_depth == 0:
         session._acp_breaker.reset()
@@ -3970,7 +3971,6 @@ async def run_chat(
         if first_word == "/compact" and not saw_compaction and not slash_substituted:
             session.messages = [m for m in session.messages if m.get("role") != "chunk"]
             assistant_text = ""
-            state.broadcast_ws("chat_done", {"session": session.key, **session.stream_cursor()})
             logger.info("Deferred compaction: waiting for compaction result")
             state.broadcast_ws(
                 "chat_message",
@@ -4415,10 +4415,69 @@ async def run_chat(
             task.add_done_callback(state._background_tasks.discard)
         else:
             session._stopping = False
+            latest_user = max(
+                (i for i, row in enumerate(session.messages) if row.get("role") == "user"),
+                default=-1,
+            )
+            latest_result = next(
+                (
+                    row.get("role")
+                    for row in reversed(session.messages[latest_user + 1 :])
+                    if row.get("role") in ("assistant", "error")
+                ),
+                None,
+            )
+            stop_completed = False
+            stop_event_row = None
+            for row in reversed(session.messages[latest_user + 1 :]):
+                cls_value = row.get("cls", "")
+                if not isinstance(cls_value, str) or not cls_value.startswith("{"):
+                    continue
+                try:
+                    stop_value = json.loads(cls_value)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(stop_value, dict) and stop_value.get("kind") == "stop_event":
+                    stop_completed = stop_value.get("state") == "stopped" or stop_value.get("outcome") in {"soft", "hard"}
+                    stop_event_row = row
+                    break
+            stop_reason = locals().get("_stop_reason", "")
+            outcome = (
+                "error"
+                if getattr(session, "_last_turn_errored", False) or latest_result == "error"
+                else "stopped"
+                if stop_completed or is_cancelled_stop(stop_reason)
+                else "complete"
+            )
+            session._last_turn_outcome = outcome
+            terminal_row = next(
+                (
+                    row
+                    for row in reversed(session.messages[latest_user + 1 :])
+                    if row.get("role") in ("assistant", "error")
+                ),
+                None,
+            )
+            if terminal_row is None and stop_completed:
+                terminal_row = stop_event_row
+            if terminal_row is not None:
+                metadata = terminal_row.get("meta")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    terminal_row["meta"] = metadata
+                metadata["last_turn_outcome"] = outcome
+                session._dirty = True
+            try:
+                save_session_to_history(state, session)
+            except Exception:
+                logger.warning("Could not persist turn outcome for %s", session.key, exc_info=True)
             session.append("done", "", "done")
             session.task = None
             state.push_sessions_update()
-            state.broadcast_ws("chat_done", {"session": session.key, **session.stream_cursor()})
+            state.broadcast_ws(
+                "chat_done",
+                {"session": session.key, **session.stream_cursor(), "last_turn_outcome": outcome},
+            )
             state.push_refresh("history")
             if not session._titled:
                 t = asyncio.create_task(_maybe_auto_title(state, session))

@@ -12,6 +12,7 @@ const DEFAULT_CONFIRMATION_PHRASES = ['do it', 'go ahead', 'send it', 'execute']
 const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
+import { acceptedActionSnapshot, claimTurnEndAnnouncement, readTurnOutcome } from './chat/turnOutcome'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Edit3, History, Search, MessageSquare, Trash2, Activity, ChevronRight, ChevronDown, Quote, PanelRight, Clipboard, X, Pin, BookText, AlertTriangle, Pencil, Sparkles, Link2, Check, Repeat, Rewind, GitBranch, Volume2, Square, Folder, FolderPlus, Tag as TagIcon, Columns3, List as ListIcon, ListChecks, Filter, EyeOff, Clock, Loader2, Wrench, Target, Code2 as CodeIcon, Paperclip, ExternalLink, ArrowLeft, ArrowRight, ArrowUp, FolderKanban, GripVertical, MessageCircleQuestion, Bot, ShieldCheck, Shield, Eye, Zap, ClipboardList, Hammer, Camera, NotebookPen, FolderCog, Archive, ArchiveRestore, Boxes, CornerDownLeft, Download, Share2, Coins } from 'lucide-react'
 import { IconButton } from '../shared/ui/IconButton'
@@ -81,7 +82,8 @@ import { SnipOverlay } from '../shared/ui/SnipOverlay'
 import { chooseCaptureProvider, cropToPngFile, displayCaptureSupported, grabOneFrame, type SnipRect } from '../shared/ui/composer/displayCapture'
 import { notify } from '../app/shell/appSdk'
 import { spring } from '../shared/theme/motion'
-import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
+import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire, type ChatTurnOutcome } from '../shared/data/api'
+import { claimCompletedReplySpeech, forgetSpeechOwner, rememberSpeechOwner, sessionSpeechStorage } from './chat/speakRepliesAloud'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
 import { useStreamCoalescer, type StreamCursor } from './chat/useStreamCoalescer'
 import { normalizeCompletedSnapshot, SnapshotReplay } from './chat/snapshotReplay'
@@ -433,14 +435,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     () => (seededDetail ? hydrateTurns(seededDetail.messages || [], false) : []),
   )
   const { data: threadSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
+  const { data: ttsSettings } = useQuery('settings:tts-auto-speak', () => api.useCaseSettings('tts'), { persist: false })
   const [input, setInput] = useState(seed)
   const [streaming, setStreaming] = useState(false)
+  const [lastTurnOutcome, setLastTurnOutcome] = useState<ChatTurnOutcome | null>(null)
   const streamingRef = useRef(false)
   const [sessionSkillsEpoch, setSessionSkillsEpoch] = useState(0)
   const markStreaming = (v: boolean) => {
+    if (v) setLastTurnOutcome(null)
     if (streamingRef.current && !v) {
       setSessionSkillsEpoch((n) => n + 1)
-      playCue('turn_complete')
     }
     streamingRef.current = v
     setStreaming(v)
@@ -607,15 +611,27 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   if (!snapshotReplayRef.current) snapshotReplayRef.current = new SnapshotReplay<WsMessage>(() => true)
   const replayingSnapshotFramesRef = useRef(false)
   const onWsRef = useRef<(message: WsMessage) => void>(() => {})
+  const activeSpeechRequestIdRef = useRef<string | null>(null)
   const started = turns.length > 0
   const lastTurn = turns[turns.length - 1]
   const showThinking = streaming && (!lastTurn || lastTurn.role === 'user' || lastTurn.segments.length === 0)
 
   const [srAnnounce, setSrAnnounce] = useState('')
   const wasStreamingRef = useRef(false)
+  const announcedTurnEndsRef = useRef(new Set<string>())
+  const announceTurnEnd = useCallback((key: string, cursor: unknown, rawOutcome: unknown, superseded = false) => {
+    const announcement = claimTurnEndAnnouncement(
+      announcedTurnEndsRef.current,
+      key,
+      streamCursorOf(cursor),
+      readTurnOutcome(rawOutcome, superseded),
+    )
+    if (!announcement) return
+    setSrAnnounce(announcement.sentence)
+    playCue(announcement.cue)
+  }, [])
   useEffect(() => {
     if (streaming && !wasStreamingRef.current) setSrAnnounce(statusText || 'Assistant is responding…')
-    else if (!streaming && wasStreamingRef.current) setSrAnnounce('Response complete.')
     else if (streaming && statusText) setSrAnnounce(statusText)
     wasStreamingRef.current = streaming
   }, [streaming, statusText])
@@ -645,14 +661,49 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const generation = replay.begin()
     try {
       const detail = normalizeCompletedSnapshot(await api.chatSessionDetail(key) as CursorChatDetail)
-      const frames = replay.settle(generation, () => sessionRef.current === key && adopt(detail))
+      const frames = replay.settle(generation, () => {
+        if (sessionRef.current !== key || !adopt(detail)) return false
+        setLastTurnOutcome(detail.last_turn_outcome ?? null)
+        if (!detail.running) announceTurnEnd(key, detail.stream_cursor, detail.last_turn_outcome)
+        return true
+      })
       replaySnapshotFrames(frames)
       return detail
     } catch (error) {
       replaySnapshotFrames(replay.settle(generation, null))
       throw error
     }
-  }, [replaySnapshotFrames])
+  }, [replaySnapshotFrames, announceTurnEnd])
+
+  const adoptAcceptedActionSnapshot = (key: string, generation: number, response: { ok?: boolean; snapshot?: ChatDetail | null }) => {
+    const detail = normalizeCompletedSnapshot(acceptedActionSnapshot(response) as CursorChatDetail)
+    const frames = snapshotReplayRef.current!.settle(generation, () => {
+      if (sessionRef.current !== key) return false
+      writeCachedDetail(key, detail)
+      setLastTurnOutcome(detail.last_turn_outcome ?? null)
+      const partial = partialFromSnapshot(detail)
+      coalescer.resume(partial, streamCursorOf(detail.stream_cursor))
+      coalescing.current = partial !== null
+      breakText.current = !detail.running || partial === null
+      setTurns(hydrateTurns(detail.messages || [], detail.running))
+      setQueued(Array.isArray(detail.queue)
+        ? detail.queue.filter((item) => item && item.id).map((item) => ({ id: item.id, content: item.content }))
+        : [])
+      markStreaming(!!detail.running)
+      if (!detail.running) {
+        setStatusText('')
+        setLatestActivity(null)
+        announceTurnEnd(key, detail.stream_cursor, detail.last_turn_outcome)
+      }
+      return true
+    })
+    replaySnapshotFrames(frames)
+    return detail
+  }
+
+  const releaseActionSnapshot = (generation: number) => {
+    replaySnapshotFrames(snapshotReplayRef.current!.settle(generation, null))
+  }
 
   useEffect(() => {
     sessionRef.current = sessionId
@@ -748,6 +799,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     switch (m.type) {
       case 'chat_chunk': {
         if (d.session !== sessionRef.current) break
+        markStreaming(true)
         setStatusText('')
         const chunk = String(d.content ?? '')
         if (breakText.current) { coalescer.reset(); coalescing.current = false; breakText.current = false }
@@ -768,7 +820,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (d.session && d.session !== sessionRef.current) break
         if (d.role === 'error') {
           coalescer.flushNow()
-          markStreaming(false); setStatusText(''); setLatestActivity(null)
+          setStatusText(''); setLatestActivity(null)
           const text = String(d.content ?? 'The model returned an error.')
           patchLastAssistant((segs) => segs.some((segment) => segment.kind === 'error' && segment.text === text)
             ? segs : [...segs, { kind: 'error', text }])
@@ -855,6 +907,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         breakText.current = true; markStreaming(false); setStatusText(''); setLatestActivity(null)
         setSteered([])
 
+        announceTurnEnd(sessionRef.current || '', d, d.last_turn_outcome, !!d.superseded)
         if (d.superseded) setStatusText('Superseded by your new message…')
         const sk = sessionRef.current
         refreshSessionCost(sk)
@@ -935,6 +988,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (d.session !== sessionRef.current) break
         const content = String(d.content ?? '')
         if (!content) break
+        markStreaming(true)
         breakText.current = true
         setFollowups([])
         const ts = d.ts ? String(d.ts) : undefined
@@ -966,7 +1020,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           : s))
         break
       }
-      case 'voice_chunk': if (d.audio) enqueueAudio(String(d.audio)); break
+      case 'voice_chunk':
+        if (d.audio && typeof d.request_id === 'string' && d.request_id === activeSpeechRequestIdRef.current) {
+          enqueueAudio(String(d.audio))
+        }
+        break
       case 'chat.side_result': {
         const rid = String(d.run_id ?? '')
         const delta = String(d.delta ?? '')
@@ -1264,6 +1322,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       const seed: HistMsg[] = [{ role: 'user', content: llmText, ts: clientTs, meta: meta as HistMsg['meta'] }]
       const sid = await ensureSession(seed, false)
       acceptedSession = sid
+      rememberSpeechOwner(sessionSpeechStorage(), sid, clientTs)
       if (screenShare.sharing) await screenShare.captureAndStage(sid)
       await api.sendChat(llmText, sid, meta, undefined, opts?.inputOrigin)
       if (!sessionId) navigate(`chat/${sid}`, { replace: true })
@@ -1459,8 +1518,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   async function stop() {
-    markStreaming(false)
-    if (sessionRef.current) await api.stopChat(sessionRef.current).catch(reportActionFailure('stop this turn'))
+    const key = sessionRef.current
+    if (!key) return
+    const generation = snapshotReplayRef.current!.begin()
+    try {
+      const response = await api.stopChat(key)
+      adoptAcceptedActionSnapshot(key, generation, response)
+    } catch (error) {
+      releaseActionSnapshot(generation)
+      reportActionFailure('stop this turn')(error)
+    }
   }
 
   const [feedbackTarget, setFeedbackTarget] = useState<number | null>(null)
@@ -1508,13 +1575,15 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   async function regenerate() {
     const s = sessionRef.current
     if (!s || streaming) return
-    setTurns((prev) => {
-      const i = prev.map((t) => t.role).lastIndexOf('assistant')
-      return i >= 0 ? prev.slice(0, i) : prev
-    })
-    markStreaming(true); breakText.current = true
-    try { await api.regenerate(s) }
-    catch (e) { markStreaming(false); patchLastAssistant((segs) => [...segs, { kind: 'text', text: `⚠️ ${(e as Error).message}` }]) }
+    const generation = snapshotReplayRef.current!.begin()
+    try {
+      const response = await api.regenerate(s)
+      adoptAcceptedActionSnapshot(s, generation, response)
+    } catch (error) {
+      releaseActionSnapshot(generation)
+      setMicError(`Couldn’t regenerate: ${(error as Error).message}`)
+      window.setTimeout(() => setMicError(null), 6000)
+    }
   }
 
   async function switchVariant(index: number) {
@@ -1547,31 +1616,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const t = content.trim()
     if (!s || !t || streaming) return
     const turn = turns[turnIndex]
-    const previousTurns = turns
-    setEditingTurn(null)
     const newTs = new Date().toISOString()
-    setTurns((prev) => [...prev.slice(0, turnIndex), userTurn(t, newTs)])
-    markStreaming(true); breakText.current = true
-    try { await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind) }
-    catch (e) {
-      let accepted = false
-      const detail = await loadSnapshot(s, (snapshot) => {
-        accepted = !!snapshot.messages?.some((m) => m.role === 'user' && m.ts === newTs)
-        if (!accepted) return false
-        const partial = partialFromSnapshot(snapshot)
-        coalescer.resume(partial, streamCursorOf(snapshot.stream_cursor))
-        coalescing.current = partial !== null
-        breakText.current = !snapshot.running || partial === null
-        setTurns(hydrateTurns(snapshot.messages || [], snapshot.running))
-        markStreaming(!!snapshot.running)
-        return true
-      }).catch(() => null)
-      if (!accepted || !detail) {
-        markStreaming(false)
-        setTurns(previousTurns)
-        setInput(t)
-        setMicError(`Couldn’t resend: ${(e as Error).message}`)
-      }
+    const generation = snapshotReplayRef.current!.begin()
+    try {
+      const response = await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind)
+      adoptAcceptedActionSnapshot(s, generation, response)
+      setEditingTurn(null)
+    } catch (error) {
+      releaseActionSnapshot(generation)
+      setMicError(`Couldn’t resend: ${(error as Error).message}`)
+      window.setTimeout(() => setMicError(null), 6000)
     }
   }
 
@@ -1623,6 +1677,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
 
   function stopSpeak() {
     speakGenRef.current++
+    activeSpeechRequestIdRef.current = null
     for (const src of audioSourcesRef.current) { try { src.stop() } catch {   } }
     audioSourcesRef.current = []
     audioPlayHeadRef.current = 0
@@ -1636,16 +1691,45 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const ctx = getAudioCtx()
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
     speakGenRef.current++
+    const requestId = crypto.randomUUID()
+    activeSpeechRequestIdRef.current = requestId
     setSpeakingTurn(turnIndex)
-    return api.voiceSynthesize(text, s ?? '').catch((e: Error) => {
+    return api.voiceSynthesize(text, s ?? '', requestId).catch((e: Error) => {
+      if (activeSpeechRequestIdRef.current === requestId) activeSpeechRequestIdRef.current = null
       setSpeakingTurn((cur) => (cur === turnIndex ? null : cur))
       const msg = /TTS voice|no.*voice|Settings/i.test(e.message)
-        ? 'Text-to-speech needs a voice — choose one in Settings → AI & Models.'
+        ? 'Text-to-speech needs a voice — choose one in Settings → Models.'
         : `Couldn’t play audio: ${e.message}`
       setMicError(msg)
       window.setTimeout(() => setMicError(null), 6000)
     })
   }
+  useEffect(() => {
+    const sid = sessionRef.current
+    if (!sid) return
+    const userIndex = turns.map((turn) => turn.role).lastIndexOf('user')
+    const ownerTs = userIndex >= 0 ? turns[userIndex].ts : undefined
+    const storage = sessionSpeechStorage()
+    if (lastTurnOutcome === 'stopped' || lastTurnOutcome === 'error') {
+      if (ownerTs) forgetSpeechOwner(storage, sid, ownerTs)
+      return
+    }
+    if (lastTurnOutcome !== 'complete' || !ttsSettings?.enabled || !ttsSettings?.auto_speak || !ownerTs) return
+    let assistantIndex = -1
+    for (let index = turns.length - 1; index > userIndex; index--) {
+      if (turns[index].role === 'assistant') { assistantIndex = index; break }
+    }
+    const assistant = turns[assistantIndex]
+    if (!assistant || !assistant.ts) return
+    const failed = assistant.stopOutcome != null || assistant.segments.some((segment) => segment.kind === 'error')
+    if (failed) {
+      forgetSpeechOwner(storage, sid, ownerTs)
+      return
+    }
+    const reply = turnText(assistant).trim()
+    if (!reply || !claimCompletedReplySpeech(storage, sid, ownerTs, assistant.ts, lastTurnOutcome)) return
+    if (speakingTurn !== assistantIndex) void speak(reply, assistantIndex)
+  }, [lastTurnOutcome, turns, ttsSettings, speakingTurn])
   async function enqueueAudio(b64: string) {
     const ctx = getAudioCtx()
     if (!ctx) return
@@ -2397,7 +2481,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                       {!streaming && followups.length > 0 && <ThreadFollowupSuggestions sendOnSelect={false} onPick={(text) => { setInput(text); setFollowups([]); }}/>}
                       {!streaming && checkWorkOffer && <CheckWorkChip label={checkWorkOffer.label} onRun={() => { const prompt = checkWorkOffer.prompt; setCheckWorkOffer(null); void send(prompt); }}/>}
                       <div ref={endRef}/>
-                      <div aria-live="polite" className="sr-only">{srAnnounce}</div>
+                      <div aria-live="polite" className="sr-only">{srAnnounce || (lastTurnOutcome === 'complete' ? 'Response complete.' : lastTurnOutcome === 'stopped' ? 'Response stopped.' : lastTurnOutcome === 'error' ? 'Response ended with an error.' : '')}</div>
                       <div role="status" aria-live="polite" className="sr-only">{followupAnnouncement(streaming ? 0 : followups.length)}</div>
                     </div>}
                     afterViewport={<ScrollAnchor viewportRef={scrollRef} pinned={!scrolledUp} showJump={scrolledUp} unreadCount={unreadTurns}

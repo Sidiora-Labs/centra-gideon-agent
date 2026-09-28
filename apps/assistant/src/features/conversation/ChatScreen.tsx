@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { createAudioPlayer } from "expo-audio";
 import type { OwnerScope } from "../../shared/auth.web";
 import { ConversationController } from "../../shared/conversation/controller";
-import type { ConversationMessage } from "../../shared/conversation/types";
+import type { ConversationMessage, SpeechPlayback } from "../../shared/conversation/types";
 import type { ShellReturnContext } from "../../shared/shell/shellRoutes";
 import type { ShellRoute } from "../../shared/shell/shellRoutes";
 import { useShellTheme } from "../../shared/shell/shellTheme";
@@ -10,6 +11,8 @@ import { AssistantResponse } from "./AssistantResponse";
 import { Composer } from "./Composer";
 import { chatStyles } from "./chatStyles";
 import { adaptConversationMessage } from "../../shared/conversation/turnAdapter";
+import { createWebSpeechAudioSource } from "../../shared/conversation/speechAudioSource";
+import { createCachedSpeechFile, deleteCachedSpeechFile } from "../../shared/conversation/speechFileCache";
 
 export type ChatScreenProps = {
   controller: ConversationController;
@@ -68,6 +71,12 @@ export function ChatScreen({
     error: "",
   } : snapshot;
   const list = useRef<ScrollView>(null);
+  const speechPlayer = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const speechFile = useRef<string | null>(null);
+  const speechWebSource = useRef<ReturnType<typeof createWebSpeechAudioSource> | null>(null);
+  const speechStatus = useRef<{ remove: () => void } | null>(null);
+  const speechRequest = useRef<string | null>(null);
+  const [speechNotice, setSpeechNotice] = useState("");
   const followLatest = useRef(true);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const activeSessionId = state.sessionId;
@@ -93,6 +102,80 @@ export function ChatScreen({
       void controller.open(sessionId);
     }
   }, [controller, scope.cacheKey, sessionId]);
+
+  useEffect(() => {
+    const disposeSpeech = () => {
+      speechStatus.current?.remove();
+      speechStatus.current = null;
+      speechPlayer.current?.pause();
+      speechPlayer.current?.remove();
+      speechPlayer.current = null;
+      const fileUri = speechFile.current;
+      speechFile.current = null;
+      if (fileUri && Platform.OS !== "web") deleteCachedSpeechFile(fileUri);
+      speechWebSource.current?.dispose();
+      speechWebSource.current = null;
+    };
+    const playSpeech = async (playback: Exclude<SpeechPlayback, null>) => {
+      let fileUri: string | null = null;
+      let webSource: ReturnType<typeof createWebSpeechAudioSource> | null = null;
+      try {
+        let uri: string;
+        if (Platform.OS === "web") {
+          webSource = createWebSpeechAudioSource(playback.audio);
+          speechWebSource.current = webSource;
+          uri = webSource.uri;
+        } else {
+          fileUri = await createCachedSpeechFile(playback.requestId, playback.audio);
+          speechFile.current = fileUri;
+          uri = fileUri;
+        }
+        if (speechRequest.current !== playback.requestId) {
+          webSource?.dispose();
+          if (fileUri) deleteCachedSpeechFile(fileUri);
+          return;
+        }
+        const player = createAudioPlayer({ uri });
+        speechPlayer.current = player;
+        speechStatus.current = player.addListener("playbackStatusUpdate", status => {
+          if (status.didJustFinish && speechRequest.current === playback.requestId) {
+            speechRequest.current = null;
+            disposeSpeech();
+          }
+        });
+        player.play();
+      } catch {
+        webSource?.dispose();
+        if (fileUri) deleteCachedSpeechFile(fileUri);
+        if (speechRequest.current === playback.requestId) {
+          speechRequest.current = null;
+          if (speechFile.current === fileUri) speechFile.current = null;
+          if (speechWebSource.current === webSource) speechWebSource.current = null;
+          disposeSpeech();
+          setSpeechNotice("Gideon could not play the spoken reply. Try again from this conversation.");
+        }
+      }
+    };
+    const stopPlayback = controller.subscribeSpeech((playback) => {
+      if (!playback) {
+        speechRequest.current = null;
+        disposeSpeech();
+        return;
+      }
+      speechRequest.current = null;
+      disposeSpeech();
+      speechRequest.current = playback.requestId;
+      setSpeechNotice("");
+      void playSpeech(playback);
+    });
+    const stopErrors = controller.subscribeSpeechError(setSpeechNotice);
+    return () => {
+      stopPlayback();
+      stopErrors();
+      speechRequest.current = null;
+      disposeSpeech();
+    };
+  }, [controller]);
 
   useEffect(() => {
     const restore = scrollY ?? rememberedScroll.get(key) ?? 0;
@@ -225,6 +308,20 @@ export function ChatScreen({
           <View accessibilityLiveRegion="polite" aria-live="polite" accessibilityLabel="Gideon is working" style={[chatStyles.loadingDots, { backgroundColor: palette.card }]}>
             {[0.4, 0.7, 1].map(opacity => <View key={opacity} style={[chatStyles.loadingDot, { backgroundColor: palette.muted, opacity }]} />)}
             <Text accessibilityLiveRegion="polite" style={[chatStyles.statusText, { color: palette.muted }]}>Gideon is working</Text>
+          </View>
+        )}
+
+        {!busy && !waitingForAnswer && state.lastTurnOutcome && (
+          <View accessibilityLiveRegion="polite" aria-live="polite" style={[chatStyles.statusCard, { backgroundColor: palette.card, borderColor: palette.line }] }>
+            <Text style={[chatStyles.statusText, { color: palette.muted }]}>
+              {state.lastTurnOutcome === "complete" ? "Response complete." : state.lastTurnOutcome === "stopped" ? "Response stopped." : "Response ended with an error."}
+            </Text>
+          </View>
+        )}
+
+        {!!speechNotice && (
+          <View accessibilityLiveRegion="polite" aria-live="polite" style={[chatStyles.statusCard, { backgroundColor: palette.orange, borderColor: palette.line }] }>
+            <Text style={[chatStyles.statusText, { color: palette.text }]}>{speechNotice}</Text>
           </View>
         )}
 

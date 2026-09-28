@@ -260,6 +260,7 @@ class _ChatSession:
         "_app",
         "_created_by_app",
         "_last_turn_errored",
+        "_last_turn_outcome",
         "_followups_task",
         "_pending_variants",
         "_lock",
@@ -377,6 +378,7 @@ class _ChatSession:
         self._app: str = ""
         self._created_by_app: str = created_by_app if isinstance(created_by_app, str) else ""
         self._last_turn_errored: bool = False
+        self._last_turn_outcome: str | None = None
         self._followups_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._pending_variants: list[dict] = []
         self._lock = asyncio.Lock()

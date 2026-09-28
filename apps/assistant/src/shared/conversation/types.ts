@@ -18,6 +18,7 @@ export type ConversationState = Readonly<{
   phase: 'signed-out' | 'idle' | 'loading' | 'ready' | 'sending' | 'recovering' | 'failed' | 'uncertain'
   connected: boolean
   running: boolean
+  lastTurnOutcome: 'complete' | 'stopped' | 'error' | null
   error: string
 }>
 
@@ -40,9 +41,12 @@ export type ChatDetail = Readonly<{
   running: boolean
   messages: readonly ChatHistoryMessage[]
   stream_cursor?: ConversationStreamCursor
+  last_turn_outcome?: 'complete' | 'stopped' | 'error' | null
 }>
 
 export type ChatSocketEvent = Readonly<{
   type: string
   data: Readonly<Record<string, unknown>>
 }>
+
+export type SpeechPlayback = Readonly<{ session: string; requestId: string; audio: string }> | null
