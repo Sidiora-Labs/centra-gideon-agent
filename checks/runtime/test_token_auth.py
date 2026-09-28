@@ -103,12 +103,16 @@ def test_token_url_safe_chars(user_id: str) -> None:
     assert all(c in URL_SAFE_B64_CHARS for c in token)
 
 
-@pytest.mark.parametrize("n", [0, 1, 5, 24, 100, 9999])
+@pytest.mark.parametrize("n", [1, 5, 24, 100, 2160])
 def test_parse_duration_hours(n: int) -> None:
-    assert parse_duration(f"{n}h") == min(n * 3600, MAX_SESSION_TTL_SECS)
+    assert parse_duration(f"{n}h") == n * 3600
 
 
-@pytest.mark.parametrize("n", [0, 1, 5, 30, 60, 9999])
+def test_parse_duration_refuses_more_than_ninety_days() -> None:
+    assert parse_duration("2161h") is None
+
+
+@pytest.mark.parametrize("n", [1, 5, 30, 60, 9999])
 def test_parse_duration_minutes(n: int) -> None:
     assert parse_duration(f"{n}m") == min(n * 60, MAX_SESSION_TTL_SECS)
 
@@ -117,6 +121,8 @@ def test_parse_duration_minutes(n: int) -> None:
     "s",
     [
         "",
+        "0h",
+        "0m",
         "h",
         "m",
         "10",
@@ -560,7 +566,7 @@ def test_oldest_token_evicted_after_max_concurrent() -> None:
     assert (
         not valid_old
     ), f"oldest token should be evicted after {MAX_CONCURRENT_NONCES + 1} generations"
-    assert reason == "token superseded"
+    assert reason == "evicted"
     assert valid_new, "most recently issued token should remain valid"
     valid_survivor, _, _ = validate_token(tokens[1])
     assert valid_survivor, "second-oldest token should survive when only one is evicted"
@@ -593,14 +599,15 @@ def test_evict_expired_removes_old_entries() -> None:
     mark_consumed(token, session_exp=1000.0)
 
     with _state._lock:
-        _state._nonces["expired_nonce"] = 1000.0
+        _state._nonces["token"]["expired_nonce"] = 1000.0
+        _state._nonce_pool["expired_nonce"] = "token"
 
     _state.evict_expired(2000.0)
 
     with _state._lock:
         assert token not in _state._ip_bindings, "expired IP binding should be evicted"
         assert token not in _state._consumed, "expired consumed token should be evicted"
-        assert "expired_nonce" not in _state._nonces, "expired nonce should be evicted"
+        assert "expired_nonce" not in _state._nonces["token"], "expired nonce should be evicted"
 
 
 def test_token_reusable_across_multiple_validations() -> None:

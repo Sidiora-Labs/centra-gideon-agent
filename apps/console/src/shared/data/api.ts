@@ -577,6 +577,8 @@ export interface DeviceRec {
   last_seen: number
   issuer: string
   expires_at: number
+  ip: string
+  current: boolean
 }
 export interface DevicePairStart {
   code: string
@@ -3717,6 +3719,8 @@ export const api = {
     post<DevicePairStart>('/api/devices/pair/start', label ? { label } : {}),
   deviceRevoke: (id: string) =>
     post<{ ok: boolean; revoked: number }>(`/api/devices/${encodeURIComponent(id)}/revoke`, {}),
+  deviceRevokeOthers: () =>
+    post<{ ok: boolean; revoked: number }>('/api/devices/revoke-others', { confirmed: true }),
 
   packsInstalled: () => get<{ packs: InstalledPackRec[] }>('/api/packs/installed').then((d) => d.packs),
   packFinishSetup: (name: string) => post<{ pack: string; setup_skill: string; command: string; pending: boolean }>(`/api/packs/${encodeURIComponent(name)}/finish-setup`, {}),

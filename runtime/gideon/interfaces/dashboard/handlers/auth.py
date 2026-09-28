@@ -36,6 +36,7 @@ from gideon.interfaces.dashboard.handlers.page_shell import page_document
 from gideon.interfaces.dashboard.origin import check_origin
 from gideon.interfaces.dashboard.token_auth import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
+    MAX_SESSION_TTL_SECS,
     generate_token,
     parse_config_duration,
     secure_cookies,
@@ -200,7 +201,10 @@ async def api_auth_login(request: web.Request) -> web.Response:
     ttl = parse_config_duration(
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
-    token = generate_token(username.strip() or "owner", ttl_seconds=ttl)
+    token = generate_token(
+        username.strip() or "owner", ttl_seconds=ttl, kind="browser",
+        label=str(request.headers.get("User-Agent") or "Browser")[:64], client_ip=ip,
+    )
     _clear_failures(ip)
     _sel().log_api_access(
         caller=username.strip() or "owner",
@@ -263,11 +267,11 @@ async def api_auth_logout(request: web.Request) -> web.Response:
     revoked = False
     if nonce:
         try:
-            from gideon.interfaces.dashboard.session_store import forget_session
+            from gideon.interfaces.dashboard.session_store import end_session
             from gideon.interfaces.dashboard.token_auth import revoke_nonce
 
-            revoked = revoke_nonce(nonce)
-            forget_session(nonce)
+            stored_revocation = end_session(nonce, "signed_out")
+            revoked = revoke_nonce(nonce) or stored_revocation
         except Exception:  # noqa: BLE001
             logger.warning("could not revoke the session on logout", exc_info=True)
 
@@ -318,6 +322,11 @@ async def api_auth_session(request: web.Request) -> web.Response:
             "totp_enabled": bool(st["totp_enabled"]),
             "totp_required": bool(cfg.require_totp),
             "session_ttl": str(cfg.session_ttl),
+            "session_ttl_seconds": parse_config_duration(
+                cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
+            ),
+            "session_ttl_max_seconds": MAX_SESSION_TTL_SECS,
+            "session_ttl_default_seconds": DEFAULT_BROWSER_SESSION_TTL_SECS,
             "lockout_threshold": int(cfg.lockout_threshold),
             "lockout_window": str(cfg.lockout_window),
             "user": request.get("user") or "",
@@ -436,7 +445,11 @@ async def api_auth_enroll_complete(request: web.Request) -> web.Response:
     ttl = parse_config_duration(
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
-    token = generate_token("enrolled-device", ttl_seconds=ttl)
+    token = generate_token(
+        "enrolled-device", ttl_seconds=ttl, kind="browser",
+        label=str(request.headers.get("User-Agent") or "Browser")[:64],
+        client_ip=_client_ip(request),
+    )
     _clear_failures(ip)
     _sel().log_api_access(
         caller=ip, operation="enroll_completed", outcome="granted", source="auth"

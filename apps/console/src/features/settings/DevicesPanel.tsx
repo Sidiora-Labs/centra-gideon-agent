@@ -64,6 +64,7 @@ export function DevicesPanel() {
   const [said, setSaid] = useState('')
   const codeRef = useRef<HTMLDivElement | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
+  const [revokingOthers, setRevokingOthers] = useState(false)
 
   useEffect(() => {
     if (!pairing) return
@@ -101,6 +102,26 @@ export function DevicesPanel() {
     }
   }
 
+  const revokeOthers = async () => {
+    const ok = await confirm({
+      title: 'Sign out other clients?',
+      body: 'Every other browser, paired device and terminal session will be signed out. This client will stay signed in.',
+      danger: true,
+      confirmLabel: 'Sign out other clients',
+    })
+    if (!ok) return
+    setRevokingOthers(true)
+    try {
+      await api.deviceRevokeOthers()
+      notify('Other clients have been signed out.', 'success')
+      refresh()
+    } catch (e) {
+      notify(`Couldn't sign out other clients: ${msg(e)}`, 'error')
+    } finally {
+      setRevokingOthers(false)
+    }
+  }
+
   const expired = pairing != null && left <= 0
 
   useEffect(() => {
@@ -122,8 +143,8 @@ export function DevicesPanel() {
   return (
     <div>
       <PanelHeader
-        title="Devices"
-        hint="Phones, tablets and other browsers you have paired with this gateway. Each one holds an ordinary session, so revoking a device logs exactly that device out."
+        title="Signed-in clients"
+        hint="See every browser, paired device and terminal session that can reach this gateway. App-scoped tokens stay out of this owner list."
       />
 
       <Section
@@ -212,13 +233,22 @@ export function DevicesPanel() {
         </div>
       </Section>
 
-      <Section title={`Paired devices${data.length ? ` (${data.length})` : ''}`}
-        hint="Revoking a device drops its session on this gateway and on disk, so it stays locked out across a restart.">
+      <Section title={`Signed-in clients${data.length ? ` (${data.length})` : ''}`}
+        hint="Browsers, paired devices and terminal sessions stay listed until they expire or are revoked.">
+        {data.some((d) => d.current) ? (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-s rounded-lg bg-surface-container px-4 py-3">
+            <p data-type="body-s" className="text-on-surface-low">Sign out every other browser, paired device and terminal session.</p>
+            <Button size="xs" variant="danger" onClick={revokeOthers} loading={revokingOthers}
+              ariaLabel="Sign out other clients">
+              Sign out other clients
+            </Button>
+          </div>
+        ) : null}
         {data.length === 0 ? (
           <EmptyState
             icon={MonitorSmartphone}
-            title="No devices paired"
-            hint="Nothing but this browser can reach your gateway with a paired session."
+            title="No other clients signed in"
+            hint="Pair another device or sign in from a browser or terminal to add a client here."
             action={{ label: 'Pair your first device', onClick: startPairing, icon: QrCode }}
           />
         ) : (
@@ -242,9 +272,11 @@ export function DevicesPanel() {
                         <span>Last seen {d.last_seen > 0 ? relPast(d.last_seen) : 'never'}</span>
                         {' · '}
                         <span>{issuerLabel(d.issuer)}</span>
+                        {d.current ? <><span> · </span><span className="text-primary">This client</span></> : null}
                       </div>
                       <div data-type="caption" className="mt-0.5 text-on-surface-low/80">
-                        Paired {d.minted_at > 0 ? relPast(d.minted_at) : 'unknown'}
+                        First seen {d.minted_at > 0 ? relPast(d.minted_at) : 'unknown'}
+                        {d.ip ? ` · IP ${d.ip}` : ''}
                         {d.expires_at > 0 ? ` · session expires ${absTime(d.expires_at)}` : ''}
                       </div>
                     </div>

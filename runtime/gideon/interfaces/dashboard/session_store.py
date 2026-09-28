@@ -47,6 +47,7 @@ should refuse to pretend otherwise.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import time
@@ -80,6 +81,10 @@ ISSUER_UNKNOWN = "unknown"
 ISSUER_PAIR = "pair"
 
 DEVICE_KINDS: tuple[str, ...] = ("browser", "mobile", "desktop", "cli", "unknown")
+
+POOL_LIMITS = {"browser": 64, "device": 128, "token": 64, "app": 512}
+MAX_ENDED_SESSIONS = 512
+END_REASONS = frozenset({"expired", "evicted", "revoked", "signed_out", "replaced"})
 
 MAX_DEVICE_NAME = 64
 
@@ -173,6 +178,7 @@ class DeviceInfo:
     kind: str = "unknown"
     minted_at: float = 0.0
     last_seen: float = 0.0
+    ip: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,6 +187,7 @@ class DeviceInfo:
             "kind": self.kind,
             "minted_at": self.minted_at,
             "last_seen": self.last_seen,
+            "ip": self.ip,
         }
 
 
@@ -191,11 +198,25 @@ class SessionRecord:
     expiry: float
     issuer: str = ISSUER_UNKNOWN
     device: DeviceInfo | None = field(default=None)
+    minted_at: float = 0.0
+    last_seen: float = 0.0
+    ip: str = ""
+    kind: str = "token"
+    label: str = ""
+    pool: str = "token"
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"exp": self.expiry, "issuer": self.issuer}
         if self.device is not None:
             out["device"] = self.device.to_dict()
+        out.update({
+            "minted_at": self.minted_at,
+            "last_seen": self.last_seen,
+            "ip": self.ip,
+            "kind": self.kind,
+            "label": self.label,
+            "pool": self.pool,
+        })
         return out
 
 
@@ -233,6 +254,7 @@ def _parse_device(raw: Any) -> DeviceInfo | None:
         kind=sanitize_device_kind(raw.get("kind", "")),
         minted_at=minted_at,
         last_seen=last_seen,
+        ip=str(raw.get("ip") or "")[:64],
     )
 
 
@@ -250,9 +272,82 @@ def _parse_record(raw: Any) -> SessionRecord | None:
     except (TypeError, ValueError):
         return None
     issuer = str(raw.get("issuer") or ISSUER_UNKNOWN)
+    def number(key: str) -> float:
+        try:
+            return float(raw.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    pool = str(raw.get("pool") or "")
+    raw_kind = str(raw.get("kind") or "unknown").strip().lower()
+    kind = raw_kind if raw_kind in {"browser", "mobile", "desktop", "cli", "app", "unknown"} else "unknown"
+    if pool not in POOL_LIMITS:
+        pool = "device" if raw.get("device") is not None else ("app" if kind == "app" else "token")
+    device = _parse_device(raw.get("device"))
     return SessionRecord(
-        expiry=expiry, issuer=issuer, device=_parse_device(raw.get("device"))
+        expiry=expiry, issuer=issuer, device=device,
+        minted_at=number("minted_at") or (device.minted_at if device is not None else 0.0),
+        last_seen=number("last_seen") or (device.last_seen if device is not None else 0.0),
+        ip=str(raw.get("ip") or "")[:64], kind=kind,
+        label=sanitize_device_name(raw.get("label") or ""), pool=pool,
     )
+
+
+def _read_payload() -> dict[str, Any]:
+    path = sessions_path()
+    if not path.is_file():
+        return {"sessions": {}, "ended": {}}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("session store unreadable — treating every session as absent")
+        return {"sessions": {}, "ended": {}}
+    if not isinstance(value, dict):
+        return {"sessions": {}, "ended": {}}
+    return {
+        "sessions": value.get("sessions") if isinstance(value.get("sessions"), dict) else {},
+        "ended": value.get("ended") if isinstance(value.get("ended"), dict) else {},
+    }
+
+
+def _ended_key(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+
+def _bounded_ended(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = {
+        key: row for key, row in raw.items()
+        if isinstance(key, str) and isinstance(row, dict) and row.get("reason") in END_REASONS
+    }
+    return dict(sorted(rows.items(), key=lambda item: float(item[1].get("ended_at") or 0))[-MAX_ENDED_SESSIONS:])
+
+
+def ended_session_reason(nonce: str) -> str:
+    if not nonce:
+        return ""
+    row = _read_payload()["ended"].get(_ended_key(nonce))
+    return str(row.get("reason") or "") if isinstance(row, dict) else ""
+
+
+def end_session(nonce: str, reason: str) -> bool:
+    """Remove an active session and retain a bounded, value-free explanation."""
+    if not nonce or reason not in END_REASONS:
+        return False
+    payload = _read_payload()
+    removed = payload["sessions"].pop(nonce, None) is not None
+    payload["ended"][_ended_key(nonce)] = {"reason": reason, "ended_at": time.time()}
+    payload["ended"] = _bounded_ended(payload["ended"])
+    _write_payload(payload)
+    return removed
+
+
+def _write_payload(payload: dict[str, Any]) -> None:
+    path = sessions_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps(payload, indent=2) + "\n", mode=0o600)
+    except OSError:
+        logger.warning("could not persist the session store", exc_info=True)
 
 
 def load_session_records() -> dict[str, SessionRecord]:
@@ -261,32 +356,36 @@ def load_session_records() -> dict[str, SessionRecord]:
     Returns ``{}`` on any read failure. Fail-CLOSED in effect: an unreadable store means no
     nonce validates, so tokens are rejected rather than blanket-accepted.
     """
-    path = sessions_path()
-    if not path.is_file():
-        return {}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        logger.warning("session store unreadable — treating every session as absent")
-        return {}
-    if not isinstance(raw, dict):
-        return {}
+    payload = _read_payload()
     now = time.time()
     out: dict[str, SessionRecord] = {}
+    retained: dict[str, Any] = {}
     dropped = 0
-    for nonce, row in (raw.get("sessions") or {}).items():
+    ended = payload["ended"]
+    expired = False
+    for nonce, row in payload["sessions"].items():
         record = _parse_record(row)
         if record is None:
             dropped += 1
             continue
+        if record.minted_at:
+            from gideon.security.auth.lifetimes import cap_legacy_expiry
+
+            record.expiry = cap_legacy_expiry(record.minted_at, record.expiry)
         if record.expiry > now:
+            retained[str(nonce)] = record.to_dict()
             out[str(nonce)] = record
+        else:
+            ended[_ended_key(str(nonce))] = {"reason": "expired", "ended_at": now}
+            expired = True
     if dropped:
         logger.info(
             "dropped %d session row(s) that predate the device-session record shape — "
             "re-run `gideon token` (or log in) to get a fresh session",
             dropped,
         )
+    if expired:
+        _write_payload({"sessions": retained, "ended": _bounded_ended(ended)})
     return out
 
 
@@ -303,19 +402,26 @@ def save_session_records(records: dict[str, SessionRecord]) -> None:
     """Persist *records*, dropping expired entries and capping the total."""
     now = time.time()
     live = {n: r for n, r in records.items() if r.expiry > now}
-    if len(live) > MAX_SESSIONS:
-        live = dict(
-            sorted(live.items(), key=lambda kv: kv[1].expiry, reverse=True)[
-                :MAX_SESSIONS
-            ]
+    existing = _read_payload()
+    ended = existing["ended"]
+    for pool, limit in POOL_LIMITS.items():
+        members = [(nonce, row) for nonce, row in live.items() if row.pool == pool]
+        members.sort(
+            key=lambda item: (item[1].last_seen or item[1].minted_at, item[1].expiry),
+            reverse=True,
         )
-    payload = {"sessions": {n: r.to_dict() for n, r in live.items()}}
-    path = sessions_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, json.dumps(payload, indent=2) + "\n", mode=0o600)
-    except OSError:
-        logger.warning("could not persist the session store", exc_info=True)
+        for nonce, _record in members[limit:]:
+            live.pop(nonce, None)
+            ended[_ended_key(nonce)] = {"reason": "evicted", "ended_at": now}
+    if len(live) > MAX_SESSIONS:
+        oldest = sorted(live.items(), key=lambda item: item[1].last_seen or item[1].minted_at)
+        for nonce, _record in oldest[: len(live) - MAX_SESSIONS]:
+            live.pop(nonce, None)
+            ended[_ended_key(nonce)] = {"reason": "evicted", "ended_at": now}
+    _write_payload({
+        "sessions": {n: r.to_dict() for n, r in live.items()},
+        "ended": _bounded_ended(ended),
+    })
 
 
 def remember_session(
@@ -324,12 +430,23 @@ def remember_session(
     *,
     issuer: str = ISSUER_UNKNOWN,
     device: DeviceInfo | None = None,
+    minted_at: float | None = None,
+    ip: str = "",
+    kind: str = "token",
+    label: str = "",
+    pool: str = "token",
 ) -> None:
     """Record one minted session so it survives a restart."""
     if not nonce:
         return
     records = load_session_records()
-    records[nonce] = SessionRecord(expiry=float(expiry), issuer=issuer, device=device)
+    now = time.time() if minted_at is None else float(minted_at)
+    if pool not in POOL_LIMITS:
+        pool = "token"
+    records[nonce] = SessionRecord(
+        expiry=float(expiry), issuer=issuer, device=device, minted_at=now,
+        ip=str(ip or "")[:64], kind=str(kind), label=sanitize_device_name(label), pool=pool,
+    )
     save_session_records(records)
 
 
@@ -348,7 +465,12 @@ def attach_device(nonce: str, device: DeviceInfo, *, issuer: str = ISSUER_PAIR) 
     if existing is None:
         logger.warning("no live session row to attach a device to")
         return False
-    records[nonce] = SessionRecord(expiry=existing.expiry, issuer=issuer, device=device)
+    device.ip = existing.ip
+    records[nonce] = SessionRecord(
+        expiry=existing.expiry, issuer=issuer, device=device, minted_at=existing.minted_at,
+        last_seen=existing.last_seen, ip=existing.ip, kind=device.kind,
+        label=device.name, pool="device",
+    )
     save_session_records(records)
     return True
 
@@ -356,12 +478,10 @@ def attach_device(nonce: str, device: DeviceInfo, *, issuer: str = ISSUER_PAIR) 
 def touch_device_last_seen(nonce: str, *, now: float | None = None) -> bool:
     """Best-effort: stamp ``last_seen`` on *nonce*'s device row. Returns whether it WROTE.
 
-    Three no-ops, each deliberate:
+    A throttled activity update for a live sign-in:
 
     * **no row** — a nonce the store never recorded is not resurrected here, for the same
       reason :func:`attach_device` refuses to.
-    * **no device** — a plain owner-token session has no ``DeviceInfo`` and nothing to be
-      "last seen"; the field belongs to the device registry, not to every session.
     * **still fresh** — while the recorded stamp is newer than
       :data:`LAST_SEEN_THROTTLE_SECS`, this returns without touching the file. That throttle
       is the whole reason the field was safe to add: see the constant.
@@ -377,11 +497,13 @@ def touch_device_last_seen(nonce: str, *, now: float | None = None) -> bool:
         stamp = time.time() if now is None else float(now)
         records = load_session_records()
         record = records.get(nonce)
-        if record is None or record.device is None:
+        if record is None:
             return False
-        if stamp - record.device.last_seen < LAST_SEEN_THROTTLE_SECS:
+        if stamp - record.last_seen < LAST_SEEN_THROTTLE_SECS:
             return False
-        record.device.last_seen = stamp
+        record.last_seen = stamp
+        if record.device is not None:
+            record.device.last_seen = stamp
         save_session_records(records)
         return True
     except Exception:  # noqa: BLE001 — best-effort by contract; see the docstring
@@ -390,8 +512,8 @@ def touch_device_last_seen(nonce: str, *, now: float | None = None) -> bool:
 
 
 def device_sessions() -> dict[str, SessionRecord]:
-    """Only the rows that carry a device — the registry, keyed by nonce."""
-    return {n: r for n, r in load_session_records().items() if r.device is not None}
+    """Owner-visible sign-ins, excluding app-scoped tokens."""
+    return {n: r for n, r in load_session_records().items() if r.pool != "app"}
 
 
 def paired_session_record(nonce: str) -> SessionRecord | None:
@@ -419,6 +541,19 @@ def nonces_for_device(device_id: str) -> list[str]:
     return [
         n for n, r in device_sessions().items() if r.device and r.device.id == device_id
     ]
+
+
+def session_id(nonce: str) -> str:
+    """A value-free identifier for a plain owner session."""
+    return "session-" + _ended_key(nonce)[:20]
+
+
+def nonces_for_session(session_key: str) -> list[str]:
+    records = device_sessions()
+    paired = [n for n, r in records.items() if r.device and r.device.id == session_key]
+    if paired:
+        return paired
+    return [n for n in records if session_id(n) == session_key]
 
 
 def forget_session(nonce: str) -> None:

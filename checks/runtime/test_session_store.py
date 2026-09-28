@@ -152,22 +152,22 @@ def test_the_store_is_owner_only(home):
 
 
 def test_the_store_is_capped(home):
-    """An unbounded file is a slow disk leak if something mints in a loop."""
+    """Every issuer pool has its own durable bound."""
     now = time.time()
     ss.save_session_records(
-        _records(**{f"n{i}": now + 3600 + i for i in range(ss.MAX_SESSIONS + 50)})
+        _records(**{f"n{i}": now + 3600 + i for i in range(ss.POOL_LIMITS["token"] + 50)})
     )
-    assert len(ss.load_sessions()) == ss.MAX_SESSIONS
+    assert len(ss.load_sessions()) == ss.POOL_LIMITS["token"]
 
 
 def test_the_cap_keeps_the_longest_lived(home):
     """A session about to expire anyway is the cheapest one to lose."""
     now = time.time()
     ss.save_session_records(
-        _records(**{f"n{i}": now + 100 + i for i in range(ss.MAX_SESSIONS + 10)})
+        _records(**{f"n{i}": now + 100 + i for i in range(ss.POOL_LIMITS["token"] + 10)})
     )
     kept = ss.load_sessions()
-    assert f"n{ss.MAX_SESSIONS + 9}" in kept, "the longest-lived survived"
+    assert f"n{ss.POOL_LIMITS['token'] + 9}" in kept, "the longest-lived survived"
     assert "n0" not in kept, "the soonest-to-expire was dropped"
 
 
@@ -255,7 +255,7 @@ class TestSurvivesRestart:
 
 
 def test_browser_default_is_thirty_days():
-    """Owner ruling: browser sessions ~30d; the 1-year cap is for explicit CLI tokens."""
+    """Owner browser sessions default to 30d beneath the shared 90d ceiling."""
     from gideon.interfaces.dashboard.token_auth import (
         DEFAULT_BROWSER_SESSION_TTL_SECS,
         MAX_SESSION_TTL_SECS,
@@ -265,8 +265,8 @@ def test_browser_default_is_thirty_days():
     assert DEFAULT_BROWSER_SESSION_TTL_SECS < MAX_SESSION_TTL_SECS
 
 
-def test_the_year_cap_is_still_reachable_explicitly(tmp_path, monkeypatch):
-    """An automation token the user asked to last a year still can."""
+def test_the_ninety_day_cap_is_reachable_explicitly(tmp_path, monkeypatch):
+    """An explicit owner token may use the full but not exceed the shared cap."""
     from gideon.interfaces.dashboard import token_auth as ta
 
     monkeypatch.setattr(ss, "config_dir", lambda: tmp_path)

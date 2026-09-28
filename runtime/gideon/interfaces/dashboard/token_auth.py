@@ -37,6 +37,12 @@ from aiohttp import web
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
 from gideon.security.sel import sel as _sel_fn
+from gideon.security.auth.lifetimes import (
+    DEFAULT_BROWSER_SESSION_TTL_SECS,
+    MAX_SESSION_TTL_SECS,
+    cap_legacy_expiry,
+    parse_lifetime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,21 +121,29 @@ class TokenStateManager:
     is minimal (dict operations only), so blocking the event loop is negligible.
     """
 
-    def __init__(self, max_concurrent_nonces: int = 5) -> None:
+    def __init__(self, max_concurrent_nonces: int = 64) -> None:
         self._lock = threading.Lock()
         self._max_nonces = max_concurrent_nonces
-        self._nonces: OrderedDict[str, float] = OrderedDict()
+        self._nonces: dict[str, OrderedDict[str, float]] = {
+            pool: OrderedDict() for pool in ("browser", "device", "token", "app")
+        }
+        self._nonce_pool: dict[str, str] = {}
         self._ip_bindings: dict[str, tuple[str, float]] = {}
         self._consumed: dict[str, float] = {}
         self._last_seen_touched: dict[str, float] = {}
 
-    def register_nonce(self, nonce: str, expiry: float) -> str | None:
-        """Register a nonce with its expiry time, evicting oldest if over limit."""
+    def register_nonce(self, nonce: str, expiry: float, pool: str = "token") -> str | None:
+        """Register a nonce and evict the oldest active member only within its pool."""
+        if pool not in self._nonces:
+            pool = "token"
         with self._lock:
-            self._nonces[nonce] = expiry
-            self._nonces.move_to_end(nonce)
-            if len(self._nonces) > self._max_nonces:
-                evicted, _ = self._nonces.popitem(last=False)
+            members = self._nonces[pool]
+            members[nonce] = expiry
+            members.move_to_end(nonce)
+            self._nonce_pool[nonce] = pool
+            if len(members) > self._max_nonces:
+                evicted, _ = members.popitem(last=False)
+                self._nonce_pool.pop(evicted, None)
                 return evicted
             return None
 
@@ -147,9 +161,10 @@ class TokenStateManager:
         enough to authorize; a session record is the second half of the same fix.
         """
         with self._lock:
-            in_memory = nonce in self._nonces
+            pool = self._nonce_pool.get(nonce)
+            in_memory = pool is not None and nonce in self._nonces[pool]
             if in_memory:
-                self._nonces.move_to_end(nonce)
+                self._nonces[pool].move_to_end(nonce)
         if in_memory:
             self._touch_last_seen(nonce)
             return True, ""
@@ -165,15 +180,32 @@ class TokenStateManager:
             stored = {}
         expiry = stored.get(nonce)
         if expiry is None:
+            try:
+                from gideon.interfaces.dashboard.session_store import ended_session_reason
+
+                ended = ended_session_reason(nonce)
+                if ended:
+                    return False, ended
+            except Exception:
+                pass
             with self._lock:
                 return False, (
-                    "no active sessions" if not self._nonces else "token superseded"
+                    "no active sessions" if not any(self._nonces.values()) else "token superseded"
                 )
         if expiry <= time.time():
             return False, "session expired"
         with self._lock:
-            self._nonces[nonce] = expiry
-            self._nonces.move_to_end(nonce)
+            try:
+                from gideon.interfaces.dashboard.session_store import load_session_records
+
+                record = load_session_records().get(nonce)
+                pool = record.pool if record is not None else "token"
+            except Exception:
+                pool = "token"
+            members = self._nonces.get(pool, self._nonces["token"])
+            members[nonce] = expiry
+            members.move_to_end(nonce)
+            self._nonce_pool[nonce] = pool
         self._touch_last_seen(nonce)
         return True, ""
 
@@ -266,9 +298,11 @@ class TokenStateManager:
             expired_consumed = [t for t, exp in self._consumed.items() if exp < now]
             for t in expired_consumed:
                 self._consumed.pop(t, None)
-            expired_nonces = [n for n, exp in self._nonces.items() if exp < now]
-            for n in expired_nonces:
-                self._nonces.pop(n, None)
+            for pool, members in self._nonces.items():
+                expired_nonces = [n for n, exp in members.items() if exp < now]
+                for n in expired_nonces:
+                    members.pop(n, None)
+                    self._nonce_pool.pop(n, None)
 
     def revoke_nonce(self, nonce: str, token: str = "") -> bool:
         """Drop ONE nonce (single-session logout). Returns whether it was present.
@@ -277,7 +311,8 @@ class TokenStateManager:
         session lingers to be matched against a future token.
         """
         with self._lock:
-            existed = self._nonces.pop(nonce, None) is not None
+            pool = self._nonce_pool.pop(nonce, None)
+            existed = self._nonces[pool].pop(nonce, None) is not None if pool else False
             if token:
                 self._ip_bindings.pop(token, None)
                 self._consumed.pop(token, None)
@@ -286,13 +321,15 @@ class TokenStateManager:
     def clear_all(self) -> None:
         """Clear all token state (nonces, IP bindings, consumed tokens, last-seen throttle)."""
         with self._lock:
-            self._nonces.clear()
+            for members in self._nonces.values():
+                members.clear()
+            self._nonce_pool.clear()
             self._ip_bindings.clear()
             self._consumed.clear()
             self._last_seen_touched.clear()
 
 
-MAX_CONCURRENT_NONCES = 5
+MAX_CONCURRENT_NONCES = 64
 
 _state: TokenStateManager = TokenStateManager(
     max_concurrent_nonces=MAX_CONCURRENT_NONCES
@@ -395,9 +432,6 @@ def _uses_handler_auth(request: web.Request) -> bool:
 
 
 LINK_WINDOW_SECS = 24 * 3600
-MAX_SESSION_TTL_SECS = 365 * 24 * 3600
-
-DEFAULT_BROWSER_SESSION_TTL_SECS = 30 * 24 * 3600
 
 _403_HTML = (
     "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' "
@@ -490,7 +524,10 @@ def _sign(payload: bytes) -> str:
     return _b64url_encode(hmac.new(_secret(), payload, hashlib.sha256).digest())
 
 
-def generate_token(user_id: str, ttl_seconds: int = 3600, *, app: str = "") -> str:
+def generate_token(
+    user_id: str, ttl_seconds: int = 3600, *, app: str = "", kind: str = "cli",
+    label: str = "", client_ip: str = "",
+) -> str:
     """Return ``base64url(payload).base64url(signature)``.
 
     The token carries two expiry times:
@@ -506,18 +543,26 @@ def generate_token(user_id: str, ttl_seconds: int = 3600, *, app: str = "") -> s
     _evict_expired()
     now = time.time()
     nonce = os.urandom(8).hex()
-    session_ttl = min(ttl_seconds, MAX_SESSION_TTL_SECS)
+    if not isinstance(ttl_seconds, int) or ttl_seconds <= 0 or ttl_seconds > MAX_SESSION_TTL_SECS:
+        raise ValueError("session lifetime must be between 1 second and 90 days")
+    session_ttl = ttl_seconds
+    pool = "app" if app else ("device" if kind in {"mobile", "desktop", "device"} else ("browser" if kind == "browser" else "token"))
+    display_kind = "mobile" if kind == "device" else kind
 
-    evicted = _state.register_nonce(nonce, now + session_ttl)
+    evicted = _state.register_nonce(nonce, now + session_ttl, pool)
     try:
         from gideon.interfaces.dashboard.session_store import (
-            forget_session,
+            end_session,
             remember_session,
         )
 
-        remember_session(nonce, now + session_ttl)
+        remember_session(
+            nonce, now + session_ttl, issuer="app" if app else "local",
+            minted_at=now, ip=client_ip, kind="app" if app else display_kind,
+            label=app or label, pool=pool,
+        )
         if evicted:
-            forget_session(evicted)
+            end_session(evicted, "evicted")
     except Exception:  # noqa: BLE001
         logger.debug("could not persist the minted session", exc_info=True)
     if evicted:
@@ -568,7 +613,10 @@ def validate_token(
     except Exception:
         return False, "", "invalid payload"
     exp_field = "session_exp" if use_session_exp else "exp"
-    if time.time() > data.get(exp_field, data.get("exp", 0)):
+    claim_expiry = data.get(exp_field, data.get("exp", 0))
+    if use_session_exp and data.get("iat") and claim_expiry:
+        claim_expiry = cap_legacy_expiry(float(data["iat"]), float(claim_expiry))
+    if time.time() > claim_expiry:
         return False, "", "token expired"
     token_nonce = data.get("nonce", "")
     valid, reason = _state.is_nonce_valid(token_nonce)
@@ -801,16 +849,10 @@ def revoke_nonce(nonce: str) -> bool:
 
 
 def parse_duration(s: str) -> int | None:
-    """Parse ``'<int>h'`` or ``'<int>m'`` into seconds, or *None*.
-
-    Returns *None* for invalid input. Caps at ``MAX_SESSION_TTL_SECS``.
-    """
-    m = re.fullmatch(r"(\d+)(h|m)", s)
-    if not m:
+    """Parse a CLI/API lifetime in minutes or hours, refusing anything over 90 days."""
+    if not isinstance(s, str) or s != s.strip():
         return None
-    value, unit = int(m.group(1)), m.group(2)
-    secs = value * 3600 if unit == "h" else value * 60
-    return min(secs, MAX_SESSION_TTL_SECS)
+    return parse_lifetime(s, units="mh")
 
 
 _DURATION_UNITS = {"m": 60, "h": 3600, "d": 86400}
@@ -827,14 +869,11 @@ def parse_config_duration(s: str, *, default_secs: int) -> int:
     documented default and carry on. ``d`` is accepted because a browser session lifetime is
     naturally expressed in days (the plan's ``30d``), where a token's is in hours.
     """
-    m = re.fullmatch(r"(\d+)([mhd])", (s or "").strip())
-    if not m:
+    value = parse_lifetime(s, units="mhd")
+    if value is None:
         logger.warning("unparseable duration %r in config — using the default", s)
         return default_secs
-    secs = int(m.group(1)) * _DURATION_UNITS[m.group(2)]
-    if secs <= 0:
-        return default_secs
-    return min(secs, MAX_SESSION_TTL_SECS)
+    return value
 
 
 @dataclass(frozen=True)

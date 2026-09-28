@@ -259,12 +259,12 @@ def test_the_store_stays_owner_only_with_a_device_row(_isolated) -> None:
     assert oct(ss.sessions_path().stat().st_mode)[-3:] == "600"
 
 
-def test_only_device_rows_are_in_the_registry(_isolated) -> None:
+def test_owner_registry_excludes_apps_but_includes_unpaired_clients(_isolated) -> None:
     ss.remember_session("owner", time.time() + 3600)
     ss.remember_session(
         "phone", time.time() + 3600, issuer=ss.ISSUER_PAIR, device=_device()
     )
-    assert set(ss.device_sessions()) == {"phone"}
+    assert set(ss.device_sessions()) == {"owner", "phone"}
 
 
 def test_stats_count_devices_without_naming_them(_isolated) -> None:
@@ -367,13 +367,14 @@ def test_a_stamp_older_than_the_threshold_is_written_again(
     assert _stored_device("n1").last_seen == pytest.approx(later)
 
 
-def test_a_non_device_session_is_never_stamped(_isolated, monkeypatch) -> None:
-    """A plain owner-token row has no device, so there is nothing to be 'last seen'."""
+def test_a_non_device_owner_session_records_last_seen(_isolated, monkeypatch) -> None:
+    """Browser and CLI activity receives the same owner-visible last-seen field."""
     ss.remember_session("owner", time.time() + 3600)
     calls = _count_saves(monkeypatch)
-    assert ss.touch_device_last_seen("owner") is False
+    assert ss.touch_device_last_seen("owner") is True
     assert ss.touch_device_last_seen("never-stored") is False
-    assert calls[0] == 0, "a no-op must be a no-op on disk too"
+    assert calls[0] == 1
+    assert ss.load_session_records()["owner"].last_seen > 0
 
 
 def test_two_rapid_authorizations_write_the_store_once(_isolated, monkeypatch) -> None:
@@ -414,7 +415,10 @@ def test_an_authorization_still_succeeds_when_the_stamp_raises(
 def _age_stored_last_seen(nonce: str, age_secs: float) -> None:
     """Push one row's stamp *age_secs* into the past, leaving in-memory state alone."""
     raw = json.loads(ss.sessions_path().read_text(encoding="utf-8"))
-    raw["sessions"][nonce]["device"]["last_seen"] = time.time() - age_secs
+    seen = time.time() - age_secs
+    raw["sessions"][nonce]["last_seen"] = seen
+    if raw["sessions"][nonce].get("device"):
+        raw["sessions"][nonce]["device"]["last_seen"] = seen
     ss.sessions_path().write_text(json.dumps(raw), encoding="utf-8")
 
 
@@ -560,7 +564,7 @@ async def test_clause_4_revoke_locks_the_device_out_across_a_restart(_isolated) 
     token_auth.reset_secret_cache()
     valid, _user, reason = token_auth.validate_token(token, use_session_exp=True)
     assert valid is False, "a revoke that un-revokes on reboot is worse than no revoke"
-    assert reason in ("no active sessions", "token superseded", "session expired")
+    assert reason in ("no active sessions", "token superseded", "session expired", "revoked")
     assert ss.device_sessions() == {}
 
 
@@ -617,12 +621,14 @@ async def test_the_registry_reports_a_real_last_seen_once_stamped(_isolated) -> 
 
 
 @pytest.mark.asyncio
-async def test_an_owner_session_is_not_a_device(_isolated) -> None:
-    """The registry must not list the owner's own browser as a paired device."""
-    token_auth.generate_token("owner", ttl_seconds=3600)
+async def test_an_owner_session_is_listed_as_a_signed_in_client(_isolated) -> None:
+    """The signed-in list includes owner CLI sessions, not only paired hardware."""
+    token_auth.generate_token("owner", ttl_seconds=3600, kind="cli", label="Terminal")
     async with TestClient(TestServer(_app())) as client:
         payload = await (await client.get("/api/devices")).json()
-    assert payload["devices"] == []
+    assert len(payload["devices"]) == 1
+    assert payload["devices"][0]["kind"] == "cli"
+    assert payload["devices"][0]["name"] == "Terminal"
 
 
 @pytest.mark.asyncio

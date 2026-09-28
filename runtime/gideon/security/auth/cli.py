@@ -19,6 +19,11 @@ import os
 import sys
 
 from gideon.security.auth import credentials as creds
+from gideon.security.auth.lifetimes import (
+    DEFAULT_BROWSER_SESSION_TTL_SECS,
+    MAX_SESSION_TTL_SECS,
+)
+from gideon.interfaces.dashboard.token_auth import parse_config_duration
 
 
 def _print_status() -> int:
@@ -33,7 +38,15 @@ def _print_status() -> int:
     else:
         print("  credential:  NOT set — run `gideon auth set-password`")
     print(f"  2FA (TOTP):  {'on' if st['totp_enabled'] else 'off'}")
-    print(f"  session TTL: {cfg.get('session_ttl')}")
+    configured_ttl = str(cfg.get("session_ttl") or "30d")
+    effective_ttl = parse_config_duration(
+        configured_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
+    )
+    print(f"  session TTL: configured {configured_ttl}; effective {effective_ttl}s")
+    print(
+        f"  browser default: {DEFAULT_BROWSER_SESSION_TTL_SECS}s; "
+        f"maximum: {MAX_SESSION_TTL_SECS}s"
+    )
     print(
         f"  lockout:     after {cfg.get('lockout_threshold')} tries, {cfg.get('lockout_window')}"
     )

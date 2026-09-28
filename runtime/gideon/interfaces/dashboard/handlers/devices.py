@@ -46,8 +46,11 @@ from gideon.interfaces.dashboard.session_store import (
     DeviceInfo,
     attach_device,
     device_sessions,
+    end_session,
     forget_session,
     nonces_for_device,
+    nonces_for_session,
+    session_id,
     sanitize_device_kind,
     sanitize_device_name,
 )
@@ -263,7 +266,10 @@ async def api_devices_pair_complete(request: web.Request) -> web.Response:
     ttl = parse_config_duration(
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
-    token = generate_token(PAIRED_DEVICE_USER, ttl_seconds=ttl)
+    token = generate_token(
+        PAIRED_DEVICE_USER, ttl_seconds=ttl, kind="device",
+        label=name or _derive_device_name(request), client_ip=ip,
+    )
     nonce = _nonce_of(token)
 
     device = DeviceInfo(
@@ -424,28 +430,43 @@ _PAIR_HTML = page_document(
 
 
 async def api_devices_list(request: web.Request) -> web.Response:
-    """GET /api/devices — every paired device with a live session.
+    """GET /api/devices — every owner sign-in with a live session.
 
     Derived from `sessions.json`, so a device disappears from this list the moment its session
     is revoked or expires. Never returns a nonce: the registry is something the owner reads out
     loud, and the nonce is the credential.
     """
-    rows: list[dict[str, Any]] = []
-    for record in device_sessions().values():
+    by_id: dict[str, dict[str, Any]] = {}
+    current_nonce = str(request.get("session_nonce") or "")
+    for nonce, record in device_sessions().items():
         device = record.device
-        if device is None:  # pragma: no cover — `device_sessions` filters these out
-            continue
-        rows.append(
-            {
-                "id": device.id,
-                "name": device.name,
-                "kind": device.kind,
-                "minted_at": device.minted_at,
-                "last_seen": device.last_seen,
-                "issuer": record.issuer,
-                "expires_at": record.expiry,
-            }
-        )
+        device_id = device.id if device is not None else session_id(nonce)
+        name = device.name if device is not None else record.label
+        kind = device.kind if device is not None else record.kind
+        minted_at = device.minted_at if device is not None else record.minted_at
+        last_seen = max(record.last_seen, device.last_seen if device is not None else 0.0)
+        row = {
+            "id": device_id,
+            "name": name,
+            "kind": kind,
+            "minted_at": minted_at,
+            "last_seen": last_seen,
+            "issuer": record.issuer,
+            "expires_at": record.expiry,
+            "ip": record.ip,
+            "current": nonce == current_nonce,
+        }
+        previous = by_id.get(device_id)
+        if previous is None:
+            by_id[device_id] = row
+        else:
+            previous_seen = float(previous["last_seen"])
+            if last_seen >= previous_seen:
+                previous["ip"] = record.ip
+            previous["current"] = bool(previous["current"] or row["current"])
+            previous["last_seen"] = max(float(previous["last_seen"]), last_seen)
+            previous["expires_at"] = max(float(previous["expires_at"]), record.expiry)
+    rows = list(by_id.values())
     rows.sort(key=lambda r: float(r["minted_at"] or 0.0), reverse=True)
     _audit("devices_listed", "ok", resources=f"devices={len(rows)}")
     return web.json_response({"devices": rows})
@@ -465,7 +486,7 @@ async def api_devices_revoke(request: web.Request) -> web.Response:
         return json_error(ERR_ORIGIN, status=403)
 
     device_id = request.match_info.get("id", "")
-    nonces = nonces_for_device(device_id)
+    nonces = nonces_for_session(device_id)
     if not nonces:
         _audit(
             "device_revoked",
@@ -477,12 +498,35 @@ async def api_devices_revoke(request: web.Request) -> web.Response:
 
     for nonce in nonces:
         revoke_nonce(nonce)
-        forget_session(nonce)
+        end_session(nonce, "revoked")
 
     _audit(
         "device_revoked", "ok", resources=f"device={device_id} sessions={len(nonces)}"
     )
     return web.json_response({"ok": True, "revoked": len(nonces)})
+
+
+async def api_devices_revoke_others(request: web.Request) -> web.Response:
+    """POST /api/devices/revoke-others — keep this authenticated session only."""
+    if not check_origin(request):
+        _audit("devices_revoke_others", "denied", error="origin rejected")
+        return json_error(ERR_ORIGIN, status=403)
+    body = await _body(request)
+    if body.get("confirmed") is not True:
+        _audit("devices_revoke_others", "denied", error="confirmation required")
+        return json_error("device_revoke_confirmation_required", status=400)
+    current = str(request.get("session_nonce") or "")
+    if not current or current not in device_sessions():
+        _audit("devices_revoke_others", "denied", error="current session unavailable")
+        return json_error("device_current_session_unavailable", status=409)
+    removed = 0
+    for nonce in list(device_sessions()):
+        if nonce == current:
+            continue
+        revoke_nonce(nonce)
+        removed += int(end_session(nonce, "revoked"))
+    _audit("devices_revoke_others", "ok", resources=f"sessions={removed}")
+    return web.json_response({"ok": True, "revoked": removed})
 
 
 def register_device_routes(app: web.Application) -> None:
@@ -491,4 +535,5 @@ def register_device_routes(app: web.Application) -> None:
     app.router.add_post("/api/devices/pair/complete", api_devices_pair_complete)
     app.router.add_get("/api/devices", api_devices_list)
     app.router.add_post("/api/devices/{id}/revoke", api_devices_revoke)
+    app.router.add_post("/api/devices/revoke-others", api_devices_revoke_others)
     app.router.add_get("/pair", pair_page)

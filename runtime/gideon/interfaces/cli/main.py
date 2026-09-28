@@ -1152,7 +1152,7 @@ per-arm marginal contribution is the leave-one-out delta with an enable/hold ver
         help="Dashboard port (default: resolved from GIDEON_PORT env or dashboard.url config)",  # noqa: E501
     )
     token_parser.add_argument(
-        "--ttl", default="20h", help="Token TTL, e.g. 1h, 30m (default: 20h)"
+        "--ttl", default="20h", help="Token TTL, e.g. 1h, 30m (default: 20h; maximum: 90d)"
     )
 
     pair_parser = sub.add_parser(

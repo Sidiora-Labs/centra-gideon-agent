@@ -19,6 +19,7 @@ from gideon.core.layout import package_path
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import (
     MAX_SESSION_TTL_SECS,
+    DEFAULT_BROWSER_SESSION_TTL_SECS,
     generate_token,
     parse_duration,
 )
@@ -1357,9 +1358,20 @@ async def api_token_local(request: web.Request) -> web.Response:
     ttl_param = request.query.get("ttl", "")
     if ttl_param:
         parsed = parse_duration(ttl_param)
-        if parsed:
-            ttl = parsed
-    token = generate_token("local-app", ttl_seconds=ttl)
+        if parsed is None:
+            return web.json_response(
+                {
+                    "error": "invalid_token_lifetime",
+                    "maximum_seconds": MAX_SESSION_TTL_SECS,
+                    "default_seconds": MAX_SESSION_TTL_SECS,
+                },
+                status=400,
+            )
+        ttl = parsed
+    token = generate_token(
+        "local-app", ttl_seconds=ttl, kind="cli", label="CLI token",
+        client_ip=request.remote or "",
+    )
     _sel().log_api_access(
         caller=request.remote or "unknown",
         operation="token.local",
@@ -1367,7 +1379,13 @@ async def api_token_local(request: web.Request) -> web.Response:
         source="local-bootstrap",
         resources="token-issued",
     )
-    return web.json_response({"token": token, "expires_in": ttl})
+    return web.json_response({
+        "token": token,
+        "expires_in": ttl,
+        "maximum_lifetime_seconds": MAX_SESSION_TTL_SECS,
+        "default_lifetime_seconds": MAX_SESSION_TTL_SECS,
+        "browser_default_lifetime_seconds": DEFAULT_BROWSER_SESSION_TTL_SECS,
+    })
 
 
 async def api_session_agents_list(request: web.Request) -> web.Response:

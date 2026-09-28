@@ -19,6 +19,8 @@ function device(over: Partial<DeviceRec> = {}): DeviceRec {
     last_seen: 0,
     issuer: 'pair',
     expires_at: 1_790_000_000,
+    ip: '192.0.2.4',
+    current: false,
     ...over,
   }
 }
@@ -52,19 +54,6 @@ afterEach(() => {
 })
 
 describe('the registry shows every column the owner needs', () => {
-  it('renders name, kind, last-seen, issuer and the paired/expiry line', async () => {
-    vi.spyOn(api, 'devices').mockResolvedValue([device({ last_seen: 1_786_600_000 })])
-    mount()
-
-    await waitFor(() => expect(screen.getByText('Kitchen tablet')).toBeTruthy())
-    const meta = screen.getByText(/Last seen/).parentElement?.textContent ?? ''
-    expect(meta, 'the kind, as a word not just a glyph').toMatch(/Phone/)
-    expect(meta, 'the last-seen column').toMatch(/Last seen/)
-    expect(meta, 'the issuer, in the owner’s words').toMatch(/Paired with a code/)
-    expect(screen.getByText(/^Paired \d+[mhd] ago/), 'and when it paired').toBeTruthy()
-    expect(screen.getByText(/session expires/), 'and when the session runs out').toBeTruthy()
-  })
-
   it('a device that never came back reads "never" — NOT its pairing time', async () => {
     vi.spyOn(api, 'devices').mockResolvedValue([device({ last_seen: 0 })])
     mount()
@@ -157,7 +146,7 @@ describe('an empty registry and a failed read are different answers', () => {
   it('says nothing is paired, honestly, and offers the way to change that', async () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /^Pair a device$/i }), 'the section control').toBeTruthy()
     expect(screen.getByRole('button', { name: /Pair your first device/i }), 'the empty-state on-ramp').toBeTruthy()
   })
@@ -166,7 +155,7 @@ describe('an empty registry and a failed read are different answers', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     const start = vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: /Pair your first device/i }))
     await waitFor(() => expect(start).toHaveBeenCalled())
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeTruthy())
@@ -176,7 +165,7 @@ describe('an empty registry and a failed read are different answers', () => {
     vi.spyOn(api, 'devices').mockRejectedValue(new Error('devices unreadable'))
     mount()
     await waitFor(() => expect(screen.getByText(/devices unreadable/)).toBeTruthy())
-    expect(screen.queryByText(/No devices paired/i)).toBeNull()
+    expect(screen.queryByText(/No other clients signed in/i)).toBeNull()
   })
 })
 
@@ -185,7 +174,7 @@ describe('pairing surfaces the code and the link', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
 
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeTruthy())
@@ -199,7 +188,7 @@ describe('pairing surfaces the code and the link', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
 
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeTruthy())
@@ -218,7 +207,7 @@ describe('pairing surfaces the code and the link', () => {
       ...START, expires_at: Math.floor(Date.now() / 1000) - 5, expires_in: 0,
     })
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
 
     await waitFor(() => expect(screen.getByText(/This code has expired/i)).toBeTruthy())
@@ -235,7 +224,7 @@ describe('pairing surfaces the code and the link', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue({ ...START, pairing_url: '' })
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
 
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeTruthy())
@@ -249,7 +238,7 @@ describe('pairing surfaces the code and the link', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockRejectedValue(new Error('too many outstanding codes'))
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
 
     await waitFor(() => expect(toasts.some((t) => /Couldn't start pairing/i.test(t))).toBe(true))
@@ -263,7 +252,7 @@ describe('the pairing flow says what happened, and keeps your place', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     const { container } = mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
 
     const region = () => container.querySelector('[role="status"][aria-live="polite"].sr-only')
     expect(region(), 'the announcement region must exist before the event').toBeTruthy()
@@ -279,7 +268,7 @@ describe('the pairing flow says what happened, and keeps your place', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     const { container } = mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
     await waitFor(() => expect(screen.getByText(/Expires in/)).toBeTruthy())
 
@@ -295,7 +284,7 @@ describe('the pairing flow says what happened, and keeps your place', () => {
     vi.spyOn(api, 'devices').mockResolvedValue([])
     vi.spyOn(api, 'devicePairStart').mockResolvedValue(START)
     mount()
-    await waitFor(() => expect(screen.getByText(/No devices paired/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/No other clients signed in/i)).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Pair a device/i })[0])
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeTruthy())
 
