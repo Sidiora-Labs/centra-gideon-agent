@@ -277,7 +277,9 @@ def _resolve(
 ) -> tuple[ConsoleState, _ChatSession] | web.Response:
     state: ConsoleState = request.app["state"]
     name = request.match_info["session"]
-    chat = state._sessions.get(name)
+    from gideon.interfaces.dashboard.chat_persistence import resolve_session
+
+    chat = resolve_session(state, name)
     if chat is None:
         return json_error(
             "session_not_found", message="No such chat session", status=404
