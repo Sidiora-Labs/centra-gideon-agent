@@ -1501,7 +1501,7 @@ export function ConfigModal({ name, displayName, providerType, onClose }: { name
             <p data-type="body-s" className="text-on-surface">{ownerQuery.data.owner_configured
               ? `An owner direct message is paired for ${channel.display_name}.`
               : `No owner direct message is paired for ${channel.display_name}.`}</p>
-            {!ownerQuery.data.owner_configured && <p data-type="caption" className="mt-1 text-on-surface-low">Pair this owner from Settings → Providers.</p>}
+            {!ownerQuery.data.owner_configured && <p data-type="caption" className="mt-1 text-on-surface-low">Pair this owner from Settings → Sender trust.</p>}
           </div>
         ) : null)}
         {cfg.error ? (
