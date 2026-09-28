@@ -492,7 +492,7 @@ async def _run_backed_action(request: web.Request, run: Any, action: str) -> web
     _audit(request, operation, "success" if result.get("ok") else "failure", run.id)
     if not result.get("ok"):
         return _reply(result)
-    return web.json_response(loop_view.get_loop_view(run.id))
+    return web.json_response(_mask_projection(loop_view.get_loop_view(run.id)))
 
 
 async def api_loop_get(request: web.Request) -> web.Response:
