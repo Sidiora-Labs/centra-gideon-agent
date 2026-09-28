@@ -500,13 +500,29 @@ class _HookAdmission:
             hook = _sanitize_hook(event, entry)
             if hook is None:
                 continue
+            from gideon.security.agent_hook_grants import pinned
+
+            pinned_command = pinned(
+                event, hook["command"], hook.get("matcher"), write=True
+            )
+            if not pinned_command:
+                _hook_audit(
+                    "agent_hook_admission",
+                    "waiting_for_owner",
+                    f"event={event} command={hook['command']} matcher={hook.get('matcher', '')}",
+                )
+                continue
+            hook["command"] = pinned_command
             identity = (hook["command"], hook.get("matcher"))
             if identity in seen:
                 continue
             accepted.append(hook)
             seen.add(identity)
             self.count += 1
-        self.hooks[event] = accepted
+        if accepted:
+            self.hooks[event] = accepted
+        else:
+            self.hooks.pop(event, None)
 
 
 def _merge_agent_hooks(hooks: dict, user_hooks: dict) -> dict:
@@ -542,6 +558,38 @@ def _configured_hooks_directory(value: Any) -> Path:
 
 def _hook_count(hooks: dict) -> int:
     return sum(len(entries) for entries in hooks.values() if isinstance(entries, list))
+
+
+def configured_user_agent_hooks(runtime_config: dict | None = None) -> list[dict[str, str]]:
+    """Return the current user hook descriptors before grant filtering."""
+    if runtime_config is None:
+        runtime_config = _load_json(_USER_OVERRIDES) or {}
+    settings = runtime_config.get("agent")
+    if not isinstance(settings, dict):
+        settings = {
+            "agent_hooks": getattr(settings, "agent_hooks", {}),
+            "agent_hooks_autoimport": getattr(settings, "agent_hooks_autoimport", True),
+            "agent_hooks_dir": getattr(settings, "agent_hooks_dir", None),
+        }
+    explicit = settings.get("agent_hooks")
+    explicit = explicit if isinstance(explicit, dict) else {}
+    result: list[dict[str, str]] = []
+    for event, entries in explicit.items():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            hook = _sanitize_hook(event, entry)
+            if hook is not None:
+                result.append({"event": event, **hook, "source": "configured"})
+    if bool(settings.get("agent_hooks_autoimport", True)):
+        directory = _configured_hooks_directory(settings.get("agent_hooks_dir"))
+        for event, entries in _autoimport_agent_hooks(directory).items():
+            for hook in entries:
+                result.append({"event": event, **hook, "source": "discovered"})
+    unique = {}
+    for item in result:
+        unique[(item["event"], item["command"], item.get("matcher", ""))] = item
+    return list(unique.values())
 
 
 def _apply_user_agent_hooks(config: dict, runtime_config: dict) -> None:

@@ -882,6 +882,22 @@ async def start_dashboard(
     app.router.add_get("/api/action-providers", handlers.api_action_providers)
     app.router.add_get("/api/agent-hooks", handlers.api_agent_hooks)
 
+    from gideon.interfaces.dashboard.handlers.hooks import api_agent_hook_allow
+    from gideon.interfaces.dashboard.handlers.heartbeat_tasks import (
+        api_heartbeat_task_allow,
+        api_heartbeat_tasks,
+    )
+    from gideon.interfaces.dashboard.handlers.trigger_callbacks import (
+        api_hook_allow,
+        api_hooks_pending,
+    )
+
+    app.router.add_post("/api/agent-hooks/allow", api_agent_hook_allow)
+    app.router.add_get("/api/heartbeat/tasks", api_heartbeat_tasks)
+    app.router.add_post("/api/heartbeat/tasks/{task_id}/allow", api_heartbeat_task_allow)
+    app.router.add_get("/api/hooks/pending", api_hooks_pending)
+    app.router.add_post("/api/hooks/{hook_id}/allow", api_hook_allow)
+
     app.router.add_get("/api/prompts", handlers.api_prompts)
     app.router.add_post("/api/prompts", handlers.api_prompt_create)
     app.router.add_get("/api/prompts/bindings", handlers.api_prompt_bindings)

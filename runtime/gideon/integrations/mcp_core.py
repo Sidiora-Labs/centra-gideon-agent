@@ -1182,14 +1182,14 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             outcome="success",
         )
         return (
-            f"Hook registered: {hook_id_safe}\n"
+            f"Hook registered: {hook_id_safe} (waiting for owner Allow before webhook turns can run)\n"
             f"Session key: {session_key_safe}\n"
             f"Webhook URL: {url}\n"
             f"External systems should POST to this URL with:\n"
             f'  {{"message": "<results>", "sessionKey": "{session_key_safe}", '
             f'"name": "{hook_id_safe}"}}\n'
             f"Include Authorization: Bearer <webhook_token> header.\n"
-            f"Context summary saved for session resume."
+            f"Context summary saved for review by the owner before session resume is enabled."
         )
 
     if name == "notify":

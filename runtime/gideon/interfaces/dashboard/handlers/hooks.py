@@ -89,45 +89,113 @@ async def api_action_providers(request: web.Request) -> web.Response:
 
 async def api_agent_hooks(request: web.Request) -> web.Response:
     """GET /api/agent-hooks — read-only view of agent hooks from gideon.json."""
-    from gideon.engine.agent import _VALID_HOOK_EVENTS, AGENTS_DIR, _shipped_defaults
+    from gideon.engine.agent import _VALID_HOOK_EVENTS, _shipped_defaults, configured_user_agent_hooks
     from gideon.security.security import redact
+    from gideon.security.agent_hook_grants import allowed, seal_of, key as hook_key
+    from gideon.security.owner_grants import seal
 
-    agent_cfg = AGENTS_DIR / "gideon.json"
-    try:
-        raw = json.loads(agent_cfg.read_text())
-        hooks = raw.get("hooks", {}) if isinstance(raw, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        hooks = {}
     try:
         raw = json.loads(_shipped_defaults().read_text())
         bundled = raw.get("hooks", {}) if isinstance(raw, dict) else {}
     except (OSError, json.JSONDecodeError):
         bundled = {}
-    bundled_keys: set[tuple[str, str, str]] = set()
-    for event, entries in bundled.items():
-        for e in entries if isinstance(entries, list) else []:
-            if isinstance(e, dict):
-                bundled_keys.add(
-                    (event, e.get("command") or "", e.get("matcher") or "")
-                )
     result: dict[str, list[dict]] = {}
-    for event, entries in hooks.items():
+    for event, entries in bundled.items():
         if event not in _VALID_HOOK_EVENTS:
             continue
         tagged = []
         for e in entries if isinstance(entries, list) else []:
             if isinstance(e, dict):
-                key = (event, e.get("command") or "", e.get("matcher") or "")
-                tagged.append(
-                    {
-                        "command": redact(e.get("command") or ""),
-                        "matcher": redact(e.get("matcher") or ""),
-                        "source": "bundled" if key in bundled_keys else "user",
-                    }
-                )
+                tagged.append({
+                    "command": redact(e.get("command") or ""),
+                    "matcher": redact(e.get("matcher") or ""),
+                    "source": "bundled",
+                    "allowed": True,
+                })
         if tagged:
             result[event] = tagged
+    for entry in configured_user_agent_hooks():
+        event = entry["event"]
+        command = entry["command"]
+        matcher = entry.get("matcher") or ""
+        current_seal = seal_of(command)
+        identity = seal(hook_key(event, command, matcher))
+        result.setdefault(event, []).append({
+            "id": identity,
+            "command": redact(command),
+            "matcher": redact(matcher),
+            "source": entry["source"],
+            "revision": current_seal,
+            "allowed": bool(current_seal and allowed(event, command, matcher)),
+            "question": (
+                "Allow the agent CLI to run this hook on its configured event? "
+                "The reviewed file bytes and matcher are fixed by this approval; "
+                "an edit requires a new Allow."
+            ),
+        })
     return web.json_response({"hooks": result})
+
+
+async def api_agent_hook_allow(request: web.Request) -> web.Response:
+    """POST /api/agent-hooks/allow — allow one current configured hook revision."""
+    from gideon.engine.agent import configured_user_agent_hooks
+    from gideon.security.agent_hook_grants import allow
+    from gideon.security.owner_grants import seal
+    from gideon.security.approval_answer import OWNER, of_request
+
+    principal = of_request(request)
+    if principal.kind != OWNER or not principal.name:
+        return web.json_response({"error": "owner required"}, status=403)
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict) or body.get("confirm") is not True:
+        return web.json_response({
+            "error": "confirmation_required",
+            "question": "Allow this exact hook file, event, and matcher to run in the agent CLI? An edit requires a new Allow.",
+        }, status=409)
+    hook_id = body.get("id")
+    seen = body.get("seen")
+    if not isinstance(hook_id, str) or not isinstance(seen, str) or len(seen) != 64:
+        return web.json_response({"error": "invalid hook revision"}, status=400)
+    selected = None
+    for item in configured_user_agent_hooks():
+        identity = seal(f"{item['event']}\0{item['command']}\0{item.get('matcher', '')}")
+        if identity == hook_id:
+            selected = item
+            break
+    if selected is None or not allow(
+        selected["event"], selected["command"], selected.get("matcher"),
+        seen=seen, principal=principal.label,
+    ):
+        return web.json_response({
+            "error": "hook_changed",
+            "message": "The configured hook or its file changed. Review the current hook before allowing it.",
+        }, status=409)
+    try:
+        from gideon.security.sel import sel
+
+        sel().log_api_access(
+            caller=principal.label,
+            operation="agent_hook.allow",
+            outcome="allowed",
+            source="dashboard",
+            resources="one reviewed hook revision",
+        )
+    except Exception:
+        logger.warning("agent hook grant audit failed after grant was stored", exc_info=True)
+    try:
+        from gideon.engine.agent import rebuild_agent_config
+
+        await asyncio.to_thread(rebuild_agent_config)
+        from gideon.interfaces.dashboard.handlers.sessions import _reset_all_sessions
+
+        reset = await _reset_all_sessions(request)
+    except Exception:
+        logger.warning("agent hook was allowed but config refresh failed", exc_info=True)
+        return web.json_response({"ok": True, "applied": False})
+    return web.json_response({"ok": True, "applied": True, "sessions_reset": reset})
 
 
 _HOOK_SESSION_PREFIX = "hook:"
@@ -238,6 +306,26 @@ async def api_hooks_agent(request: web.Request) -> web.Response:
             status=400,
         )
 
+    callback_id = session_key[len(_HOOK_SESSION_PREFIX) :]
+    from gideon.interfaces.dashboard.handlers.trigger_callbacks import callback_snapshot
+
+    callback = callback_snapshot(callback_id)
+    if callback is None or not callback[2]:
+        try:
+            _sel().log_api_access(
+                caller="webhook",
+                operation="hooks.agent",
+                outcome="denied",
+                source="webhook",
+                resources="callback owner grant required",
+            )
+        except Exception:
+            logger.debug("callback grant denial audit failed", exc_info=True)
+        return web.json_response(
+            {"error": "owner_allow_required", "message": "This registered callback is waiting for owner Allow."},
+            status=403,
+        )
+
     name = body.get("name", "Webhook")
     agent = body.get("agent", "") or None
     deliver = body.get("deliver", True)
@@ -277,7 +365,8 @@ async def api_hooks_agent(request: web.Request) -> web.Response:
     try:
         task = asyncio.create_task(
             _run_hook_agent(
-                state, session_key, message, name, agent, deliver, timeout_secs
+                state, session_key, message, name, agent, deliver, timeout_secs,
+                callback[3],
             )
         )
     except BaseException:
@@ -326,6 +415,7 @@ async def _run_hook_agent(
     agent: str | None,
     deliver: bool,
     timeout_secs: int,
+    saved_context: str | None = None,
 ) -> None:
     """Execute a webhook-triggered agent turn in an ephemeral session.
 
@@ -338,7 +428,7 @@ async def _run_hook_agent(
     from gideon.security.security import redact_credentials
 
     hook_id = session_key.removeprefix(_HOOK_SESSION_PREFIX)
-    saved_context = _load_hook_context(hook_id)
+    saved_context = _load_hook_context(hook_id) if saved_context is None else saved_context
     if saved_context:
         message = (
             f"=== Restored Context (from prior session) ===\n"

@@ -1477,6 +1477,11 @@ async def api_file_write(request: web.Request) -> web.Response:
             )
             return web.json_response({"error": "not found"}, status=404)
         try:
+            try:
+                with open(path, "r", encoding="utf-8") as source:
+                    before_content = source.read()
+            except (OSError, UnicodeError):
+                before_content = None
             if expected_validator is not None:
                 digest = hashlib.sha256()
                 with open(path, "rb") as source:
@@ -1504,6 +1509,24 @@ async def api_file_write(request: web.Request) -> web.Response:
                 except OSError:
                     pass
                 raise
+            if before_content is not None:
+                try:
+                    from gideon.engine.heartbeat import (
+                        heartbeat_path,
+                        record_owner_file_added_tasks,
+                    )
+                    from gideon.security.approval_answer import of_request
+
+                    if os.path.realpath(path) == os.path.realpath(str(heartbeat_path())):
+                        record_owner_file_added_tasks(
+                            before_content,
+                            body.get("content", ""),
+                            principal=of_request(request),
+                        )
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "owner file task grants unavailable; file write remains committed"
+                    )
             _sel().log_tool_invocation(
                 session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
             )

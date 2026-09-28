@@ -1,8 +1,10 @@
 """Periodic user work, transcript upkeep, and heartbeat task-file processing."""
 
 import asyncio
+import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Coroutine, Iterator
@@ -10,6 +12,8 @@ from typing import TYPE_CHECKING, Callable, Coroutine, Iterator
 from gideon import shutdown_event
 from gideon.cognition.memory import workspace_dir
 from gideon.core.atomic_write import atomic_write
+from gideon.security.owner_grants import GrantBook, seal
+from gideon.security.approval_answer import OWNER, Principal
 
 if TYPE_CHECKING:
     from gideon.cognition.history import HistoryConsolidator
@@ -29,6 +33,7 @@ _HEADER = (
     "# Heartbeat Tasks\n\n<!-- Add tasks below (one per line). "
     "Gideon picks them up on next heartbeat. -->\n"
 )
+_HEARTBEAT_GRANTS = GrantBook("heartbeat_tasks")
 
 
 def heartbeat_path() -> Path:
@@ -67,6 +72,112 @@ def _task_lines(content: str) -> Iterator[_TaskLine]:
         text = _LIST_MARKER.sub("", visible, count=1).strip()
         if text and text != "-":
             yield _TaskLine(text, destination)
+
+
+def _task_content(entry: _TaskLine) -> str:
+    return json.dumps([entry.text, entry.destination], ensure_ascii=False, separators=(",", ":"))
+
+
+def _task_keys(entries: tuple[_TaskLine, ...] | list[_TaskLine]) -> list[str]:
+    occurrences: Counter[str] = Counter()
+    result = []
+    for entry in entries:
+        content = _task_content(entry)
+        occurrences[content] += 1
+        result.append(f"heartbeat:{seal(content)}:{occurrences[content]}")
+    return result
+
+
+def record_owner_file_added_tasks(
+    before: str,
+    after: str,
+    *,
+    principal: Principal,
+) -> int:
+    """Grant only exact task occurrences added by a committed owner Files edit.
+
+    This is a post-commit hook. A grant failure leaves the task waiting and does not
+    change the outcome of the already committed file write.
+    """
+    if not isinstance(principal, Principal) or principal.kind != OWNER:
+        return 0
+    old_counts = Counter(_task_content(entry) for entry in _task_lines(before))
+    entries = tuple(_task_lines(after))
+    seen: Counter[str] = Counter()
+    granted = 0
+    for entry, key in zip(entries, _task_keys(entries)):
+        content = _task_content(entry)
+        seen[content] += 1
+        if seen[content] <= old_counts[content]:
+            continue
+        try:
+            _HEARTBEAT_GRANTS.give(key, content, principal=principal.label)
+            granted += 1
+        except OSError:
+            logger.warning("owner heartbeat grant could not be recorded; task remains waiting")
+            try:
+                from gideon.security.sel import sel
+
+                sel().log_api_access(
+                    caller=principal.label,
+                    operation="heartbeat.owner_file_grant",
+                    outcome="failed_closed",
+                    source="grant_book",
+                    resources="grant storage unavailable",
+                )
+            except Exception:
+                logger.debug("heartbeat grant failure audit failed", exc_info=True)
+            return granted
+    return granted
+
+
+def heartbeat_task_rows(content: str | None = None) -> list[dict[str, str | bool]]:
+    """Return parsed current tasks with exact revisions and owner-grant state."""
+    if content is None:
+        try:
+            content = heartbeat_path().read_text(encoding="utf-8")
+        except OSError:
+            return []
+    entries = tuple(_task_lines(content))
+    keys = _task_keys(entries)
+    rows = []
+    for entry, key in zip(entries, keys):
+        task_content = _task_content(entry)
+        rows.append({
+            "id": key,
+            "text": entry.text,
+            "destination": entry.destination,
+            "revision": seal(task_content),
+            "allowed": _HEARTBEAT_GRANTS.holds(key, task_content),
+            "question": (
+                "Allow this exact heartbeat task to run unattended?\n\n"
+                f"Task: {entry.text}\nDestination: {entry.destination or 'dashboard'}"
+            ),
+        })
+    return rows
+
+
+def allow_heartbeat_task(
+    task_id: str, *, seen: str, principal: str
+) -> bool:
+    """Allow one current task occurrence only if it still matches the reviewed revision."""
+    try:
+        content = heartbeat_path().read_text(encoding="utf-8")
+    except OSError:
+        return False
+    entries = tuple(_task_lines(content))
+    for entry, key in zip(entries, _task_keys(entries)):
+        task_content = _task_content(entry)
+        if key == task_id and seal(task_content) == seen:
+            try:
+                _HEARTBEAT_GRANTS.give(
+                    key, task_content, principal=principal
+                )
+                return True
+            except OSError:
+                logger.warning("heartbeat grant could not be recorded; task remains waiting")
+            return False
+    return False
 
 
 @dataclass
@@ -249,16 +360,29 @@ class HeartbeatService:
         document = _TaskDocument.open(heartbeat_path())
         if not document.entries or not self._on_task:
             return
+        keys = _task_keys(document.entries)
         self._processing = True
         try:
             logger.info("Heartbeat: %d task(s) found", len(document.entries))
             outcomes = await asyncio.gather(
                 *(
                     self._run_one_task(entry.text, entry.destination)
-                    for entry in document.entries
+                    if _HEARTBEAT_GRANTS.holds(key, _task_content(entry))
+                    else asyncio.sleep(0, result=_KEEP_SENTINEL)
+                    for entry, key in zip(document.entries, keys)
                 ),
                 return_exceptions=True,
             )
+            for entry, key, outcome in zip(document.entries, keys, outcomes):
+                if (
+                    not isinstance(outcome, BaseException)
+                    and not _should_keep(outcome)
+                    and _HEARTBEAT_GRANTS.holds(key, _task_content(entry))
+                ):
+                    try:
+                        _HEARTBEAT_GRANTS.revoke(key)
+                    except OSError:
+                        logger.warning("completed heartbeat grant could not be cleared")
             document.settle(outcomes)
         finally:
             self._processing = False
