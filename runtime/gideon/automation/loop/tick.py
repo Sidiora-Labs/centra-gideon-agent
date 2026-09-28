@@ -256,13 +256,13 @@ def evaluate(cfg: TickConfig, state: TickState, now: float) -> Decision:
     """
     n_steps = len(cfg.steps)
 
+    if n_steps and state.step_index >= n_steps:
+        return Decision(Action.COMPLETE, n_steps, "all steps complete", state.metric)
+
     if cfg.max_cycles and state.total_cycles >= cfg.max_cycles:
         return Decision(
             Action.COMPLETE, state.step_index, "cycle budget reached", state.metric
         )
-
-    if n_steps and state.step_index >= n_steps:
-        return Decision(Action.COMPLETE, n_steps, "all steps complete", state.metric)
 
     if state.worker_in_flight:
         return Decision(

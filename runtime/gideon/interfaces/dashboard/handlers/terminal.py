@@ -5,6 +5,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import pty as _pty
 import struct
 import termios
@@ -42,6 +43,8 @@ _pending_cwd: dict[str, str] = {}
 
 _pending_sandbox: dict[str, str] = {}
 _pending_provider_argv: dict[str, list[str]] = {}
+_SESSION_TIER = re.compile(r"^([^@]{1,64})@([a-z][a-z0-9_-]{0,31})$")
+_LEGACY_SESSION_REFUSAL = "This terminal was opened before an update; open a new one."
 
 
 def _sel():
@@ -66,6 +69,16 @@ class _TerminalSession:
     cwd: str = ""
     shell: str = ""
     persistent: bool = False
+    sandbox_handle: object | None = None
+
+
+def _session_tier(session_id: str) -> str | None:
+    match = _SESSION_TIER.fullmatch(session_id)
+    return match.group(2) if match else None
+
+
+def _provider_session_id(session_id: str) -> str:
+    return session_id.split("@", 1)[0]
 
 
 def _get_registry(request: web.Request) -> dict[str, _TerminalSession | None]:
@@ -138,7 +151,10 @@ async def _kill_session(sess: _TerminalSession) -> None:
     """Kill PTY process and close FDs for a session."""
     from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
 
-    cleanup(sess.session_id)
+    cleanup(_provider_session_id(sess.session_id))
+    if sess.sandbox_handle is not None:
+        sess.sandbox_handle.cleanup()
+        sess.sandbox_handle = None
     if sess.master_fd >= 0:
         try:
             asyncio.get_running_loop().remove_reader(sess.master_fd)
@@ -232,6 +248,25 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
             registry.pop(session_id, None)  # type: ignore[arg-type]
         raise
 
+    tier = _session_tier(session_id)
+    if tier is None:
+        if placeholder:
+            registry.pop(session_id, None)
+        await ws.send_str(json.dumps({"type": "error", "message": _LEGACY_SESSION_REFUSAL}))
+        await ws.close()
+        return ws
+    if tier != "none":
+        from gideon.integrations.sandbox_providers import SandboxUnavailableError, resolve_provider
+
+        try:
+            resolve_provider(tier)
+        except SandboxUnavailableError as error:
+            if placeholder:
+                registry.pop(session_id, None)
+            await ws.send_str(json.dumps({"type": "error", "message": str(error)}))
+            await ws.close()
+            return ws
+
     if existing:
         existing.ws = ws
         existing.last_ws_disconnect = None
@@ -264,7 +299,7 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                 "DISABLE_AUTO_UPDATE": "true",
             }
             provider_argv = _pending_provider_argv.pop(session_id, None)
-            persistent = _persist_enabled(request)
+            persistent = tier == "none" and _persist_enabled(request)
             if persistent:
                 env["TMUX_TMPDIR"] = tmux_substrate.command_env()["TMUX_TMPDIR"]
                 argv = tmux_substrate.terminal_attach_argv(
@@ -272,28 +307,16 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                 )
             else:
                 argv = provider_argv or [shell, "-l"]
-            _req_sandbox = _pending_sandbox.pop(session_id, "")
-            if _req_sandbox:
+            sandbox_handle = None
+            if tier != "none":
                 from gideon.integrations.sandbox_providers import (
                     SandboxSpec,
-                    SandboxUnavailableError,
-                    get_provider,
+                    resolve_provider,
                 )
-
-                _provider = get_provider(_req_sandbox)
-                if _provider is not None:
-                    try:
-                        argv = _provider.wrap(
-                            SandboxSpec(workspace_dir=cwd, egress_tier="all", env={}),
-                            argv,
-                        ).argv
-                    except SandboxUnavailableError as _exc:
-                        logger.info(
-                            "terminal %s: sandbox %r unavailable (%s); host shell fallback",
-                            session_id,
-                            _req_sandbox,
-                            _exc,
-                        )
+                sandbox_handle = resolve_provider(tier).wrap(
+                    SandboxSpec(workspace_dir=cwd, egress_tier="all", env={}), argv
+                )
+                argv = sandbox_handle.argv
             from gideon.security.sandbox import PROFILE_NONE, create_subprocess_limited
 
             proc = await create_subprocess_limited(
@@ -307,6 +330,8 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                 env=env,
             )
         except Exception as exc:
+            if "sandbox_handle" in locals() and sandbox_handle is not None:
+                sandbox_handle.cleanup()
             try:
                 os.close(master_fd)
             except OSError:
@@ -327,6 +352,7 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
             cwd=str(cwd),
             shell=shell,
             persistent=persistent,
+            sandbox_handle=sandbox_handle,
         )
         registry[session_id] = sess
         _sel().log_api_access(
@@ -359,7 +385,10 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
         registry.pop(session_id, None)
         from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
 
-        cleanup(session_id)
+        cleanup(_provider_session_id(session_id))
+        if sess.sandbox_handle is not None:
+            sess.sandbox_handle.cleanup()
+            sess.sandbox_handle = None
         if sess.ws and not sess.ws.closed:
             try:
                 await sess.ws.send_str(json.dumps({"type": "exited", "code": code}))
@@ -531,6 +560,8 @@ async def api_terminal_create(request: web.Request) -> web.Response:
                     requested_cwd = body["cwd"]
                 if isinstance(body.get("sandbox"), str):
                     requested_sandbox = body["sandbox"].strip()
+                elif "sandbox" in body:
+                    return web.json_response({"error": "Invalid sandbox tier"}, status=400)
         except Exception:
             pass
     if requested_cwd:
@@ -575,15 +606,31 @@ async def api_terminal_create(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "Image requires a configured provider"}, status=400
         )
-    if requested_sandbox and requested_sandbox != "none":
-        from gideon.integrations.sandbox_providers import get_provider
+    if requested_sandbox and not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", requested_sandbox):
+        _pending_cwd.pop(session_id, None)
+        _pending_provider_argv.pop(session_id, None)
+        from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
 
-        if get_provider(requested_sandbox) is not None:
-            _pending_sandbox[session_id] = requested_sandbox
-        else:
-            requested_sandbox = ""
-    else:
-        requested_sandbox = ""
+        cleanup(session_id)
+        return web.json_response({"error": "Invalid sandbox tier"}, status=400)
+    requested_sandbox = requested_sandbox or "none"
+    from gideon.integrations.sandbox_providers import SandboxUnavailableError, resolve_provider
+
+    try:
+        resolve_provider(requested_sandbox)
+    except SandboxUnavailableError as error:
+        _pending_cwd.pop(session_id, None)
+        _pending_provider_argv.pop(session_id, None)
+        from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
+
+        cleanup(session_id)
+        return web.json_response({"error": str(error)}, status=409)
+    base_id = session_id
+    session_id = f"{base_id}@{requested_sandbox}"
+    if base_id in _pending_cwd:
+        _pending_cwd[session_id] = _pending_cwd.pop(base_id)
+    if base_id in _pending_provider_argv:
+        _pending_provider_argv[session_id] = _pending_provider_argv.pop(base_id)
     _sel().log_api_access(
         caller=caller,
         operation="terminal.session.create",
@@ -624,13 +671,16 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
         return web.Response(status=403, text="Terminal panel disabled")
 
     session_id = request.match_info.get("session_id", "")
+    session_kinds = dict(await _list_tmux_session_kinds())
+    if session_kinds.get(_tmux_session_name(session_id)) == tmux_substrate.WORKER_KIND:
+        return web.Response(status=409, text="Durable worker sessions cannot be closed as terminals")
     registry = _get_registry(request)
     sess = registry.pop(session_id, None)  # type: ignore[arg-type]
     pending = _pending_provider_argv.pop(session_id, None)
     if pending is not None and sess is None:
         from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
 
-        cleanup(session_id)
+        cleanup(_provider_session_id(session_id))
         _pending_cwd.pop(session_id, None)
         _pending_sandbox.pop(session_id, None)
         return web.json_response({"deleted": session_id})
@@ -638,7 +688,7 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
     persistent = sess.persistent if sess else _persist_enabled(request)
     detached = False
     if sess is None and persistent:
-        detached = _tmux_session_name(session_id) in await _list_tmux_sessions()
+        detached = _tmux_session_name(session_id) in session_kinds
 
     if sess is None and not detached:
         return web.Response(status=404, text="Session not found")
@@ -721,10 +771,13 @@ async def api_terminal_list(request: web.Request) -> web.Response:
                 "cwd": sess.cwd,
                 "shell": sess.shell,
                 "persistent": sess.persistent,
+                "sandbox": _session_tier(sid),
             }
         )
     if _persist_enabled(request):
-        for tname in await _list_tmux_sessions():
+        for tname, kind in await _list_tmux_session_kinds():
+            if kind == tmux_substrate.WORKER_KIND:
+                continue
             if not tname.startswith("gideon-"):
                 continue
             sid = tname[len("gideon-") :]
@@ -742,6 +795,7 @@ async def api_terminal_list(request: web.Request) -> web.Response:
                     "shell": "",
                     "persistent": True,
                     "detached": True,
+                    "sandbox": _session_tier(sid),
                 }
             )
     _sel().log_api_access(
@@ -763,6 +817,10 @@ async def api_terminal_list(request: web.Request) -> web.Response:
 async def _list_tmux_sessions() -> list[str]:
     """Live tmux session names on our dedicated socket, or [] if tmux/none. Never raises."""
     return await tmux_substrate.list_sessions()
+
+
+async def _list_tmux_session_kinds() -> list[tuple[str, str]]:
+    return await tmux_substrate.list_session_kinds()
 
 
 async def reap_orphaned_terminals(app: web.Application) -> None:

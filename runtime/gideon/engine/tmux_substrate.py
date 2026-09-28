@@ -18,6 +18,9 @@ TMUX_SOCKET = "gideon"
 PROBE_TIMEOUT_S = 5.0
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 _PART_MAX = 32
+KIND_OPTION = "@gideon_kind"
+WORKER_KIND = "worker"
+TERMINAL_KIND = "terminal"
 
 
 def tmux_available() -> bool:
@@ -40,10 +43,16 @@ def terminal_session_name(session_id: str) -> str:
 
 
 def terminal_attach_argv(session_id: str, command: list[str]) -> list[str]:
+    name = terminal_session_name(session_id)
     return [
         "tmux", "-L", socket_name(), "new-session", "-A", "-s",
-        terminal_session_name(session_id), *map(str, command),
+        name, *(_literal(str(part)) for part in command),
+        ";", "set-option", KIND_OPTION, TERMINAL_KIND,
     ]
+
+
+def _literal(part: str) -> str:
+    return part[:-1] + "\\;" if part.endswith(";") else part
 
 
 def durable_session_name(project_id: str, run_id: str, session_slug: str) -> str:
@@ -147,12 +156,17 @@ class TmuxCommand:
 async def new_session(
     name: str, *, workspace: str, command: list[str], env: dict[str, str] | None = None
 ) -> bool:
-    if not name or _UNSAFE.search(name) or not command:
+    if (
+        not name
+        or re.search(r"[^A-Za-z0-9_@-]", name)
+        or not command
+        or not os.path.isdir(workspace)
+    ):
         return False
     environment = [
         argument
         for key, value in (env or {}).items()
-        for argument in ("-e", f"{key}={value}")
+        for argument in ("-e", _literal(f"{key}={value}"))
     ]
     arguments = [
         "new-session",
@@ -160,38 +174,64 @@ async def new_session(
         "-s",
         name,
         "-c",
-        str(workspace or "."),
+        _literal(str(workspace or ".")),
         *environment,
-        *map(str, command),
+        *(_literal(str(part)) for part in command),
+        ";", "set-option", "-p", "remain-on-exit", "off",
+        ";", "set-option", KIND_OPTION, WORKER_KIND,
     ]
-    return await TmuxCommand(tuple(arguments)).status()
+    if not await TmuxCommand(tuple(arguments)).status():
+        return False
+    if await has_session(name):
+        return True
+    await kill_session(name)
+    return False
 
 
 async def has_session(name: str) -> bool:
-    return (
-        await TmuxCommand(("has-session", "-t", f"={name}")).status() if name else False
-    )
+    if not name:
+        return False
+    panes = await TmuxCommand(
+        ("list-panes", "-s", "-t", f"={name}", "-F", "#{pane_dead}")
+    ).lines()
+    return "0" in panes
 
 
 def has_session_sync(name: str) -> bool:
-    return (
-        TmuxCommand(("has-session", "-t", f"={name}")).status_sync() if name else False
-    )
+    if not name:
+        return False
+    output = TmuxCommand(
+        ("list-panes", "-s", "-t", f"={name}", "-F", "#{pane_dead}")
+    ).output_sync()
+    return any(line.strip() == "0" for line in output.decode("utf-8", "replace").splitlines())
 
 
 async def list_sessions() -> list[str]:
-    return await TmuxCommand(("list-sessions", "-F", "#{session_name}")).lines()
+    return [name for name, _ in await list_session_kinds()]
+
+
+async def list_session_kinds() -> list[tuple[str, str]]:
+    lines = await TmuxCommand(
+        ("list-sessions", "-F", f"#{{session_name}}\t#{{{KIND_OPTION}}}")
+    ).lines()
+    sessions = []
+    for line in lines:
+        name, _, kind = line.partition("\t")
+        if name:
+            sessions.append((name, kind))
+    return sessions
 
 
 def pane_paths_sync() -> list[tuple[str, str]]:
     output = TmuxCommand(
-        ("list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}")
+        ("list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}\t#{pane_dead}")
     ).output_sync()
     pairs = []
     for line in output.decode("utf-8", "replace").splitlines():
-        name, _, path = line.partition("\t")
+        name, _, rest = line.partition("\t")
+        path, _, dead = rest.partition("\t")
         pair = name.strip(), path.strip()
-        if all(pair):
+        if all(pair) and dead.strip() == "0":
             pairs.append(pair)
     return pairs
 

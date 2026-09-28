@@ -52,11 +52,8 @@ def register_builtin_providers() -> None:
 
 
 def resolve_provider(name: str = "") -> "SandboxProvider":
-    """Return the named provider, or the ``none`` builtin as the always-available fallback.
-
-    A sandbox is a best-effort bound: an unknown/unavailable name must never BLOCK a spawn, so
-    this resolves to ``none`` rather than raising. Ensures the builtin is registered first.
-    """
+    """Resolve an explicitly named provider without downgrading unknown tiers to host."""
+    from gideon.integrations.sandbox_providers.base import SandboxUnavailableError
     from gideon.integrations.sandbox_providers.none import (
         NONE_PROVIDER_NAME,
         NoneSandboxProvider,
@@ -64,7 +61,13 @@ def resolve_provider(name: str = "") -> "SandboxProvider":
 
     if NONE_PROVIDER_NAME not in _providers:
         register_builtin_providers()
-    provider = _providers.get(name) if name else None
+    if not name or name == NONE_PROVIDER_NAME:
+        return _providers.get(NONE_PROVIDER_NAME) or NoneSandboxProvider()
+    provider = _providers.get(name)
     if provider is None:
-        provider = _providers.get(NONE_PROVIDER_NAME) or NoneSandboxProvider()
+        raise SandboxUnavailableError(
+            f"Sandbox tier {name!r} is unavailable",
+            "the requested provider is not registered",
+            "select an available sandbox tier and open a new terminal",
+        )
     return provider

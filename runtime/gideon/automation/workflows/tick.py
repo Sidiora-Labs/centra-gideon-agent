@@ -855,20 +855,24 @@ class _LoopExit:
         return not satisfied, "" if not satisfied else "condition_met"
 
     def decision(self) -> tuple[bool, str]:
+        if self.mode == LoopMode.COUNTED:
+            decision = self.threshold(
+                self.config.get("n"), self.iteration, "counted_complete"
+            )
+        elif self.mode == LoopMode.UNTIL:
+            decision = self.until()
+        elif self.mode == LoopMode.UNTIL_CANCELLED:
+            decision = (True, "")
+        else:
+            decision = self.threshold(
+                self.config.get("streak", 1), self.dry_streak, "dry_streak"
+            )
+        if not decision[0]:
+            return decision
         ceiling = self.config.get("max_iterations")
         if isinstance(ceiling, int) and ceiling > 0 and self.iteration >= ceiling:
             return False, "max_iterations"
-        if self.mode == LoopMode.COUNTED:
-            return self.threshold(
-                self.config.get("n"), self.iteration, "counted_complete"
-            )
-        if self.mode == LoopMode.UNTIL:
-            return self.until()
-        if self.mode == LoopMode.UNTIL_CANCELLED:
-            return True, ""
-        return self.threshold(
-            self.config.get("streak", 1), self.dry_streak, "dry_streak"
-        )
+        return decision
 
 
 def loop_should_continue(

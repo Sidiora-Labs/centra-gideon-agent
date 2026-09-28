@@ -3605,7 +3605,7 @@ class RunController:
                 ),
                 tokens=inst.tokens,
             )
-            if verdict.reason in _BUDGET_TRIPS:
+            if verdict.reason in _BUDGET_TRIPS and verdict.reason != "max_iterations":
                 self._surface_loop(
                     parent_path, node, reason=verdict.reason, detail=verdict.detail
                 )
@@ -3636,6 +3636,13 @@ class RunController:
             dry_streak=self._dry_streaks.get(parent_path, 0),
             ctx=ctx,
         )
+        if verdict.tripped and verdict.reason == "max_iterations" and (
+            keep_going or reason == "max_iterations"
+        ):
+            self._surface_loop(
+                parent_path, node, reason=verdict.reason, detail=verdict.detail
+            )
+            return
         self.journal.iteration(
             parent_path,
             node.id,

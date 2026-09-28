@@ -286,7 +286,8 @@ class _DurableSetupJob:
                     env=self.environment,
                 )
                 if not started:
-                    return None
+                    result = await self.read_result(status_path, output_path)
+                    return result if status_path.exists() else None
                 phase = "observe"
                 continue
             assert status_path is not None and output_path is not None
@@ -320,7 +321,9 @@ class _DurableSetupJob:
             if text:
                 break
             await asyncio.sleep(0.05)
-        code = int(text) if text and text.lstrip("-").isdigit() else 1
+        if not text:
+            return None
+        code = int(text) if text.lstrip("-").isdigit() else 1
         try:
             detail = output_path.read_text(encoding="utf-8", errors="replace")[:2000]
         except OSError:
