@@ -37,3 +37,38 @@ def get_default_provider(name: str = "native") -> MessageSourceProvider:
     )
 
     return FilesystemSourceProvider()
+
+
+def source_catalog(
+    fallback: MessageSourceProvider | None = None,
+) -> list[tuple[MessageSourceProvider, bool]]:
+    """Return a fresh list of active source instances and their polling posture."""
+    from gideon.integrations.inbox_providers.registry import get_source, list_source_names
+
+    sources: dict[str, MessageSourceProvider] = {}
+    for name in list_source_names():
+        instance = get_source(name)
+        if instance is not None:
+            sources[name] = instance
+    if fallback is not None:
+        sources.setdefault(str(fallback.source_name), fallback)
+    if "filesystem" not in sources:
+        try:
+            sources["filesystem"] = get_default_provider("filesystem")
+        except Exception:
+            pass
+
+    try:
+        from gideon.core.config.loader import AppConfig
+
+        filesystem_enabled = bool(AppConfig.load().inbox.enabled)
+    except Exception:
+        filesystem_enabled = False
+    return [
+        (
+            source,
+            bool(getattr(source, "polling_enabled", True))
+            and (name != "filesystem" or filesystem_enabled),
+        )
+        for name, source in sorted(sources.items())
+    ]

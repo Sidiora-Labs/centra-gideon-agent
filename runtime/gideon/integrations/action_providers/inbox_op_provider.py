@@ -32,11 +32,11 @@ def _status_value(item: Any) -> str:
 
 
 def _thread_key(item: Any) -> str:
-    if value := getattr(item, "thread_ts", None):
-        return str(value)
-    identifier = str(getattr(item, "id", "") or "")
-    head, separator, tail = identifier.partition("_")
-    return tail if separator else head
+    value = getattr(item, "thread_key", None)
+    if isinstance(value, str) and value:
+        return value
+    identifier = str(getattr(item, "thread_ts", "") or getattr(item, "id", ""))
+    return identifier.rsplit("_", 1)[-1]
 
 
 def _encode(payload: dict[str, Any]) -> str:

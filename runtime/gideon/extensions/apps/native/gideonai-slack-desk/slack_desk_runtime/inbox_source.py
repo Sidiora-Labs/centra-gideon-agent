@@ -54,6 +54,7 @@ class SlackDeskInboxSource(MessageSourceProvider):
 
     #: Shown by /api/inbox/providers alongside ``source_name``.
     display_name = "Slack"
+    watches_channels = True
 
     def __init__(
         self, config: dict[str, Any] | None = None, client: SlackDeskClientOps | None = None
@@ -71,6 +72,7 @@ class SlackDeskInboxSource(MessageSourceProvider):
         # Resolved lazily and cached: a display name per Slack user id. Bounded by
         # the number of distinct senders in watched channels.
         self._names: dict[str, str] = {}
+        self.last_error = ""
 
     @property
     def source_name(self) -> str:
@@ -86,14 +88,17 @@ class SlackDeskInboxSource(MessageSourceProvider):
         of skipping past unread messages.
         """
         out: list[IncomingMessage] = []
+        self.last_error = ""
         cursors = dict(checkpoints)
         for channel_id in watched_channels:
             since = checkpoints.get(channel_id, "0")
             try:
                 raw = await self._client.fetch_history(channel_id, since, _POLL_LIMIT)
-            except Exception:
+            except Exception as exc:
                 # Keep the old cursor: a transient API error must not look like
                 # "nothing new" and consume the unread window.
+                suffix = exc.__class__.__name__
+                self.last_error = f"{channel_id}: {suffix}"
                 logger.debug("inbox poll failed for %s", channel_id, exc_info=True)
                 continue
             newest = since

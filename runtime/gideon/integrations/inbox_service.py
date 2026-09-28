@@ -48,9 +48,11 @@ from gideon.integrations.inbox import (
     evaluate_alert,
     notify_inbox_alert,
     owner_username,
+    polled_item_id,
+    thread_mute_key,
 )
 from gideon.security.guardrails.audit import caller_scope
-from gideon.security.security import fence_untrusted
+from gideon.security.security import fence_untrusted, redact_credentials, redact_exfiltration_urls
 
 if TYPE_CHECKING:
     from gideon.integrations.inbox_providers.base import (
@@ -151,6 +153,7 @@ class InboxService:
         self._last_error = ""
         self._poll_count = 0
         self._last_maintenance_at = 0.0
+        self._source_health: dict[str, dict] = {}
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
 
     def health(self) -> dict:
@@ -162,10 +165,35 @@ class InboxService:
             "last_error": self._last_error,
             "poll_count": self._poll_count,
             "stale": stale,
+            "sources": self.source_statuses(),
         }
+
+    def source_statuses(self) -> list[dict]:
+        now = time.time()
+        result = []
+        for source, enabled in self._source_catalog():
+            name = str(source.source_name)
+            health = self._source_health.get(name, {})
+            last = float(health.get("last_poll_at") or 0)
+            result.append({
+                "name": name,
+                "active": bool(enabled),
+                "kind": "poll",
+                "can_reply": name != "filesystem",
+                "watches_channels": bool(getattr(source, "watches_channels", False)),
+                "last_poll_at": last,
+                "last_poll_ok": bool(health.get("last_poll_ok", False)),
+                "last_error": str(health.get("last_error") or ""),
+                "poll_count": int(health.get("poll_count") or 0),
+                "stale": bool(last and now - last > 900),
+            })
+        return result
 
     def start(self) -> None:
         """Start the background loop. Idempotent."""
+        from gideon.integrations.inbox import settle_verification_rows
+
+        settle_verification_rows(_dashboard_state(), self.inbox)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._loop())
             logger.info(
@@ -202,11 +230,25 @@ class InboxService:
                 except Exception:
                     logger.warning("Inbox maintenance failed", exc_info=True)
                 self._last_maintenance_at = now
-            if self._provider is not None:
+            if self._provider is not None or self._source_catalog():
                 try:
                     await self._poll_once()
-                    self._last_poll_ok = True
-                    self._last_error = ""
+                    active_names = {
+                        str(source.source_name)
+                        for source, enabled in self._source_catalog()
+                        if enabled
+                    }
+                    failed = [
+                        self._source_health[name]
+                        for name in active_names
+                        if name in self._source_health
+                        and not self._source_health[name]["last_poll_ok"]
+                    ]
+                    self._last_poll_ok = not failed
+                    self._last_error = "; ".join(
+                        f"{name}: {value['last_error']}" for name, value in self._source_health.items()
+                        if name in active_names and not value["last_poll_ok"]
+                    )
                 except Exception as exc:
                     self._last_poll_ok = False
                     self._last_error = str(exc) or exc.__class__.__name__
@@ -214,27 +256,84 @@ class InboxService:
                 self._last_poll_at = time.time()
                 self._poll_count += 1
 
+    def _source_catalog(self) -> list[tuple["MessageSourceProvider", bool]]:
+        from gideon.integrations.inbox_providers import source_catalog
+
+        return source_catalog(self._provider)
+
     async def _poll_once(self) -> None:
-        """Fetch new messages from the wired provider and ingest them."""
-        assert self._provider is not None
+        """Fetch from a fresh catalog, isolating failures and deadlines per source."""
         from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig.load().inbox
-        messages, checkpoints = await self._provider.poll(
-            list(cfg.watched_channels), dict(self.state.last_read_ts), cfg.user_id
-        )
-        if checkpoints:
-            self.state.last_read_ts.update(checkpoints)
-        ingested = self._ingest(
-            messages, own_user_id=cfg.user_id, test_mode=cfg.test_mode
-        )
-        if ingested or checkpoints:
+        catalog = [(source, enabled) for source, enabled in self._source_catalog() if enabled]
+        timeout = 30.0
+
+        async def poll_one(source: "MessageSourceProvider") -> tuple[str, int, str, bool]:
+            name = str(source.source_name)
+            started = time.time()
+            try:
+                prefix = f"{name}:"
+                checkpoints = {
+                    key[len(prefix):]: value
+                    for key, value in self.state.last_read_ts.items()
+                    if key.startswith(prefix)
+                }
+                if name == "filesystem" and not checkpoints:
+                    checkpoints = dict(self.state.last_read_ts)
+                watched = list(cfg.watched_channels) if getattr(source, "watches_channels", False) else []
+                messages, new_checkpoints = await asyncio.wait_for(
+                    source.poll(watched, checkpoints, cfg.user_id), timeout=timeout
+                )
+                self.state.last_read_ts.update({prefix + key: value for key, value in new_checkpoints.items()})
+                ingested = self._ingest(
+                    messages, source=source, own_user_id=cfg.user_id, test_mode=cfg.test_mode
+                )
+                provider_error = str(getattr(source, "last_error", "") or "")
+                if provider_error:
+                    provider_error = redact_exfiltration_urls(redact_credentials(provider_error))
+                self._source_health[name] = {
+                    "active": True,
+                    "kind": "poll",
+                    "can_reply": name != "filesystem",
+                    "watches_channels": bool(getattr(source, "watches_channels", False)),
+                    "last_poll_at": started,
+                    "last_poll_ok": not bool(provider_error),
+                    "last_error": provider_error,
+                    "poll_count": int(self._source_health.get(name, {}).get("poll_count", 0)) + 1,
+                    "stale": False,
+                }
+                return name, ingested, "", bool(new_checkpoints)
+            except asyncio.TimeoutError:
+                error = f"poll exceeded {timeout:g}s timeout"
+            except Exception as exc:
+                detail = str(exc) or exc.__class__.__name__
+                error = redact_exfiltration_urls(redact_credentials(detail))
+                logger.warning("Inbox source %s poll failed", name, exc_info=True)
+            self._source_health[name] = {
+                "active": True,
+                "kind": "poll",
+                "can_reply": name != "filesystem",
+                "watches_channels": bool(getattr(source, "watches_channels", False)),
+                "last_poll_at": started,
+                "last_poll_ok": False,
+                "last_error": error,
+                "poll_count": int(self._source_health.get(name, {}).get("poll_count", 0)) + 1,
+                "stale": False,
+            }
+            return name, 0, error, False
+
+        if not catalog:
+            return
+        results = await asyncio.gather(*(poll_one(source) for source, _ in catalog))
+        if any(ingested or error or checkpoints for _, ingested, error, checkpoints in results):
             self.state.save()
 
     def _ingest(
         self,
         messages: "list[IncomingMessage]",
         *,
+        source: "MessageSourceProvider | None" = None,
         own_user_id: str = "",
         test_mode: bool = False,
     ) -> int:
@@ -244,16 +343,28 @@ class InboxService:
             return 0
         operator = self._operator_name()
         dash_state = _dashboard_state()
-        can_reply = bool(
-            self._provider is not None and self._provider.source_name != "filesystem"
-        )
-        source_name = self._provider.source_name if self._provider else "native"
+        provider = source or self._provider
+        can_reply = bool(provider is not None and provider.source_name != "filesystem")
+        source_name = provider.source_name if provider else "native"
         count = 0
         for m in messages:
-            item_id = f"{m.channel_id}_{m.timestamp}"
-            if item_id in self.inbox.items or item_id in self.state.dismissed:
+            timestamp = m.timestamp or 0.0
+            message_key = m.id or m.text
+            item_id = polled_item_id(source_name, m.channel_id, message_key, now=timestamp)
+            legacy_id = f"{m.channel_id}_{m.timestamp}"
+            if (
+                item_id in self.inbox.items
+                or item_id in self.state.dismissed
+                or legacy_id in self.inbox.items
+                or legacy_id in self.state.dismissed
+            ):
                 continue
-            if m.thread_id and m.thread_id in self.state.muted_threads:
+            thread_id = m.thread_id or m.id or m.text
+            mute_key = thread_mute_key(source_name, m.channel_id, thread_id)
+            legacy_mute_keys = {m.thread_id or "", m.id or "", legacy_id.rsplit("_", 1)[-1]}
+            if mute_key in self.state.muted_threads or any(
+                key and key in self.state.muted_threads for key in legacy_mute_keys
+            ):
                 continue
             if own_user_id and m.sender_id == own_user_id and not test_mode:
                 continue
@@ -271,6 +382,7 @@ class InboxService:
                 created_at=m.timestamp or time.time(),
                 source=source_name,
                 can_reply=can_reply,
+                reply_target=m.id,
                 item_kind=_resolve_source_kind(m.kind, source_name),
                 owner=owner_username(),
             )

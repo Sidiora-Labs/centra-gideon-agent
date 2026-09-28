@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -385,8 +386,7 @@ async def api_inbox_update(request: web.Request) -> web.Response:
         return json_error("invalid_field_type", message=str(exc), status=400)
 
     if body.get("mute_thread"):
-        thread_key = item.thread_ts or item.id.split("_", 1)[1]
-        inbox_state.muted_threads.add(thread_key)
+        inbox_state.muted_threads.add(item.thread_key)
         inbox_state.save()
 
     if body.get("status") == ItemStatus.DISMISSED:
@@ -644,9 +644,31 @@ async def api_inbox_send(request: web.Request) -> web.Response:
         state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
         return web.json_response({"ok": True, "delivered_to_session": delivered})
 
-    return web.json_response(
-        {"error": f"replies for source {item.source!r} are not yet wired"}, status=503
-    )
+    inbox.update(item_id, draft=text)
+    from gideon.integrations.inbox_providers.registry import get_source
+
+    provider = get_source(item.source)
+    svc = getattr(state, "_inbox_svc", None)
+    if provider is None and getattr(svc, "_provider", None) is not None:
+        candidate = svc._provider
+        if str(getattr(candidate, "source_name", "")) == item.source:
+            provider = candidate
+    if provider is None:
+        return web.json_response({"error": "reply source is unavailable; draft was kept"}, status=503)
+    try:
+        delivered = await provider.send_reply(
+            item.channel, text, item.thread_ts or item.reply_target
+        )
+    except Exception:
+        logger.warning("Inbox reply failed for source %s", item.source, exc_info=True)
+        delivered = False
+    if not delivered:
+        return web.json_response({"error": "reply was not sent; draft was kept"}, status=502)
+    item.replied_at = time.time()
+    inbox.update_status(item_id, ItemStatus.SENT.value, owner=owner)
+    _record_signal(state, item, "reply")
+    state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+    return web.json_response({"ok": True, "sent": True, "item": _owner_item(item, owner)})
 
 
 async def api_inbox_open(request: web.Request) -> web.Response:
@@ -715,17 +737,7 @@ async def api_inbox_status(request: web.Request) -> web.Response:
 
     sources = [{"name": "native", "active": True, "kind": "push", "can_reply": True}]
     try:
-        from gideon.integrations.inbox_providers import get_message_providers
-
-        for name in get_message_providers():
-            sources.append(
-                {
-                    "name": name,
-                    "active": bool(sec.enabled),
-                    "kind": "poll",
-                    "can_reply": name != "filesystem",
-                }
-            )
+        sources.extend(svc.source_statuses() if svc else [])
     except Exception:
         logger.debug("inbox status: provider enumeration failed", exc_info=True)
 
@@ -781,12 +793,11 @@ async def api_inbox_digest(request: web.Request) -> web.Response:
 
 async def api_inbox_providers(request: web.Request) -> web.Response:
     """GET /api/inbox/providers — list registered inbox message source providers."""
-    from gideon.integrations.inbox_providers import get_message_providers
+    from gideon.integrations.inbox_providers import source_catalog
 
-    providers = get_message_providers()
     result = []
-    for name, cls in providers.items():
-        instance = cls()
+    for instance, enabled in source_catalog():
+        name = str(instance.source_name)
         result.append(
             {
                 "name": name,
@@ -794,6 +805,8 @@ async def api_inbox_providers(request: web.Request) -> web.Response:
                     instance, "display_name", name.replace("_", " ").title()
                 ),
                 "source_name": instance.source_name,
+                "active": bool(enabled),
+                "watches_channels": bool(getattr(instance, "watches_channels", False)),
             }
         )
     return web.json_response({"providers": result})

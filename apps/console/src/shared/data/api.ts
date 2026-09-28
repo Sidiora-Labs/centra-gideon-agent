@@ -2394,6 +2394,7 @@ export interface InboxItem {
   classification: InboxClassification; draft?: string; confidence: InboxConfidence
   status: InboxItemStatus; created_at?: number; context_summary?: string; ts?: string
   source?: string; can_reply?: boolean; reply_target?: string
+  replied_at?: number
   favorited?: boolean
   feedback_producers?: Record<'classification' | 'draft' | 'digest', FeedbackProducer | undefined>
   item_kind?: InboxItemKind
@@ -2418,9 +2419,9 @@ export interface InboxProposalApplyResult {
   item?: InboxItem
 }
 export interface InboxKindCount { kind: InboxItemKind; total: number; open: number; channel: boolean }
-export interface InboxProvider { name: string; display_name: string; source_name: string }
-export interface InboxHealth { running: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean }
-export interface InboxSourceHealth { name: string; active: boolean; kind: 'push' | 'poll'; can_reply: boolean }
+export interface InboxProvider { name: string; display_name: string; source_name: string; active?: boolean; watches_channels?: boolean }
+export interface InboxHealth { running: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean; sources?: InboxSourceHealth[] }
+export interface InboxSourceHealth { name: string; active: boolean; kind: 'push' | 'poll'; can_reply: boolean; watches_channels?: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean }
 export interface InboxStatus {
   enabled: boolean; user_id?: string
   native_source_active?: boolean; sources?: InboxSourceHealth[]

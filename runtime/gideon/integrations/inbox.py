@@ -5,8 +5,10 @@ dashboard inbox handlers read and mutate. Live message ingestion is provided
 separately by the message-source providers in ``gideon.integrations.inbox_providers``.
 """
 
+import asyncio
 import json
 import logging
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -46,6 +48,8 @@ __all__ = [
     "NON_CHANNEL_KINDS",
     "SOURCE_DECLARABLE_KINDS",
     "make_item_id",
+    "polled_item_id",
+    "thread_mute_key",
     "emit_attention_item",
     "emit_shared_knowledge_item",
     "evaluate_alert",
@@ -56,6 +60,8 @@ __all__ = [
 _STATE_FILE = "inbox_state.json"
 _ITEMS_FILE = "inbox.json"
 _USER_CACHE_TTL = 86400
+_verification_tasks: set[asyncio.Task] = set()
+_verification_tasks_lock = threading.Lock()
 
 
 def owner_username() -> str:
@@ -159,6 +165,23 @@ def make_item_id(kind: str, *, now: float | None = None) -> str:
     return f"{kind}_{uuid.uuid4().hex[:8]}_{stamp:.6f}"
 
 
+def polled_item_id(source: str, channel: str, message_id: str, *, now: float) -> str:
+    """A stable path-safe id bound to a source, channel and provider message id."""
+    import hashlib
+
+    identity = "\0".join((str(source), str(channel), str(message_id)))
+    digest = hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()[:24]
+    return f"message_{digest}_{float(now)}"
+
+
+def thread_mute_key(source: str, channel: str, message_id: str) -> str:
+    """One namespaced durable mute key shared by row actions and pollers."""
+    import hashlib
+
+    identity = "\0".join((str(source), str(channel), str(message_id)))
+    return "inbox-thread:" + hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()
+
+
 class Classification(str, Enum):
     NEEDS_REPLY = "needs_reply"
     FYI = "fyi"
@@ -254,6 +277,7 @@ class InboxItem:
     refs: dict = field(default_factory=dict)
     owner: str = ""
     owner_states: dict[str, str] = field(default_factory=dict)
+    replied_at: float = 0.0
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -297,6 +321,13 @@ class InboxItem:
     def ts(self) -> str:
         """Message timestamp extracted from the item ID ({channel}_{ts})."""
         return self.id.rsplit("_", 1)[-1]
+
+    @property
+    def thread_key(self) -> str:
+        """The source-owned root message key used by both mute writers and pollers."""
+        return thread_mute_key(
+            self.source or "native", self.channel, self.thread_ts or self.reply_target or self.id
+        )
 
     @classmethod
     def from_dict(cls, d: dict) -> "InboxItem":
@@ -692,21 +723,17 @@ def emit_attention_item(
         item.refs["dedup_key"] = dedup_key
     item.owner = owner_username() if addressee is None else str(addressee)
 
-    withheld = False
-    if _verification_opted_in(source, kind):
-        from gideon.workspace.notification_verify import REFUTED, run_verification_sync
-
-        verdict = run_verification_sync(title, body)
-        item.refs["verify"] = verdict
-        if verdict == REFUTED:
-            item.status = ItemStatus.FILTERED.value
-            item.refs["verify_withheld"] = {
-                "kind": notification_kinds.kind_for_legacy_pair(source, kind),
-                "title": title,
-                "body": body,
-                "item_kind": resolved_kind,
-            }
-            withheld = True
+    checking = _verification_opted_in(source, kind)
+    notice_kind = notification_kinds.kind_for_legacy_pair(source, kind)
+    pending = {
+        "kind": notice_kind,
+        "title": title,
+        "body": body,
+        "item_kind": resolved_kind,
+    }
+    if checking:
+        item.refs["verify"] = "checking"
+        item.refs["verify_pending"] = pending
 
     item_id = ""
     try:
@@ -716,10 +743,18 @@ def emit_attention_item(
     except Exception:
         logger.warning("attention item: inbox write failed", exc_info=True)
 
-    if state is not None and not withheld:
+    if state is not None and item_id:
+        try:
+            state.broadcast_ws("inbox_new_item", redact_item(item.to_dict()))
+        except Exception:
+            logger.debug("attention item: inbox row broadcast failed", exc_info=True)
+
+    if checking and item_id:
+        _schedule_attention_verification(state, target, item, pending)
+    elif state is not None:
         try:
             state.notify(
-                notification_kinds.kind_for_legacy_pair(source, kind),
+                notice_kind,
                 title,
                 body,
                 meta={
@@ -732,6 +767,170 @@ def emit_attention_item(
         except Exception:
             logger.warning("attention item: notify failed", exc_info=True)
     return item_id
+
+
+def _schedule_attention_verification(
+    state: Any, store: InboxStore, item: InboxItem, pending: dict[str, Any]
+) -> None:
+    """Run the managed check off the caller and apply its result on the owner loop."""
+    try:
+        caller_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        caller_loop = None
+    owner_loop = getattr(state, "_ws_loop", None)
+    if owner_loop is None:
+        owner_loop = caller_loop
+    elif owner_loop.is_closed():
+        owner_loop = None
+
+    async def check() -> None:
+        from gideon.workspace.notification_verify import verify_attention_item
+
+        verdict = await verify_attention_item(
+            str(pending.get("title") or ""), str(pending.get("body") or "")
+        )
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        apply = lambda: _apply_attention_verdict(
+            state, store, item.id, verdict, pending
+        )
+        if owner_loop is not None and running is not owner_loop:
+            if not owner_loop.is_closed():
+                owner_loop.call_soon_threadsafe(apply)
+            return
+        apply()
+
+    if owner_loop is not None:
+        def create_and_track() -> None:
+            if owner_loop.is_closed() or not owner_loop.is_running():
+                return
+            coroutine = check()
+            try:
+                task = owner_loop.create_task(coroutine)
+            except RuntimeError:
+                coroutine.close()
+                return
+            with _verification_tasks_lock:
+                _verification_tasks.add(task)
+
+            def forget(done: asyncio.Task) -> None:
+                with _verification_tasks_lock:
+                    _verification_tasks.discard(done)
+
+            task.add_done_callback(forget)
+
+        if caller_loop is owner_loop:
+            create_and_track()
+        else:
+            try:
+                owner_loop.call_soon_threadsafe(create_and_track)
+            except RuntimeError:
+                _start_attention_verification_worker(check, state, store, item, pending)
+        return
+
+    _start_attention_verification_worker(check, state, store, item, pending)
+
+
+def _start_attention_verification_worker(
+    check: Any, state: Any, store: InboxStore, item: InboxItem, pending: dict[str, Any]
+) -> None:
+    def worker() -> None:
+        try:
+            asyncio.run(check())
+        except Exception:
+            logger.debug("attention verification worker failed", exc_info=True)
+            _apply_attention_verdict(state, store, item.id, "skipped", pending)
+
+    threading.Thread(target=worker, name="inbox-verification", daemon=True).start()
+
+
+def _apply_attention_verdict(
+    state: Any,
+    store: InboxStore,
+    item_id: str,
+    verdict: str,
+    pending: dict[str, Any],
+) -> None:
+    item = store.items.get(item_id)
+    if item is None or item.refs.get("verify") != "checking":
+        return
+    item.refs["verify"] = verdict
+    item.refs.pop("verify_pending", None)
+    untouched = item.status_for(item.owner) == ItemStatus.PENDING.value
+    withheld = verdict == "refuted" and untouched
+    if withheld:
+        item.set_status_for(item.owner, ItemStatus.FILTERED.value)
+        item.refs["verify_withheld"] = dict(pending)
+    store.save()
+    if state is not None:
+        try:
+            state.broadcast_ws("inbox_item_updated", redact_item(item.to_dict()))
+        except Exception:
+            logger.debug("attention verification broadcast failed", exc_info=True)
+    if not untouched or withheld or state is None:
+        return
+    try:
+        state.notify(
+            str(pending.get("kind") or item.source),
+            str(pending.get("title") or ""),
+            str(pending.get("body") or ""),
+            meta={"inbox_item": item.id, "item_kind": item.item_kind, **dict(item.refs)},
+        )
+    except Exception:
+        logger.warning("attention verification: notify failed", exc_info=True)
+
+
+def settle_verification_rows(state: Any, store: InboxStore) -> int:
+    """Fail open checks interrupted by restart and repair stale filtered decisions."""
+    changed = 0
+    for item in store.items.values():
+        if item.refs.get("verify") == "checking":
+            notice = item.refs.pop("verify_pending", None)
+            legacy = item.refs.pop("verify_withheld", None)
+            if not isinstance(notice, dict):
+                notice = legacy if isinstance(legacy, dict) else {}
+            item.refs["verify"] = "skipped"
+            changed += 1
+            if state is not None and item.status_for(item.owner) == ItemStatus.PENDING.value:
+                try:
+                    state.notify(
+                        str(notice.get("kind") or item.source),
+                        str(notice.get("title") or ""),
+                        str(notice.get("body") or ""),
+                        meta={"inbox_item": item.id, "item_kind": item.item_kind},
+                    )
+                except Exception:
+                    logger.debug("interrupted attention notification failed", exc_info=True)
+        elif item.status_for(item.owner) == ItemStatus.FILTERED.value and isinstance(item.refs.get("verify_withheld"), dict):
+            withheld = item.refs["verify_withheld"]
+            is_decision = item.item_kind == ItemKind.AGENT_REQUEST.value or bool(item.refs.get("approval"))
+            if not is_decision:
+                continue
+            approval_id = str(item.refs.get("approval") or "")
+            pending_approvals = getattr(state, "_pending_approvals", {}) if state is not None else {}
+            if approval_id and approval_id not in pending_approvals:
+                item.set_status_for(item.owner, ItemStatus.HANDLED.value)
+                item.refs.pop("verify_withheld", None)
+                changed += 1
+                continue
+            item.set_status_for(item.owner, ItemStatus.PENDING.value)
+            item.refs.pop("verify_withheld", None)
+            changed += 1
+            if state is not None:
+                try:
+                    state.notify(
+                        str(withheld.get("kind") or item.source),
+                        str(withheld.get("title") or ""),
+                        str(withheld.get("body") or ""),
+                        meta={"inbox_item": item.id, "item_kind": item.item_kind},
+                    )
+                except Exception:
+                    logger.debug("legacy decision notification failed", exc_info=True)
+    if changed:
+        store.save()
+    return changed
 
 
 def emit_shared_knowledge_item(
@@ -783,7 +982,7 @@ def _verification_opted_in(source: str, kind: str) -> bool:
     """
     try:
         registered = notification_kinds.resolve_kind(source, kind)
-        if not registered.verifiable:
+        if not registered.verifiable or registered.decision:
             return False
         from gideon.workspace import notification_rules
 

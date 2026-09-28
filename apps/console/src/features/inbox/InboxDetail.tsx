@@ -24,6 +24,8 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
 
   const dirtyDraft = draft !== (item.draft ?? '')
   const canReply = item.can_reply ?? false
+  const replySent = Boolean(item.replied_at && (item.status === 'sent' || item.status === 'handled'))
+  const replyClosed = ['sent', 'handled', 'dismissed'].includes(item.status)
 
   const channelBacked = !NON_CHANNEL_ITEM_KINDS.includes(item.item_kind || 'message')
   const km = kindMeta(item.item_kind)
@@ -122,7 +124,16 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
               value={item.classification} onChange={(v) => patch({ classification: v as InboxClassification, confidence: 'user' }, 'class')} />
           </Section>
 
-          {canReply ? (
+          {replySent ? (
+            <Section label="Your reply">
+              <div data-type="body-s" className="rounded-md bg-surface-container px-m py-s text-on-surface-var whitespace-pre-wrap">{item.draft}</div>
+              <p data-type="caption" className="mt-1.5 text-on-surface-low">Sent {relPast(item.replied_at!)}.</p>
+            </Section>
+          ) : canReply && replyClosed ? (
+            item.draft ? <Section label="Drafted reply">
+              <div data-type="body-s" className="rounded-md bg-surface-container px-m py-s text-on-surface-var whitespace-pre-wrap">{item.draft}</div>
+            </Section> : null
+          ) : canReply ? (
             <Section label="Drafted reply"
               right={item.draft ? (
                 <FeedbackThumbs targetKind="inbox_draft" targetId={item.id}
@@ -158,9 +169,10 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
       )}
 
       <div className="flex flex-wrap items-center gap-s border-t border-outline-variant/40 pt-l">
+        {replySent && <Button size="sm" variant="secondary" onClick={() => patch({ status: 'seen' }, 'reopen')} disabled={!!busy} disabledReason={BUSY_REASON}><RotateCcw size={14} /> Reopen</Button>}
         {[
-          { key: 'handled', label: 'Mark handled', icon: Check, payload: { status: 'handled' }, variant: 'secondary' as const },
-          { key: 'dismiss', label: 'Dismiss', icon: XCircle, payload: { status: 'dismissed' }, variant: 'ghost' as const },
+          ...(!replySent ? [{ key: 'handled', label: 'Mark handled', icon: Check, payload: { status: 'handled' }, variant: 'secondary' as const },
+          { key: 'dismiss', label: 'Dismiss', icon: XCircle, payload: { status: 'dismissed' }, variant: 'ghost' as const }] : []),
           ...(channelBacked ? [{ key: 'mute', label: 'Mute thread', icon: BellOff, payload: { mute_thread: true }, variant: 'ghost' as const }] : []),
         ].map(action => <Button key={action.key} size="sm" variant={action.variant} onClick={() => patch(action.payload, action.key)}
           disabled={!!busy} disabledReason={BUSY_REASON}><action.icon size={14} /> {action.label}</Button>)}

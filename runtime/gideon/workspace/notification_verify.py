@@ -21,10 +21,8 @@ provider in the ``ModelCallGuard`` (circuit breaker + hard timeout + attempt aud
 bridge seam, so budget/breaker exhaustion surfaces here as an exception and degrades open
 rather than blocking delivery.
 
-The public entry point the inbox hook uses is :func:`run_verification_sync`, a sync bridge
-over the async :func:`verify_attention_item` — ``emit_attention_item`` is synchronous and has
-many synchronous callers, so the model call is run to completion on a worker loop rather than
-forcing every emitter to become a coroutine.
+The caller records the inbox row first and schedules :func:`verify_attention_item` as a
+background task; this module never waits on the model from an emitter or request loop.
 """
 
 from __future__ import annotations
@@ -32,7 +30,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -108,34 +105,3 @@ async def verify_attention_item(title: str, body: str = "") -> str:
         logger.debug("verify: model call failed — skipping (fail-open)", exc_info=True)
         return SKIPPED
     return _parse_verdict(raw)
-
-
-def _run_sync(coro: Any) -> Any:
-    """Run *coro* to completion from a synchronous caller.
-
-    ``emit_attention_item`` is sync and reached from both plain sync code and async request
-    handlers. When no loop is running on this thread ``asyncio.run`` is correct; when one is
-    (an async caller), run the coroutine on its own loop in a worker thread rather than
-    exploding with "asyncio.run() cannot be called from a running event loop". Blocking the
-    caller is acceptable: verification is a pre-delivery gate whose contract is synchronous.
-    """
-    import asyncio
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
-
-
-def run_verification_sync(title: str, body: str = "") -> str:
-    """Sync entry point for the inbox hook. Never raises — worst case returns ``skipped``."""
-    try:
-        return _run_sync(verify_attention_item(title, body))
-    except Exception:
-        logger.debug("verify: sync bridge failed — skipping (fail-open)", exc_info=True)
-        return SKIPPED

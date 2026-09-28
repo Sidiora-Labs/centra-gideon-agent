@@ -40,6 +40,9 @@ class IncomingMessage:
 
 
 class MessageSourceProvider(ABC):
+    watches_channels = False
+    polling_enabled = True
+
     @property
     @abstractmethod
     def source_name(self) -> str: ...

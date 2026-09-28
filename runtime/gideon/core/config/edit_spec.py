@@ -230,6 +230,20 @@ class EditCandidate:
                 self.regex(pattern)
         return self.value
 
+    def channel_ids(self):
+        if not isinstance(self.value, list) or any(not isinstance(item, str) for item in self.value):
+            self.deny("must be a list of channel ids")
+        if len(self.value) > 100:
+            self.deny("must have at most 100 channel ids")
+        result = []
+        for item in self.value:
+            value = item.strip()
+            if not value or len(value) > 256 or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+                self.deny("each channel id must be a non-empty, single-line value of at most 256 characters")
+            if value not in result:
+                result.append(value)
+        return result
+
     def regex(self, pattern: str, resource: str | None = None, operation: str = ""):
         try:
             re.compile(pattern)
@@ -382,6 +396,7 @@ _EDIT_POLICIES = {
     "bool": EditCandidate.boolean,
     "duration": EditCandidate.duration,
     "str_list": EditCandidate.strings,
+    "channel_ids": EditCandidate.channel_ids,
     "str": EditCandidate.text,
     "egress": EditCandidate.egress,
     "projection_rules": EditCandidate.projection,

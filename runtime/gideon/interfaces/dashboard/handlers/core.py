@@ -897,6 +897,7 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     "inbox.engagement_ranking_enabled": {"type": "bool"},
     "inbox.engagement_half_life_days": {"type": "float", "min": 0.0, "max": 365.0},
     "inbox.enabled": {"type": "bool"},
+    "inbox.watched_channels": {"type": "channel_ids"},
     "workflows.enabled": {"type": "bool"},
     "workflows.self_schedule_max_outstanding": {"type": "int", "min": 0, "max": 200},
     "workflows.default_node_timeout_total_secs": {
