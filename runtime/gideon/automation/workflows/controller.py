@@ -4744,11 +4744,14 @@ class RunController:
                 )
             self._cancel_usage_snapshot.clear()
         if status in (RunStatus.FAILED, RunStatus.ESCALATED) and not error:
+            from gideon.automation.workflows.ending_sentence import for_failures
+
+            error = for_failures(self)
             failed = [
                 (path, inst) for path, inst in self.instances.items()
                 if inst.failure and inst.failure.cause_plain
             ]
-            if failed:
+            if not error and failed:
                 path, inst = max(failed, key=lambda row: (row[0].count("."), row[1].completed_at or ""))
                 node = dict(_walk(self.root)).get(spec_path(path))
                 label = node.id if node and node.id else path

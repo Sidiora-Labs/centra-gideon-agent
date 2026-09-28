@@ -232,9 +232,10 @@ async def record_review_outcome(
     outcome: str,
     *,
     error: str = "",
+    action_record: dict[str, Any] | None = None,
     now: float | None = None,
     base_dir: Path | str | None = None,
-) -> None:
+) -> str | None:
     from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
     from gideon.core.config.loader import config_dir
 
@@ -243,7 +244,7 @@ async def record_review_outcome(
     if identity.startswith("store:"):
         identity = identity[len("store:") :]
     if not identity:
-        return
+        return None
     status = outcome
     if status == "dismissed":
         status = "interrupted_dismissed" if card.get("reason") == "interrupted" else "skipped_missed"
@@ -251,10 +252,17 @@ async def record_review_outcome(
         run_id=f"review-{int(finished * 1000)}",
         job_id=identity,
         trigger="review",
-        started_at=finished,
-        finished_at=finished,
-        status=status,
-        summary=f"{card.get('reason', 'missed')} review: {outcome}",
-        error=error,
+        started_at=float(action_record.get("started_at") or finished) if action_record else finished,
+        finished_at=float(action_record.get("finished_at") or finished) if action_record else finished,
+        duration_ms=int(action_record.get("duration_ms") or 0) if action_record else 0,
+        status=str(action_record.get("status") or status) if action_record else status,
+        summary=(
+            str(action_record.get("summary") or action_record.get("error") or "")
+            if action_record
+            else f"{card.get('reason', 'missed')} review: {outcome}"
+        ),
+        trace=str(action_record.get("trace") or "") if action_record else "",
+        error=str(action_record.get("error") or error) if action_record else error,
     )
     await ExecutionJournal(config_dir() if base_dir is None else Path(base_dir)).append(record)
+    return record.run_id

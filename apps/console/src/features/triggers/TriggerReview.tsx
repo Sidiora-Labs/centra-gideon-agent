@@ -1,13 +1,19 @@
 import { useState } from 'react'
-import { api, type TriggerReviewCard, type TriggerReviewDecision } from '../../shared/data/api'
+import { api, type TriggerReviewCard, type TriggerReviewDecision, type TriggerReviewResult } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { readableErrText } from '../../shared/data/errText'
 import { Button } from '../../shared/ui/Button'
 import { InlineError } from '../../shared/ui/InlineError'
 import { relPast } from './triggerMeta'
+import { runFlashMeta } from '../schedule/scheduleMeta'
 
 export function reviewDecision(card: TriggerReviewCard, decision: TriggerReviewDecision) {
   return { trigger_id: card.trigger_id, review_id: card.id, decision, expected_revision: card.action_revision }
+}
+
+export function announceReviewResult(card: TriggerReviewCard, result: TriggerReviewResult) {
+  const message = result.summary || runFlashMeta(result.status || (result.outcome === 'dismissed' ? 'dismissed' : undefined)).label
+  window.dispatchEvent(new CustomEvent('ne:toast', { detail: { level: 'info', message: `${card.trigger_name || 'Automation'}: ${message}` } }))
 }
 
 export function TriggerReview({ onOpenTrigger, onChanged }: { onOpenTrigger: (id: string) => void; onChanged: () => void }) {
@@ -33,6 +39,7 @@ export function ReviewCard({ card, onOpenTrigger, onChanged }: { card: TriggerRe
     try {
       const result = await api.decideTriggerReview(reviewDecision(card, decision))
       if (!result.ok) throw new Error('The review decision was refused.')
+      announceReviewResult(card, result)
       setSettled(true)
       onChanged()
     } catch (failure) { setError(failure) }

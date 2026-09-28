@@ -7,7 +7,7 @@ import { Button } from '../../shared/ui/Button'
 import { Toggle } from '../../shared/ui/Toggle'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { api, isOutcomeRoute, type ActionProvider, type EventPattern, type Trigger as WireTrigger } from '../../shared/data/api'
-import { RunHistory } from '../schedule/ScheduleDetail'
+import { RunHistory, RunReceipt } from '../schedule/ScheduleDetail'
 import { triggerHealthMeta } from '../schedule/scheduleMeta'
 import { actionLabel, EVENT_PATTERN_META } from './triggerMeta'
 import { reportingWrite } from '../../app/shell/reportingWrite'
@@ -23,6 +23,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
 }) {
   const [busy, setBusy] = useState(false)
   const [runFlash, setRunFlash] = useState<string | null>(null)
+  const [runReceipt, setRunReceipt] = useState<{ status?: string; summary?: string } | null>(null)
   const [histKey, setHistKey] = useState(0)
   const [err, setErr] = useState('')
   const [delivery, setDelivery] = useState(trigger.delivery ?? 'none')
@@ -123,6 +124,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
     setBusy(true)
     setErr('')
     setRunFlash(null)
+    setRunReceipt(null)
     try {
       const r = await api.runStoreTrigger(trigger.raw_id, dry)
       if (!dry && r.ok === false) {
@@ -132,7 +134,8 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
       const plan = (r.result as { plan?: { enforced?: string[]; bypassed?: string[] } } | undefined)?.plan
       setRunFlash(dry
         ? plan ? `Dry run: no action executed. Enforced: ${(plan.enforced ?? []).join(', ') || 'none'}. Bypassed: ${(plan.bypassed ?? []).join(', ') || 'none'}.` : 'Dry run: no action executed.'
-        : 'Ran')
+        : null)
+      if (!dry) setRunReceipt({ status: r.status, summary: r.summary })
       if (!dry) setHistKey((k) => k + 1)
       onChanged()
     } catch (e) {
@@ -300,6 +303,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
       )}
 
       {err && <FieldError>{err}</FieldError>}
+      {runReceipt && !err && <RunReceipt {...runReceipt} />}
       {runFlash && !err && <div className="text-on-surface-low text-[0.8125rem]">{runFlash}</div>}
 
       {

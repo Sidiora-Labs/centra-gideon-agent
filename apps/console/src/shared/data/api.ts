@@ -1679,9 +1679,12 @@ export type TriggerReviewDecision = 'run_now' | 'dismiss'
 export interface TriggerReviewResult {
   ok: boolean
   outcome: 'ran_late' | 'interrupted_retried' | 'dismissed'
+  status?: string
+  summary?: string
+  run_id?: string
   result?: unknown
 }
-export interface TriggerRunResult { ok: boolean; name?: string; result?: unknown; refused?: string; running?: boolean }
+export interface TriggerRunResult { ok: boolean; name?: string; result?: unknown; refused?: string; running?: boolean; status?: string; summary?: string; run_id?: string }
 export interface LearningRow {
   id: string; kind: string; title: string; provenance: string
   source_cadence: string; source_excerpt: string

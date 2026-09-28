@@ -39,6 +39,39 @@ _LIST_FIELDS = (
 )
 
 
+def action_summary(status: str, result: Any = None, error: str = "") -> str:
+    """Return the readable outcome kept beside an action's structured trace."""
+    if status == "waiting":
+        try:
+            from gideon.automation.triggers.parks import waiting_line
+
+            return waiting_line(result)
+        except Exception:
+            return "Waiting for you to finish this action."
+    if status == "failure":
+        return " ".join(str(error or "The action failed.").split())
+    raw = str(getattr(result, "stdout", "") or "")
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    workflow = str(payload.get("workflow") or "").strip()
+    if status == "launched":
+        return f"Workflow {workflow!r} launched." if workflow else "The workflow run was launched."
+    if status == "queued":
+        return (
+            f"Workflow {workflow!r} queued behind a run already in flight."
+            if workflow
+            else "The workflow run was queued behind a run already in flight."
+        )
+    if status == "skipped_noop":
+        reason = str(payload.get("reason") or "").strip()
+        return f"Action skipped: {reason}." if reason else "Action skipped."
+    return "Action completed."
+
+
 @dataclass
 class ExecutionRecord:
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])

@@ -2092,15 +2092,28 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "name": row.trigger.name, "refused": refusal}
         )
+    previous_runs, _total = await _runs_store().list_for_job(raw, 0, 1)
+    previous = previous_runs[0] if previous_runs and isinstance(previous_runs[0], dict) else {}
     ran, note = await _dispatch_store_action(
         row.trigger, {"trigger_id": raw, "manual": True}
     )
+    runs, _total = await _runs_store().list_for_job(raw, 0, 1)
+    recorded = runs[0] if runs and isinstance(runs[0], dict) else {}
+    if recorded and recorded.get("run_id") == previous.get("run_id") and recorded.get("finished_at") == previous.get("finished_at"):
+        recorded = {}
     paused_note = (
         "" if row.trigger.enabled else " (paused — this run does not re-enable it)"
     )
-    return web.json_response(
-        {"ok": ran, "name": row.trigger.name, "result": note + paused_note}
-    )
+    response = {"ok": ran, "name": row.trigger.name, "result": note + paused_note}
+    if recorded:
+        response.update(
+            {
+                "run_id": str(recorded.get("run_id") or ""),
+                "status": str(recorded.get("status") or ""),
+                "summary": _redact(str(recorded.get("summary") or recorded.get("error") or "")),
+            }
+        )
+    return web.json_response(response)
 
 
 async def _dispatch_store_action(
@@ -2227,17 +2240,17 @@ async def _record_manual_run(
         status = status_for_result(result, exc)
         if exc is not None:
             error = f"{type(exc).__name__}: {exc}"
-            summary = error
         elif status == "failure":
             error = (
                 str(getattr(result, "error", "") or "") or "the action reported failure"
             )
-            summary = error
         else:
             error = ""
-            summary = (
-                str(getattr(result, "stdout", "") or "") if result is not None else ""
-            )
+
+        from gideon.automation.schedule_history import action_summary
+
+        summary = action_summary(status, result, error)
+        trace = str(getattr(result, "stdout", "") or "") if result is not None else ""
 
         run_id = f"manual-{int(finished * 1000)}"
         await _runs_store().append(
@@ -2250,7 +2263,7 @@ async def _record_manual_run(
                 duration_ms=int(max(0.0, finished - started) * 1000),
                 status=status,
                 summary=summary,
-                trace=summary,
+                trace=trace,
                 error=error,
             )
         )
@@ -2849,6 +2862,8 @@ async def api_trigger_review(request: web.Request) -> web.Response:
             {"error": "trigger changed before dispatch"}, status=409
         )
 
+    previous_runs, _total = await _runs_store().list_for_job(raw, 0, 1)
+    previous_record = previous_runs[0] if previous_runs and isinstance(previous_runs[0], dict) else {}
     ran, note = await _dispatch_store_action(
         row.trigger,
         {
@@ -2859,14 +2874,43 @@ async def api_trigger_review(request: web.Request) -> web.Response:
         },
         event="restart.review",
     )
+    action_runs, _total = await _runs_store().list_for_job(raw, 0, 1)
+    action_record = (
+        action_runs[0]
+        if action_runs and isinstance(action_runs[0], dict)
+        else {}
+    )
+    if (
+        action_record
+        and action_record.get("run_id") == previous_record.get("run_id")
+        and action_record.get("finished_at") == previous_record.get("finished_at")
+    ):
+        action_record = {}
+    if action_record:
+        action_record = await _runs_store().get_run(
+            raw, str(action_record.get("run_id") or "")
+        ) or action_record
     if not ran:
         reviews.release_run(review_id, error=note)
-        await record_review_outcome(
-            card, "failed", error=note, base_dir=store.base_dir
+        review_run_id = await record_review_outcome(
+            card,
+            "failed",
+            error=note,
+            action_record=action_record or None,
+            base_dir=store.base_dir,
         )
-        return web.json_response(
-            {"ok": False, "outcome": "failed", "result": _redact(note)}, status=500
-        )
+        response = {"ok": False, "outcome": "failed", "result": _redact(note)}
+        if action_record:
+            response.update(
+                {
+                    "run_id": str(action_record.get("run_id") or ""),
+                    "status": str(action_record.get("status") or ""),
+                    "summary": _redact(str(action_record.get("summary") or action_record.get("error") or "")),
+                }
+            )
+        if review_run_id:
+            response["run_id"] = review_run_id
+        return web.json_response(response, status=500)
     outcome = (
         "interrupted_retried"
         if card.get("reason") == "interrupted"
@@ -2881,11 +2925,27 @@ async def api_trigger_review(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "review decision could not be committed"}, status=500
         )
-    await record_review_outcome(card, outcome, base_dir=store.base_dir)
+    review_run_id = await record_review_outcome(
+        card,
+        outcome,
+        action_record=action_record or None,
+        base_dir=store.base_dir,
+    )
     state = request.app.get("state")
     if state is not None:
         state.push_refresh("crons")
-    return web.json_response({"ok": True, "outcome": outcome, "result": _redact(note)})
+    response = {"ok": True, "outcome": outcome, "result": _redact(note)}
+    if action_record:
+        response.update(
+            {
+                "run_id": str(action_record.get("run_id") or ""),
+                "status": str(action_record.get("status") or ""),
+                "summary": _redact(str(action_record.get("summary") or action_record.get("error") or "")),
+            }
+        )
+    if review_run_id:
+        response["run_id"] = review_run_id
+    return web.json_response(response)
 
 
 async def api_trigger_history_all(request: web.Request) -> web.Response:

@@ -56,6 +56,9 @@ export function statusMeta(s?: string | null): StatusMeta {
   if (s === 'ran_late') return { label: 'ran late', tone: 'var(--color-warning)', icon: Clock }
   if (s === 'failed') return { label: 'failed', tone: 'var(--color-danger)', icon: XCircle }
   if (s === 'timeout') return { label: 'timed out', tone: 'var(--color-danger)', icon: Clock }
+  if (s === 'waiting' || s === 'needs_input') return { label: 'waiting for you', tone: 'var(--color-info)', icon: PauseCircle }
+  if (s === 'queued') return { label: 'queued', tone: 'var(--color-info)', icon: Clock }
+  if (s === 'interrupted') return { label: 'interrupted', tone: 'var(--color-warning)', icon: PauseCircle }
   if (s === 'launched') return { label: 'launched', tone: 'var(--color-info)', icon: Rocket }
   if (s === 'blocked_injection') return { label: 'blocked', tone: 'var(--color-danger)', icon: ShieldAlert }
   if (s && s.startsWith('skipped_')) return { label: s.slice(8).replace(/_/g, ' '), tone: 'var(--color-on-surface-low)', icon: PauseCircle }
@@ -65,6 +68,18 @@ export function statusMeta(s?: string | null): StatusMeta {
 }
 
 
+
+export function runFlashMeta(status?: string | null): StatusMeta {
+  if (status === 'waiting' || status === 'needs_input') return { label: 'Waiting for you', tone: 'var(--color-info)', icon: PauseCircle }
+  if (status === 'launched') return { label: 'Launched', tone: 'var(--color-info)', icon: Rocket }
+  if (status === 'queued') return { label: 'Queued', tone: 'var(--color-info)', icon: Clock }
+  if (status === 'interrupted') return { label: 'Interrupted', tone: 'var(--color-warning)', icon: PauseCircle }
+  if (['failure', 'failed', 'error', 'timeout'].includes(status || '')) return { label: status === 'timeout' ? 'Timed out' : 'Run failed', tone: 'var(--color-danger)', icon: XCircle }
+  if (['success', 'ok', 'ran', 'ran_late', 'interrupted_retried', 'skipped_noop'].includes(status || '')) return { label: 'Run finished', tone: 'var(--color-ok)', icon: CheckCircle2 }
+  if (status === 'dismissed' || status === 'interrupted_dismissed') return { label: 'Dismissed', tone: 'var(--color-on-surface-low)', icon: Circle }
+  if (status?.startsWith('skipped_')) return { label: 'Skipped', tone: 'var(--color-on-surface-low)', icon: PauseCircle }
+  return { label: 'Run recorded', tone: 'var(--color-on-surface-var)', icon: Circle }
+}
 
 export function isInertOutcome(s?: string | null): boolean {
   return Boolean(s) && String(s).startsWith('skipped_')

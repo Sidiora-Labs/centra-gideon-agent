@@ -10,7 +10,7 @@ import { InvestigateButton } from '../../shared/ui/InvestigateButton'
 import { Markdown } from '../../shared/ui/Markdown'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { api, type ScheduleJob, type ScheduleRun } from '../../shared/data/api'
-import { modeMeta, deriveMode, statusMeta, lastRunMeta, isInertOutcome, relPast, absTime, mdToPlain } from './scheduleMeta'
+import { modeMeta, deriveMode, statusMeta, lastRunMeta, runFlashMeta, type StatusMeta, isInertOutcome, relPast, absTime, mdToPlain } from './scheduleMeta'
 import { ScheduledAgentRun } from '../agents/auiAgentPanel'
 import { actionLabel, actionIcon } from '../triggers/triggerMeta'
 import { ScheduleForm, toDraft, draftToPayload, type ScheduleDraft } from './ScheduleForm'
@@ -34,7 +34,8 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
   const [cardHistory, setCardHistory] = useState<{ jobId: string; runs: ScheduleRun[] } | null>(null)
 
   const [triggered, setTriggered] = useState(false)
-  const [ranFlash, setRanFlash] = useState<null | 'ok' | 'error'>(null)
+  const [ranFlash, setRanFlash] = useState<StatusMeta | null>(null)
+  const [runSummary, setRunSummary] = useState('')
   const [fading, setFading] = useState(false)
   const runStartRef = useRef<number | null>(null)
   const mm = modeMeta(deriveMode(job))
@@ -52,7 +53,7 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
     if (finished) {
       setTriggered(false)
       setHistKey((k) => k + 1)
-      setRanFlash(job.last_status === 'error' ? 'error' : 'ok')
+      setRanFlash(runFlashMeta(job.last_run_status))
       return
     }
     const t = window.setInterval(() => onChanged(), 2500)
@@ -86,7 +87,14 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
         setErr(r.refused || (typeof r.result === 'string' && r.result) || 'This schedule did not run.')
         return
       }
-      setTriggered(true)
+      setRunSummary(r.summary || '')
+      if (r.status) {
+        setTriggered(false)
+        setRanFlash(runFlashMeta(r.status))
+        setHistKey(key => key + 1)
+      } else {
+        setTriggered(true)
+      }
       onChanged()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Run failed'
@@ -143,12 +151,11 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
         <Button size="sm" variant="secondary" onClick={runNow} disabled={busy || running || !!ranFlash}
           disabledReason={ranFlash ? undefined : BUSY_REASON}>
           <span className={`inline-flex items-center gap-1.5 transition-opacity duration-500 ${fading ? 'opacity-0' : 'opacity-100'}`}
-            style={ranFlash === 'ok' ? { color: 'var(--color-ok)' } : ranFlash === 'error' ? { color: 'var(--color-danger)' } : undefined}>
+            style={ranFlash ? { color: ranFlash.tone } : undefined}>
             {running ? <Loader2 size={14} className="animate-spin" />
-              : ranFlash === 'ok' ? <Check size={14} />
-              : ranFlash === 'error' ? <AlertTriangle size={14} />
+              : ranFlash ? <ranFlash.icon size={14} />
               : <PlayCircle size={14} />}
-            {running ? 'Running…' : ranFlash === 'ok' ? 'Run finished' : ranFlash === 'error' ? 'Run failed' : 'Run now'}
+            {running ? 'Running…' : ranFlash?.label || 'Run now'}
           </span>
         </Button>
         <span title="Dry-run replay — preview what this would do, with no side effects (write tools are not executed)">
@@ -166,6 +173,7 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
         </label>
       </div>
       {err && <FieldError>{err}</FieldError>}
+      {runSummary && <p role="status" data-type="body-s" className="text-on-surface-var">{runSummary}</p>}
       {note && !running && <p className="text-ok text-[0.8125rem]">{note}</p>}
 
       {cardHistory?.jobId === job.id && <ScheduledAgentRun job={job} history={cardHistory.runs} onSaved={onChanged} displayOnly />}
@@ -229,6 +237,13 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
         onLoaded={runs => setCardHistory(runs == null ? null : { jobId: job.id, runs })} />
     </div>
   )
+}
+
+export function RunReceipt({ status, summary }: { status?: string | null; summary?: string | null }) {
+  const receipt = runFlashMeta(status)
+  return <p role="status" data-type="body-s" className="text-on-surface-var">
+    <span style={{ color: receipt.tone }}>{receipt.label}</span>{summary ? ` · ${summary}` : ''}
+  </p>
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
