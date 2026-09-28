@@ -4362,8 +4362,10 @@ export const api = {
 
   status: () => get<DashboardStatus>('/api/status'),
   approvals: () => get<PendingApproval[]>('/api/approvals'),
-  resolveApproval: (id: string, action: 'approve' | 'reject') =>
-    post<{ ok: boolean }>(`/api/approvals/${encodeURIComponent(id)}/${action}`, {}),
+  resolveApproval: (id: string, action: 'approve' | 'reject', revision: string | undefined) => {
+    if (!revision) return Promise.reject(new Error('This approval has no revision. Refresh it before deciding.'))
+    return post<{ ok: boolean }>(`/api/approvals/${encodeURIComponent(id)}/${action}`, { expected_revision: revision })
+  },
   pushStatus: () => get<PushStatus>('/api/push'),
   pushSubscribe: (device_id: string, subscription: unknown) =>
     post<{ ok: boolean; device_id: string }>('/api/push/subscribe', { device_id, subscription }),

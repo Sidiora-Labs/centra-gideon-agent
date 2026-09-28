@@ -92,14 +92,25 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
     state.register_ws(ws, app=request.get("app", ""))
 
     try:
-        sessions_data = [s.to_dict() for s in state._sessions.values()]
-        await ws.send_json(
-            {"type": "sessions", "data": sessions_data, "yolo": state.is_yolo_active()}
-        )
         app = request.get("app", "")
+        sessions_data = [
+            s.to_dict()
+            for s in state._sessions.values()
+            if not app or getattr(s, "created_by_app", "") == app
+        ]
+        await ws.send_json(
+            {
+                "type": "sessions",
+                "data": sessions_data,
+                "yolo": state.is_yolo_active() if not app else False,
+            }
+        )
         for chat_session in state._sessions.values():
             if chat_session._routing_suggestion is not None and (
-                not app or state._app_may_see_event(app, "routing_suggestion")
+                not app or (
+                    getattr(chat_session, "created_by_app", "") == app
+                    and state._app_may_see_event(app, "routing_suggestion")
+                )
             ):
                 await ws.send_json(
                     {
@@ -140,6 +151,10 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                     session = a.parent_session_key.removeprefix(
                                         "dashboard:"
                                     )
+                                    if request.get("app") and not state._app_owns_session(
+                                        request["app"], session
+                                    ):
+                                        continue
                                     await ws.send_json(
                                         {
                                             "type": "subagent_snapshot",
@@ -162,6 +177,10 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                 session = a.parent_session_key.removeprefix(
                                     "dashboard:"
                                 )
+                                if request.get("app") and not state._app_owns_session(
+                                    request["app"], session
+                                ):
+                                    continue
                                 try:
                                     await ws.send_json(
                                         {

@@ -13,6 +13,7 @@ from gideon.integrations.channel_trust import (
     is_tracked_channel,
     provider_trust,
 )
+from gideon.security.approval_answer import Principal, on_channel
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from .api import TelegramError
 from .format import split_text, to_markdown_v2
@@ -51,6 +52,7 @@ class PendingApproval:
     future: asyncio.Future = field(
         default_factory=lambda: asyncio.get_running_loop().create_future()
     )
+    answerer: Principal | None = None
 
 
 class TelegramDelivery:
@@ -443,6 +445,7 @@ class TelegramDelivery:
             ):
                 answer = cm.text.split("\n", 1)[0].strip().casefold()
                 if answer in ("yes", "y", "no", "n"):
+                    pending.answerer = on_channel("telegram", cm.sender)
                     pending.future.set_result(
                         "approved" if answer in ("yes", "y") else "rejected"
                     )
@@ -582,6 +585,7 @@ class TelegramDelivery:
             and is_allowed_sender("telegram", pending.owner)
         )
         if allowed:
+            pending.answerer = on_channel("telegram", str(sender.get("id", "")))
             pending.future.set_result("approved" if action == "approve" else "rejected")
         return bool(allowed)
 

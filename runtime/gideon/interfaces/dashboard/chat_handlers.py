@@ -513,6 +513,7 @@ def _origin_label(origin: str, source_id: str) -> str:
     return source_id
 
 
+
 async def api_chat_sessions(request: web.Request) -> web.Response:
     """GET /api/chat/sessions — list all chat sessions.
 
@@ -537,7 +538,10 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
 
     out: list[dict] = []
     seen: set[str] = set()
+    request_app = str(request.get("app", "") or "")
     for s in state._sessions.values():
+        if request_app and getattr(s, "created_by_app", "") != request_app:
+            continue
         if getattr(s, "memory_mode", "persistent") in ("incognito", "temporary"):
             seen.add(s.key)
             continue
@@ -587,6 +591,8 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             if name in seen:
                 continue
             meta = state.conversation_log.get_metadata(raw_key)
+            if request_app and meta.get("created_by_app") != request_app:
+                continue
             if meta.get("closed"):
                 continue
             if meta.get("memory_mode") in ("incognito", "temporary"):
@@ -2325,14 +2331,26 @@ async def api_chat_mode(request: web.Request) -> web.Response:
             },
             status=400,
         )
+    from gideon.security.approval_answer import of_request, refusal
+
+    principal = of_request(request)
+    denial = refusal(principal)
+    if denial:
+        return web.json_response(
+            {"error": {"code": "approval_owner_only", "message": denial}}, status=403
+        )
     session_name = body.get("session") or None
     if session_name is not None and session_name not in state._sessions:
         return web.json_response({"ok": False, "error": "unknown session"}, status=400)
 
     from gideon.security.guardrails.ladder import approval_screening_verdict
+    from gideon.security.approval_grants import stands
 
     screening = approval_screening_verdict(mode)
-    if not screening.allowed:
+    mode_level = "hook_based" if mode == "trust_reads" else "auto"
+    if not screening.allowed or (mode != "normal" and not stands(
+        mode, caller=principal.label, subject=f"session={session_name or 'all'}", level=mode_level
+    )):
         current = _session_approval_mode(
             state, state._sessions.get(session_name) if session_name else None
         )
@@ -2360,10 +2378,12 @@ async def api_chat_mode(request: web.Request) -> web.Response:
         if session_name is not None:
             state._sessions[session_name]._trust = False
             state._sessions[session_name]._trust_reads = True
+            state._sessions[session_name]._agent_floor_seeded = False
         else:
             for session in state._sessions.values():
                 session._trust = False
                 session._trust_reads = True
+                session._agent_floor_seeded = False
         try:
             sel().log_api_access(
                 caller="dashboard:mode",
@@ -2380,9 +2400,11 @@ async def api_chat_mode(request: web.Request) -> web.Response:
         state.disable_yolo()
         if session_name is not None:
             state._sessions[session_name]._trust = True
+            state._sessions[session_name]._agent_floor_seeded = False
         else:
             for session in state._sessions.values():
                 session._trust = True
+                session._agent_floor_seeded = False
         try:
             sel().log_api_access(
                 caller="dashboard:mode",
@@ -2398,10 +2420,12 @@ async def api_chat_mode(request: web.Request) -> web.Response:
         if session_name is not None:
             state._sessions[session_name]._trust = False
             state._sessions[session_name]._trust_reads = False
+            state._sessions[session_name]._agent_floor_seeded = False
         else:
             for session in state._sessions.values():
                 session._trust = False
                 session._trust_reads = False
+                session._agent_floor_seeded = False
         try:
             sel().log_api_access(
                 caller="dashboard:mode",
@@ -2417,37 +2441,11 @@ async def api_chat_mode(request: web.Request) -> web.Response:
         for session in state._sessions.values():
             for aid, fut in list(session._approval_futures.items()):
                 if not fut.done():
-                    fut.set_result("approved")
-                    _mark_permission_resolved(session.messages, aid, mode)
-                    state.broadcast_ws(
-                        "approval_resolved", {"id": aid, "approved": True}
+                    state.resolve_session_approval(
+                        session, aid, "approved", by=principal
                     )
-                    try:
-                        sel().log_api_access(
-                            caller=f"dashboard:{session.key}",
-                            operation=f"tool_approval:bulk_{mode}",
-                            outcome="approved",
-                            resources=aid,
-                        )
-                    except Exception:
-                        logger.warning(
-                            "SEL audit failed for bulk approval %s", aid, exc_info=True
-                        )
         for aid in list(state._approval_futures):
-            fut = state._approval_futures[aid]
-            if not fut.done():
-                state.resolve_approval(aid, True)
-                try:
-                    sel().log_api_access(
-                        caller="dashboard:background",
-                        operation=f"tool_approval:bulk_{mode}",
-                        outcome="approved",
-                        resources=aid,
-                    )
-                except Exception:
-                    logger.warning(
-                        "SEL audit failed for bulk approval %s", aid, exc_info=True
-                    )
+            state.resolve_approval(aid, True, by=principal)
     for session in state._sessions.values():
         policy = "auto" if session._trust or state.is_yolo_active() else ""
         state.sessions.set_approval_policy(f"dashboard:{session.key}", policy)
@@ -2607,7 +2605,32 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         )
     original_action = action
     reported_decision = original_action
-    request_id = body.get("request_id", "")
+    request_id = str(body.get("request_id", "") or "")
+    if not request_id:
+        pending = [(key, future) for key, future in session._approval_futures.items() if not future.done()]
+        if len(pending) == 1:
+            request_id = pending[0][0]
+        elif len(pending) > 1:
+            return web.json_response(
+                {"error": "multiple approvals pending, specify request_id", "pending": [key for key, _ in pending]},
+                status=400,
+            )
+    fut = session._approval_futures.get(request_id) if request_id else None
+    if not fut or fut.done():
+        return web.json_response({"error": "no pending approval"}, status=404)
+    from gideon.security.approval_answer import of_request
+    from gideon.security.approval_answer import check as check_answerer
+
+    principal = of_request(request)
+    why = check_answerer(
+        principal,
+        what=f"approval:{request_id}",
+        asked_by=state.approval_asked_by(request_id, session),
+    )
+    if why:
+        return web.json_response(
+            {"error": {"code": "approval_owner_only", "message": why}}, status=403
+        )
     revision = ""
     if original_action == "revised":
         revision = body.get("revision", "")
@@ -2630,12 +2653,23 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
 
         screening = approval_screening_verdict(requested_mode)
     grant_allowed = screening is None or screening.allowed
+    if requested_mode:
+        from gideon.security.approval_grants import stands
+
+        grant_allowed = stands(
+            requested_mode,
+            caller=principal.label,
+            subject=f"session={name}",
+            level="hook_based" if requested_mode == "trust_reads" else "auto",
+        )
     if action == "trust" and grant_allowed:
         session._trust = True
+        session._agent_floor_seeded = False
         state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
         action = "approved"
     elif action == "trust_agent" and grant_allowed:
         session._trust = True
+        session._agent_floor_seeded = False
         state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
         action = "approved"
         try:
@@ -2662,6 +2696,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             reported_decision = "trust_agent_session"
             logger.warning("Failed to persist always-for-agent grant", exc_info=True)
     elif action == "trust_reads" and grant_allowed:
+        session._agent_floor_seeded = False
         action = "approved_trust_reads"
     elif action == "yolo" and grant_allowed:
         state.enable_yolo()
@@ -2670,30 +2705,10 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         action = "approved"
     elif not grant_allowed:
         action = "approved"
-    if not request_id:
-        pending = [(k, f) for k, f in session._approval_futures.items() if not f.done()]
-        if len(pending) == 1:
-            request_id, fut = pending[0]
-        else:
-            fut = None
-    else:
-        fut = session._approval_futures.get(request_id)
-    if not fut or fut.done():
-        if not request_id and session._approval_futures:
-            pending_ids = [
-                k for k, f in session._approval_futures.items() if not f.done()
-            ]
-            if len(pending_ids) > 1:
-                return web.json_response(
-                    {
-                        "error": "multiple approvals pending, specify request_id",
-                        "pending": pending_ids,
-                    },
-                    status=400,
-                )
-        return web.json_response({"error": "no pending approval"}, status=404)
     resolved = action if action in ("approved", "approved_trust_reads") else "revised" if action == "revised" else "rejected"
-    fut.set_result("revision:" + json.dumps(revision.strip()) if resolved == "revised" else resolved)
+    response_value = "revision:" + json.dumps(revision.strip()) if resolved == "revised" else resolved
+    if not state.resolve_session_approval(session, request_id, response_value, by=principal):
+        return web.json_response({"error": {"code": "approval_owner_only", "message": "Only the owner can answer this approval."}}, status=403)
     if request_id:
         _mark_permission_resolved(
             session.messages,

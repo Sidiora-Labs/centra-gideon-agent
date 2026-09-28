@@ -49,7 +49,7 @@ export function PendingApprovalResult({ approval, onResolved }: { approval: Pend
     setBusy(true)
     setError('')
     try {
-      const result = await api.resolveApproval(approval.id, action)
+      const result = await api.resolveApproval(approval.id, action, approval.revision)
       if (!result.ok) throw new Error('Approval decision was not confirmed')
       setDecision(action)
       onResolved()

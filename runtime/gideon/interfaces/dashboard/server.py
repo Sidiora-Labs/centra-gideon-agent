@@ -363,6 +363,49 @@ async def spa_fallback(
         raise
 
 
+@web.middleware  # type: ignore[misc]
+async def app_conversation_scope_middleware(
+    request: web.Request, handler: object
+) -> web.StreamResponse:
+    """Authorize app access to a conversation before its route reads state."""
+    app_name = str(request.get("app", "") or "")
+    path = request.path
+    if not app_name or (not path.startswith("/api/chat/") and path != "/api/chat"):
+        return await handler(request)  # type: ignore[operator]
+    state = request.app.get("state")
+
+    def creator(name: str) -> str:
+        return state.created_by_app_for_session(name) if name and state is not None else ""
+
+    session_name = str(request.match_info.get("session", "") or "")
+    body: object = {}
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+    if not session_name and isinstance(body, dict):
+        session_name = str(body.get("session") or body.get("name") or "")
+
+    if session_name and creator(session_name) != app_name:
+        return web.json_response({"error": "app does not own this session"}, status=403)
+    if session_name and path.endswith("/resume") and isinstance(body, dict):
+        history_key = str(body.get("key") or "")
+        if history_key and creator(history_key) != app_name:
+            return web.json_response({"error": "app does not own this session"}, status=403)
+    if path == "/api/chat/sessions" and request.method == "POST":
+        candidate = str(body.get("name") or "") if isinstance(body, dict) else ""
+        if candidate:
+            exists = candidate in getattr(state, "_sessions", {})
+            if not exists and getattr(state, "conversation_log", None):
+                from gideon.interfaces.dashboard.chat_persistence import session_key_exists
+
+                exists = session_key_exists(state, candidate)
+            if exists and creator(candidate) != app_name:
+                return web.json_response({"error": "app does not own this session"}, status=403)
+    return await handler(request)  # type: ignore[operator]
+
+
 async def start_dashboard(
     sessions: "ConversationDirectory",
     port: int = _DEFAULT_PORT,
@@ -1964,6 +2007,8 @@ async def start_dashboard(
                 return _deny(reason)
         return await handler(request)  # type: ignore[operator]
 
+    app_conversation_middleware = app_conversation_scope_middleware
+
     _secret_path = config_dir() / ".local_secret"
     _secret_path.parent.mkdir(parents=True, exist_ok=True)
     _internal_secret = os.urandom(16).hex()
@@ -2040,6 +2085,7 @@ async def start_dashboard(
             ]
         ),
         app_permission_middleware,
+        app_conversation_middleware,
         sel_audit_middleware,
         request_boundary_middleware(),
         invalid_id_middleware(),

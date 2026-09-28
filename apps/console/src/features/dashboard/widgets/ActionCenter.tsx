@@ -12,7 +12,7 @@ import type { RouteProps } from '../../../app/shell/useQueryState'
 import { invalidateKeys } from '../../../shared/data/data'
 
 type Kind = 'approval' | 'inbox' | 'proposal'
-interface Entry { key: string; kind: Kind; title: string; sub: string; id: string; session?: string; inboxItemId?: string }
+interface Entry { key: string; kind: Kind; title: string; sub: string; id: string; revision?: string; session?: string; inboxItemId?: string }
 
 function needsAction(item: { item_kind?: string; classification?: string }): boolean {
   return ['needs_input', 'agent_request', 'proposal', 'user_note'].includes(item.item_kind ?? '')
@@ -45,7 +45,7 @@ export function ActionCenter({ navigate }: RouteProps) {
       && !(i.refs?.approval && approvalIds.has(String(i.refs.approval))),
   )
   const allEntries: Entry[] = [
-    ...approvals.map((a) => ({ key: `a:${a.id}`, kind: 'approval' as const, id: a.id, title: `Run ${a.tool}`, sub: a.tool_purpose || a.source || 'Tool approval', session: a.session })),
+    ...approvals.map((a) => ({ key: `a:${a.id}`, kind: 'approval' as const, id: a.id, title: `Run ${a.tool}`, sub: a.tool_purpose || a.source || 'Tool approval', session: a.session, revision: a.revision })),
     ...liveInbox.map((i) => ({ key: `i:${i.id}`, kind: 'inbox' as const, id: i.id, title: i.sender_name || i.channel_name || 'Message', sub: i.message?.slice(0, 90) || '' })),
     ...proposals.map((p) => ({ key: `p:${p.id}`, kind: 'proposal' as const, id: p.id, title: `Skill: ${p.slug}`, sub: p.description?.slice(0, 90) || '', inboxItemId: proposalInbox.get(p.id) })),
   ].filter((e) => !done.has(e.key))
@@ -76,12 +76,12 @@ export function ActionCenter({ navigate }: RouteProps) {
   }
 
   const primary = (e: Entry) => {
-    if (e.kind === 'approval') withBusy(e.key, `approve “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'approve'))
+    if (e.kind === 'approval') withBusy(e.key, `approve “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'approve', e.revision))
     else if (e.kind === 'proposal') withBusy(e.key, `accept “${rowSubject([e.title, e.sub])}”`, () => api.acceptSkillProposal(e.id).then(bustProposals))
     else navigate(routeFor(e))
   }
   const secondary = (e: Entry) => {
-    if (e.kind === 'approval') withBusy(e.key, `reject “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'reject'))
+    if (e.kind === 'approval') withBusy(e.key, `reject “${rowSubject([e.title, e.sub])}”`, () => api.resolveApproval(e.id, 'reject', e.revision))
     else if (e.kind === 'proposal') withBusy(e.key, `reject “${rowSubject([e.title, e.sub])}”`, () => api.rejectSkillProposal(e.id).then(bustProposals))
     else withBusy(e.key, `dismiss “${rowSubject([e.title, e.sub])}”`, () => api.updateInboxItem(e.id, { status: 'dismissed' }))
   }

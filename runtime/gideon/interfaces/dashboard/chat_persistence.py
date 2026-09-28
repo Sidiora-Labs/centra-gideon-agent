@@ -391,6 +391,9 @@ def _rehydrate_session_from_history(
     session._titled = bool(session_info.get("title") or meta.get("title"))
     if meta.get("created_at"):
         session.created_at = meta["created_at"]
+    provider_identity = meta.get("app", "")
+    if isinstance(provider_identity, str):
+        session._app = provider_identity
     if meta.get("agent"):
         session.agent = meta["agent"]
     if meta.get("model"):
@@ -415,6 +418,12 @@ def _rehydrate_session_from_history(
     if meta.get("reasoning_effort"):
         session.reasoning_effort = _validate_reasoning_effort(meta["reasoning_effort"])
     _restore_runtime_binding(state, session, meta)
+    created_by_app = meta.get("created_by_app", "")
+    if isinstance(created_by_app, str) and created_by_app:
+        try:
+            session.restore_created_by_app(created_by_app)
+        except ValueError:
+            logger.warning("Ignoring conflicting creator metadata for %s", session_name)
     if meta.get("folder_id"):
         session.folder_id = meta["folder_id"]
     if meta.get("pinned"):
@@ -792,6 +801,9 @@ def save_session_to_history(
         _app = getattr(session, "_app", "") or existing_meta.get("app", "")
         if _app:
             meta_line["app"] = _app
+        created_by_app = getattr(session, "created_by_app", "")
+        if created_by_app:
+            meta_line["created_by_app"] = created_by_app
         lines = [json.dumps(meta_line) + "\n"]
         messages_to_write = outgoing if preserved_lines is None else []
         for m in messages_to_write:

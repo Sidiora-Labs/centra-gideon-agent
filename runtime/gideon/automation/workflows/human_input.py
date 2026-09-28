@@ -211,10 +211,21 @@ def gate_timeout_secs(
     mode: str = "background",
     background_default: int = DEFAULT_BACKGROUND_GATE_TIMEOUT_SECS,
     blocking_default: int = DEFAULT_BLOCKING_GATE_TIMEOUT_SECS,
+    unattended: bool | None = None,
 ) -> int:
-    configured = (node_config or {}).get("timeout_secs")
+    config = node_config or {}
+    configured = config.get("timeout_secs")
     if isinstance(configured, (int, float)) and configured >= 0:
         selected = configured
+    elif str(config.get("kind", "approval") or "approval") == "approval":
+        if unattended is None:
+            unattended = bool(config.get("_approval_unattended", False))
+        if unattended:
+            selected = background_default
+        else:
+            from gideon.security.approval_grants import approval_window_secs
+
+            selected = approval_window_secs()
     else:
         selected = blocking_default if str(mode) == "blocking" else background_default
     return int(selected)

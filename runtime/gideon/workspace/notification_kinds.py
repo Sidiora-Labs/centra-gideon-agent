@@ -80,6 +80,7 @@ class NotificationKind:
     verifiable: bool = False
     production_owner: str = ""
     configurable: bool = True
+    decision: bool = False
 
     @property
     def key(self) -> str:
@@ -101,6 +102,8 @@ def register(k: NotificationKind) -> None:
         raise ValueError(
             f"{k.key}: severity must be 1, 2 or 3 (got {k.default_severity})"
         )
+    if k.decision and k.verifiable:
+        raise ValueError(f"{k.key}: human decisions cannot be model-verified")
     if (
         k.configurable
         and not k.production_owner.strip()
@@ -248,6 +251,7 @@ def _built_in(
     *,
     attention: bool = False,
     verifiable: bool = False,
+    decision: bool = False,
 ) -> NotificationKind:
     """Build a registry entry only after declaring its production owner."""
     identity = (source, kind)
@@ -266,6 +270,7 @@ def _built_in(
         configurable=owner is not None,
         attention=attention,
         verifiable=verifiable,
+        decision=decision,
     )
 
 
@@ -283,6 +288,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         "immediate",
         SEV_WARNING,
         attention=True,
+        decision=True,
     ),
     _built_in("loop", "progress", "Loop progress", "immediate", SEV_INFO),
     _built_in("inbox", "alert", "Inbox alert", "immediate", SEV_WARNING),
@@ -338,7 +344,7 @@ _KINDS: tuple[NotificationKind, ...] = (
         "immediate",
         SEV_WARNING,
         attention=True,
-        verifiable=True,
+        decision=True,
     ),
     _built_in(
         "system", "digest", "Daily digest", "immediate", SEV_INFO, attention=True
@@ -359,7 +365,10 @@ _KINDS: tuple[NotificationKind, ...] = (
         "learning", "report", "Identity report", "immediate", SEV_INFO, attention=True
     ),
     # timeout (`ConsoleState._approval_futures`), not a durable inbox row. Claiming
-    _built_in("approval", "requested", "Approval needed", "immediate", SEV_WARNING),
+    _built_in(
+        "approval", "requested", "Approval needed", "immediate", SEV_WARNING,
+        decision=True,
+    ),
     _built_in(
         "user",
         "note",

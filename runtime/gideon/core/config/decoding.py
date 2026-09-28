@@ -234,6 +234,11 @@ RECORDS = {
         "AgentConfig",
         {
             "approval_mode": Value(("agent", "approval_mode"), "auto"),
+            "approval_timeout_minutes": Value(
+                ("agent", "approval_timeout_minutes"),
+                120,
+                lambda value: max(1, min(10080, definitions._safe_int(value, 120))),
+            ),
             "provider": Value(("agent", "provider"), "native"),
             "sandbox": Value(("agent", "sandbox"), "auto"),
             "yolo": Value(("agent", "yolo"), False),

@@ -47,7 +47,7 @@ export function CompanionPage({ navigate, query }: RouteProps) {
     setBusy((s) => new Set(s).add(ap.id))
     setResolved((s) => new Set(s).add(ap.id))
     try {
-      await api.resolveApproval(ap.id, action)
+      await api.resolveApproval(ap.id, action, ap.revision)
     } catch (e) {
       setResolved((s) => { const n = new Set(s); n.delete(ap.id); return n })
       window.dispatchEvent(new CustomEvent('ne:toast', {

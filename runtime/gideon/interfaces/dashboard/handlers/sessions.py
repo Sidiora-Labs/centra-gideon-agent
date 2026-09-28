@@ -338,39 +338,61 @@ async def api_approvals(request: web.Request) -> web.Response:
 async def api_approval_resolve(request: web.Request) -> web.Response:
     """POST /api/approvals/{id}/{action} — approve or reject."""
     state: ConsoleState = request.app["state"]
+    from gideon.security.approval_answer import of_request
+    from gideon.security.approval_answer import check
+
+    principal = of_request(request)
     approval_id = request.match_info["id"]
+    why = check(
+        principal,
+        what=f"approval:{approval_id}",
+        asked_by=state.approval_asked_by(approval_id),
+    )
+    if why:
+        return web.json_response(
+            {"error": {"code": "approval_owner_only", "message": why}}, status=403
+        )
     action = request.match_info["action"]
     if action not in ("approve", "reject"):
         return web.json_response({"error": "invalid action"}, status=400)
-    if request.can_read_body:
-        try:
-            body = await request.json()
-        except Exception:
-            return web.json_response({"error": "invalid JSON body"}, status=400)
-        if not isinstance(body, dict) or set(body) != {"expected_revision"}:
-            return web.json_response({"error": "expected_revision is required"}, status=400)
-        expected_revision = body.get("expected_revision")
-        if not isinstance(expected_revision, str) or not expected_revision:
-            return web.json_response({"error": "expected_revision is required"}, status=400)
-        result = state.resolve_approval_revision(
-            approval_id, action == "approve", expected_revision
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected_revision is required"}, status=400)
+    if not isinstance(body, dict) or set(body) != {"expected_revision"}:
+        return web.json_response({"error": "expected_revision is required"}, status=400)
+    expected_revision = body.get("expected_revision")
+    if not isinstance(expected_revision, str) or not expected_revision:
+        return web.json_response({"error": "expected_revision is required"}, status=400)
+    result = state.resolve_approval_revision(
+        approval_id, action == "approve", expected_revision, by=principal
+    )
+    if result == "revision_conflict":
+        return web.json_response(
+            {
+                "error": {
+                    "code": "revision_conflict",
+                    "message": "Approval request changed. Reload before deciding.",
+                }
+            },
+            status=409,
         )
-        if result == "revision_conflict":
-            return web.json_response(
-                {
-                    "error": {
-                        "code": "revision_conflict",
-                        "message": "Approval request changed. Reload before deciding.",
-                    }
-                },
-                status=409,
-            )
-        if result == "missing":
-            return web.json_response({"error": "not found or expired"}, status=404)
-        return web.json_response({"ok": True})
-
-    ok = state.resolve_approval(approval_id, action == "approve")
-    if not ok:
+    if result == "owner_ended":
+        return web.json_response(
+            {
+                "error": {
+                    "code": "approval_owner_ended",
+                    "message": "The work that requested this approval has ended.",
+                }
+            },
+            status=409,
+        )
+    if result == "expired":
+        return web.json_response(
+            {"error": {"code": "approval_expired", "message": "This approval request expired."}},
+            status=410,
+        )
+    if result == "missing":
         return web.json_response({"error": "not found or expired"}, status=404)
     return web.json_response({"ok": True})
 

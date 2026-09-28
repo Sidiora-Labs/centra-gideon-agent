@@ -1963,17 +1963,13 @@ async def run_chat(
         agent_system_prompt: str = ""
         provider_kind: str = ""
         acp_mode: str = ""
-        agent_approval_mode: str = ""
-        global_approval_mode: str = ""
         try:
             cfg = AppConfig.load()
-            global_approval_mode = cfg.agent.approval_mode or ""
             bindings = resolve_agent_bindings(cfg, session.agent or None)
             provider_agent = bindings.provider_agent
             acp_mode = getattr(bindings, "acp_mode", "") or ""
             memory_store = bindings.memory_store_name
             agent_system_prompt = bindings.system_prompt
-            agent_approval_mode = getattr(bindings, "approval_mode", "") or ""
             provider_kind = getattr(bindings, "provider", "") or ""
         except Exception:
             logger.warning(
@@ -2089,41 +2085,11 @@ async def run_chat(
             },
         )
 
-        if not session._agent_floor_seeded:
-            session._agent_floor_seeded = True
-            if agent_approval_mode == "auto" and not session._trust:
-                session._trust = True
-                try:
-                    sel().log_api_access(
-                        caller="dashboard:approval",
-                        operation="mode_change:agent_floor_auto",
-                        outcome="enabled",
-                        resources=f"{session_key} agent={session.agent or 'default'}",
-                    )
-                except Exception:
-                    logger.warning(
-                        "SEL audit failed for agent approval-floor seeding",
-                        exc_info=True,
-                    )
-            elif (
-                (agent_approval_mode or global_approval_mode) == "trust_reads"
-                and not session._trust
-                and not session._trust_reads
-            ):
-                session._trust_reads = True
-                try:
-                    sel().log_api_access(
-                        caller="dashboard:approval",
-                        operation="mode_change:approval_floor_trust_reads",
-                        outcome="enabled",
-                        resources=f"{session_key} agent={session.agent or 'default'}",
-                    )
-                except Exception:
-                    logger.warning(
-                        "SEL audit failed for trust_reads floor seeding", exc_info=True
-                    )
-
-        if session._trust or state.is_yolo_active():
+        if session.created_by_app:
+            # Owner chat posture is not an app grant. App-origin conversations
+            # remain interactive until an app-specific grant is available.
+            state.sessions.set_approval_policy(session_key, "")
+        elif session._trust or state.is_yolo_active():
             state.sessions.set_approval_policy(session_key, "auto")
         else:
             state.sessions.set_approval_policy(session_key, "")
@@ -2656,22 +2622,6 @@ async def run_chat(
                     _emit_question_card(
                         state, session.key, event.tool_input, event.tool_call_id
                     )
-                sel().log_tool_invocation(
-                    session_key=session_key,
-                    agent=_agent_label(session),
-                    source="dashboard",
-                    tool_name=event.title,
-                    tool_kind=event.tool_kind,
-                    outcome="invoked",
-                    metadata={
-                        "risk": resolve_effective_risk(
-                            getattr(event, "risk_level", "") or "",
-                            event.title,
-                            event.tool_kind,
-                            event.tool_input,
-                        )
-                    },
-                )
                 _raw = event.title or ""
                 if _raw.startswith("Running: "):
                     _raw = _raw[9:]
@@ -2773,6 +2723,30 @@ async def run_chat(
                 _tmeta = event.tool_meta or {}
                 _tool_ok = _tmeta.get("ok")
                 _agent_error = _payload.get("agent_error")
+                unasked_outcome = str(_tmeta.get("unasked_outcome") or "")
+                decided_by = str(_tmeta.get("decided_by") or "")
+                if (
+                    unasked_outcome in {"denied", "auto_approved", "invoked"}
+                    and decided_by
+                    in {
+                        "deny_list",
+                        "task_mode",
+                        "tool_grant",
+                        "hook_deny",
+                        "session_policy",
+                        "no_approval_needed",
+                    }
+                ):
+                    sel().log_tool_invocation(
+                        session_key=session_key,
+                        agent=_agent_label(session),
+                        source="dashboard",
+                        tool_name=event.title or "unknown",
+                        tool_kind=event.tool_kind,
+                        outcome=unasked_outcome,
+                        request_id=event.tool_call_id,
+                        metadata={"decided_by": decided_by},
+                    )
                 state.broadcast_ws("tool_result", _payload)
                 if event.tool_call_id:
                     for m in reversed(session.messages):
@@ -3098,7 +3072,47 @@ async def run_chat(
                         continue
                     _pre_tool_hooks_fired = True
                 cmd = shell_command(event.title, event.tool_kind, event.tool_input)
-                yolo_active = state.is_yolo_active()
+                app_origin = bool(getattr(session, "created_by_app", ""))
+                yolo_active = state.is_yolo_active() and not app_origin
+                from gideon.security import approval_grants
+                from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+
+                agent_mode = "" if app_origin else approval_grants.agent_mode_now(session.agent or "")
+                agent_auto = agent_mode == "auto" and approval_grants.stands(
+                    approval_grants.AGENT_FLOOR, caller=session_key, subject=event.title
+                )
+                agent_reads = agent_mode == "trust_reads" and approval_grants.stands(
+                    approval_grants.AGENT_FLOOR,
+                    caller=session_key,
+                    subject=event.title,
+                    level="hook_based",
+                )
+                trust_reads = not app_origin and session._trust_reads and not session._agent_floor_seeded and approval_grants.stands(
+                    approval_grants.TRUST_READS,
+                    caller=session_key,
+                    subject=event.title,
+                    level="hook_based",
+                )
+                trusted = not app_origin and session._trust and not session._agent_floor_seeded and approval_grants.stands(
+                    approval_grants.TRUST, caller=session_key, subject=event.title
+                )
+                yolo_active = yolo_active and approval_grants.stands(
+                    approval_grants.YOLO, caller=session_key, subject=event.title
+                )
+                posture = profile_for_session(session_key)
+                tool_denial = tool_grant_denial(
+                    event.title, posture.tool_grants, posture.tool_allowlist
+                )
+                if tool_denial:
+                    await client.reject_tool(event.request_id)
+                    sel().log_tool_invocation(
+                        session_key=session_key, agent=_agent_label(session),
+                        source="dashboard", tool_name=event.title,
+                        tool_kind=event.tool_kind, outcome="denied",
+                        request_id=event.request_id, error=tool_denial,
+                        metadata={"decided_by": "tool_grant"},
+                    )
+                    continue
                 effective_risk = resolve_effective_risk(
                     getattr(event, "risk_level", "") or "",
                     event.title,
@@ -3106,8 +3120,9 @@ async def run_chat(
                     event.tool_input,
                 )
                 if (
-                    session._trust_reads
-                    and not session._trust
+                    (trust_reads or agent_reads)
+                    and not trusted
+                    and not agent_auto
                     and not yolo_active
                     and effective_risk == "safe"
                 ):
@@ -3150,10 +3165,14 @@ async def run_chat(
                         tool_kind=event.tool_kind,
                         outcome="auto_approved",
                         request_id=event.request_id,
-                        metadata={"reason": "trust_reads", "risk": effective_risk},
+                        metadata={
+                            "reason": "trust_reads",
+                            "risk": effective_risk,
+                            "decided_by": "trust_reads" if trust_reads else "agent_floor",
+                        },
                     )
                     continue
-                if session._trust or yolo_active:
+                if trusted or yolo_active or agent_auto:
                     try:
                         validated_tool = _validate_tool_name(
                             event.title, event.tool_kind
@@ -3233,6 +3252,9 @@ async def run_chat(
                         metadata={
                             "reason": "yolo" if yolo_active else "trust",
                             "risk": effective_risk,
+                            "decided_by": (
+                                "yolo" if yolo_active else "agent_floor" if agent_auto else "trust"
+                            ),
                         },
                     )
                     continue
@@ -3312,6 +3334,16 @@ async def run_chat(
                     "tool_kind": event.tool_kind or "",
                     "can_revise": callable(getattr(client, "revise_tool", None)),
                 }
+                from gideon.security.approval_answer import asker_of_chat
+
+                perm_meta["asked_by"] = asker_of_chat(
+                    session.key,
+                    created_by_app=str(
+                        getattr(session, "_app", "")
+                        or getattr(session, "created_by_app", "")
+                        or ""
+                    ),
+                ).label
                 if event.tool_input:
                     input_text = tool_input_to_str(event.tool_input)
                     sanitized, _ = redact_exfiltration_urls(input_text)
@@ -3344,16 +3376,23 @@ async def run_chat(
                 state.push_sessions_update()
                 mirrored_item = ""
                 outcome = "rejected"
+                approval_answered = False
                 try:
                     try:
                         outcome = await asyncio.wait_for(
                             asyncio.shield(fut), timeout=_APPROVAL_MIRROR_GRACE_SECS
                         )
+                        approval_answered = True
                     except asyncio.TimeoutError:
                         mirrored_item = _mirror_approval_to_inbox(
                             state, session.key, event, effective_risk
                         )
-                        outcome = await asyncio.wait_for(fut, timeout=7200.0)
+                        from gideon.security.approval_grants import approval_window_secs
+
+                        outcome = await asyncio.wait_for(
+                            fut, timeout=approval_window_secs()
+                        )
+                        approval_answered = True
                 except asyncio.TimeoutError:
                     outcome = "rejected"
                 finally:
@@ -3480,7 +3519,7 @@ async def run_chat(
                             tool_kind=event.tool_kind,
                             outcome="approved",
                             request_id=event.request_id,
-                            metadata={"reason": "interactive", "risk": effective_risk},
+                            metadata={"reason": "interactive", "risk": effective_risk, "decided_by": "you"},
                         )
                 elif outcome == "revised":
                     session.append("tool", f"{event.title} (revision requested)", "msg msg-tool")
@@ -3492,7 +3531,11 @@ async def run_chat(
                         tool_kind=event.tool_kind,
                         outcome="revised",
                         request_id=event.request_id,
-                        metadata={"reason": "interactive", "risk": effective_risk},
+                        metadata={
+                            "reason": "interactive",
+                            "risk": effective_risk,
+                            "decided_by": "you" if approval_answered else "nobody",
+                        },
                     )
                 else:
                     await client.reject_tool(event.request_id)
@@ -3505,7 +3548,11 @@ async def run_chat(
                         tool_kind=event.tool_kind,
                         outcome="rejected",
                         request_id=event.request_id,
-                        metadata={"reason": "interactive", "risk": effective_risk},
+                        metadata={
+                            "reason": "interactive",
+                            "risk": effective_risk,
+                            "decided_by": "you" if approval_answered else "nobody",
+                        },
                     )
 
                 if outcome != "approved":

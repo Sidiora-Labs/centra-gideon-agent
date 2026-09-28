@@ -658,6 +658,29 @@ def active_ceiling() -> Ceiling:
     return _ACTIVE
 
 
+def approval_permits_now(value: str) -> bool:
+    """Check a standing approval against both the boot bound and the current file.
+
+    Re-reading makes an operator tightening effective at the next decision. Composing with
+    the cached boot value means edits cannot widen the running process. An unreadable or
+    invalid current file refuses the grant.
+    """
+    try:
+        scale = get_scale("approval")
+        if value not in scale:
+            return False
+        boot = active_ceiling().control("approval")
+        current = load_ceiling().control("approval")
+        bound = max(
+            (scale.index(item.value) for item in (boot, current) if item is not None),
+            default=0,
+        )
+        return scale.index(value) >= bound
+    except Exception:
+        logger.warning("could not establish current approval ceiling", exc_info=True)
+        return False
+
+
 def reset_ceiling() -> None:
     """Drop the cached ceiling (tests + a deliberate reload). Process-global by design."""
     global _ACTIVE

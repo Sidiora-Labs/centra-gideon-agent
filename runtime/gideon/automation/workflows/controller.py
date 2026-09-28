@@ -882,6 +882,9 @@ class RunController:
                 return
         node = dict(_walk(self.root)).get(spec_path(path))
         ask = dict(self.run.attention or {}) if self.run.attention else {}
+        from gideon.security.approval_answer import run as run_principal
+
+        ask.setdefault("asked_by", run_principal(self.run.id).label)
         outstanding = [
             p
             for p, i in self.instances.items()
@@ -1050,6 +1053,11 @@ class RunController:
             node_id=cont.node_id,
             epoch=cont.epoch,
             approved=approved,
+            decided_by=(
+                "you"
+                if str(responder or "").startswith(("owner:", "channel:"))
+                else "nobody"
+            ),
             answer=filled,
             resolved_after_secs=(
                 round(max(0.0, time.time() - cont.created_at), 3)
@@ -2583,6 +2591,16 @@ class RunController:
         """
         node = self._with_retry_hint(item)
         node = self._with_carried_context(node, item)
+        if (
+            node.kind == NodeKind.GATE
+            and str((node.config or {}).get("kind", "") or "") == "approval"
+        ):
+            import copy
+
+            node = copy.deepcopy(node)
+            node.config["_approval_unattended"] = gate_policy.is_unattended(
+                self.run.origin.kind, mode=self.run.mode
+            )
         declared_total = (node.config or {}).get("timeout_total_secs")
         total = (
             float(declared_total)
@@ -2938,6 +2956,7 @@ class RunController:
                 origin_kind=self.run.origin.kind,
                 mode=self.run.mode,
                 memory=self._allow_memory,
+                run_id=self.run.id,
             )
             if verdict.approved:
                 inst.state = InstanceState.DONE
@@ -4291,6 +4310,13 @@ class RunController:
             if self.run.started_at:
                 self.run.elapsed_seconds = max(
                     0.0, _epoch(self.run.completed_at) - _epoch(self.run.started_at)
+                )
+        if status in TERMINAL_RUN_STATUSES or status == RunStatus.PAUSED:
+            attention_state = getattr(self.services, "attention_state", None)
+            if attention_state is not None:
+                attention_state.cancel_approvals(
+                    session_prefix=f"workflow:{self.run.id}:",
+                    reason=f"workflow run {status.value}",
                 )
         totals = journal_mod.run_totals(self.run.id)
         self._restore_recorded_tokens(totals)

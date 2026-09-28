@@ -1246,15 +1246,24 @@ class NativeAgentRuntime(AgentProvider):
         return observation
 
     async def _policy_refusal(
-        self, call: AgentEvent, name: str, arguments: dict
+        self, call: AgentEvent, name: str, arguments: dict, *, meta: dict | None = None
     ) -> str | None:
         from gideon.engine.task_modes import task_mode_denies
         from gideon.security import security
+        from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
 
         reason = security.is_denied(name, self._extra_deny)
+        decided_by = "deny_list"
         if not reason:
             reason = task_mode_denies(self._task_mode, name, "", call.tool_input)
+            decided_by = "task_mode"
+        if not reason:
+            posture = profile_for_session(self._session_key)
+            reason = tool_grant_denial(name, posture.tool_grants, posture.tool_allowlist)
+            decided_by = "tool_grant"
         if reason:
+            if meta is not None:
+                meta.update(unasked_outcome="denied", decided_by=decided_by)
             return self._denial(security.DENY_KIND_POLICY, reason, name)
         if self._hook_fire is not None:
             try:
@@ -1268,6 +1277,8 @@ class NativeAgentRuntime(AgentProvider):
             ]
             if blocked:
                 reason = blocked[0].removeprefix("BLOCKED:").strip() or "policy hook"
+                if meta is not None:
+                    meta.update(unasked_outcome="denied", decided_by="hook_deny")
                 return self._denial(security.DENY_KIND_HOOK, reason, name)
         return None
 
@@ -1284,10 +1295,10 @@ class NativeAgentRuntime(AgentProvider):
                 "run here. Continue reasoning about what this run would do; do not "
                 "retry it expecting a real effect."
             )
-        refusal = await self._policy_refusal(call, tool_name, args)
+        refusal = await self._policy_refusal(call, tool_name, args, meta=meta)
         if refusal is not None:
             return refusal
-        if self._requires_approval(tool_name):
+        if self._requires_approval(tool_name, meta=meta):
             return _NEEDS_APPROVAL
         return await self._invoke(tool_name, args, meta_sink=meta)
 
@@ -1372,19 +1383,6 @@ class NativeAgentRuntime(AgentProvider):
         return metadata
 
     async def _invoke(self, tool_name: str, args: dict, *, meta_sink: dict) -> str:
-        if self._session_key.removeprefix("dashboard_").startswith("room:"):
-            from gideon.security.guardrails.policy import (
-                profile_for_session,
-                tool_grant_denial,
-            )
-
-            posture = profile_for_session(self._session_key)
-            denial = tool_grant_denial(
-                tool_name, posture.tool_grants, posture.tool_allowlist
-            )
-            if denial:
-                meta_sink["ok"] = False
-                return f"Error: {denial}"
         handlers = {
             "tool_schema": self._describe_tool,
             "reset_tools": self._reset_tools,
@@ -1420,21 +1418,24 @@ class NativeAgentRuntime(AgentProvider):
 
     _META_TOOLS = frozenset(("tool_search", "tool_schema", "reset_tools"))
 
-    def _requires_approval(self, tool_name: str) -> bool:
-        if tool_name in self._META_TOOLS or self._approval_policy in (
-            "auto",
-            "yolo",
-            "acceptEdits",
-        ):
+    def _requires_approval(self, tool_name: str, *, meta: dict | None = None) -> bool:
+        if tool_name in self._META_TOOLS:
             return False
+        if self._approval_policy in ("auto", "yolo", "acceptEdits"):
+            from gideon.security.approval_grants import SESSION_POLICY, stands
+
+            if stands(SESSION_POLICY, caller=self._session_key or "agent", subject=f"tool={tool_name}"):
+                if meta is not None:
+                    meta.update(unasked_outcome="auto_approved", decided_by=SESSION_POLICY)
+                return False
         definition = next(
             (entry for entry in self._tool_defs if entry.name == tool_name), None
         )
-        return (
-            True
-            if definition is None
-            else bool(getattr(definition, "requires_approval", True))
-        )
+        if definition is None or bool(getattr(definition, "requires_approval", True)):
+            return True
+        if meta is not None:
+            meta.update(unasked_outcome="invoked", decided_by="no_approval_needed")
+        return False
 
     _COMPACT_THRESHOLD_PCT = 70.0
 

@@ -184,8 +184,18 @@ class WebSocketState:
             app = self._ws_app.get(ws, "")
             if app and not self._app_may_see_event(app, msg_type):
                 continue
+            send_msg = msg
+            if app and msg_type == "sessions" and isinstance(data, list):
+                scoped = [
+                    row for row in data
+                    if isinstance(row, dict)
+                    and self._app_owns_session(app, str(row.get("key") or ""))
+                ]
+                send_msg = json.dumps({"type": msg_type, "data": scoped})
+            elif app and not self._app_may_see_payload(app, msg_type, data):
+                continue
             try:
-                if not self._schedule_ws_send(ws.send_str(msg), ws):
+                if not self._schedule_ws_send(ws.send_str(send_msg), ws):
                     dead.append(ws)
             except Exception:
                 dead.append(ws)
@@ -201,6 +211,20 @@ class WebSocketState:
             return checker is not None and checker.can_use_event(event_type)
         except Exception:
             return False
+
+    def _app_may_see_payload(self, app: str, event_type: str, data: object) -> bool:
+        """Keep app sockets on their own sessions and app-raised notifications."""
+        if event_type in {"notification", "notification_ack", "notification_unack", "notification_removed"}:
+            return isinstance(data, dict) and data.get("created_by_app") == app
+        if isinstance(data, dict) and data.get("session"):
+            return self._app_owns_session(app, str(data.get("session") or ""))
+        return True
+
+    def _app_owns_session(self, app: str, session_key: str) -> bool:
+        key = session_key.removeprefix("dashboard:").removeprefix("dashboard_")
+        sessions = getattr(self, "_sessions", {})
+        session = sessions.get(key) if isinstance(sessions, dict) else None
+        return bool(session is not None and getattr(session, "created_by_app", "") == app)
 
     def register_ws(self, ws: web.WebSocketResponse, *, app: str = "") -> None:
         """Register a new WebSocket client.

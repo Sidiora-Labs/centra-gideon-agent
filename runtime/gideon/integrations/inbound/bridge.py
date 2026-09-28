@@ -388,12 +388,13 @@ def pending_count() -> int:
     return len(_pending)
 
 
-def _mint_confirmation(action: Action, params: dict) -> str:
+def _mint_confirmation(action: Action, params: dict, *, asked_by: str = "bridge:surface") -> str:
     _reap()
     token = secrets.token_urlsafe(32)
     _pending[token] = {
         "action": action.name,
         "params": params,
+        "asked_by": asked_by,
         "created": time.monotonic(),
     }
     return token
@@ -614,7 +615,10 @@ async def handle_action(request: web.Request) -> web.Response:
 
     state = request.app["state"]
     if action.requires_confirmation:
-        token = _mint_confirmation(action, params)
+        token = _mint_confirmation(
+            action, params,
+            asked_by=f"bridge:{client.client_id if client is not None else 'surface'}",
+        )
         try:
             from gideon.integrations.inbox import emit_attention_item
 
@@ -655,7 +659,8 @@ async def handle_confirm(request: web.Request) -> web.Response:
         audit(BRIDGE_SURFACE, route="/confirm", status=400, refused="invalid JSON")
         return json_error("invalid_json", status=400)
     token = str((body or {}).get("confirm_token") or "").strip()
-    intent = take_confirmation(token) if token else None
+    _reap()
+    intent = _pending.get(token) if token else None
     if intent is None:
         audit(
             BRIDGE_SURFACE,
@@ -673,8 +678,26 @@ async def handle_confirm(request: web.Request) -> web.Response:
             refused="action no longer exists",
         )
         return json_error("unknown_action", status=410)
+    from gideon.security.approval_answer import (
+        bridge as bridge_principal,
+        check,
+        of_request,
+    )
+
+    principal = bridge_principal(client.client_id) if client is not None else of_request(request)
+    why = check(
+        principal,
+        what=f"bridge:{token[:16]}",
+        asked_by=str(intent.get("asked_by") or "bridge:unknown"),
+    )
+    if why:
+        audit(BRIDGE_SURFACE, route="/confirm", status=403, refused="approval owner only")
+        return json_error("approval_owner_only", message=why, status=403)
     if not _bound(client, action.name):
         return _refuse_unbound(client, action, "/confirm")
+    intent = take_confirmation(token)
+    if intent is None:
+        return json_error("confirm_token_invalid", status=404)
     return await _run(request.app["state"], action, dict(intent["params"]), "/confirm")
 
 

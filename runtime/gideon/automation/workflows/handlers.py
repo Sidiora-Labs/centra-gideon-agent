@@ -1232,6 +1232,14 @@ async def api_run_resume(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     run_id = request.match_info.get("run_id", "")
+    from gideon.security.approval_answer import of_request, check
+
+    principal = of_request(request)
+    answer_denial = check(
+        principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}"
+    )
+    if answer_denial:
+        return json_error("approval_owner_only", message=answer_denial, status=403)
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -1248,6 +1256,7 @@ async def api_run_resume(request: web.Request) -> web.Response:
             supervisor=_supervisor(request),
             token=str(body.get("resume_token", "") or ""),
             answer=body.get("answer"),
+            responder=principal.label,
             always_allow=strict_bool(body.get("always_allow"), field="always_allow"),
         )
     _audit(
@@ -1270,6 +1279,14 @@ async def api_run_confirm(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     run_id = request.match_info.get("run_id", "")
+    from gideon.security.approval_answer import of_request, check
+
+    principal = of_request(request)
+    answer_denial = check(
+        principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}"
+    )
+    if answer_denial:
+        return json_error("approval_owner_only", message=answer_denial, status=403)
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
@@ -1279,6 +1296,7 @@ async def api_run_confirm(request: web.Request) -> web.Response:
         verb=str(body.get("verb", "") or ""),
         token=str(body.get("resume_token", "") or ""),
         note=str(body.get("note", "") or ""),
+        responder=principal.label,
     )
     _audit(
         request,

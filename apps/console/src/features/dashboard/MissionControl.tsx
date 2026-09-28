@@ -137,10 +137,10 @@ export function MissionControl() {
   }, [])
 
   const resolve = useCallback(
-    (cardId: string, approvalId: string, action: 'approve' | 'reject') => {
+    (cardId: string, approvalId: string, action: 'approve' | 'reject', revision: string | undefined) => {
       mark(cardId, { state: 'busy' })
       api
-        .resolveApproval(approvalId, action)
+        .resolveApproval(approvalId, action, revision)
         .then(() => {
           mark(cardId, { state: 'done', text: action === 'approve' ? 'Approved.' : 'Rejected.' })
           refresh()
@@ -230,7 +230,7 @@ function AttentionLaneSection({
   cards: ConsumedCard[]
   loading: boolean
   outcomes: Record<string, Outcome>
-  onResolve: (cardId: string, approvalId: string, action: 'approve' | 'reject') => void
+  onResolve: (cardId: string, approvalId: string, action: 'approve' | 'reject', revision: string | undefined) => void
   onAnswer: (cardId: string, q: CardQuestion, choice: string) => void
 }) {
   const headingId = `mission-control-lane-${lane}`
@@ -279,7 +279,7 @@ function AttentionCard({
 }: {
   card: ConsumedCard
   outcome: Outcome | undefined
-  onResolve: (cardId: string, approvalId: string, action: 'approve' | 'reject') => void
+  onResolve: (cardId: string, approvalId: string, action: 'approve' | 'reject', revision: string | undefined) => void
   onAnswer: (cardId: string, q: CardQuestion, choice: string) => void
 }) {
   const approval = card.approval ?? null
@@ -346,7 +346,7 @@ function AttentionCard({
                 loading={busy}
                 disabled={busy}
                 ariaLabel={`Approve ${subject}`}
-                onClick={() => onResolve(card.id, approval.id, 'approve')}
+                onClick={() => onResolve(card.id, approval.id, 'approve', approval.revision)}
               >
                 <Check size={13} aria-hidden="true" /> Approve
               </Button>
@@ -355,7 +355,7 @@ function AttentionCard({
                 variant="secondary"
                 disabled={busy} disabledReason={BUSY_REASON}
                 ariaLabel={`Reject ${subject}`}
-                onClick={() => onResolve(card.id, approval.id, 'reject')}
+                onClick={() => onResolve(card.id, approval.id, 'reject', approval.revision)}
               >
                 <X size={13} aria-hidden="true" /> Reject
               </Button>

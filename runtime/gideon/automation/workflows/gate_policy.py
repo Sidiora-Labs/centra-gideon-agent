@@ -35,6 +35,7 @@ class PolicyVerdict:
     decision: Decision
     reason: str = ""
     risk: str = ""
+    decided_by: str = "nobody"
 
     @property
     def asks_human(self) -> bool:
@@ -47,7 +48,7 @@ class PolicyVerdict:
     def to_dict(self) -> dict[str, Any]:
         return dict(
             decision=self.decision.value,
-            **{name: getattr(self, name) for name in ("reason", "risk")},
+            **{name: getattr(self, name) for name in ("reason", "risk", "decided_by")},
         )
 
 
@@ -102,25 +103,45 @@ def decide(
     origin_kind: OriginKind = OriginKind.MANUAL,
     mode: str = "background",
     memory: AllowMemory | None = None,
+    run_id: str = "",
 ) -> PolicyVerdict:
+    from gideon.security import approval_grants
+
     risk = gate_risk(node_config)
+    caller = f"workflow:{run_id or 'unknown'}"
     rules = (
         (
-            lambda: memory is not None and memory.allows(node_config, node_id),
+            lambda: memory is not None
+            and memory.allows(node_config, node_id)
+            and approval_grants.stands(
+                approval_grants.REMEMBERED,
+                caller=caller,
+                subject=f"node={node_id}",
+            ),
             lambda: (
                 Decision.REMEMBERED,
                 "the user chose 'always allow' for this operation in this run",
             ),
         ),
         (
-            lambda: is_unattended(origin_kind, mode=mode),
+            lambda: is_unattended(origin_kind, mode=mode)
+            and approval_grants.stands(
+                approval_grants.GATE_POLICY,
+                caller=caller,
+                subject=f"risk={risk.value}",
+            ),
             lambda: _unattended_verdict(risk),
         ),
     )
     for applies, outcome in rules:
         if applies():
             decision, reason = outcome()
-            return PolicyVerdict(decision, reason, risk.value)
+            decided_by = (
+                "remembered" if decision == Decision.REMEMBERED
+                else "gate_policy" if decision == Decision.AUTO_APPROVED
+                else "nobody"
+            )
+            return PolicyVerdict(decision, reason, risk.value, decided_by)
     return PolicyVerdict(Decision.ASK, "attended run", risk.value)
 
 
@@ -131,17 +152,22 @@ def owner_of(run: Any) -> str:
 
 
 def may_answer(run: Any, *, responder: str, channel: str = "") -> tuple[bool, str]:
-    if not channel:
-        return True, ""
+    from gideon.security.approval_answer import CHANNEL, OWNER
+
+    kind = str(responder or "").partition(":")[0]
+    if kind not in (OWNER, CHANNEL):
+        return False, "only the authenticated owner or a verified paired owner channel may answer"
     owner = owner_of(run)
-    if owner:
-        allowed = bool(responder and responder == owner)
-        return (
-            (True, "")
-            if allowed
-            else (False, "only the run's requester may approve from a shared channel")
-        )
-    return False, "this run has no recorded owner, so remote approval is refused"
+    asked_by = f"run:{getattr(run, 'id', '')}"
+    if responder == asked_by:
+        return False, "the party that asked for this approval cannot answer it"
+    if channel and kind != CHANNEL:
+        return False, "remote approval requires a verified paired owner channel"
+    if not channel and kind != OWNER:
+        return False, "a channel principal cannot answer on the local dashboard route"
+    if not owner and kind == CHANNEL:
+        return False, "this run has no recorded owner, so remote approval is refused"
+    return True, ""
 
 
 def remote_timeout_decision(node_config: dict[str, Any]) -> PolicyVerdict:
@@ -150,6 +176,7 @@ def remote_timeout_decision(node_config: dict[str, Any]) -> PolicyVerdict:
         decision=Decision.AUTO_DENIED,
         reason="remote gate expired with no owner reply; silence is not consent",
         risk=gate_risk(node_config).value,
+        decided_by="nobody",
     )
 
 

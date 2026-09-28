@@ -257,13 +257,14 @@ def _coerce_rule(source: str, kind: str, raw: Any, default_mode: str) -> Rule:
             default_mode,
         )
         mode = default_mode
+    decision = nk.resolve_kind(source, kind).decision
     return Rule(
         source=source,
         kind=kind,
         mode=mode,
         targets=_coerce_targets(raw.get("targets")),
         conditions=_coerce_conditions(raw.get("conditions")),
-        verify=bool(raw.get("verify")),
+        verify=bool(raw.get("verify")) and not decision,
         sound=_coerce_sound(raw.get("sound")),
     )
 
@@ -452,6 +453,7 @@ def rules_document() -> dict[str, Any]:
                     "name_mention": rule.conditions.name_mention,
                 },
                 "verifiable": registered.verifiable,
+                "decision": registered.decision,
                 "verify": rule.verify,
                 "wire": nk.kind_for_legacy_pair(rule.source, rule.kind),
                 "sound": rule.sound,

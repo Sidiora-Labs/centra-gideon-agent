@@ -224,6 +224,7 @@ class ConversationDirectory:
         self._on_compacted: Callable[[str, float], Awaitable[None]] | None = None
         self._on_session_expire: Callable[[str], Awaitable[object]] | None = None
         self._stop_children: Callable[[str], Awaitable[int]] | None = None
+        self._approval_stopper: Callable[[str], object] | None = None
         self._session_map = SessionMap()
         self._active_dashboard_sessions: set[str] | None = None
         self._pool_started = False
@@ -1137,6 +1138,9 @@ class ConversationDirectory:
     def register_child_stopper(self, stopper: Callable[[str], Awaitable[int]]) -> None:
         self._stop_children = stopper
 
+    def register_approval_stopper(self, stopper: Callable[[str], object]) -> None:
+        self._approval_stopper = stopper
+
     async def _stop_spawned_children(self, key: str) -> int:
         if self._stop_children is None:
             return 0
@@ -1165,6 +1169,11 @@ class ConversationDirectory:
         on_soft: Callable[[], Awaitable[None]] | None = None,
         on_hard: Callable[[], Awaitable[None]] | None = None,
     ) -> StopOutcome:
+        if self._approval_stopper is not None:
+            try:
+                self._approval_stopper(key)
+            except Exception:
+                logger.warning("Withdrawing approvals for stopped turn failed for %s", key, exc_info=True)
         entry = self._sessions.get(key)
         if entry is None:
             return "idle"

@@ -25,6 +25,10 @@ from gideon.engine.task_modes import (
     shell_command,
 )
 from gideon.interfaces.dashboard.desktop_registry import DesktopRegistry
+from gideon.interfaces.dashboard.approval_state import (
+    DashboardApprovalState,
+    chat_approval_id,
+)
 from gideon.interfaces.dashboard.sse import SseRegistry
 from gideon.interfaces.dashboard.ws_state import NOTE_TYPE_NOTIFICATION, WebSocketState
 from gideon.security import trust_mode
@@ -254,6 +258,7 @@ class _ChatSession:
         "_ephemeral",
         "_pending_context",
         "_app",
+        "_created_by_app",
         "_last_turn_errored",
         "_followups_task",
         "_pending_variants",
@@ -284,6 +289,7 @@ class _ChatSession:
         memory_mode: str = "persistent",
         ephemeral: bool = False,
         project_id: str = "",
+        created_by_app: str = "",
     ) -> None:
         self.key = key
         self.title = title or key
@@ -369,6 +375,7 @@ class _ChatSession:
         self._ephemeral: bool = ephemeral
         self._pending_context: list[dict[str, Any]] = []
         self._app: str = ""
+        self._created_by_app: str = created_by_app if isinstance(created_by_app, str) else ""
         self._last_turn_errored: bool = False
         self._followups_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._pending_variants: list[dict] = []
@@ -480,6 +487,19 @@ class _ChatSession:
                     self._queue.insert(0, self._queue.pop(i))
                 return True
         return False
+
+    @property
+    def created_by_app(self) -> str:
+        """Installed app that created this conversation; independent of transport identity."""
+        return self._created_by_app
+
+    def restore_created_by_app(self, app: str) -> None:
+        """Restore durable creator metadata without allowing ownership reassignment."""
+        if not isinstance(app, str):
+            return
+        if self._created_by_app and self._created_by_app != app:
+            raise ValueError("conversation creator is immutable")
+        self._created_by_app = app
 
     @property
     def running(self) -> bool:
@@ -672,7 +692,7 @@ BROADCAST_NOTE_TYPES = frozenset(
 )
 
 
-class ConsoleState(WebSocketState):
+class ConsoleState(WebSocketState, DashboardApprovalState):
     """Shared state injected into all handlers via ``app["state"]``."""
 
     def __init__(
@@ -744,6 +764,13 @@ class ConsoleState(WebSocketState):
         self._ws_loop: asyncio.AbstractEventLoop | None = None
         self._pending_approvals: dict[str, dict] = {}
         self._approval_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
+        self._approval_endings: dict[str, str] = {}
+        register_stopper = getattr(self.sessions, "register_approval_stopper", None)
+        if register_stopper is not None:
+            register_stopper(self.cancel_turn_approvals)
+        from gideon.automation.loop import store as loop_store
+
+        loop_store.register_status_observer(self.loop_status_changed)
         self._mcp_elicitation_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
         self._mcp_elicitation_deadlines: dict[str, float] = {}
         self._flush_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -761,6 +788,18 @@ class ConsoleState(WebSocketState):
 
         self.file_indexes = FileIndexRegistry()
         self._last_spoken: dict[str, str] = {}
+
+    def broadcast_ws(
+        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None
+    ) -> None:
+        if (
+            msg_type == "approval"
+            and isinstance(data, dict)
+            and str(data.get("session") or "") in self._sessions
+            and not data.get("approval_id")
+        ):
+            self._register_chat_approval(data)
+        super().broadcast_ws(msg_type, data, extra=extra)
 
     @property
     def channel_delivery(self) -> Any:
@@ -1000,6 +1039,7 @@ class ConsoleState(WebSocketState):
         tool_input: str = "",
         tool_purpose: str = "",
         session: str = "",
+        asked_by: str = "",
     ) -> bool:
         """Request interactive approval. Returns True if approved, False if rejected/timeout.
 
@@ -1030,11 +1070,10 @@ class ConsoleState(WebSocketState):
             "tool_input": safe_input,
             "tool_purpose": safe_purpose,
             "session": session,
+            "asked_by": asked_by or self._approval_requester(source, session),
             "ts": time.time(),
         }
-        self._pending_approvals[approval_id] = pending
-        self.broadcast_ws("approval", pending)
-        self._push_approval(approval_id)
+        self._hold_approval(pending)
         from gideon.automation.triggers.lifecycle_fire import approval_request_payload
         from gideon.automation.triggers.lifecycle_fire import fire as _fire_lifecycle
 
@@ -1048,9 +1087,14 @@ class ConsoleState(WebSocketState):
                 ),
                 tool_name=safe_tool,
             )
-            timeout = self._approval_timeout_for(source)
+            from gideon.security.approval_grants import approval_window_secs
+
+            timeout = approval_window_secs(self._APPROVAL_TIMEOUT)
+            if any(marker in (source or "").lower() for marker in self._UNATTENDED_SOURCE_MARKERS):
+                timeout = min(timeout, self._UNATTENDED_APPROVAL_TIMEOUT)
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
+            self.end_approval(approval_id, outcome="expired")
             try:
                 from gideon.security.sel import sel
 
@@ -1063,9 +1107,12 @@ class ConsoleState(WebSocketState):
             except Exception:
                 self._log.debug("SEL audit failed for approval timeout", exc_info=True)
             return False
+        except asyncio.CancelledError:
+            self.end_approval(approval_id, outcome="cancelled")
+            raise
         finally:
             if self._pending_approvals.get(approval_id) is pending:
-                self._pending_approvals.pop(approval_id, None)
+                self.end_approval(approval_id, outcome="cancelled")
             if self._approval_futures.get(approval_id) is fut:
                 self._approval_futures.pop(approval_id, None)
 
@@ -1137,68 +1184,46 @@ class ConsoleState(WebSocketState):
             self._log.debug("approval push dispatch failed", exc_info=True)
 
     def _audit_and_broadcast_approval(
-        self, session_key: str, approval_id: str, approved: bool
+        self, session_key: str, approval_id: str, approved: bool | str, *,
+        decided_by: str = "you", entry: dict[str, Any] | None = None,
     ) -> None:
         """Emit SEL audit event and broadcast WS notification for an approval decision."""
-        try:
-            sel().log_tool_invocation(
-                session_key=session_key,
-                tool_name="approval_decision",
-                outcome="approved" if approved else "rejected",
-                request_id=approval_id,
-                source="dashboard",
-            )
-        except Exception:
-            self._log.warning("SEL audit failed for approval resolution", exc_info=True)
-        try:
-            self.broadcast_ws(
-                "approval_resolved", {"id": approval_id, "approved": approved}
-            )
-        except Exception:
-            self._log.warning(
-                "WS broadcast failed for approval resolution", exc_info=True
-            )
+        outcome = approved if isinstance(approved, str) else (
+            "approved" if approved else "rejected"
+        )
+        DashboardApprovalState._audit_and_broadcast_approval(
+            self, session_key, approval_id, outcome, decided_by=decided_by, entry=entry
+        )
 
-    def resolve_approval(self, approval_id: str, approved: bool) -> bool:
-        """Resolve a pending approval. Returns False if not found.
+    @staticmethod
+    def _approval_requester(source: str, session: str) -> str:
+        from gideon.security.approval_answer import agent, run, trigger
 
-        State-level futures receive ``bool`` (consumed by gateway, which converts to str).
-        Session-level futures receive ``str`` ("approved"/"rejected", consumed by channel.py).
-        """
-        decision = "approved" if approved else "rejected"
-        fut = self._approval_futures.get(approval_id)
-        if fut and not fut.done():
-            fut.set_result(approved)
-            self._audit_and_broadcast_approval("state", approval_id, approved)
-            return True
-        for session in self._sessions.values():
-            fut = session._approval_futures.get(approval_id)
-            if fut and not fut.done():
-                fut.set_result(decision)
-                _mark_permission_resolved(session.messages, approval_id, decision)
-                self._audit_and_broadcast_approval(session.key, approval_id, approved)
-                self.push_sessions_update()
-                return True
-        return False
+        if session:
+            return agent(session.removeprefix("dashboard:")).label
+        lowered = (source or "").lower()
+        if lowered.startswith("trigger:"):
+            return trigger(lowered.partition(":")[2]).label
+        if lowered.startswith(("workflow:", "run:")):
+            return run(lowered.partition(":")[2]).label
+        return agent(source or "unknown").label
 
-    def resolve_approval_revision(
-        self, approval_id: str, approved: bool, expected_revision: str
-    ) -> str:
-        """Resolve one state-level request only if its native revision still matches.
-
-        The lookup, revision check, and future completion contain no await, so another
-        dashboard decision cannot replace the pending request between comparison and
-        resolution. Session-level approvals retain their legacy unversioned contract.
-        """
+    def approval_asked_by(self, approval_id: str, session: Any = None) -> str:
         pending = self._pending_approvals.get(approval_id)
-        fut = self._approval_futures.get(approval_id)
-        if pending is None or fut is None or fut.done():
-            return "missing"
-        if pending.get("revision") != expected_revision:
-            return "revision_conflict"
-        if not self.resolve_approval(approval_id, approved):
-            return "missing"
-        return "resolved"
+        if pending:
+            return str(pending.get("asked_by") or "")
+        sessions = [session] if session is not None else self._sessions.values()
+        for current in sessions:
+            for message in reversed(current.messages):
+                if message.get("role") != "permission":
+                    continue
+                try:
+                    meta = json.loads(message.get("cls", "{}") or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if str(meta.get("request_id") or "") == approval_id:
+                    return str(meta.get("asked_by") or self._approval_requester("chat", current.key))
+        return ""
 
     def start_flush_loop(self) -> None:
         """Start background loop that flushes dirty sessions to disk every 5s."""
@@ -1250,6 +1275,7 @@ class ConsoleState(WebSocketState):
             "acked",
             "withheld_reason",
             "routed_to",
+            "created_by_app",
         }
     )
 
@@ -1315,6 +1341,14 @@ class ConsoleState(WebSocketState):
                 "ts": datetime.now(tz=timezone.utc).isoformat(),
             }
         )
+        session_name = (
+            str(note.get("session") or "")
+            .removeprefix("dashboard:")
+            .removeprefix("dashboard_")
+        )
+        source_session = self._sessions.get(session_name)
+        if source_session is not None and source_session.created_by_app:
+            note["created_by_app"] = source_session.created_by_app
 
         if not self.is_locally_addressed(str(note.get("addressee") or "")):
             note["withheld_reason"] = "foreign_addressee"
@@ -1449,6 +1483,18 @@ class ConsoleState(WebSocketState):
             logger.debug("inbox unread count unavailable", exc_info=True)
             return 0
 
+    def notifications_for_app(self, app: str) -> list[dict[str, Any]]:
+        """Return only durable notification rows attributed to this app."""
+        if not app:
+            return []
+        return [
+            note for note in self._notification_log
+            if note.get("created_by_app") == app
+        ]
+
+    def unread_notifications_for_app(self, app: str) -> int:
+        return sum(1 for note in self.notifications_for_app(app) if not note.get("acked"))
+
     def loop_sse(self) -> SseRegistry:
         """The per-loop SSE registry (key ``loop:<id>``) — serves every kind, incl. code."""
         return self._loop_sse
@@ -1537,8 +1583,11 @@ class ConsoleState(WebSocketState):
             self._embedding_reindex = ReindexRegistry()
         return self._embedding_reindex
 
-    def delete_notification(self, ts: str) -> bool:
+    def delete_notification(self, ts: str, *, app: str = "") -> bool:
         """Remove a single notification by timestamp and persist to disk."""
+        target = next((n for n in self._notification_log if n.get("ts") == ts), None)
+        if app and (target is None or target.get("created_by_app") != app):
+            return False
         before = len(self._notification_log)
         self._notification_log = [
             n for n in self._notification_log if n.get("ts") != ts
@@ -1546,8 +1595,17 @@ class ConsoleState(WebSocketState):
         removed = len(self._notification_log) < before
         if removed:
             _rewrite_notifications(self._notification_log)
-            self.broadcast_ws("notification_removed", {"ts": ts})
+            self.broadcast_ws("notification_removed", {
+                "ts": ts,
+                **({"created_by_app": app} if app else {}),
+            })
         return removed
+
+    def notification_belongs_to_app(self, ts: str, app: str) -> bool:
+        return bool(app) and any(
+            note.get("ts") == ts and note.get("created_by_app") == app
+            for note in self._notification_log
+        )
 
     def delete_notifications_for_loop(self, loop_id: str) -> int:
         """Remove all notifications tagged with ``loop_id`` and persist. Called
@@ -1571,40 +1629,95 @@ class ConsoleState(WebSocketState):
             self.broadcast_ws("notification_removed", {"ts": removed_ts})
         return removed
 
-    def ack_notification(self, ts: str) -> bool:
+    def ack_notification(self, ts: str, *, app: str = "") -> bool:
         """Mark a notification as acknowledged and persist."""
         for n in self._notification_log:
             if n.get("ts") == ts:
+                if app and n.get("created_by_app") != app:
+                    return False
                 n["acked"] = True
                 _rewrite_notifications(self._notification_log)
-                self.broadcast_ws("notification_ack", {"ts": ts})
+                self.broadcast_ws("notification_ack", {
+                    "ts": ts,
+                    **({"created_by_app": app} if app else {}),
+                })
                 return True
         return False
 
-    def unack_notification(self, ts: str) -> bool:
+    def unack_notification(self, ts: str, *, app: str = "") -> bool:
         """Mark a notification as unread and persist."""
         for n in self._notification_log:
             if n.get("ts") == ts:
+                if app and n.get("created_by_app") != app:
+                    return False
                 n["acked"] = False
                 _rewrite_notifications(self._notification_log)
-                self.broadcast_ws("notification_unack", {"ts": ts})
+                self.broadcast_ws("notification_unack", {
+                    "ts": ts,
+                    **({"created_by_app": app} if app else {}),
+                })
                 return True
         return False
 
-    def clear_notifications(self) -> None:
+    def clear_notifications(self, *, app: str = "") -> None:
         """Remove all notifications from memory and disk."""
-        self._notification_log.clear()
+        if app:
+            removed = [n for n in self._notification_log if n.get("created_by_app") == app]
+            self._notification_log = [n for n in self._notification_log if n.get("created_by_app") != app]
+        else:
+            removed = self._notification_log[:]
+            self._notification_log.clear()
         path = _notifications_path()
         try:
             if path.exists():
                 path.write_text("", encoding="utf-8")
         except Exception:
             logger.debug("Failed to clear notifications file", exc_info=True)
-        self.broadcast_ws("notification_removed", {"ts": "*"})
+        if app:
+            for note in removed:
+                self.broadcast_ws("notification_removed", {
+                    "ts": note.get("ts", ""), "created_by_app": app
+                })
+        else:
+            self.broadcast_ws("notification_removed", {"ts": "*"})
+
+    def ack_all_notifications(self, *, app: str = "") -> None:
+        """Acknowledge all notifications in the caller's creator scope."""
+        changed = []
+        for note in self._notification_log:
+            if app and note.get("created_by_app") != app:
+                continue
+            note["acked"] = True
+            changed.append(note)
+        if changed:
+            _rewrite_notifications(self._notification_log)
+            for note in changed:
+                self.broadcast_ws("notification_ack", {
+                    "ts": note.get("ts", ""),
+                    **({"created_by_app": app} if app else {}),
+                })
 
     def get_session(self, name: str) -> _ChatSession | None:
         """Look up a session by name without creating it. Returns None if absent."""
         return self._sessions.get(name)
+
+    def created_by_app_for_session(self, name: str) -> str:
+        """Resolve a session creator from live state or durable metadata; legacy rows fail closed."""
+        key = str(name or "").removeprefix("dashboard:").removeprefix("dashboard_")
+        session = self._sessions.get(key)
+        if session is not None:
+            return session.created_by_app
+        if self.conversation_log is None:
+            return ""
+        try:
+            from gideon.interfaces.dashboard.chat_utils import resolve_history_key
+
+            history_key = resolve_history_key(self.conversation_log, key)
+            value = self.conversation_log.get_metadata(history_key).get("created_by_app", "") if history_key else ""
+            return value if isinstance(value, str) else ""
+        except Exception:
+            logger.debug("conversation creator lookup failed", exc_info=True)
+            return ""
 
     def get_linked_session(self, session_key: str) -> "_ChatSession | None":
         """Look up a dashboard session linked to a channel thread. Cleans up stale mappings."""
@@ -1694,6 +1807,7 @@ class ConsoleState(WebSocketState):
         ephemeral: bool | None = None,
         app: str = "",
         project_id: str = "",
+        created_by_app: str = "",
     ) -> _ChatSession:
         """Return existing session or create a new one."""
         if name and name in self._sessions:
@@ -1717,10 +1831,19 @@ class ConsoleState(WebSocketState):
             mode=mode,
             memory_mode=memory_mode or "persistent",
             project_id=project_id,
+            created_by_app=created_by_app,
         )
         session._tab_id = uuid.uuid4().hex[:12]
         session._on_message = self._broadcast_chat_message
         session._app = app
+        if app and not created_by_app:
+            try:
+                from gideon.extensions.apps.permissions import checker_for
+
+                if checker_for(app) is not None:
+                    session.restore_created_by_app(app)
+            except Exception:
+                pass
         if memory_mode and memory_mode != "persistent":
             self._restricted_keys.add(f"dashboard:{name}")
         if ephemeral:

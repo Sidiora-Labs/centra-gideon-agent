@@ -309,6 +309,12 @@ async def api_spawn_cancel_fanout(request: web.Request) -> web.Response:
 
 async def api_notifications(request: web.Request) -> web.Response:
     state: ConsoleState = request.app["state"]
+    app = str(request.get("app", "") or "")
+    if app:
+        notifications = state.notifications_for_app(app)
+        return web.json_response(
+            {"notifications": notifications, "unread": state.unread_notifications_for_app(app)}
+        )
     return web.json_response(
         {"notifications": state._notification_log, "unread": state.unread_count()}
     )
@@ -326,14 +332,14 @@ async def api_notification_delete(request: web.Request) -> web.Response:
     ts = body.get("ts", "")
     if not ts:
         return web.json_response({"error": "ts is required"}, status=400)
-    ok = state.delete_notification(ts)
+    ok = state.delete_notification(ts, app=str(request.get("app", "") or ""))
     return web.json_response({"ok": ok})
 
 
 async def api_notifications_clear(request: web.Request) -> web.Response:
     """POST /api/notifications/clear — clear all notifications."""
     state: ConsoleState = request.app["state"]
-    state.clear_notifications()
+    state.clear_notifications(app=str(request.get("app", "") or ""))
     return web.json_response({"ok": True})
 
 
@@ -349,7 +355,7 @@ async def api_notification_ack(request: web.Request) -> web.Response:
     ts = body.get("ts", "")
     if not ts:
         return web.json_response({"error": "ts is required"}, status=400)
-    ok = state.ack_notification(ts)
+    ok = state.ack_notification(ts, app=str(request.get("app", "") or ""))
     return web.json_response({"ok": ok})
 
 
@@ -365,17 +371,14 @@ async def api_notification_unack(request: web.Request) -> web.Response:
     ts = body.get("ts", "")
     if not ts:
         return web.json_response({"error": "ts is required"}, status=400)
-    ok = state.unack_notification(ts)
+    ok = state.unack_notification(ts, app=str(request.get("app", "") or ""))
     return web.json_response({"ok": ok})
 
 
 async def api_notifications_ack_all(request: web.Request) -> web.Response:
     """POST /api/notifications/ack-all — mark all notifications as read."""
     state: ConsoleState = request.app["state"]
-    for n in state._notification_log:
-        n["acked"] = True
-    _rewrite_notifications(state._notification_log)
-    state.broadcast_ws("notification_ack", {"ts": "*"})
+    state.ack_all_notifications(app=str(request.get("app", "") or ""))
     return web.json_response({"ok": True})
 
 

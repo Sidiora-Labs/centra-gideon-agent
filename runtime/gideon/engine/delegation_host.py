@@ -108,6 +108,10 @@ class DelegationHost:
         if not state:
             return
         name = agent.parent_session_key.removeprefix("dashboard:")
+        if kind == "subagent_done":
+            state.cancel_subagent_approvals(
+                str(agent.id), reason="the subagent that requested approval has ended"
+            )
         payload = dict(id=agent.id, session=name)
         payload.update(extra)
         if kind == "subagent_chunk":

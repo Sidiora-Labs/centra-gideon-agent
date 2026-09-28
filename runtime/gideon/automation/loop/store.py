@@ -25,8 +25,9 @@ import json
 import logging
 import re
 import time
+import weakref
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from gideon.automation.loop import files
 from gideon.automation.loop.loop import (
@@ -42,6 +43,15 @@ from gideon.automation.loop.loop import (
 from gideon.core.sqlite_compat import sqlite3
 
 logger = logging.getLogger(__name__)
+_STATUS_OBSERVERS: list[weakref.WeakMethod] = []
+
+
+def register_status_observer(
+    observer: Callable[[str, LoopStatus, LoopStatus], None],
+) -> None:
+    if not getattr(observer, "__self__", None):
+        raise TypeError("loop status observers must be bound methods")
+    _STATUS_OBSERVERS.append(weakref.WeakMethod(observer))
 
 _LOOP_ID_RE = re.compile(r"^[a-f0-9]{8}$")
 
@@ -361,6 +371,18 @@ def update_status(loop_id: str, new_status: LoopStatus, **fields: Any) -> Loop:
     finally:
         conn.close()
     files.write_status(loop_id, new_status)
+    if current != new_status and new_status in ENDED_STATUSES:
+        alive: list[weakref.WeakMethod] = []
+        for reference in _STATUS_OBSERVERS:
+            callback = reference()
+            if callback is None:
+                continue
+            alive.append(reference)
+            try:
+                callback(loop_id, current, new_status)
+            except Exception:
+                logger.warning("loop status observer failed for %s", loop_id, exc_info=True)
+        _STATUS_OBSERVERS[:] = alive
     if current in ATTENTION_STATUSES and new_status not in ATTENTION_STATUSES:
         _resolve_attention_rows(loop_id)
     out = get(loop_id)

@@ -316,20 +316,57 @@ class ApprovalFlow:
 
     def automatically_allowed(self, event: LLMEvent, hint: str) -> bool:
         from gideon.security.trust_mode import is_yolo_active
+        from gideon.security import approval_grants
 
         coordinator = self.coordinator
-        if self.source in coordinator._cfg.hooks.get("auto_approve_sources", []):
+        try:
+            hooks = approval_grants.hooks_now()
+        except Exception:
+            hooks = None
+        if hooks is not None and self.source in hooks.auto_approve_sources and approval_grants.stands(
+            approval_grants.SOURCE, caller=f"source:{self.source}", subject=event.title
+        ):
             logger.info(
                 "Auto-approving tool %s from source %s", event.title, self.source
             )
             return True
-        if self.cli_approval(event) or is_yolo_active():
+        if self.cli_approval(event) and approval_grants.stands(
+            approval_grants.CLI, caller=f"source:{self.source}", subject=event.title
+        ):
+            return True
+        if is_yolo_active() and approval_grants.stands(
+            approval_grants.YOLO, caller=f"source:{self.source}", subject=event.title
+        ):
             return True
         state = coordinator.dashboard_state
-        return bool(state and (state.is_yolo_active() or self.trusted(event, hint)))
+        if state and state.is_yolo_active() and approval_grants.stands(
+            approval_grants.YOLO, caller=f"source:{self.source}", subject=event.title
+        ):
+            return True
+        trusted = self.trusted(event, hint)
+        return bool(trusted and approval_grants.stands(
+            approval_grants.TRUST, caller=f"session:{hint or self.source}", subject=event.title
+        ))
 
     async def approve(self, event: LLMEvent, parent_session_key: str = "") -> bool:
         hint = self.session_hint()
+        from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+
+        try:
+            session_key = self.resolver(str(event.request_id)) if self.resolver else parent_session_key or hint
+            posture = profile_for_session(session_key or "unattended:approval")
+            denial = tool_grant_denial(
+                event.title or "", posture.tool_grants, posture.tool_allowlist
+            )
+        except Exception:
+            logger.warning("approval tool grant could not be established", exc_info=True)
+            return False
+        if denial:
+            self.audit_trust(
+                f"session:{session_key or self.source}", "tool_grant_denied",
+                str(denial), approved=False,
+            )
+            return False
         if self.automatically_allowed(event, hint):
             return True
         exchange = ApprovalExchange(self, event, hint)
@@ -344,7 +381,11 @@ class ApprovalFlow:
                 )
         if self.coordinator.dashboard_state:
             return await exchange.dashboard()
-        return True
+        self.audit_trust(
+            f"source:{self.source}", "approval_no_surface_denied",
+            event.title or "", approved=False,
+        )
+        return False
 
 
 class ApprovalExchange:
@@ -354,19 +395,35 @@ class ApprovalExchange:
         self.hint = hint
         self.request_id = str(event.request_id)
         self.dashboard_future: asyncio.Future | None = None
+        self.channel_pending: Any = None
+        self._channel_audit_attempted = False
 
     def dashboard(self):
         flow, event = self.flow, self.event
+        from gideon.security.approval_answer import asker_of_chat
+
+        session_key = flow.resolver(self.request_id) if flow.resolver else self.hint
+        session = (
+            flow.coordinator.dashboard_state._sessions.get(session_key)
+            if session_key and flow.coordinator.dashboard_state
+            else None
+        )
+        asker = asker_of_chat(
+            session_key or flow.source,
+            created_by_app=str(getattr(session, "_app", "") or ""),
+        )
         return flow.coordinator.dashboard_state.request_approval(
             self.request_id,
             flow.source,
             event.title,
             tool_input=event.tool_input,
             tool_purpose=event.tool_purpose,
-            session=flow.resolver(self.request_id) if flow.resolver else self.hint,
+            session=session_key,
+            asked_by=asker.label,
         )
 
     def on_prompted(self, pending: Any) -> None:
+        self.channel_pending = pending
         if not self.flow.coordinator.dashboard_state:
             return
         self.dashboard_future = asyncio.ensure_future(self.dashboard())
@@ -380,6 +437,54 @@ class ApprovalExchange:
 
         self.dashboard_future.add_done_callback(relay)
 
+    def finish_channel_decision(self, decision: bool | None) -> bool | None:
+        if decision is None:
+            return None
+        from gideon.security.approval_answer import CHANNEL, Principal
+
+        approved = bool(decision)
+        by = getattr(self.channel_pending, "answerer", None)
+        verified_answer = isinstance(by, Principal) and by.kind == CHANNEL
+        state = self.flow.coordinator.dashboard_state
+        if not verified_answer:
+            if (
+                self.dashboard_future is not None
+                and self.dashboard_future.done()
+                and not self.dashboard_future.cancelled()
+            ):
+                try:
+                    return bool(self.dashboard_future.result())
+                except Exception:
+                    return None
+            return None
+        if state is None:
+            if not self._channel_audit_attempted:
+                self._channel_audit_attempted = True
+                try:
+                    sel().log_tool_invocation(
+                        session_key=by.label,
+                        tool_name="approval_decision",
+                        outcome="approved" if approved else "rejected",
+                        request_id=self.request_id,
+                        source="paired_channel",
+                        metadata={"decided_by": by.label},
+                    )
+                except Exception:
+                    logger.warning(
+                        "SEL audit failed for paired-channel approval", exc_info=True
+                    )
+            return approved
+        if self.dashboard_future is None:
+            return None
+        if state.resolve_approval(self.request_id, approved, by=by):
+            return approved
+        if self.dashboard_future.done() and not self.dashboard_future.cancelled():
+            try:
+                return bool(self.dashboard_future.result())
+            except Exception:
+                return None
+        return None
+
     async def channel(self, parent_session_key: str):
         flow = self.flow
         approved = None
@@ -392,10 +497,8 @@ class ApprovalExchange:
                 sessions=flow.coordinator.sessions,
                 on_prompted=self.on_prompted,
             )
+            approved = self.finish_channel_decision(approved)
         finally:
-            state = flow.coordinator.dashboard_state
-            if state:
-                state.resolve_approval(self.request_id, bool(approved))
             if self.dashboard_future and not self.dashboard_future.done():
                 self.dashboard_future.cancel()
         return approved

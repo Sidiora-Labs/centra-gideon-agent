@@ -297,6 +297,14 @@ class AgentConfig:
             enum=["auto", "interactive", "trust_reads"],
         ),
     )
+    approval_timeout_minutes: int = field(
+        default=120,
+        metadata=_meta(
+            "Approval Timeout (minutes)",
+            "How long a human approval remains pending before it is denied. "
+            "Unattended approvals use the shorter unattended limit.",
+        ),
+    )
     provider: str = field(
         default="native",
         metadata=_meta(
@@ -2299,6 +2307,7 @@ class ResolvedBindings:
     provider_agent: str
     acp_mode: str = ""
     system_prompt: str = ""
+    voice: str = ""
     tools: list = field(default_factory=list)
     skills: list = field(default_factory=list)
     approval_mode: str = ""
