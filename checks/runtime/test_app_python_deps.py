@@ -8,6 +8,19 @@ it (surfaced via ``InstallResult.restart_required``).
 
 from __future__ import annotations
 
+import base64
+import csv
+import hashlib
+import io
+import os
+import subprocess
+import sys
+import venv
+import zipfile
+from pathlib import Path
+
+import pytest
+
 from gideon.extensions.apps import app_manager
 from gideon.extensions.apps.manifest import AppManifest
 
@@ -21,6 +34,35 @@ def _manifest(deps: list[str]) -> AppManifest:
             "provider": {"type": "tool", "implementation": "provider:make"},
         }
     )
+
+
+def _wheel(path: Path) -> Path:
+    name = "gideon_storage_probe"
+    version = "1.0"
+    dist_info = f"{name}-{version}.dist-info"
+    entries = {
+        f"{name}/__init__.py": "value = 'installed'\n",
+        f"{dist_info}/METADATA": (
+            "Metadata-Version: 2.1\nName: gideon-storage-probe\nVersion: 1.0\n"
+        ),
+        f"{dist_info}/WHEEL": (
+            "Wheel-Version: 1.0\nGenerator: local-vector\n"
+            "Root-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+    }
+    record = io.StringIO()
+    rows = csv.writer(record, lineterminator="\n")
+    for entry, contents in entries.items():
+        raw = contents.encode()
+        digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).rstrip(b"=").decode()
+        rows.writerow((entry, f"sha256={digest}", len(raw)))
+    rows.writerow((f"{dist_info}/RECORD", "", ""))
+    entries[f"{dist_info}/RECORD"] = record.getvalue()
+    wheel = path / f"{name}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for entry, contents in entries.items():
+            archive.writestr(entry, contents)
+    return wheel
 
 
 def test_manifest_parses_and_roundtrips_python_deps():
@@ -127,3 +169,52 @@ def test_no_installer_raises_actionable_lifecycle_error(monkeypatch):
             _manifest(["totally-not-a-real-pkg-xyz==9.9.9"])
         )
     assert "uv" in str(ei.value)
+
+
+def test_real_install_uses_no_cache_and_cleans_its_home_scratch(tmp_path):
+    wheelhouse = tmp_path / "wheels"
+    wheelhouse.mkdir()
+    _wheel(wheelhouse)
+    child_python = tmp_path / "venv" / "bin" / "python"
+    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(child_python.parent.parent)
+    user_home = tmp_path / "user-home"
+    active_home = tmp_path / "gideon-home"
+    user_home.mkdir()
+    active_home.mkdir()
+    script = r'''
+import json
+import sys
+from gideon.extensions.apps import app_manager
+from gideon.extensions.apps.manifest import AppManifest
+manifest = AppManifest.from_dict({
+    "name": "storage-probe", "version": "1.0.0",
+    "dependencies": {"pythonDependencies": ["gideon-storage-probe @ " + __import__("pathlib").Path(sys.argv[1]).as_uri()]},
+    "provider": {"type": "tool", "implementation": "provider:make"},
+})
+installed = app_manager._install_python_deps(manifest)
+from importlib.metadata import version
+print(json.dumps({"installed": installed, "version": version("gideon-storage-probe")}))
+'''
+    env = {
+        **os.environ,
+        "HOME": str(user_home),
+        "GIDEON_HOME": str(active_home),
+        "PATH": os.pathsep.join([str(child_python.parent), "/usr/bin", "/bin"]),
+        "PYTHONPATH": os.pathsep.join(
+            [str(Path(__file__).resolve().parents[2] / "runtime"), os.environ.get("PYTHONPATH", "")]
+        ),
+    }
+    result = subprocess.run(
+        [str(child_python), "-c", script, str(next(wheelhouse.glob("*.whl")))],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert '"installed": true' in result.stdout
+    assert '"version": "1.0"' in result.stdout
+    assert list(user_home.iterdir()) == []
+    assert not (active_home / "cache").exists()
+    assert list((active_home / "tmp").iterdir()) == []

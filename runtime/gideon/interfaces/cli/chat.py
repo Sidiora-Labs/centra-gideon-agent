@@ -1,7 +1,6 @@
 """CLI chat subcommand."""
 
 import gc
-import json
 import sys
 
 from gideon.core.config import AppConfig
@@ -130,19 +129,17 @@ async def _interactive(provider: ModelProvider, cfg: AppConfig) -> None:
 
 def _ensure_default_agent_in_config() -> None:
     """Ensure config.json includes a default Gideon agent for fresh installs."""
-    p = config_path()
-    try:
-        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-    except Exception:
-        data = {}
-    if not data.get("agents"):
-        data["agents"] = {
-            "default": {
-                "provider_agent": "gideon",
-                "workspace": "default",
-                "memory_store": "default",
+    from gideon.core.config.transactions import mutate_config
+
+    def ensure(document: dict) -> None:
+        if not document.get("agents"):
+            document["agents"] = {
+                "default": {
+                    "provider_agent": "gideon",
+                    "workspace": "default",
+                    "memory_store": "default",
+                }
             }
-        }
-        data["default_agent"] = "default"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            document["default_agent"] = "default"
+
+    mutate_config(ensure, path=config_path())

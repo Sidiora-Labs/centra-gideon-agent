@@ -203,35 +203,84 @@ def is_sensitive_path(path_str: str) -> bool:
     Works for both absolute paths and ~/relative paths.
     Used by hooks to block fs_read/ReadFile of credential files.
     """
-    if "\x00" in path_str:
-        return True
-    expanded = os.path.expanduser(os.path.expandvars(path_str))
-    try:
-        resolved = str(Path(expanded).resolve())
-    except (OSError, ValueError):
-        resolved = expanded
+    return SensitivePaths().contains(path_str)
 
-    try:
-        home = str(Path.home().resolve())
-    except (OSError, ValueError):
-        home = str(Path.home())
-    resolved_cmp = resolved.casefold()
-    if os.path.basename(resolved_cmp) in {n.casefold() for n in OWN_SECRET_BASENAMES}:
-        return True
-    for sensitive_dir in _SENSITIVE_HOME_DIRS:
-        sensitive_path = os.path.join(home, sensitive_dir).casefold()
-        if resolved_cmp == sensitive_path or resolved_cmp.startswith(
-            sensitive_path + os.sep
-        ):
-            return True
-    for entry in _gideon_home_sensitive_paths():
+
+class SensitivePaths:
+    """Classify lexical and resolved paths against credential-bearing locations.
+
+    Both spellings matter: callers commonly resolve a path before checking it, while
+    users commonly link protected home entries into a dotfiles tree. Direct symlink
+    entries under protected roots are included without recursively walking those roots.
+    """
+
+    def __init__(self) -> None:
+        self._lexical: set[str] = set()
+        self._resolved: set[str] = set()
         try:
-            entry_cmp = str(Path(entry).resolve()).casefold()
-        except (OSError, ValueError):
-            entry_cmp = entry.casefold()
-        if resolved_cmp == entry_cmp or resolved_cmp.startswith(entry_cmp + os.sep):
+            home = Path.home()
+        except (OSError, ValueError, RuntimeError):
+            home = Path(os.environ.get("HOME", "/invalid-home"))
+
+        protected: list[Path] = []
+        for item in _SENSITIVE_HOME_DIRS:
+            root = home / item
+            protected.append(root)
+            self._add_root(root)
+        for raw in _gideon_home_sensitive_paths():
+            root = Path(raw)
+            protected.append(root)
+            self._add_root(root)
+
+        for root in protected:
+            try:
+                children = list(root.iterdir())
+            except (OSError, ValueError, NotADirectoryError):
+                children = []
+            for child in children:
+                try:
+                    if child.is_symlink():
+                        self._add_root(child)
+                except (OSError, ValueError, RuntimeError):
+                    # An unreadable or invalid entry remains protected by its lexical
+                    # path; no value from the entry is needed to classify it.
+                    self._add_lexical(child)
+
+    def _add_lexical(self, path: Path) -> None:
+        try:
+            value = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+            self._lexical.add(value.casefold())
+        except (OSError, ValueError, RuntimeError):
+            self._lexical.add(str(path).casefold())
+
+    def _add_root(self, path: Path) -> None:
+        self._add_lexical(path)
+        try:
+            self._resolved.add(str(path.resolve()).casefold())
+        except (OSError, ValueError, RuntimeError):
+            # Keep the lexical root when a symlink is dangling or cannot be resolved.
+            pass
+
+    @staticmethod
+    def _within(path: str, root: str) -> bool:
+        return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+    def contains(self, path_str: str) -> bool:
+        if not isinstance(path_str, str) or "\x00" in path_str:
             return True
-    return False
+        try:
+            expanded = os.path.expanduser(os.path.expandvars(path_str))
+            lexical = os.path.normpath(os.path.abspath(expanded)).casefold()
+            resolved = str(Path(expanded).resolve()).casefold()
+        except (OSError, ValueError, RuntimeError):
+            return True
+        if os.path.basename(lexical) in {n.casefold() for n in OWN_SECRET_BASENAMES}:
+            return True
+        return any(
+            self._within(candidate, root)
+            for candidate in (lexical, resolved)
+            for root in self._lexical | self._resolved
+        )
 
 
 _SYSTEM_SUBTREES: tuple[str, ...] = (

@@ -27,15 +27,46 @@ def _user_dir() -> Path:
     return config_dir()
 
 
-_USER_DIR = _user_dir()
-AGENTS_DIR = _USER_DIR / "agents"
+class _ActiveHomePath(os.PathLike[str]):
+    """Path-like view that resolves its child from the active home when used."""
+
+    def __init__(self, *parts: str) -> None:
+        self._parts = parts
+
+    def _current(self) -> Path:
+        return _user_dir().joinpath(*self._parts)
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._current())
+
+    def __str__(self) -> str:
+        return str(self._current())
+
+    def __truediv__(
+        self, child: str | os.PathLike[str]
+    ) -> "_ActiveHomePath | Path":
+        path = Path(child)
+        if path.is_absolute():
+            return path
+        return _ActiveHomePath(*self._parts, *path.parts)
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+
+def _path_value(value: Path | _ActiveHomePath) -> Path:
+    return value._current() if isinstance(value, _ActiveHomePath) else Path(value)
+
+
+_USER_DIR = _ActiveHomePath()
+AGENTS_DIR = _ActiveHomePath("agents")
 AGENT_FILENAME = "gideon.json"
-_USER_MCP_JSON = _USER_DIR / "mcp.json"
-_USER_PROMPT = _USER_DIR / "prompt.md"
-_USER_OVERRIDES = _USER_DIR / "agent.json"
+_USER_MCP_JSON = _ActiveHomePath("mcp.json")
+_USER_PROMPT = _ActiveHomePath("prompt.md")
+_USER_OVERRIDES = _ActiveHomePath("agent.json")
 _BUNDLED_CFG_DIR = package_path("core", "config")
 _GIDEON_BIN: str | None = None
-_DEFAULT_HOOKS_DIR = _USER_DIR / "hooks"
+_DEFAULT_HOOKS_DIR = _ActiveHomePath("hooks")
 _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9/_.\-]+$")
 _SAFE_MATCHER_RE = re.compile(r"^[a-zA-Z0-9_.*\-]+$")
 _MAX_MATCHER_LEN = 200
@@ -108,7 +139,7 @@ def _shipped_prompt() -> Path:
 
 
 def _prompt_path(mode: str = "") -> Path:
-    return _USER_PROMPT if _USER_PROMPT.is_file() else _shipped_prompt()
+    return _path_value(_USER_PROMPT) if _USER_PROMPT.is_file() else _shipped_prompt()
 
 
 def _bin_is_usable(path: Path) -> bool:
@@ -204,8 +235,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def _all_skill_paths() -> list[str]:
     from gideon.extensions.skills.loader import skills_dir
     from gideon.extensions.skills.native import _bundled_root
+    from gideon.core.outside_home import allowed_paths
 
-    directories = [skills_dir(), Path.home() / ".agents" / "skills", _bundled_root()]
+    directories = [skills_dir(), _bundled_root()]
+    directories.extend(
+        Path(path)
+        for label, path in allowed_paths()
+        if label == "Shared agent skills"
+    )
     project = _project_dir()
     if project is not None:
         directories.append(project / "skills")
@@ -484,11 +521,13 @@ def _merge_agent_hooks(hooks: dict, user_hooks: dict) -> dict:
 
 def _configured_hooks_directory(value: Any) -> Path:
     if not isinstance(value, str) or not value:
-        return _DEFAULT_HOOKS_DIR
+        return _path_value(_DEFAULT_HOOKS_DIR)
     requested = Path(os.path.expanduser(value))
     try:
         directory = requested.resolve()
-        home = Path.home().resolve()
+        from gideon.core.config.loader import resolve_config_dir
+
+        home = resolve_config_dir().resolve()
         allowed = home in directory.parents and not is_sensitive_path(str(directory))
     except (OSError, ValueError):
         allowed = False
@@ -498,7 +537,7 @@ def _configured_hooks_directory(value: Any) -> Path:
     _sel_hook_rejected(
         "autoimport", str(requested), "agent_hooks_dir outside HOME or sensitive"
     )
-    return _DEFAULT_HOOKS_DIR
+    return _path_value(_DEFAULT_HOOKS_DIR)
 
 
 def _hook_count(hooks: dict) -> int:

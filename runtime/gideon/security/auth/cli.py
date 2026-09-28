@@ -15,7 +15,6 @@ code for pairing another device — the store keeps only its hash, so it cannot 
 from __future__ import annotations
 
 import getpass
-import json
 import os
 import sys
 
@@ -64,24 +63,22 @@ def _auth_config() -> dict:
 def _set_auth_field(name: str, value: object) -> None:
     """Write one `auth.*` field into config.json, preserving everything else."""
     from gideon.core.config.loader import config_path
-    from gideon.engine.agent import _atomic_json_write
+    from gideon.core.config.transactions import ConfigPreserveError, mutate_config
 
     path = config_path()
-    data: dict = {}
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                data = loaded
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"❌ Could not read {path}: {exc}")
-            raise SystemExit(1) from exc
-    section = data.get("auth")
-    if not isinstance(section, dict):
-        section = {}
-    section[name] = value
-    data["auth"] = section
-    _atomic_json_write(path, data)
+
+    def update(data: dict) -> None:
+        section = data.get("auth")
+        if not isinstance(section, dict):
+            section = {}
+        section[name] = value
+        data["auth"] = section
+
+    try:
+        mutate_config(update, path=path)
+    except ConfigPreserveError as exc:
+        print(f"❌ Could not read {path}: {exc}")
+        raise SystemExit(1) from exc
 
 
 def _read_new_password() -> str | None:

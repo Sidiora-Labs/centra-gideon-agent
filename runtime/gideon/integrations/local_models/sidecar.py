@@ -820,7 +820,7 @@ class SidecarInstall:
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=build_child_env(site="model-sidecar-install"),
+            env=build_child_env(site="model-sidecar-install", installer="pip"),
             check=False,
         )
         for line in (proc.stdout or "").splitlines()[-_LOG_TAIL_MAX:]:

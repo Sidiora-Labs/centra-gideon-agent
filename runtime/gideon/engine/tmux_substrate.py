@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -22,6 +24,12 @@ def tmux_available() -> bool:
     return shutil.which("tmux") is not None
 
 
+def _active_home():
+    from gideon.core.config.loader import resolve_config_dir
+
+    return resolve_config_dir()
+
+
 def sanitize(part: str) -> str:
     token = _UNSAFE.sub("_", str(part))
     return token[:_PART_MAX] or "_"
@@ -31,12 +39,42 @@ def terminal_session_name(session_id: str) -> str:
     return f"gideon-{str(session_id).replace('.', '_')}"
 
 
+def terminal_attach_argv(session_id: str, command: list[str]) -> list[str]:
+    return [
+        "tmux", "-L", socket_name(), "new-session", "-A", "-s",
+        terminal_session_name(session_id), *map(str, command),
+    ]
+
+
 def durable_session_name(project_id: str, run_id: str, session_slug: str) -> str:
     return "gideon-" + "-".join(map(sanitize, (project_id, run_id, session_slug)))
 
 
+def socket_name() -> str:
+    identity = hashlib.sha256(os.fsencode(_active_home())).hexdigest()[:16]
+    return f"gideon-{identity}"
+
+
+def command_env() -> dict[str, str]:
+    from gideon.core.config.loader import config_dir
+
+    home = config_dir()
+    socket_dir = home / "tmux"
+    socket_name_value = socket_name()
+    if len(os.fsencode(socket_dir / f"tmux-{os.getuid()}" / socket_name_value)) > 103:
+        socket_dir = None
+    else:
+        socket_dir.mkdir(parents=True, exist_ok=True)
+    environment = dict(os.environ)
+    if socket_dir is None:
+        environment["TMUX_TMPDIR"] = "/tmp"
+    else:
+        environment["TMUX_TMPDIR"] = str(socket_dir)
+    return environment
+
+
 def _argv(*args: str) -> list[str]:
-    return ["tmux", "-L", TMUX_SOCKET, *args]
+    return ["tmux", "-L", socket_name(), *args]
 
 
 @dataclass(frozen=True)
@@ -47,6 +85,7 @@ class TmuxCommand:
         try:
             process = await asyncio.create_subprocess_exec(
                 *_argv(*self.arguments),
+                env=command_env(),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -61,6 +100,7 @@ class TmuxCommand:
         try:
             process = await asyncio.create_subprocess_exec(
                 *_argv(*self.arguments),
+                env=command_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -80,6 +120,7 @@ class TmuxCommand:
         try:
             completed = subprocess.run(
                 _argv(*self.arguments),
+                env=command_env(),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=PROBE_TIMEOUT_S,
@@ -94,7 +135,7 @@ class TmuxCommand:
     def output_sync(self) -> bytes:
         try:
             return subprocess.run(
-                _argv(*self.arguments), capture_output=True, timeout=PROBE_TIMEOUT_S
+                _argv(*self.arguments), capture_output=True, timeout=PROBE_TIMEOUT_S, env=command_env()
             ).stdout
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             return b""

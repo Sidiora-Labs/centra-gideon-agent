@@ -315,6 +315,13 @@ class SecurityConfig:
             "against the full command string.",
         ),
     )
+    outside_home: list[str] = field(
+        default_factory=list,
+        metadata=_meta(
+            "Allowed outside-home reads",
+            "Named locations Gideon may read. Access is read-only; Gideon never installs, edits or deletes files there.",
+        ),
+    )
     egress: EgressConfig = field(
         default_factory=EgressConfig,
         metadata=_meta(

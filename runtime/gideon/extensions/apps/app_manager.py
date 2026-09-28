@@ -40,6 +40,7 @@ import json
 import logging
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -245,6 +246,8 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
     if not cmd.strip():
         return
     try:
+        from gideon.security.sandbox import build_child_env
+
         proc = (
             subprocess.run(  # noqa: S602 — intentional: vetted third-party setup hook
                 cmd,
@@ -253,6 +256,7 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
                 timeout=max(1, timeout),
                 capture_output=True,
                 text=True,
+                env=build_child_env(site="app-setup-hook"),
             )
         )
     except subprocess.TimeoutExpired as exc:
@@ -407,6 +411,15 @@ def _install_python_deps(manifest: AppManifest) -> bool:
         install_argv,
         installer_name,
     )
+    from gideon.security.sandbox import build_child_env
+
+    from gideon.core.config.loader import config_dir
+
+    home = config_dir()
+    scratch_root = home / "tmp"
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    child_env = build_child_env(site="app-python-install", installer="pip")
+    child_env.update(PIP_NO_CACHE_DIR="1", UV_NO_CACHE="1")
 
     try:
         argv = install_argv(["--disable-pip-version-check", *missing])
@@ -420,12 +433,14 @@ def _install_python_deps(manifest: AppManifest) -> bool:
         installer_name(),
     )
     try:
-        proc = subprocess.run(  # noqa: S603 — deps come from a scanned+vetted manifest
-            argv,
-            timeout=_PIP_TIMEOUT,
-            capture_output=True,
-            text=True,
-        )
+        with tempfile.TemporaryDirectory(prefix="app-python-install-", dir=scratch_root) as scratch:
+            proc = subprocess.run(  # noqa: S603 — deps come from a scanned+vetted manifest
+                argv,
+                timeout=_PIP_TIMEOUT,
+                capture_output=True,
+                text=True,
+                env={**child_env, "TMPDIR": scratch},
+            )
     except subprocess.TimeoutExpired as exc:
         raise AppLifecycleError(
             f"python dependency install timed out after {_PIP_TIMEOUT}s: {missing}"

@@ -90,7 +90,7 @@ def _refresh_instance_provider_safe(name: str) -> None:
             return
         if ext.enabled:
             registry.disable(name)
-        registry.enable(name)
+            registry.enable(name)
         _rebuild_agent_config_safe()
     except Exception:
         logger.warning(

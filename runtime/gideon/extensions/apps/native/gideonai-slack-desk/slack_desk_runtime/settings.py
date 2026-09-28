@@ -16,7 +16,6 @@ app store once (then deletes the core key), so existing installs keep their data
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -25,7 +24,6 @@ from gideon.sdk.channel import (
     CRED_SLACK_APP_TOKEN,
     CRED_SLACK_BOT_TOKEN,
     ProviderSettings,
-    atomic_write,
     config_path,
 )
 
@@ -262,52 +260,62 @@ def migrate_from_core() -> None:
     between is never clobbered by the stale core copies. Idempotent throughout."""
     if _migrated_marker_present():
         return
+    cpath = config_path()
+    leftover: list[str] = []
+    moved_count = 0
+    decision_made = False
     try:
-        cpath = config_path()
-        if not cpath.exists():
-            return
-        core = json.loads(cpath.read_text(encoding="utf-8"))
-    except Exception:
-        return  # unreadable core config — leave unmarked, re-check next boot
-    slack_desk = core.get("slack")
-    if not isinstance(slack_desk, dict) or not slack_desk:
-        # Nothing legacy to lift (fresh install, or already migrated before the
-        # explicit marker existed) — mark done so we stop re-reading core each boot.
-        _mark_migration_done()
-        return
-    leftover = [k for k in _OWNED_KEYS if k in slack_desk]
-    if not leftover:
-        # slack block holds none of our keys (e.g. stale observe_* copies —
-        # core reads those top-level only) — mark done, leave the block alone.
-        _mark_migration_done()
-        return
-    # Copy the behavioral keys (observe_* stay in core, top-level now — not moved
-    # here). Store-present keys win (see docstring).
-    store = ProviderSettings.load(_APP)
-    moved = {k: slack_desk[k] for k in leftover if k not in store}
-    try:
-        if moved:
-            ProviderSettings.update(_APP, moved)
-        # Drop the migrated behavioral keys from core (observe_* is core's own,
-        # top-level — never lived here to migrate).
-        for k in _OWNED_KEYS:
-            slack_desk.pop(k, None)
-        if slack_desk:
-            core["slack"] = slack_desk
-        else:
-            core.pop("slack", None)
-        atomic_write(cpath, json.dumps(core, indent=2) + "\n")
+        from gideon.core.config.transactions import mutate_config
+
+        def migrate(document: dict) -> str:
+            nonlocal decision_made, leftover, moved_count
+            decision_made = True
+            if not cpath.exists():
+                return "missing"
+            slack_desk = document.get("slack")
+            if not isinstance(slack_desk, dict) or not slack_desk:
+                return "complete"
+            leftover = [key for key in _OWNED_KEYS if key in slack_desk]
+            if not leftover:
+                return "complete"
+
+            store = ProviderSettings.load(_APP)
+            moved = {key: slack_desk[key] for key in leftover if key not in store}
+            if moved:
+                ProviderSettings.update(_APP, moved)
+            moved_count = len(moved)
+
+            for key in _OWNED_KEYS:
+                slack_desk.pop(key, None)
+            if slack_desk:
+                document["slack"] = slack_desk
+            else:
+                document.pop("slack", None)
+            return "migrated"
+
+        outcome = mutate_config(migrate, path=cpath)
     except Exception:
         # LOUD: the app store may already hold the lifted keys, but the legacy
         # copies are still sitting in core config.json. The absent done-marker
         # makes the next boot retry the rewrite.
-        logger.error(
-            "Slack config migration: rewriting core config.json failed — legacy key(s) "
-            "%s left behind in %s (will retry next boot)",
-            ", ".join(leftover),
-            cpath,
-            exc_info=True,
-        )
+        if decision_made:
+            logger.error(
+                "Slack config migration: rewriting core config.json failed — legacy key(s) "
+                "%s left behind in %s (will retry next boot)",
+                ", ".join(leftover),
+                cpath,
+                exc_info=True,
+            )
+        else:
+            logger.error(
+                "Slack config migration: core config.json could not be read at %s; "
+                "migration remains unmarked and will retry next boot",
+                cpath,
+                exc_info=True,
+            )
+        return
+    if outcome == "missing":
         return
     _mark_migration_done()
-    logger.info("Migrated %d Slack config key(s) from core config.json to the app store", len(moved))
+    if outcome == "migrated":
+        logger.info("Migrated %d Slack config key(s) from core config.json to the app store", moved_count)

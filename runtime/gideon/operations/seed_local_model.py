@@ -154,31 +154,29 @@ class ProviderDocument:
         )
 
     def append(self, endpoint, model, embedding):
-        from gideon.core.atomic_write import atomic_write
+        from gideon.core.config.transactions import mutate_config
 
-        data = self.read({})
-        if not isinstance(data, dict):
-            data = {}
-        options = {
-            "endpoint": endpoint,
-            "default_model": model,
-            "timeout_secs": REQUEST_TIMEOUT_SECS,
-        }
-        if embedding:
-            options["embedding_model"] = embedding
-        entries = data.setdefault("providers", [])
-        if not isinstance(entries, list):
-            data["providers"] = entries = []
-        entries.append(
-            {
-                "name": PROVIDER_ENTRY_NAME,
-                "type": PROVIDER_TYPE,
-                "model": model,
-                "options": options,
+        def append_entry(data):
+            options = {
+                "endpoint": endpoint,
+                "default_model": model,
+                "timeout_secs": REQUEST_TIMEOUT_SECS,
             }
-        )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(self.path, json.dumps(data, indent=2) + "\n", fsync=True)
+            if embedding:
+                options["embedding_model"] = embedding
+            entries = data.setdefault("providers", [])
+            if not isinstance(entries, list):
+                data["providers"] = entries = []
+            entries.append(
+                {
+                    "name": PROVIDER_ENTRY_NAME,
+                    "type": PROVIDER_TYPE,
+                    "model": model,
+                    "options": options,
+                }
+            )
+
+        mutate_config(append_entry, path=self.path)
 
 
 def _config_has_entry(name: str) -> bool:

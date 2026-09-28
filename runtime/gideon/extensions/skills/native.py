@@ -11,6 +11,7 @@ catalog of curated skills.
 """
 
 import logging
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 
@@ -47,8 +48,13 @@ class NativeSkillsMarketplace(SkillsMarketplace):
     ``gideon/skills/bundled/`` that contain a ``SKILL.md``.
     """
 
-    def __init__(self, root: Path | None = None) -> None:
-        self._root = root or _bundled_root()
+    def __init__(self, root: Path | Callable[[], Path] | None = None) -> None:
+        self._root = root if root is not None else _bundled_root()
+
+    def _root_path(self) -> Path:
+        if callable(self._root):
+            return Path(self._root())
+        return self._root
 
     @property
     def marketplace_type(self) -> str:
@@ -59,10 +65,11 @@ class NativeSkillsMarketplace(SkillsMarketplace):
         return "trusted"
 
     def _iter_skill_dirs(self) -> list[Path]:
-        if not self._root.is_dir():
+        root = self._root_path()
+        if not root.is_dir():
             return []
         out: list[Path] = []
-        for entry in sorted(self._root.iterdir()):
+        for entry in sorted(root.iterdir()):
             if entry.is_dir() and (entry / _SKILL_FILENAME).is_file():
                 out.append(entry)
         return out
@@ -96,9 +103,10 @@ class NativeSkillsMarketplace(SkillsMarketplace):
             or Path(skill_id).is_absolute()
         ):
             raise SkillNotFoundError(skill_id)
-        skill_dir = self._root / skill_id
+        root = self._root_path()
+        skill_dir = root / skill_id
         try:
-            resolved_root = self._root.resolve(strict=True)
+            resolved_root = root.resolve(strict=True)
             resolved_dir = skill_dir.resolve(strict=True)
         except OSError:
             raise SkillNotFoundError(skill_id) from None
@@ -130,10 +138,15 @@ class NativeSkillsMarketplace(SkillsMarketplace):
 
 get_default_skills_registry().register("native", NativeSkillsMarketplace())
 
-from gideon.extensions.skills.loader import skills_dir as _user_skills_dir  # noqa: E402
+
+def _installed_skills_root() -> Path:
+    from gideon.extensions.skills.loader import skills_dir
+
+    return skills_dir()
+
 
 get_default_skills_registry().register(
-    "installed", NativeSkillsMarketplace(root=_user_skills_dir())
+    "installed", NativeSkillsMarketplace(root=_installed_skills_root)
 )
 
 

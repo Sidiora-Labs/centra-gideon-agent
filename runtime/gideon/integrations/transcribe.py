@@ -21,9 +21,21 @@ from gideon.integrations.stt.provider import (
 logger = logging.getLogger(__name__)
 _STT_SEGMENT_THRESHOLD = 25 * 1024 * 1024
 _STT_SEGMENT_SECONDS = 600
+
+
+class _HomePath(os.PathLike[str]):
+    """Resolve an optional user-home executable directory at call time."""
+
+    def __init__(self, relative: str) -> None:
+        self._relative = relative
+
+    def __fspath__(self) -> str:
+        return os.path.expanduser(self._relative)
+
+
 _FFMPEG_CANDIDATE_DIRS = [
-    os.path.expanduser("~/ffmpeg"),
-    os.path.expanduser("~/.local/bin"),
+    _HomePath("~/ffmpeg"),
+    _HomePath("~/.local/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
 ]

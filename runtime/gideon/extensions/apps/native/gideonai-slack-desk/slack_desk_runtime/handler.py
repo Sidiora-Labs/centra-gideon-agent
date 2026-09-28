@@ -695,16 +695,13 @@ def _set_default_agent(name: str) -> None:
     if is_sensitive_path(str(path)):
         raise ValueError(f"Refusing to write to sensitive path: {path}")
     try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
-    data["default_agent"] = name
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        from gideon.sdk.channel import atomic_write
+        from gideon.core.config.transactions import mutate_config
 
-        atomic_write(path, json.dumps(data, indent=2) + "\n")
-    except OSError as e:
+        def set_default_agent(data: dict) -> None:
+            data["default_agent"] = name
+
+        mutate_config(set_default_agent, path=path)
+    except Exception as e:
         raise ValueError(f"Failed to write config: {e}") from e
     _cached_default_agent = name
 

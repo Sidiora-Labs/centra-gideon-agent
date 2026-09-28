@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
-from gideon.core.atomic_write import atomic_write
 from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
+from gideon.core.config.transactions import mutate_config
 from gideon.core.config.loader import (
     _WORKSPACE_DIR_NAME,
     DASHBOARD_PORT,
@@ -240,11 +240,10 @@ def _setup_noninteractive(
     if provider:
         cfg_file = config_path()
         try:
-            data: dict = {}
-            if cfg_file.exists():
-                data = json.loads(cfg_file.read_text(encoding="utf-8"))
-            data.setdefault("agent", {})["provider"] = provider
-            atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+            def set_provider(data: dict) -> None:
+                data.setdefault("agent", {})["provider"] = provider
+
+            mutate_config(set_provider, path=cfg_file)
             print(f"  ✅ Provider set: {provider}")
         except Exception as exc:
             print(f"  ❌ Could not set provider: {exc}")
@@ -396,8 +395,10 @@ def _setup_timezone() -> None:
             print("  ⏭  Skipped after too many attempts.\n")
             return
 
-    data["timezone"] = tz_val
-    atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+    def set_timezone(document: dict) -> None:
+        document["timezone"] = tz_val
+
+    mutate_config(set_timezone, path=cfg_file)
     print(f"  ✅ Timezone saved: {tz_val}\n")
 
 
@@ -448,12 +449,10 @@ def _maybe_setup_dashboard_url() -> None:
         return
 
     try:
-        data: dict = {}
-        if cfg_file.exists():
-            data = json.loads(cfg_file.read_text(encoding="utf-8"))
-        dashboard = data.setdefault("dashboard", {})
-        dashboard["url"] = answer
-        atomic_write(cfg_file, json.dumps(data, indent=2) + "\n")
+        def set_dashboard_url(data: dict) -> None:
+            data.setdefault("dashboard", {})["url"] = answer
+
+        mutate_config(set_dashboard_url, path=cfg_file)
         print(f"  ✅ Dashboard URL saved: {answer}")
         print("  Token auth will be required for all requests.\n")
     except Exception as e:

@@ -133,7 +133,10 @@ async def api_agent_hooks(request: web.Request) -> web.Response:
 _HOOK_SESSION_PREFIX = "hook:"
 _HOOK_TIMEOUT_DEFAULT = 599
 _HOOK_TIMEOUT_MAX = 3593
-_HOOK_STORE_PATH = _path_home_gideon() / "hooks.json"
+def _hook_store_path() -> Path:
+    return _path_home_gideon() / "hooks.json"
+
+
 _HOOK_MESSAGE_MAX_LEN = 49_999
 _HOOK_MAX_CONCURRENT = 6
 _hook_semaphore = asyncio.Semaphore(_HOOK_MAX_CONCURRENT)
@@ -147,10 +150,11 @@ def _load_hook_context(hook_id: str) -> str:
     Horizon 2 (1-24h): context injected with staleness warning
     Horizon 3 (> 24h): context skipped (too stale to be useful)
     """
-    if not _HOOK_STORE_PATH.exists():
+    path = _hook_store_path()
+    if not path.exists():
         return ""
     try:
-        hooks = json.loads(_HOOK_STORE_PATH.read_text(encoding="utf-8"))
+        hooks = json.loads(path.read_text(encoding="utf-8"))
         entry = hooks.get(hook_id, {})
         ctx = entry.get("context_summary", "") or entry.get("summary", "")
         if not ctx:

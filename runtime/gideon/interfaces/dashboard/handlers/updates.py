@@ -16,7 +16,6 @@ from aiohttp.client_exceptions import ClientConnectionResetError
 
 from gideon import __version__ as _local_version
 from gideon import shutdown_event
-from gideon.core.atomic_write import atomic_write
 from gideon.core.cancellation import run_with_timeout
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import AppConfig
@@ -221,13 +220,12 @@ async def api_update_auto(request: web.Request) -> web.Response:
     enabled = body.get("enabled", True)
     if not isinstance(enabled, bool):
         return web.json_response({"error": "enabled must be a boolean"}, status=400)
-    path = config_path()
+    from gideon.core.config.transactions import mutate_config_async
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        await mutate_config_async(lambda data: data.update(auto_update=enabled))
     except Exception:
-        data = {}
-    data["auto_update"] = enabled
-    atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
+        return web.json_response({"error": "failed to update config"}, status=500)
     return web.json_response({"ok": True, "auto_update": enabled})
 
 
@@ -248,17 +246,19 @@ async def api_update_dev_mode(request: web.Request) -> web.Response:
     enabled = body.get("enabled", False)
     if not isinstance(enabled, bool):
         return web.json_response({"error": "enabled must be a boolean"}, status=400)
-    path = config_path()
+    from gideon.core.config.transactions import mutate_config_async
+
+    def update_dev_mode(data: dict) -> None:
+        dashboard = data.get("dashboard")
+        if not isinstance(dashboard, dict):
+            dashboard = {}
+            data["dashboard"] = dashboard
+        dashboard["update_dev_mode"] = enabled
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        await mutate_config_async(update_dev_mode)
     except Exception:
-        data = {}
-    dash = data.get("dashboard")
-    if not isinstance(dash, dict):
-        dash = {}
-    dash["update_dev_mode"] = enabled
-    data["dashboard"] = dash
-    atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
+        return web.json_response({"error": "failed to update config"}, status=500)
     return web.json_response({"ok": True, "update_dev_mode": enabled})
 
 

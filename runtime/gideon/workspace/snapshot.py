@@ -1366,8 +1366,57 @@ def _merge_run_history(src_dir: Path, dst_dir: Path) -> None:
     print(f"  Run history: {shards} shard(s), {imported} row(s) imported")
 
 
+def _snapshot_config_document(path: Path) -> dict:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Snapshot config is unreadable: {path}: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ValueError(f"Snapshot config must be a JSON object: {path}")
+    return document
+
+
+def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
+    incoming = _snapshot_config_document(src)
+
+    from gideon.core.config.transactions import mutate_config
+
+    def replace(document: dict) -> None:
+        if live.is_symlink():
+            raise ValueError(f"Refusing to restore symlinked config: {live}")
+        if live.is_file():
+            shutil.copy2(str(live), str(backup))
+        document.clear()
+        document.update(incoming)
+
+    mutate_config(replace, path=live, create_if_missing=True)
+
+
+def _copy_config_if_missing(src: Path, live: Path) -> bool:
+    incoming = _snapshot_config_document(src)
+
+    from gideon.core.config.transactions import mutate_config
+
+    def copy_if_missing(document: dict) -> bool:
+        if live.is_symlink():
+            raise ValueError(f"Refusing to restore symlinked config: {live}")
+        if live.exists():
+            return False
+        document.update(incoming)
+        return True
+
+    return mutate_config(copy_if_missing, path=live, create_if_missing=True)
+
+
 def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None:
     for f in CORE_FILES.get(component, ()):
+        if f == "config.json":
+            src = snap / f
+            if src.is_symlink():
+                print(f"⚠️  Skipping symlinked file from snapshot: {src}")
+            elif src.is_file():
+                _replace_config_from_snapshot(src, pc / f, backup / f)
+            continue
         if (pc / f).is_file():
             if os.path.islink(pc / f):
                 print(f"⚠️  Skipping symlinked core file during backup: {pc / f}")
@@ -1637,6 +1686,12 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
     if _want(components, "config"):
         for f in CORE_FILES["config"]:
             s, d = snap / f, pc / f
+            if f == "config.json":
+                if s.is_symlink():
+                    print(f"⚠️  Skipping symlinked file from snapshot: {s}")
+                elif s.is_file() and _copy_config_if_missing(s, d):
+                    print(f"  {f}: restored (was missing)")
+                continue
             if s.is_file() and not d.is_file():
                 shutil.copy2(str(s), str(d))
                 print(f"  {f}: restored (was missing)")

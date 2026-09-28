@@ -38,6 +38,9 @@ async def handle_list_extensions(request: web.Request) -> web.Response:
     type_filter = request.query.get("type")
 
     extensions = registry.list_extensions()
+    request_app = request.get("app", "")
+    if request_app:
+        extensions = [extension for extension in extensions if extension.name == request_app]
     if type_filter:
         extensions = [e for e in extensions if e.provider_config.type == type_filter]
 

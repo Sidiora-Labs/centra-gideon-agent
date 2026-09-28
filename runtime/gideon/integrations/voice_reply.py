@@ -187,7 +187,11 @@ class _StitchTarget:
     def create(cls, output: str | None):
         if output is not None:
             return cls(output, False)
-        descriptor, path = tempfile.mkstemp(suffix=".wav")
+        from gideon.core.config.loader import config_dir
+
+        scratch = config_dir() / "tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        descriptor, path = tempfile.mkstemp(suffix=".wav", dir=scratch)
         os.close(descriptor)
         return cls(path, True)
 
@@ -208,7 +212,11 @@ async def _stop_codec(process) -> None:
 
 @contextlib.contextmanager
 def _concat_manifest(paths: list[str]):
-    descriptor, manifest = tempfile.mkstemp(prefix="voice_concat_", suffix=".ffconcat")
+    from gideon.core.config.loader import config_dir
+
+    scratch = config_dir() / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    descriptor, manifest = tempfile.mkstemp(prefix="voice_concat_", suffix=".ffconcat", dir=scratch)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write("ffconcat version 1.0\n")

@@ -72,7 +72,9 @@ def _path_home_gideon() -> Path:
 
         return _cd()
     except Exception:
-        return Path.home() / ".gideon"
+        from gideon.core.config.loader import resolve_config_dir
+
+        return resolve_config_dir()
 
 
 async def api_reveal_path(request: web.Request) -> web.Response:
@@ -101,7 +103,7 @@ async def api_reveal_path(request: web.Request) -> web.Response:
             metadata={"action": action},
         )
         return web.json_response({"error": "access denied"}, status=403)
-    if _validate_dashboard_path(path) is None:
+    if _validate_dashboard_path(path, read_only=True) is None:
         _sel().log_tool_invocation(
             session_key="api",
             source="api",
@@ -911,14 +913,13 @@ async def api_screenshot(request: web.Request) -> web.Response:
 def _dashboard_roots() -> list[tuple[str, str]]:
     """Return the labeled root directories the dashboard is allowed to surface.
 
-    Each entry is ``(label, realpath)``. These are the boundaries the file
-    explorer browses and the allowlist :func:`_validate_dashboard_path`
-    enforces — workspace, outbox, uploads, and GIDEON_HOME. Roots that
+    Each entry is ``(label, realpath)``. These are the writable roots. The active
+    home itself is deliberately never exposed. Roots that
     fail to resolve (e.g. not configured) are skipped. The order is
     user-facing-first (workspace) so the explorer can default to it.
     """
 
-    from gideon.core.config.loader import config_dir, outbox_dir
+    from gideon.core.config.loader import outbox_dir
 
     candidates: list[tuple[str, str]] = []
 
@@ -934,10 +935,10 @@ def _dashboard_roots() -> list[tuple[str, str]]:
         _add("Workspace", workspace_root)
     except Exception:
         pass
-    _add("Home", config_dir)
     _add("Outbox", outbox_dir)
+    from gideon.core.config.loader import config_dir
+
     _add("Uploads", lambda: os.path.join(config_dir(), "uploads"))
-    _add("Gideon", config_dir)
 
     def _add_workspace_root(label: str, wsd: str) -> None:
         real = os.path.realpath(os.path.expanduser(wsd))
@@ -970,7 +971,13 @@ def _dashboard_roots() -> list[tuple[str, str]]:
 
     seen: set[str] = set()
     roots: list[tuple[str, str]] = []
+    try:
+        active_home = os.path.realpath(str(config_dir()))
+    except Exception:
+        active_home = ""
     for label, rp in candidates:
+        if active_home and (rp == active_home or active_home.startswith(rp.rstrip(os.sep) + os.sep)):
+            continue
         if rp and rp not in seen:
             seen.add(rp)
             roots.append((label, rp))
@@ -996,7 +1003,7 @@ def _is_dashboard_root(path: str) -> bool:
 MAX_NAME_BYTES = 255
 
 
-def _validate_dashboard_path(raw: str) -> str | None:
+def _validate_dashboard_path(raw: str, *, read_only: bool = False) -> str | None:
     """Validate a file path for dashboard file I/O.
 
     Two-layer check:
@@ -1017,6 +1024,10 @@ def _validate_dashboard_path(raw: str) -> str | None:
         return None
 
     roots = [rp for _label, rp in _dashboard_roots()]
+    if read_only:
+        from gideon.core.outside_home import allowed_paths
+
+        roots.extend(rp for _label, rp in allowed_paths())
 
     inside_allowlist = False
     for root in roots:
@@ -1123,7 +1134,7 @@ async def api_file_watch(request: web.Request) -> web.StreamResponse:
         )
         return web.json_response({"error": "invalid input"}, status=400)
 
-    path = _validate_dashboard_path(raw_path)
+    path = _validate_dashboard_path(raw_path, read_only=True)
     if not path:
         _sel().log_tool_invocation(
             session_key="dashboard",
@@ -1260,7 +1271,7 @@ async def api_file_read(request: web.Request) -> web.Response:
         )
         return web.json_response({"error": "invalid input"}, status=400)
 
-    path = _validate_dashboard_path(raw_path)
+    path = _validate_dashboard_path(raw_path, read_only=True)
     if not path:
         _sel().log_tool_invocation(
             session_key="dashboard",
@@ -1522,7 +1533,11 @@ async def api_file_list(request: web.Request) -> web.Response:
 
     if not raw_path:
         roots = []
-        for label, rp in _dashboard_roots():
+        roots_with_read_only = [*_dashboard_roots()]
+        from gideon.core.outside_home import allowed_paths
+
+        roots_with_read_only.extend(allowed_paths())
+        for label, rp in roots_with_read_only:
             if os.path.isdir(rp):
                 roots.append(
                     {"label": label, "path": rp, "name": label, "is_dir": True}
@@ -1535,7 +1550,7 @@ async def api_file_list(request: web.Request) -> web.Response:
         )
         return web.json_response({"roots": roots, "entries": [], "path": ""})
 
-    path = _validate_dashboard_path(raw_path)
+    path = _validate_dashboard_path(raw_path, read_only=True)
     if not path:
         _sel().log_tool_invocation(
             session_key="dashboard",
@@ -1569,7 +1584,7 @@ async def api_file_list(request: web.Request) -> web.Response:
                     mtime = float(st.st_mtime)
                 except OSError:
                     continue
-                if not is_dir and _validate_dashboard_path(de.path) is None:
+                if not is_dir and _validate_dashboard_path(de.path, read_only=True) is None:
                     continue
                 entries.append(
                     {
@@ -2978,7 +2993,6 @@ async def api_create_dir(request: web.Request) -> web.Response:
 
 async def api_dashboard_config(request: web.Request) -> web.Response:
     """GET/PUT /api/dashboard/config — read or write dashboard settings."""
-    cfg = AppConfig.load()
     if request.method == "PUT":
         try:
             body = await read_json_body(request)
@@ -2989,6 +3003,38 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
                 outcome="failure",
             )
             return web.json_response({"error": str(exc)}, status=400)
+        if "operation" in body:
+            if body != {"operation": "keep_or_default_name"}:
+                return web.json_response({"error": "invalid config operation"}, status=400)
+            from gideon.core.config.transactions import mutate_config_async
+            from gideon.core.config.transactions import ConfigWriteError
+
+            def keep_or_default(document: dict) -> dict[str, str]:
+                dashboard = document.get("dashboard", {})
+                if not isinstance(dashboard, dict):
+                    raise ConfigWriteError("dashboard config is not an object; nothing was written")
+                user_name = dashboard.get("user_name", "")
+                username = dashboard.get("username", "")
+                if not isinstance(user_name, str) or not isinstance(username, str):
+                    raise ConfigWriteError("saved identity fields must be strings; nothing was written")
+                if not (user_name.strip() or username.strip()):
+                    user_name = "Operator"
+                    dashboard["user_name"] = "Operator"
+                    document["dashboard"] = dashboard
+                return {"user_name": user_name, "username": username}
+
+            try:
+                identity = await mutate_config_async(keep_or_default)
+            except (ConfigWriteError, RuntimeError) as exc:
+                _sel().log_tool_invocation(
+                    session_key="dashboard", tool_name="dashboard_config_write", outcome="failure"
+                )
+                return web.json_response({"error": str(exc)}, status=409)
+            _sel().log_tool_invocation(
+                session_key="dashboard", tool_name="dashboard_config_write", outcome="success"
+            )
+            return web.json_response({"ok": True, "identity": identity})
+        cfg = AppConfig.load()
         _allowed = {
             "restore_sessions",
             "restore_window_minutes",
@@ -3136,6 +3182,7 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
             outcome="success",
         )
         return web.json_response({"ok": True})
+    cfg = AppConfig.load()
     _sel().log_tool_invocation(
         session_key="dashboard", tool_name="dashboard_config_read", outcome="success"
     )

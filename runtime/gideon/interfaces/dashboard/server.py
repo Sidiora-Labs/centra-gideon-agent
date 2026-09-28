@@ -1412,6 +1412,7 @@ async def start_dashboard(
     app.router.add_post("/api/logs/level", handlers.api_log_level)
     app.router.add_post("/api/sel/rotate", handlers.api_sel_rotate)
     app.router.add_get("/api/security/stats", handlers.api_security_stats)
+    app.router.add_get("/api/security/outside-home", handlers.api_security_outside_home)
     app.router.add_get(
         "/api/security/denied-commands", handlers.api_security_denied_commands
     )
@@ -1944,11 +1945,19 @@ async def start_dashboard(
                 except Exception:
                     pass
                 raise web.HTTPForbidden(
-                    text=f"app {app_name!r} not permitted to access {request.path}",
+                    text=f"app {app_name!r} not permitted to access {request.path}: {reason}",
                     content_type="text/plain",
                 )
 
-            reason = app_request_denial(app_name, request.path)
+            resource = getattr(request.match_info.route, "resource", None)
+            route = getattr(resource, "canonical", "") if resource is not None else ""
+            reason = app_request_denial(
+                app_name,
+                request.path,
+                method=request.method,
+                route=route,
+                target=request.match_info.get("name", ""),
+            )
             if reason:
                 return _deny(reason)
         return await handler(request)  # type: ignore[operator]

@@ -81,7 +81,7 @@ def _workspace_dir_file() -> Path:
 
 
 def _default_workspace_base() -> Path:
-    return Path.home().joinpath("workplace")
+    return config_dir() / "workspace"
 
 
 def workspace_root() -> Path:
@@ -132,26 +132,26 @@ def outbox_dir() -> Path:
     return WorkspaceLocator.create(workspace_root() / OUTBOX_DIR_NAME)
 
 
-_ensured_dirs: set[str] = set()
-
-
 def _ensure_dir(p: Path) -> Path:
-    key = str(p)
-    if key in _ensured_dirs:
-        return p
     p.mkdir(parents=True, exist_ok=True)
-    _ensured_dirs.add(key)
     return p
 
 
-def config_dir() -> Path:
-    from gideon.core.config.locations import configuration_home
+def default_config_dir() -> Path:
+    """Return the default home without creating it."""
+    return Path.home() / CONFIG_DIR_NAME
 
-    return _ensure_dir(
-        configuration_home(
-            os.environ.get("GIDEON_HOME"), Path.home() / CONFIG_DIR_NAME, logger
-        )
-    )
+
+def resolve_config_dir() -> Path:
+    """Resolve the active Gideon home without creating it."""
+    from gideon.core.config.locations import active_home
+
+    return active_home(default=default_config_dir(), logger=logger)
+
+
+def config_dir() -> Path:
+    """Resolve and create the active Gideon home at call time."""
+    return _ensure_dir(resolve_config_dir())
 
 
 def config_path() -> Path:
@@ -2835,6 +2835,8 @@ class ConfigPreserveError(RuntimeError):
 
 @dataclass
 class AppConfig:
+    _loaded_values: dict | None = field(default=None, init=False, repr=False, compare=False)
+    _loaded_missing: bool = field(default=False, init=False, repr=False, compare=False)
     agent: AgentConfig = field(
         default_factory=AgentConfig,
         metadata=_meta("Agent", "Agent runtime configuration."),
@@ -3107,7 +3109,13 @@ class AppConfig:
 
         values = read_configuration(config_path(), logger)
         if values is None:
-            return cls(memory_stores={"default": MemoryStoreConfig()}), False
+            configuration = cls(memory_stores={"default": MemoryStoreConfig()})
+            configuration._loaded_values = configuration.to_dict()
+            configuration._loaded_missing = True
+            return configuration, False
+        from gideon.core.config.secret_refs import resolve_config_secrets
+
+        values = resolve_config_secrets(values)
         _validate_config_data(values)
         configuration = decode_configuration(values, cls)
         try:
@@ -3117,6 +3125,8 @@ class AppConfig:
         except Exception as failure:
             logger.warning("Config migration failed: %s", failure)
             changed = False
+        configuration._loaded_values = configuration.to_dict()
+        configuration._loaded_missing = False
         return configuration, changed
 
     def to_dict(self) -> dict:
@@ -3125,9 +3135,9 @@ class AppConfig:
         return configuration_values(self)
 
     def save(self) -> None:
-        from gideon.core.config.document import write_configuration
+        from gideon.core.config.transactions import save_config
 
-        write_configuration(config_path(), self.to_dict(), ConfigPreserveError)
+        save_config(self)
 
     def load_credentials(self) -> dict[str, str]:
         from gideon.core.config.credentials import (
@@ -3140,7 +3150,14 @@ class AppConfig:
             _keychain_credentials(),
             {key: os.environ[key] for key in _CREDENTIAL_KEYS if os.environ.get(key)},
         )
-        credentials = {key: value for layer in layers for key, value in layer.items()}
+        from gideon.core.config.credentials import is_config_secret_reference_key
+
+        credentials = {
+            key: value
+            for layer in layers
+            for key, value in layer.items()
+            if not is_config_secret_reference_key(key)
+        }
         for key in credentials.keys() - os.environ.keys():
             if credentials[key]:
                 os.environ[key] = credentials[key]

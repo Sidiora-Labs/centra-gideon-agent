@@ -81,9 +81,6 @@ def _get_config(request: web.Request) -> dict:
         return {}
 
 
-_TMUX_SOCKET = tmux_substrate.TMUX_SOCKET
-
-
 def _tmux_available() -> bool:
     """Whether the tmux binary is on PATH (macOS/Linux only; Windows has none)."""
     return tmux_substrate.tmux_available()
@@ -269,17 +266,10 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
             provider_argv = _pending_provider_argv.pop(session_id, None)
             persistent = _persist_enabled(request)
             if persistent:
-                tname = _tmux_session_name(session_id)
-                argv = [
-                    "tmux",
-                    "-L",
-                    _TMUX_SOCKET,
-                    "new-session",
-                    "-A",
-                    "-s",
-                    tname,
-                    *(provider_argv or [shell, "-l"]),
-                ]
+                env["TMUX_TMPDIR"] = tmux_substrate.command_env()["TMUX_TMPDIR"]
+                argv = tmux_substrate.terminal_attach_argv(
+                    session_id, provider_argv or [shell, "-l"]
+                )
             else:
                 argv = provider_argv or [shell, "-l"]
             _req_sandbox = _pending_sandbox.pop(session_id, "")

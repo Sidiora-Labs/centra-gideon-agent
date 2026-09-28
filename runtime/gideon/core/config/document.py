@@ -26,11 +26,19 @@ def _credential_field(name: object) -> bool:
 def redact_configuration(values: dict[str, Any]) -> dict[str, Any]:
     """Return the config's display form without credential values."""
 
-    def redact(value: Any, name: object = "") -> Any:
+    def redact(value: Any, name: object = "", path: tuple[str, ...] = ()) -> Any:
         if isinstance(value, dict):
-            return {key: redact(item, key) for key, item in value.items()}
+            return {
+                key: redact(item, key, path + (str(key),))
+                for key, item in value.items()
+            }
         if isinstance(value, list):
-            return [redact(item) for item in value]
+            return [
+                redact(item, path=path + (str(index),))
+                for index, item in enumerate(value)
+            ]
+        if path == ("security", "credential_keychain") and isinstance(value, bool):
+            return value
         return CREDENTIAL_MASK if value and _credential_field(name) else deepcopy(value)
 
     return redact(values)
@@ -79,6 +87,8 @@ def read_configuration(path: Path, logger: Any) -> dict[str, Any] | None:
 def configuration_values(configuration: Any) -> dict[str, Any]:
     result = {}
     for item in fields(configuration):
+        if item.name.startswith("_"):
+            continue
         value = getattr(configuration, item.name)
         if is_dataclass(value) and not isinstance(value, type):
             result[item.name] = asdict(value)
@@ -114,17 +124,39 @@ def write_configuration(
     path: Path, values: dict[str, Any], error_type: type[Exception]
 ) -> None:
     from gideon import __version__
-    from gideon.core.atomic_write import atomic_write
     from gideon.core.config.validation import consume_retired_keys
 
-    document = merge_configuration(path, values, error_type)
-    consume_retired_keys(document)
-    document.setdefault(
-        "meta",
-        {
-            "lastTouchedVersion": __version__,
-            "lastTouchedAt": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(document, indent=2) + "\n")
+    from copy import deepcopy
+    from gideon.core.config.transactions import mutate_config
+
+    def merge_fresh(document: dict[str, Any]) -> None:
+        def merge(old: Any, new: Any) -> Any:
+            if isinstance(old, dict) and isinstance(new, dict):
+                result = deepcopy(old)
+                for key, value in new.items():
+                    result[key] = merge(result[key], value) if key in result else deepcopy(value)
+                return result
+            return deepcopy(new)
+
+        updated = merge(document, values)
+        consume_retired_keys(updated)
+        updated.setdefault(
+            "meta",
+            {
+                "lastTouchedVersion": __version__,
+                "lastTouchedAt": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        document.clear()
+        document.update(updated)
+
+    try:
+        mutate_config(merge_fresh, path=path)
+    except Exception as failure:
+        if isinstance(failure, error_type):
+            raise
+        from gideon.core.config.loader import ConfigPreserveError
+
+        if isinstance(failure, ConfigPreserveError):
+            raise error_type(str(failure)) from failure
+        raise

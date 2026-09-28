@@ -25,28 +25,38 @@ from typing import Any
 from gideon.core.record_ids import record_path
 
 
-def _path_home_gideon():
-    """Resolve Gideon home dir, honoring GIDEON_HOME."""
-    try:
-        from gideon.core.config.loader import config_dir as _cd
-
-        return _cd()
-    except Exception:
-        from pathlib import Path as _P
-
-        return _P.home() / ".gideon"
-
-
 logger = logging.getLogger(__name__)
 
 _SKILL_FILENAME = "SKILL.md"
 
-SKILL_DISCOVERY_PATHS: list[Path] = [
-    Path.home() / ".agents" / "skills",
-    _path_home_gideon() / "skills",
-]
 
-DEFAULT_SKILLS_INSTALL_PATH: Path = Path.home() / ".agents" / "skills"
+class _SkillDiscoveryPaths:
+    """Resolve skill discovery roots when a caller iterates the registry."""
+
+    def __iter__(self):
+        return iter(_skill_discovery_paths())
+
+
+_DEFAULT_SKILL_DISCOVERY_PATHS = _SkillDiscoveryPaths()
+SKILL_DISCOVERY_PATHS = _DEFAULT_SKILL_DISCOVERY_PATHS
+
+
+def _skill_discovery_paths() -> list[Path]:
+    # Tests and callers historically replace this exported list to isolate
+    # discovery. Preserve that override while resolving defaults at call time.
+    if SKILL_DISCOVERY_PATHS is not _DEFAULT_SKILL_DISCOVERY_PATHS:
+        return list(SKILL_DISCOVERY_PATHS)
+
+    from gideon.extensions.skills.loader import skills_dir
+
+    return [skills_dir()]
+
+
+def default_skills_install_path() -> Path:
+    """Return the active Gideon home skills directory at call time."""
+    from gideon.extensions.skills.loader import skills_dir
+
+    return skills_dir()
 
 
 @dataclass
@@ -437,7 +447,20 @@ def install_scanned(
     import shutil
     import tempfile
 
+    from gideon.core.config.locations import active_home
     from gideon.security.supply_chain import TrustTier, Verdict, scan_dir
+
+    home = active_home()
+    destination = Path(target_dir).expanduser().resolve()
+    try:
+        destination.relative_to(home)
+    except ValueError as exc:
+        raise ValueError(
+            "skill installs must stay inside the active Gideon home"
+        ) from exc
+    target_dir = destination
+
+    home.mkdir(parents=True, exist_ok=True)
 
     try:
         tier = TrustTier(marketplace.trust_tier)
@@ -445,7 +468,9 @@ def install_scanned(
         tier = TrustTier.COMMUNITY
 
     detail = marketplace.fetch(skill_id)
-    staged_root = Path(tempfile.mkdtemp(prefix="gideon-skill-quarantine-"))
+    staged_root = Path(
+        tempfile.mkdtemp(prefix=".gideon-skill-quarantine-", dir=home)
+    )
     try:
         staged_skill = record_path(
             staged_root, detail.name or skill_id, suffix="", kind="skill name"
@@ -486,7 +511,7 @@ def list_local_skills(extra_paths: list[Path] | None = None) -> list[dict[str, s
     Each dict contains: ``{name, description, path, source}``.
     The ``source`` field is the discovery directory name.
     """
-    search_paths = list(SKILL_DISCOVERY_PATHS)
+    search_paths = _skill_discovery_paths()
     if extra_paths:
         search_paths.extend(extra_paths)
 
@@ -509,6 +534,25 @@ def list_local_skills(extra_paths: list[Path] | None = None) -> list[dict[str, s
                     "description": description,
                     "path": str(skill_md),
                     "source": str(base),
+                }
+            )
+
+    from gideon.extensions.skills.loader import _outside_skill_dirs
+
+    for base in _outside_skill_dirs():
+        if not base.is_dir():
+            continue
+        for name, skill_md in iter_skill_files(base):
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            description = _parse_description(skill_md)
+            skills.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "path": str(skill_md),
+                    "source": base.name,
                 }
             )
 

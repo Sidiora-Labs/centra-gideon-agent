@@ -7,8 +7,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from gideon.core.config.document import write_configuration
-from gideon.core.config.loader import AgentProfile, ConfigPreserveError
+from gideon.core.config.loader import AgentProfile
 from gideon.workspace.capabilities.experience.avatar import (
     STATES,
     AvatarStore,
@@ -47,6 +46,10 @@ class BundleInventory:
     def _config(self):
         path = self.home / "config.json"
         value = json.loads(path.read_text()) if path.exists() else {}
+        return self._validate_config(value)
+
+    @staticmethod
+    def _validate_config(value):
         if (
             not isinstance(value, dict)
             or not isinstance(value.get("agents", {}), dict)
@@ -56,6 +59,95 @@ class BundleInventory:
         ):
             raise ValueError("Invalid destination agent configuration")
         return value
+
+    @staticmethod
+    def _agent_config_snapshot(group, config):
+        agents = config.get("agents", {})
+        if group == "agent_definitions":
+            return [
+                {
+                    "name": name,
+                    **{
+                        key: raw.get(key, getattr(AgentProfile(), key))
+                        for key in AGENT_FIELDS
+                    },
+                }
+                for name, raw in sorted(agents.items())
+                if raw.get("source") != "builtin"
+            ]
+        return [
+            {"name": name, "model": raw["model"]}
+            for name, raw in sorted(agents.items())
+            if raw.get("model")
+        ]
+
+    def _apply_agent_config(self, group, data, expected):
+        from gideon.core.config.transactions import mutate_config
+
+        def apply_current(config):
+            self._validate_config(config)
+            if not group_available(group):
+                raise ValueError("Group unavailable under destination policy")
+            current = self._agent_config_snapshot(group, config)
+            if digest(current) != expected:
+                raise ValueError("Destination group changed or became unavailable")
+
+            result = {
+                "new": [],
+                "duplicates": [],
+                "conflicts": [],
+                "blocked": False,
+            }
+            existing = {row["name"]: row for row in current}
+            agents = config.get("agents", {})
+            from gideon.engine.agents.defaults import is_reserved_agent
+
+            for row in data:
+                name = row["name"]
+                if group == "agent_definitions" and is_reserved_agent(name):
+                    result["conflicts"].append(
+                        name + ": reserved agent cannot be imported"
+                    )
+                elif existing.get(name) == row:
+                    result["duplicates"].append(name)
+                elif group == "agent_definitions" and name in agents:
+                    result["conflicts"].append(
+                        name + ": destination agent already exists"
+                    )
+                elif group == "model_policy" and name not in agents:
+                    result["conflicts"].append(
+                        name + ": import agent definition first"
+                    )
+                else:
+                    result["new"].append(name)
+            if group == "model_policy":
+                try:
+                    require_model_policy(self.home, data)
+                except (ValueError, PermissionError) as error:
+                    result["conflicts"].append(str(error))
+            result["blocked"] = bool(result["conflicts"])
+            if result["blocked"]:
+                raise ValueError("Destination group has conflicts")
+            if not result["new"]:
+                return 0
+
+            agents = config.setdefault("agents", {})
+            for row in data:
+                if row["name"] not in result["new"]:
+                    continue
+                if group == "agent_definitions":
+                    agents[row["name"]] = asdict(
+                        AgentProfile(
+                            **{key: row[key] for key in AGENT_FIELDS},
+                            approval_mode="interactive",
+                            source="identity_bundle",
+                        )
+                    )
+                else:
+                    agents[row["name"]]["model"] = row["model"]
+            return len(result["new"])
+
+        return mutate_config(apply_current, path=self.home / "config.json")
 
     def _avatars(self):
         return AvatarStore(ExperienceStore(self.home))
@@ -412,6 +504,8 @@ class BundleInventory:
 
     def apply(self, group, data, expected):
         self.validate(group, data)
+        if group in ("agent_definitions", "model_policy"):
+            return self._apply_agent_config(group, data, expected)
         current = self.snapshot(group) if group_available(group) else None
         if current is None or digest(current) != expected:
             raise ValueError("Destination group changed or became unavailable")
@@ -440,30 +534,6 @@ class BundleInventory:
                     db.execute(
                         "INSERT INTO stories VALUES(?,?)", (row["id"], json.dumps(row))
                     )
-        elif group in ("agent_definitions", "model_policy"):
-            cfg = self._config()
-            agents = cfg.setdefault("agents", {})
-            for row in data:
-                if row["name"] not in plan["new"]:
-                    continue
-                if group == "agent_definitions":
-                    from gideon.engine.agents.defaults import is_reserved_agent
-
-                    if is_reserved_agent(row["name"]):
-                        raise ValueError("Reserved agent cannot be imported")
-                    agents[row["name"]] = asdict(
-                        AgentProfile(
-                            **{key: row[key] for key in AGENT_FIELDS},
-                            approval_mode="interactive",
-                            source="identity_bundle",
-                        )
-                    )
-                else:
-                    require_model_policy(self.home, data)
-                    agents[row["name"]]["model"] = row["model"]
-            write_configuration(
-                self.home / "config.json", {"agents": agents}, ConfigPreserveError
-            )
         else:
             avatars = self._avatars()
             for row in data:

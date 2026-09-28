@@ -4964,6 +4964,8 @@ export const api = {
   memoryContextPreview: (q: string) => get<MemoryContextPreview>(`/api/memory/context-preview?q=${encodeURIComponent(q)}`),
   consolidateMemory: (key: string) => post<{ ok?: boolean; key?: string; error?: string }>('/api/memory/consolidate', { key }),
   securityStats: () => get<SecurityStats>('/api/security/stats'),
+  securityOutsideHome: () => get<{ places: { id: string; label: string; path: string; allowed: boolean }[] }>('/api/security/outside-home'),
+  setOutsideHome: (ids: string[], confirm = false) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.outside_home', value: ids, ...(confirm ? { confirm: true } : {}) }),
   deniedCommands: () => get<DeniedCommands>('/api/security/denied-commands'),
   setUserDeniedCommands: (patterns: string[]) => patch<Record<string, any>>('/api/config/gideon', { path: 'security.denied_commands', value: patterns }),
   securityEgress: () => get<EgressPolicyConfig>('/api/security/egress'),

@@ -6,8 +6,7 @@ import json
 import re
 from urllib.parse import urlsplit
 
-from gideon.core.atomic_write import atomic_write
-from gideon.core.config.loader import config_dir, config_path
+from gideon.core.config.loader import ConfigPreserveError, config_dir, config_path
 from gideon.integrations.llm.catalog import ModelManager
 from gideon.integrations.llm.credentials import CredentialStore
 
@@ -27,13 +26,7 @@ def document():
         data = {}
     except (OSError, ValueError) as error:
         raise ConnectionError("Provider configuration is unreadable", 503) from error
-    if (
-        not isinstance(data, dict)
-        or not isinstance(data.get("provider_connections", {}), dict)
-        or not isinstance(data.get("providers", []), list)
-    ):
-        raise ConnectionError("Provider configuration is invalid", 503)
-    return data
+    return _validate_document(data)
 
 
 def allowed(model, policy):
@@ -89,7 +82,48 @@ def projection(data=None):
 def mutate(identifier, body, *, operation="save", provider=None):
     if not isinstance(identifier, str) or not _ID.fullmatch(identifier):
         raise ConnectionError("Invalid connection identifier")
-    data = document()
+
+    def apply(current):
+        data = _validate_document(current)
+        return _apply_mutation(identifier, body, operation, provider, data)
+
+    from gideon.core.config.transactions import ConfigWriteError, mutate_config
+    from gideon.core.config.secret_refs import ConfigSecretReferenceError
+
+    try:
+        data = mutate_config(apply, path=config_path())
+    except ConnectionError:
+        raise
+    except ConfigPreserveError as error:
+        raise ConnectionError("Provider configuration is unreadable", 503) from error
+    except ConfigWriteError as error:
+        raise ConnectionError("Provider configuration is temporarily unavailable", 503) from error
+    except ConfigSecretReferenceError as error:
+        raise ConnectionError("Provider configuration is invalid", 503) from error
+
+    from gideon.integrations.llm.registry import get_default_registry
+
+    registry = get_default_registry()
+    for row in data.get("providers", []):
+        entry = registry._entries.get(row.get("name"))
+        if entry is not None:
+            registry._entries[entry.name] = dataclasses.replace(
+                entry, options=dict(row.get("options", {}))
+            )
+    return projection(data)
+
+
+def _validate_document(data):
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("provider_connections", {}), dict)
+        or not isinstance(data.get("providers", []), list)
+    ):
+        raise ConnectionError("Provider configuration is invalid", 503)
+    return data
+
+
+def _apply_mutation(identifier, body, operation, provider, data):
     connections = data.setdefault("provider_connections", {})
     previous = connections.get(identifier)
     revision = previous.get("revision", 0) if previous else 0
@@ -179,17 +213,7 @@ def mutate(identifier, body, *, operation="save", provider=None):
         previous["revision"] += 1
     else:
         raise ConnectionError("Unknown connection operation")
-    atomic_write(config_path(), json.dumps(data, indent=2) + "\n", fsync=True)
-    from gideon.integrations.llm.registry import get_default_registry
-
-    registry = get_default_registry()
-    for row in data.get("providers", []):
-        entry = registry._entries.get(row.get("name"))
-        if entry is not None:
-            registry._entries[entry.name] = dataclasses.replace(
-                entry, options=dict(row.get("options", {}))
-            )
-    return projection(data)
+    return data
 
 
 def effective_entry(entry):

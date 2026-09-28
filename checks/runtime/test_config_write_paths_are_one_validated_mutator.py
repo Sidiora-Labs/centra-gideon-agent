@@ -29,11 +29,55 @@ everything" is one `return 400` away from an endpoint that saves nothing at all.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import time
+import asyncio
 from unittest.mock import patch
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+
+
+_HOLD_CONFIG_TRANSACTION = r"""
+import os, time
+from pathlib import Path
+from gideon.core.config.transactions import mutate_config
+home = Path(os.environ['GIDEON_HOME'])
+def hold(document):
+    (home / 'config-transaction-held').touch()
+    deadline = time.monotonic() + 30
+    while not (home / 'release-config-transaction').exists():
+        if time.monotonic() > deadline:
+            raise SystemExit('release timeout')
+        time.sleep(0.002)
+    document['transaction_holder_finished'] = True
+mutate_config(hold)
+"""
+
+
+async def _start_config_transaction_holder(home):
+    process = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_CONFIG_TRANSACTION],
+        env={**os.environ, "GIDEON_HOME": str(home)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 30
+    while not (home / "config-transaction-held").exists():
+        assert time.monotonic() < deadline, "transaction holder did not acquire the config lock"
+        assert process.poll() is None, process.communicate()[1]
+        await asyncio.sleep(0.01)
+    return process
+
+
+async def _release_config_transaction(home, process):
+    (home / "release-config-transaction").touch()
+    _, stderr = await asyncio.to_thread(process.communicate, timeout=30)
+    assert process.returncode == 0, stderr
 
 
 class _RecordingSel:
@@ -413,35 +457,26 @@ def test_the_shared_validator_rejects_a_bool_for_a_numeric_field():
 
 
 @pytest.mark.asyncio
-async def test_put_waits_on_the_same_lock_patch_holds(cfg_file, sel_rows):
-    """PUT and PATCH both read-modify-write the WHOLE file, and only PATCH took the lock.
-
-    `atomic_write` guarantees the file is never half-written; it says nothing about a
-    concurrent modifier's change surviving. Interleaved, the later writer's read predates the
-    earlier writer's write, so it serialises a `data` that never saw it and one field silently
-    reverts — a write that reports success having done something other than what was asked,
-    which is this file's whole subject.
-
-    Asserted by HOLDING the lock and showing PUT blocks, rather than by racing two requests:
-    a race that happens to run sequentially passes whether or not the lock is there, and a
-    test that can pass on the broken code is not evidence. This one cannot.
-    """
-    import asyncio
-
-    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
-
-    async with TestClient(TestServer(_config_app())) as client:
-        async with _get_config_lock():
+async def test_put_waits_on_real_config_transaction_lock(cfg_file, sel_rows):
+    """The real cross-process config transaction lock serializes successful PUT writes."""
+    holder = await _start_config_transaction_holder(cfg_file.parent)
+    try:
+        async with TestClient(TestServer(_config_app())) as client:
             task = asyncio.ensure_future(
                 client.put("/api/config/gideon", json={"agent": {"max_subagents": 4}})
             )
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
-            assert not task.done(), "PUT did not wait on the lock PATCH holds"
-
-        resp = await task
-        assert resp.status == 200, await resp.text()
-        assert _section(cfg_file, "agent")["max_subagents"] == 4
+            assert not task.done(), "PUT did not wait on the config transaction lock"
+            await _release_config_transaction(cfg_file.parent, holder)
+            resp = await task
+            assert resp.status == 200, await resp.text()
+        saved = json.loads(cfg_file.read_text(encoding="utf-8"))
+        assert saved["agent"]["max_subagents"] == 4
+        assert saved["transaction_holder_finished"] is True
+    finally:
+        if holder.poll() is None:
+            await _release_config_transaction(cfg_file.parent, holder)
 
 
 @pytest.mark.asyncio
@@ -463,18 +498,18 @@ async def test_a_put_still_applies_when_nothing_holds_the_lock(cfg_file, sel_row
 
 @pytest.mark.asyncio
 async def test_a_refused_put_does_not_hold_the_lock(cfg_file, sel_rows):
-    """Validation is deliberately OUTSIDE the lock: it touches no shared state, and holding a
-    lock across it would serialise every rejected request for no benefit. Proven by refusing a
-    PUT while the lock is held — it must answer 400 without waiting for the holder."""
-    import asyncio
+    """Invalid PUT validation returns while another process holds the config transaction lock."""
 
-    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
-
-    async with TestClient(TestServer(_config_app())) as client:
-        async with _get_config_lock():
+    holder = await _start_config_transaction_holder(cfg_file.parent)
+    try:
+        async with TestClient(TestServer(_config_app())) as client:
             resp = await asyncio.wait_for(
                 client.put("/api/config/gideon", json={"agent": {"nonsense": 1}}),
                 timeout=2.0,
             )
             assert resp.status == 400
             assert "nonsense" in (await resp.json())["error"]
+        await _release_config_transaction(cfg_file.parent, holder)
+    finally:
+        if holder.poll() is None:
+            await _release_config_transaction(cfg_file.parent, holder)

@@ -52,8 +52,27 @@ def _mcp_sources() -> tuple[tuple[Path, str], ...]:
     return ((config_dir() / "mcp.json", SCOPE_GIDEON),)
 
 
-_IMPORT_SOURCES: tuple[tuple[Path, str], ...] = (
-    (Path.home() / ".claude.json", "Claude Code"),
+class _HomePath(os.PathLike[str]):
+    """Resolve a user-home path only when a discovery operation uses it."""
+
+    def __init__(self, relative: str) -> None:
+        self._relative = relative
+
+    def _current(self) -> Path:
+        return Path.home() / self._relative
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._current())
+
+    def __str__(self) -> str:
+        return str(self._current())
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+
+_IMPORT_SOURCES: tuple[tuple[os.PathLike[str], str], ...] = (
+    (_HomePath(".claude.json"), "Claude Code"),
 )
 
 
@@ -514,11 +533,13 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
     server.status = "probing"
     proc = None
     try:
-        env = dict(os.environ)
-        env["PATH"] = augmented_path(env.get("PATH", ""))
+        from gideon.security.sandbox import build_child_env
+
+        extra_env = {k: v for k, v in server.env.items() if k != "PATH"}
+        env = build_child_env(site=f"mcp-probe:{server.name}", extra=extra_env)
+        env["PATH"] = augmented_path(os.environ.get("PATH", ""))
         if "PATH" in server.env:
             env["PATH"] = server.env["PATH"] + os.pathsep + env["PATH"]
-        env.update({k: v for k, v in server.env.items() if k != "PATH"})
 
         resolved = shutil.which(server.command, path=env.get("PATH"))
         if not resolved:
@@ -730,7 +751,7 @@ def discover_servers_to_sync() -> list[McpServerInfo]:
     return out
 
 
-_IMPORT_JSON_PATHS: tuple[tuple[Path, str], ...] = _IMPORT_SOURCES
+_IMPORT_JSON_PATHS: tuple[tuple[os.PathLike[str], str], ...] = _IMPORT_SOURCES
 
 
 def discover_importable_servers() -> list[dict[str, Any]]:

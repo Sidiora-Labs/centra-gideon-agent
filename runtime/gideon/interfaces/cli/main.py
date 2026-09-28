@@ -1691,7 +1691,6 @@ def _handle_skills(args) -> None:  # noqa: ANN001
 
     from gideon.engine.agent import _all_skill_paths
     from gideon.extensions.skills.marketplace import (
-        DEFAULT_SKILLS_INSTALL_PATH,
         get_default_skills_registry,
         list_local_skills,
     )
@@ -1729,7 +1728,12 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         skill_id = args.id
         marketplace_name = getattr(args, "marketplace", "skills.sh")
         target_str = getattr(args, "target", "")
-        target = Path(target_str) if target_str else DEFAULT_SKILLS_INSTALL_PATH
+        if target_str:
+            target = Path(target_str)
+        else:
+            from gideon.extensions.skills.marketplace import default_skills_install_path
+
+            target = default_skills_install_path()
         force = bool(getattr(args, "force", False))
         from gideon.extensions.skills.marketplace import SkillInstallRefused
 

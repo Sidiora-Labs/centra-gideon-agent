@@ -34,7 +34,11 @@ class AudioDestination:
     def allocate(cls, requested: str) -> AudioDestination:
         if requested:
             return cls(requested, False)
-        descriptor, location = tempfile.mkstemp(suffix=".mp3")
+        from gideon.core.config.loader import config_dir
+
+        scratch = config_dir() / "tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        descriptor, location = tempfile.mkstemp(suffix=".mp3", dir=scratch)
         os.close(descriptor)
         return cls(location, True)
 

@@ -11,8 +11,8 @@ from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
 
 import gideon.assurance.validation as _validation_mod
-from gideon.core.atomic_write import atomic_write
 from gideon.core.config.edit_spec import ConfigValueError, coerce_edit_value
+from gideon.core.config.editable import EDITABLE_CONFIG_FIELDS
 from gideon.core.config.loader import MEMORY_VAULT_MODES, PUSH_BACKENDS, AppConfig
 from gideon.core.http_request import read_json_body
 from gideon.core.layout import package_path
@@ -300,7 +300,11 @@ async def api_stt_transcribe(request: web.Request) -> web.Response:
 
     _stt_cap = _STT_MIC_CAP_BYTES
     field_mime = (getattr(field, "headers", {}) or {}).get("Content-Type") or None
-    fd, tmp = tempfile.mkstemp(suffix=ext)
+    from gideon.core.config.loader import config_dir
+
+    scratch = config_dir() / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(suffix=ext, dir=scratch)
     try:
         os.close(fd)
         size = 0
@@ -386,7 +390,6 @@ async def api_security_stats(_request: web.Request) -> web.Response:
         for name in dir(_validation_mod)
         if name.endswith("_SCHEMA") and name.isupper()
     )
-
     return web.json_response(
         {
             "denied_commands": denied,
@@ -395,6 +398,13 @@ async def api_security_stats(_request: web.Request) -> web.Response:
             "redaction_paths": 5,
         }
     )
+
+
+async def api_security_outside_home(_request: web.Request) -> web.Response:
+    """Return named, read-only locations available to the owner."""
+    from gideon.core.outside_home import place_rows
+
+    return web.json_response({"places": place_rows()})
 
 
 async def api_security_denied_commands(_request: web.Request) -> web.Response:
@@ -461,8 +471,6 @@ async def api_security_egress(_request: web.Request) -> web.Response:
 
 async def api_gideon_config(request: web.Request) -> web.Response:
     """GET/PUT /api/config/gideon — read or update Gideon config."""
-    from gideon.core.config.loader import config_path  # noqa: F811
-
     if request.method == "PUT":
         caller = request.get("user", "dashboard")
 
@@ -507,33 +515,31 @@ async def api_gideon_config(request: web.Request) -> web.Response:
             return _deny("no recognized settings provided")
         applied = list(staged)
 
-        from gideon.interfaces.dashboard.handlers.agents import (  # noqa: F811
-            _get_config_lock,
-        )
+        from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
-        path = config_path()
-        async with _get_config_lock():
-            try:
-                data = (
-                    json.loads(path.read_text(encoding="utf-8"))
-                    if path.exists()
-                    else {}
-                )
-            except Exception:
-                _sel().log_api_access(
-                    caller=caller,
-                    operation="config.update",
-                    outcome="error",
-                    error="config.json is corrupt",
-                )
-                return web.json_response(
-                    {"error": "config.json is corrupt"}, status=500
-                )
-            if not isinstance(data.get("agent"), dict):
-                data["agent"] = {}
-            agent = data["agent"]
+        def update_agent(data: dict) -> dict:
+            agent = data.get("agent")
+            if not isinstance(agent, dict):
+                agent = {}
+                data["agent"] = agent
             agent.update(staged)
-            atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
+            return dict(agent)
+
+        try:
+            agent = await mutate_config_async(update_agent)
+        except ConfigPreserveError:
+            _sel().log_api_access(
+                caller=caller,
+                operation="config.update",
+                outcome="error",
+                error="config.json is corrupt",
+            )
+            return web.json_response({"error": "config.json is corrupt"}, status=500)
+        except Exception:
+            _sel().log_api_access(
+                caller=caller, operation="config.update", outcome="error", error="config write failed"
+            )
+            return web.json_response({"error": "config write failed"}, status=500)
         _sel().log_api_access(
             caller=caller,
             operation="config.update",
@@ -559,8 +565,10 @@ async def api_gideon_config(request: web.Request) -> web.Response:
                     logger.exception("Failed to clean up orchestrator skill")
         return web.json_response({"ok": True})
 
+    from gideon.core.config.document import redact_configuration
+
     cfg = AppConfig.load()
-    return web.json_response(cfg.to_dict())
+    return web.json_response(redact_configuration(cfg.to_dict()))
 
 
 _SETTINGS_CONFIG_SECTIONS = {
@@ -643,6 +651,7 @@ def _scratchpad_path_sanitizer(value: str) -> str:
 
 
 _EDITABLE_CONFIG: dict[str, dict] = {
+    **EDITABLE_CONFIG_FIELDS,
     "agent.approval_mode": {
         "type": "enum",
         "values": ["auto", "interactive", "trust_reads"],
@@ -978,7 +987,6 @@ _EDITABLE_CONFIG: dict[str, dict] = {
 
 async def api_gideon_config_patch(request: web.Request) -> web.Response:
     """PATCH /api/config/gideon — update a single config field."""
-    from gideon.core.config.loader import config_path  # noqa: F811
 
     caller = request.get("user")
     if not caller:
@@ -1013,49 +1021,96 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     if not spec:
         return _deny(f"field not editable: {path_key}", f"{path_key}={value}")
 
+    app_name = request.get("app", "")
+    from gideon.core.config.edit_spec import security_control, security_loosening
+
+    control = security_control(path_key)
+    if app_name and control is not None:
+        _sel().log_api_access(
+            caller=f"app:{app_name}",
+            operation="config.patch",
+            outcome="denied",
+            source="app_permissions",
+            resources=path_key,
+            error="security setting is owner-only",
+        )
+        return web.json_response(
+            {"error": "security_setting_owner_only", "field": path_key}, status=403
+        )
+    if app_name:
+        from gideon.extensions.apps.permissions import checker_for
+
+        checker = checker_for(app_name)
+        if checker is None or path_key not in checker.permissions.config:
+            _sel().log_api_access(
+                caller=f"app:{app_name}",
+                operation="config.patch",
+                outcome="denied",
+                source="app_permissions",
+                resources=path_key,
+                error="config field is not declared",
+            )
+            return web.json_response(
+                {"error": "config_field_not_declared", "field": path_key}, status=403
+            )
+
     try:
         value = coerce_edit_value(path_key, value, spec)
     except ConfigValueError as exc:
         return _deny(str(exc), exc.resources, exc.status)
 
-    cfg_path = config_path()
-    from gideon.interfaces.dashboard.handlers.agents import (  # noqa: F811
-        _get_config_lock,
-    )
+    from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
-    async with _get_config_lock():
-        try:
-            data = (
-                json.loads(cfg_path.read_text(encoding="utf-8"))
-                if cfg_path.exists()
-                else {}
-            )
-        except Exception:
-            _log_sel("error", f"{path_key}=read_failed")
-            return web.json_response(
-                {"error": "failed to read config file"}, status=500
-            )
+    def patch_config(data: dict) -> dict:
+        consent = ""
+        if control is not None:
+            effective = AppConfig.load().to_dict()
+            current: Any = effective
+            for segment in path_key.split("."):
+                current = current.get(segment) if isinstance(current, dict) else None
+            consent = security_loosening(path_key, current, value)
+            if consent and body.get("confirm") is not True:
+                return {"status": "confirmation_required", "consent": consent}
 
         parts = path_key.split(".")
         cursor = data
         for seg in parts[:-1]:
             child = cursor.setdefault(seg, {})
             if not isinstance(child, dict):
-                _log_sel("error", f"{path_key}=section_not_dict")
-                return web.json_response(
-                    {"error": f"config section '{seg}' is not an object"}, status=500
-                )
+                return {"status": "section_not_dict", "segment": seg}
             cursor = child
         cursor[parts[-1]] = value
+        return {"status": "applied", "consent": consent}
 
-        try:
-            cfg_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write(cfg_path, json.dumps(data, indent=2) + "\n", fsync=True)
-        except OSError:
-            _log_sel("error", f"{path_key}=write_failed")
-            return web.json_response(
-                {"error": "failed to write config file"}, status=500
-            )
+    try:
+        outcome = await mutate_config_async(patch_config)
+    except ConfigPreserveError:
+        _log_sel("error", f"{path_key}=read_failed")
+        return web.json_response({"error": "failed to read config file"}, status=500)
+    except Exception:
+        _log_sel("error", f"{path_key}=write_failed")
+        return web.json_response({"error": "failed to write config file"}, status=500)
+    if outcome["status"] == "confirmation_required":
+        _sel().log_api_access(
+            caller=caller,
+            operation="config.patch",
+            outcome="denied",
+            resources=path_key,
+            error="security setting loosening requires confirmation",
+        )
+        return web.json_response(
+            {
+                "error": "confirmation_required",
+                "field": path_key,
+                "consent": outcome["consent"],
+            },
+            status=400,
+        )
+    if outcome["status"] == "section_not_dict":
+        _log_sel("error", f"{path_key}=section_not_dict")
+        return web.json_response(
+            {"error": f"config section '{outcome['segment']}' is not an object"}, status=500
+        )
 
     _log_sel("success", f"{path_key}={value}")
 
@@ -1171,8 +1226,10 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
         except Exception:
             logger.exception("Failed to live-apply projection rules")
 
+    from gideon.core.config.document import redact_configuration
+
     cfg = AppConfig.load()
-    return web.json_response(cfg.to_dict())
+    return web.json_response(redact_configuration(cfg.to_dict()))
 
 
 async def api_incident(request: web.Request) -> web.Response:

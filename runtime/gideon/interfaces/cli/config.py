@@ -13,8 +13,8 @@ from gideon.core.config.document import (
     preserve_configuration_credentials,
     read_configuration,
     redact_configuration,
-    write_configuration,
 )
+from gideon.core.config.transactions import mutate_config
 from gideon.engine.hooks import safe_read_file
 from gideon.security.sel import sel
 
@@ -76,11 +76,15 @@ def _config_cmd(args: argparse.Namespace) -> None:
                 print("❌ Config must be a JSON object", file=sys.stderr)
                 sys.exit(1)
             try:
-                existing = _read_config_for_update(config_path())
-                data = preserve_configuration_credentials(data, existing)
-                _validate_file_update(data, existing)
-                write_configuration(config_path(), data, ValueError)
-            except (OSError, ValueError) as e:
+                def apply_file_update(existing: dict) -> None:
+                    incoming = preserve_configuration_credentials(data, existing)
+                    _validate_file_update(incoming, existing)
+                    updated = _merge_config_values(existing, incoming)
+                    existing.clear()
+                    existing.update(updated)
+
+                mutate_config(apply_file_update, path=config_path())
+            except (OSError, ValueError, RuntimeError) as e:
                 print(f"❌ Could not apply config: {e}", file=sys.stderr)
                 sys.exit(1)
             sel().log_api_access(
@@ -99,13 +103,6 @@ def _config_cmd(args: argparse.Namespace) -> None:
                 print("       gideon config set --file <path.json>", file=sys.stderr)
                 sys.exit(1)
             p = config_path()
-            try:
-                raw = _read_config_for_update(p)
-            except (OSError, ValueError) as exc:
-                print(f"❌ Could not read config: {exc}", file=sys.stderr)
-                sys.exit(1)
-            cfg = AppConfig.load()
-            d = cfg.to_dict()
             parsed = _parse_value(value)
             spec = _editable_spec(key)
             if spec is not None:
@@ -126,10 +123,20 @@ def _config_cmd(args: argparse.Namespace) -> None:
                         resources=exc.resources or f"{key}={value}",
                     )
                     sys.exit(1)
-            if not _dict_set(d, key, parsed):
-                print(f"❌ Unknown key: {key}", file=sys.stderr)
+            try:
+                def apply_keyed_update(document: dict) -> bool:
+                    modeled = AppConfig.load().to_dict()
+                    if not _dict_set(modeled, key, parsed):
+                        return False
+                    document.update(_merge_config_values(document, modeled))
+                    return True
+
+                if not mutate_config(apply_keyed_update, path=p):
+                    print(f"❌ Unknown key: {key}", file=sys.stderr)
+                    sys.exit(1)
+            except (OSError, ValueError, RuntimeError) as exc:
+                print(f"❌ Could not apply config: {exc}", file=sys.stderr)
                 sys.exit(1)
-            write_configuration(p, d, ValueError)
             sel().log_api_access(
                 caller="cli",
                 operation="config_set",
@@ -139,28 +146,30 @@ def _config_cmd(args: argparse.Namespace) -> None:
             )
             print(f"✅ {key} = {json.dumps(parsed)}")
     elif action == "unset":
-        from gideon.core.atomic_write import atomic_write
-
         key = getattr(args, "key", "")
         if not key or any(not part or part.strip() != part for part in key.split(".")):
             print("❌ Invalid key: use a nonempty dot-separated key", file=sys.stderr)
             sys.exit(1)
         p = config_path()
         try:
-            raw = _read_config_for_update(p)
-            if _dict_get(raw, key) is _MISSING:
-                if _dict_get(AppConfig().to_dict(), key) is _MISSING:
-                    print(f"❌ Unknown key: {key}", file=sys.stderr)
-                    sys.exit(1)
+            def remove_key(document: dict) -> str:
+                if _dict_get(document, key) is _MISSING:
+                    return "known_missing" if _dict_get(AppConfig().to_dict(), key) is not _MISSING else "unknown"
+                owner = document
+                parts = key.split(".")
+                for part in parts[:-1]:
+                    owner = owner[part]
+                del owner[parts[-1]]
+                return "removed"
+
+            result = mutate_config(remove_key, path=p)
+            if result == "unknown":
+                print(f"❌ Unknown key: {key}", file=sys.stderr)
+                sys.exit(1)
+            if result == "known_missing":
                 print(f"✅ {key} is not set")
                 return
-            owner = raw
-            parts = key.split(".")
-            for part in parts[:-1]:
-                owner = owner[part]
-            del owner[parts[-1]]
-            atomic_write(p, json.dumps(raw, indent=2) + "\n")
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             print(f"❌ Could not unset config: {exc}", file=sys.stderr)
             sys.exit(1)
         sel().log_api_access(
@@ -248,16 +257,15 @@ def _editable_spec(key: str) -> dict | None:
         return None
 
 
-def _read_config_for_update(path: Path) -> dict:
-    """Read the complete document before a keyed update can replace it."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    data = json.loads(text)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} contains {type(data).__name__}, not a JSON object")
-    return data
+def _merge_config_values(existing: dict, incoming: dict) -> dict:
+    """Merge modeled or imported values while retaining opaque config blocks."""
+    result = deepcopy(existing)
+    for key, value in incoming.items():
+        if isinstance(result.get(key), dict) and isinstance(value, dict):
+            result[key] = _merge_config_values(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
 
 
 def _dict_get(d: dict, key: str) -> object:

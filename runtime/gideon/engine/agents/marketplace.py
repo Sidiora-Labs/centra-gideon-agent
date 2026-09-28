@@ -195,17 +195,20 @@ class _AgentShelf:
 
 class LocalAgentMarketplace(AgentMarketplace):
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base = base_dir or (_path_home_gideon() / "agents")
+        self._base = base_dir
+
+    def _base_dir(self) -> Path:
+        return self._base or (_path_home_gideon() / "agents")
 
     @property
     def marketplace_type(self) -> str:
         return "local"
 
     def _agent_path(self, name: str) -> Path:
-        return self._base.joinpath(name, "agent.json")
+        return self._base_dir().joinpath(name, "agent.json")
 
     def _ensure_base(self) -> None:
-        self._base.mkdir(parents=True, exist_ok=True)
+        self._base_dir().mkdir(parents=True, exist_ok=True)
 
     def list(self) -> list[AgentDefinition]:
         result = []
@@ -219,7 +222,7 @@ class LocalAgentMarketplace(AgentMarketplace):
     def documents(self):
         """Yield raw agent records from flat and marketplace directory layouts."""
         self._ensure_base()
-        for name, path in _AgentShelf(self._base).files():
+        for name, path in _AgentShelf(self._base_dir()).files():
             try:
                 document = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(document, dict):
@@ -241,7 +244,7 @@ class LocalAgentMarketplace(AgentMarketplace):
     def create(self, defn: AgentDefinition) -> AgentDefinition:
         _DefinitionCodec.require_valid(defn)
         self._ensure_base()
-        path = _AgentShelf(self._base).reserve(defn.name)
+        path = _AgentShelf(self._base_dir()).reserve(defn.name)
         defn.created_at = defn.updated_at = time.time()
         self._write(path, defn)
         logger.info("Created local agent: %s", defn.name)
@@ -257,7 +260,7 @@ class LocalAgentMarketplace(AgentMarketplace):
         return edited
 
     def delete(self, name: str) -> None:
-        _AgentShelf(self._base).remove(name)
+        _AgentShelf(self._base_dir()).remove(name)
         logger.info("Deleted local agent: %s", name)
 
     @staticmethod

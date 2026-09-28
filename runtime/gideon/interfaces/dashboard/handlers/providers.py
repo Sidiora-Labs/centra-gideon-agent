@@ -19,7 +19,6 @@ from typing import Any
 
 from aiohttp import web
 
-from gideon.core.atomic_write import atomic_write
 from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 
@@ -752,10 +751,6 @@ async def api_provider_model_delete(request: web.Request) -> web.Response:
 
 async def api_provider_create(request: web.Request) -> web.Response:
     """POST /api/model-providers — add a new model provider to config."""
-    import json as _json
-
-    from gideon.core.config.loader import config_path
-    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
 
     try:
         body = await read_json_body(request)
@@ -794,25 +789,34 @@ async def api_provider_create(request: web.Request) -> web.Response:
             status=400,
         )
 
-    async with _get_config_lock():
-        path = config_path()
-        try:
-            data = _provider_document(path)
-        except (OSError, ValueError) as exc:
-            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
-        providers = data.setdefault("providers", [])
-        if any(p.get("name") == name for p in providers):
-            return web.json_response(
-                {"error": f"Provider '{name}' already exists"}, status=409
-            )
+    entry: dict = {"name": name, "type": ptype, "model": model}
+    if options:
+        entry["options"] = options
 
-        entry: dict = {"name": name, "type": ptype, "model": model}
-        if options:
-            entry["options"] = options
+    def add_provider(data: dict) -> dict:
+        providers = data.get("providers")
+        if providers is None:
+            providers = []
+            data["providers"] = providers
+        if not isinstance(providers, list):
+            raise ValueError("provider configuration must be an object with a providers list")
+        if any(isinstance(provider, dict) and provider.get("name") == name for provider in providers):
+            return {"status": "exists"}
         providers.append(entry)
+        return {"status": "created"}
 
-        atomic_write(path, _json.dumps(data, indent=2) + "\n", fsync=True)
+    try:
+        result = await mutate_config_async(add_provider)
+    except ConfigPreserveError as exc:
+        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    except ValueError as exc:
+        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    except Exception:
+        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+    if result["status"] == "exists":
+        return web.json_response({"error": f"Provider '{name}' already exists"}, status=409)
 
     from gideon.integrations.llm.registry import (
         ProviderEntry,
@@ -873,10 +877,6 @@ def _refresh_media_registries() -> None:
 async def api_provider_update(request: web.Request) -> web.Response:
     """PUT /api/model-providers/{name} — update a provider's model, endpoint, or options."""
     import dataclasses as _dataclasses
-    import json as _json
-
-    from gideon.core.config.loader import config_path
-    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
 
     name = request.match_info["name"]
     try:
@@ -890,30 +890,38 @@ async def api_provider_update(request: web.Request) -> web.Response:
     if "options" in body and not isinstance(body["options"], dict):
         return web.json_response({"error": "options must be an object"}, status=400)
 
-    async with _get_config_lock():
-        path = config_path()
-        try:
-            data = _provider_document(path)
-        except (OSError, ValueError) as exc:
-            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
+    def update_provider(data: dict) -> dict:
         providers = data.get("providers", [])
-        target = None
-        for p in providers:
-            if p.get("name") == name:
-                target = p
-                break
-        if not target:
-            return web.json_response({"error": "not found"}, status=404)
-
+        if not isinstance(providers, list):
+            raise ValueError("provider configuration must be an object with a providers list")
+        target = next(
+            (provider for provider in providers if isinstance(provider, dict) and provider.get("name") == name),
+            None,
+        )
+        if target is None:
+            return {"status": "missing"}
         if "model" in body:
             target["model"] = body["model"]
         if "options" in body:
-            target.setdefault("options", {}).update(body["options"])
+            options = target.setdefault("options", {})
+            if not isinstance(options, dict):
+                raise ValueError("provider options must be an object")
+            options.update(body["options"])
         if "type" in body:
             target["type"] = body["type"]
+        return {"status": "updated", "provider": dict(target)}
 
-        atomic_write(path, _json.dumps(data, indent=2) + "\n", fsync=True)
+    try:
+        result = await mutate_config_async(update_provider)
+    except (ConfigPreserveError, ValueError) as exc:
+        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    except Exception:
+        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+    if result["status"] == "missing":
+        return web.json_response({"error": "not found"}, status=404)
+    target = result["provider"]
 
     from gideon.integrations.llm.registry import get_default_registry
 
@@ -936,27 +944,30 @@ async def api_provider_update(request: web.Request) -> web.Response:
 
 async def api_provider_delete(request: web.Request) -> web.Response:
     """DELETE /api/model-providers/{name} — remove a provider from config."""
-    import json as _json
-
-    from gideon.core.config.loader import config_path
-    from gideon.interfaces.dashboard.handlers.agents import _get_config_lock
-
     name = request.match_info["name"]
 
-    async with _get_config_lock():
-        path = config_path()
-        try:
-            data = _provider_document(path)
-        except (OSError, ValueError) as exc:
-            return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
+    def delete_provider(data: dict) -> dict[str, bool]:
         providers = data.get("providers", [])
-        before = len(providers)
-        data["providers"] = [p for p in providers if p.get("name") != name]
-        if len(data["providers"]) == before:
-            return web.json_response({"error": "not found"}, status=404)
+        if not isinstance(providers, list):
+            raise ValueError("provider configuration must be an object with a providers list")
+        if any(not isinstance(provider, dict) for provider in providers):
+            raise ValueError("provider configuration contains an invalid entry")
+        retained = [provider for provider in providers if provider.get("name") != name]
+        if len(retained) == len(providers):
+            return {"deleted": False}
+        data["providers"] = retained
+        return {"deleted": True}
 
-        atomic_write(path, _json.dumps(data, indent=2) + "\n", fsync=True)
+    try:
+        result = await mutate_config_async(delete_provider)
+    except (ConfigPreserveError, ValueError) as exc:
+        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+    except Exception:
+        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+    if not result["deleted"]:
+        return web.json_response({"error": "not found"}, status=404)
 
     from gideon.integrations.llm.registry import get_default_registry
 

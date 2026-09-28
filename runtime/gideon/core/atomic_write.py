@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+import shutil
+import stat
 import tempfile
 import threading
 from collections.abc import Callable
@@ -86,6 +89,7 @@ def _replace_file(
     binary: bool,
     durable: bool,
     permissions: int | None,
+    replace_fallback: bool = False,
 ) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     staged_name: str | None = None
@@ -103,7 +107,13 @@ def _replace_file(
             if durable:
                 staged.flush()
                 os.fsync(staged.fileno())
-        os.replace(staged_name, str(destination))
+        try:
+            os.replace(staged_name, str(destination))
+        except OSError:
+            if not replace_fallback:
+                raise
+            shutil.copy2(staged_name, destination)
+            os.unlink(staged_name)
         staged_name = None
     finally:
         if staged_name is not None:
@@ -132,3 +142,27 @@ def atomic_write_bytes(
     mode: int | None = None,
 ) -> None:
     _replace_file(Path(path), data, binary=True, durable=fsync, permissions=mode)
+
+
+def atomic_json_write(
+    path: Path | str, data: object, *, replace_fallback: bool = True
+) -> None:
+    """Write indented JSON through the subscribed atomic-write seam.
+
+    Existing files retain their permission bits. By default, a filesystem that refuses
+    replacement falls back to copying the staged bytes in place; callers that require
+    all-or-nothing replacement can disable that fallback.
+    """
+    destination = Path(path)
+    try:
+        mode = stat.S_IMODE(destination.stat().st_mode)
+    except FileNotFoundError:
+        mode = None
+    _replace_file(
+        destination,
+        json.dumps(data, indent=2) + "\n",
+        binary=False,
+        durable=False,
+        permissions=mode,
+        replace_fallback=replace_fallback,
+    )

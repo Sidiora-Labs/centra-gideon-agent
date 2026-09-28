@@ -115,7 +115,6 @@ _SETTINGS_FIELDS: tuple[str, ...] = (
 
 async def api_memory_settings(request: web.Request) -> web.Response:
     """GET/PUT /api/memory/settings — memory consolidation config."""
-    from gideon.core.config.loader import config_path  # noqa: F811
     from gideon.core.config.loader import AppConfig
 
     cfg = AppConfig.load()
@@ -163,25 +162,22 @@ async def api_memory_settings(request: web.Request) -> web.Response:
         if not applied:
             return _deny("no settings provided")
 
-        from gideon.interfaces.dashboard.handlers.agents import (  # noqa: F811
-            _get_config_lock,
-        )
+        from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
 
-        async with _get_config_lock():
-            path = config_path()
-            try:
-                data = (
-                    json.loads(path.read_text(encoding="utf-8"))
-                    if path.exists()
-                    else {}
-                )
-            except Exception:
-                data = {}
-            mem = data.setdefault("memory", {})
+        def update_memory(data: dict) -> None:
+            mem = data.get("memory")
+            if not isinstance(mem, dict):
+                mem = {}
+                data["memory"] = mem
             mem.update(applied)
             if "vault_mode" in applied:
                 mem.pop("vault_enabled", None)
-            atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
+        try:
+            await mutate_config_async(update_memory)
+        except ConfigPreserveError:
+            return _deny("config.json is corrupt", "config.json", 409)
+        except Exception:
+            return _deny("failed to write config", "config.json", 500)
         _sel().log_api_access(
             caller=caller,
             operation="memory.settings.update",
@@ -641,19 +637,16 @@ _migrate_lock: asyncio.Lock | None = None
 
 async def _set_migrated(value: bool) -> None:
     """Set memory.migrated in config.json."""
-    from gideon.core.config.loader import config_path  # noqa: F811
-    from gideon.interfaces.dashboard.handlers.agents import (  # noqa: F811
-        _get_config_lock,
-    )
+    from gideon.core.config.transactions import mutate_config_async
 
-    async with _get_config_lock():
-        path = config_path()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        except Exception:
-            data = {}
-        data.setdefault("memory", {})["migrated"] = value
-        atomic_write(path, json.dumps(data, indent=2) + "\n", fsync=True)
+    def update_migrated(data: dict) -> None:
+        memory = data.get("memory")
+        if not isinstance(memory, dict):
+            memory = {}
+            data["memory"] = memory
+        memory["migrated"] = value
+
+    await mutate_config_async(update_migrated)
 
 
 async def api_memory_episodic_search(request: web.Request) -> web.Response:

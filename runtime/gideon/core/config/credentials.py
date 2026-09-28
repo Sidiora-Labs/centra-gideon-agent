@@ -14,6 +14,7 @@ from gideon.core.config import loader as _loader
 logger = logging.getLogger(__name__)
 CredentialBackend = Literal["keychain", "dotenv"]
 CREDENTIAL_BACKEND_ENV = "GIDEON_CREDENTIAL_BACKEND"
+CONFIG_SECRET_REFERENCE_PREFIX = "gideon-config-secret:v1:"
 _KEYCHAIN_SERVICE = "gideon"
 _KEYCHAIN_INDEX_KEY = "__gideon_key_index__"
 _UNUSABLE_KEYRING_BACKENDS = ("keyring.backends.fail.", "keyring.backends.null.")
@@ -146,6 +147,11 @@ def credential_backend_warning() -> str:
     return "keychain requested but no usable OS keyring backend is available — credentials stay in .env at mode 0600 (never plaintext elsewhere)"
 
 
+def is_config_secret_reference_key(key: str) -> bool:
+    """Identify opaque config-secret keys that must never be projected to env."""
+    return isinstance(key, str) and key.startswith(CONFIG_SECRET_REFERENCE_PREFIX)
+
+
 class KeyringStore:
     def __init__(self, backend):
         self.backend = backend
@@ -264,6 +270,34 @@ def save_credential(key: str, value: str) -> None:
 
 def get_credential(key: str) -> str:
     return _keychain_get(key) or _dotenv_credentials().get(key, "")
+
+
+def put_secret_value(key: str, value: str) -> None:
+    """Store an owner-scoped config secret without projecting it into the environment."""
+    if credential_backend() == "keychain" and _keychain_save(key, value):
+        return
+    _dotenv_save_credential(key, value)
+
+
+def get_secret_value(key: str) -> str:
+    """Read an owner-scoped config secret without consulting process environment."""
+    return _keychain_get(key) or _dotenv_credentials().get(key, "")
+
+
+def delete_secret_value(key: str) -> bool:
+    """Delete an owner-scoped config secret without changing process environment."""
+    existed = bool(_keychain_get(key) or key in _dotenv_names())
+    failures = []
+    if _usable_keyring() is not None:
+        if _keychain_get(key) and not _keychain_delete(key):
+            failures.append("keychain")
+    try:
+        _dotenv_remove_credentials((key,))
+    except Exception:
+        failures.append("dotenv")
+    if failures:
+        raise OSError("credential backend cleanup failed")
+    return existed
 
 
 def credential_names() -> list[str]:

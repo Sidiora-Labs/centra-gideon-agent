@@ -169,7 +169,11 @@ class _AdapterInstall:
         if npm is None:
             logger.warning("ACP adapter %s: npm unavailable for %s", self.package, node)
             return False
-        environment = dict(os.environ, PATH=path)
+        from gideon.security.sandbox import build_child_env
+
+        environment = build_child_env(
+            site="acp-adapter-install", installer="npm", extra={"PATH": path}
+        )
         specifier = (
             "@".join((self.package, self.version)) if self.version else self.package
         )

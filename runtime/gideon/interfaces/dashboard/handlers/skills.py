@@ -18,7 +18,6 @@ from aiohttp import web
 
 from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
-from gideon.extensions.skills.marketplace import DEFAULT_SKILLS_INSTALL_PATH
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -507,7 +506,12 @@ async def api_skills_install(request: web.Request) -> web.Response:
         return web.json_response({"error": "id is required"}, status=400)
     marketplace_name = str(body.get("marketplace", "skills.sh"))
     target_str = body.get("target", "")
-    target = Path(target_str) if target_str else DEFAULT_SKILLS_INSTALL_PATH
+    if target_str:
+        target = Path(target_str)
+    else:
+        from gideon.extensions.skills.marketplace import default_skills_install_path
+
+        target = default_skills_install_path()
     force = bool(body.get("force", False))
 
     from gideon.extensions.skills.marketplace import (

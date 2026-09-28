@@ -8,10 +8,8 @@ REAL home — and because the same roots feed the WRITE allowlist in
 ``_validate_dashboard_path``, the dashboard could browse AND edit the real home instead
 of the active one.
 
-These tests monkeypatch the active home to an isolated ``tmp_path`` exactly the way the
-sibling suite (``checks/runtime/test_dashboard_file_io.py``) does — patching ``config_dir`` on the
-loader module, NEVER the real home — and assert every surfaced root resolves inside the
-active home or an explicitly-resolved workspace, and none under the real ``~/.gideon``.
+These tests configure isolated home directories and assert every surfaced root resolves
+inside the active home or an explicitly resolved workspace.
 """
 
 import os
@@ -26,16 +24,14 @@ def _under(path: str, root: str) -> bool:
 
 @pytest.fixture
 def _isolated_home(tmp_path, monkeypatch):
-    """Point the active Gideon home at an isolated tmp dir.
-
-    Mirrors ``TestBoundProjectWorkspaceRoot._isolated_home`` in
-    ``checks/runtime/test_dashboard_file_io.py``: patch ``config_dir`` on the loader module and
-    nothing else. ``files.py`` imports ``config_dir`` at call time inside
-    ``_dashboard_roots``, so the patch is picked up per request.
-    """
+    """Resolve the active home from an isolated process environment."""
     import gideon.core.config.loader as cfg
 
-    monkeypatch.setattr(cfg, "config_dir", lambda: tmp_path)
+    user_home = tmp_path / "user-home"
+    user_home.mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    assert cfg.config_dir() == tmp_path.resolve()
     return tmp_path
 
 
@@ -65,13 +61,13 @@ def test_roots_follow_active_home_not_real_gideon(_isolated_home, tmp_path):
         )
 
 
-def test_uploads_and_home_roots_resolve_under_active_home(_isolated_home, tmp_path):
-    """Pin the two roots the fix touches: Uploads -> <active_home>/uploads and the
-    config/data tree root -> <active_home> (surfaced as "Home"; the "Gideon"
-    factory now resolves to the same path and de-dupes into it)."""
+def test_files_roots_never_expose_active_home(_isolated_home, tmp_path):
+    """Writable roots stay in the active home without exposing the home itself."""
+    from gideon.core.config.loader import workspace_root
     from gideon.interfaces.dashboard.handlers.files import _dashboard_roots
 
     active_home = os.path.realpath(str(tmp_path))
+    ws_root = os.path.realpath(str(workspace_root()))
     rp_by_label = {label: rp for label, rp in _dashboard_roots()}
 
     assert "Uploads" in rp_by_label, f"no Uploads root; labels={list(rp_by_label)}"
@@ -79,6 +75,17 @@ def test_uploads_and_home_roots_resolve_under_active_home(_isolated_home, tmp_pa
         os.path.join(active_home, "uploads")
     ), f"Uploads must live under the active home; got {rp_by_label['Uploads']!r}"
 
-    assert (
-        active_home in rp_by_label.values()
-    ), f"active home {active_home!r} not surfaced as a dashboard root; got {rp_by_label}"
+    assert active_home not in rp_by_label.values(), f"active home exposed as a Files root: {rp_by_label}"
+    assert all(_under(root, active_home) or root == ws_root for root in rp_by_label.values())
+
+
+def test_workspace_equal_to_home_or_symlink_alias_is_never_a_files_root(_isolated_home, tmp_path, monkeypatch):
+    from gideon.interfaces.dashboard.handlers.files import _dashboard_roots
+
+    home = _isolated_home.resolve()
+    alias = tmp_path / "home-alias"
+    alias.symlink_to(home, target_is_directory=True)
+    for configured in (str(home), str(alias)):
+        monkeypatch.setenv("GIDEON_WORKSPACE", configured)
+        roots = _dashboard_roots()
+        assert all(path != str(home) for _, path in roots), roots

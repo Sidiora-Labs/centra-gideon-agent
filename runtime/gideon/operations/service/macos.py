@@ -12,11 +12,32 @@ from pathlib import Path
 
 from gideon.operations.service.common import LAUNCHD_LABEL, gideon_bin, service_path
 
-PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
-PLIST_PATH = PLIST_DIR / f"{LAUNCHD_LABEL}.plist"
-LOG_DIR = Path.home() / "Library" / "Logs" / "Gideon"
-STDOUT_LOG = LOG_DIR / "gateway.log"
-STDERR_LOG = LOG_DIR / "gateway.err"
+class _HomePath(os.PathLike[str]):
+    """Resolve a LaunchAgent path against the current macOS user home."""
+
+    def __init__(self, relative: str) -> None:
+        self._relative = relative
+
+    def _current(self) -> Path:
+        return Path.home() / self._relative
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._current())
+
+    def __str__(self) -> str:
+        return str(self._current())
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+
+# Keep these module globals patchable for service tests while resolving their
+# defaults only when an operation uses them.
+PLIST_DIR = _HomePath("Library/LaunchAgents")
+PLIST_PATH = _HomePath(f"Library/LaunchAgents/{LAUNCHD_LABEL}.plist")
+LOG_DIR = _HomePath("Library/Logs/Gideon")
+STDOUT_LOG = _HomePath("Library/Logs/Gideon/gateway.log")
+STDERR_LOG = _HomePath("Library/Logs/Gideon/gateway.err")
 
 
 def _xml_escape(value: str) -> str:

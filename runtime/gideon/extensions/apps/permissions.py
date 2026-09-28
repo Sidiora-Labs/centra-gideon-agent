@@ -64,6 +64,108 @@ from gideon.extensions.apps.manifest import Permissions
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class OwnerOnly:
+    reason: str
+
+
+@dataclass(frozen=True)
+class OwnedTarget:
+    field: str
+
+
+@dataclass(frozen=True)
+class AppMay:
+    reason: str
+    owns: OwnedTarget | None = None
+    agent_work: bool = False
+
+
+_OWNER_ONLY_PREFIXES: dict[str, str] = {
+    "/api/auth": "your login credentials and second factor",
+    "/api/config": "your configuration and security posture",
+    "/api/onboarding": "your first-run setup and model discovery",
+    "/api/mcp": "MCP server definitions and commands run by the gateway",
+    "/api/security": "your security controls and credentials",
+    "/api/secrets": "your secrets vault",
+    "/api/sel": "your security event log",
+    "/api/model-providers": "your model providers and credentials",
+    "/api/models": "your model inventory, bindings, and routing",
+    "/api/agents": "agent instructions, tools, and approval settings",
+    "/api/agent-marketplace": "agent definitions and their instructions",
+    "/api/agent-metadata": "routing notes used by your agents",
+    "/api/skills": "skills and instructions followed by your agents",
+    "/api/terminal": "your terminal sessions",
+    "/api/ws/terminal": "your interactive terminal",
+    "/api/computer-use": "your keyboard, mouse, and screen",
+    "/api/devices": "your paired devices and sessions",
+    "/api/channels": "your connected channels and trusted senders",
+    "/api/autonomy": "your autonomy grants",
+    "/api/external-access": "credentials for reaching this gateway",
+    "/api/agent/config": "the tools and servers your agent may run",
+    "/api/triggers": "automations and their approval settings",
+    "/api/workflows": "workflows and their approval settings",
+    "/api/loops": "autonomous work and its approval settings",
+    "/api/spawn": "background agents started on request",
+    "/api/approvals": "approval decisions for work performed as the owner",
+    "/api/chat/mode": "the approval mode for your chats",
+    "/api/agent-hooks/allow": "scripts allowed to run on agent events",
+    "/api/heartbeat/tasks": "unattended tasks carried out by your agents",
+}
+
+# Keys use the exact method and canonical aiohttp route template. An app API prefix
+# cannot create an entry here; new paths stay denied until their authority is reviewed.
+ROUTE_AUTHORITY: dict[str, OwnerOnly | AppMay] = {
+    "POST /api/apps": OwnerOnly("installing app code"),
+    "POST /api/apps/preview": OwnerOnly("reviewing an app installation"),
+    "POST /api/apps/{name}/enable": OwnerOnly("starting app code as the owner"),
+    "POST /api/apps/{name}/disable": OwnerOnly("changing app lifecycle state"),
+    "POST /api/apps/{name}/update": OwnerOnly("replacing app code"),
+    "DELETE /api/apps/{name}": OwnerOnly("uninstalling an app"),
+    "POST /api/apps/{name}/token": OwnerOnly("minting an app credential"),
+    "GET /api/apps/{name}/config": AppMay("reading its own app settings", OwnedTarget("name")),
+    "PUT /api/apps/{name}/config": AppMay("writing its own app settings", OwnedTarget("name")),
+    "GET /api/apps/{name}": AppMay("reading its own app metadata", OwnedTarget("name")),
+    "POST /api/apps/{name}/agent-run": AppMay("starting agent work", agent_work=True),
+    "GET /api/apps/{name}/agent-run/{run_id}": AppMay("reading its own agent run", OwnedTarget("name")),
+    "POST /api/apps/message": AppMay("using the declared app messaging grant"),
+    "GET /api/apps/message": AppMay("reading messages delivered to this app"),
+    "PATCH /api/config/gideon": AppMay("writing a specifically declared ordinary config field"),
+    "GET /api/providers": AppMay("listing only its own provider"),
+    "GET /api/providers/{name}": AppMay("reading its own provider", OwnedTarget("name")),
+    "GET /api/providers/{name}/schema": AppMay("reading its own provider schema", OwnedTarget("name")),
+    "GET /api/providers/{name}/config": AppMay("reading its own masked provider settings", OwnedTarget("name")),
+    "PATCH /api/providers/{name}/config": AppMay("writing its own provider settings", OwnedTarget("name")),
+    "GET /api/providers/{name}/instances": AppMay("reading its own masked provider instances", OwnedTarget("name")),
+    "POST /api/providers/{name}/instances": AppMay("writing its own provider instances", OwnedTarget("name")),
+    "GET /api/providers/{name}/instances/{id}": AppMay("reading its own masked provider instance", OwnedTarget("name")),
+    "PUT /api/providers/{name}/instances/{id}": AppMay("writing its own provider instance", OwnedTarget("name")),
+    "DELETE /api/providers/{name}/instances/{id}": AppMay("deleting its own provider instance", OwnedTarget("name")),
+    "POST /api/providers/{name}/instances/{id}/test": AppMay("testing its own provider instance", OwnedTarget("name")),
+}
+
+
+def route_authority(method: str, route: str) -> OwnerOnly | AppMay | None:
+    if not method or not route:
+        return None
+    verb = "GET" if method.upper() == "HEAD" else method.upper()
+    if route == "/apps/{name}/api/{tail}" and verb in {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
+        return AppMay("proxying to its own app backend", OwnedTarget("name"))
+    if route == "/apps/{name}/ui/{tail}" and verb == "GET":
+        return AppMay("reading its own app UI assets", OwnedTarget("name"))
+    return ROUTE_AUTHORITY.get(f"{verb} {route}")
+
+
+def _owner_only_reason(path: str, method: str, route: str) -> str:
+    for root, reason in _OWNER_ONLY_PREFIXES.items():
+        if path == root or path.startswith(root + "/"):
+            if path == "/api/config/gideon" and method.upper() == "PATCH":
+                break
+            return reason
+    authority = route_authority(method, route)
+    return authority.reason if isinstance(authority, OwnerOnly) else ""
+
+
 @dataclass
 class PermissionChecker:
     """Decides whether an app may reach a given resource, per its declared scope.
@@ -260,7 +362,14 @@ def app_lifecycle_denial(app_name: str) -> str:
     return ""
 
 
-def app_request_denial(app_name: str, path: str) -> str:
+def app_request_denial(
+    app_name: str,
+    path: str,
+    *,
+    method: str = "",
+    route: str = "",
+    target: str = "",
+) -> str:
     """Why an app-scoped request must be refused, or ``""`` to allow it.
 
     **The one authorization decision for a request carrying an app identity**, so the
@@ -302,6 +411,30 @@ def app_request_denial(app_name: str, path: str) -> str:
     checker = checker_for(app_name)
     if checker is None:
         return "app manifest could not be read"
+    if not method or not route:
+        return "app route authority is unavailable"
+    owner_only = _owner_only_reason(path, method, route)
+    if owner_only:
+        return f"owner-only capability, not grantable to an app: {owner_only}"
+    authority = route_authority(method, route)
+    if authority is None:
+        return f"{method.upper()} {route} is not declared for app access"
+    if isinstance(authority, AppMay) and authority.owns:
+        if not target or target != app_name:
+            return "provider or app settings are owned by the calling app"
+        if route.startswith("/api/providers/{name}"):
+            try:
+                from gideon.extensions.providers.registry import get_provider_registry
+
+                provider = get_provider_registry().get(target)
+            except Exception:
+                provider = None
+            if provider is None:
+                return "the app's provider is not available"
+            if provider.provider_config.type == "model":
+                return "model providers and model bindings are owner-only"
+    if isinstance(authority, AppMay) and authority.agent_work and not checker.can_use_agent():
+        return "agent work requires this app's permissions.agent grant"
     if not checker.can_use_api(path):
         return "api path not in declared permissions"
     if path.startswith("/api/memory") and not checker.can_use_memory("shared"):

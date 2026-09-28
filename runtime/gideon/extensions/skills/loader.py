@@ -153,6 +153,16 @@ def _project_skills_dir() -> Path | None:
     return None
 
 
+def _outside_skill_dirs() -> list[Path]:
+    from gideon.core.outside_home import allowed_paths
+
+    return [
+        Path(raw_root).resolve()
+        for label, raw_root in allowed_paths()
+        if label == "Shared agent skills"
+    ]
+
+
 def iter_skill_files(base: Path) -> list[tuple[str, Path]]:
     """Recursively find all SKILL.md files under *base*.
 
@@ -468,15 +478,21 @@ class ProcedureLibrary:
         results.extend(iter_skill_files(self._dir))
         if self._scoped:
             return results
-        from gideon.extensions.skills.marketplace import SKILL_DISCOVERY_PATHS
+        from gideon.extensions.skills.marketplace import _skill_discovery_paths
 
         seen = {name for name, _ in results}
-        for extra_dir in SKILL_DISCOVERY_PATHS:
+        for extra_dir in _skill_discovery_paths():
             if extra_dir.is_dir() and extra_dir != self._dir:
                 for name, path in iter_skill_files(extra_dir):
                     if name not in seen:
                         results.append((name, path))
                         seen.add(name)
+        for root in _outside_skill_dirs():
+            for name, path in iter_skill_files(root):
+                if not path.resolve().is_relative_to(root) or name in seen:
+                    continue
+                results.append((name, path))
+                seen.add(name)
         return results
 
     def _cached_frontmatter(self, path: Path) -> dict[str, str]:
@@ -559,10 +575,10 @@ class ProcedureLibrary:
         """
         if self._scoped:
             return [self._dir]
-        from gideon.extensions.skills.marketplace import SKILL_DISCOVERY_PATHS
+        from gideon.extensions.skills.marketplace import _skill_discovery_paths
 
         agent_dirs = [self._agent_dir] if self._agent_dir is not None else []
-        return agent_dirs + [self._dir] + SKILL_DISCOVERY_PATHS
+        return agent_dirs + [self._dir] + _skill_discovery_paths() + _outside_skill_dirs()
 
     def skill_file(self, name: str) -> Path | None:
         """The ``SKILL.md`` this loader resolves *name* to, or None.
@@ -720,7 +736,10 @@ class ProcedureLibrary:
         """Delete a skill directory from any discovery path.  Returns True if found and removed."""
         if not self._safe_name(name):
             return False
+        read_only_dirs = {path.resolve() for path in _outside_skill_dirs()}
         for search_dir in self._search_dirs():
+            if search_dir.resolve() in read_only_dirs:
+                continue
             skill_dir = search_dir / name
             if skill_dir.is_dir():
                 shutil.rmtree(skill_dir)

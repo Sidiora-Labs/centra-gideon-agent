@@ -2,11 +2,6 @@
 
 import io
 
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.pdfgen import canvas
-
 MAJORS = (
     "The Fool",
     "The Magician",
@@ -111,6 +106,11 @@ def compose(deck, card):
 
 
 def pdf_bytes(deck, images):
+    from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
+
     width, height, bleed, safe = (
         deck[key] * mm for key in ("width_mm", "height_mm", "bleed_mm", "safe_mm")
     )

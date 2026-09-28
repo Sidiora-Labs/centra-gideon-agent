@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import glob
 import logging
 import os
 import signal
-import stat
 import subprocess as subprocess_mod
 import sys
 import time
@@ -29,28 +27,8 @@ def _acp_trace(direction: str, text: str) -> None:
 
 
 def _resolve_ssh_auth_sock(env: dict[str, str]) -> None:
-    if os.path.exists(env.get("SSH_AUTH_SOCK", "")):
-        return
-    patterns = ["/tmp/com.apple.launchd.*/Listeners"]
-    if sys.platform != "darwin":
-        patterns = [
-            "/tmp/ssh-*/agent.*",
-            f"/run/user/{os.getuid()}/ssh-agent.socket",
-            f"/run/user/{os.getuid()}/keyring/ssh",
-        ]
-    for pattern in patterns:
-        sockets = []
-        for candidate in glob.glob(pattern):
-            try:
-                metadata = os.stat(candidate)
-            except OSError:
-                continue
-            if stat.S_ISSOCK(metadata.st_mode):
-                sockets.append((metadata.st_mtime, candidate))
-        if sockets:
-            env["SSH_AUTH_SOCK"] = max(sockets, key=lambda item: item[0])[1]
-            logger.debug("SSH agent socket selected: %s", env["SSH_AUTH_SOCK"])
-            break
+    """Ensure ACP children never inherit the gateway's SSH agent capability."""
+    env.pop("SSH_AUTH_SOCK", None)
 
 
 def _direct_children(pid: int) -> list[int]:
@@ -262,17 +240,20 @@ class AcpProcess:
         return _redacted("; ".join(self._stderr_lines)) if self._stderr_lines else ""
 
     def _environment(self) -> dict[str, str]:
-        environment = dict(os.environ)
-        environment.update(self._extra_env or {})
+        from gideon.integrations.acp.cli_resolve import is_npx_fallback
+        from gideon.security.sandbox import build_child_env
+
+        extra = dict(self._extra_env or {})
+        if self._session_key:
+            extra["GIDEON_SESSION_KEY"] = self._session_key
+        if self._channel_id:
+            extra["GIDEON_CHANNEL_ID"] = self._channel_id
+        environment = build_child_env(
+            site="acp-agent",
+            extra=extra,
+            installer="npm" if is_npx_fallback(self._command) else None,
+        )
         environment["PATH"] = augmented_path(environment.get("PATH", ""))
-        for key, value in (
-            ("GIDEON_SESSION_KEY", self._session_key),
-            ("GIDEON_CHANNEL_ID", self._channel_id),
-        ):
-            environment.pop(key, None)
-            if value:
-                environment[key] = value
-        _resolve_ssh_auth_sock(environment)
         return environment
 
     def _remember_descendants(self, descendants: list[int]) -> None:

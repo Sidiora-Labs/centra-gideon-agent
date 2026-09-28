@@ -1134,6 +1134,13 @@ RECORDS = {
                 [],
                 lambda value: [str(p) for p in value if isinstance(p, str)],
             ),
+            "outside_home": Value(
+                ("security", "outside_home"),
+                [],
+                lambda value: [str(place) for place in value if isinstance(place, str)]
+                if isinstance(value, list)
+                else [],
+            ),
             "credential_keychain": Value(
                 ("security", "credential_keychain"), None, lambda value: value is True
             ),

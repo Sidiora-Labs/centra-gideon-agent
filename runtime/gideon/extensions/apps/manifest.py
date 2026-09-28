@@ -457,6 +457,7 @@ class Permissions:
     """Declared permissions for an app."""
 
     api: list[str] = field(default_factory=list)
+    config: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     mcpTools: list[str] = field(default_factory=list)  # noqa: N815
     storage: bool = False
@@ -477,6 +478,8 @@ class Permissions:
         d: dict[str, Any] = {}
         if self.api:
             d["api"] = self.api
+        if self.config:
+            d["config"] = self.config
         if self.events:
             d["events"] = self.events
         if self.mcpTools:
@@ -511,6 +514,7 @@ class Permissions:
     def from_dict(cls, data: dict[str, Any]) -> "Permissions":
         return cls(
             api=[str(p) for p in data.get("api", []) if p],
+            config=[str(p) for p in data.get("config", []) if p],
             events=[str(e) for e in data.get("events", []) if e],
             mcpTools=[str(t) for t in data.get("mcpTools", []) if t],  # noqa: N815
             storage=bool(data.get("storage", False)),
@@ -1360,6 +1364,14 @@ class AppManifest:
     def validate(self) -> list[str]:
         """Return list of validation errors (empty list means valid)."""
         errors: list[str] = []
+
+        from gideon.core.config.edit_spec import security_control
+
+        for field_name in self.permissions.config:
+            if security_control(field_name) is not None:
+                errors.append(
+                    f"permissions.config field {field_name!r} is owner-only security state"
+                )
 
         if not self.name:
             errors.append("missing required field: name")

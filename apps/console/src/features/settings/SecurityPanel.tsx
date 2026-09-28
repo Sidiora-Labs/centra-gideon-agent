@@ -68,9 +68,50 @@ export function SecurityPanel() {
       ) : null}
       <CredentialStoreEditor />
       <EgressPolicyEditor />
+      <OutsideHomeEditor />
       <DesktopCapabilitiesPanel />
     </div>
   )
+}
+
+function OutsideHomeEditor() {
+  const { data, error, refresh } = useQuery('settings:outside-home', () => api.securityOutsideHome())
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  if (!data) return <Section title="Outside-home reads">
+    {error ? <LoadError what="outside-home locations" error={error} onRetry={refresh} />
+      : <CardGridSkeleton cards={1} cols={1} what="outside-home locations" />}
+  </Section>
+  return <Section title="Outside-home reads">
+    <p data-type="body-s" className="mb-3 text-on-surface-low">
+      Allow Gideon to read a named shared location. These locations stay read-only; Gideon installs and saves files in its own home.
+    </p>
+    <div className="space-y-2">
+      {data.places.map((place) => <div key={place.id} className="flex items-start gap-3 rounded-lg bg-surface-container px-3 py-3">
+        <Toggle on={place.allowed} disabled={busy} label={`Allow read access to ${place.label}`}
+          onChange={async (on) => {
+            if (on && !(await confirm({
+              title: `Allow Gideon to read ${place.label}?`,
+              body: `${place.path} is outside Gideon's home. Enabling this permission lets Gideon read files there, but it cannot write to this location. You can revoke access at any time.`,
+              confirmLabel: 'Allow read access',
+            }))) return
+            setBusy(true); setErr('')
+            try {
+              const ids = data.places
+                .filter((item) => item.id === place.id ? on : item.allowed)
+                .map((item) => item.id)
+              await api.setOutsideHome(ids, on); refresh()
+            } catch (ex) { setErr(ex instanceof Error ? ex.message : 'Could not save location access') }
+            finally { setBusy(false) }
+          }} />
+        <div className="min-w-0">
+          <div data-type="body-s" className="text-on-surface">{place.label}</div>
+          <code data-type="caption" className="break-all text-on-surface-low">{place.path}</code>
+        </div>
+      </div>)}
+    </div>
+    {err && <FieldError>{err}</FieldError>}
+  </Section>
 }
 
 function CredentialStoreEditor() {

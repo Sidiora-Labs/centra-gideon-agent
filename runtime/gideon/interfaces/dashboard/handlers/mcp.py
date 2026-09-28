@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -90,9 +91,47 @@ def _migrate_legacy_mcp_json() -> None:
         logger.debug("mcp: legacy migration skipped", exc_info=True)
 
 
-_GLOBAL_MCP_JSON = _canonical_mcp_json()
+class _CanonicalMcpPath(os.PathLike[str]):
+    """Resolve the canonical MCP file only when an operation uses it."""
 
-_MCP_LOCK_PATH = _GLOBAL_MCP_JSON.with_suffix(".lock")
+    def __init__(self, suffix: str | None = None) -> None:
+        self._suffix = suffix
+
+    def _current(self) -> Path:
+        path = _canonical_mcp_json()
+        return path.with_suffix(self._suffix) if self._suffix else path
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._current())
+
+    def __str__(self) -> str:
+        return str(self._current())
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+
+class _HomeMcpPath(os.PathLike[str]):
+    """Resolve an external MCP store against the current user home."""
+
+    def __init__(self, relative: str) -> None:
+        self._relative = relative
+
+    def _current(self) -> Path:
+        return Path.home() / self._relative
+
+    def __fspath__(self) -> str:
+        return os.fspath(self._current())
+
+    def __str__(self) -> str:
+        return str(self._current())
+
+    def __getattr__(self, name: str):
+        return getattr(self._current(), name)
+
+
+_GLOBAL_MCP_JSON = _CanonicalMcpPath()
+_MCP_LOCK_PATH = _CanonicalMcpPath(".lock")
 
 
 class _McpFileLock:
@@ -101,9 +140,10 @@ class _McpFileLock:
     async def __aenter__(self) -> None:
         import fcntl
 
-        _GLOBAL_MCP_JSON.parent.mkdir(parents=True, exist_ok=True)
-        _MCP_LOCK_PATH.touch(exist_ok=True)
-        self._fd = open(_MCP_LOCK_PATH, "r")
+        path = _MCP_LOCK_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        self._fd = open(path, "r")
         await asyncio.get_running_loop().run_in_executor(
             None,
             lambda: fcntl.flock(self._fd, fcntl.LOCK_EX),
@@ -949,7 +989,7 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "name": name}, status=200)
 
 
-_CC_GLOBAL_JSON = Path.home() / ".claude.json"
+_CC_GLOBAL_JSON = _HomeMcpPath(".claude.json")
 
 
 def _load_json_or_empty(path: Path) -> dict[str, Any]:

@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,57 @@ CHILD_ENV_BASE_NAMES: frozenset[str] = frozenset(
 )
 
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PIP_CHILD_SETTINGS = frozenset(
+    {
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_TRUSTED_HOST",
+        "PIP_CERT",
+        "PIP_CLIENT_CERT",
+        "PIP_NO_INDEX",
+        "PIP_FIND_LINKS",
+        "PIP_TIMEOUT",
+        "PIP_RETRIES",
+        "PIP_DISABLE_PIP_VERSION_CHECK",
+        "PIP_ONLY_BINARY",
+        "PIP_PREFER_BINARY",
+    }
+)
+_NPM_CHILD_SETTINGS = frozenset({"npm_config_registry", "NPM_CONFIG_REGISTRY"})
+_INSTALLER_RELOCATION_SETTINGS = frozenset(
+    {
+        "PIP_TARGET",
+        "PIP_PREFIX",
+        "PIP_ROOT",
+        "PIP_USER",
+        "NPM_CONFIG_PREFIX",
+        "NPM_CONFIG_GLOBAL",
+        "NPM_CONFIG_USERCONFIG",
+    }
+)
+_URL_CHILD_SETTINGS = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "npm_config_registry",
+        "NPM_CONFIG_REGISTRY",
+    }
+)
+_URL_CREDENTIAL_WARNING_SITES: set[tuple[str, str]] = set()
+
+
+def _sandbox_temp_file(**kwargs):
+    from gideon.core.config.loader import config_dir
+
+    scratch = config_dir() / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    return tempfile.mkstemp(dir=scratch, **kwargs)
 
 
 def env_name_is_sensitive(name: str) -> bool:
@@ -193,6 +245,7 @@ def build_child_env(
     site: str,
     extra: "dict[str, str] | None" = None,
     source: "dict[str, str] | None" = None,
+    installer: str | None = None,
 ) -> dict[str, str]:
     """The environment an agent-influenced child process runs with.
 
@@ -207,11 +260,21 @@ def build_child_env(
     script.
     """
     src = dict(os.environ) if source is None else dict(source)
-    names = CHILD_ENV_BASE_NAMES | _declared_env_passthrough(site)
+    installer_name = (installer or "").strip().lower()
+    installer_names = (
+        _PIP_CHILD_SETTINGS
+        if installer_name == "pip"
+        else _NPM_CHILD_SETTINGS
+        if installer_name == "npm"
+        else frozenset()
+    )
+    names = CHILD_ENV_BASE_NAMES | _declared_env_passthrough(site) | installer_names
     env = {
         name: src[name]
         for name in sorted(names)
-        if name in src and not env_name_is_sensitive(name)
+        if name in src
+        and not env_name_is_sensitive(name)
+        and name.upper() not in _INSTALLER_RELOCATION_SETTINGS
     }
 
     withheld = sorted(name for name in src if name not in env)
@@ -234,7 +297,32 @@ def build_child_env(
                 name,
             )
             continue
-        env[name] = str(value)
+        if name.upper() not in _INSTALLER_RELOCATION_SETTINGS:
+            env[name] = str(value)
+
+    for name in tuple(env):
+        if name not in _URL_CHILD_SETTINGS:
+            continue
+        value = env[name]
+        try:
+            parsed = urlsplit(value if "://" in value else f"http://{value}")
+            if parsed.username is None and parsed.password is None:
+                continue
+            host = parsed.hostname or ""
+            if parsed.port:
+                host = f"{host}:{parsed.port}"
+            clean = urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+            env[name] = clean if "://" in value else clean.removeprefix("http://")
+            key = (site, name)
+            if key not in _URL_CREDENTIAL_WARNING_SITES:
+                logger.warning(
+                    "%s child env: removed URL credentials from %s; grant a separate credential mechanism if required",
+                    site,
+                    name,
+                )
+                _URL_CREDENTIAL_WARNING_SITES.add(key)
+        except (ValueError, UnicodeError):
+            env.pop(name, None)
     return env
 
 
@@ -327,7 +415,7 @@ def _probe_sandbox_exec() -> bool:
     target_arg: list[str] = []
     profile_path = None
     try:
-        fd, profile_path = tempfile.mkstemp(suffix=".sb", prefix="gideon_probe_")
+        fd, profile_path = _sandbox_temp_file(suffix=".sb", prefix="gideon_probe_")
         with os.fdopen(fd, "wb") as profile_file:
             profile_file.write(b"(version 1)(allow default)")
         result = subprocess.run(
@@ -424,6 +512,9 @@ import ctypes
 import ctypes.util
 import os
 import sys
+import signal
+import shutil
+import stat
 import tempfile
 
 _CLONE_NEWUSER = 0x10000000
@@ -450,12 +541,60 @@ ENV_PREFIXES = {env_prefixes_json}
 SSH_DIR = {ssh_dir}
 SSH_KNOWN_HOSTS = {ssh_known_hosts}
 HIDE_SSH = {hide_ssh}
+RUNTIME_DIRS = [f"/run/user/{{REAL_UID}}", "/dev/shm"]
+SCRATCH_PREFIX = "gideon_sb_"
+
+def _remove_stale_scratch(parent):
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(SCRATCH_PREFIX):
+            continue
+        owner = name[len(SCRATCH_PREFIX):].split("_", 1)[0]
+        if not owner.isdigit():
+            continue
+        try:
+            os.kill(int(owner), 0)
+            continue
+        except ProcessLookupError:
+            pass
+        except (OSError, OverflowError):
+            continue
+        path = os.path.join(parent, name)
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid():
+            shutil.rmtree(path, ignore_errors=True)
+
+def _make_scratch():
+    home = os.environ.get("GIDEON_HOME") or os.path.expanduser("~")
+    try:
+        home_device = os.stat(home).st_dev
+    except OSError:
+        home_device = None
+    prefix = f"{{SCRATCH_PREFIX}}{{os.getpid()}}_"
+    for candidate in RUNTIME_DIRS:
+        try:
+            if home_device is not None and os.stat(candidate).st_dev == home_device:
+                continue
+            _remove_stale_scratch(candidate)
+            return tempfile.mkdtemp(dir=candidate, prefix=prefix)
+        except (OSError, ValueError):
+            continue
+    fallback = tempfile.gettempdir()
+    _remove_stale_scratch(fallback)
+    return tempfile.mkdtemp(dir=fallback, prefix=prefix)
 
 def main():
     argv = sys.argv[1:]
     if not argv:
         sys.exit("sandbox_launcher: no command given")
 
+    scratch = _make_scratch()
     # Two pipes for parent↔child synchronization
     c2p_r, c2p_w = os.pipe()  # child signals "unshare done"
     p2c_r, p2c_w = os.pipe()  # parent signals "maps written"
@@ -463,21 +602,52 @@ def main():
     pid = os.fork()
 
     if pid > 0:
-        # ── Parent: write identity UID/GID map ──
-        os.close(c2p_w)
-        os.close(p2c_r)
-        os.read(c2p_r, 1)  # wait for child to unshare(NEWUSER)
-        os.close(c2p_r)
-        with open(f"/proc/{{pid}}/setgroups", "w") as f:
-            f.write("deny")
-        with open(f"/proc/{{pid}}/uid_map", "w") as f:
-            f.write(f"{{REAL_UID}} {{REAL_UID}} 1\\n")
-        with open(f"/proc/{{pid}}/gid_map", "w") as f:
-            f.write(f"{{REAL_GID}} {{REAL_GID}} 1\\n")
-        os.write(p2c_w, b"x")  # signal child to proceed
-        os.close(p2c_w)
-        _, status = os.waitpid(pid, 0)
-        code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+        caught = []
+
+        def _forward(signum, _frame):
+            caught.append(signum)
+            try:
+                os.kill(pid, signum)
+            except OSError:
+                pass
+
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(signum, _forward)
+        try:
+            os.close(c2p_w)
+            os.close(p2c_r)
+            if os.read(c2p_r, 1):
+                with open(f"/proc/{{pid}}/setgroups", "w") as f:
+                    f.write("deny")
+                with open(f"/proc/{{pid}}/uid_map", "w") as f:
+                    f.write(f"{{REAL_UID}} {{REAL_UID}} 1\\n")
+                with open(f"/proc/{{pid}}/gid_map", "w") as f:
+                    f.write(f"{{REAL_GID}} {{REAL_GID}} 1\\n")
+                os.write(p2c_w, b"x")
+            os.close(c2p_r)
+            os.close(p2c_w)
+            _, status = os.waitpid(pid, 0)
+            code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+        except BaseException:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                os.waitpid(pid, 0)
+            except OSError:
+                pass
+            raise
+        finally:
+            for fd in (c2p_r, c2p_w, p2c_r, p2c_w):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            shutil.rmtree(scratch, ignore_errors=True)
+        if caught:
+            signal.signal(caught[0], signal.SIG_DFL)
+            os.kill(os.getpid(), caught[0])
         sys.exit(code)
     else:
         # ── Child: unshare, wait for maps, mount, exec ──
@@ -507,26 +677,6 @@ def main():
         # cannot leak that way. Fallback chain: /run/user/$UID → /dev/shm.
         # Verify each candidate is on a different filesystem from HOME by
         # comparing st_dev — same-fs candidates provide no isolation benefit.
-        _tmpfs_src = None
-        try:
-            _home_dev = os.stat(os.path.expanduser("~")).st_dev
-        except OSError:
-            _home_dev = None
-        for _candidate in (f"/run/user/{{REAL_UID}}", "/dev/shm"):
-            try:
-                if _home_dev is not None and os.stat(_candidate).st_dev == _home_dev:
-                    continue  # same fs as HOME — no isolation, race still possible
-                _probe = tempfile.mkdtemp(dir=_candidate, prefix="gideon_sb_")
-                os.rmdir(_probe)
-                _tmpfs_src = _candidate
-                break
-            except (OSError, ValueError):
-                continue
-        # _tmpfs_src=None falls through to system default tempdir (typically /tmp).
-        # In that case we accept the kernel-race risk because no tmpfs is
-        # available — better to function (with the original regression risk)
-        # than to refuse to start.
-
         # Pre-read files that must survive dir hiding
         expose_data = {{}}
         for src_path, filename in EXPOSE_FILES:
@@ -539,7 +689,7 @@ def main():
         for d in SENSITIVE_DIRS:
             target = d.encode()
             if os.path.isdir(target):
-                per_dir_empty = tempfile.mkdtemp(dir=_tmpfs_src).encode()
+                per_dir_empty = tempfile.mkdtemp(dir=scratch).encode()
                 _libc.mount(per_dir_empty, target, None, _MS_BIND, None)
 
         # Restore selectively exposed files into the now-empty mounts
@@ -557,7 +707,7 @@ def main():
         for f in SENSITIVE_FILES:
             target = f.encode()
             if os.path.isfile(target):
-                fd, empty_path = tempfile.mkstemp(dir=_tmpfs_src)
+                fd, empty_path = tempfile.mkstemp(dir=scratch)
                 os.close(fd)
                 _libc.mount(empty_path.encode(), target, None, _MS_BIND, None)
 
@@ -569,7 +719,7 @@ def main():
                     kh_data = fh.read()
             # Cross-fs source for the same kernel-race reason as SENSITIVE_DIRS
             # (line 371) and SENSITIVE_FILES (line 389).
-            ssh_tmp = tempfile.mkdtemp(dir=_tmpfs_src).encode()
+            ssh_tmp = tempfile.mkdtemp(dir=scratch).encode()
             _libc.mount(ssh_tmp, SSH_DIR.encode(), None, _MS_BIND, None)
             if kh_data:
                 with open(os.path.join(SSH_DIR, "known_hosts"), "wb") as fh:
@@ -632,7 +782,7 @@ def namespace_argv(argv: list[str], sandbox_level: str = "strict") -> list[str]:
         real_argv[0] = _resolve_real_agent_bin(real_argv[0])
 
     script = _build_launcher_script(sandbox_level)
-    fd, path = tempfile.mkstemp(suffix=".py", prefix="gideon_sandbox_")
+    fd, path = _sandbox_temp_file(suffix=".py", prefix="gideon_sandbox_")
     os.write(fd, script.encode())
     os.close(fd)
     os.chmod(path, 0o700)
@@ -707,7 +857,7 @@ def sandbox_exec_argv(
     """
     env, sandbox_exec = _seatbelt_binaries()
     profile = _build_seatbelt_profile(sandbox_level)
-    fd, path = tempfile.mkstemp(suffix=".sb", prefix="gideon_sandbox_")
+    fd, path = _sandbox_temp_file(suffix=".sb", prefix="gideon_sandbox_")
     os.write(fd, profile.encode())
     os.close(fd)
     prefixes = list(_SENSITIVE_ENV_PREFIXES)
