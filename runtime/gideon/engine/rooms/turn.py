@@ -144,13 +144,37 @@ class RoomTurns:
             return existing
         lock = self.store.acquire_turn(room_id)
         try:
-            record, created = self.store.begin_turn(room_id, content, request_id)
+            record, created = self.store.begin_turn(room_id, content, request_id, pending_queue=[turn.member.id for turn in plan_member_turns(room, content, config.round_budget)])
             if not created:
                 lock.close()
                 return record
         except BaseException:
             lock.close()
             raise
+        return self._launch(room, content, record, lock)
+
+    def continue_round(self, room_id: str) -> dict | None:
+        config = AppConfig.load().rooms
+        if not config.enabled:
+            raise PermissionError("rooms are disabled")
+        room = self.store.get(room_id)
+        current = self.store.turn(room_id)
+        if not room.owed():
+            return current
+        if self.active(room_id):
+            raise RoomBusyError("room already has an active round")
+        if current is None:
+            raise ValueError("room has no round to continue")
+        lock = self.store.acquire_turn(room_id)
+        try:
+            record = self.store.update_turn(room_id, current["id"], status="queued", error=None)
+            return self._launch(room, "", record, lock)
+        except BaseException:
+            lock.close()
+            raise
+
+    def _launch(self, room: Room, content: str, record: dict, lock) -> dict:
+        room_id = room.id
         self._active.add(room_id)
         task = asyncio.create_task(
             self._execute(room, content, record["id"], lock),
@@ -181,7 +205,9 @@ class RoomTurns:
         self.store.update_turn(room_id, turn_id, status="running")
         try:
             async with asyncio.timeout(900):
-                await self._members(room, content, turn_id)
+                completed = await self._members(room, content, turn_id)
+            if not completed:
+                return
             self.store.update_turn(
                 room_id, turn_id, status="completed", member_id=None, text=""
             )
@@ -189,24 +215,20 @@ class RoomTurns:
             self.store.update_turn(room_id, turn_id, status="cancelled")
             raise
         except Exception as exc:
-            error = (
-                "Room turn exceeded the 15 minute limit"
-                if isinstance(exc, TimeoutError)
-                else str(exc)
-            )
-            self.store.update_turn(
-                room_id, turn_id, status="failed", error=redact_field(error)[:1000]
-            )
-            raise
+            error = "Room turn exceeded the 15 minute limit" if isinstance(exc, TimeoutError) else str(exc)
+            self.store.fail_member(room_id, turn_id, redact_field(error)[:1000])
         finally:
             self._active.discard(room_id)
             lock.close()
 
-    async def _members(self, room: Room, content: str, turn_id: str) -> None:
+    async def _members(self, room: Room, content: str, turn_id: str) -> bool:
         room_id = room.id
-        config = AppConfig.load().rooms
-        for turn in plan_member_turns(room, content, config.round_budget):
-            member = turn.member
+        while True:
+            room = self.store.get(room_id)
+            member = self.store.begin_member(room_id, turn_id)
+            if member is None:
+                return True
+            turn = MemberTurn(room, member)
             if not AppConfig.load().rooms.enabled:
                 raise PermissionError("rooms are disabled")
             key = turn.key
@@ -215,14 +237,8 @@ class RoomTurns:
                 posture = profile_for_session(key)
                 check_member_budget(key, posture)
             except ProfileRefusal as exc:
-                self.store.append(
-                    room_id,
-                    "system",
-                    f"Profile refused for {member.id}: {exc}",
-                    speaker="system",
-                    turn_id=turn_id,
-                )
-                continue
+                self.store.fail_member(room_id, turn_id, redact_field(str(exc))[:1000])
+                return False
             previous = self._bindings.get(key) or self.state.sessions.get_agent(key)
             if previous and previous != member.agent:
                 await self.state.sessions.destroy(key)
@@ -312,23 +328,20 @@ class RoomTurns:
                             speaker=member.id,
                             turn_id=turn_id,
                         )
+                    if not answer.strip():
+                        raise ValueError("Member returned no reply")
                     saved = True
+                    self.store.finish_member(room_id, turn_id)
                 except asyncio.CancelledError:
                     await provider.cancel()
                     raise
                 except Exception as exc:
-                    from gideon.engine.agents.native.failover import NoModelAnswered
-
-                    if not isinstance(exc, NoModelAnswered):
-                        raise
-                    self.store.append(
-                        room_id,
-                        "system",
-                        redact_field(exc.sentence(room_member=member.name)),
-                        speaker="system",
-                        turn_id=turn_id,
-                    )
-                    saved = True
+                    error = redact_field(str(exc))[:1000]
+                    sentence = getattr(exc, "sentence", None)
+                    if callable(sentence):
+                        error = redact_field(sentence(room_member=member.name))[:1000]
+                    self.store.fail_member(room_id, turn_id, error)
+                    return False
                 finally:
                     if not saved and chunks:
                         answer = redact_field("".join(chunks))
@@ -360,7 +373,5 @@ class RoomTurns:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def active(self, room_id: str) -> bool:
-        current = self.store.turn(room_id)
-        return room_id in self._active or bool(
-            current and current["status"] in {"queued", "running"}
-        )
+        task = self._tasks.get(room_id)
+        return bool(task and not task.done()) or self.store.is_running(room_id)

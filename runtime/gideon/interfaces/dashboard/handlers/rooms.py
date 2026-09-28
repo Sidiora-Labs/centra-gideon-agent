@@ -28,12 +28,16 @@ def _redacted(value):
     return value
 
 
-def _public_turn(turn):
-    return (
-        _redacted({key: value for key, value in turn.items() if key != "content_hash"})
-        if turn
-        else None
-    )
+def _public_turn(turn, *, running: bool = False):
+    if turn is None:
+        return None
+    return _redacted({**{key: value for key, value in turn.items() if key != "content_hash"},
+                      "round_running": running})
+
+
+def _running(request, room_id: str) -> bool:
+    turns = request.app.get(_TURNS)
+    return turns.active(room_id) if turns else request.app[_STORE].is_running(room_id)
 
 
 def _turns(request: web.Request) -> RoomTurns:
@@ -124,16 +128,23 @@ async def api_rooms(request: web.Request) -> web.Response:
                 )
             )
         if action == "turn":
-            return web.json_response({"turn": _public_turn(store.turn(room_id))})
+            return web.json_response({"turn": _public_turn(store.turn(room_id), running=_running(request, room_id))})
         if action == "turns":
             body = await read_json_body(request)
             if set(body) != {"text", "request_id"}:
                 raise ValueError("turn requires text and request_id")
             turn = _turns(request).submit(room_id, body["text"], body["request_id"])
-            return web.json_response({"turn": _public_turn(turn)}, status=202)
+            return web.json_response({"turn": _public_turn(turn, running=_running(request, room_id))}, status=202)
         if action == "cancel":
             turn = await _turns(request).cancel(room_id)
-            return web.json_response({"turn": _public_turn(turn)})
+            return web.json_response({"turn": _public_turn(turn, running=_running(request, room_id))})
+        if action == "continue_round":
+            body = await read_json_body(request)
+            if body:
+                raise ValueError("continue does not accept room or member fields")
+            turn = _turns(request).continue_round(room_id)
+            running = _running(request, room_id)
+            return web.json_response({"turn": _public_turn(turn, running=running)}, status=202 if running else 200)
         if action == "export":
             fmt = request.query.get("format", "json")
             text, content_type = session_export.render(
@@ -173,6 +184,8 @@ async def api_rooms(request: web.Request) -> web.Response:
             store.delete(room_id)
             return web.json_response({"ok": True})
         payload = room.to_dict()
+        payload["round_running"] = _running(request, room_id)
+        payload["owed"] = room.owed()
         payload["member_postures"] = {
             member.id: resolved_posture(session_key(room.id, member.id))
             for member in room.members
@@ -215,6 +228,7 @@ def setup_room_routes(app: web.Application, store: RoomStore | None = None) -> N
     app.router.add_post("/api/rooms/{room_id}/messages", api_rooms, name="messages")
     app.router.add_post("/api/rooms/{room_id}/turns", api_rooms, name="turns")
     app.router.add_post("/api/rooms/{room_id}/cancel", api_rooms, name="cancel")
+    app.router.add_post("/api/rooms/{room_id}/continue", api_rooms, name="continue_round")
     app.router.add_get(
         "/api/rooms/{room_id}/turn", api_rooms, allow_head=False, name="turn"
     )

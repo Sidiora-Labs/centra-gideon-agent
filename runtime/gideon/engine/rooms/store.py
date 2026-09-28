@@ -84,6 +84,12 @@ class Room:
     members: builtins.list[RoomMember] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
+    pending_queue: builtins.list[str] = field(default_factory=list)
+    speaking: str = ""
+
+    def owed(self) -> builtins.list[str]:
+        roster = {member.id for member in self.members}
+        return list(dict.fromkeys(member for member in [self.speaking, *self.pending_queue] if member in roster))
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -360,7 +366,7 @@ class RoomStore:
         )
 
     def begin_turn(
-        self, room_id: str, content: str, request_id: str
+        self, room_id: str, content: str, request_id: str, *, pending_queue: builtins.list[str] | None = None
     ) -> tuple[dict, bool]:
         content = message_text(content)
         _identifier(request_id)
@@ -379,6 +385,11 @@ class RoomStore:
             current = self.turn(room_id)
             if current and current["status"] in {"queued", "running"}:
                 raise RoomBusyError("room already has an active turn")
+            if room.owed():
+                raise RoomBusyError("Continue the remaining room replies before sending a new message")
+            queue = list(dict.fromkeys(pending_queue or []))
+            if any(member not in {m.id for m in room.members} for member in queue):
+                raise ValueError("queued speaker must be a room member")
             now = timestamp()
             record = dict(
                 id=request_id,
@@ -408,6 +419,12 @@ class RoomStore:
                 )
                 self._save_turn(record)
                 raise
+            room.pending_queue = queue
+            room.speaking = ""
+            room.updated_at = timestamp()
+            rooms = self._read()
+            rooms[room.id] = room
+            self._save(rooms)
             return record, True
 
     def update_turn(self, room_id: str, turn_id: str, **changes) -> dict:
@@ -431,6 +448,57 @@ class RoomStore:
             raise RoomBusyError("room already has an active turn") from None
         return lock
 
+    def is_running(self, room_id: str) -> bool:
+        try:
+            lock = self.acquire_turn(room_id)
+        except RoomBusyError:
+            return True
+        lock.close()
+        return False
+
+    def begin_member(self, room_id: str, turn_id: str) -> RoomMember | None:
+        with self._locked():
+            rooms = self._read()
+            room = rooms[_identifier(room_id)]
+            paid = {row.get("speaker") for row in self.messages(room_id)
+                    if row.get("turn_id") == turn_id and row.get("role") == "assistant"
+                    and not row.get("interrupted")}
+            owed = [member for member in room.owed() if member not in paid]
+            room.speaking = owed[0] if owed else ""
+            room.pending_queue = owed[1:]
+            room.updated_at = timestamp()
+            self._save(rooms)
+            record = self.turn(room_id, turn_id)
+            if record is None:
+                raise KeyError(turn_id)
+            record.update(member_id=room.speaking or None, text="", updated_at=timestamp())
+            self._save_turn(record)
+            return next((member for member in room.members if member.id == room.speaking), None)
+
+    def finish_member(self, room_id: str, turn_id: str) -> None:
+        with self._locked():
+            rooms = self._read()
+            room = rooms[_identifier(room_id)]
+            if not any(row.get("turn_id") == turn_id and row.get("speaker") == room.speaking
+                       and row.get("role") == "assistant" and not row.get("interrupted")
+                       for row in self.messages(room_id)):
+                raise ValueError("a completed member must have a stored reply")
+            room.speaking = ""
+            room.updated_at = timestamp()
+            self._save(rooms)
+
+    def fail_member(self, room_id: str, turn_id: str, error: str) -> None:
+        with self._locked():
+            room = self.get(room_id)
+            name = next((member.name for member in room.members if member.id == room.speaking), "A member")
+            self._append(room, "system", f"{name} could not finish: {error}. Continue to retry this member and the remaining replies.",
+                         speaker="system", turn_id=turn_id)
+            record = self.turn(room_id, turn_id)
+            if record is None:
+                raise KeyError(turn_id)
+            record.update(status="failed", error=error, updated_at=timestamp())
+            self._save_turn(record)
+
     def recover_interrupted(self) -> None:
         for room in self.list():
             current = self.turn(room.id)
@@ -443,11 +511,20 @@ class RoomStore:
             try:
                 current = self.turn(room.id)
                 if current and current["status"] in {"queued", "running"}:
+                    paid = {row.get("speaker") for row in self.messages(room.id)
+                            if row.get("turn_id") == current["id"] and row.get("role") == "assistant"
+                            and not row.get("interrupted")}
+                    with self._locked():
+                        rooms = self._read()
+                        room = rooms[room.id]
+                        room.pending_queue = [member for member in room.pending_queue if member not in paid]
+                        if room.speaking in paid:
+                            room.speaking = ""
+                        self._save(rooms)
                     self.update_turn(
-                        room.id,
-                        current["id"],
-                        status="failed",
-                        error="Room turn interrupted by a runtime restart. Send a new message to continue.",
+                        room.id, current["id"], status="paused" if room.owed() else "completed" if paid else "failed",
+                        error="Room round paused after a runtime restart. Continue to finish the remaining replies."
+                              if room.owed() else None if paid else "Room turn interrupted by a runtime restart. Send a new message to continue.",
                     )
             finally:
                 lock.close()

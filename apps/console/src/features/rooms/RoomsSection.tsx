@@ -5,8 +5,8 @@ import { api, type PendingApproval, type SavedAgent } from '../../shared/data/ap
 import { Markdown } from '../../shared/ui/Markdown'
 import { FocusScope } from '../../shared/ui/focusNavigation'
 import { RoomEditor } from './RoomEditor'
-import { roomsApi, type Room, type RoomMember, type RoomMessage, type RoomsIndex, type RoomTurn } from './roomsApi'
-import { changedDraft, draftKey, filterRooms, insertMention, isActiveTurn, mentionAt, mentionLabel, readDraft, roomApprovals, writeDraft } from './roomsState'
+import { roomsApi, owedMembers, roundRunning, type Room, type RoomMember, type RoomMessage, type RoomsIndex, type RoomTurn } from './roomsApi'
+import { changedDraft, draftKey, filterRooms, insertMention, mentionAt, mentionLabel, readDraft, roomApprovals, writeDraft } from './roomsState'
 import { roomsAccountScope, t } from './roomsText'
 import './rooms.css'
 
@@ -70,7 +70,9 @@ function RoomConversation({ id, agents, maxMembers, roundBudget, onBack, onChang
   const alive = useRef(true)
   const loadedOlder = useRef(false)
   const requestSequence = useRef(0)
-  const active = isActiveTurn(turn)
+  const active = roundRunning(turn)
+  const owed = owedMembers(room)
+  const [continuing, setContinuing] = useState(false)
   const changedRef = useRef(onChanged)
   changedRef.current = onChanged
   const closeSettings = useCallback(() => {
@@ -106,16 +108,21 @@ function RoomConversation({ id, agents, maxMembers, roundBudget, onBack, onChang
   activeRef.current = active
   useEffect(() => {
     alive.current = true
+    const visible = () => { if (!document.hidden) void refresh() }
+    void refresh()
+    document.addEventListener('visibilitychange', visible)
+    return () => { alive.current = false; document.removeEventListener('visibilitychange', visible) }
+  }, [refresh])
+  useEffect(() => {
+    if (!active) return
     let timeout: ReturnType<typeof setTimeout>
     const poll = async () => {
       await refresh()
-      if (alive.current) timeout = setTimeout(() => void poll(), document.hidden ? 10000 : activeRef.current ? 1200 : 5000)
+      if (alive.current && activeRef.current) timeout = setTimeout(() => void poll(), document.hidden ? 10000 : 1200)
     }
-    const visible = () => { if (!document.hidden) void refresh() }
-    void poll()
-    document.addEventListener('visibilitychange', visible)
-    return () => { alive.current = false; clearTimeout(timeout); document.removeEventListener('visibilitychange', visible) }
-  }, [refresh])
+    timeout = setTimeout(() => void poll(), 1200)
+    return () => clearTimeout(timeout)
+  }, [refresh, active])
   useLayoutEffect(() => {
     const node = transcript.current
     if (node && following.current) node.scrollTop = node.scrollHeight
@@ -141,7 +148,7 @@ function RoomConversation({ id, agents, maxMembers, roundBudget, onBack, onChang
     requestAnimationFrame(() => { textarea.current?.focus(); textarea.current?.setSelectionRange(next.cursor, next.cursor) })
   }
   const send = async () => {
-    if (!draft.text.trim() || sending || active || !room || error) return
+    if (!draft.text.trim() || sending || active || owed.length > 0 || !room || error) return
     const submitted = draft
     setSending(true)
     setActionError('')
@@ -203,6 +210,7 @@ function RoomConversation({ id, agents, maxMembers, roundBudget, onBack, onChang
         {turn?.status === 'cancelled' && <p className="rooms-turn-note">{t('Turn stopped. Completed replies are saved.')}</p>}
       </div>
       <div className="rooms-composer-area">
+        {!active && owed.length > 0 && <section className="rooms-error" role="status"><p>{t('The room is paused. Remaining replies: {p0}', [owed.map(member => room.members.find(item => item.id === member)?.name ?? member).join(', ')])}</p><button className="rooms-button" disabled={continuing} onClick={() => { setContinuing(true); void action(() => roomsApi.continue(id)).finally(() => setContinuing(false)) }}>{continuing ? t('Continuing…') : t('Continue')}</button></section>}
         {!atEnd && <button className="rooms-jump rooms-button" onClick={() => { if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; following.current = true; setAtEnd(true) }}><ArrowDown size={14} />{t('Latest messages')}</button>}
         {approvals.map(approval => <section className="rooms-approval" key={approval.id} aria-label={t('Human approval required')}><div className="rooms-approval-heading"><ShieldCheck size={18} /><strong>{t('Your approval is needed')}</strong></div><p><bdi>{room.members.find(member => approval.session === `room:${id}:${member.id}`)?.name || t('A room member')}</bdi><span> · </span><bdi>{approval.tool}</bdi></p>{approval.tool_purpose && <p dir="auto">{approval.tool_purpose}</p>}{approval.tool_input != null && <details><summary>{t('Review action details')}</summary><pre>{typeof approval.tool_input === 'string' ? approval.tool_input : JSON.stringify(approval.tool_input, null, 2)}</pre></details>}<div className="rooms-actions"><button className="rooms-button rooms-primary" disabled={deciding !== null} onClick={() => { setDeciding(approval.id); void action(() => api.resolveApproval(approval.id, 'approve', approval.revision)).finally(() => setDeciding(null)) }}><Check size={15} />{t('Approve once')}</button><button className="rooms-button" disabled={deciding !== null} onClick={() => { setDeciding(approval.id); void action(() => api.resolveApproval(approval.id, 'reject', approval.revision)).finally(() => setDeciding(null)) }}><X size={15} />{t('Reject')}</button></div></section>)}
         {actionError && <div className="rooms-error" role="alert">{actionError}<span className="rooms-hint"> {draft.text ? t('Your draft is saved. Try sending again.') : ''}</span></div>}
@@ -217,7 +225,7 @@ function RoomConversation({ id, agents, maxMembers, roundBudget, onBack, onChang
             }
             if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() }
           }} />
-          <div className="rooms-composer-footer"><span className="rooms-hint">{active ? t('Members are taking turns. You can draft your next message.') : t('Enter to send · Shift + Enter for a new line')}</span>{active ? <button type="button" className="rooms-button" disabled={stopping} onClick={() => { setStopping(true); void action(() => roomsApi.cancel(id)).finally(() => setStopping(false)) }}><Square size={14} />{stopping ? t('Stopping…') : t('Stop')}</button> : <button className="rooms-send" type="submit" aria-label={t('Send message')} disabled={sending || !draft.text.trim() || Boolean(error)}>{sending ? <LoaderCircle size={19} className="rooms-spin" /> : <ArrowUp size={20} />}</button>}</div>
+          <div className="rooms-composer-footer"><span className="rooms-hint">{active ? t('Members are taking turns. You can draft your next message.') : t('Enter to send · Shift + Enter for a new line')}</span>{active ? <button type="button" className="rooms-button" disabled={stopping} onClick={() => { setStopping(true); void action(() => roomsApi.cancel(id)).finally(() => setStopping(false)) }}><Square size={14} />{stopping ? t('Stopping…') : t('Stop')}</button> : <button className="rooms-send" type="submit" aria-label={t('Send message')} disabled={sending || owed.length > 0 || !draft.text.trim() || Boolean(error)}>{sending ? <LoaderCircle size={19} className="rooms-spin" /> : <ArrowUp size={20} />}</button>}</div>
         </form>
         <p className="rooms-composer-note"><ShieldCheck size={12} />{t('Human approval stays in your hands.')}<span>{t('Up to {p0} replies per message', [roundBudget])}</span></p>
       </div>
